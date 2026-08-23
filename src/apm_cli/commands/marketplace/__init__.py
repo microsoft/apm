@@ -245,207 +245,15 @@ def _check_gitignore_for_marketplace_json(logger):
 
 
 def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, str, str | None]:
-    """Parse a marketplace source argument into ``(url, kind, embedded_host)``.
+    """Compatibility adapter for the canonical marketplace source owner."""
+    from ...marketplace.source_identity import parse_marketplace_source
 
-    Accepted forms (auto-detected, in order of test):
-
-      * Local filesystem path -- absolute (``/...``), relative (``./...``,
-        ``../...``), home (``~/...``), or Windows drive letter
-        (``C:\\repos\\foo``). Returns ``kind="local"``, ``url`` is the
-        ``file://`` URI form, ``embedded_host=None``.
-      * ``file://`` URI -- same shape as a local path but explicit.
-      * SCP-like SSH (``git@host:org/repo.git``). Returns ``kind`` derived
-        from the host via ``AuthResolver.classify_host``, ``url`` rewritten
-        to the SCP form (subprocess git understands it natively),
-        ``embedded_host=<host>``.
-      * Full SSH URL (``ssh://git@host:2222/org/repo.git``). Normalises the
-        scheme and otherwise preserves the URL so the username and optional
-        port reach subprocess git, with ``embedded_host`` extracted and
-        ``kind="git"``.
-      * Full HTTPS URL. Returns the URL untouched, ``embedded_host``
-        extracted, ``kind`` classified by host. Hosts that ``AuthResolver``
-        does not recognise as github/gitlab fall through as ``kind="git"``
-        (subprocess git path).
-      * ``OWNER/REPO`` or ``HOST/OWNER/.../REPO`` shorthand. The HOST
-        segment is detected via ``is_valid_fqdn``. Returns a synthesised
-        ``https://`` URL plus the resolved host.
-
-    Raises ``ValueError`` on malformed input (single-segment, HTTP, empty,
-    or path-traversal sequences in any segment).
-    """
-    from urllib.parse import unquote, urlparse
-
-    from ...core.auth import AuthResolver
-    from ...utils.github_host import is_valid_fqdn, validate_ssh_user
-
-    raw = (source or "").strip()
-    if not raw:
-        raise ValueError("Empty source argument")
-    if any(ord(c) < 32 for c in raw):
-        raise ValueError("Source argument contains invalid control characters")
-
-    # --- Local path detection ---------------------------------------------
-    # Catches absolute (/, ~), relative (./, ../), file:// URIs, and
-    # Windows drive letters (C:\, C:/). Done BEFORE URL parsing so a path
-    # like '/srv/foo' is not misread as a relative HTTP URL.
-    if _looks_like_local_marketplace_source(raw):
-        url = raw if raw.lower().startswith("file://") else f"file://{_expand_local_path(raw)}"
-        return url, "local", None
-
-    lowered = raw.lower()
-    if lowered.startswith("http://"):
-        raise ValueError(
-            f"Insecure HTTP URL rejected: '{raw}'. Use HTTPS for marketplace registration."
-        )
-
-    # --- SCP-like SSH (git@host:org/repo.git) -----------------------------
-    scp_match = _SCP_LIKE_RE.match(raw)
-    if scp_match:
-        host = scp_match.group("host").lower()
-        path = scp_match.group("path")
-        # Validate the path component does not carry traversal markers.
-        for seg in (s for s in path.split("/") if s):
-            validate_path_segments(seg, context="marketplace SSH path", reject_empty=True)
-        host_info = AuthResolver.classify_host(host)
-        kind = _host_kind_to_fetcher_kind(host_info.kind)
-        return raw, kind, host
-
-    # --- SSH protocol URL -------------------------------------------------
-    if lowered.startswith("ssh://"):
-        normalized_url = f"ssh://{raw[len('ssh://') :]}"
-        parsed = urlparse(normalized_url)
-        embedded_host = (parsed.hostname or "").strip().lower()
-        if not embedded_host:
-            raise ValueError("SSH URL is missing a host")
-        if parsed.password is not None:
-            raise ValueError(
-                "SSH URL must not include a password; configure SSH authentication instead."
-            )
-        try:
-            port = parsed.port
-        except ValueError as exc:
-            raise ValueError("SSH URL has an invalid port") from exc
-        if port is not None and not 1 <= port <= 65535:
-            raise ValueError("SSH URL has an invalid port")
-        if parsed.username:
-            validate_ssh_user(parsed.username)
-        decoded_path = parsed.path or ""
-        for _ in range(8):
-            next_path = unquote(decoded_path)
-            if next_path == decoded_path:
-                break
-            decoded_path = next_path
-        path_segments = [s for s in decoded_path.split("/") if s]
-        for seg in path_segments:
-            validate_path_segments(seg, context="marketplace SSH URL path", reject_empty=True)
-        if not path_segments:
-            raise ValueError("SSH URL is missing a repo path")
-        return normalized_url, "git", embedded_host
-
-    # --- HTTPS URL --------------------------------------------------------
-    if lowered.startswith("https://"):
-        parsed = urlparse(raw)
-        embedded_host = (parsed.hostname or "").strip().lower()
-        if not embedded_host:
-            raise ValueError(f"HTTPS URL is missing a host: '{raw}'")
-        # Validate path segments for traversal markers.
-        from urllib.parse import unquote as _unquote
-
-        path_segments = [s for s in _unquote(parsed.path or "").split("/") if s]
-        for seg in path_segments:
-            validate_path_segments(seg, context="marketplace URL path", reject_empty=True)
-        if not path_segments:
-            raise ValueError(f"HTTPS URL is missing a repo path: '{raw}'")
-        host_info = AuthResolver.classify_host(embedded_host)
-        kind = _host_kind_to_fetcher_kind(host_info.kind)
-        if kind in ("github", "gitlab") and len(path_segments) < 2:
-            # GitHub / GitLab URLs are owner/repo-shaped; a single
-            # path segment is ambiguous (no owner). Generic git URLs
-            # (kind == "git") MAY legitimately have a single segment
-            # (e.g. self-hosted ``https://gitea.example.com/repo``).
-            raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO' in the URL path.")
-        if host_flag and host_flag.strip().lower() != embedded_host:
-            import shlex as _shlex
-
-            raise ValueError(
-                f"Conflicting host: --host '{host_flag}' does not match "
-                f"'{embedded_host}' in '{raw}'.\n"
-                f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
-            )
-        return raw, kind, embedded_host
-
-    # --- Shorthand (OWNER/REPO or HOST/OWNER/.../REPO) --------------------
-    from urllib.parse import unquote as _unquote
-
-    raw_decoded = _unquote(raw)
-    segments = [seg for seg in raw_decoded.split("/") if seg]
-    if len(segments) < 2:
-        raise ValueError(
-            f"Invalid format: '{raw}'. "
-            f"Expected 'OWNER/REPO', 'HOST/OWNER/REPO', a full HTTPS URL, "
-            f"a local path, or an SSH URL."
-        )
-
-    embedded_host: str | None = None
-    if is_valid_fqdn(segments[0]):
-        if len(segments) < 3:
-            raise ValueError(
-                f"Invalid format: '{raw}'. When the first segment is a host FQDN, "
-                f"at least 'HOST/OWNER/REPO' is required."
-            )
-        embedded_host = segments[0].lower()
-        segments = segments[1:]
-
-    repo_name = segments[-1]
-    owner_segments = segments[:-1]
-    if not owner_segments or not repo_name:
-        raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO'.")
-
-    owner_path = "/".join(owner_segments)
-    validate_path_segments(owner_path, context="marketplace owner path", reject_empty=True)
-    validate_path_segments(repo_name, context="marketplace repo name", reject_empty=True)
-
-    if embedded_host and host_flag and host_flag.strip().lower() != embedded_host:
-        import shlex as _shlex
-
-        raise ValueError(
-            f"Conflicting host: --host '{host_flag}' does not match "
-            f"'{embedded_host}' in '{raw}'.\n"
-            f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
-        )
-
-    from ...utils.github_host import default_host
-
-    resolved_host = (host_flag or "").strip().lower() or embedded_host or default_host()
-    host_info = AuthResolver.classify_host(resolved_host)
-    kind = _host_kind_to_fetcher_kind(host_info.kind)
-    url = f"https://{resolved_host}/{owner_path}/{repo_name}"
-    return url, kind, resolved_host
+    identity = parse_marketplace_source(source, host_flag)
+    return identity.url, identity.kind, identity.host
 
 
 # Backward-compat alias for any external callers.
 _parse_marketplace_repo = _parse_marketplace_source
-
-
-def _host_kind_to_fetcher_kind(host_kind: str) -> str:
-    """Map ``AuthResolver.classify_host`` kinds to fetcher-table kinds.
-
-    ``github`` / ``ghe_cloud`` / ``ghes`` -> ``"github"`` (Contents API)
-    ``gitlab``                            -> ``"gitlab"`` (REST v4 raw)
-    Everything else (``ado``, ``generic``) -> ``"git"`` (subprocess + GitCache)
-    """
-    if host_kind in ("github", "ghe_cloud", "ghes"):
-        return "github"
-    if host_kind == "gitlab":
-        return "gitlab"
-    return "git"
-
-
-# SCP-like SSH form: ``user@host:path``. The path component does not need
-# to start with a slash (that is what makes it SCP-like). Reuses the
-# canonical regex from ``apm_cli.cache.url_normalize`` so SCP parsing here
-# stays consistent with ``DependencyReference`` and policy discovery.
-from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE  # noqa: E402
 
 
 def _looks_like_local_marketplace_source(raw: str) -> bool:
@@ -477,14 +285,6 @@ def _expand_local_path(raw: str) -> str:
     import os.path as _osp
 
     return _osp.abspath(_osp.expanduser(raw))
-
-
-# Host-trust classification is owned by AuthResolver.classify_host (see
-# core/auth.py). The marketplace command layer routes through it so that the
-# credential-leakage guard at registration time uses the same single source of
-# truth as the fetch-time guard in marketplace/client.py. Adding a second
-# implementation here would create silent drift on a security-critical path.
-_TRUSTED_MARKETPLACE_HOST_KINDS = ("github", "ghe_cloud", "ghes", "gitlab")
 
 
 def _marketplace_add_unsupported_host_error(
@@ -633,29 +433,6 @@ def add(source, name, ref, branch, host, verbose):
                 symbol="warning",
             )
 
-        # Trust gate is now scoped to kinds that would forward an APM token
-        # via header injection. The subprocess git path (kind == "git")
-        # never forwards GITHUB_APM_PAT / GITLAB_APM_PAT -- AuthResolver
-        # only emits credentials matching the classified host. Local-kind
-        # fetches use no credentials at all.
-        if kind in ("github", "gitlab"):
-            from ...core.auth import AuthResolver
-
-            host_info = AuthResolver.classify_host(resolved_host or "")
-            if host_info.kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
-                # Should not happen because _host_kind_to_fetcher_kind already
-                # mapped non-trusted kinds to "git", but defend in depth.
-                import shlex as _shlex
-
-                quoted_repo = _shlex.quote(source)
-                quoted_host = _shlex.quote(resolved_host or "")
-                logger.error(
-                    _marketplace_add_unsupported_host_error(
-                        resolved_host or "", quoted_repo, quoted_host, host_info.kind
-                    )
-                )
-                sys.exit(1)
-
         if name is not None and not _is_valid_alias(name):
             logger.error(
                 f"Invalid marketplace name: '{name}'. "
@@ -788,6 +565,8 @@ def add(source, name, ref, branch, host, verbose):
 def _split_source_fragment_ref(source: str) -> tuple[str, str]:
     """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
     raw = (source or "").strip()
+    if raw.lower().startswith("ssh://") and "#" in raw:
+        raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
     if not raw.lower().startswith("https://"):
         return raw, ""
     parsed = urlsplit(raw)

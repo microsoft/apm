@@ -1314,6 +1314,58 @@ def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
     assert "Approval fallback outcomes must use policy/outcome_routing.py" in guard
 
 
+def test_marketplace_source_admission_has_single_owner() -> None:
+    """CLI registration and persisted sources must share one parser."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/marketplace/source_identity.py").read_text(encoding="utf-8")
+    command = (root / "src/apm_cli/commands/marketplace/__init__.py").read_text(
+        encoding="utf-8"
+    )
+    model = (root / "src/apm_cli/marketplace/models.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("def parse_marketplace_source(") == 1
+    assert "identity = parse_marketplace_source(source, host_flag)" in command
+    assert "identity = parse_marketplace_source(self.url)" in model
+    assert "Marketplace source admission must route through marketplace/source_identity.py" in guard
+
+
+def test_marketplace_source_admission_guard_rejects_parallel_parser(tmp_path: Path) -> None:
+    """The static boundary rejects restoring SCP parsing in the CLI layer."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    command = sandbox / "src/apm_cli/commands/marketplace/__init__.py"
+    command.write_text(
+        command.read_text(encoding="utf-8") + "\n_PARALLEL_SCP = SCP_LIKE_RE\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Marketplace source admission must route through marketplace/source_identity.py" in result.stdout
+
+
 def test_object_git_dependency_fields_have_single_owner() -> None:
     """Fixture authoring must consume the product parser's field vocabulary."""
     root = Path(__file__).parents[2]

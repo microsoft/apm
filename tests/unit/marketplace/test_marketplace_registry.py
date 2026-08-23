@@ -51,6 +51,27 @@ class TestRegistryBasicOps:
         registry_mod.add_marketplace(src2)
         assert registry_mod.marketplace_count() == 1
 
+    def test_failed_same_alias_replacement_preserves_original_registry_bytes(self):
+        registry_mod.add_marketplace(
+            MarketplaceSource(
+                name="acme",
+                url="ssh://git@[2001:db8::1]:2222/Team/Marketplace.git",
+            )
+        )
+        path = registry_mod._marketplaces_path()
+        before = open(path, "rb").read()
+
+        with pytest.raises(ValueError):
+            MarketplaceSource(
+                name="acme",
+                url="ssh://git:secret@[2001:db8::1]:2222/Team/Marketplace.git",
+            )
+
+        assert open(path, "rb").read() == before
+        registry_mod._invalidate_cache()
+        restored = registry_mod.get_marketplace_by_name("acme")
+        assert restored.url == "ssh://git@[2001:db8::1]:2222/Team/Marketplace.git"
+
     def test_remove(self):
         src = MarketplaceSource(name="acme", owner="o", repo="r")
         registry_mod.add_marketplace(src)

@@ -203,6 +203,15 @@ class MarketplaceSource:
             # If neither URL nor legacy fields are usable, leave url empty; callers/tests
             # that pass only name=... will fail later when something tries to use it.
 
+        # Validate persisted source transport through the same admission owner
+        # used by `marketplace add`; config reload must not bypass its checks.
+        identity = None
+        if self.url:
+            from apm_cli.marketplace.source_identity import parse_marketplace_source
+
+            identity = parse_marketplace_source(self.url)
+            object.__setattr__(self, "url", identity.url)
+
         # Backfill legacy mirror fields from URL when caller used URL-only signature.
         if self.url and self.path != "" and not self.owner and not self.repo:
             o, r = _extract_owner_repo_from_url(self.url)
@@ -210,10 +219,8 @@ class MarketplaceSource:
                 object.__setattr__(self, "owner", o)
             if r:
                 object.__setattr__(self, "repo", r)
-        if self.url and self.path != "" and self.host == "github.com":
-            h = _extract_host_from_url(self.url)
-            if h:
-                object.__setattr__(self, "host", h)
+        if identity is not None and self.path != "" and self.host == "github.com" and identity.host:
+            object.__setattr__(self, "host", identity.host)
 
     # -- derived properties --------------------------------------------------
 
@@ -225,12 +232,11 @@ class MarketplaceSource:
     @property
     def port(self) -> int | None:
         """Return the explicit remote URL port, if present."""
-        if not self.url or _looks_like_local_path(self.url):
+        if not self.url:
             return None
-        try:
-            return urlsplit(self.url).port
-        except ValueError:
-            return None
+        from apm_cli.marketplace.source_identity import parse_marketplace_source
+
+        return parse_marketplace_source(self.url).port
 
     @property
     def kind(self) -> str:
@@ -250,25 +256,9 @@ class MarketplaceSource:
             return "local"
         if self.is_remote_manifest_url:
             return "url"
-        try:
-            if urlsplit(self.url).scheme.lower() == "ssh":
-                return "git"
-        except ValueError:
-            pass
-        host = _extract_host_from_url(self.url)
-        if not host:
-            return "git"
-        # Lazy import to keep models.py free of heavy dependencies
-        from apm_cli.core.auth import AuthResolver
+        from apm_cli.marketplace.source_identity import parse_marketplace_source
 
-        host_kind = AuthResolver.classify_host(host).kind
-        if host_kind in ("github", "ghe_cloud", "ghes"):
-            return "github"
-        if host_kind == "gitlab":
-            return "gitlab"
-        if host_kind == "ado":
-            return "ado"
-        return "git"
+        return parse_marketplace_source(self.url).kind
 
     @property
     def local_path(self) -> str:

@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.commands.marketplace import _parse_marketplace_source
+from apm_cli.core.auth import AuthResolver
 from apm_cli.marketplace.client import (
     _FETCHERS,
     _fetch_ado,
@@ -47,6 +48,11 @@ def fake_auth_resolver():
     resolver.resolve.return_value = SimpleNamespace(git_env={"GIT_TERMINAL_PROMPT": "0"})
     resolver.hardened_git_base_env.return_value = {"GIT_TERMINAL_PROMPT": "0"}
     resolver.hardened_git_env_for_context.side_effect = lambda auth_ctx: auth_ctx.git_env
+    resolver.build_ssh_git_env.return_value = {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=30",
+        "SSH_ASKPASS_REQUIRE": "never",
+    }
     return resolver
 
 
@@ -106,7 +112,7 @@ def test_fetch_git_preserves_ssh_protocol_url_with_port(tmp_path: Path, fake_aut
     assert result == {"name": "acme", "plugins": []}
     assert gitcache_mock.get_checkout.call_args.args[0] == raw
     fake_auth_resolver.resolve.assert_not_called()
-    fake_auth_resolver.hardened_git_base_env.assert_called_once_with()
+    fake_auth_resolver.build_ssh_git_env.assert_called_once_with()
 
 
 @pytest.mark.parametrize(
@@ -137,7 +143,13 @@ def test_fetch_git_ssh_does_not_forward_http_credentials(tmp_path: Path, raw: st
     auth_resolver = MagicMock()
     auth_resolver.resolve.return_value = SimpleNamespace(git_env=credential_env)
     auth_resolver.hardened_git_env_for_context.return_value = dict(credential_env)
-    auth_resolver.hardened_git_base_env.return_value = dict(credential_env)
+    auth_resolver.build_ssh_git_env.return_value = {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=30",
+        "SSH_ASKPASS_REQUIRE": "never",
+        "GITHUB_APM_PAT": "",
+        "GITHUB_APM_PAT_ORG": "",
+    }
 
     gitcache_mock = MagicMock()
     gitcache_mock.get_checkout.return_value = str(checkout)
@@ -166,6 +178,38 @@ def test_fetch_git_ssh_does_not_forward_http_credentials(tmp_path: Path, raw: st
     assert "GIT_ASKPASS" not in env
     assert env["GITHUB_APM_PAT"] == ""
     assert env["GITHUB_APM_PAT_ORG"] == ""
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_SSH_COMMAND"] == "ssh -o BatchMode=yes -o ConnectTimeout=30"
+    assert env["SSH_ASKPASS_REQUIRE"] == "never"
+
+
+def test_ssh_git_environment_masks_http_credentials_and_forces_batch_mode() -> None:
+    resolver = AuthResolver(token_manager=MagicMock())
+    inherited = {
+        "GITHUB_APM_PAT": "platform-secret",
+        "GIT_TOKEN": "git-secret",
+        "GIT_HTTP_EXTRAHEADER": "Authorization: secret",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": "Authorization: secret",
+        "GIT_ASKPASS": "unsafe-askpass",
+        "SSH_ASKPASS": "unsafe-ssh-askpass",
+        "GIT_SSH_COMMAND": "ssh -i /tmp/test-key -o BatchMode=no",
+    }
+    with patch.object(resolver, "hardened_git_base_env", return_value=inherited):
+        env = resolver.build_ssh_git_env()
+
+    assert env["GITHUB_APM_PAT"] == ""
+    assert "GIT_TOKEN" not in env
+    assert "GIT_HTTP_EXTRAHEADER" not in env
+    assert env["GIT_CONFIG_KEY_0"] == "credential.helper"
+    assert env["GIT_CONFIG_VALUE_0"] == ""
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert "GIT_ASKPASS" not in env
+    assert "SSH_ASKPASS" not in env
+    assert env["SSH_ASKPASS_REQUIRE"] == "never"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_SSH_COMMAND"] == "ssh -i /tmp/test-key -o BatchMode=yes -o ConnectTimeout=30"
 
 
 def test_fetch_git_ado_url_routes_via_subprocess(

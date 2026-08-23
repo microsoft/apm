@@ -574,17 +574,11 @@ def _fetch_git(
 
     from ..cache.git_cache import GitCache, _sanitize_url
     from ..cache.paths import get_cache_root
-    from ..cache.url_normalize import SCP_LIKE_RE
+    from ..marketplace.source_identity import parse_marketplace_source
 
-    is_ssh_source = urlsplit(source.url).scheme.lower() == "ssh" or bool(
-        SCP_LIKE_RE.match(source.url)
-    )
+    is_ssh_source = parse_marketplace_source(source.url).transport in {"ssh", "scp"}
     if is_ssh_source:
-        from ..core.auth import AuthResolver
-
-        git_env = AuthResolver.build_noninteractive_git_env(
-            base_env=auth_resolver.hardened_git_base_env(),
-        )
+        git_env = auth_resolver.build_ssh_git_env()
     else:
         org = source.owner or None
         auth_ctx = (

@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from apm_cli.commands.marketplace import _parse_marketplace_source
+from apm_cli.marketplace.source_identity import parse_marketplace_source
 
 
 @pytest.mark.parametrize(
@@ -108,6 +109,40 @@ def test_ssh_protocol_url_on_known_host_uses_git_fetcher() -> None:
 @pytest.mark.parametrize(
     "raw",
     [
+        "ssh://git@[2001:db8::1]:2222/Team/Repo.git",
+        "ssh://git@[2001:DB8::1]/Team/Repo.git",
+    ],
+)
+def test_ssh_protocol_url_preserves_validated_transport_identity(raw: str) -> None:
+    identity = parse_marketplace_source(raw)
+
+    assert identity.url == raw
+    assert identity.kind == "git"
+    assert identity.host == "2001:db8::1"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ssh://git@gitea.example.com/org/repo.git?ref=main",
+        "ssh://git@gitea.example.com/org/repo.git#main",
+        "ssh://git@gitea.example.com/org/%2frepo.git",
+        "ssh://git@gitea.example.com/org/%5Crepo.git",
+        "ssh://git@gitea.example.com/org/%zzrepo.git",
+        "ssh://git@gitea.example.com/org/%00repo.git",
+        "ssh://git%40user@gitea.example.com/org/repo.git",
+        "ssh://git@gitea.example.com%2fevil/org/repo.git",
+        "ssh://git@gitea.example.com%3a2222/org/repo.git",
+    ],
+)
+def test_ssh_protocol_url_rejects_ambiguous_or_unsafe_components(raw: str) -> None:
+    with pytest.raises(ValueError):
+        parse_marketplace_source(raw)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
         "ssh://git@/org/repo.git",
         "ssh://git@gitea.example.com",
         "ssh://git@gitea.example.com:not-a-port/org/repo.git",
@@ -181,13 +216,12 @@ def test_explicit_host_flag_combined_with_owner_repo() -> None:
     assert parsed.path.rstrip("/") == "/owner/repo"
 
 
-def test_https_ado_url_classified_as_git() -> None:
-    """ADO is no longer rejected at the parser layer."""
+def test_https_ado_url_classified_as_ado() -> None:
+    """ADO stays on its HTTPS REST fetch path after source admission."""
     url, kind, host = _parse_marketplace_source(
         "https://dev.azure.com/contoso/eng/_git/agent-forge", host_flag=None
     )
-    # ADO classification routes through "git" kind so subprocess-git fetcher handles it.
-    assert kind == "git"
+    assert kind == "ado"
     # Use urlsplit().hostname for exact host match (CodeQL: avoid substring sanitization).
     assert urlsplit(url).hostname == "dev.azure.com"
     assert host == "dev.azure.com"

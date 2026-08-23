@@ -834,6 +834,20 @@ if ! printf '%s\n' "$packed_source_body" \
     violations=$((violations + 1))
 fi
 
+marketplace_identity_owner="src/apm_cli/marketplace/source_identity.py"
+marketplace_command_source="src/apm_cli/commands/marketplace/__init__.py"
+marketplace_model_source="src/apm_cli/marketplace/models.py"
+if [ ! -f "$marketplace_identity_owner" ] \
+    || ! grep -Fq 'def parse_marketplace_source(' "$marketplace_identity_owner" \
+    || ! grep -Fq 'identity = parse_marketplace_source(source, host_flag)' \
+        "$marketplace_command_source" \
+    || ! grep -Fq 'identity = parse_marketplace_source(self.url)' \
+        "$marketplace_model_source" \
+    || grep -Eq 'SCP_LIKE_RE|AuthResolver\.classify_host' "$marketplace_command_source"; then
+    echo "[x] Marketplace source admission must route through marketplace/source_identity.py"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC10b: local marketplace audit resolution authority"
 if ! grep -Fq 'resolve_local_plugin_path(' src/apm_cli/marketplace/audit.py \
     || grep -Fq '_resolve_local_relative_source' src/apm_cli/marketplace/audit.py \

@@ -93,7 +93,9 @@ browse / install / update workflow works against:
 - **SSH URLs** -- `git@gitea.example.com:org/repo.git`, or
   `ssh://git@gitea.example.com:2222/org/repo.git` when the server uses a
   non-default port. The fully qualified form is passed unchanged to subprocess
-  `git`, retaining its username and port.
+  `git`, retaining its username and port. SSH uses the local key or agent
+  without forwarding HTTP credentials; passwords, query parameters, and `#ref`
+  fragments are rejected (use `--ref` instead).
   For in-repository plugins from GitLab and generic git marketplaces, APM
   keeps this consumer-selected SSH transport when it writes their concrete
   `git:` and `path:` entry to `apm.yml`. HTTPS registrations likewise remain

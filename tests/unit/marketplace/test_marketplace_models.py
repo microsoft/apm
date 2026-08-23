@@ -39,6 +39,17 @@ class TestMarketplaceSource:
         assert src.kind == "git"
         assert src.port == 2222
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "ssh://git:secret@github.com/acme/private-marketplace.git",
+            "ssh://git@github.com/acme/%2frepository.git",
+        ],
+    )
+    def test_url_only_source_cannot_bypass_source_admission(self, url: str):
+        with pytest.raises(ValueError):
+            MarketplaceSource(name="private-marketplace", url=url)
+
     def test_frozen(self):
         src = MarketplaceSource(name="x", owner="o", repo="r")
         with pytest.raises(AttributeError):

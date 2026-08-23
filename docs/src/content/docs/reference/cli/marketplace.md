@@ -67,6 +67,8 @@ Register a marketplace from a source reference. Accepted forms:
 - SSH URL -- SCP-like `git@host:org/repo.git` or fully qualified
   `ssh://git@host[:PORT]/org/repo.git`. Use the fully qualified form when the
   server listens on a non-default SSH port; the port is optional otherwise.
+  SSH URLs cannot include passwords, queries, or fragments; use `--ref` to
+  select a branch, tag, or commit.
 - Local filesystem path -- absolute (`/srv/marketplaces/agent-forge`),
   relative (`./local-mkt`), home-based (`~/code/marketplace`), or a
   direct `marketplace.json` file.

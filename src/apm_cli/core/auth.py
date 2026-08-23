@@ -32,6 +32,7 @@ import base64
 import logging
 import os
 import re
+import shlex
 import sys
 import threading
 import traceback
@@ -1266,6 +1267,47 @@ class AuthResolver:
             preserve_config_isolation=preserve_config_isolation,
             suppress_credential_helpers=suppress_credential_helpers,
         )
+
+    def build_ssh_git_env(self) -> dict[str, str]:
+        """Build a credential-free, noninteractive environment for SSH Git.
+
+        SSH keys and agents remain available, while HTTP token/header channels,
+        terminal prompts, and askpass programs are disabled before Git starts.
+        """
+        env = self.build_noninteractive_git_env(
+            base_env=self.hardened_git_base_env(),
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+        )
+        env["GIT_SSH_COMMAND"] = self._harden_ssh_command(env.get("GIT_SSH_COMMAND", ""))
+        env["SSH_ASKPASS_REQUIRE"] = "never"
+        env.pop("GIT_ASKPASS", None)
+        env.pop("SSH_ASKPASS", None)
+        return env
+
+    @staticmethod
+    def _harden_ssh_command(command: str) -> str:
+        """Preserve SSH key options while replacing prompt-related options."""
+        try:
+            parts = shlex.split(command) if command else ["ssh"]
+        except ValueError:
+            parts = ["ssh"]
+        filtered: list[str] = []
+        index = 0
+        while index < len(parts):
+            part = parts[index]
+            lowered = part.lower()
+            if part == "-o" and index + 1 < len(parts):
+                option = parts[index + 1].lower()
+                if option.startswith(("batchmode=", "connecttimeout=")):
+                    index += 2
+                    continue
+            if lowered.startswith("-obatchmode=") or lowered.startswith("-oconnecttimeout="):
+                index += 1
+                continue
+            filtered.append(part)
+            index += 1
+        return f"{shlex.join(filtered)} -o BatchMode=yes -o ConnectTimeout=30"
 
     @classmethod
     def build_public_github_anonymous_git_env(

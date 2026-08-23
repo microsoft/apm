@@ -252,6 +252,7 @@ class GitCache:
                 text=True,
                 timeout=30,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise RuntimeError(
@@ -374,6 +375,7 @@ class GitCache:
                     text=True,
                     timeout=300,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
@@ -413,6 +415,7 @@ class GitCache:
                             text=True,
                             timeout=300,
                             env=subprocess_env,
+                            stdin=subprocess.DEVNULL,
                             check=True,
                         )
                         fallback_done = True
@@ -567,6 +570,7 @@ class GitCache:
                     text=True,
                     timeout=60,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
                 if promisor_url:
@@ -587,6 +591,7 @@ class GitCache:
                         text=True,
                         timeout=10,
                         env=subprocess_env,
+                        stdin=subprocess.DEVNULL,
                         check=True,
                     )
                 if sparse_paths:
@@ -615,6 +620,7 @@ class GitCache:
                     text=True,
                     timeout=60,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
@@ -652,6 +658,7 @@ class GitCache:
                 text=True,
                 timeout=10,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
             )
             return result.returncode == 0 and "commit" in result.stdout.strip()
         except (subprocess.TimeoutExpired, OSError):
@@ -700,6 +707,7 @@ class GitCache:
                 text=True,
                 timeout=120,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
                 check=True,
             )
         except subprocess.CalledProcessError:
@@ -710,6 +718,7 @@ class GitCache:
                 text=True,
                 timeout=120,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
                 check=True,
             )
 
@@ -818,19 +827,18 @@ def _dir_size(path: Path) -> int:
 
 
 def _sanitize_url(url: str) -> str:
-    """Strip credentials from URL for safe logging."""
+    """Remove all URL userinfo before including a transport in diagnostics."""
     import urllib.parse
 
     try:
         parsed = urllib.parse.urlparse(url)
-        if parsed.password:
-            # Replace password with ***
-            netloc = parsed.hostname or ""
-            if parsed.username:
-                netloc = f"{parsed.username}:***@{netloc}"
-            if parsed.port:
-                netloc = f"{netloc}:{parsed.port}"
-            return urllib.parse.urlunparse(parsed._replace(netloc=netloc))
+        if parsed.username is not None or parsed.password is not None:
+            host = parsed.hostname or ""
+            if ":" in host:
+                host = f"[{host}]"
+            if parsed.port is not None:
+                host = f"{host}:{parsed.port}"
+            return urllib.parse.urlunparse(parsed._replace(netloc=host))
     except Exception:
-        pass
+        return "<redacted git URL>"
     return url
