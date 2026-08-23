@@ -785,15 +785,17 @@ def test_intellij_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path
 
 
 def test_copilot_mcp_config_paths_have_single_owner() -> None:
-    """Copilot cleanup must use the adapter's project or user config path."""
+    """Copilot cleanup and runtime inspection use the adapter-owned path."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/adapters/client/copilot.py").read_text(encoding="utf-8")
     integrator = (root / "src/apm_cli/integration/mcp_integrator.py").read_text(encoding="utf-8")
+    runtime = (root / "src/apm_cli/runtime/copilot_runtime.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     assert owner.count("def get_config_path(") == 1
     assert "COPILOT_HOME" in owner
     assert 'ClientFactory.create_client(\n                "copilot",' in integrator
+    assert "CopilotClientAdapter(user_scope=True).get_config_path()" in runtime
     assert "Copilot CLI MCP paths must come from the Copilot adapter" in guard
 
 
@@ -814,10 +816,9 @@ def test_copilot_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path)
             "node_modules",
         ),
     )
-    integrator = sandbox / "src/apm_cli/integration/mcp_integrator.py"
-    integrator.write_text(
-        integrator.read_text(encoding="utf-8")
-        + '\n_PARALLEL_COPILOT_MCP_PATH = ".github/mcp.json"\n',
+    runtime = sandbox / "src/apm_cli/runtime/copilot_runtime.py"
+    runtime.write_text(
+        runtime.read_text(encoding="utf-8") + '\n_PARALLEL_COPILOT_MCP_PATH = ".github/mcp.json"\n',
         encoding="utf-8",
     )
 

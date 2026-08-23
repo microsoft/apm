@@ -136,7 +136,7 @@ unresolved required entries fail closed.
 | Harness | File | Scope | Format |
 |---|---|---|---|
 | GitHub Copilot CLI | `.github/mcp.json` | project | JSON `mcpServers` |
-| GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |
+| GitHub Copilot CLI | `$COPILOT_HOME/mcp-config.json` (`-g`, unset/blank: `~/.copilot/mcp-config.json`) | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
@@ -213,7 +213,8 @@ permissions to check. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to
-`~/.copilot/mcp-config.json`, Claude Code to
+`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set, otherwise
+`~/.copilot/mcp-config.json`; Claude Code to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
 non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to

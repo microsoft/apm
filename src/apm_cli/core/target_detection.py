@@ -859,8 +859,10 @@ class EffectiveTargetDecision:
         seen: set[str] = set()
         for target, capability in _target_capabilities(self.value):
             runtime = (
-                target
-                if target in capability.runtimes
+                "vscode"
+                if target == "vscode" and "vscode" in capability.runtimes
+                else capability.name
+                if capability.name in capability.runtimes
                 else capability.compile_family
                 if capability.compile_family in capability.runtimes
                 else capability.runtimes[0]
@@ -989,6 +991,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("cursor", "dir", ".cursor"),
     ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
     ("copilot", "file", ".github/copilot-instructions.md"),
+    ("copilot", "file", ".github/mcp.json"),  # architecture-authority-exempt: detection signal
     ("copilot", "dir", ".github/instructions"),
     ("copilot", "dir", ".github/agents"),
     ("copilot", "dir", ".github/prompts"),

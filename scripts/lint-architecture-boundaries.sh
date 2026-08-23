@@ -103,8 +103,8 @@ if [ "$effective_target_definition_count" -ne 1 ] \
 fi
 copilot_mcp_path_owner="src/apm_cli/adapters/client/copilot.py"
 copilot_mcp_path_duplicate_hits=$(
-    grep -En '(\.github/mcp\.json|mcp-config\.json)' \
-        src/apm_cli/integration/mcp_integrator.py \
+    find src/apm_cli -type f -name '*.py' ! -path "$copilot_mcp_path_owner" \
+        -exec grep -En '(\.github/mcp\.json|mcp-config\.json)' {} + \
         | grep -v 'architecture-authority-exempt:' \
         || true
 )

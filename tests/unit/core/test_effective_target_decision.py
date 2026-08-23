@@ -76,11 +76,11 @@ def test_canonical_copilot_projects_to_copilot_runtime(_saved, tmp_path: Path) -
 
 
 @patch("apm_cli.config.get_install_target", return_value="agents")
-def test_deprecated_agents_alias_projects_to_agents_runtime(_saved, tmp_path: Path) -> None:
+def test_deprecated_agents_alias_projects_to_copilot_runtime(_saved, tmp_path: Path) -> None:
     decision = _resolve(tmp_path)
 
     assert decision.canonical_targets == ("copilot",)
-    assert decision.runtime_targets == ("agents",)
+    assert decision.runtime_targets == ("copilot",)
     assert decision.runtime_equivalents == ("agents", "copilot", "vscode")
 
 
@@ -120,6 +120,19 @@ def test_unset_or_malformed_saved_target_uses_single_project_detection(
 def test_unrestricted_project_without_harness_fails_closed(_saved, tmp_path: Path) -> None:
     with pytest.raises(NoHarnessError):
         _resolve(tmp_path)
+
+
+@patch("apm_cli.config.get_install_target", return_value=None)
+def test_copilot_mcp_config_is_a_copilot_project_signal(_saved, tmp_path: Path) -> None:
+    """A project Copilot config remains discoverable on a later install."""
+    config = tmp_path / ".github" / "mcp.json"
+    config.parent.mkdir()
+    config.write_text('{"mcpServers": {}}', encoding="utf-8")
+
+    decision = _resolve(tmp_path)
+
+    assert decision.canonical_targets == ("copilot",)
+    assert decision.runtime_targets == ("copilot",)
 
 
 @patch("apm_cli.config.get_install_target", return_value=None)

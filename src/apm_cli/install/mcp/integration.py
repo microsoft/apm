@@ -27,6 +27,7 @@ def run_owned_mcp_integration(
     verbose: bool = False,
 ) -> int:
     """Reconcile one bundle owner's MCP servers and persist ownership."""
+    from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_integrator import MCPIntegrator as _OwnedMCPIntegrator
 
@@ -73,6 +74,7 @@ def run_owned_mcp_integration(
                 runtime=target,
                 project_root=project_root,
                 user_scope=user_scope,
+                scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
                 fail_on_write_error=True,
             )
             names.difference_update(stale_for_target)
