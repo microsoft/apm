@@ -35,7 +35,7 @@ Scaffold:
 ```bash
 apm plugin init my-plugin --yes
 apm marketplace init --owner acme-org --name my-marketplace
-apm marketplace package add ./ --name my-plugin --version 0.1.0
+apm marketplace package add ./ --name my-plugin --version 0.1.0 --no-verify
 ```
 
 Resulting `apm.yml`:
@@ -153,12 +153,14 @@ only at `plugins/<name>/apm.yml`.
 Scaffold:
 
 ```bash
+# From the empty my-monorepo repository root
 mkdir -p plugins
 cd plugins
 apm plugin init plugin-a --yes
 apm plugin init plugin-b --yes
 cd ..
 apm marketplace init --owner acme-org --name acme-monorepo
+apm marketplace package remove example-package --yes
 apm marketplace package add ./plugins/plugin-a --name plugin-a --version 0.1.0 --no-verify
 apm marketplace package add ./plugins/plugin-b --name plugin-b --version 0.1.0 --no-verify
 ```
