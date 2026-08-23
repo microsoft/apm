@@ -148,6 +148,7 @@ requirements:
     keyword: MUST
     section: "5.5"
     conformance_class: consumer
+    notes: "generated_at is optional advisory metadata; consumers omit it from new lockfiles by default and preserve an existing omission unless explicitly configured otherwise"
   - id: req-lk-006
     keyword: MUST
     section: "5.5"

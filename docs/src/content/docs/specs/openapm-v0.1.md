@@ -1141,16 +1141,17 @@ against.
 <a id="req-lk-005"></a>
 **[req-lk-005]** A conforming **consumer** implementation MUST treat
 two lockfiles as semantically equivalent if they differ only in the
-values of `generated_at` and `apm_version`. A no-op install
-operation MUST NOT rewrite a lockfile whose only changed fields
-would be these two. Consumers operating in privacy-sensitive
-deployments MAY omit `generated_at` and `apm_version` entirely;
-their absence MUST NOT affect content-equivalence comparison.
-Consumers SHOULD expose a `--no-provenance` (or equivalent) flag
-that suppresses these fields on write. Consumers SHOULD NOT include
-`generated_at` or `apm_version` in lockfiles persisted by
-deployments that have declared privacy sensitivity. When a
-consumer writes a lockfile, the `dependencies` list MUST be
+presence or values of `generated_at` and `apm_version`. A no-op
+install operation MUST NOT rewrite a lockfile whose only changed
+fields would be these two. `generated_at` is optional, advisory
+metadata. Consumers MUST omit `generated_at` from newly created
+lockfiles unless explicit user or deployment configuration requests
+it. When an existing lockfile omits `generated_at`, a consumer MUST
+NOT reintroduce it solely as metadata during a later write unless
+that configuration opts in. Consumers operating in privacy-sensitive
+deployments SHOULD omit both provenance fields to avoid leaking tool
+version or build-time information. When a consumer writes a
+lockfile, the `dependencies` list MUST be
 ordered ascending lexicographically by the tuple (`repo_url`,
 `virtual_path`); entries without `virtual_path` sort as if
 `virtual_path` were the empty string. Two lockfiles differing
@@ -3850,6 +3851,7 @@ renumbering of conformance classes.
 | 0.1.35  | 2026-08-27 | Stale-spec (Mode C) amendment recording a machine-verifiable native Agent Plugins lifecycle. Added [req-tg-013] (Section 8.5.7, consumer MUST): schema, effective-target, integrity, security, and executable admission drives one aggregate direct-plus-transitive registration per scope without locating, invoking, or version-checking a host binary during lifecycle operations; packages remain materialized in place and opaque to legacy projection; direct dependencies win plugin-name collisions over transitive dependencies, same-precedence collisions fail, and recorded ownership does not silently repoint to a transitive claimant; a consumer-owned marketplace identifier and activation suffix are reserved only with the exact generated directory-marketplace entry; the ownership record is primary evidence, while missing-record recovery may re-adopt only that exact entry and reconcile the reserved namespace; foreign collisions and invalid JSON fail closed; unrelated JSON values are preserved semantically though stable serialization may reformat them; and catalog, ownership-record, and settings writes form one rollback unit. Revised [req-tg-011] to clarify that acquisition, materialization, and lock recording may precede target exclusion, which creates no target registration or primitive projection and does not block ordinary dependencies in the same batch. Compatibility is qualified at release or build time by the pinned real-host lifecycle suite; runtime availability is the operator's responsibility. Added the native plugin namespace and ownership-recovery threat to Section 10. Section 8.7, Section 11.3.2 Consumer enumeration, Appendix C, and conformance coverage updated. Statement count: 118 -> 119 (114 MUST, 5 SHOULD). |
 | 0.1.36  | 2026-08-29 | Editorial and defensive alignment for [req-tg-011] and [req-tg-013]. Named the [req-tg-008] result as the effective target intersection; scoped aggregate registration and plugin-name claimant selection to dependencies that passed admission; required target contraction to retire consumer-owned native registration; required advisory uninstall, prune, and restore reconciliation to omit ambiguous or changed-owner plugin entries without blocking cleanup; restored exact removal boundaries; defined directory-marketplace entries; and added reserved namespace disclosure to Section 11.2. Added conformance coverage for direct-owner promotion, advisory collision cleanup, and transitive owner-repoint refusal. Statement count remains 119 (114 MUST, 5 SHOULD). |
 | 0.1.37  | 2026-09-01 | Spec-citation fold for safe full-SHA revision-pin updates (closes #2511 Mode-B silent-extension gate). Added [req-rs-017] (Section 7.7, consumer MUST): a consumer extension may replace a full commit pin only with the peeled commit of the highest eligible non-prerelease annotated tag, including 0.x; no eligible tag retains the current commit and allows unrelated updates to continue; malformed, ambiguous, or failed remote tag resolution stops before manifest or lockfile writes. Revised [req-rs-011], [req-rs-012], and [req-rs-015] for bounded manifest rewrite, scoped operation, advisory tag provenance, and network-free replay. Section 5.2, Section 5.6, Section 7.11, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 119 -> 120 (115 MUST, 5 SHOULD). |
+| 0.1.38  | 2026-09-01 | Defensive amendment of [req-lk-005] (no new normative statement; count remains 120 (115 MUST, 5 SHOULD)): `generated_at` is optional advisory metadata, new lockfiles omit it by default, and later writes preserve an existing omission unless explicitly configured otherwise. |
 
 Errata (none at publication).
 

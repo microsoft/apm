@@ -130,7 +130,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Newly generated `apm.lock.yaml` files no longer include volatile
   `generated_at` metadata, preventing timestamp-only merge conflicts. Existing
   lockfiles preserve and refresh the legacy field until it is removed once;
-  later writes do not add it back. (#2616)
+  later writes do not add it back. `openapm-v0.1.md` requirement `req-lk-005`
+  defines these omission and opt-in semantics. Agent Plugin archive timestamps
+  fall back to `SOURCE_DATE_EPOCH` or the portable ZIP epoch when the field is
+  absent. (by @lachieh; closes #2572) (#2616)
 - Lockfiles generated on Windows for marketplace-plugin / skill-subset git
   dependencies now pass `apm install --frozen` on Linux, and vice versa, by
   hashing synthetic manifests with deterministic LF line endings.

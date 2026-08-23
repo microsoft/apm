@@ -104,9 +104,10 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_resolved_field"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_resolved_field",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_new_lockfile_omits_generated_at_by_default"
       ]
     },
     {

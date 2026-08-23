@@ -104,6 +104,17 @@ def test_lockfile_dependency_carries_resolved_field():
     )
 
 
+@pytest.mark.req("req-lk-005")
+def test_new_lockfile_omits_generated_at_by_default():
+    from apm_cli.deps.lockfile import LockFile
+
+    assert "generated_at:" not in LockFile().to_yaml()
+    assert_spec_contains(
+        "MUST omit `generated_at` from newly created\nlockfiles",
+        "MUST\nNOT reintroduce it solely as metadata",
+    )
+
+
 @pytest.mark.req("req-lk-013")
 def test_lockfile_dependency_carries_integrity_field_when_remote():
     doc = load_yaml_fixture(*TRUST_LOCKFILE)
