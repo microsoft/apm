@@ -99,6 +99,70 @@ def test_git_semver_preflight_eligibility_has_single_owner() -> None:
     assert "| Git semver preflight eligibility and resolution |" in architecture
 
 
+def test_frontmatter_detection_has_single_owner() -> None:
+    """Markdown fence detection must route through the bounded YAML handler."""
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        (sys.executable, "scripts/check_frontmatter_authority.py", "--root", str(root)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Markdown frontmatter detection must remain owned by yaml_io.load_frontmatter" in guard
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("local-grammar", "must delegate fence detection"),
+        ("direct-bypass", "direct frontmatter parsing must route through load_frontmatter"),
+    ],
+)
+def test_frontmatter_authority_mutations_are_killed(
+    tmp_path: Path, mutation: str, expected: str
+) -> None:
+    """The static owner guard rejects local grammar and direct parser bypasses."""
+    root = Path(__file__).parents[2]
+    owner = tmp_path / "src/apm_cli/utils/yaml_io.py"
+    owner.parent.mkdir(parents=True)
+    shutil.copy(root / "src/apm_cli/utils/yaml_io.py", owner)
+
+    if mutation == "local-grammar":
+        source = owner.read_text(encoding="utf-8")
+        owner.write_text(
+            source.replace(
+                "_BOUNDED_FRONTMATTER_HANDLER.detect(text)",
+                'text.startswith("---")',
+            ),
+            encoding="utf-8",
+        )
+    else:
+        bypass = tmp_path / "src/apm_cli/probe.py"
+        bypass.write_text(
+            "import frontmatter\n\n\ndef parse(path):\n    return frontmatter.load(path)\n",
+            encoding="utf-8",
+        )
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/check_frontmatter_authority.py"),
+            "--root",
+            str(tmp_path),
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert expected in result.stdout
+
+
 @pytest.mark.parametrize(
     ("relative_path", "source", "expected"),
     [

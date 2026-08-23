@@ -180,6 +180,13 @@ if [ "$agent_plugin_component_status" -ne 0 ]; then
     echo "$agent_plugin_component_output"
     violations=$((violations + 1))
 fi
+frontmatter_authority_output=$(python3 scripts/check_frontmatter_authority.py --root "$ROOT" 2>&1)
+frontmatter_authority_status=$?
+if [ "$frontmatter_authority_status" -ne 0 ]; then
+    echo "[x] Markdown frontmatter detection must remain owned by yaml_io.load_frontmatter"
+    echo "$frontmatter_authority_output"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC2: validate-before-mutate boundaries"
 generated_bundle_writer_output=$(python3 scripts/check_generated_bundle_text_writers.py 2>&1)
