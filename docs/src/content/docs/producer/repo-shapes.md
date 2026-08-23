@@ -153,9 +153,11 @@ only at `plugins/<name>/apm.yml`.
 Scaffold:
 
 ```bash
-apm plugin init plugin-a --yes              # cd plugins/plugin-a first
-apm plugin init plugin-b --yes              # cd plugins/plugin-b first
-cd ../..
+mkdir -p plugins
+cd plugins
+apm plugin init plugin-a --yes
+apm plugin init plugin-b --yes
+cd ..
 apm marketplace init --owner acme-org --name acme-monorepo
 apm marketplace package add ./plugins/plugin-a --name plugin-a
 apm marketplace package add ./plugins/plugin-b --name plugin-b
