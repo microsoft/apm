@@ -275,4 +275,18 @@ def test_deployment_ledger_owner_is_hard_integrity_failure():
     )
 
 
+@pytest.mark.req("req-pl-017")
+def test_ado_policy_coordinate_fallback_is_404_only():
+    """Azure DevOps discovery uses the valid coordinate before legacy fallback."""
+    from apm_cli.policy.discovery import ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY
+
+    assert (ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY) == ("apm", "apm-policy")
+    assert_spec_contains(
+        "`apm/apm-policy`",
+        "only when the primary\nrequest received an HTTP 404 response",
+        "MUST NOT try that legacy\ncoordinate",
+        "actionable migration warning",
+    )
+
+
 _ = waive  # keep import for any future structural waiver
