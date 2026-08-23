@@ -410,9 +410,10 @@ def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
 def test_manifestless_local_claude_skill_waived(tmp_path: Path) -> None:
     """A local Claude-skill filesystem shape waives its missing manifest.
 
-    A local ``path:`` dependency's directory is part of the project's own
-    source tree -- checked in, always present -- not a download target, so
-    the same defined-by-shape waiver that applies to virtual subdirectory
+    A local ``path:`` dependency is resolved directly from the filesystem
+    (it can point anywhere, including outside the repo, e.g. ``../sibling``)
+    rather than materialised into ``apm_modules/`` -- not a download target,
+    so the same defined-by-shape waiver that applies to virtual subdirectory
     packages applies here too, gated by the on-disk shape actually being a
     valid Claude skill (probed below, unlike the cold-cache fallback used
     for virtual packages whose directory may not exist yet).

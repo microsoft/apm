@@ -224,8 +224,9 @@ def _allows_missing_manifest(
     # tree.  When the package directory is absent we cannot probe the on-disk
     # shape, so fall back to the frozen lockfile classification -- a virtual
     # ``claude_skill`` legitimately ships no ``apm.yml`` by design.  A local
-    # dependency's directory is part of the project's own source tree, not a
-    # download target, so this fallback does not apply to it -- if a local
+    # dependency's path is resolved directly from the filesystem (not
+    # materialised into ``apm_modules/``) and can point anywhere, including
+    # outside the repo, so this fallback does not apply to it -- if a local
     # path is missing, that is a real problem, not an absent-by-design shape.
     # Once the modules ARE materialised the strict shape probe below still
     # runs and guards against a mislabeled or malformed installed package.
