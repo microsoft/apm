@@ -133,8 +133,13 @@ def test_export_timestamp_is_reproducible(runner, tmp_path):
         _seed(Path.cwd())
         first = runner.invoke(cli, ["lock", "export", "--timestamp", "2030-01-01T00:00:00+00:00"])
         second = runner.invoke(cli, ["lock", "export", "--timestamp", "2030-01-01T00:00:00+00:00"])
+        utc_designator = runner.invoke(
+            cli, ["lock", "export", "--timestamp", "2030-01-01T00:00:00Z"]
+        )
         assert first.output == second.output
         assert "2030-01-01T00:00:00+00:00" in first.output
+        assert utc_designator.exit_code == 0
+        assert "2030-01-01T00:00:00+00:00" in utc_designator.output
 
 
 @pytest.mark.parametrize("timestamp", ["not-a-date", "2024-06-01T12:00:00"])

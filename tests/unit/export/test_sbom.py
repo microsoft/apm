@@ -187,11 +187,12 @@ def test_credentials_scrubbed_from_external_references():
 
 
 def test_resolve_export_timestamp_valid_iso():
-    from apm_cli.commands.lock import _resolve_export_timestamp
+    from apm_cli.commands.lock import _normalize_utc_designator, _resolve_export_timestamp
 
     valid_ts = "2024-06-01T00:00:00+00:00"
     assert _resolve_export_timestamp(valid_ts, None) == valid_ts
     assert _resolve_export_timestamp("2024-06-01T00:00:00Z", None) == valid_ts
+    assert _normalize_utc_designator("2024-06-01T00:00:00Z") == valid_ts
 
 
 def test_resolve_export_timestamp_invalid_iso_raises_bad_parameter():

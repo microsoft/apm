@@ -326,7 +326,7 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
 
     if explicit is not None:
         try:
-            dt = datetime.fromisoformat(explicit)
+            dt = datetime.fromisoformat(_normalize_utc_designator(explicit))
         except (ValueError, TypeError):
             dt = None
         if dt is None or dt.tzinfo is None:
@@ -346,6 +346,11 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
     if lockfile_generated_at:
         return lockfile_generated_at
     return "1970-01-01T00:00:00+00:00"
+
+
+def _normalize_utc_designator(value: str) -> str:
+    """Normalize ISO 8601 UTC syntax for Python 3.10 ``fromisoformat``."""
+    return f"{value[:-1]}+00:00" if value.endswith("Z") else value
 
 
 __all__ = ["lock"]
