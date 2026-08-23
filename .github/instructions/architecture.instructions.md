@@ -58,7 +58,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) | `src/apm_cli/cache/url_normalize.py` |
 | Self-update release -> installer ref + VERSION | commands/self_update.py (_ResolvedSelfUpdateRelease) | `src/apm_cli/commands/self_update.py` |
 | Dependency comparison identity vs display-cased materialization path | models/dependency/identity.py + materialization.py + DependencyReference | `src/apm_cli/models/dependency/identity.py`; `src/apm_cli/models/dependency/materialization.py`; `src/apm_cli/models/dependency/reference.py` |
-| Cached policy shape and ADO policy coordinate | policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) | `src/apm_cli/policy/discovery.py` |
+| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) | `src/apm_cli/policy/discovery.py` |
 | Post-uninstall dependency reachability | deps/reachability.py (compute_forward_reachable_keys) | `src/apm_cli/deps/reachability.py` |
 | CI audit scratch materialization | install/audit_replay.py (prepare_ci_audit_replay) | `src/apm_cli/install/audit_replay.py` |
 | GitHub API throttle classification | deps/github_rate_limit.py | `src/apm_cli/deps/github_rate_limit.py` |

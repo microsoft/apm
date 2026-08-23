@@ -739,7 +739,7 @@ def test_ado_policy_coordinate_has_single_owner() -> None:
     owner = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     owner_row = (
-        "| Cached policy shape and ADO policy coordinate | policy/discovery.py "
+        "| Cached policy shape | policy/discovery.py "
         "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |"
     )
 
