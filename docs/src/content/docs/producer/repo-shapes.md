@@ -104,7 +104,7 @@ writes `marketplace.json` only. No bundle is produced because
 
 > **Advanced.** Most first-time authors should start with single-plugin or aggregator. Reach for hybrid when you're shipping your own plugin *and* curating others. [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config) is the live reference: 7 plugins under `plugins/`, one root `apm.yml`, releases via [microsoft/apm-action@v1](https://github.com/microsoft/apm-action) `mode: release`.
 
-One repo, many plugins under `packages/`, one marketplace at the root
+One repo, many plugins under `plugins/`, one marketplace at the root
 that lists them as local-path entries. Each plugin gets its own
 `apm.yml` so it can be compiled and tested in isolation.
 
@@ -113,7 +113,7 @@ Layout:
 ```text
 my-monorepo/
   apm.yml                          # marketplace + local-path packages
-  packages/
+  plugins/
     plugin-a/
       apm.yml                      # plugin-a's manifest
       .apm/
@@ -139,21 +139,26 @@ my-monorepo/
 > including after `apm init` writes `includes: auto`. Mixed layouts pack from
 > `.apm/` and warn about each skipped root source. `apm install` only discovers
 > instructions, commands, and prompts under `.apm/<type>/`, so authoring
-> `packages/plugin-a/instructions/style.instructions.md` instead of
-> `packages/plugin-a/.apm/instructions/style.instructions.md` can install
+> `plugins/plugin-a/instructions/style.instructions.md` instead of
+> `plugins/plugin-a/.apm/instructions/style.instructions.md` can install
 > incomplete. See [Pack a bundle -- source layout and install-time
 > discovery](../pack-a-bundle/#source-layout-and-install-time-discovery)
 > for the full per-primitive scan-path reference.
 
+`plugins/` is not an APM CLI repository requirement: a package `source:` can
+point to another directory. This walkthrough uses `plugins/` because
+`microsoft/apm-action` with `mode: release` autodetects aggregator members
+only at `plugins/<name>/apm.yml`.
+
 Scaffold:
 
 ```bash
-apm plugin init plugin-a --yes              # cd packages/plugin-a first
-apm plugin init plugin-b --yes              # cd packages/plugin-b first
+apm plugin init plugin-a --yes              # cd plugins/plugin-a first
+apm plugin init plugin-b --yes              # cd plugins/plugin-b first
 cd ../..
 apm marketplace init --owner acme-org --name acme-monorepo
-apm marketplace package add ./packages/plugin-a --name plugin-a
-apm marketplace package add ./packages/plugin-b --name plugin-b
+apm marketplace package add ./plugins/plugin-a --name plugin-a
+apm marketplace package add ./plugins/plugin-b --name plugin-b
 ```
 
 Resulting root `apm.yml`:
@@ -173,10 +178,10 @@ marketplace:
     strategy: lockstep              # see versioning-strategies
   packages:
     - name: plugin-a
-      source: ./packages/plugin-a
+      source: ./plugins/plugin-a
       version: 1.0.0
     - name: plugin-b
-      source: ./packages/plugin-b
+      source: ./plugins/plugin-b
       version: 1.0.0
 ```
 
