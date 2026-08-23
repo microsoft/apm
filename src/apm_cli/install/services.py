@@ -426,6 +426,16 @@ def integrate_package_primitives(  # noqa: PLR0913
         "skills": integrators.skill,
     }
 
+    # Validate every converted instruction target before any primitive kind can
+    # write. A rejected instruction must not leave prompts, agents, commands,
+    # or identity-target instructions from the same package active.
+    if integrators.instruction is not None:
+        integrators.instruction.preflight_instructions_for_targets(
+            targets,
+            package_info,
+            project_root,
+        )
+
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
     # Structure: { prim_name: {"files": int, "adopted": int, "label": str, "paths": [str]} }
@@ -469,12 +479,6 @@ def integrate_package_primitives(  # noqa: PLR0913
         _agg_paths: list[str] = []
         _agg_hook_payloads: list = []
         _label = _prim_name
-        if _prim_name == "instructions":
-            _integrator.preflight_instructions_for_targets(
-                targets,
-                package_info,
-                project_root,
-            )
         for _target in targets:
             _mapping = _target.primitives.get(_prim_name)
             if _mapping is None:

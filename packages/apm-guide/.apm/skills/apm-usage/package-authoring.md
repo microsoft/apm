@@ -301,8 +301,8 @@ Frontmatter requirements vary by Markdown primitive type. When frontmatter is
 present, its opening fence of at least three hyphens (for example, `---`) must
 start at the first character of line 1. Without that opening fence, APM treats
 the document as body content, and later `---` lines remain Markdown horizontal
-rules. For converted instruction targets, rejected frontmatter stops that
-package's rule writes before any file is deployed to the target.
+rules. During `apm install`, rejected instruction frontmatter stops that
+package before any primitive is deployed to the selected targets.
 
 ### 1. Instruction (`*.instructions.md`)
 

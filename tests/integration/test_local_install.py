@@ -283,6 +283,9 @@ print("ordinary Markdown")
         )
         good_source = source.with_name("a-good.instructions.md")
         good_source.write_text("# Good rule\n", encoding="utf-8")
+        prompt_source = source.parents[1] / "prompts" / "good.prompt.md"
+        prompt_source.parent.mkdir(parents=True, exist_ok=True)
+        prompt_source.write_text("# Good prompt\n", encoding="utf-8")
         lines = ["a0: &a0 {k: v}"]
         previous = "a0"
         for index in range(1, 40):
@@ -311,7 +314,9 @@ print("ordinary Markdown")
 
         assert result.returncode != 0, result.stdout + result.stderr
         output = result.stdout + result.stderr
+        assert not (consumer / ".github/prompts/good.prompt.md").exists()
         assert not (consumer / ".github/instructions/a-good.instructions.md").exists()
+        assert not (consumer / ".github/instructions/test-skill.instructions.md").exists()
         assert not (consumer / ".cursor/rules/a-good.mdc").exists()
         assert not (consumer / ".cursor/rules/test-skill.mdc").exists()
         assert "Fix or remove the invalid frontmatter, then rerun apm install." in output
