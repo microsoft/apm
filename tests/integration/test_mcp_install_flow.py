@@ -179,9 +179,9 @@ def test_manifest_targets_make_mcp_ownership_portable_across_machines(
     payload = json.loads(snapshots[0])
     assert payload["mcp_target_servers"] == {
         "codex": ["apm-managed"],
-        "vscode": ["apm-managed"],
+        "copilot": ["apm-managed"],
     }
-    assert {row["runtime"] for row in payload["deployments"]} == {"codex", "vscode"}
+    assert {row["runtime"] for row in payload["deployments"]} == {"codex", "copilot"}
 
 
 def test_omitted_targets_use_project_harness_detection(tmp_path, monkeypatch) -> None:
@@ -233,7 +233,7 @@ def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_pat
     assert broad_lock is not None
     assert broad_lock.mcp_target_servers == {
         "codex": ["apm-managed"],
-        "vscode": ["apm-managed"],
+        "copilot": ["apm-managed"],
     }
 
     manifest["targets"] = ["copilot"]
@@ -249,14 +249,14 @@ def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_pat
     assert updated["projects"][r"c:\src\project"]["trust_level"] == "trusted"
     contracted_lock = LockFile.read(tmp_path / "apm.lock.yaml")
     assert contracted_lock is not None
-    assert contracted_lock.mcp_target_servers == {"vscode": ["apm-managed"]}
+    assert contracted_lock.mcp_target_servers == {"copilot": ["apm-managed"]}
 
 
-def test_legacy_copilot_ownership_migrates_without_vscode_ghost(
+def test_legacy_vscode_ownership_migrates_to_copilot_without_rewriting_vscode(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """A matching VS Code entry keeps ownership while old Copilot state is cleaned."""
+    """A legacy VS Code entry becomes Copilot-owned without a second VS Code write."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     LockFile().write(tmp_path / "apm.lock.yaml")
@@ -267,46 +267,32 @@ def test_legacy_copilot_ownership_migrates_without_vscode_ghost(
 
     legacy = CliRunner().invoke(
         cli,
-        ["install", "--runtime", "copilot", "--no-policy"],
+        ["install", "--runtime", "vscode", "--target", "vscode", "--no-policy"],
     )
     assert legacy.exit_code == 0, legacy.output
     legacy_lock = LockFile.read(tmp_path / "apm.lock.yaml")
     assert legacy_lock is not None
-    assert legacy_lock.mcp_target_servers == {"copilot": ["apm-managed"]}
+    assert legacy_lock.mcp_target_servers == {"vscode": ["apm-managed"]}
 
     vscode_config = tmp_path / ".vscode" / "mcp.json"
-    vscode_config.parent.mkdir(exist_ok=True)
-    vscode_config.write_text(
-        json.dumps(
-            {
-                "servers": {
-                    "apm-managed": {
-                        "type": "stdio",
-                        "command": "echo",
-                        "args": ["managed"],
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
+    vscode_bytes = vscode_config.read_bytes()
 
     migrated = CliRunner().invoke(cli, ["install", "--no-policy"])
 
     assert migrated.exit_code == 0, migrated.output
     lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
     assert lockfile is not None
-    assert lockfile.mcp_target_servers == {"vscode": ["apm-managed"]}
+    assert lockfile.mcp_target_servers == {"copilot": ["apm-managed"]}
     ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
     assert {
         record.locator.runtime
         for record in ledger.records.values()
         if record.locator.target == "mcp"
-    } == {"vscode"}
-    copilot_config = tmp_path / "home" / ".copilot" / "mcp-config.json"
-    if copilot_config.exists():
-        copilot_payload = json.loads(copilot_config.read_text(encoding="utf-8"))
-        assert "apm-managed" not in copilot_payload.get("mcpServers", {})
+    } == {"copilot"}
+    assert vscode_config.read_bytes() == vscode_bytes
+    copilot_config = tmp_path / ".github" / "mcp.json"
+    copilot_payload = json.loads(copilot_config.read_text(encoding="utf-8"))
+    assert "apm-managed" in copilot_payload["mcpServers"]
 
 
 def test_legacy_lockfile_adopts_exact_mcp_baseline_before_target_contraction(
@@ -358,7 +344,7 @@ def test_legacy_lockfile_adopts_exact_mcp_baseline_before_target_contraction(
     assert "apm-managed" not in codex_config.get("mcp_servers", {})
     migrated = LockFile.read(lock_path)
     assert migrated is not None
-    assert migrated.mcp_target_servers == {"vscode": ["apm-managed"]}
+    assert migrated.mcp_target_servers == {"copilot": ["apm-managed"]}
 
 
 # ---------------------------------------------------------------------------

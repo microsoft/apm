@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - YAML expansion guard no longer rejects large anchor-free lockfiles (150K+
   entries) with a false-positive "billion-laughs" error. APM-generated
   lockfiles with no anchors or aliases now load without error. (#2389)
+- `apm install` no longer skips the credential retry on non-English machines.
+  Git localises its diagnostics through gettext, so a translated stderr made an
+  authentication failure unrecognisable and private-repo installs failed with
+  misleading network guidance. Git subprocesses in the authentication retry
+  path now run with `LC_ALL=C` and `LANGUAGE=C`. (by @Naofel-eal, closes #2533)
 
 ### Changed
 

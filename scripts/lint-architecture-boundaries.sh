@@ -101,6 +101,20 @@ if [ "$effective_target_definition_count" -ne 1 ] \
     [ -n "$effective_target_context_hits" ] && echo "$effective_target_context_hits"
     violations=$((violations + 1))
 fi
+copilot_mcp_path_owner="src/apm_cli/adapters/client/copilot.py"
+copilot_mcp_path_duplicate_hits=$(
+    find src/apm_cli -type f -name '*.py' ! -path "$copilot_mcp_path_owner" \
+        -exec grep -En '(\.github/mcp\.json|mcp-config\.json)' {} + \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q 'COPILOT_HOME' "$copilot_mcp_path_owner" \
+    || ! grep -q 'ClientFactory.create_client(' src/apm_cli/integration/mcp_integrator.py \
+    || [ -n "$copilot_mcp_path_duplicate_hits" ]; then
+    echo "[x] Copilot CLI MCP paths must come from the Copilot adapter"
+    [ -n "$copilot_mcp_path_duplicate_hits" ] && echo "$copilot_mcp_path_duplicate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Install orchestration must not branch on native locator target names" \
     'name == "copilot-(app|cowork)"|name in \{.*copilot-(app|cowork)' \
@@ -160,6 +174,14 @@ if [ "$nested_worktree_walk_count" -ne 1 ] \
     || [ -n "$nested_worktree_rglob_hits" ]; then
     echo "[x] Nested worktree cleanup must prune .git-file roots"
     [ -n "$nested_worktree_rglob_hits" ] && echo "$nested_worktree_rglob_hits"
+    violations=$((violations + 1))
+fi
+agents_source_attribution_output=$(python3 scripts/check_agents_source_attribution_owner.py \
+    "$distributed_compiler" 2>&1)
+agents_source_attribution_status=$?
+if [ "$agents_source_attribution_status" -ne 0 ]; then
+    echo "[x] AGENTS.md cosmetics must use the canonical source_attribution config boolean"
+    echo "$agents_source_attribution_output"
     violations=$((violations + 1))
 fi
 hook_file="src/apm_cli/integration/hook_integrator.py"

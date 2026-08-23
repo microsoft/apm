@@ -126,7 +126,7 @@ class MCPServerOperations:
 
                 if isinstance(config, dict):
                     if runtime == "copilot":
-                        # Copilot stores servers in mcpServers object in mcp-config.json
+                        # Copilot config stores servers in its mcpServers object.
                         mcp_servers = config.get("mcpServers", {})
                         for server_name, server_config in mcp_servers.items():  # noqa: B007
                             if isinstance(server_config, dict):

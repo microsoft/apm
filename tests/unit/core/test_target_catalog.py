@@ -98,6 +98,7 @@ def test_current_runtime_mapping_is_characterized() -> None:
     """Lock runtime-to-native-profile routing before moving its owner."""
     assert RUNTIME_TO_CANONICAL_TARGET == {
         "agents": "copilot",
+        "copilot": "copilot",
         "intellij": "copilot",
         "vscode": "copilot",
     }
@@ -359,6 +360,7 @@ def test_apm_yml_canonical_targets_project_catalog_profiles() -> None:
             for capability in TARGET_CAPABILITIES.values()
             if capability.experimental_flag is None and not capability.mcp_only
         )
+        | {"vscode"}
         == CANONICAL_TARGETS
     )
 

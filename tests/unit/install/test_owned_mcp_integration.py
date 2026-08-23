@@ -49,9 +49,12 @@ def test_owned_mcp_reconciles_stale_servers_and_preserves_other_owners(tmp_path)
         managed.setdefault("codex", set()).update(dep.name for dep in dependencies)
         return len(dependencies)
 
-    with patch(
-        "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
-        side_effect=fake_install,
+    with (
+        patch(
+            "apm_cli.integration.mcp_integrator.MCPIntegrator.install",
+            side_effect=fake_install,
+        ),
+        patch("apm_cli.integration.mcp_integrator.MCPIntegrator.remove_stale") as remove_stale,
     ):
         count = run_owned_mcp_integration(
             dependencies=[_dependency("new")],
@@ -70,6 +73,7 @@ def test_owned_mcp_reconciles_stale_servers_and_preserves_other_owners(tmp_path)
         "other": "bundle:bundle-b",
     }
     assert updated.mcp_target_servers == {"codex": ["new", "other"]}
+    assert remove_stale.call_args.kwargs["scope"].value == "project"
 
 
 def test_owned_mcp_empty_update_removes_only_bundle_state(tmp_path) -> None:

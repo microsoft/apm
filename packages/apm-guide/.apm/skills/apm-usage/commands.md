@@ -100,9 +100,10 @@ writing the direct MCP manifest entry or deploying packages. Native service
 config write failures also exit non-zero with an actionable path/permissions
 diagnostic.
 
-For MCP, the canonical `copilot` target writes `.vscode/mcp.json` at project
-scope and `~/.copilot/mcp-config.json` with `--global`. The legacy
-`--runtime copilot` override addresses the Copilot CLI adapter directly.
+For MCP, `--target copilot` writes `.github/mcp.json` at project scope and
+`$COPILOT_HOME/mcp-config.json` with `--global` (or
+`~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset). `--target vscode`
+writes only `.vscode/mcp.json`.
 
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
 
@@ -171,7 +172,7 @@ If the install cache has not been warmed (e.g. a fresh checkout before the first
 | `apm lifecycle trust` | Trust `apm.yml` `lifecycle:` at its current contents so project scripts run on install | -- |
 | `apm lifecycle untrust` | Revoke trust for `apm.yml` `lifecycle:`; project scripts will stop running | -- |
 
-Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. `post-install` fires only after success or partial success; failed and dry-run installs skip it. Script files are discovered from three sources (additive): policy (`/etc/apm/policy.d/*.json`, JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
+Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. `post-install` fires only after success or partial success; failed and dry-run installs skip it. Script files are discovered from three sources (additive): policy (POSIX: `/etc/apm/policy.d/*.json`; Windows: `C:\ProgramData\APM\policy.d\*.json`; JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
 
 ## Distribution
 
