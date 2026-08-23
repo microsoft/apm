@@ -59,7 +59,8 @@ class TestRegistryBasicOps:
             )
         )
         path = registry_mod._marketplaces_path()
-        before = open(path, "rb").read()
+        with open(path, "rb") as registry_file:
+            before = registry_file.read()
 
         with pytest.raises(ValueError):
             MarketplaceSource(
@@ -67,7 +68,8 @@ class TestRegistryBasicOps:
                 url="ssh://git:secret@[2001:db8::1]:2222/Team/Marketplace.git",
             )
 
-        assert open(path, "rb").read() == before
+        with open(path, "rb") as registry_file:
+            assert registry_file.read() == before
         registry_mod._invalidate_cache()
         restored = registry_mod.get_marketplace_by_name("acme")
         assert restored.url == "ssh://git@[2001:db8::1]:2222/Team/Marketplace.git"

@@ -1318,9 +1318,7 @@ def test_marketplace_source_admission_has_single_owner() -> None:
     """CLI registration and persisted sources must share one parser."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/marketplace/source_identity.py").read_text(encoding="utf-8")
-    command = (root / "src/apm_cli/commands/marketplace/__init__.py").read_text(
-        encoding="utf-8"
-    )
+    command = (root / "src/apm_cli/commands/marketplace/__init__.py").read_text(encoding="utf-8")
     model = (root / "src/apm_cli/marketplace/models.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
@@ -1363,7 +1361,10 @@ def test_marketplace_source_admission_guard_rejects_parallel_parser(tmp_path: Pa
     )
 
     assert result.returncode == 1
-    assert "Marketplace source admission must route through marketplace/source_identity.py" in result.stdout
+    assert (
+        "Marketplace source admission must route through marketplace/source_identity.py"
+        in result.stdout
+    )
 
 
 def test_object_git_dependency_fields_have_single_owner() -> None:

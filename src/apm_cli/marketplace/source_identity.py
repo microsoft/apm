@@ -110,7 +110,9 @@ def _parse_ssh_url(raw: str, host_flag: str | None) -> MarketplaceSourceIdentity
     if parsed.fragment:
         raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
     if parsed.password is not None:
-        raise ValueError("SSH URL must not include a password; configure SSH authentication instead.")
+        raise ValueError(
+            "SSH URL must not include a password; configure SSH authentication instead."
+        )
     if parsed.username:
         validate_ssh_user(parsed.username)
     if port is not None and not 1 <= port <= 65535:
@@ -251,9 +253,7 @@ def _comparison_host(host: str) -> str:
     return host.strip().lower()
 
 
-def _reject_conflicting_host(
-    host_flag: str | None, embedded_host: str | None, source: str
-) -> None:
+def _reject_conflicting_host(host_flag: str | None, embedded_host: str | None, source: str) -> None:
     if host_flag and embedded_host and host_flag.strip().lower() != embedded_host:
         import shlex
 
