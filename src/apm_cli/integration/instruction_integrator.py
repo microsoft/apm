@@ -13,6 +13,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+import yaml
+
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
@@ -96,7 +98,13 @@ class InstructionIntegrator(BaseIntegrator):
         content = source.read_text(encoding="utf-8")
         if fmt in RULE_FORMATS:
             converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
-            content = converter(content)
+            try:
+                content = converter(content)
+            except yaml.YAMLError as exc:
+                raise yaml.YAMLError(
+                    f"Rejected frontmatter in {source.name}: {exc}\n"
+                    "Fix or remove the invalid frontmatter, then rerun apm install."
+                ) from exc
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
 
@@ -174,22 +182,29 @@ class InstructionIntegrator(BaseIntegrator):
         files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
+        rendered_rules: dict[Path, tuple[Path, str, int]] = {}
 
-        for source_file in instruction_files:
-            if apm_owned_rule_dir:
+        if apm_owned_rule_dir:
+            # Render the entire package before writing any rule. A parser
+            # rejection in one source must not leave earlier files active.
+            for source_file in instruction_files:
                 stem = source_file.name
                 if stem.endswith(".instructions.md"):
                     stem = stem[: -len(".instructions.md")]
-                target_name = f"{stem}{mapping.extension}"
-            else:
-                target_name = source_file.name
+                target_path = deploy_dir / f"{stem}{mapping.extension}"
+                ensure_path_within(target_path, deploy_dir)
+                content, links_resolved = self._render_instruction(source_file, target_path, fmt)
+                rendered_rules[source_file] = (target_path, content, links_resolved)
 
-            target_path = deploy_dir / target_name
-            # target_name is Path.name (no separators), so traversal via
-            # deploy_dir is impossible.  Validated against deploy_dir (not
-            # project_root) so user-scope targets whose root resolves
-            # outside the workspace still work correctly.
-            ensure_path_within(target_path, deploy_dir)
+        for source_file in instruction_files:
+            if apm_owned_rule_dir:
+                target_path, new_content, links_resolved = rendered_rules[source_file]
+            else:
+                target_path = deploy_dir / source_file.name
+                # source_file.name has no separators, so traversal via
+                # deploy_dir is impossible. Validate against deploy_dir (not
+                # project_root) so user-scope targets outside the workspace work.
+                ensure_path_within(target_path, deploy_dir)
 
             rel_path = portable_relpath(target_path, project_root)
 
@@ -207,9 +222,6 @@ class InstructionIntegrator(BaseIntegrator):
                 # transformed *output*: adopt when up-to-date (no churn), else
                 # (re)write. Always record the path so it stays managed on the
                 # next run.
-                new_content, links_resolved = self._render_instruction(
-                    source_file, target_path, fmt
-                )
                 # Compare the on-disk bytes against the exact bytes
                 # write_text_lf would emit (LF-normalized). A text-mode
                 # read_text() comparison would collapse CRLF->LF and wrongly

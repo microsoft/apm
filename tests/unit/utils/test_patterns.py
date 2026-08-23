@@ -173,6 +173,10 @@ class TestYamlDoubleQuote:
     def test_yaml_safe_load_roundtrip(self):
         import yaml
 
-        for value in ['a"b', "a\\b", "a\nb", "**/src/**", "**/*.{css,scss}"]:
+        values = ['a"b', "a\\b", "a\nb", "**/src/**", "**/*.{css,scss}"]
+        values.extend(chr(codepoint) for codepoint in range(32))
+        values.append(chr(127))
+        for value in values:
             yaml_doc = f"k: {yaml_double_quote(value)}\n"
+            assert yaml_doc.isascii()
             assert yaml.safe_load(yaml_doc) == {"k": value}

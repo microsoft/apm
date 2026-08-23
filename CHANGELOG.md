@@ -51,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in large repositories while preserving historical placement. It shares a
   source inventory across discovery and placement while preserving cleanup
   behavior, and preserves commas in character classes. (#2595)
+- `apm install` no longer silently drops instruction or skill Markdown whose
+  unfenced bodies contain `---` horizontal rules; converted instruction targets
+  now reject invalid frontmatter before writing any package rules.
+  (by @manideep-malyala, #2666)
 - Hook commands such as `"${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py` now rewrite to
   `"${CLAUDE_PLUGIN_ROOT}/hooks/probe.py"` and warn when a supported plugin-root
   placeholder remains unresolved instead of silently deploying a dead hook.

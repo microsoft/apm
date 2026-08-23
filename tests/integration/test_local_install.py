@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from apm_cli.primitives.parser import parse_primitive_file
+from apm_cli.utils.yaml_io import loads_frontmatter
 
 pytestmark = pytest.mark.requires_apm_binary
 
@@ -280,6 +281,8 @@ print("ordinary Markdown")
             / "instructions"
             / "test-skill.instructions.md"
         )
+        good_source = source.with_name("a-good.instructions.md")
+        good_source.write_text("# Good rule\n", encoding="utf-8")
         lines = ["a0: &a0 {k: v}"]
         previous = "a0"
         for index in range(1, 40):
@@ -307,7 +310,52 @@ print("ordinary Markdown")
         )
 
         assert result.returncode != 0, result.stdout + result.stderr
+        output = result.stdout + result.stderr
+        assert not (consumer / ".claude/rules/a-good.md").exists()
         assert not (consumer / ".claude/rules/test-skill.md").exists()
+        assert "Fix or remove the invalid frontmatter, then rerun apm install." in output
+
+    def test_install_cursor_quotes_multiline_control_characters(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Cursor output remains valid YAML for decoded control characters."""
+        consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        source.write_text(
+            '---\napplyTo: src/**\ndescription: "safe\\n---\\n\\0suffix"\n---\n# Scoped rule\n',
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "cursor",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        deployed = consumer / ".cursor/rules/test-skill.mdc"
+        rendered = deployed.read_text(encoding="utf-8")
+        assert "\0" not in rendered
+        post = loads_frontmatter(rendered)
+        assert post.metadata["description"] == "safe\n---\n\0suffix"
+        assert post.metadata["globs"] == "src/**"
 
     def test_install_local_package_no_manifest_fails(self, temp_workspace, apm_binary_path):
         """Installing a path with no apm.yml or SKILL.md should fail gracefully."""

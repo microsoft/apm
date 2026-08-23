@@ -7,6 +7,7 @@ parse so converters and the placement optimizer behave consistently.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 
 _APPLY_TO_ESCAPE = "\\"
@@ -76,9 +77,9 @@ def yaml_double_quote(value: str) -> str:
     Defence-in-depth for the instruction integrators that emit YAML
     frontmatter via f-strings (``f'  - "{g}"'``). A glob containing a
     literal backslash, double-quote, or control character would break
-    the surrounding YAML if inlined verbatim; this helper escapes the
-    minimal set needed for the YAML 1.2 double-quoted form. Returns the
-    value already wrapped in the surrounding double quotes.
+    the surrounding YAML if inlined verbatim. JSON string serialization
+    is a strict subset of YAML double-quoted scalar syntax and covers every
+    control character. Returns the value wrapped in double quotes.
 
     Note: ``parse_apply_to`` already strips leading/trailing whitespace
     per segment, and the Windsurf integrator strips newlines from the
@@ -86,14 +87,7 @@ def yaml_double_quote(value: str) -> str:
     is near-zero -- this exists so emitted YAML stays well-formed even
     on adversarial or copy-paste-mangled inputs.
     """
-    escaped = (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
-    return f'"{escaped}"'
+    return json.dumps(value, ensure_ascii=True)
 
 
 def normalize_apply_to(value: object, default: str = "") -> str:
