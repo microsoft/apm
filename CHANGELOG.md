@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Pass `--trust-bin` to suppress the warning and deploy, or `apm approve` for
   persistent per-package approval.
 
+### Removed
+
+- Retired the credential-dependent roadmap project sync. Release commitments
+  now live solely in the active milestone.
+
 ## [0.28.0] - 2026-08-04
 
 ### Added

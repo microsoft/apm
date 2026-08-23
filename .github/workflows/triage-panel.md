@@ -108,7 +108,7 @@ tools:
     # Integrity exemption for external contributor issues.
     #
     # Write-class safe-outputs (add-comment, add-labels, remove-labels,
-    # assign-milestone, dispatch-workflow) cause gh-aw's integrity
+    # assign-milestone) cause gh-aw's integrity
     # filter to elevate the minimum integrity for MCP reads to
     # `approved` by default on public repos. Issues filed by external
     # contributors (FIRST_TIME_CONTRIBUTOR / NONE author association)
@@ -250,6 +250,7 @@ once from the GitHub REST API:
 ```
 curl --fail --silent --show-error \
   --header "Accept: application/vnd.github+json" \
+  --header "Authorization: Bearer ${GITHUB_TOKEN}" \
   "https://api.github.com/repos/microsoft/apm/milestones?state=open&per_page=100"
 ```
 
