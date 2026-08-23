@@ -48,3 +48,37 @@ def foo():
     assert "# Dataverse Guide" in post.content
     assert "def foo():" in post.content
     assert "## 2. Next Steps" in post.content
+
+
+def test_load_frontmatter_with_supported_four_hyphen_fence(tmp_path):
+    md_content = """----
+name: sample-skill
+----
+# Main Content
+"""
+    file_path = tmp_path / "sample.skill.md"
+    file_path.write_text(md_content, encoding="utf-8")
+
+    post = load_frontmatter(file_path)
+    assert post.metadata == {"name": "sample-skill"}
+    assert "# Main Content" in post.content
+
+
+def test_load_frontmatter_with_indented_horizontal_rule_on_line1(tmp_path):
+    md_content = """  ---
+# Guide
+
+---
+
+interval: daily
+
+---
+
+Body content.
+"""
+    file_path = tmp_path / "guide.instructions.md"
+    file_path.write_text(md_content, encoding="utf-8")
+
+    post = load_frontmatter(file_path)
+    assert post.metadata == {}
+    assert post.content == md_content

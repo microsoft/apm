@@ -297,6 +297,11 @@ installing or exporting other people's dependencies is silent.
 
 ## The 7 primitive types
 
+For Markdown primitives, the opening `---` frontmatter fence must start at
+the first character of line 1. Without that opening fence, APM treats the
+document as body content, and later `---` lines remain Markdown horizontal
+rules.
+
 ### 1. Instruction (`*.instructions.md`)
 
 Contextual guidance scoped to file patterns.

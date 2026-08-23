@@ -45,6 +45,10 @@ Commands ship as prompts (`.apm/prompts/*.prompt.md`); there is no separate `.ap
 
 Every primitive type follows the same pattern: a markdown file (or directory containing a primary markdown file) with frontmatter declaring its name and its trigger conditions. `apm compile` reads `.apm/`, applies any policy, and writes per-target output to the right directories on the target's filesystem.
 
+:::note
+The opening `---` fence must start at the first character of line 1; otherwise APM treats the document as body content and later `---` lines remain Markdown horizontal rules.
+:::
+
 ## Recommended reading order
 
 1. [Skills](./skills/) -- the densest primitive type and the one most newcomers hit first.

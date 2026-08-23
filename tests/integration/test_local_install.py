@@ -12,6 +12,8 @@ import tempfile  # noqa: F401
 import pytest
 import yaml
 
+from apm_cli.primitives.parser import parse_primitive_file
+
 pytestmark = pytest.mark.requires_apm_binary
 
 # ---------------------------------------------------------------------------
@@ -165,6 +167,31 @@ class TestLocalInstall:
     def test_install_local_deploys_instructions(self, temp_workspace, apm_binary_path):
         """Verify that instructions from a local package are deployed to .github/instructions/."""
         consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        unfenced_markdown = """# Test Skill
+
+This instruction has no frontmatter.
+
+---
+
+## Examples
+
+```python
+print("ordinary Markdown")
+```
+
+---
+
+## Next steps
+"""
+        source.write_text(unfenced_markdown, encoding="utf-8")
         result = subprocess.run(
             [apm_binary_path, "install", "../packages/local-skills"],
             cwd=consumer,
@@ -180,6 +207,8 @@ class TestLocalInstall:
         assert deployed.exists(), (
             f"Instructions not deployed. Files in .github/: {all_files}\nstdout: {result.stdout}"
         )
+        assert deployed.read_text(encoding="utf-8") == unfenced_markdown
+        assert parse_primitive_file(deployed).content == unfenced_markdown
 
     def test_install_local_package_no_manifest_fails(self, temp_workspace, apm_binary_path):
         """Installing a path with no apm.yml or SKILL.md should fail gracefully."""
