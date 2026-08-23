@@ -10,13 +10,11 @@ and enforcement through the shared preflight owner before any deployment.
 Local bundles remain a separate path because they short-circuit package network
 I/O (proven by the air-gap E2E test).
 
-MCP wiring (#1207): bundles MAY ship a ``.mcp.json`` (Anthropic plugin
-format) describing MCP servers.  After the per-target deploy loop, the
-handler routes those entries through :func:`MCPIntegrator.install` so each
-resolved target's native MCP config gets the servers in its own
-format/location -- ``.mcp.json`` is Claude-Code-native, but Copilot,
-Cursor, OpenCode, Gemini, etc. each have their own MCP config conventions.
-The bundle's ``.mcp.json`` itself is metadata and never deployed verbatim.
+Legacy MCP wiring (#1207): Claude bundles MAY ship a ``.mcp.json`` describing
+MCP servers. After the per-target deploy loop, the handler routes those entries
+through :func:`MCPIntegrator.install`. Native Agent Plugins fail before this
+legacy parser or writer. The bundle's ``.mcp.json`` itself is metadata and is
+never deployed.
 """
 
 from __future__ import annotations
@@ -24,9 +22,12 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
+
+from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
+from ..bundle.formats import BundleFormat
 
 if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
@@ -60,7 +61,10 @@ def install_local_bundle(
     )
     from ..core.scope import InstallScope
     from ..deps.lockfile import LockFile, get_lockfile_path
-    from ..install.services import integrate_local_bundle
+    from ..install.services import (
+        enforce_agent_plugin_deployment_boundary,
+        integrate_local_bundle,
+    )
     from ..integration.targets import resolve_targets
 
     # Reject incompatible flags with a single consolidated error.  Preserve
@@ -87,6 +91,8 @@ def install_local_bundle(
     logger.start(f"Installing local bundle from {bundle_arg}")
 
     try:
+        enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
+
         # Resolve targets before policy preflight so target restrictions apply
         # to the actual deployment set, including auto-detected targets.
         explicit = target if target else None
@@ -121,21 +127,46 @@ def install_local_bundle(
 
             targets = apply_legacy_skill_paths(targets)
 
+        bundle_mcp_deps: list[MCPDependency] = []
         bundle_mcp_declared = False
         if bundle_info.lockfile is not None:
             pack = bundle_info.lockfile.get("pack") or {}
             bundle_files = pack.get("bundle_files") or {}
             if isinstance(bundle_files, dict):
-                bundle_mcp_declared = any(str(path).lower() == ".mcp.json" for path in bundle_files)
+                bundle_mcp_declared = any(
+                    str(path).lower() in {".mcp.json", "mcp.json"} for path in bundle_files
+                )
         elif bundle_info.source_dir is not None:
             bundle_mcp_declared = any(
-                path.is_file() and path.name.lower() == ".mcp.json"
+                path.is_file() and path.name.lower() in {".mcp.json", "mcp.json"}
                 for path in bundle_info.source_dir.iterdir()
             )
         bundle_mcp_deps = (
-            _parse_bundle_mcp_servers(bundle_info.source_dir)
+            _parse_legacy_bundle_mcp_servers(
+                bundle_info.source_dir,
+                bundle_format=bundle_info.format,
+            )
             if bundle_mcp_declared and bundle_info.source_dir is not None
             else []
+        )
+        bundle_mcp_deps = _filter_bundle_executables(
+            bundle_mcp_deps,
+            bundle_info=bundle_info,
+            allow_executables=allow_executables,
+            exec_type="mcp",
+            logger=logger,
+        )
+        bundle_lsp_deps = (
+            _parse_bundle_lsp_servers(bundle_info.source_dir)
+            if bundle_info.source_dir is not None
+            else []
+        )
+        bundle_lsp_deps = _filter_bundle_executables(
+            bundle_lsp_deps,
+            bundle_info=bundle_info,
+            allow_executables=allow_executables,
+            exec_type="lsp",
+            logger=logger,
         )
         from ..policy.install_preflight import run_policy_preflight
 
@@ -177,8 +208,7 @@ def install_local_bundle(
             if errors:
                 logger.error("Bundle integrity check failed:")
                 for err in errors:
-                    # Plain detail lines -- no [x] symbol prefix per IM3.
-                    click.echo(f"  - {err}", err=True)
+                    logger.error_detail(err)
                 raise click.Abort()
             logger.verbose_detail("Bundle integrity verified")
 
@@ -221,11 +251,8 @@ def install_local_bundle(
                 and "/.apm/instructions/" in f.replace("\\", "/")
             )
         ]
-        # Issue #1207 D2.c: detect bundle-level ``.mcp.json`` so the
-        # post-deploy block can route it through ``MCPIntegrator.install``
-        # (each resolved target's native MCP config gets the servers in
-        # its own format/location).  ``.mcp.json`` itself is metadata and
-        # never deployed verbatim.
+        # Issue #1207 D2.c: legacy Claude bundle MCP metadata is routed through
+        # MCPIntegrator.install. Native Agent Plugins fail at the deployment boundary.
         bundle_mcp_present = bool(bundle_mcp_deps)
 
         if dry_run:
@@ -235,6 +262,29 @@ def install_local_bundle(
             for f in deployed:
                 logger.tree_item(f)
             return
+
+        if bundle_mcp_present and bundle_info.source_dir is not None:
+            _wire_legacy_bundle_mcp_servers(
+                bundle_format=bundle_info.format,
+                targets=targets,
+                project_root=project_root,
+                user_scope=global_,
+                verbose=getattr(logger, "verbose", False),
+                logger=logger,
+                deps=bundle_mcp_deps,
+                owner=_bundle_owner_key(bundle_info),
+            )
+        if bundle_lsp_deps and bundle_info.source_dir is not None:
+            _wire_bundle_lsp_servers(
+                bundle_dir=bundle_info.source_dir,
+                targets=targets,
+                project_root=project_root,
+                user_scope=global_,
+                verbose=getattr(logger, "verbose", False),
+                logger=logger,
+                deps=bundle_lsp_deps,
+                owner=_bundle_owner_key(bundle_info),
+            )
 
         # Persist into project lockfile -- never mutate apm.yml (per design).
         if deployed:
@@ -321,46 +371,45 @@ def install_local_bundle(
                 "Reference: https://microsoft.github.io/apm/guides/compilation/"
             )
 
-        # Issue #1207 D2.c: route bundle ``.mcp.json`` (Anthropic plugin
+        # Issue #1207 D2.c: route bundle ``mcp.json`` / ``.mcp.json`` (Anthropic plugin
         # format) through the MCP integrator so each resolved target's
         # native MCP config gets the servers in its own format and
         # location.  ``.mcp.json`` is Claude-Code-native; Copilot,
         # Cursor, OpenCode, Gemini, etc. each have their own MCP config
         # conventions, and ``MCPIntegrator.install`` handles per-target
         # dispatch (same code path used for ``apm.yml mcp_dependencies``).
-        if bundle_mcp_present and not dry_run and bundle_info.source_dir is not None:
-            _wire_bundle_mcp_servers(
-                bundle_dir=bundle_info.source_dir,
-                targets=targets,
-                project_root=project_root,
-                user_scope=global_,
-                verbose=getattr(logger, "verbose", False),
-                logger=logger,
-                deps=bundle_mcp_deps,
-            )
-
     finally:
         # Tarball cleanup (caller-owned per LocalBundleInfo contract).
         if bundle_info.temp_dir is not None and bundle_info.temp_dir.exists():
             shutil.rmtree(bundle_info.temp_dir, ignore_errors=True)
 
 
-def _parse_bundle_mcp_servers(bundle_dir: Path) -> list[MCPDependency]:
-    """Parse ``<bundle>/.mcp.json`` (case-insensitive) into a list of
-    self-defined :class:`MCPDependency` entries.
+def _parse_legacy_bundle_mcp_servers(
+    bundle_dir: Path,
+    *,
+    bundle_format: str,
+) -> list[MCPDependency]:
+    """Parse legacy bundle MCP metadata into self-defined dependencies.
 
     Returns an empty list when the file is missing, malformed, or has no
     ``mcpServers`` map.  Per-server parsing errors are logged at debug
     level and the offending entry is dropped so a single bad entry does
     not block the rest of the bundle's MCP wiring.
     """
+    _require_legacy_bundle_mcp_format(bundle_format)
+    from urllib.parse import urlparse
+
     from apm_cli.models.dependency.mcp import MCPDependency
 
     # Case-insensitive lookup mirrors the rest of the bundle metadata
     # filtering (HFS+/NTFS case folding).
     mcp_path: Path | None = None
     for entry in bundle_dir.iterdir() if bundle_dir.is_dir() else []:
-        if entry.is_file() and not entry.is_symlink() and entry.name.lower() == ".mcp.json":
+        if (
+            entry.is_file()
+            and not entry.is_symlink()
+            and entry.name.lower() in {"mcp.json", ".mcp.json"}
+        ):
             mcp_path = entry
             break
     if mcp_path is None:
@@ -383,61 +432,116 @@ def _parse_bundle_mcp_servers(bundle_dir: Path) -> list[MCPDependency]:
     for name, cfg in servers.items():
         if not isinstance(name, str) or not isinstance(cfg, dict):
             continue
-        # Anthropic plugin .mcp.json schema -> MCPDependency self-defined:
-        # ``type`` aliases ``transport`` (handled by MCPDependency.from_dict).
         spec = dict(cfg)
+        transport = str(spec.get("type") or spec.get("transport") or "").strip().lower()
+        if transport in {"http", "sse", "streamable-http"}:
+            url = spec.get("url")
+            if not isinstance(url, str) or not url:
+                continue
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                continue
+            if parsed.username or parsed.password or parsed.fragment:
+                continue
         spec["name"] = name
         spec["registry"] = False
         try:
             out.append(MCPDependency.from_dict(spec))
         except (ValueError, TypeError):
-            # Per-server parse failure: skip and continue.
             continue
     return out
 
 
-def _wire_bundle_mcp_servers(
+def _filter_bundle_executables(
+    dependencies: list[Any],
     *,
-    bundle_dir: Path,
+    bundle_info,
+    allow_executables: dict[str, dict[str, bool]] | None,
+    exec_type: str,
+    logger,
+) -> list[Any]:
+    """Apply executable trust to a bundle identity, never to server names."""
+    if not dependencies or allow_executables is None:
+        return dependencies
+    from ..security.executables import build_approval_key, is_package_approved
+
+    version = str(bundle_info.plugin_json.get("version") or "")
+    package_key = build_approval_key(bundle_info.package_id, version)
+    candidate_keys = (package_key, bundle_info.package_id)
+    if any(is_package_approved(allow_executables, key, exec_type) for key in candidate_keys):
+        return dependencies
+    logger.warning(
+        f"Skipped {len(dependencies)} bundle {exec_type.upper()} executable(s) from "
+        f"{package_key}: approve the bundle identity under allowExecutables.{exec_type} "
+        "to enable them."
+    )
+    return []
+
+
+def _bundle_owner_key(bundle_info) -> str:
+    """Return the version-independent service owner for a legacy local bundle."""
+    return bundle_info.package_id
+
+
+def _require_legacy_bundle_mcp_format(bundle_format: str) -> None:
+    """Reject native Agent Plugins before any legacy MCP interpretation."""
+    if bundle_format == BundleFormat.AGENT_PLUGIN.value:
+        from apm_cli.agent_plugins.errors import AgentPluginLegacyBoundaryError
+
+        raise AgentPluginLegacyBoundaryError(
+            "Native Agent Plugin MCP must not enter legacy MCP integration"
+        )
+    if bundle_format != BundleFormat.CLAUDE_PLUGIN.value:
+        raise ValueError("Legacy MCP helpers require a Claude plugin bundle format")
+
+
+def _wire_legacy_bundle_mcp_servers(
+    *,
+    bundle_format: str,
     targets,
     project_root: Path,
     user_scope: bool,
     verbose: bool,
     logger,
-    deps: list[MCPDependency] | None = None,
+    deps: list[MCPDependency],
+    owner: str | None = None,
 ) -> int:
-    """Wire bundle ``.mcp.json`` servers through ``MCPIntegrator.install``.
+    """Wire legacy bundle MCP servers through ``MCPIntegrator.install``.
 
-    Returns the count of newly configured/updated MCP servers across all
-    resolved targets.  The function is best-effort: any per-target failure
-    is logged and the remaining targets continue to be processed.
+    Returns the count of newly configured/updated MCP servers.
     """
-    if deps is None:
-        deps = _parse_bundle_mcp_servers(bundle_dir)
-    if not deps:
+    _require_legacy_bundle_mcp_format(bundle_format)
+    if not deps and owner is None:
         return 0
 
-    from apm_cli.integration.mcp_integrator import MCPIntegrator
-
     target_names = [t.name for t in targets]
-    apm_config = {"targets": target_names, "scripts": {}}
-    try:
+    if owner is None:
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
         count = MCPIntegrator.install(
             deps,
             verbose=verbose,
-            apm_config=apm_config,
+            apm_config={"targets": target_names, "scripts": {}},
             project_root=project_root,
             user_scope=user_scope,
             explicit_target=target_names,
             logger=logger,
+            fail_on_write_error=True,
         )
-    except Exception as exc:
-        logger.warning(
-            f"Bundle .mcp.json present but MCP wiring failed: {exc}. "
-            "Copy the entries into your project's apm.yml mcp_dependencies "
-            "and re-run 'apm install' to register them."
+    else:
+        from apm_cli.deps.lockfile import get_lockfile_path
+        from apm_cli.install.mcp.integration import run_owned_mcp_integration
+
+        count = run_owned_mcp_integration(
+            dependencies=deps,
+            owner=owner,
+            lock_path=get_lockfile_path(project_root),
+            target_runtimes=target_names,
+            verbose=verbose,
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
         )
-        return 0
 
     if count:
         joined = ", ".join(target_names)
@@ -450,5 +554,91 @@ def _wire_bundle_mcp_servers(
         logger.info(
             f"Bundle .mcp.json declared {len(deps)} server(s); "
             f"no new MCP config changes for target(s): {joined}"
+        )
+    return count
+
+
+def _parse_bundle_lsp_servers(
+    bundle_dir: Path,
+):
+    """Parse ``<bundle>/lsp.json`` or ``<bundle>/com.microsoft.apm/lsp.json`` into LSP deps."""
+    from apm_cli.models.dependency.lsp import LSPDependency
+
+    lsp_path: Path | None = None
+    for entry in bundle_dir.iterdir() if bundle_dir.is_dir() else []:
+        if (
+            entry.is_file()
+            and not entry.is_symlink()
+            and entry.name.lower() in {"lsp.json", ".lsp.json"}
+        ):
+            lsp_path = entry
+            break
+        if entry.is_dir() and entry.name == COM_MICROSOFT_APM_NAMESPACE:
+            candidate = entry / "lsp.json"
+            if candidate.is_file() and not candidate.is_symlink():
+                lsp_path = candidate
+                break
+    if lsp_path is None:
+        return []
+
+    try:
+        data = json.loads(lsp_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    servers = data.get("lspServers")
+    if not isinstance(servers, dict):
+        servers = data
+    if not isinstance(servers, dict):
+        return []
+
+    out: list[LSPDependency] = []
+    for name, cfg in servers.items():
+        if not isinstance(name, str) or not isinstance(cfg, dict):
+            continue
+        spec = dict(cfg)
+        spec["name"] = name
+        try:
+            out.append(LSPDependency.from_dict(spec))
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+def _wire_bundle_lsp_servers(
+    *,
+    bundle_dir: Path,
+    targets,
+    project_root: Path,
+    user_scope: bool,
+    verbose: bool,
+    logger,
+    deps,
+    owner: str,
+) -> int:
+    """Wire bundle LSP servers through the canonical owned lifecycle."""
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.install.lsp.integration import run_owned_lsp_integration
+
+    target_names = [t.name for t in targets]
+    count = run_owned_lsp_integration(
+        dependencies=deps,
+        owner=owner,
+        lock_path=get_lockfile_path(project_root),
+        project_root=project_root,
+        user_scope=user_scope,
+        logger=logger,
+        target_runtimes=target_names,
+        fail_on_write_error=True,
+    )
+
+    if count:
+        logger.success(
+            f"Wired {count} LSP server(s) from bundle lsp.json (target(s): {', '.join(target_names)})"
+        )
+    elif deps:
+        logger.info(
+            f"Bundle lsp.json declared {len(deps)} server(s); no new LSP config changes for target(s): {', '.join(target_names)}"
         )
     return count

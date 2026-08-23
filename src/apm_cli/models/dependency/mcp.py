@@ -23,6 +23,7 @@ _KNOWN_DICT_KEYS = frozenset(
         "tools",
         "url",
         "command",
+        "cwd",
         "extra",  # explicit extra block is also a known key
         # Install-time provenance field: reserved here so a manifest key named
         # ``resolved_by`` is treated as known (ignored by from_dict, never
@@ -44,6 +45,10 @@ _RESERVED_EXTRA_KEYS = _KNOWN_DICT_KEYS - {"extra"}
 
 _NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
+
+
+class TrustedEnvLiteral(str):
+    """Literal environment value introduced by a trusted APM integration."""
 
 
 @dataclass
@@ -69,6 +74,7 @@ class MCPDependency:
     tools: list[str] | None = None  # Restrict exposed tools (default is ["*"])
     url: str | None = None  # Required for self-defined http/sse transports
     command: str | None = None  # Required for self-defined stdio transports
+    cwd: str | None = None  # Working directory for stdio transports
     extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
     # Install-time provenance: the declaring package identity when this server
     # was contributed transitively (via a sub-package's apm.yml), else None for
@@ -140,6 +146,7 @@ class MCPDependency:
             tools=d.get("tools"),
             url=d.get("url"),
             command=d.get("command"),
+            cwd=d.get("cwd"),
             extra=extra,
         )
 
@@ -178,6 +185,7 @@ class MCPDependency:
             "tools",
             "url",
             "command",
+            "cwd",
         ):
             value = getattr(self, field_name)
             if value is not None or (field_name == "registry" and value is False):
@@ -224,6 +232,8 @@ class MCPDependency:
                 parts.append(f"command={preview!r}")
             else:
                 parts.append(f"command=<{type(self.command).__name__}>")
+        if self.cwd:
+            parts.append(f"cwd={self.cwd!r}")
         if self.extra:
             parts.append(f"extra=<{len(self.extra)} key(s)>")
         return f"MCPDependency({', '.join(parts)})"
@@ -292,6 +302,22 @@ class MCPDependency:
                     f"Invalid MCP command '{self.command}': must not contain "
                     f"'..' path segments. Use an absolute path or a command "
                     f"name on PATH instead."
+                ) from None
+        if self.cwd is not None:
+            if not isinstance(self.cwd, str):
+                raise ValueError(
+                    f"MCP dependency '{self.name}': 'cwd' must be a string, "
+                    f"got {type(self.cwd).__name__}."
+                )
+            try:
+                validate_path_segments(
+                    self.cwd,
+                    context="MCP cwd",
+                    allow_current_dir=True,
+                )
+            except PathTraversalError:
+                raise ValueError(
+                    f"Invalid MCP cwd '{self.cwd}': must not contain '..' path segments."
                 ) from None
 
         if not strict:

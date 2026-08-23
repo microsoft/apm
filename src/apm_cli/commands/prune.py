@@ -43,6 +43,33 @@ def _lock_keys_by_install_path(
     return {path: tuple(keys) for path, keys in grouped.items()}
 
 
+def _preflight_prune_survivors(
+    apm_package: APMPackage,
+    project_root: Path,
+    apm_modules_dir: Path,
+    *,
+    lockfile: LockFile | None,
+    excluded_keys: set[str],
+) -> None:
+    """Reject unsafe survivors before prune can mutate package or target state."""
+    from ..agent_plugins.errors import preflight_reintegration_survivors
+    from ..models.apm_package import surviving_dependency_refs_for_reintegration
+
+    survivors = surviving_dependency_refs_for_reintegration(
+        apm_package,
+        project_root,
+        lockfile=lockfile,
+    )
+    preflight_reintegration_survivors(
+        (
+            dependency
+            for dependency in survivors
+            if dependency.get_unique_key() not in excluded_keys
+        ),
+        apm_modules_dir,
+    )
+
+
 @click.command(
     help=(
         "Remove APM packages absent from the resolved dependency graph "
@@ -143,6 +170,22 @@ def prune(ctx, dry_run):
                 )
             return
 
+        planned_pruned_keys = set(missing_orphaned_keys)
+        for orphaned_package in orphaned_packages:
+            planned_pruned_keys.update(
+                key
+                for key in lock_keys_by_path.get(orphaned_package, ())
+                if key not in expected_lock_keys
+            )
+        if planned_pruned_keys and not dry_run:
+            _preflight_prune_survivors(
+                apm_package,
+                project_root,
+                apm_modules_dir,
+                lockfile=lockfile,
+                excluded_keys=planned_pruned_keys,
+            )
+
         if orphaned_packages:
             logger.warning(f"Found {len(orphaned_packages)} orphaned package(s):")
             for pkg_name in orphaned_packages:
@@ -163,13 +206,6 @@ def prune(ctx, dry_run):
             if missing_orphaned_keys:
                 logger.dry_run_notice(
                     f"remove {len(missing_orphaned_keys)} stale lockfile dependency record(s)"
-                )
-            planned_pruned_keys = set(missing_orphaned_keys)
-            for orphaned_package in orphaned_packages:
-                planned_pruned_keys.update(
-                    key
-                    for key in lock_keys_by_path.get(orphaned_package, ())
-                    if key not in expected_lock_keys
                 )
             planned_owner_repairs = (
                 DeploymentLedgerCodec.owner_reference_violations(

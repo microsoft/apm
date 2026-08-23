@@ -612,9 +612,9 @@ class TestTargetParamType:
 
     def test_list_input_collapses_aliases_to_string(self):
         """Multi-element list whose entries all alias to one canonical
-        target collapses to that single canonical name (``"vscode"``)."""
+        target collapses to that single canonical name (``"copilot"``)."""
         with pytest.warns(DeprecationWarning, match="--target agents"):
-            assert self.tp.convert(["copilot", "agents"], None, None) == "vscode"
+            assert self.tp.convert(["copilot", "agents"], None, None) == "copilot"
 
     # -- Single target (backward compat: returns string) ------------------
 
@@ -663,14 +663,14 @@ class TestTargetParamType:
 
     def test_mixed_case_multi(self):
         result = self.tp.convert("Claude,Copilot", None, None)
-        assert result == ["claude", "vscode"]
+        assert result == ["claude", "copilot"]
 
     # -- Multi-target (returns list) --------------------------------------
 
     def test_multi_claude_copilot(self):
-        """claude,copilot → ['claude', 'vscode'] (alias resolved)."""
+        """claude,copilot preserves Copilot's canonical target spelling."""
         result = self.tp.convert("claude,copilot", None, None)
-        assert result == ["claude", "vscode"]
+        assert result == ["claude", "copilot"]
 
     def test_multi_preserves_order(self):
         """Order of user input is preserved."""
@@ -694,33 +694,32 @@ class TestTargetParamType:
     # -- Alias deduplication ----------------------------------------------
 
     def test_copilot_vscode_deduplicates(self):
-        """copilot,vscode → 'vscode' (both alias to same canonical)."""
+        """copilot,vscode retains separate MCP configuration destinations."""
         result = self.tp.convert("copilot,vscode", None, None)
-        # Both map to "vscode"; collapses to single string.
-        assert result == "vscode"
+        assert result == ["copilot", "vscode"]
 
     def test_copilot_agents_deduplicates(self):
-        """copilot,agents → 'vscode' (both alias to same canonical)."""
+        """copilot,agents collapse to Copilot's canonical target."""
         with pytest.warns(DeprecationWarning, match="--target agents"):
             result = self.tp.convert("copilot,agents", None, None)
-        assert result == "vscode"
+        assert result == "copilot"
 
     def test_copilot_agents_vscode_deduplicates(self):
-        """copilot,agents,vscode → 'vscode' (all alias to same)."""
+        """The legacy agents alias collapses without merging VS Code's destination."""
         with pytest.warns(DeprecationWarning, match="--target agents"):
             result = self.tp.convert("copilot,agents,vscode", None, None)
-        assert result == "vscode"
+        assert result == ["copilot", "vscode"]
 
     def test_copilot_claude_deduplicates_alias(self):
-        """copilot,claude → ['vscode', 'claude'] (alias resolved)."""
+        """copilot,claude preserves the configured target destinations."""
         result = self.tp.convert("copilot,claude", None, None)
-        assert result == ["vscode", "claude"]
+        assert result == ["copilot", "claude"]
 
     # -- Whitespace and formatting ----------------------------------------
 
     def test_spaces_around_comma(self):
         result = self.tp.convert("claude , copilot", None, None)
-        assert result == ["claude", "vscode"]
+        assert result == ["claude", "copilot"]
 
     def test_trailing_comma_ignored(self):
         result = self.tp.convert("claude,", None, None)

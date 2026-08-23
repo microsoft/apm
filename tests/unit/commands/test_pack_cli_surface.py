@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.bundle.formats import BundleFormat
 from apm_cli.commands.pack import (
     _emit_json_error_or_raise,
     _log_bundle_meta,
@@ -196,7 +197,7 @@ class TestRenderBundleResult:
         """Live mode with no files calls _warn_empty."""
         logger = _RecordingLogger()
         result = _pack_result(files=[])
-        _render_bundle_result(logger, result, "plugin", None, False)
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
         assert any("empty" in w.lower() for w in logger.warnings)
 
     def test_live_with_files_emits_success(self) -> None:
@@ -207,11 +208,11 @@ class TestRenderBundleResult:
         assert any("3 file(s)" in s for s in logger.successes)
 
     def test_live_plugin_format_progress_message(self) -> None:
-        """Plugin format emits the 'Plugin bundle ready' progress message."""
+        """Plugin format emits the Agent Plugin ready progress message."""
         logger = _RecordingLogger()
         result = _pack_result(files=["plugin.json"])
-        _render_bundle_result(logger, result, "plugin", None, False)
-        assert any("Plugin bundle ready" in p for p in logger.progresses)
+        _render_bundle_result(logger, result, BundleFormat.AGENT_PLUGIN, None, False)
+        assert any("Agent Plugin bundle ready" in p for p in logger.progresses)
 
     def test_live_apm_format_no_plugin_message(self) -> None:
         """'apm' format does NOT emit the plugin-ready progress message."""
@@ -471,8 +472,29 @@ class TestPackCmdFlags:
     def test_help_text_includes_all_key_flags(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--help"])
         assert result.exit_code == 0
-        for flag in ["--archive", "--format", "--dry-run", "--force", "--verbose", "--offline"]:
+        for flag in [
+            "--claude-plugin",
+            "--archive",
+            "--format",
+            "--dry-run",
+            "--force",
+            "--verbose",
+            "--offline",
+        ]:
             assert flag in result.output
+        assert "current no-flag default" in result.output
+        assert "agent-plugin" in result.output
+        assert not any(line.strip().startswith("--plugin ") for line in result.output.splitlines())
+
+    def test_redundant_format_selectors_are_usage_error(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--claude-plugin", "--format", "plugin"])
+        assert result.exit_code == 2
+        assert "Choose one bundle format selector" in result.output
+
+    def test_removed_plugin_shortcut_is_rejected(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--plugin"])
+        assert result.exit_code == 2
+        assert "No such option: --plugin" in result.output
 
     def test_archive_help_includes_migration_and_size_cues(self) -> None:
         result = CliRunner().invoke(pack_cmd, ["--help"])

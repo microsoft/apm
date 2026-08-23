@@ -103,8 +103,8 @@ the [policy schema](../policy-schema/).
 
 ### `deployed-files-present`
 
-- **What it verifies.** That every path in each lockfile entry's `deployed_files` exists on disk under the project root.
-- **Fails when.** One or more deployed files are missing (e.g. a developer ran `apm install` then deleted integrated files, or skipped install entirely).
+- **What it verifies.** That every path in each lockfile entry's `deployed_files` exists on disk under the project root. Gitignored paths are considered expected-absent and do not cause a failure.
+- **Fails when.** One or more non-gitignored deployed files are missing (e.g. a developer ran `apm install` then deleted integrated files, or skipped install entirely).
 - **Remediation.** Run `apm install` to restore integrated files. When
   `apm.yml` declares targets, install also removes stale entries outside the
   declared, gated, and dynamic target set. Then commit the updated lockfile:
@@ -125,7 +125,7 @@ the [policy schema](../policy-schema/).
 ### `config-consistency`
 
 - **What it verifies.** That MCP server configs derived from the root `dependencies.mcp` and `devDependencies.mcp`, plus `dependencies.mcp` from every current local or installed-remote package manifest bounded by the lockfile, match the `mcp_configs` baseline. Dependency-package `devDependencies.mcp` is author-only and is excluded from the consumer baseline.
-- **Fails when.** A server's resolved config differs from the lockfile, a server exists on only one side, or a locked package manifest is unreadable. In `apm audit --ci`, when `apm_modules/` is absent but the lockfile is present, APM first self-hydrates a lock-pinned scratch install and derives the current MCP truth from that isolated modules tree; if the scratch replay itself fails, `config-consistency` fails closed with the replay error. A missing manifest also fails unless the lockfile records a skill bundle, or declares a virtual subdirectory whose lock metadata and materialized shape both identify it as a Claude skill. `mcp_config_provenance` identifies the package in lock-only diagnostics but never exempts a removed declaration.
+- **Fails when.** A server's resolved config differs from the lockfile, a server exists on only one side, or a locked package manifest is unreadable. In `apm audit --ci`, when `apm_modules/` is absent but the lockfile is present, APM first self-hydrates a lock-pinned scratch install and derives the current MCP truth from that isolated modules tree; if the scratch replay itself fails, `config-consistency` fails closed with the replay error. A missing manifest also fails unless the lockfile records a skill bundle, declares a virtual subdirectory whose lock metadata and materialized shape both identify it as a Claude skill, or declares a present local path whose on-disk shape and lock metadata both identify it as a Claude skill. A missing local path still fails. `mcp_config_provenance` identifies the package in lock-only diagnostics but never exempts a removed declaration.
 - **Remediation.** Run `apm install` to reconcile the MCP configuration or restore an unreadable package source.
 
 ### `content-integrity`

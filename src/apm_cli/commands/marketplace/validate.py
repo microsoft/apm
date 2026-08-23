@@ -11,14 +11,14 @@ from ...core.command_logger import CommandLogger
 from . import marketplace
 
 
-@marketplace.command(help="Validate a marketplace manifest")
+@marketplace.command(help="Validate marketplace structure and plugin schema")
 @click.argument("name", required=True)
 @click.option(
     "--check-refs", is_flag=True, hidden=True, help="Verify version refs are reachable (network)"
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def validate(name, check_refs, verbose):
-    """Validate the manifest of a registered marketplace."""
+    """Report malformed manifest structure and plugin schema errors."""
     logger = CommandLogger("marketplace-validate", verbose=verbose)
     try:
         from ...marketplace.client import fetch_marketplace
@@ -29,20 +29,22 @@ def validate(name, check_refs, verbose):
         logger.start(f"Validating marketplace '{name}'...", symbol="gear")
 
         manifest = fetch_marketplace(source, force_refresh=True)
-
-        logger.progress(
-            f"Found {len(manifest.plugins)} plugins",
-            symbol="info",
+        results = validate_marketplace(manifest)
+        has_structure_errors = any(
+            result.check_name == "Structure" and result.errors for result in results
         )
 
+        if not has_structure_errors:
+            logger.progress(
+                f"Found {len(manifest.plugins)} plugins",
+                symbol="info",
+            )
+
         # Verbose: per-plugin details
-        if verbose:
+        if verbose and not has_structure_errors:
             for p in manifest.plugins:
                 source_type = "dict" if isinstance(p.source, dict) else "string"
                 logger.verbose_detail(f"    {p.name}: source type: {source_type}")
-
-        # Run validation
-        results = validate_marketplace(manifest)
 
         # Check-refs placeholder
         if check_refs:
@@ -59,7 +61,9 @@ def validate(name, check_refs, verbose):
         logger.progress("Validation Results:", symbol="info")
         for r in results:
             if r.passed and not r.warnings:
-                logger.success(f"  {r.check_name}: all plugins valid", symbol="check")
+                if has_structure_errors:
+                    continue
+                logger.success(f"  {r.check_name}: passed", symbol="check")
                 passed += 1
             elif r.warnings and not r.errors:
                 for w in r.warnings:

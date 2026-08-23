@@ -1,8 +1,8 @@
 """GitHub Copilot CLI implementation of MCP client adapter.
 
-This adapter implements the Copilot CLI-specific handling of MCP server configuration,
-targeting the global ~/.copilot/mcp-config.json file as specified in the MCP installation
-architecture specification.
+This adapter implements the Copilot-specific handling of MCP server configuration.
+At project scope it targets .github/mcp.json (read by Copilot CLI); at user scope
+it targets the global ~/.copilot/mcp-config.json file.
 """
 
 import json
@@ -13,6 +13,7 @@ from typing import ClassVar
 import click
 
 from ...core.token_manager import GitHubTokenManager
+from ...models.dependency.mcp import TrustedEnvLiteral
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
@@ -103,13 +104,23 @@ class CopilotClientAdapter(MCPClientAdapter):
         self.registry_integration = RegistryIntegration(registry_url)
 
     def get_config_path(self):
-        """Get the path to the Copilot CLI MCP configuration file.
+        """Get the path to the Copilot MCP configuration file.
+
+        At user scope returns the global Copilot CLI config so MCP servers are
+        available across all projects. At project scope returns the per-repo
+        .github/mcp.json path that Copilot CLI reads since deprecating
+        .vscode/mcp.json.
 
         Returns:
-            str: Path to ~/.copilot/mcp-config.json
+            str: Path to the MCP configuration file.
         """
-        copilot_dir = Path.home() / ".copilot"
-        return str(copilot_dir / "mcp-config.json")
+        if self.user_scope:
+            configured_home = os.environ.get("COPILOT_HOME", "").strip()
+            copilot_home = (
+                Path(configured_home).expanduser() if configured_home else Path.home() / ".copilot"
+            )
+            return str(copilot_home / "mcp-config.json")
+        return str(self.project_root / ".github" / "mcp.json")
 
     def update_config(self, config_updates):
         """Update the Copilot CLI MCP configuration.
@@ -423,6 +434,8 @@ class CopilotClientAdapter(MCPClientAdapter):
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
+            if raw.get("cwd") is not None:
+                config["cwd"] = raw["cwd"]
             resolved_env_for_args = {}
             if raw.get("env"):
                 resolved_env_for_args = self._resolve_environment_variables(
@@ -723,7 +736,9 @@ class CopilotClientAdapter(MCPClientAdapter):
                 if not isinstance(raw_value, str):
                     translated[name] = _stringify_env_literal(raw_value)
                     continue
-                if _has_env_placeholder(raw_value):
+                if isinstance(raw_value, TrustedEnvLiteral):
+                    translated[name] = raw_value
+                elif _has_env_placeholder(raw_value):
                     self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(raw_value))
                     translated[name] = self._translate_env_placeholder_for_runtime(raw_value)
                     for match in _ENV_VAR_RE.finditer(translated[name]):

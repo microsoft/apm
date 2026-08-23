@@ -25,7 +25,7 @@ the registry resolver entirely.
 
 ## What `apm pack` produces
 
-By default `apm pack` writes a plugin-format directory under `./build/`:
+By default `apm pack` writes a Claude Code plugin directory under `./build/`:
 
 ```
 build/<your-package>/
@@ -47,6 +47,14 @@ $ apm pack
     apm.lock.yaml for install-time integrity verification.
 [i] Share with: apm install build/my-pkg
 ```
+
+Pass `--format agent-plugin` instead to opt into a portable [Agent Plugins v1](../../reference/cli/pack/#agent-plugin-bundle---format-agent-plugin)
+bundle (`plugin.json` + `skills/` + `mcp.json` only, no Claude-specific
+directories) for producers targeting Agent-Plugin-aware hosts beyond APM.
+That format is stricter -- it fails before writing anything if your source
+has agents, commands, instructions, extensions, hooks, or LSP config it
+cannot represent -- and `apm install` does not deploy it yet. Use the
+default Claude plugin bundle above for anything you need to install today.
 
 Add `--archive` to get a single archive (`.zip` by default; use `--archive-format tar.gz`
 for legacy CI pipelines) instead of a directory; use `-o` to change the output location
@@ -150,8 +158,8 @@ it:
 ```
 
 When packing git dependencies, `apm pack` emits **only** what the
-lockfile attests, in every format (`--format plugin` and the default
-`--format apm`). Dependency content is sourced exclusively from the
+lockfile attests, in every bundle format (the default Claude plugin format,
+the explicit Agent Plugin format, and the legacy APM format). Dependency content is sourced exclusively from the
 lockfile `deployed_files` list -- the `apm_modules` cache is never
 packed, because it carries no provenance or integrity guarantee (it can
 be stale, partial, or tampered). Each attested file is verified against
@@ -188,7 +196,7 @@ primitive type:
 | command (prompt) | `.apm/prompts/*.prompt.md` | No |
 | hook | `.apm/hooks/*.json` | Yes: `hooks/*.json` |
 | agent | `.apm/agents/**/*.agent.md` | Yes: `*.agent.md` at package root |
-| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
+| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE; for MARKETPLACE_PLUGIN only when `plugin.json` declares it) |
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,
 `src/apm_cli/integration/command_integrator.py`,
@@ -214,6 +222,10 @@ If you publish a plugin that consumers install via `apm install`, use
 `.apm/<type>/` for **every** primitive type. This layout is the only
 one that works symmetrically through both `apm pack` (export) and
 `apm install` (discovery).
+
+For a marketplace plugin, `plugin.json` is authoritative when it declares
+`skills`: declare each skill or an immediate container, or omit `skills` to
+use conventional discovery. See [Package Types](../../reference/package-types/#plugin-collection-pluginjson).
 
 ```
 plugins/my-plugin/
@@ -276,12 +288,18 @@ bundle. The root `apm pack` builds the marketplace index. See
 **Do not use `--format apm` for bundles you expect consumers to install.**
 The legacy APM bundle layout has no `plugin.json` and `apm install` rejects
 it with a targeted error. The flag exists for tooling that still consumes
-the older layout; new bundles should use the default `--format plugin`. If
-you only have a legacy artifact, repack it:
+the older layout; new bundles should use the default Claude plugin format
+(no format flag needed). If you only have a legacy artifact, repack it:
 
 ```bash
-apm pack --format plugin --archive
+apm pack --archive
 ```
+
+**`apm install` does not deploy Agent Plugin output yet.** `apm pack --format agent-plugin`
+produces a valid, portable Agent Plugins v1 bundle, but installing one with
+`apm install` fails closed today, pending native runtime integration. Use the
+default Claude plugin bundle (or `--format apm` for legacy tooling) for
+anything you need `apm install` to deploy.
 
 **Do not set `--target`.** The flag is deprecated. Bundles are
 target-agnostic: the consumer's project decides which harness layouts
@@ -299,7 +317,7 @@ after `apm install`, its bytes no longer match the `deployed_file_hashes`
 SHA-256 recorded in `apm.lock.yaml` and `apm pack` fails with
 `... does not match the hash recorded in apm.lock.yaml`. A deleted file
 raises a sibling error that also points at `apm install` (the exact
-wording differs between `--format apm` and `--format plugin`). Run
+wording differs between the legacy APM format and the plugin formats). Run
 `apm install` to restore the attested content, then pack again.
 
 **Dry-run before sharing.** Use `apm pack --dry-run --verbose` to see the

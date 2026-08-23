@@ -6,67 +6,27 @@ import os
 import re
 import shutil
 import stat
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from apm_cli.core.deployment_state import MaterializationResult
+from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.skill_support import (
+    SkillIntegrationResult,
+    build_copy_ignore,
+    clean_orphaned_skills,
+    get_lockfile_owned_agent_skills,
+)
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.atomic_io import write_text_lf
 
-
-def _build_copy_ignore(
-    *,
-    skip_bin: bool = False,
-) -> Callable[[str, list[str]], list[str]]:
-    """Build a ``shutil.copytree`` ignore function.
-
-    When *skip_bin* is True the returned function also excludes ``bin/``
-    directories so that unapproved executables are not deployed during
-    skill promotion.
-    """
-    from apm_cli.security.gate import ignore_non_content
-
-    if not skip_bin:
-        return ignore_non_content
-    _bin_filter = shutil.ignore_patterns("bin")
-
-    def _combined(directory: str, contents: list[str]) -> list[str]:
-        return list(
-            set(ignore_non_content(directory, contents)) | set(_bin_filter(directory, contents))
-        )
-
-    return _combined
-
-
-# DEPRECATED -- use IntegrationResult directly for new code.
-# Kept for backward compatibility. The fields map as follows:
-# skill_created -> IntegrationResult.skill_created
-# sub_skills_promoted -> IntegrationResult.sub_skills_promoted
-# skill_path, references_copied -> not mapped (skill-internal)
-@dataclass
-class SkillIntegrationResult:
-    """Result of skill integration operation."""
-
-    skill_created: bool
-    skill_updated: bool
-    skill_skipped: bool
-    skill_path: Path | None
-    references_copied: int  # Now tracks total files copied to subdirectories
-    links_resolved: int = 0  # Kept for backwards compatibility
-    sub_skills_promoted: int = 0  # Number of sub-skills promoted to top-level
-    bin_deployed: int = 0  # Number of marketplace_plugin bin/ executables deployed
-    # Why a plugin's bin/ was NOT deployed despite shipping one, so the install
-    # layer can surface an actionable hint: "project_scope" | "no_claude_target".
-    bin_skipped_reason: str | None = None
-    target_paths: list[Path] = None  # All deployed directories (for deployed_files manifest)
-    materializations: tuple[MaterializationResult, ...] = ()
-
-    def __post_init__(self):
-        if self.target_paths is None:
-            self.target_paths = []
+if TYPE_CHECKING:
+    # Runtime imports of PackageType stay inside the functions that need it:
+    # importing the models package here would close an import cycle.
+    from apm_cli.models.validation import PackageType
 
 
 def to_hyphen_case(name: str) -> str:
@@ -204,7 +164,7 @@ def get_effective_type(package_info) -> "PackageContentType":
 
     Determines type by:
     1. Package has SKILL.md (PackageType.CLAUDE_SKILL or HYBRID) -> SKILL
-    2. Package is a SKILL_BUNDLE or MARKETPLACE_PLUGIN (has skills/) -> SKILL
+    2. Package is a SKILL_BUNDLE or legacy marketplace plugin with skills/ -> SKILL
     3. Otherwise -> INSTRUCTIONS (compile to AGENTS.md only)
 
     Args:
@@ -219,10 +179,7 @@ def get_effective_type(package_info) -> "PackageContentType":
     # PackageType.CLAUDE_SKILL = has root SKILL.md only
     # PackageType.HYBRID = has both apm.yml AND root SKILL.md
     # PackageType.SKILL_BUNDLE = has skills/<name>/SKILL.md (nested bundle)
-    # PackageType.MARKETPLACE_PLUGIN = has plugin manifest (plugin.json or
-    #   .claude-plugin/); may or may not include skills/. The integrator
-    #   path gates on actual skills/ presence, so plugins without skills
-    #   are inert in the SKILL branch.
+    # PackageType.MARKETPLACE_PLUGIN = explicit legacy Claude plugin input.
     if package_info.package_type in (
         PackageType.CLAUDE_SKILL,
         PackageType.HYBRID,
@@ -616,21 +573,66 @@ class SkillIntegrator(BaseIntegrator):
             return frozenset()
 
     @staticmethod
+    def _skill_source_dir(package_path: Path) -> Path:
+        """Return the single directory a package's skills are promoted from.
+
+        A root ``skills/`` bundle wins whenever it holds at least one skill;
+        otherwise the normalized ``.apm/skills/`` location supplies them.
+
+        Private on purpose: a plugin's skills need not share one parent, so
+        this answer is incomplete for ``MARKETPLACE_PLUGIN`` and reading it
+        directly is how the raw tree overrode the declaration in the first
+        place (#2537). ``skill_source_paths`` is the routing entry point --
+        it consults this only for the types that do have a single source.
+        """
+        root_bundle = package_path / "skills"
+        if SkillIntegrator._skill_names_in_directory(root_bundle):
+            return root_bundle
+        return package_path / ".apm" / "skills"
+
+    @staticmethod
+    def skill_source_paths(
+        package_path: Path, package_type: "PackageType | None" = None
+    ) -> dict[str, Path]:
+        """Map every deployable skill name to the directory it is promoted from.
+
+        Single source of truth for skill routing: deployment and ``--skill``
+        enumeration both resolve through here, so the set a user may select
+        can never drift from the set that actually deploys (issue #2530).
+
+        For a ``MARKETPLACE_PLUGIN`` parser-owned normalized membership is
+        authoritative. The parser records each normalized name's validated
+        byte source, so this integrator never re-derives membership from the
+        raw root ``skills/`` tree. An empty resolution is a real answer:
+        ``"skills": []`` means no skills, and a missing or malformed receipt
+        fails closed rather than falling back to staged package content.
+
+        Callers must handle a root ``SKILL.md`` before asking: a native
+        single-skill package deploys the bundle itself, not children.
+        """
+        from apm_cli.models.validation import PackageType
+
+        if package_type is PackageType.MARKETPLACE_PLUGIN:
+            from apm_cli.deps.plugin_parser import normalized_plugin_skill_sources
+
+            resolved, _ = normalized_plugin_skill_sources(package_path)
+            return resolved
+
+        source = SkillIntegrator._skill_source_dir(package_path)
+        return {name: source / name for name in SkillIntegrator._skill_names_in_directory(source)}
+
+    @staticmethod
     def available_skill_names(package_info) -> frozenset[str] | None:
         """Return names selectable through ``--skill`` for one package."""
+        enforce_agent_plugin_deployment_boundary(package_info)
+
         package_path = package_info.install_path
         if (package_path / "SKILL.md").is_file():
             return None
 
-        from apm_cli.models.validation import PackageType
-
-        normalized = package_path / ".apm" / "skills"
-        root_bundle = package_path / "skills"
-        if package_info.package_type is PackageType.MARKETPLACE_PLUGIN:
-            return SkillIntegrator._skill_names_in_directory(normalized)
-
-        root_names = SkillIntegrator._skill_names_in_directory(root_bundle)
-        return root_names or SkillIntegrator._skill_names_in_directory(normalized)
+        return frozenset(
+            SkillIntegrator.skill_source_paths(package_path, package_info.package_type)
+        )
 
     @staticmethod
     def _skill_filter_misses_available(
@@ -670,6 +672,55 @@ class SkillIntegrator(BaseIntegrator):
                 pass
 
     @staticmethod
+    def _note_plugin_declaration_deploys_no_skills(
+        package_path: Path,
+        parent_name: str,
+        diagnostics=None,
+        logger=None,
+    ) -> None:
+        """Report a plugin whose declaration resolves to no skills at all.
+
+        Zero deployable skills is a legitimate answer -- most plugins ship
+        none. It stops being obvious once the package actually carries a
+        root ``skills/`` bundle: those skills deployed before the declaration
+        became authoritative (#2537), and now nothing does, with no line of
+        output to tell "no skills by design" apart from "my declaration ate
+        them". Say which names went unclaimed, once, at that exact shape.
+        """
+        from apm_cli.deps.plugin_parser import normalized_plugin_skill_sources
+
+        _, declared = normalized_plugin_skill_sources(package_path)
+        if not declared:
+            return
+        shadowed = SkillIntegrator._skill_names_in_directory(package_path / "skills")
+        if not shadowed:
+            return
+        names = ", ".join(sorted(shadowed))
+        message = (
+            f"Package '{parent_name}': plugin.json declares no deployable skills, "
+            f"so nothing under skills/ deploys ({names}). Declare the skill directories "
+            "or their container in plugin.json, or remove the skills key to discover skills/."
+        )
+        detail = (
+            "A 'skills' declaration replaces default discovery instead of adding "
+            "to it. Declare each skill directory, or the container holding them, "
+            "to deploy them -- or drop the 'skills' key to fall back to "
+            "discovering skills/."
+        )
+        if diagnostics is not None:
+            diagnostics.info(message, package=parent_name, detail=detail)
+        elif logger:
+            logger.info(message)
+            logger.verbose_detail(detail)
+        else:
+            try:
+                from apm_cli.utils.console import _rich_info
+
+                _rich_info(message)
+            except ImportError:
+                pass
+
+    @staticmethod
     def _promote_sub_skills(
         sub_skills_dir: Path,
         target_skills_root: Path,
@@ -685,11 +736,12 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         name_filter: set[str] | None = None,
         link_rewriter: "SkillIntegrator | None" = None,
+        source_paths: dict[str, Path] | None = None,
     ) -> tuple[int, list[Path]]:
-        """Promote sub-skills from .apm/skills/ to top-level skill entries.
+        """Promote named skill directories to top-level skill entries.
 
         Args:
-            sub_skills_dir: Path to the .apm/skills/ directory in the source package.
+            sub_skills_dir: Default source directory when ``source_paths`` is absent.
             target_skills_root: Root skills directory (e.g. .github/skills/ or .claude/skills/).
             parent_name: Name of the parent skill (used in warning messages).
             warn: Whether to emit a warning on name collisions.
@@ -697,14 +749,23 @@ class SkillIntegrator(BaseIntegrator):
                 When provided, warnings are suppressed for self-overwrites.
             diagnostics: Optional DiagnosticCollector for deferred warning output.
             project_root: Project root for computing relative diagnostic paths.
+            source_paths: Explicit name -> source directory map. Plugins resolve
+                each declared skill individually, so their sources do not all
+                share one parent directory. When omitted, every child of
+                *sub_skills_dir* is a candidate.
 
         Returns:
             tuple[int, list[Path]]: (count of promoted sub-skills, list of deployed dir paths)
         """
         promoted = 0
         deployed = []
-        if not sub_skills_dir.is_dir():
-            return promoted, deployed
+        candidates: Iterable[Path]
+        if source_paths is None:
+            if not sub_skills_dir.is_dir():
+                return promoted, deployed
+            candidates = sub_skills_dir.iterdir()
+        else:
+            candidates = [source_paths[name] for name in sorted(source_paths)]
 
         # Compute project-relative prefix for consistent path reporting
         if project_root is not None:
@@ -717,7 +778,7 @@ class SkillIntegrator(BaseIntegrator):
         else:
             rel_prefix = target_skills_root.name
 
-        for sub_skill_path in sub_skills_dir.iterdir():
+        for sub_skill_path in candidates:
             if not sub_skill_path.is_dir():
                 continue
             if not (sub_skill_path / "SKILL.md").exists():
@@ -792,7 +853,7 @@ class SkillIntegrator(BaseIntegrator):
                 sub_skill_path,
                 target,
                 dirs_exist_ok=True,
-                ignore=_build_copy_ignore(skip_bin=skip_bin),
+                ignore=build_copy_ignore(skip_bin=skip_bin),
             )
             if link_rewriter is not None:
                 link_rewriter._resolve_markdown_links_in_skill_bundle(sub_skill_path, target)
@@ -1139,7 +1200,7 @@ class SkillIntegrator(BaseIntegrator):
                 shutil.rmtree(target_skill_dir)
 
             target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-            _base_ignore = _build_copy_ignore(skip_bin=skip_bin)
+            _base_ignore = build_copy_ignore(skip_bin=skip_bin)
 
             _apm_filter = shutil.ignore_patterns(".apm")
 
@@ -1210,6 +1271,7 @@ class SkillIntegrator(BaseIntegrator):
         targets=None,
         skill_subset=None,
         skip_bin: bool = False,
+        source_paths: dict[str, Path] | None = None,
     ) -> SkillIntegrationResult:
         """Promote every skill in a SKILL_BUNDLE's top-level skills/ directory.
 
@@ -1227,6 +1289,9 @@ class SkillIntegrator(BaseIntegrator):
             logger: Optional InstallLogger.
             targets: Optional explicit list of TargetProfile objects.
             skill_subset: Optional tuple of skill names to install (None = all).
+            source_paths: Explicit name -> source directory map, for packages
+                whose deployable skills do not all share one parent directory.
+                When omitted, every child of *skills_dir* is a candidate.
 
         Returns:
             SkillIntegrationResult with all promoted skills.
@@ -1251,7 +1316,11 @@ class SkillIntegrator(BaseIntegrator):
         any_created = False
         seen_skill_dirs: set[Path] = set()
         primary_selected = False
-        available_names = self._skill_names_in_directory(skills_dir)
+        available_names = (
+            frozenset(source_paths)
+            if source_paths is not None
+            else self._skill_names_in_directory(skills_dir)
+        )
 
         # Convert skill_subset tuple to promotion filter tokens for O(1) lookup.
         _name_filter = skill_subset_filter_tokens(skill_subset)
@@ -1293,6 +1362,7 @@ class SkillIntegrator(BaseIntegrator):
                 name_filter=_name_filter,
                 link_rewriter=self,
                 skip_bin=skip_bin,
+                source_paths=source_paths,
             )
             if is_primary:
                 total_promoted = n
@@ -1333,6 +1403,8 @@ class SkillIntegrator(BaseIntegrator):
         scope=None,
         policy=None,
         skip_bin: bool = False,
+        bin_skip_reason_override: str | None = None,
+        trust_bin: bool | None = None,
     ) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
 
@@ -1355,10 +1427,21 @@ class SkillIntegrator(BaseIntegrator):
                 package ships one.  Used by the executable approval gate to
                 block unapproved bin/ executables while still deploying text
                 primitives (skills, sub-skills).
+            bin_skip_reason_override: When *skip_bin* is True, use this
+                string as ``bin_skipped_reason`` instead of the default
+                ``"not_approved"``.  Lets the caller distinguish
+                ``--no-trust-bin`` (``"not_trusted"``) from the
+                ``allowExecutables`` gate.
+            trust_bin: Tri-state consent flag.  ``True`` suppresses the
+                trust-posture warning; ``False`` is handled upstream by
+                setting *skip_bin*; ``None`` (default) emits the warning
+                when bin/ is deployed.
 
         Returns:
             SkillIntegrationResult: Results of the integration operation
         """
+        enforce_agent_plugin_deployment_boundary(package_info)
+
         # Check if package type allows skill installation (T4 routing)
         # SKILL and HYBRID -> install as skill
         # INSTRUCTIONS and PROMPTS -> skip skill installation
@@ -1412,9 +1495,9 @@ class SkillIntegrator(BaseIntegrator):
         bin_skip_reason: str | None = None
         from apm_cli.models.apm_package import PackageType as _PackageType
 
-        if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
+        if package_info.package_type is _PackageType.MARKETPLACE_PLUGIN:
             if skip_bin:
-                bin_skip_reason = "not_approved"
+                bin_skip_reason = bin_skip_reason_override or "not_approved"
             else:
                 bin_paths, bin_skip_reason = self._deploy_plugin_bin(
                     package_info,
@@ -1424,6 +1507,7 @@ class SkillIntegrator(BaseIntegrator):
                     policy=policy,
                     force=force,
                     logger=logger,
+                    trust_bin=trust_bin,
                 )
 
         # Check if this is a native Skill (already has SKILL.md at root)
@@ -1453,15 +1537,48 @@ class SkillIntegrator(BaseIntegrator):
             )
 
         # SKILL_BUNDLE: promote skills from root-level skills/ directory.
+        # Routed through ``skill_source_paths`` -- the same helper backing
+        # ``available_skill_names`` -- so a ``--skill`` value can never be
+        # validated against a set other than the one that deploys.
+        #
+        # A plugin's resolved declaration IS its bundle, wherever the
+        # individual skills happen to sit, so it takes this path rather than
+        # the sub-skill path (#2537). For every other type the bundle is the
+        # root ``skills/`` directory, and ``.apm/skills/`` stays what it has
+        # always been: sub-skills promoted alongside a package that is not
+        # itself a skill.
         root_skills_dir = package_path / "skills"
-        if root_skills_dir.is_dir() and any(
-            (d / "SKILL.md").exists() for d in root_skills_dir.iterdir() if d.is_dir()
-        ):
+        _source_paths = self.skill_source_paths(package_path, package_info.package_type)
+        _is_plugin = package_info.package_type == _PackageType.MARKETPLACE_PLUGIN
+        if _is_plugin and not _source_paths:
+            self._note_plugin_declaration_deploys_no_skills(
+                package_path,
+                package_path.name,
+                diagnostics=diagnostics,
+                logger=logger,
+            )
+            return self._merge_bin_paths(
+                SkillIntegrationResult(
+                    skill_created=False,
+                    skill_updated=False,
+                    skill_skipped=True,
+                    skill_path=None,
+                    references_copied=0,
+                    links_resolved=0,
+                ),
+                bin_paths,
+                bin_skip_reason,
+            )
+        source_dir_is_root = bool(_source_paths) and all(
+            source.parent == root_skills_dir for source in _source_paths.values()
+        )
+        if _source_paths and (_is_plugin or source_dir_is_root):
             return self._merge_bin_paths(
                 self._integrate_skill_bundle(
                     package_info,
                     project_root,
-                    root_skills_dir,
+                    package_path / ".apm" / "skills" if _is_plugin else root_skills_dir,
+                    source_paths=_source_paths,
                     diagnostics=diagnostics,
                     managed_files=managed_files,
                     force=force,
@@ -1539,6 +1656,7 @@ class SkillIntegrator(BaseIntegrator):
         policy=None,
         force: bool = False,
         logger=None,
+        trust_bin: bool | None = None,
     ) -> tuple[list[Path], str | None]:
         """Deploy bin/ executables and plugin manifest for a MARKETPLACE_PLUGIN.
 
@@ -1558,6 +1676,13 @@ class SkillIntegrator(BaseIntegrator):
         (owner read/write/execute; all group/other bits cleared) on POSIX
         systems.  The deployed root is user-scoped (~/.claude/skills/), so
         tighter-than-0o755 permissions are correct.
+
+        When *trust_bin* is ``None`` (no ``--trust-bin`` / ``--no-trust-bin``
+        flag), a prominent trust-posture warning is emitted after deployment
+        so the user is aware that executables are on Claude Code's PATH.
+        When *trust_bin* is ``True`` (``--trust-bin``), the warning is
+        suppressed.  ``False`` is never passed here (handled upstream by
+        the caller setting ``skip_bin=True``).
 
         Returns ``(deployed_paths, skip_reason)``.  ``skip_reason`` is non-None
         ONLY when the package ships a bin/ but it could not be deployed for an
@@ -1619,6 +1744,16 @@ class SkillIntegrator(BaseIntegrator):
             )
             if manifest is not None:
                 deployed.append(manifest)
+
+        # Trust-posture warning: when bin/ is deployed without explicit
+        # --trust-bin consent, surface a prominent warning so the user
+        # knows executables are on Claude Code's PATH.
+        if deployed and trust_bin is None and logger:
+            canonical = package_info.get_canonical_dependency_string()
+            logger.warning(
+                f"Plugin '{canonical}' adds executables to Claude Code's PATH. "
+                "Pass --trust-bin to allow, or --no-trust-bin to skip bin/ deployment.",
+            )
 
         return deployed, None
 
@@ -1936,70 +2071,15 @@ class SkillIntegrator(BaseIntegrator):
         *,
         project_root: Path | None = None,
     ) -> dict[str, int]:
-        """Clean orphaned skills from a skills directory.
-
-        Uses npm-style approach: any skill directory not matching an installed
-        package name is considered orphaned and removed.
-
-        For the cross-client ``.agents/skills/`` directory, only removes skill
-        directories that appear in the lockfile's ``deployed_files`` to avoid
-        deleting foreign skills placed by other tools (Codex CLI, manual).
-
-        Args:
-            skills_dir: Path to skills directory (.github/skills/, .claude/skills/, etc.)
-            installed_skill_names: Set of expected skill directory names
-            project_root: Project root for lockfile-based ownership check.
-
-        Returns:
-            Dict with cleanup statistics
-        """
-        files_removed = 0
-        errors = 0
-
-        # For .agents/skills/: only delete skills that APM owns (appear in lockfile).
-        is_agents_dir = skills_dir.parent.name == ".agents"
-        lockfile_owned_skills: set[str] | None = None
-        if is_agents_dir and project_root is not None:
-            lockfile_owned_skills = self._get_lockfile_owned_agent_skills(project_root)
-
-        for skill_subdir in skills_dir.iterdir():
-            if skill_subdir.is_dir():
-                if skill_subdir.name not in installed_skill_names:
-                    # Ownership check: skip foreign skills in .agents/skills/.
-                    if lockfile_owned_skills is not None:
-                        if skill_subdir.name not in lockfile_owned_skills:
-                            continue
-                    try:
-                        shutil.rmtree(skill_subdir)
-                        files_removed += 1
-                    except Exception:
-                        errors += 1
-
-        return {"files_removed": files_removed, "errors": errors}
+        """Clean legacy-orphan skill directories without touching foreign agents."""
+        return clean_orphaned_skills(
+            skills_dir,
+            installed_skill_names,
+            project_root=project_root,
+            get_lockfile_owned_agent_skills=self._get_lockfile_owned_agent_skills,
+        )
 
     @staticmethod
     def _get_lockfile_owned_agent_skills(project_root: Path) -> set[str]:
-        """Return the set of skill names under ``.agents/skills/`` in the lockfile.
-
-        Used by ``_clean_orphaned_skills`` to avoid deleting foreign skills
-        in the cross-client ``.agents/`` directory.
-        """
-        owned: set[str] = set()
-        try:
-            from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-
-            lockfile = LockFile.read(get_lockfile_path(project_root))
-            if lockfile and lockfile.dependencies:
-                for dep in lockfile.dependencies.values():
-                    for f in dep.deployed_files:
-                        if f.startswith(".agents/skills/"):
-                            parts = f[len(".agents/skills/") :].split("/")
-                            if parts and parts[0]:
-                                owned.add(parts[0])
-        except (FileNotFoundError, OSError, KeyError, ValueError, TypeError, AttributeError) as exc:
-            import logging
-
-            logging.getLogger(__name__).debug(
-                "Could not read lockfile for ownership check: %s", exc
-            )
-        return owned
+        """Return the lockfile-owned ``.agents/skills`` names."""
+        return get_lockfile_owned_agent_skills(project_root)

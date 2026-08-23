@@ -25,10 +25,12 @@ from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_CANVAS,
     EXEC_TYPE_HOOKS,
+    EXEC_TYPE_LSP,
     EXEC_TYPE_MCP,
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
+    filter_lsp_by_allow_executables,
     filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
@@ -62,6 +64,12 @@ class TestExecutableDeclaration:
     def test_has_executables_true_with_bin(self) -> None:
         decl = ExecutableDeclaration(package_key="a#1.0", package_name="a", bin_count=3)
         assert decl.has_executables
+
+    def test_has_executables_true_with_lsp_only(self) -> None:
+        decl = ExecutableDeclaration(package_key="a#1.0", package_name="a", lsp_count=1)
+        assert decl.has_executables
+        assert decl.exec_types == [EXEC_TYPE_LSP]
+        assert decl.summary_line() == "1 LSP server(s)"
 
     def test_exec_types_empty(self) -> None:
         decl = ExecutableDeclaration(package_key="a#1.0", package_name="a")
@@ -258,6 +266,28 @@ class TestScanPackageExecutables:
             # MCP is now enforced so it appears in exec_types.
             assert EXEC_TYPE_MCP in decl.exec_types
             assert "server-a" in decl.mcp_details
+
+    def test_detects_lsp_from_apm_yml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "apm.yml").write_text(
+                yaml.dump(
+                    {
+                        "name": "lsp-pkg",
+                        "dependencies": {
+                            "lsp": [
+                                {"name": "pyright", "command": "pyright-langserver"},
+                                "typescript-language-server",
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            decl = scan_package_executables(Path(tmpdir), "lsp-pkg", "1.0")
+            assert decl.lsp_count == 2
+            assert EXEC_TYPE_LSP in decl.exec_types
+            assert decl.lsp_details == ["pyright", "typescript-language-server"]
 
     def test_transitive_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -668,3 +698,29 @@ class TestFilterMcpFailClosed:
         result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
         assert result == []
         assert logger.warnings
+
+
+class TestFilterLspFailClosed:
+    def test_project_allowed_slug_passes(self) -> None:
+        deps = [_FakeMcpDep("pyright")]
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables(
+            deps,
+            {"pyright": {"lsp": True}},
+            logger,
+        )
+
+        assert result == deps
+        assert logger.warnings == []
+
+    def test_unapproved_lsp_is_filtered(self) -> None:
+        deps = [_FakeMcpDep("pyright")]
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables(deps, {}, logger)
+
+        assert result == []
+        assert logger.warnings == [
+            "Filtered 1 LSP server(s) whose executables are not trusted yet."
+        ]

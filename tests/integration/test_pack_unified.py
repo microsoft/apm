@@ -16,6 +16,7 @@ from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.commands.pack import pack_cmd
+from apm_cli.models.validation import PackageType, validate_apm_package
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,6 +63,72 @@ marketplace:
     )
 
 
+def _write_agent_block_yml(root: Path, *, nonportable: bool = True) -> None:
+    _write_apm_yml(
+        root,
+        """\
+name: agent-pack
+version: 1.0.0
+description: agent plugin fixture
+dependencies:
+  apm: []
+""",
+    )
+    _write_minimal_lockfile(root)
+    lockfile = root / "apm.lock.yaml"
+    lockfile.write_text(
+        _LOCKFILE_TEMPLATE
+        + "mcp_servers: [safe]\n"
+        + "mcp_configs:\n"
+        + "  safe:\n"
+        + "    name: safe\n"
+        + "    transport: stdio\n"
+        + "    command: tool\n"
+        + (
+            "lsp_servers: [pyright]\n"
+            "lsp_configs:\n"
+            "  pyright:\n"
+            "    name: pyright\n"
+            "    command: pyright-langserver\n"
+            "    extensionToLanguage:\n"
+            "      .py: python\n"
+            if nonportable
+            else ""
+        ),
+        encoding="utf-8",
+    )
+    (root / ".apm" / "skills" / "demo").mkdir(parents=True, exist_ok=True)
+    (root / ".apm" / "skills" / "demo" / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Demo skill\n---\n\nUse the demo skill.\n",
+        encoding="utf-8",
+    )
+    if nonportable:
+        for directory, name, content in (
+            ("agents", "agent.md", "agent"),
+            ("commands", "hello.md", "command"),
+            ("instructions", "note.md", "note"),
+            ("extensions", "ext.json", "{}"),
+        ):
+            component_dir = root / ".apm" / directory
+            component_dir.mkdir(parents=True, exist_ok=True)
+            (component_dir / name).write_text(content, encoding="utf-8")
+        (root / ".apm" / "hooks").mkdir(parents=True, exist_ok=True)
+        (root / ".apm" / "hooks" / "hooks.json").write_text(
+            json.dumps({"preCommit": [{"command": "lint"}]}),
+            encoding="utf-8",
+        )
+        (root / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"safe": {"type": "stdio", "command": "tool"}}}),
+            encoding="utf-8",
+        )
+        (root / ".lsp.json").write_text(
+            json.dumps({"lspServers": {"pyright": {"command": "pyright-langserver"}}}),
+            encoding="utf-8",
+        )
+    for name in ("README.md", "LICENSE", "CHANGELOG.md"):
+        (root / name).write_text(name, encoding="utf-8")
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -88,6 +155,138 @@ class TestPackUnified:
         assert (tmp_path / "build").exists()
         # Marketplace.json should NOT be created
         assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()
+
+    def test_pack_defaults_to_legacy_claude_plugin(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_agent_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 0, result.output
+        bundle = next((tmp_path / "build").iterdir())
+        manifest = json.loads((bundle / "plugin.json").read_text(encoding="utf-8"))
+        assert "$schema" not in manifest
+        assert (bundle / "agents" / "agent.md").exists()
+        assert (bundle / ".mcp.json").exists()
+        assert not (bundle / "com.microsoft.apm").exists()
+
+    def test_pack_default_succeeds_without_lockfile(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: no-lock\nversion: 1.0.0\ndescription: No lockfile fixture\ntarget: claude\n",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 0, result.output
+        manifest = json.loads(
+            (tmp_path / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+        )
+        assert "$schema" not in manifest
+
+    def test_pack_explicit_agent_plugin_round_trips(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_agent_block_yml(tmp_path, nonportable=False)
+
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin"])
+
+        assert result.exit_code == 0, result.output
+        bundle = next((tmp_path / "build").iterdir())
+        assert (bundle / "plugin.json").exists()
+        assert (bundle / "skills" / "demo" / "SKILL.md").exists()
+        assert (bundle / "mcp.json").exists()
+        assert not (bundle / "com.microsoft.apm").exists()
+        assert not (bundle / "agents").exists()
+        assert not (bundle / "commands").exists()
+        assert not (bundle / "instructions").exists()
+        assert not (bundle / "extensions").exists()
+        assert not (bundle / "hooks").exists()
+        assert not (bundle / "lsp.json").exists()
+        assert (bundle / "README.md").exists()
+        assert (bundle / "LICENSE").exists()
+        assert (bundle / "CHANGELOG.md").exists()
+        assert not (bundle / "apm.yml").exists()
+        assert not (bundle / "apm.yaml").exists()
+
+    def test_pack_explicit_agent_plugin_rejects_nonportable_sources(
+        self, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        _write_agent_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin"])
+
+        assert result.exit_code == 1
+        assert "non-portable primitives would be discarded" in result.output
+        assert "apm pack --format claude-plugin" in result.output
+        assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in result.output
+        assert not (tmp_path / "build").exists()
+
+    def test_pack_json_does_not_claim_default_flip_before_t10(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("apm_cli.version.get_version", lambda: "0.30.0")
+        _write_agent_block_yml(tmp_path, nonportable=False)
+
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin", "--json"])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["ok"] is True
+        assert not any(
+            "defaults to Agent Plugin output" in warning for warning in payload["warnings"]
+        )
+
+    def test_pack_json_reports_nonportable_agent_plugin_failure(
+        self, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        _write_agent_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin", "--json"])
+
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["ok"] is False
+        assert payload["errors"][0]["code"] == "build_error"
+        assert "non-portable primitives would be discarded" in payload["errors"][0]["message"]
+        assert not (tmp_path / "build").exists()
+
+    def test_pack_claude_plugin_preserves_legacy_layout(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_agent_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--claude-plugin"])
+
+        assert result.exit_code == 0, result.output
+        bundle = next((tmp_path / "build").iterdir())
+        assert (bundle / "plugin.json").exists()
+        assert (bundle / "agents" / "agent.md").exists()
+        assert not (bundle / "com.microsoft.apm" / "agents" / "agent.md").exists()
+        validation = validate_apm_package(bundle)
+        assert validation.is_valid is True
+        assert validation.package_type is PackageType.MARKETPLACE_PLUGIN
+
+    def test_pack_plugin_alias_preserves_legacy_layout(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_agent_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--format", "plugin"])
+
+        assert result.exit_code == 0, result.output
+        bundle = next((tmp_path / "build").iterdir())
+        manifest = json.loads((bundle / "plugin.json").read_text(encoding="utf-8"))
+        assert "$schema" not in manifest
+        assert (bundle / "agents" / "agent.md").exists()
+
+    def test_pack_conflicting_format_selectors_error(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_agent_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--format", "agent-plugin", "--claude-plugin"])
+
+        assert result.exit_code == 2
+        assert "Choose one bundle format selector" in result.output
 
     def test_pack_marketplace_only(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

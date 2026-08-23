@@ -42,8 +42,11 @@ KNOWN_LARGE_MODULES = {
     # services.py grew past 1000 when exec-gate delegation helpers (main)
     # and canvas integration helpers (canvas PR) merged concurrently.
     # Further growth from target-reconcile warning helper extraction (#2362).
+    # Added _resolve_bin_skip helper for trust-bin gate (#1620).
+    # G2 adds the atomic native Agent Plugin deployment boundary before any
+    # target reconciliation or generic integrator can mutate state.
     # Decomposition tracked as follow-up.
-    "services.py": 1110,
+    "services.py": 1175,
 }
 
 

@@ -26,7 +26,7 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
 ]
 
-_POLICY_SOURCE = "dev.azure.com/contoso/_apm/_apm"
+_POLICY_SOURCE = "dev.azure.com/contoso/apm/apm-policy"
 _POLICY_REMOTE = "https://dev.azure.com/contoso/project/_git/govern-contract"
 _POLICY_DIAGNOSTIC = f"Policy: org:{_POLICY_SOURCE} (cached"
 _EXPECTED_BUNDLE_FILES = {
@@ -468,7 +468,7 @@ def _run_govern_contract(root: Path, binary: Path) -> _GovernReceipt:
     )
     _run_expected(
         runner,
-        ("pack", "--format", "plugin", "--offline"),
+        ("pack", "--format", "claude-plugin", "--offline"),
         expected_returncode=0,
         scenario_id="govern-pack",
         cwd=producer.root,

@@ -110,7 +110,7 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="copilot",
             compile_family="vscode",
-            runtimes=("vscode", "agents"),
+            runtimes=("copilot", "vscode", "agents"),
         ),
         _capability(
             "claude",
@@ -256,12 +256,14 @@ def accepted_target_values(command: str | None = None) -> frozenset[str]:
 
 
 def manifest_target_names() -> frozenset[str]:
-    """Return canonical target identifiers accepted in ``apm.yml``."""
-    return frozenset(
+    """Return target identifiers accepted in ``apm.yml``."""
+    names = {
         capability.name
         for capability in TARGET_CAPABILITIES.values()
         if capability.experimental_flag is None and not capability.mcp_only
-    )
+    }
+    names.add("vscode")
+    return frozenset(names)
 
 
 def normalize_target_name(name_or_alias: str) -> str:
@@ -289,6 +291,25 @@ def expand_all(command: str) -> tuple[str, ...]:
 def target_help_fragment(command: str) -> str:
     """Return the generated accepted-values fragment for command help."""
     return f"Values: {', '.join(sorted(accepted_target_values(command)))}."
+
+
+def target_all_exclusion_help() -> str:
+    """Return the generated 'all' exclusion clause for command help strings.
+
+    Produces a sorted list of names excluded from 'all': explicit-only
+    non-experimental targets, 'experimental targets' as a category, and
+    mcp-only targets.  Adding a new catalog entry automatically appears here.
+    """
+    explicit_non_experimental = sorted(
+        cap.name
+        for cap in TARGET_CAPABILITIES.values()
+        if cap.explicit_only and cap.experimental_flag is None
+    )
+    mcp_only_names = sorted(cap.name for cap in TARGET_CAPABILITIES.values() if cap.mcp_only)
+    parts = [*explicit_non_experimental, "experimental targets", *mcp_only_names]
+    if len(parts) == 1:
+        return f"'all' excludes {parts[0]}"
+    return f"'all' excludes {', '.join(parts[:-1])}, and {parts[-1]}"
 
 
 def target_error_values(command: str) -> tuple[str, ...]:

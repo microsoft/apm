@@ -11,6 +11,72 @@ if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.dependency.lsp import LSPDependency
+
+
+def run_owned_lsp_integration(
+    *,
+    dependencies: list["LSPDependency"],
+    owner: str,
+    lock_path: Path,
+    project_root: Path,
+    user_scope: bool,
+    target_runtimes: list[str],
+    logger,
+    fail_on_write_error: bool = True,
+) -> int:
+    """Reconcile one bundle owner's LSP servers and persist ownership."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+    lockfile = LockFile.read(lock_path) or LockFile()
+    old_owned = {
+        name
+        for name, recorded_owner in lockfile.lsp_config_provenance.items()
+        if recorded_owner == owner
+    }
+    new_names = LSPIntegrator.get_server_names(dependencies)
+    conflicts = {
+        name
+        for name in new_names
+        if name in lockfile.lsp_servers
+        and name not in old_owned
+        and lockfile.lsp_config_provenance.get(name) != owner
+    }
+    if conflicts:
+        raise ValueError(
+            "Bundle LSP server name conflicts with another owner: " + ", ".join(sorted(conflicts))
+        )
+
+    count = 0
+    if dependencies:
+        count = LSPIntegrator.install(
+            dependencies,
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+            target_runtimes=target_runtimes,
+            fail_on_write_error=fail_on_write_error,
+        )
+    stale = old_owned - new_names
+    if stale:
+        LSPIntegrator.remove_stale(
+            stale,
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+            target_runtimes=target_runtimes,
+            fail_on_write_error=fail_on_write_error,
+        )
+
+    for name in old_owned:
+        lockfile.lsp_configs.pop(name, None)
+        lockfile.lsp_config_provenance.pop(name, None)
+    lockfile.lsp_servers = sorted((set(lockfile.lsp_servers) - old_owned) | new_names)
+    lockfile.lsp_configs.update(LSPIntegrator.get_server_configs(dependencies))
+    lockfile.lsp_config_provenance.update(dict.fromkeys(new_names, owner))
+    lockfile.write(lock_path)
+    return count
 
 
 def run_lsp_integration(  # noqa: PLR0913
@@ -88,6 +154,13 @@ def run_lsp_integration(  # noqa: PLR0913
         if transitive_lsp:
             logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")
             lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)
+
+    from apm_cli.security.executables import filter_lsp_by_allow_executables
+
+    package_allow = getattr(apm_package, "allow_executables", None)
+    if not isinstance(package_allow, dict):
+        package_allow = None
+    lsp_deps = filter_lsp_by_allow_executables(lsp_deps, package_allow, logger)
 
     lsp_count = 0
     new_lsp_servers: builtins.set = builtins.set()

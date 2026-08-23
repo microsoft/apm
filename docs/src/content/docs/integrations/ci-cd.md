@@ -93,8 +93,10 @@ provides the CLI, then run the full CI gate:
 In setup-only CI, `apm audit --ci` now self-hydrates a lock-pinned scratch
 install when `apm_modules/` is absent, so drift and `config-consistency`
 still run without mutating the checkout. Repos that gitignore deployed
-outputs still need those files on disk for `deployed-files-present`, so keep
-the full-install pattern for that case. See
+outputs can still use the audit-only pattern: `deployed-files-present`
+skips gitignored paths automatically, so a fresh checkout of a repo that
+gitignores a deploy directory (e.g. `.agents/`) passes the check without
+an `apm install` step. See
 [Audit-only CI pattern](../../enterprise/enforce-in-ci/#audit-only-ci-pattern)
 for the full recipe and when to use each approach.
 

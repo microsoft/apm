@@ -812,7 +812,7 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) 
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
 | `chatmode` | `string` | unset | | Chatmode filter for compilation. |
 | `resolve_links` | `bool` | `true` | | Resolve relative Markdown links in primitives. |
-| `source_attribution` | `bool` | `false` | | Include source-file origin comments in compiled output (opt-in). |
+| `source_attribution` | `bool` | `false` | | Include the cosmetic compile annotations -- source-file origin comments, the APM version comment, and the generated-by footer -- in compiled output (opt-in). Applies to every compile target, including `AGENTS.md` targets. |
 | `exclude` | `list<string>` or `string` | `[]` | Glob patterns | Directories to skip during compilation (e.g. `apm_modules/**`). |
 | `placement` | `object` | unset | | Placement tuning. See Section 6.1. |
 | `agents_md` | `object` | unset | | AGENTS.md output tuning. See Section 6.2. |

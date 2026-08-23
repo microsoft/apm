@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE
+from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.utils.diagnostics import printable_ascii_text
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +26,55 @@ logger = logging.getLogger(__name__)
 
 def _looks_like_local_path(value: str) -> bool:
     """Heuristic for local filesystem paths and file:// URIs."""
+    value = value.strip()
     if not value:
         return False
-    if value.startswith("file://"):
+    if value.lower().startswith("file:"):
         return True
-    if value.startswith(("/", "./", "../", "~")):
+    if value.startswith(("/", "./", "../", "~", ".\\", "..\\", "~\\", "\\\\")):
         return True
     # Windows drive letter: C:\ or C:/
     return bool(len(value) >= 3 and value[1:3] in (":\\", ":/") and value[0].isalpha())
+
+
+def _is_valid_remote_coordinate(value: object) -> bool:
+    """Return whether a source locator parses as a non-local dependency."""
+    if not isinstance(value, str) or not value.strip() or _looks_like_local_path(value):
+        return False
+    try:
+        return not DependencyReference.parse(value.strip()).is_local
+    except ValueError:
+        return False
+
+
+def _dict_source_error(source_type: str, repo: object, url: object) -> str | None:
+    """Return a structural diagnostic for an unsupported dict plugin source."""
+    has_repo = isinstance(repo, str) and "/" in repo.strip()
+    has_url = isinstance(url, str) and bool(url.strip())
+    safe_source_type = printable_ascii_text(source_type)
+    if source_type == "npm":
+        return "source: unsupported source type 'npm'"
+    if not source_type and not has_repo:
+        return "source: expected a supported source type or an owner/repository field"
+    if source_type not in {"", "github", "url", "git-subdir", "gitlab"}:
+        return f"source: unsupported source type '{safe_source_type}'"
+    if source_type == "github":
+        if not has_repo:
+            return "source: github requires an owner/repository field"
+        if not _is_valid_remote_coordinate(repo):
+            return "source: github requires a valid non-local owner/repository field"
+    if source_type == "url":
+        if not has_url:
+            return "source: url requires a non-empty url field"
+        if not _is_valid_remote_coordinate(url):
+            return "source: url requires a valid non-local url field"
+    if source_type in {"git-subdir", "gitlab"}:
+        locator = repo if has_repo else url
+        if not locator:
+            return f"source: {source_type} requires an owner/repository or url field"
+        if not _is_valid_remote_coordinate(locator):
+            return f"source: {source_type} requires a valid non-local owner/repository or url field"
+    return None
 
 
 def _extract_host_from_url(url: str) -> str:
@@ -350,6 +393,7 @@ class MarketplaceManifest:
     plugin_root: str = ""  # metadata.pluginRoot - base path for bare-name sources
     source_url: str = ""
     source_digest: str = ""
+    structural_errors: tuple[str, ...] = ()
 
     def find_plugin(self, plugin_name: str) -> MarketplacePlugin | None:
         """Find a plugin by exact name (case-insensitive)."""
@@ -375,12 +419,15 @@ class MarketplaceManifest:
 #   { "name": "...", "plugins": [ { "name": "...", "source": { "type": "github", ... } } ] }
 
 
-def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplacePlugin | None:
-    """Parse a single plugin entry from either format."""
-    name = entry.get("name", "").strip()
+def _parse_plugin_entry(
+    entry: dict[str, Any], source_name: str
+) -> tuple[MarketplacePlugin | None, str | None]:
+    """Parse one plugin entry, retaining an error when it cannot be consumed."""
+    raw_name = entry.get("name", "")
+    name = raw_name.strip() if isinstance(raw_name, str) else ""
     if not name:
         logger.debug("Skipping marketplace plugin entry without a name")
-        return None
+        return None, "name: expected a non-empty string"
 
     description = entry.get("description", "")
     version = entry.get("version", "")
@@ -396,18 +443,33 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
             # Relative path source (Claude shorthand)
             source = raw
         elif isinstance(raw, dict):
-            # Type discriminator: Copilot CLI uses "source" key, Claude uses "type"
-            source_type = raw.get("type", "") or raw.get("source", "")
-            if source_type == "npm":
-                logger.debug("Skipping npm source type for plugin '%s' (unsupported)", name)
-                return None
+            # Copilot CLI uses "source", while other manifests use "type" or "kind".
+            source_type = next(
+                (
+                    value.strip().lower()
+                    for key in ("type", "source", "kind")
+                    if isinstance(value := raw.get(key), str) and value.strip()
+                ),
+                "",
+            )
+            error = _dict_source_error(
+                source_type,
+                raw.get("repo", "") or raw.get("repository", ""),
+                raw.get("url", ""),
+            )
+            if error is not None:
+                if source_type == "npm":
+                    logger.debug("Skipping npm source type for plugin '%s' (unsupported)", name)
+                return None, error
             # Normalize: ensure "type" key is set for downstream resolvers
             if source_type and "type" not in raw:
                 raw = {**raw, "type": source_type}
+            elif not source_type and "repository" in raw:
+                raw = {**raw, "type": "github", "repo": raw["repository"]}
             source = raw
         else:
             logger.debug("Skipping plugin '%s' with unrecognized source format", name)
-            return None
+            return None, "source: expected a string or object"
     elif "repository" in entry:
         # Copilot CLI format: "repository": "owner/repo"
         repo = entry["repository"]
@@ -422,10 +484,10 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
                 name,
                 repo,
             )
-            return None
+            return None, "repository: expected an owner/repository string"
     else:
         logger.debug("Plugin '%s' has no source or repository field", name)
-        return None
+        return None, "source: expected a source or repository field"
 
     # Optional dedicated-registry routing (design §4.5). When ``registry``
     # is set, ``version`` is interpreted as a semver range and the plugin
@@ -460,22 +522,28 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
     if isinstance(source, dict):
         raw_tp = source.get("tag_pattern")
         if raw_tp is not None:
-            from .tag_pattern import validate_tag_pattern
+            from .tag_pattern import TagPatternError, validate_tag_pattern
 
-            tag_pattern = validate_tag_pattern(
-                raw_tp,
-                context=f"Plugin {name!r} source.tag_pattern",
-            )
+            try:
+                tag_pattern = validate_tag_pattern(
+                    raw_tp,
+                    context=f"Plugin {name!r} source.tag_pattern",
+                )
+            except TagPatternError as exc:
+                return None, f"source.tag_pattern: {printable_ascii_text(str(exc))}"
 
-    return MarketplacePlugin(
-        name=name,
-        source=source,
-        description=description,
-        version=version,
-        tags=tags,
-        source_marketplace=source_name,
-        registry=registry_name,
-        tag_pattern=tag_pattern,
+    return (
+        MarketplacePlugin(
+            name=name,
+            source=source,
+            description=description,
+            version=version,
+            tags=tags,
+            source_marketplace=source_name,
+            registry=registry_name,
+            tag_pattern=tag_pattern,
+        ),
+        None,
     )
 
 
@@ -489,7 +557,8 @@ def parse_marketplace_json(
     """Parse a marketplace.json dict into a ``MarketplaceManifest``.
 
     Accepts both Copilot CLI and Claude Code marketplace formats.
-    Invalid or unsupported entries are silently skipped with debug logging.
+    Invalid or unsupported entries are skipped for runtime tolerance and retained
+    as structural diagnostics for manifest validation.
 
     Args:
         data: Parsed JSON content of marketplace.json.
@@ -517,24 +586,30 @@ def parse_marketplace_json(
             plugin_root = raw_root.strip()
 
     raw_plugins = data.get("plugins", [])
+    structural_errors: list[str] = []
     if not isinstance(raw_plugins, list):
         logger.warning(
             "marketplace.json 'plugins' field is not a list in '%s'",
             source_name,
         )
+        structural_errors.append("plugins: expected a list")
         raw_plugins = []
 
     plugins: list[MarketplacePlugin] = []
-    for entry in raw_plugins:
+    for index, entry in enumerate(raw_plugins):
         if not isinstance(entry, dict):
+            structural_errors.append(f"plugins[{index}]: expected an object")
             continue
-        plugin = _parse_plugin_entry(entry, source_name)
+        plugin, error = _parse_plugin_entry(entry, source_name)
         if plugin is not None:
             plugins.append(plugin)
+        elif error is not None:
+            structural_errors.append(f"plugins[{index}].{error}")
 
     return MarketplaceManifest(
         name=manifest_name,
         plugins=tuple(plugins),
+        structural_errors=tuple(structural_errors),
         owner_name=owner_name,
         description=description,
         plugin_root=plugin_root,

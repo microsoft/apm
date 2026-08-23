@@ -132,21 +132,74 @@ def _check_ref_consistency(
             message="All dependency refs match lockfile",
         )
     repair_command = "apm install --update" if requires_update else "apm install"
+    n = len(mismatches)
+    noun = "mismatch" if n == 1 else "mismatches"
     return CheckResult(
         name="ref-consistency",
         passed=False,
-        message=(
-            f"{len(mismatches)} ref mismatch(es) -- run '{repair_command}' to update lockfile"
-        ),
+        message=(f"{n} ref {noun} -- run '{repair_command}' to update lockfile"),
         details=mismatches,
     )
+
+
+def _filter_gitignored(project_root: Path, rel_paths: list[str]) -> list[str]:
+    """Return only paths from rel_paths that are NOT gitignored.
+
+    A gitignored path is absent by design on a fresh clone and must not be
+    reported as a missing deployment.  Uses ``git check-ignore --stdin -z``
+    for reliable, gitignore-spec-compliant evaluation.
+
+    Falls back to returning the original list unchanged when git is not
+    available or when ``project_root`` is not inside a git repository, so
+    the behaviour reverts to the pre-fix state rather than silently passing.
+
+    Args:
+        project_root: Absolute path to the root of the git repository.
+        rel_paths: Paths relative to ``project_root`` to evaluate.
+
+    Returns:
+        The subset of ``rel_paths`` whose entries are NOT gitignored.
+    """
+    if not rel_paths:
+        return rel_paths
+    try:
+        import subprocess
+
+        from ..utils.git_env import get_git_executable, git_subprocess_env
+
+        git_exe = get_git_executable()
+        result = subprocess.run(
+            [git_exe, "check-ignore", "--stdin", "-z"],
+            input="\x00".join(rel_paths),
+            cwd=str(project_root),
+            env=git_subprocess_env(),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # git check-ignore exits 0 if at least one path is ignored, 1 if none
+        # are ignored, and 128 on fatal errors.  We only care about stdout.
+        ignored = {p for p in result.stdout.split("\x00") if p}
+        return [p for p in rel_paths if p not in ignored]
+    except (OSError, subprocess.SubprocessError, ImportError):
+        _logger.warning(
+            "Could not query gitignore status for %d path(s); reporting all absent paths as missing",
+            len(rel_paths),
+        )
+        return rel_paths
 
 
 def _check_deployed_files_present(
     project_root: Path,
     lock: LockFile,
 ) -> CheckResult:
-    """Verify all files listed in lockfile deployed_files exist on disk."""
+    """Verify all files listed in lockfile deployed_files exist on disk.
+
+    Paths that are gitignored are considered absent by design (the repo owner
+    deliberately chose not to commit them) and are excluded from the missing
+    count.  This prevents false positives on fresh checkouts of repos that
+    gitignore one or more deploy directories.
+    """
     from ..integration.base_integrator import BaseIntegrator
 
     missing: list[str] = []
@@ -159,16 +212,29 @@ def _check_deployed_files_present(
             if not abs_path.exists():
                 missing.append(rel_path)
 
+    gitignored_skipped = False
+    if missing:
+        filtered = _filter_gitignored(project_root, missing)
+        gitignored_skipped = len(filtered) < len(missing)
+        missing = filtered
+
     if not missing:
+        msg = (
+            "All deployed files present on disk (gitignored paths skipped)"
+            if gitignored_skipped
+            else "All deployed files present on disk"
+        )
         return CheckResult(
             name="deployed-files-present",
             passed=True,
-            message="All deployed files present on disk",
+            message=msg,
         )
+    n = len(missing)
+    noun = "file" if n == 1 else "files"
     return CheckResult(
         name="deployed-files-present",
         passed=False,
-        message=(f"{len(missing)} deployed file(s) missing -- run 'apm install' to restore"),
+        message=(f"{n} deployed {noun} missing -- run 'apm install' to restore"),
         details=missing,
     )
 
@@ -548,6 +614,7 @@ def _check_drift(
     then the audit remains non-blocking so CI does not red-mark a
     fresh checkout that has never installed.
     """
+    from ..agent_plugins.errors import AgentPluginDeploymentBoundaryError
     from ..deps.lockfile import get_lockfile_path
     from ..deps.path_anchoring import LocalResolutionError
     from ..install.drift import (
@@ -570,6 +637,16 @@ def _check_drift(
 
         try:
             scratch = run_replay(config, logger)
+        except AgentPluginDeploymentBoundaryError as exc:
+            return (
+                CheckResult(
+                    name="drift",
+                    passed=False,
+                    message=f"drift replay blocked: {exc}",
+                    details=[str(exc)],
+                ),
+                [],
+            )
         except LocalResolutionError as exc:
             return (
                 CheckResult(

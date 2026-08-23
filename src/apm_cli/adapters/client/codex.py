@@ -12,6 +12,7 @@ from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_success, _rich_warning
+from ...utils.net import is_loopback_host
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import MCPClientAdapter
@@ -216,6 +217,8 @@ class CodexClientAdapter(MCPClientAdapter):
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
+            if raw.get("cwd") is not None:
+                config["cwd"] = raw["cwd"]
             resolved_env_for_args: dict = {}
             if raw.get("env"):
                 resolved_env_for_args = self._resolve_environment_variables(
@@ -239,7 +242,8 @@ class CodexClientAdapter(MCPClientAdapter):
         # Precedence on Codex when a server publishes BOTH a remote and a stdio
         # package: prefer the stdio package (falls through to the packages branch
         # below). The remote-only branch here handles the streamable-http path
-        # and rejects SSE / non-https / empty-url remotes with explicit warnings.
+        # and rejects SSE / non-https (except loopback http) / empty-url remotes
+        # with explicit warnings.
         remotes = server_info.get("remotes", [])
         packages = server_info.get("packages", [])
         if remotes and not packages:
@@ -263,11 +267,22 @@ class CodexClientAdapter(MCPClientAdapter):
                 )
                 return None
 
-            scheme = urlparse(remote_url).scheme.lower()
-            if scheme != "https":
+            try:
+                parsed_remote = urlparse(remote_url)
+                scheme = parsed_remote.scheme.lower()
+                insecure_loopback = scheme == "http" and is_loopback_host(parsed_remote.hostname)
+            except ValueError:
+                scheme = ""
+                insecure_loopback = False
+            # Codex CLI itself accepts plain-http loopback URLs (its docs use
+            # http://localhost examples), and local dev servers rarely carry
+            # certs -- so loopback http is allowed. Any other non-https host is
+            # still rejected to avoid cleartext bearer tokens in transit.
+            if scheme != "https" and not insecure_loopback:
                 _rich_warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
-                    f"must use https:// (got {scheme or 'no scheme'}).",
+                    f"must use https:// (got {scheme or 'no scheme'}). "
+                    "Plain http is allowed for loopback addresses only.",
                     symbol="warning",
                 )
                 return None

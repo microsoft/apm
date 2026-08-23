@@ -23,9 +23,11 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_info, _rich_success, _rich_warning
 from ..utils.path_security import ensure_path_within
 
@@ -68,6 +70,14 @@ PLUGIN_ECOSYSTEM_PATHS: dict[str, str] = {
     "copilot": ".github/plugin/plugin.json",
 }
 """Output path (relative to project root) for each ecosystem's ``plugin.json``."""
+
+
+@dataclass(frozen=True)
+class PluginManifestWriteResult:
+    """Describe the canonical plugin-manifest write decision."""
+
+    path: Path | None
+    action: Literal["written", "skipped", "dry_run"]
 
 
 # Server-object keys that may carry live credentials. Any key whose lowercased
@@ -389,7 +399,7 @@ def build_plugin_manifest(
 # ---------------------------------------------------------------------------
 
 
-def write_plugin_manifest(
+def write_plugin_manifest_with_outcome(
     project_root: Path,
     manifest: dict,
     ecosystem: str,
@@ -397,8 +407,8 @@ def write_plugin_manifest(
     dry_run: bool = False,
     force: bool = False,
     logger: Any = None,
-) -> Path | None:
-    """Write *manifest* as ``plugin.json`` for *ecosystem* inside *project_root*.
+) -> PluginManifestWriteResult:
+    """Write *manifest* and return its canonical write decision.
 
     The output path is resolved from :data:`PLUGIN_ECOSYSTEM_PATHS`.  Parent
     directories are created automatically.
@@ -406,33 +416,29 @@ def write_plugin_manifest(
     **Overwrite policy.** If a ``plugin.json`` already exists at the target
     path it is preserved unless *force* is set (threaded from ``apm pack
     --force``). Without ``--force`` the function emits a warning and skips the
-    write, returning ``None`` -- this mirrors the collision contract the rest
+    write with a ``"skipped"`` result -- this mirrors the collision contract the rest
     of ``apm pack`` already honours and prevents a compromised ``.mcp.json``
     from silently replacing a hand-audited file. With ``--force`` the existing
     file is overwritten and a warning records the replacement.
 
-    In dry-run mode the function logs what *would* be written and returns
-    ``None`` without touching the filesystem.
+    In dry-run mode the function logs what *would* be written and returns a
+    ``"dry_run"`` result without touching the filesystem.
 
-    Returns the output :class:`~pathlib.Path` on a successful write, or ``None``
-    for an unknown ecosystem, a dry-run, or a skipped overwrite.
+    The result distinguishes a real write, a protected existing file, and a
+    dry-run preview so callers can report the same decision without inferring it
+    from filesystem state.
     """
     rel_path = PLUGIN_ECOSYSTEM_PATHS.get(ecosystem)
     if rel_path is None:
         _warn = f"Unknown plugin ecosystem {ecosystem!r}; skipping plugin.json generation."
         _emit("warning", _warn, logger, "warning")
-        return None
+        return PluginManifestWriteResult(path=None, action="skipped")
 
     output_path = project_root / rel_path
 
     # Containment guard: reject symlink-based escapes (e.g. a symlinked
     # .github/ directory pointing outside the project root).
     ensure_path_within(output_path, project_root)
-
-    if dry_run:
-        _msg = f"Would write plugin manifest to {output_path}"
-        _emit("info", _msg, logger, "info")
-        return None
 
     if output_path.exists():
         if not force:
@@ -441,8 +447,20 @@ def write_plugin_manifest(
                 "Re-run with --force to overwrite it."
             )
             _emit("warning", _skip_warn, logger, "warning")
-            return None
+            return PluginManifestWriteResult(path=None, action="skipped")
 
+    if dry_run:
+        if output_path.exists():
+            _msg = (
+                f"Would overwrite plugin manifest at {output_path} "
+                "with generated manifest from apm.yml (--force)."
+            )
+        else:
+            _msg = f"Would write plugin manifest to {output_path}"
+        _emit("info", _msg, logger, "info")
+        return PluginManifestWriteResult(path=None, action="dry_run")
+
+    if output_path.exists():
         _overwrite_warn = (
             f"Overwriting {output_path} with generated manifest from apm.yml (--force)."
         )
@@ -460,12 +478,29 @@ def write_plugin_manifest(
     # component could have been swapped for a symlink between the first check
     # and directory creation.
     ensure_path_within(output_path, project_root)
-    output_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=False) + "\n",
-        encoding="utf-8",
-    )
+    write_text_lf(output_path, json.dumps(manifest, indent=2, sort_keys=False) + "\n")
 
     _success = f"Generated plugin manifest: {output_path}"
     _emit("success", _success, logger, "check")
 
-    return output_path
+    return PluginManifestWriteResult(path=output_path, action="written")
+
+
+def write_plugin_manifest(
+    project_root: Path,
+    manifest: dict,
+    ecosystem: str,
+    *,
+    dry_run: bool = False,
+    force: bool = False,
+    logger: Any = None,
+) -> Path | None:
+    """Write *manifest* as ``plugin.json`` and return its path when written."""
+    return write_plugin_manifest_with_outcome(
+        project_root,
+        manifest,
+        ecosystem,
+        dry_run=dry_run,
+        force=force,
+        logger=logger,
+    ).path

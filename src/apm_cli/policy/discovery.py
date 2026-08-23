@@ -1,5 +1,4 @@
 """Auto-discover and fetch org-level apm-policy.yml files.
-
 Discovery flow:
 1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
 2. Determine host profile (default or ado) to select candidate repos
@@ -8,20 +7,17 @@ Discovery flow:
 5. Resolve inheritance chain via resolve_policy_chain
 6. Cache the **merged effective policy** with chain metadata
 7. Parse and return ApmPolicy
-
 Candidate repo precedence:
 - .github-private -- private org-wide config (preferred; skipped on ADO)
 - .github  -- GitHub convention (skipped on ADO)
 - .apm     -- cross-platform convention (skipped on ADO)
 - _apm     -- universal fallback (valid on every git host)
-
 Supports:
 - GitHub.com and GitHub Enterprise (*.ghe.com)
 - Azure DevOps (dev.azure.com, *.visualstudio.com)
 - Manual override via --policy <path|url>
 - Cache with TTL (default 1 hour), stale fallback up to MAX_STALE_TTL
 - Atomic cache writes (temp file + os.replace)
-- Garbage-response detection (200 OK with non-YAML body)
 """
 
 from __future__ import annotations
@@ -71,17 +67,24 @@ logger = logging.getLogger(__name__)
 # Candidate repo names in precedence order (first valid policy wins).
 # Host profiles select which candidates are valid for a given git host.
 _DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
-_ADO_POLICY_REPOS: tuple[str, ...] = ("_apm",)
 
-# ADO project name for the policy repo (ADO requires a project container).
-ADO_POLICY_PROJECT = "_apm"
+# Azure DevOps project and repository names cannot begin with ``_``.
+ADO_POLICY_PROJECT = "apm"
+ADO_POLICY_REPOSITORY = "apm-policy"
+_ADO_POLICY_REPOS: tuple[str, ...] = (ADO_POLICY_REPOSITORY,)
+_LEGACY_ADO_POLICY_PROJECT = "_apm"
+_LEGACY_ADO_POLICY_REPOSITORY = "_apm"
+_LEGACY_ADO_POLICY_WARNING = (
+    "Azure DevOps policy was discovered at legacy _apm/_apm. Move it to apm/apm-policy; "
+    "the legacy coordinate is a temporary compatibility fallback."
+)
 
 
 def _policy_repo_candidates(host: str) -> tuple[str, ...]:
     """Return candidate policy repo names for *host* in precedence order.
 
-    ADO hosts cannot have repo names starting/ending with ``.``, so only
-    ``_apm`` is valid.  All other hosts try the full cascade.
+    ADO hosts cannot have repo names starting with ``.`` or ``_``, so only
+    ``apm-policy`` is valid. All other hosts try the full cascade.
     """
     if is_azure_devops_hostname(host):
         return _ADO_POLICY_REPOS
@@ -233,6 +236,7 @@ class PolicyFetchResult:
     fetch_error: str | None = None  # Network/parse error on refresh attempt
     outcome: str = ""  # See docstring for valid values
     warnings: list[str] = field(default_factory=list)
+    not_found: bool = field(default=False, repr=False)
 
     # -- Hash-pin fields (#827 supply-chain hardening) --
     # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
@@ -493,7 +497,7 @@ def _resolve_ado_parent_ref(
         current_org = ""
 
     if parent_ref == "org":
-        resolved = (current_org, ADO_POLICY_PROJECT, "_apm", leaf_host)
+        resolved = (current_org, ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY, leaf_host)
     else:
         parts = parent_ref.strip("/").split("/")
         explicit_host = _extract_extends_host(parent_ref)
@@ -554,6 +558,14 @@ def _fetch_chain_parent(
                 outcome="cache_miss_fetch_fail",
             )
         org, project, repo, host = resolved
+        if parent_ref == "org":
+            return _fetch_ado_org_policy(
+                org=org,
+                host=host,
+                project_root=project_root,
+                no_cache=no_cache,
+                cache_only=cache_only,
+            )
         return _fetch_from_ado_repo(
             org=org,
             project=project,
@@ -877,10 +889,8 @@ def _auto_discover(
     for candidate_repo in candidates:
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
         if is_ado:
-            result = _fetch_from_ado_repo(
+            result = _fetch_ado_org_policy(
                 org=org,
-                project=ADO_POLICY_PROJECT,
-                repo=candidate_repo,
                 host=host,
                 port=port,
                 project_root=project_root,
@@ -1203,8 +1213,8 @@ def _fetch_from_repo(
 
     if error:
         # 404 = no policy, not an error
-        if "404" in error:
-            return PolicyFetchResult(source=source_label, outcome="absent")
+        if error.startswith("404:"):
+            return PolicyFetchResult(source=source_label, outcome="absent", not_found=True)
         # Fetch failed -- try stale cache fallback
         return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
 
@@ -1378,8 +1388,8 @@ def _fetch_from_ado_repo(
     )
 
     if error:
-        if "404" in error:
-            return PolicyFetchResult(source=source_label, outcome="absent")
+        if error.startswith("404:"):
+            return PolicyFetchResult(source=source_label, outcome="absent", not_found=True)
         return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
 
     if content is None:
@@ -1423,6 +1433,20 @@ def _fetch_from_ado_repo(
         expected_hash=expected_hash,
         warnings=warnings,
     )
+
+
+def _fetch_ado_org_policy(**fetch_kwargs) -> PolicyFetchResult:
+    primary = _fetch_from_ado_repo(
+        project=ADO_POLICY_PROJECT, repo=ADO_POLICY_REPOSITORY, **fetch_kwargs
+    )
+    if not primary.not_found:
+        return primary
+    legacy = _fetch_from_ado_repo(
+        project=_LEGACY_ADO_POLICY_PROJECT, repo=_LEGACY_ADO_POLICY_REPOSITORY, **fetch_kwargs
+    )
+    if legacy.found:
+        legacy.warnings.append(_LEGACY_ADO_POLICY_WARNING)
+    return legacy
 
 
 def _fetch_ado_contents(

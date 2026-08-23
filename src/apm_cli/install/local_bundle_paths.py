@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import cache
 from typing import TYPE_CHECKING
 
+from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..utils.path_security import PathTraversalError, validate_path_segments
 
 if TYPE_CHECKING:
@@ -79,6 +80,9 @@ def bundle_deploy_relative_path(
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root."""
     validate_path_segments(rel_path, context="bundle deploy path")
+    namespace_prefix = f"{COM_MICROSOFT_APM_NAMESPACE}/"
+    if rel_path.startswith(namespace_prefix):
+        rel_path = rel_path.removeprefix(namespace_prefix)
     parts = rel_path.split("/")
     path_prefixes = {"/".join(parts[:index]) + "/" for index in range(1, len(parts))}
     matched_prefixes = path_prefixes & known_deploy_prefixes

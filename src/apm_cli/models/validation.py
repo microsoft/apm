@@ -8,9 +8,12 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..agent_plugins.errors import AgentPluginError
+from ..agent_plugins.loader import detect_agent_plugin
 from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 
 if TYPE_CHECKING:
+    from ..agent_plugins import AgentPlugin, AgentPluginDetection
     from .apm_package import APMPackage
 
 
@@ -25,6 +28,7 @@ class PackageType(Enum):
     CLAUDE_SKILL = "claude_skill"  # Has SKILL.md, no apm.yml
     HOOK_PACKAGE = "hook_package"  # Has hooks/hooks.json, no apm.yml or SKILL.md
     HYBRID = "hybrid"  # Has both apm.yml and SKILL.md (root)
+    AGENT_PLUGIN = "agent_plugin"  # Has root plugin.json with Agent Plugins schema
     MARKETPLACE_PLUGIN = "marketplace_plugin"  # Has plugin.json or .claude-plugin/
     SKILL_BUNDLE = "skill_bundle"  # Has skills/<name>/SKILL.md (nested), apm.yml optional
     INVALID = "invalid"  # None of the above
@@ -98,14 +102,18 @@ class ValidationResult:
     errors: list[str]
     warnings: list[str]
     package: APMPackage | None = None
+    agent_plugin: AgentPlugin | None = None
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
+    legacy_metadata_only: bool = False
 
     def __init__(self):
         self.is_valid = True
         self.errors = []
         self.warnings = []
         self.package = None
+        self.agent_plugin = None
         self.package_type = None
+        self.legacy_metadata_only = False
 
     def add_error(self, error: str) -> None:
         """Add a validation error."""
@@ -257,19 +265,20 @@ def detect_package_type(
 
     Cascade order (first match wins -- implemented in NormalizationPlanner):
 
-    1. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
+    1. ``AGENT_PLUGIN`` -- root ``plugin.json`` with the Agent Plugins schema.
+    2. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
        OR ``.claude-plugin/`` directory.
-    2. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` present.
-    3. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
-    4. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
+    3. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` present.
+    4. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
+    5. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
        ``apm.yml`` optional; no ``.apm/`` required.
-    5. ``APM_PACKAGE`` -- ``apm.yml`` present with ``.apm/`` or declared deps.
-    6. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
-    7. ``INVALID`` -- nothing recognisable.
+    6. ``APM_PACKAGE`` -- ``apm.yml`` present with ``.apm/`` or declared deps.
+    7. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
+    8. ``INVALID`` -- nothing recognisable.
 
     Returns:
         A ``(package_type, plugin_json_path)`` tuple.  *plugin_json_path*
-        is non-None only when ``MARKETPLACE_PLUGIN`` was matched via an
+        is non-None only when ``AGENT_PLUGIN`` or ``MARKETPLACE_PLUGIN`` was matched via an
         actual ``plugin.json`` file (not via directory evidence alone).
     """
     from .format_detection import NormalizationPlanner, PackageFormatRegistry
@@ -319,7 +328,12 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
     )
 
 
-def validate_apm_package(package_path: Path) -> ValidationResult:
+def validate_apm_package(
+    package_path: Path,
+    *,
+    source_path: Path | None = None,
+    agent_plugin_detection: AgentPluginDetection | None = None,
+) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
 
     Supports six package types:
@@ -348,11 +362,29 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
         result.add_error(f"Package path is not a directory: {package_path}")
         return result
 
-    # Detect package type
-    pkg_type, plugin_json_path = detect_package_type(package_path)
+    package_root = package_path.resolve()
+    if agent_plugin_detection is not None and (
+        agent_plugin_detection.manifest_path.parent.resolve() != package_root
+    ):
+        result.add_error("Agent Plugin detection root does not match package path")
+        return result
+
+    native_detection = agent_plugin_detection
+    if native_detection is None:
+        native_detection = detect_agent_plugin(package_path)
+    if native_detection is not None:
+        pkg_type = (
+            PackageType.AGENT_PLUGIN if native_detection.error is None else PackageType.INVALID
+        )
+        plugin_json_path = native_detection.manifest_path
+    else:
+        pkg_type, plugin_json_path = detect_package_type(package_path)
     result.package_type = pkg_type
 
     if pkg_type == PackageType.INVALID:
+        if native_detection is not None and native_detection.error is not None:
+            result.add_error(f"Failed to process Agent Plugin: {native_detection.error}")
+            return result
         # Two sub-cases of INVALID:
         # 1. apm.yml present but no .apm/ directory (or .apm is a file)
         # 2. Nothing recognizable at all
@@ -362,6 +394,7 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
             if apm_path.exists() and not apm_path.is_dir():
                 result.add_error(".apm must be a directory")
             else:
+                result.legacy_metadata_only = not apm_path.exists()
                 result.add_error(
                     f"Not a valid APM package: {package_path.name} has apm.yml but "
                     "is missing the required .apm/ directory. "
@@ -383,6 +416,16 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     if result.package_type == PackageType.HOOK_PACKAGE:
         return _validate_hook_package(package_path, result)
 
+    # Handle Agent Plugins through their native immutable contract owner.
+    if result.package_type == PackageType.AGENT_PLUGIN:
+        return _validate_agent_plugin(
+            package_path,
+            plugin_json_path,
+            result,
+            source_path=source_path,
+            detection=native_detection,
+        )
+
     # Handle Claude Skills (no apm.yml) - auto-generate minimal apm.yml
     skill_md_path = package_path / SKILL_MD_FILENAME
     if result.package_type == PackageType.CLAUDE_SKILL:
@@ -394,7 +437,7 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
 
     # Handle Skill Bundles (nested skills/<name>/SKILL.md)
     if result.package_type == PackageType.SKILL_BUNDLE:
-        return _validate_skill_bundle(package_path, result)
+        return _validate_skill_bundle(package_path, result, source_path=source_path)
 
     # Standard APM package or HYBRID validation (has apm.yml)
     apm_yml_path = package_path / APM_YML_FILENAME
@@ -403,9 +446,55 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     # (back-compat for packages that ship both .apm/ primitives AND SKILL.md).
     # Otherwise validate as a skill bundle with apm.yml metadata.
     if result.package_type == PackageType.HYBRID:
-        return _validate_hybrid_package(package_path, apm_yml_path, result)
+        return _validate_hybrid_package(
+            package_path,
+            apm_yml_path,
+            result,
+            source_path=source_path,
+        )
 
-    return _validate_apm_package_with_yml(package_path, apm_yml_path, result)
+    return _validate_apm_package_with_yml(
+        package_path,
+        apm_yml_path,
+        result,
+        source_path=source_path,
+    )
+
+
+def _validate_agent_plugin(
+    package_path: Path,
+    plugin_json_path: Path | None,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
+    detection: AgentPluginDetection | None = None,
+) -> ValidationResult:
+    """Validate an Agent Plugin without entering Claude normalization."""
+    if plugin_json_path is None:
+        result.add_error("Agent Plugin package is missing plugin.json")
+        return result
+    if detection is None or detection.plugin is None:
+        result.add_error("Agent Plugin detection did not produce a canonical plugin")
+        return result
+
+    try:
+        plugin = detection.plugin
+        from ..agent_plugins.projection import project_agent_plugin_package
+
+        package = project_agent_plugin_package(plugin)
+        if source_path is not None:
+            package.source_path = source_path.resolve()
+    except AgentPluginError as exc:
+        result.add_error(f"Failed to process Agent Plugin: {exc}")
+        return result
+
+    result.agent_plugin = plugin
+    result.package = package
+    for diagnostic in plugin.diagnostics:
+        message = f"{diagnostic.code}: {diagnostic.message}"
+        result.add_warning(message)
+    result.package_type = PackageType.AGENT_PLUGIN
+    return result
 
 
 def _validate_hook_package(package_path: Path, result: ValidationResult) -> ValidationResult:
@@ -478,7 +567,12 @@ def _validate_claude_skill(
     return result
 
 
-def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> ValidationResult:
+def _validate_skill_bundle(
+    package_path: Path,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
+) -> ValidationResult:
     """Validate a SKILL_BUNDLE package (nested skills/<name>/SKILL.md).
 
     For each ``skills/<name>/`` with a SKILL.md:
@@ -577,7 +671,7 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
     # Build APMPackage: use apm.yml if present, otherwise synthesize
     if apm_yml_path.exists():
         try:
-            package = APMPackage.from_apm_yml(apm_yml_path)
+            package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
         except (ValueError, FileNotFoundError) as e:
             result.add_error(f"Invalid apm.yml: {e}")
             return result
@@ -596,7 +690,11 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
 
 
 def _validate_hybrid_package(
-    package_path: Path, apm_yml_path: Path, result: ValidationResult
+    package_path: Path,
+    apm_yml_path: Path,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
 ) -> ValidationResult:
     """Validate a HYBRID package (apm.yml + SKILL.md).
 
@@ -621,14 +719,19 @@ def _validate_hybrid_package(
     # Back-compat: if .apm/ exists, the author intends independent primitives.
     apm_dir = package_path / APM_DIR
     if apm_dir.exists() and apm_dir.is_dir():
-        return _validate_apm_package_with_yml(package_path, apm_yml_path, result)
+        return _validate_apm_package_with_yml(
+            package_path,
+            apm_yml_path,
+            result,
+            source_path=source_path,
+        )
 
     # --- Skill-bundle path (no .apm/) ---
     from .apm_package import APMPackage
 
     # Parse apm.yml -- authoritative for APM-owned fields.
     try:
-        package = APMPackage.from_apm_yml(apm_yml_path)
+        package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
     except (ValueError, FileNotFoundError) as e:
         result.add_error(f"Invalid apm.yml: {e}")
         return result
@@ -707,7 +810,11 @@ def _validate_marketplace_plugin(
 
 
 def _validate_apm_package_with_yml(
-    package_path: Path, apm_yml_path: Path, result: ValidationResult
+    package_path: Path,
+    apm_yml_path: Path,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
 ) -> ValidationResult:
     """Validate a standard APM package with apm.yml.
 
@@ -723,7 +830,7 @@ def _validate_apm_package_with_yml(
 
     # Try to parse apm.yml
     try:
-        package = APMPackage.from_apm_yml(apm_yml_path)
+        package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
         result.package = package
     except (ValueError, FileNotFoundError) as e:
         result.add_error(f"Invalid apm.yml: {e}")

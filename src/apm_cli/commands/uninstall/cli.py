@@ -16,6 +16,8 @@ from .engine import (
     _dependency_public_label,
     _dry_run_uninstall,
     _parse_dependency_entry,
+    _preflight_uninstall_survivors,
+    _project_transitive_orphans,
     _remove_packages_from_disk,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
@@ -155,6 +157,26 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         selected_package_labels = tuple(
             _dependency_public_label(package) for package in packages_to_remove
         )
+        surviving_deps = list(current_deps)
+        removed_keys = builtins.set()
+        for package in packages_to_remove:
+            surviving_deps.remove(package)
+            removed_keys.add(_parse_dependency_entry(package).get_unique_key())
+        projected_orphans, _ = _project_transitive_orphans(
+            lockfile,
+            packages_to_remove,
+            modules_dir,
+            apm_yml_path,
+            logger,
+            warn_on_incomplete=False,
+        )
+        _preflight_uninstall_survivors(
+            surviving_deps,
+            modules_dir,
+            lockfile=lockfile,
+            excluded_keys=removed_keys | builtins.set(projected_orphans),
+            source_root=manifest_path.parent,
+        )
 
         # Fire scripts only after every requested identifier has selected one
         # dependency, so failed validation is an atomic no-op.
@@ -197,8 +219,25 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             _dependency_public_label(package) for package in packages_to_remove
         )
         surviving_deps = list(current_deps)
+        removed_keys = builtins.set()
         for package in packages_to_remove:
             surviving_deps.remove(package)
+            removed_keys.add(_parse_dependency_entry(package).get_unique_key())
+        projected_orphans, _ = _project_transitive_orphans(
+            lockfile,
+            packages_to_remove,
+            modules_dir,
+            apm_yml_path,
+            logger,
+            warn_on_incomplete=False,
+        )
+        _preflight_uninstall_survivors(
+            surviving_deps,
+            modules_dir,
+            lockfile=lockfile,
+            excluded_keys=removed_keys | builtins.set(projected_orphans),
+            source_root=manifest_path.parent,
+        )
         if not dry_run:
             staged_local_refreshes = _stage_shared_local_survivors(
                 packages_to_remove,
@@ -219,7 +258,44 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
             return
 
-        # Step 3: Remove from apm.yml
+        # Step 3: Remove target-scoped files while their lockfile ownership is
+        # still recoverable. The post-removal manifest can omit a removed
+        # package's target, so its target must not be reconstructed from it.
+        if lockfile and removed_keys:
+            from ...install.manifest_reconcile import reconcile_target_deployed_files
+            from ...integration.targets import resolve_targets
+            from ...utils.diagnostics import DiagnosticCollector
+
+            cleanup_target_names = list(APMPackage.from_apm_yml(manifest_path).canonical_targets)
+            cleanup_targets = resolve_targets(
+                deploy_root,
+                user_scope=scope is InstallScope.USER,
+                explicit_target=cleanup_target_names or None,
+            )
+            cleanup_keys = removed_keys | builtins.set(projected_orphans)
+            retained_cleanup_paths = builtins.set()
+            reconcile_target_deployed_files(
+                project_root=deploy_root,
+                lockfile=lockfile,
+                active_targets=cleanup_targets,
+                declared_targets=cleanup_targets,
+                diagnostics=DiagnosticCollector(verbose=verbose),
+                dependency_keys=cleanup_keys,
+                remove_selected_ownership=True,
+                retained_selected_paths=retained_cleanup_paths,
+                user_scope=scope is InstallScope.USER,
+                logger=logger,
+            )
+            if retained_cleanup_paths:
+                logger.error(
+                    "Uninstall could not remove tracked target files; package state was preserved."
+                )
+                for path in sorted(retained_cleanup_paths):
+                    logger.error(f"  - {path}")
+                logger.error("Resolve or remove the listed files, then retry uninstall.")
+                sys.exit(1)
+
+        # Step 4: Remove from apm.yml
         for package in packages_to_remove:
             package_label = _dependency_public_label(package)
             if package in dev_deps:
@@ -244,12 +320,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             logger.error(f"Failed to write {apm_yml_path}: {e}")
             sys.exit(1)
 
-        # Step 4: Capture pre-uninstall MCP state (lockfile already read above)
+        # Step 5: Capture pre-uninstall MCP state (lockfile already read above)
         _pre_uninstall_mcp_servers = (
             builtins.set(lockfile.mcp_servers) if lockfile else builtins.set()
         )
 
-        # Step 5: Remove packages from disk
+        # Step 6: Remove packages from disk
         refreshed_survivor_keys = builtins.set()
         removed_from_modules = _remove_packages_from_disk(
             packages_to_remove,
@@ -259,22 +335,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             refreshed_survivor_keys=refreshed_survivor_keys,
         )
 
-        # Step 6: Cleanup transitive orphans
+        # Step 7: Cleanup transitive orphans
         orphan_removed, actual_orphans = _cleanup_transitive_orphans(
             lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
         )
         removed_from_modules += orphan_removed
 
-        # Step 7: Collect deployed files for removed packages (before lockfile mutation)
+        # Step 8: Collect deployed files for removed packages (before lockfile mutation)
         from ...integration.base_integrator import BaseIntegrator
 
-        removed_keys = builtins.set()
-        for pkg in packages_to_remove:
-            try:
-                ref = _parse_dependency_entry(pkg)
-                removed_keys.add(ref.get_unique_key())
-            except (ValueError, TypeError, AttributeError, KeyError):
-                removed_keys.add(pkg)
         removed_keys.update(actual_orphans)
         all_deployed_files = builtins.set()
         if lockfile:
@@ -285,7 +354,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
         )
 
-        # Step 8: Mutate dependency state in memory. Persistence happens once
+        # Step 9: Mutate dependency state in memory. Persistence happens once
         # after survivor ownership, hashes, ledger, and MCP state agree.
         lockfile_updated = False
         if lockfile:
@@ -303,7 +372,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                     del lockfile.dependencies[orphan_key]
                     lockfile_updated = True
 
-        # Step 9: Sync integrations
+        # Step 10: Sync integrations
         cleaned = {
             "prompts": 0,
             "agents": 0,
@@ -365,7 +434,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger.progress(f"Cleaned up {count} integrated {label}", symbol="check")
                 logger.verbose_detail(f"    Removed {count} deployed {label} file(s)")
 
-        # Step 10: MCP cleanup
+        # Step 11: MCP cleanup
         from ...adapters.client.intellij import IntelliJConfigError
         from ...utils.path_security import PathTraversalError
 

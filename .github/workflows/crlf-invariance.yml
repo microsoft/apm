@@ -6,6 +6,11 @@ name: CRLF Invariance (apm#1952)
 # `apm install` record and `apm audit` verify call), so a Windows checkout
 # (CRLF on disk) and a POSIX checkout (LF on disk) MUST yield the identical
 # hash. The gather job fails if the three OS hashes are not byte-identical.
+#
+# Also probes apm#2619: the marketplace-plugin synthesize+stamp chain writes a
+# synthetic apm.yml INSIDE the tree compute_package_hash hashes raw, so those
+# writers must emit LF bytes on every OS or the lockfile content_hash (and
+# `apm install --frozen`) breaks across platforms.
 
 on:
   pull_request:
@@ -13,8 +18,28 @@ on:
     paths:
       - 'src/apm_cli/utils/content_hash.py'
       - 'src/apm_cli/utils/atomic_io.py'
+      - 'src/apm_cli/utils/yaml_io.py'
+      - 'src/apm_cli/deps/plugin_parser.py'
+      - 'src/apm_cli/deps/package_validator.py'
+      - 'src/apm_cli/deps/github_downloader.py'
+      - 'src/apm_cli/models/validation.py'
       - 'scripts/crlf_invariance_probe.py'
       - '.github/workflows/crlf-invariance.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/apm_cli/utils/content_hash.py'
+      - 'src/apm_cli/utils/atomic_io.py'
+      - 'src/apm_cli/utils/yaml_io.py'
+      - 'src/apm_cli/deps/plugin_parser.py'
+      - 'src/apm_cli/deps/package_validator.py'
+      - 'src/apm_cli/deps/github_downloader.py'
+      - 'src/apm_cli/models/validation.py'
+      - 'scripts/crlf_invariance_probe.py'
+      - '.github/workflows/crlf-invariance.yml'
+  # Merge queues do not support path filtering; run unconditionally there so
+  # a regression cannot slip through the queue unprobed.
+  merge_group: {}
   workflow_dispatch: {}
 
 permissions:
@@ -67,7 +92,7 @@ jobs:
           done
           UNIQUE=$(cat hashes/*/hash.txt | sort -u | wc -l | tr -d ' ')
           if [ "$UNIQUE" != "1" ]; then
-            echo "::error::content hash diverges across platforms ($UNIQUE distinct values) -- apm#1952 regression"
+            echo "::error::content hash diverges across platforms ($UNIQUE distinct values) -- apm#1952 (file hash) or apm#2619 (synthetic package hash) regression; compare the two |-separated envelope halves above"
             exit 1
           fi
           echo "[+] All platform hashes are byte-identical -- line-ending invariant."

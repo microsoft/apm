@@ -506,6 +506,71 @@ class TestWritePluginManifest:
         assert result is None
         assert not expected.exists()
 
+    def test_dry_run_existing_file_reports_non_force_skip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        existing = tmp_path / ".claude-plugin" / "plugin.json"
+        _write(existing, json.dumps({"name": "old-content"}))
+
+        warnings_emitted: list[str] = []
+        info_emitted: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_warning",
+            lambda msg, **kw: warnings_emitted.append(msg),
+        )
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_info",
+            lambda msg, **kw: info_emitted.append(msg),
+        )
+
+        result = write_plugin_manifest(
+            tmp_path,
+            {"name": "new-content"},
+            "claude",
+            dry_run=True,
+        )
+
+        assert result is None
+        assert json.loads(existing.read_text(encoding="utf-8"))["name"] == "old-content"
+        assert len(warnings_emitted) == 1
+        assert "skipping plugin.json generation" in warnings_emitted[0]
+        assert not any("Would write plugin manifest" in msg for msg in info_emitted)
+
+    def test_dry_run_existing_file_with_force_previews_overwrite(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        existing = tmp_path / ".claude-plugin" / "plugin.json"
+        _write(existing, json.dumps({"name": "old-content"}))
+
+        warnings_emitted: list[str] = []
+        info_emitted: list[str] = []
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_warning",
+            lambda msg, **kw: warnings_emitted.append(msg),
+        )
+        monkeypatch.setattr(
+            "apm_cli.core.plugin_manifest._rich_info",
+            lambda msg, **kw: info_emitted.append(msg),
+        )
+
+        result = write_plugin_manifest(
+            tmp_path,
+            {"name": "new-content"},
+            "claude",
+            dry_run=True,
+            force=True,
+        )
+
+        assert result is None
+        assert json.loads(existing.read_text(encoding="utf-8"))["name"] == "old-content"
+        assert warnings_emitted == []
+        assert info_emitted == [
+            (
+                f"Would overwrite plugin manifest at {existing} "
+                "with generated manifest from apm.yml (--force)."
+            )
+        ]
+
     def test_unknown_ecosystem_returns_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
