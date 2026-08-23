@@ -1684,7 +1684,7 @@ def _frozen_install_tip(error: FrozenInstallError) -> str:
         )
     if has_mcp_drift:
         return "Tip: run 'apm install' without --frozen to create or repair MCP lock state."
-    return "Tip: run 'apm outdated' to see what changed, then 'apm update'."
+    return error.tip  # the no-rewrite check carries its own remedy
 
 
 def _install_apm_packages(ctx, outcome):

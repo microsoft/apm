@@ -22,6 +22,7 @@ the blast radius of a deeper DI rewrite.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.request import InstallRequest
@@ -56,8 +57,9 @@ class InstallService:
                 to import (e.g. missing optional extras).  Adapters are
                 responsible for presenting this to the user.
             FrozenInstallError: when ``request.frozen`` is True and the
-                lockfile is missing or structurally out of sync with
-                ``request.apm_package``.  Raised before the pipeline
+                lockfile is missing, structurally out of sync with
+                ``request.apm_package``, or not what the install
+                produces.  The first two are raised before the pipeline
                 runs so no resolve / download work is wasted.
         """
         # Enforce --frozen BEFORE invoking the pipeline.  The check is
@@ -67,6 +69,44 @@ class InstallService:
         if request.frozen:
             self.enforce_frozen(request)
 
+        runner = self._build_script_runner(request)
+        event = self._build_event("pre-install", request)
+        runner.fire("pre-install", event)
+
+        if request.frozen:
+            # req-lk-006: the lockfile is never written in frozen mode.
+            # Suppress at the chokepoint, then decide from what was
+            # withheld whether this install can report success.  The
+            # pipeline still deploys, as `npm ci` does.
+            from apm_cli.deps.lockfile import suppress_lockfile_writes
+
+            with suppress_lockfile_writes() as withheld:
+                result = self._run_pipeline(request)
+        else:
+            withheld = None
+            result = self._run_pipeline(request)
+
+        install_worked = result.disposition in {
+            InstallDisposition.SUCCESS,
+            InstallDisposition.PARTIAL_SUCCESS,
+        }
+
+        # Only judge the withheld lockfile against an install that got far
+        # enough to be meaningful.  A failed pipeline has its own
+        # diagnostics and an unreliable ledger, so raising here would
+        # replace the real cause with a confusing lockfile complaint.
+        if withheld is not None and install_worked:
+            self._enforce_frozen_no_rewrite(request, withheld)
+
+        if install_worked:
+            post_event = self._build_event("post-install", request)
+            runner.fire("post-install", post_event)
+
+        return result
+
+    @staticmethod
+    def _run_pipeline(request: InstallRequest) -> InstallResult:
+        """Invoke the install pipeline for *request*."""
         # Local import keeps service module import-cheap and matches the
         # existing pipeline's lazy-import discipline.
         try:
@@ -74,11 +114,7 @@ class InstallService:
         except ImportError as e:  # pragma: no cover -- defensive
             raise InstallNotAvailableError(f"APM dependency system not available: {e}") from e
 
-        runner = self._build_script_runner(request)
-        event = self._build_event("pre-install", request)
-        runner.fire("pre-install", event)
-
-        result = run_install_pipeline(
+        return run_install_pipeline(
             request.apm_package,
             update_refs=request.update_refs,
             verbose=request.verbose,
@@ -106,15 +142,6 @@ class InstallService:
             trust_bin=request.trust_bin,
             transaction=request.transaction,
         )
-
-        if result.disposition in {
-            InstallDisposition.SUCCESS,
-            InstallDisposition.PARTIAL_SUCCESS,
-        }:
-            post_event = self._build_event("post-install", request)
-            runner.fire("post-install", post_event)
-
-        return result
 
     # -- Lifecycle script helpers ------------------------------------------
 
@@ -202,20 +229,11 @@ class InstallService:
         loads it, and checks both package dependencies and the canonical
         current MCP config view. Any miss raises before install mutation.
         """
-        from pathlib import Path
-
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.plan import lockfile_satisfies_manifest
 
-        manifest_path = getattr(request.apm_package, "package_path", None)
-        if manifest_path is None:
-            project_dir = Path(".")
-        elif Path(manifest_path).is_file():
-            project_dir = Path(manifest_path).parent
-        else:
-            project_dir = Path(manifest_path)
-        lockfile_path = project_dir / "apm.lock.yaml"
+        lockfile_path = _frozen_lockfile_path(request)
 
         if not lockfile_path.exists():
             raise FrozenInstallError(
@@ -276,3 +294,107 @@ class InstallService:
                 "--frozen: apm.lock.yaml is out of sync with apm.yml.",
                 reasons=reasons,
             )
+
+    @staticmethod
+    def _enforce_frozen_no_rewrite(request: InstallRequest, withheld: list[str]) -> None:
+        """Raise when a withheld write claims paths the committed lockfile omits.
+
+        Compares each lockfile the frozen install *would* have written
+        against the committed ``apm.lock.yaml`` on disk.  It reads that one
+        file and does not otherwise inspect the filesystem: the deployed set
+        is taken from the withheld lockfiles, which is what install recorded
+        for the files it just deployed.
+
+        Withholding the write satisfies req-lk-006 on its own, but silently:
+        a committed lockfile that under-records the deployed set would stay
+        green while install deployed files it does not claim, and a file no
+        lockfile row claims carries no recorded hash, which puts it outside
+        ``content-integrity``'s hash comparison *and* its hidden-Unicode
+        scan for as long as it stays omitted (#2379).  CI is the one place
+        positioned to catch that, so frozen mode reports it.
+
+        Deliberately one-directional, matching the tolerance
+        :class:`FrozenInstallError` already documents.  Only paths the
+        install would *add* to the ledger fail; claims it would drop do
+        not, because a legitimately narrower install (``--target`` filter,
+        ``--only``, a removed dependency) produces exactly that and
+        ``no-orphaned-packages`` / ``deployed-files-present`` already own
+        the opposite direction.
+
+        Equivalence is judged by ``is_semantically_equivalent``, which
+        ignores ``generated_at`` and ``apm_version``: per Section 5.5 those
+        two fields "MUST NOT affect content-equivalence comparison", so a
+        newer CLI reading an older lockfile is not by itself a rewrite.
+        """
+        if not withheld:
+            return
+
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.errors import FrozenInstallError
+
+        # Re-read rather than reuse the copy `enforce_frozen` loaded: this
+        # judges what is on disk now.  `--frozen` is a CI primitive with a
+        # single writer, so nothing else is expected to touch the file
+        # between the two reads; drift.py's own membership checks make the
+        # same assumption.
+        committed = LockFile.read(_frozen_lockfile_path(request))
+        if committed is None:  # pragma: no cover -- enforce_frozen ran first
+            return
+        # DeploymentLedgerCodec owns the deployed-files vocabulary (see
+        # `scripts/lint-architecture-boundaries.sh`); ask it directly rather
+        # than borrowing drift.py's private wrapper around the same call.
+        committed_paths = set(DeploymentLedgerCodec.legacy_deployed_file_claims(committed))
+
+        unclaimed: set[str] = set()
+        for payload in withheld:
+            candidate = LockFile.from_yaml(payload)
+            if committed.is_semantically_equivalent(candidate):
+                continue
+            claimed = set(DeploymentLedgerCodec.legacy_deployed_file_claims(candidate))
+            unclaimed |= claimed - committed_paths
+        if not unclaimed:
+            return
+
+        raise FrozenInstallError(
+            "--frozen: apm.lock.yaml does not record everything this install deploys.",
+            reasons=[
+                f"  - {path} is deployed by this install but not recorded in apm.lock.yaml"
+                for path in _outermost(unclaimed)
+            ],
+            tip=(
+                "Tip: the files were still deployed; only the lockfile write was "
+                "withheld. Run 'apm install' without --frozen, then commit apm.lock.yaml."
+            ),
+        )
+
+
+def _outermost(paths: set[str]) -> list[str]:
+    """Sort *paths*, dropping any already covered by a listed ancestor.
+
+    ``deployed_files`` records a primitive's directory as well as each file
+    beneath it, so an unrecorded skill otherwise reports twice.  Sorted
+    order puts an ancestor before its descendants, so a single pass over
+    the accumulated output is enough.
+
+    The prefix scan is O(n^2) in the number of unclaimed paths.  It runs
+    only on the error path of a failing frozen install, where *n* is what
+    one install left unrecorded and the process is about to exit.
+    """
+    outermost: list[str] = []
+    for path in sorted(paths):
+        if not any(path.startswith(f"{parent}/") for parent in outermost):
+            outermost.append(path)
+    return outermost
+
+
+def _frozen_lockfile_path(request: InstallRequest) -> Path:
+    """Locate ``apm.lock.yaml`` beside the request's manifest."""
+    manifest_path = getattr(request.apm_package, "package_path", None)
+    if manifest_path is None:
+        project_dir = Path(".")
+    elif Path(manifest_path).is_file():
+        project_dir = Path(manifest_path).parent
+    else:
+        project_dir = Path(manifest_path)
+    return project_dir / "apm.lock.yaml"

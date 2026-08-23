@@ -6,6 +6,9 @@ Provides deterministic, reproducible installs by capturing exact resolved versio
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +31,41 @@ _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
 SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
+
+# req-lk-006 requires a frozen-install mode "in which the lockfile is never
+# written or rewritten".  An install reaches ``LockFile.write`` from eight
+# call sites (dependency lockfile build, local bundles, target-contraction
+# reconciliation, local-content persist, MCP and LSP integration, ...), so
+# the suppression lives at the one chokepoint they all funnel through
+# instead of as a flag threaded to each -- a new write site then inherits
+# the guarantee rather than needing to remember it.
+#
+# Suppressed writes are *recorded*, not merely dropped: the caller compares
+# them against the committed lockfile to decide whether the frozen install
+# can honestly report success (see ``InstallService``).
+#
+# A ContextVar rather than a module global so the mode cannot leak across
+# concurrent installs in one process (tests, programmatic callers).
+_suppressed_writes: ContextVar[list[str] | None] = ContextVar(
+    "apm_suppressed_lockfile_writes", default=None
+)
+
+
+@contextmanager
+def suppress_lockfile_writes() -> Iterator[list[str]]:
+    """Record and discard every :meth:`LockFile.write` in this context.
+
+    Yields the list of serialised lockfiles that *would* have been written,
+    in call order.  Serialised rather than held by reference so that later
+    mutation of the same in-memory :class:`LockFile` cannot rewrite
+    history: each entry is exactly the content that ``write`` withheld.
+    """
+    attempts: list[str] = []
+    token = _suppressed_writes.set(attempts)
+    try:
+        yield attempts
+    finally:
+        _suppressed_writes.reset(token)
 
 
 def installed_apm_version() -> str:
@@ -911,7 +949,16 @@ class LockFile:
         return lock
 
     def write(self, path: Path) -> None:
-        """Write lock file to disk."""
+        """Write lock file to disk, unless writes are suppressed.
+
+        Inside :func:`suppress_lockfile_writes` (``apm install --frozen``,
+        req-lk-006) the serialised content is recorded for the caller and
+        the file on disk is left byte-for-byte untouched.
+        """
+        suppressed = _suppressed_writes.get()
+        if suppressed is not None:
+            suppressed.append(self.to_yaml())
+            return
         from ..utils.atomic_io import atomic_write_text
 
         atomic_write_text(path, self.to_yaml())
