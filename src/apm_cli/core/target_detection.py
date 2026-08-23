@@ -715,16 +715,12 @@ def parse_target_field(
     if len(raw_parts) == 1:
         return raw_parts[0]
 
-    # Multi-token: resolve aliases + dedupe, preserving input order.
+    # Multi-token: preserve the distinct Copilot and VS Code MCP destinations
+    # while resolving every other alias to its canonical profile.
     seen: set[str] = set()
     result: list[str] = []
     for p in raw_parts:
-        capability = get_target_capability(p)
-        canonical = (
-            capability.compile_family
-            if capability.compile_family in capability.aliases
-            else normalize_target_name(p)
-        )
+        canonical = p if p in {"copilot", "vscode"} else normalize_target_name(p)
         if canonical not in seen:
             seen.add(canonical)
             result.append(canonical)

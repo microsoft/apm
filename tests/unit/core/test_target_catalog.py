@@ -360,6 +360,7 @@ def test_apm_yml_canonical_targets_project_catalog_profiles() -> None:
             for capability in TARGET_CAPABILITIES.values()
             if capability.experimental_flag is None and not capability.mcp_only
         )
+        | {"vscode"}
         == CANONICAL_TARGETS
     )
 
