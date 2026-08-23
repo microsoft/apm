@@ -59,6 +59,8 @@ def parse_marketplace_source(
 
     scp_match = SCP_LIKE_RE.fullmatch(raw)
     if scp_match:
+        if "#" in raw:
+            raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
         user = scp_match.group("user")
         host = scp_match.group("host")
         path = scp_match.group("path")

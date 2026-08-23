@@ -126,6 +126,7 @@ def test_ssh_protocol_url_preserves_validated_transport_identity(raw: str) -> No
     [
         "ssh://git@gitea.example.com/org/repo.git?ref=main",
         "ssh://git@gitea.example.com/org/repo.git#main",
+        "git@gitea.example.com:org/repo.git#main",
         "ssh://git@gitea.example.com/org/%2frepo.git",
         "ssh://git@gitea.example.com/org/%5Crepo.git",
         "ssh://git@gitea.example.com/org/%zzrepo.git",

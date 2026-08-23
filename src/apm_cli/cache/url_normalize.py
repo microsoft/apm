@@ -30,7 +30,7 @@ import urllib.parse
 SCP_LIKE_RE = re.compile(
     r"^(?P<user>[a-zA-Z0-9_][a-zA-Z0-9_.+-]*)@"
     r"(?P<host>[^:/\[\]]+)"
-    r":(?P<path>[^?#]+)$"
+    r":(?P<path>[^?]+)$"
 )
 
 # Default ports to strip
