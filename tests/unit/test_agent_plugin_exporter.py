@@ -633,11 +633,24 @@ def test_agent_bundle_nonportable_preflight_preserves_existing_output(
 
 
 @pytest.mark.parametrize("archive_format", ["zip", "tar.gz"])
+@pytest.mark.parametrize(
+    "timestamp_mode",
+    ["legacy-timestamp", "timestamp-free"],
+)
 def test_agent_bundle_archives_are_reproducible(
     tmp_path: Path,
     archive_format: str,
+    timestamp_mode: str,
 ) -> None:
     project = _write_agent_project(tmp_path / "project")
+    if timestamp_mode == "timestamp-free":
+        lockfile_path = project / "apm.lock.yaml"
+        lockfile_data = yaml.safe_load(lockfile_path.read_text(encoding="utf-8"))
+        lockfile_data.pop("generated_at")
+        lockfile_path.write_text(
+            yaml.safe_dump(lockfile_data),
+            encoding="utf-8",
+        )
     first = export_agent_plugin_bundle(
         project,
         tmp_path / "first",

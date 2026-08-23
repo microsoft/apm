@@ -302,6 +302,57 @@ class TestLockFile:
         assert written["dependencies"] == []
         assert "generated_at" not in written
 
+    def test_write_parses_legacy_lockfile_once(self, tmp_path, monkeypatch):
+        from apm_cli.utils import yaml_io
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        real_load_yaml_str = yaml_io.load_yaml_str
+        load_calls = 0
+
+        def counting_load_yaml_str(text):
+            nonlocal load_calls
+            load_calls += 1
+            return real_load_yaml_str(text)
+
+        monkeypatch.setattr(yaml_io, "load_yaml_str", counting_load_yaml_str)
+
+        LockFile().write(lock_path)
+
+        assert load_calls == 1
+
+    def test_timestamp_free_destination_discards_in_memory_legacy_timestamp(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        lock = LockFile(generated_at="2025-01-01T00:00:00+00:00")
+
+        lock.write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert "generated_at" not in written
+        assert lock.generated_at is None
+
+    def test_legacy_noop_restores_persisted_timestamp(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        persisted_timestamp = "2025-01-01T00:00:00+00:00"
+        lock_path.write_text(
+            f"lockfile_version: '1'\ngenerated_at: '{persisted_timestamp}'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+        lock = LockFile(generated_at="2026-01-01T00:00:00+00:00")
+
+        lock.write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["generated_at"] == persisted_timestamp
+        assert lock.generated_at == persisted_timestamp
+
     def test_mcp_servers_round_trip(self, tmp_path):
         """mcp_servers must survive a write → read cycle."""
         lock = LockFile(apm_version="1.0.0")

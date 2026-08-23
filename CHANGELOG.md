@@ -128,9 +128,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeping generated metadata byte-stable across operating systems.
   (by @WilliamK112, #2638)
 - Newly generated `apm.lock.yaml` files no longer include volatile
-  `generated_at` metadata. Existing lockfiles that carry the field continue
-  to refresh it on substantive writes, preventing unrelated dependency
-  updates from producing timestamp-only merge conflicts. (#2616)
+  `generated_at` metadata, preventing timestamp-only merge conflicts. Existing
+  lockfiles preserve and refresh the legacy field until it is removed once;
+  later writes do not add it back. (#2616)
 - Lockfiles generated on Windows for marketplace-plugin / skill-subset git
   dependencies now pass `apm install --frozen` on Linux, and vice versa, by
   hashing synthetic manifests with deterministic LF line endings.

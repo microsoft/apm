@@ -69,6 +69,9 @@ _GUARD_FRONTMATTER = "contracts-tooling-frontmatter-yaml"
 _GUARD_LOCKFILE_READ = "contracts-tooling-lockfile-read"
 
 
+_GUARD_LOCKFILE_TIMESTAMP = "contracts-tooling-lockfile-timestamp"
+
+
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
 
@@ -249,6 +252,45 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                     "Bundle lockfile reads must route through the read-only owner",
                 )
             )
+    return tuple(findings)
+
+
+def _assigns_generated_at(target: ast.expr) -> bool:
+    """Return whether an assignment target writes lockfile timestamp metadata."""
+    if isinstance(target, ast.Attribute):
+        return target.attr == "generated_at"
+    if isinstance(target, (ast.List, ast.Tuple)):
+        return any(_assigns_generated_at(item) for item in target.elts)
+    return False
+
+
+def check_lockfile_timestamp_authority(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Lockfile timestamp writes must stay inside the lockfile owner."""
+    rule_id = _GUARD_LOCKFILE_TIMESTAMP
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path == _LOCKFILE_OWNER:
+            continue
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures or facts.tree_index is None:
+            continue
+        for node in facts.tree_index.nodes:
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                targets = (node.target,)
+            else:
+                continue
+            if any(_assigns_generated_at(target) for target in targets):
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "Lockfile timestamp writes must route through deps/lockfile.py",
+                        line=node.lineno,
+                    )
+                )
     return tuple(findings)
 
 
@@ -727,6 +769,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LOCKFILE_READ,
         "Read-only lockfile path resolution stays owned by deps/lockfile.py.",
         check_lockfile_read_resolution,
+    ),
+    _owner_rule(
+        _GUARD_LOCKFILE_TIMESTAMP,
+        "Lockfile timestamp emission stays owned by deps/lockfile.py.",
+        check_lockfile_timestamp_authority,
     ),
     _owner_rule(
         _GUARD_GENERATION_FOOTER,

@@ -44,6 +44,13 @@
       "guards": ["contracts-tooling-lockfile-read"]
     },
     {
+      "id": "lockfile-timestamp-emission",
+      "decision": "Lockfile timestamp emission and reproducible fallback",
+      "owner": "deps/lockfile.py (LockFile.write, resolve_reproducible_timestamp)",
+      "selectors": ["src/apm_cli/deps/lockfile.py"],
+      "guards": ["contracts-tooling-lockfile-timestamp"]
+    },
+    {
       "id": "generated-content-footer-wording",
       "decision": "Generated-content footer ownership wording",
       "owner": "compilation/footer.py (build_generation_footer)",

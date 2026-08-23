@@ -6,6 +6,7 @@ Provides deterministic, reproducible installs by capturing exact resolved versio
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
 SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
+_REPRODUCIBLE_EPOCH = "1970-01-01T00:00:00+00:00"
 
 
 def installed_apm_version() -> str:
@@ -38,6 +40,25 @@ def installed_apm_version() -> str:
         return version("apm-cli")
     except Exception:
         return "unknown"
+
+
+def resolve_reproducible_timestamp(
+    explicit: str | None,
+    lockfile_generated_at: str | None,
+) -> str:
+    """Resolve stable metadata time from explicit, environment, or legacy input."""
+    if explicit:
+        return explicit
+    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if source_date_epoch:
+        try:
+            return datetime.fromtimestamp(
+                int(source_date_epoch),
+                tz=timezone.utc,
+            ).isoformat()
+        except (ValueError, OverflowError, OSError):
+            pass
+    return lockfile_generated_at or _REPRODUCIBLE_EPOCH
 
 
 class LockfileFormatError(ValueError):
@@ -866,6 +887,11 @@ class LockFile:
         except (yaml.YAMLError, ValueError) as exc:
             raise LockfileFormatError(f"Invalid lockfile YAML: {exc}") from exc
         data = _validate_lockfile_container(loaded)
+        return cls._from_validated_data(data)
+
+    @classmethod
+    def _from_validated_data(cls, data: dict[str, Any]) -> LockFile:
+        """Construct a lockfile from an already validated YAML mapping."""
         lock = cls(
             lockfile_version=data.get("lockfile_version", "1"),
             generated_at=data.get("generated_at"),
@@ -932,13 +958,16 @@ class LockFile:
             except (yaml.YAMLError, ValueError):
                 existing_data = None
             if isinstance(existing_data, dict) and existing_data.get("generated_at") is not None:
-                existing = type(self).from_yaml(existing_text)
+                existing = type(self)._from_validated_data(
+                    _validate_lockfile_container(existing_data)
+                )
         if existing is not None and existing.generated_at is not None:
             if self.is_semantically_equivalent(existing):
-                if self.generated_at is None:
-                    self.generated_at = existing.generated_at
+                self.generated_at = existing.generated_at
             else:
                 self.generated_at = datetime.now(timezone.utc).isoformat()
+        else:
+            self.generated_at = None
         atomic_write_text(path, self.to_yaml())
 
     @classmethod

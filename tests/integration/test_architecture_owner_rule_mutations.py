@@ -6,7 +6,7 @@ runner already proves the registry and the rule catalog agree *by name* and that
 every guard executes exactly once per run.  Names prove nothing about teeth: a
 rule whose body was gutted still registers its guard ID and still runs.
 
-This file supplies the missing half of that contract.  For each of the 55
+This file supplies the missing half of that contract.  For each of the 56
 registered owner guards it pins one minimal, meaningful source mutation -- a
 surgical edit that kills a load-bearing sub-condition of the owning decision --
 and asserts the one rule that owns that guard reports a real `Violation`.
@@ -146,6 +146,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    if read_only:\n",
         new="    if False and read_only:\n",
         intent="Read-only lockfile resolution stops guarding the mutating migration path.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-lockfile-timestamp",
+        rule_id="contracts-tooling-lockfile-timestamp",
+        path="src/apm_cli/integration/mcp_integrator.py",
+        old="_log = logging.getLogger(__name__)",
+        new="_log = logging.getLogger(__name__)\nMCPIntegrator.generated_at = None",
+        intent="An MCP consumer writes lockfile timestamp metadata outside its owner.",
     ),
     MutationCase(
         guard_id="hooks-integrations-copilot-cli-mcp-paths",

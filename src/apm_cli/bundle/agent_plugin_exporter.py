@@ -20,7 +20,11 @@ from ..agent_plugins import (
     load_agent_plugin,
     url_contains_literal_secret,
 )
-from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
+from ..deps.lockfile import (
+    LockFile,
+    resolve_lockfile_path_for_read,
+    resolve_reproducible_timestamp,
+)
 from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
 from ..models.apm_package import APMPackage
 from ..utils.archive import (
@@ -493,7 +497,7 @@ def export_agent_plugin_bundle(
             BundleFormat.AGENT_PLUGIN.lock_value,
             target or "all",
             bundle_files=bundle_files,
-            packed_at=lockfile.generated_at,
+            packed_at=resolve_reproducible_timestamp(None, lockfile.generated_at),
         )
         write_text_lf(staged_bundle / "apm.lock.yaml", enriched_yaml)
 
