@@ -110,7 +110,7 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="copilot",
             compile_family="vscode",
-            runtimes=("vscode", "agents"),
+            runtimes=("copilot", "vscode", "agents"),
         ),
         _capability(
             "claude",
@@ -256,12 +256,14 @@ def accepted_target_values(command: str | None = None) -> frozenset[str]:
 
 
 def manifest_target_names() -> frozenset[str]:
-    """Return canonical target identifiers accepted in ``apm.yml``."""
-    return frozenset(
+    """Return target identifiers accepted in ``apm.yml``."""
+    names = {
         capability.name
         for capability in TARGET_CAPABILITIES.values()
         if capability.experimental_flag is None and not capability.mcp_only
-    )
+    }
+    names.add("vscode")
+    return frozenset(names)
 
 
 def normalize_target_name(name_or_alias: str) -> str:

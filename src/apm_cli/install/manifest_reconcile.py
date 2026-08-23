@@ -162,6 +162,9 @@ def union_preserving(
     current_run_trusted: bool = True,
     owner: str = "legacy",
     include_ledger: bool = False,
+    desired_owners: frozenset[str] | None = None,
+    generic_governed_values: frozenset[str] = frozenset(),
+    user_scope: bool = False,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Union the current install's manifest with preserved other-target entries.
 
@@ -202,6 +205,11 @@ def union_preserving(
     from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
+    scoped_known_targets = {
+        name: scoped_target
+        for name, target in KNOWN_TARGETS.items()
+        if (scoped_target := target.for_scope(user_scope=user_scope)) is not None
+    }
     active_by_name = {target.name: target for target in targets}
     declared_by_name = (
         {target.name: target for target in declared_targets}
@@ -215,7 +223,7 @@ def union_preserving(
         ordered = [
             *targets,
             *(declared_targets or []),
-            *KNOWN_TARGETS.values(),
+            *scoped_known_targets.values(),
         ]
         seen_names: set[str] = set()
         for profile in ordered:
@@ -237,11 +245,11 @@ def union_preserving(
         )
 
     prior_values = set(prior_files or ())
-    prior_records = {
-        key: record
-        for key, record in (prior_ledger.records.items() if prior_ledger is not None else ())
-        if record.locator.value in prior_values
-    }
+    prior_records = {}
+    for key, record in prior_ledger.records.items() if prior_ledger is not None else ():
+        if record.locator.value not in prior_values:
+            continue
+        prior_records[key] = record
     prior_record_values = {record.locator.value for record in prior_records.values()}
     for path in prior_files or ():
         if path in prior_record_values:
@@ -278,7 +286,7 @@ def union_preserving(
     )
     reconciled = DeploymentReconciler(
         Path.cwd(),
-        KNOWN_TARGETS,
+        scoped_known_targets,
         diagnostics=DiagnosticCollector(),
     ).reconcile(
         DeploymentLedger(records=prior_records),
@@ -288,7 +296,7 @@ def union_preserving(
             declared_targets=(
                 frozenset(declared_by_name) if declared_by_name is not None else None
             ),
-            desired_owners=None,
+            desired_owners=desired_owners,
             authoritative_targets=current_run_trusted,
             generic_governed_values=(
                 frozenset(
@@ -296,12 +304,13 @@ def union_preserving(
                     for path in prior_values
                     if is_governed_by_install(path, active_prefixes, active_schemes)
                 )
+                | generic_governed_values
                 if (
                     current_run_trusted
                     and declared_by_name is not None
                     and set(active_by_name) == set(declared_by_name)
                 )
-                else None
+                else generic_governed_values or None
             ),
         ),
     )
@@ -440,6 +449,8 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     owner: str = "legacy",
     include_ledger: bool = False,
     apply_disk_deletion: bool = True,
+    desired_owners: frozenset[str] | None = None,
+    generic_governed_values: frozenset[str] = frozenset(),
     user_scope: bool = False,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
@@ -465,6 +476,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         current_run_trusted=current_run_trusted,
         owner=owner,
         include_ledger=True,
+        desired_owners=desired_owners,
+        generic_governed_values=generic_governed_values,
+        user_scope=user_scope,
     )
     dropped = set(prior_files) - set(files)
     # Ledger-authoritative orphan detection. A prior value that HELD a ledger
@@ -567,6 +581,9 @@ def reconcile_target_deployed_files(
     active_targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
+    dependency_keys: set[str] | None = None,
+    remove_selected_ownership: bool = False,
+    retained_selected_paths: set[str] | None = None,
     user_scope: bool = False,
     logger: InstallLogger | None = None,
 ) -> bool:
@@ -581,14 +598,37 @@ def reconcile_target_deployed_files(
     never silent.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.deployment_state import DeploymentLedger
     from apm_cli.deps.lockfile import _SELF_KEY
     from apm_cli.integration.targets import KNOWN_TARGETS
 
+    selected_owner_removal = remove_selected_ownership and dependency_keys is not None
+    survivor_files = {
+        path
+        for dep_key, dependency in lockfile.dependencies.items()
+        if dep_key not in (dependency_keys or set())
+        for path in dependency.deployed_files
+    }
+    desired_owners = (
+        DeploymentLedgerCodec.valid_owner_keys(
+            lockfile,
+            excluded_dependency_keys=dependency_keys or set(),
+        )
+        if selected_owner_removal
+        else None
+    )
     allowed_targets = [*active_targets, *(declared_targets or [])]
     allowed_prefixes, allowed_schemes = install_governance(allowed_targets)
-    known_prefixes, known_schemes = install_governance(list(KNOWN_TARGETS.values()))
+    known_targets = [
+        scoped_target
+        for target in KNOWN_TARGETS.values()
+        if (scoped_target := target.for_scope(user_scope=user_scope)) is not None
+    ]
+    known_prefixes, known_schemes = install_governance(known_targets)
 
     def _retained(files: list[str]) -> list[str]:
+        if selected_owner_removal:
+            return [path for path in files if path in survivor_files or "://" in path]
         if declared_targets is None:
             return list(files)
         return [
@@ -602,8 +642,12 @@ def reconcile_target_deployed_files(
 
     changed = False
     prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    prior_records_by_value: dict[str, dict[str, object]] = {}
+    for key, record in prior_ledger.records.items():
+        prior_records_by_value.setdefault(record.locator.value, {})[key] = record
+    dependency_updates: dict[str, tuple[list[str], dict[str, str]]] = {}
     for dep_key, dependency in lockfile.dependencies.items():
-        if dep_key == _SELF_KEY:
+        if dep_key == _SELF_KEY or (dependency_keys is not None and dep_key not in dependency_keys):
             continue
         prior_files = list(dependency.deployed_files)
         prior_hashes = dict(dependency.deployed_file_hashes)
@@ -611,6 +655,13 @@ def reconcile_target_deployed_files(
         current_hashes = {
             path: value for path, value in prior_hashes.items() if path in current_files
         }
+        dependency_ledger = DeploymentLedger(
+            records={
+                key: record
+                for path in prior_files
+                for key, record in prior_records_by_value.get(path, {}).items()
+            }
+        )
         files, hashes = reconcile_deployed_block(
             project_root=project_root,
             dep_key=dep_key,
@@ -621,37 +672,58 @@ def reconcile_target_deployed_files(
             active_targets=active_targets,
             declared_targets=declared_targets,
             diagnostics=diagnostics,
-            prior_ledger=prior_ledger,
+            prior_ledger=dependency_ledger,
             on_cleanup=partial(_surface_target_cleanup, logger, dep_key),
+            desired_owners=desired_owners,
+            generic_governed_values=(
+                frozenset(prior_files) if selected_owner_removal else frozenset()
+            ),
             user_scope=user_scope,
         )
+        if selected_owner_removal:
+            if retained_selected_paths is not None:
+                retained_selected_paths.update(
+                    path for path in files if path not in survivor_files and "://" not in path
+                )
+            continue
         if files != prior_files or hashes != prior_hashes:
-            DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
+            dependency_updates[dep_key] = (files, hashes)
             changed = True
 
-    prior_local = list(lockfile.local_deployed_files)
-    prior_local_hashes = dict(lockfile.local_deployed_file_hashes)
-    current_local = _retained(prior_local)
-    current_local_hashes = {
-        path: value for path, value in prior_local_hashes.items() if path in current_local
-    }
-    local_files, local_hashes = reconcile_deployed_block(
-        project_root=project_root,
-        dep_key="<local .apm/>",
-        current_files=current_local,
-        current_hashes=current_local_hashes,
-        prior_files=prior_local,
-        prior_hashes=prior_local_hashes,
-        active_targets=active_targets,
-        declared_targets=declared_targets,
-        diagnostics=diagnostics,
-        prior_ledger=prior_ledger,
-        on_cleanup=partial(_surface_target_cleanup, logger, "<local .apm/>"),
-        user_scope=user_scope,
-    )
-    if local_files != prior_local or local_hashes != prior_local_hashes:
-        DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
-        changed = True
+    if dependency_updates:
+        DeploymentLedgerCodec.replace_legacy_owners(lockfile, dependency_updates)
+
+    if dependency_keys is None:
+        prior_local = list(lockfile.local_deployed_files)
+        prior_local_hashes = dict(lockfile.local_deployed_file_hashes)
+        current_local = _retained(prior_local)
+        current_local_hashes = {
+            path: value for path, value in prior_local_hashes.items() if path in current_local
+        }
+        local_ledger = DeploymentLedger(
+            records={
+                key: record
+                for path in prior_local
+                for key, record in prior_records_by_value.get(path, {}).items()
+            }
+        )
+        local_files, local_hashes = reconcile_deployed_block(
+            project_root=project_root,
+            dep_key="<local .apm/>",
+            current_files=current_local,
+            current_hashes=current_local_hashes,
+            prior_files=prior_local,
+            prior_hashes=prior_local_hashes,
+            active_targets=active_targets,
+            declared_targets=declared_targets,
+            diagnostics=diagnostics,
+            prior_ledger=local_ledger,
+            on_cleanup=partial(_surface_target_cleanup, logger, "<local .apm/>"),
+            user_scope=user_scope,
+        )
+        if local_files != prior_local or local_hashes != prior_local_hashes:
+            DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
+            changed = True
 
     return changed
 

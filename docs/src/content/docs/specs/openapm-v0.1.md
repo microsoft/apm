@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **110 normative statements** indexed in
+- OpenAPM v0.1 carries **115 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1651,6 +1651,19 @@ together with its invalid owner reference(s), and MUST carry a single
 remediation directing the operator to reconcile ownership (prune the
 departed owners, then re-audit).
 
+<a id="req-pl-017"></a>
+**[req-pl-017]** A conforming **governance** implementation discovering
+an organization policy from Azure DevOps MUST request
+`apm/apm-policy` as its primary project and repository coordinate. It
+MAY use a fresh cache entry for that primary coordinate; primary and
+legacy cache entries MUST remain distinct. It MAY request or use the
+legacy `_apm/_apm` coordinate only when the primary request received
+an HTTP 404 response. It MUST NOT try that legacy coordinate after
+authentication, authorization, network, timeout, rate-limit,
+malformed-response, or other non-404 failures. When the legacy
+coordinate supplies a policy, the implementation MUST emit one
+actionable migration warning naming `apm/apm-policy`.
+
 ### 6.9 Conformance requirements (governance)
 
 This section's normative statements are:
@@ -1662,7 +1675,8 @@ This section's normative statements are:
   [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
   [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
   [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
-  [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016).
+  [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
+  [req-pl-017](#req-pl-017).
 
 ---
 
@@ -2493,6 +2507,27 @@ closed rather than partially projecting the package.
 > future revision once a consumer implementation demonstrates a
 > qualified, machine-verifiable binary lifecycle.
 
+#### 8.5.6 Plugin-root hook command resolution
+
+<a id="req-tg-012"></a>
+**[req-tg-012]** When a conforming **consumer** implementation resolves an
+implementation-defined plugin-root placeholder in a hook command, it MUST treat
+a placeholder enclosed in matching quotation marks and followed by a forward
+slash (`/`) or backslash (`\`) path separator outside the closing quote as
+equivalent to the placeholder and path enclosed together in one double-quoted
+span, regardless of the source quote character. The generated command MUST
+preserve balanced quoting, and any environment-variable expression retained in
+that command MUST remain live for target expansion. If any
+implementation-defined plugin-root placeholder remains unresolved, the consumer
+MUST emit a default-visible diagnostic before the operation returns; it MUST
+NOT silently deploy the unresolved command.
+
+> **Editorial note.** A plugin-root placeholder has the form `${NAME}`; each
+> consumer documents the fixed set of names it recognizes for its targets.
+> `${PLUGIN_ROOT}` is an illustrative spelling. For example,
+> `"${PLUGIN_ROOT}"/hooks/probe.py` normalizes to
+> `"${PLUGIN_ROOT}/hooks/probe.py"`.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2508,7 +2543,8 @@ without a spec revision. The current matrix is in the companion
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
   [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
   [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
-  [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011).
+  [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
+  [req-tg-012](#req-tg-012).
 
 ---
 
@@ -3070,7 +3106,8 @@ conformance statement identifying:
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
 [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
-[req-tg-010](#req-tg-010), [req-sc-001](#req-sc-001),
+[req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
+[req-tg-012](#req-tg-012), [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
@@ -3108,7 +3145,8 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
 [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
 [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
-[req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016).
+[req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
+[req-pl-017](#req-pl-017).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -3472,6 +3510,7 @@ renumbering of conformance classes.
 | [req-pl-014](#req-pl-014)                | MUST    | 6.8     | governance  |
 | [req-pl-015](#req-pl-015)                | MUST    | 6.3.5   | governance  |
 | [req-pl-016](#req-pl-016)                | MUST    | 6.8     | governance  |
+| [req-pl-017](#req-pl-017)                | MUST    | 6.8     | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -3504,6 +3543,7 @@ renumbering of conformance classes.
 | [req-tg-009](#req-tg-009)                | MUST    | 8.5.1   | consumer    |
 | [req-tg-010](#req-tg-010)                | MUST    | 8.5.4   | consumer    |
 | [req-tg-011](#req-tg-011)                | MUST    | 8.5.5   | consumer    |
+| [req-tg-012](#req-tg-012)                | MUST    | 8.5.6   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3522,7 +3562,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 113** (108 MUST, 5 SHOULD).
+**Total normative statements: 115** (110 MUST, 5 SHOULD).
 
 ---
 
@@ -3549,6 +3589,7 @@ renumbering of conformance classes.
 | 0.1.15  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
 | 0.1.16  | 2026-07-17 | Spec-citation fold for dropped-target merge-hook reconciliation (closes the #2253 Mode-B silent-extension gate). Added [req-lk-021] (Section 5.2, consumer MUST): extends [req-lk-020]'s target-reconciliation preserve/remove decision to merge-based hook configuration and its ownership record, since that state is deliberately outside `deployed_files`/`local_deployed_files` tracking and so was never reachable by req-lk-020's literal text -- narrowing a project's declared target set now also reconciles the dropped target's consumer-owned merge-hook entries, while preserving entries not carrying consumer ownership and preserving state for targets still attributable per req-lk-020's own (a)-(c) test. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 100 -> 101 (96 MUST, 5 SHOULD). |
 | 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
+| 0.1.31  | 2026-08-23 | Spec-citation fold for Azure DevOps organization-policy discovery. Added [req-pl-017] (Section 6.8, governance MUST): discovery uses `apm/apm-policy` first and can use legacy `_apm/_apm` only after an HTTP 404; all non-404 failures stop without fallback, and a successful legacy fallback emits one actionable migration warning. Section 6.9, Section 11.3.4, and Appendix C updated. Statement count: 114 -> 115 (110 MUST, 5 SHOULD). |
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
 | 0.1.20  | 2026-07-30 | Defensive amendment of [req-lk-006] (no new normative statement; count remains 104 (99 MUST, 5 SHOULD)): frozen validation now covers direct MCP server names and configurations as well as package pins, runs before lockfile, target-config, deployment, or cache mutation, and rejects manifest dependency mutation. |
@@ -3561,6 +3602,7 @@ renumbering of conformance classes.
 | 0.1.27  | 2026-08-03 | Spec-citation fold for object-form registry identity preservation on CLI-driven manifest updates (closes the PR #2166 Mode-B silent-extension gate). Added [req-mf-024] (Section 4.3.2, consumer MUST): a consumer MUST NOT silently rewrite an existing `id:`-form (registry-sourced) manifest entry into a `git:`-form entry when persisting a subsequent CLI-driven update (e.g. an additive `--skill` pin) for the same dependency identity; when a CLI-parsed reference is ambiguous about its source but an existing manifest entry for the same identity already resolves to the `registry` source, the existing entry's source MUST be honored, and an update that would otherwise replace a registry-sourced entry with a non-registry-shaped entry MUST be rejected with a diagnostic naming the identity. Section 4.9 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 110 -> 111 (106 MUST, 5 SHOULD). |
 | 0.1.28  | 2026-08-06 | Spec-citation fold for per-invocation executable consent in non-interactive contexts (closes #1620 Mode-B silent-extension gate). Added [req-sc-014] (Section 10.15, consumer MUST): a consumer that supports a per-invocation consent flag for bin/ executable deployment MUST deny deployment by default when stdout is not a TTY, unless the operator has explicitly opted in for that invocation; an explicit opt-in overrides the non-interactive default and permits deployment; an explicit opt-out overrides the default and denies deployment even in a terminal; the allowExecutables policy gate [req-sc-009] is evaluated first and always takes precedence. Added row 19 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 111 -> 112 (107 MUST, 5 SHOULD). |
 | 0.1.29  | 2026-08-22 | Spec-citation fold for the Agent Plugins v1 native-lifecycle deployment boundary (closes #2522 Mode-B silent-extension gate). Added [req-tg-011] (Section 8.5.5, consumer MUST): a consumer MUST treat a schema-bearing Agent Plugins v1 dependency as undeployable until it exposes a machine-verifiable native lifecycle for that dependency; before any target handler or primitive integrator runs, the consumer MUST refuse deployment with one actionable diagnostic, MUST leave the project tree unchanged, MUST NOT fall back to legacy primitive projection, and MUST reach the identical single-diagnostic outcome whether the dependency is materialized alone, mixed with ordinary dependencies in the same install, or under `--dry-run`. Section 8.7 and Appendix C updated. Statement count: 112 -> 113 (108 MUST, 5 SHOULD). |
+| 0.1.30  | 2026-08-23 | Spec-citation fold for plugin-root hook command resolution (closes #2639 Mode-B silent-extension gate). Added [req-tg-012] (Section 8.5.6, consumer MUST): a consumer that resolves plugin-root placeholders treats a matching quoted placeholder followed by an outside path separator equivalently to the fully quoted path, preserves balanced expandable quoting, and emits a default-visible diagnostic instead of silently deploying any supported placeholder that remains unresolved. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 113 -> 114 (109 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

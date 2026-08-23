@@ -46,6 +46,15 @@ _INSTALL_COPILOT = (
     "--parallel-downloads",
     "0",
 )
+_INSTALL_VSCODE = (
+    "install",
+    "--target",
+    "vscode",
+    "--trust-transitive-mcp",
+    "--no-policy",
+    "--parallel-downloads",
+    "0",
+)
 _FROZEN_BOTH = (*_INSTALL_BOTH, "--frozen")
 _UPDATE_BOTH = (
     "update",
@@ -58,9 +67,10 @@ _UPDATE_BOTH = (
 _AUDIT = ("audit", "--ci", "--no-policy", "--format", "json")
 _TARGET_SERVERS = {
     "codex": [_SERVER_NAME],
-    "vscode": [_SERVER_NAME],
+    "copilot": [_SERVER_NAME],
 }
 _CONFIG_PATHS = (
+    PurePosixPath(".github/mcp.json"),
     PurePosixPath(".vscode/mcp.json"),
     PurePosixPath(".codex/config.toml"),
     PurePosixPath(".agents/skills/local-lifecycle/SKILL.md"),
@@ -89,13 +99,18 @@ def _self_defined_server(name: str = _SERVER_NAME) -> dict[str, object]:
     }
 
 
-def _new_scenario(root: Path, apm_binary_path: Path) -> _Scenario:
+def _new_scenario(
+    root: Path,
+    apm_binary_path: Path,
+    *,
+    targets: tuple[str, ...] = ("copilot", "codex"),
+) -> _Scenario:
     """Create a mixed local-package project with user-authored MCP config."""
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     packages = LocalPackageFactory(isolated.work_root)
     project = packages.create(
         "mcp-lock-consumer",
-        targets=("copilot", "codex"),
+        targets=targets,
     )
     dependency_factory = LocalPackageFactory(project.root / "packages")
     dependency = dependency_factory.create(
@@ -287,13 +302,13 @@ def test_installed_mcp_lifecycle_is_no_write_until_real_target_change(
     changed_identity = _file_identity(lock_path)
     assert changed.lockfile_bytes != baseline.lockfile_bytes
     assert changed_lock.generated_at != baseline_lock.generated_at
-    assert changed_lock.mcp_target_servers == {"vscode": [_SERVER_NAME]}
+    assert changed_lock.mcp_target_servers == {"copilot": [_SERVER_NAME]}
     assert changed_identity != baseline_identity
     assert {
         record.locator.runtime
         for record in changed.deployment_records
         if record.locator.target == "mcp"
-    } == {"vscode"}
+    } == {"copilot"}
     _assert_user_configs(project_root)
 
     time.sleep(0.02)
@@ -301,6 +316,43 @@ def test_installed_mcp_lifecycle_is_no_write_until_real_target_change(
     converged = _snapshot(project_root)
     _assert_exact_state(changed, converged)
     assert _file_identity(lock_path) == changed_identity
+
+
+@pytest.mark.lifecycle_smoke
+def test_copilot_target_migrates_legacy_vscode_ownership_without_rewriting_vscode(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Copilot writes its discoverable repo config without dual-writing VS Code."""
+    scenario = _new_scenario(
+        tmp_path / "copilot-project-config",
+        apm_binary_path,
+        targets=("vscode",),
+    )
+    project_root = scenario.project.root
+
+    _run_ok(scenario, _INSTALL_VSCODE, "copilot-vscode-install")
+    vscode_config = project_root / ".vscode" / "mcp.json"
+    vscode_bytes = vscode_config.read_bytes()
+
+    scenario.packages.set_targets(scenario.project, ("copilot",))
+    _run_ok(scenario, _INSTALL_COPILOT, "copilot-project-install")
+
+    copilot_config = project_root / ".github" / "mcp.json"
+    assert vscode_config.read_bytes() == vscode_bytes
+    assert json.loads(copilot_config.read_text(encoding="utf-8"))["mcpServers"][_SERVER_NAME]
+
+    lock = _lock(project_root)
+    assert lock.mcp_target_servers == {"copilot": [_SERVER_NAME]}
+    assert {
+        record.locator.runtime
+        for record in lock.deployment_ledger.records.values()
+        if record.locator.target == "mcp"
+    } == {"copilot"}
+
+    first = _snapshot(project_root)
+    _run_ok(scenario, _INSTALL_COPILOT, "copilot-project-rerun")
+    _assert_exact_state(first, _snapshot(project_root))
 
 
 @pytest.mark.lifecycle_smoke

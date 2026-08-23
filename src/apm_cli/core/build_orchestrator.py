@@ -264,7 +264,7 @@ class PluginManifestProducer:
             PLUGIN_ECOSYSTEM_PATHS,
             PLUGIN_MANIFEST_ECOSYSTEMS,
             build_plugin_manifest,
-            write_plugin_manifest,
+            write_plugin_manifest_with_outcome,
         )
 
         # Read raw apm.yml to obtain targets.
@@ -335,7 +335,7 @@ class PluginManifestProducer:
             )
             rel_path = PLUGIN_ECOSYSTEM_PATHS.get(ecosystem, "")
             target_path = str(options.project_root / rel_path) if rel_path else ecosystem
-            output_path = write_plugin_manifest(
+            write_result = write_plugin_manifest_with_outcome(
                 options.project_root,
                 manifest,
                 ecosystem,
@@ -343,14 +343,12 @@ class PluginManifestProducer:
                 force=options.bundle_force,
                 logger=logger,
             )
-            if options.dry_run:
-                # write returns None in dry-run; the path would have been written.
+            if write_result.action == "dry_run":
                 dry_run_paths.append(target_path)
-            elif output_path is not None:
-                outputs.append(output_path)
-                written.append(str(output_path))
+            elif write_result.action == "written" and write_result.path is not None:
+                outputs.append(write_result.path)
+                written.append(str(write_result.path))
             else:
-                # Non-dry-run None means an existing file was preserved (no --force).
                 skipped.append(target_path)
 
         return ProducerResult(

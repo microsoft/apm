@@ -266,17 +266,41 @@ class TestPackCmd:
         assert any(p.endswith(".claude-plugin/plugin.json") for p in written)
         assert envelope["plugin_manifests"]["skipped"] == []
 
-        # Second run without --force: the existing file is preserved (skipped).
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        preserved = out.read_text(encoding="utf-8")
+
+        # Dry-run and real non-force pack must agree that the existing file skips.
+        dry_run = runner.invoke(pack_cmd, ["--claude-plugin", "--dry-run", "--json"])
+        assert dry_run.exit_code == 0
+        dry_run_start = dry_run.output.find("{")
+        assert dry_run_start >= 0, f"No JSON found in output: {dry_run.output!r}"
+        dry_run_envelope = json_mod.loads(dry_run.output[dry_run_start:])
+        assert dry_run_envelope["plugin_manifests"]["written"] == []
+        assert dry_run_envelope["plugin_manifests"]["skipped"] == [str(out)]
+        assert dry_run_envelope["plugin_manifests"]["dry_run"] == []
+        assert out.read_text(encoding="utf-8") == preserved
+
         result2 = runner.invoke(pack_cmd, ["--claude-plugin", "--json"])
         assert result2.exit_code == 0
         env2_start = result2.output.find("{")
         assert env2_start >= 0, f"No JSON found in output: {result2.output!r}"
         envelope2 = json_mod.loads(result2.output[env2_start:])
         assert envelope2["plugin_manifests"]["written"] == []
-        assert any(
-            p.endswith(".claude-plugin/plugin.json")
-            for p in envelope2["plugin_manifests"]["skipped"]
+        assert envelope2["plugin_manifests"]["skipped"] == [str(out)]
+        assert envelope2["plugin_manifests"]["dry_run"] == []
+        assert out.read_text(encoding="utf-8") == preserved
+
+        forced_dry_run = runner.invoke(
+            pack_cmd, ["--claude-plugin", "--force", "--dry-run", "--json"]
         )
+        assert forced_dry_run.exit_code == 0
+        forced_dry_run_start = forced_dry_run.output.find("{")
+        assert forced_dry_run_start >= 0, f"No JSON found in output: {forced_dry_run.output!r}"
+        forced_dry_run_envelope = json_mod.loads(forced_dry_run.output[forced_dry_run_start:])
+        assert forced_dry_run_envelope["plugin_manifests"]["written"] == []
+        assert forced_dry_run_envelope["plugin_manifests"]["skipped"] == []
+        assert forced_dry_run_envelope["plugin_manifests"]["dry_run"] == [str(out)]
+        assert out.read_text(encoding="utf-8") == preserved
 
     def test_pack_marketplace_output_flag_removed(self, runner, tmp_path, monkeypatch):
         """The legacy --marketplace-output flag was removed in favour of --marketplace-path."""

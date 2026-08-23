@@ -1,7 +1,7 @@
 """Unit tests for plugin_parser.py and find_plugin_json helper."""
 
 import json
-import os  # noqa: F401
+import os
 from pathlib import Path
 
 import pytest
@@ -1411,3 +1411,62 @@ class TestSynthesizePreservesExistingManifest:
         # Fallback still produces a usable apm.yml from plugin metadata.
         result = self._read_apm_yml(tmp_path)
         assert result["name"] == "bad-pkg"
+
+
+@pytest.mark.windows_compat
+class TestSyntheticManifestLineEndings:
+    """apm#2619: synthetic apm.yml bytes must be platform-invariant (LF).
+
+    The synthesized manifest is written by APM itself (not checked out by
+    git) into a package tree that ``compute_package_hash`` hashes raw. A
+    platform-native text-mode write (CRLF on Windows) made the lockfile
+    ``content_hash`` diverge across OSes for byte-identical upstream
+    content. Same bug class as #2187 / PR #2223, which only covered
+    ``download_virtual_file_package``.
+    """
+
+    def test_synthesized_apm_yml_is_lf_only(self, tmp_path):
+        plugin = tmp_path / "plug"
+        skill = plugin / "skills" / "demo"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_bytes(
+            b"---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n"
+        )
+
+        apm_yml_path = synthesize_apm_yml_from_plugin(plugin, {"name": "plug"})
+
+        raw = apm_yml_path.read_bytes()
+        assert b"\r" not in raw
+        assert raw.endswith(b"\n")
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not enforced on Windows")
+    def test_synthesized_apm_yml_preserves_existing_mode(self, tmp_path):
+        """Rewriting a dual-format manifest must not replace its POSIX mode."""
+        plugin = tmp_path / "plug"
+        plugin.mkdir()
+        apm_yml = plugin / "apm.yml"
+        apm_yml.write_text("name: plug\nversion: 0.0.0\n", encoding="utf-8")
+        apm_yml.chmod(0o644)
+
+        synthesize_apm_yml_from_plugin(plugin, {"name": "plug"})
+
+        assert apm_yml.stat().st_mode & 0o777 == 0o644
+
+    def test_inline_hooks_json_is_lf_only(self, tmp_path):
+        """Inline plugin.json hooks are serialized into the hashed tree as
+        .apm/hooks/hooks.json -- the bytes must be LF-only and UTF-8."""
+        plugin = tmp_path / "plug"
+        plugin.mkdir()
+        apm_dir = plugin / ".apm"
+        apm_dir.mkdir()
+        hooks = {
+            "PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hi"}]}
+            ]
+        }
+
+        _map_plugin_artifacts(plugin, apm_dir, {"name": "plug", "hooks": hooks})
+
+        raw = (apm_dir / "hooks" / "hooks.json").read_bytes()
+        assert b"\r" not in raw
+        assert json.loads(raw.decode("utf-8")) == hooks

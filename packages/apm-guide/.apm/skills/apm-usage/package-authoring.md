@@ -178,6 +178,14 @@ When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at
 runtime. Claude-family merged targets (Claude, Cursor, Codex, Gemini,
 Antigravity, and Windsurf), Copilot, and Kiro receive the same bundle.
+
+For portable hook scripts, quote the complete package-relative path:
+`"${PLUGIN_ROOT}/scripts/my hook.sh"`. A split-quoted path such as
+`"${PLUGIN_ROOT}"/scripts/my\ hook.sh` is also accepted. If install reports an
+unresolved plugin-root token, follow the package-specific repair: balance the
+quotes, add a relative path, or keep the path inside the package. Then run
+`apm install` again.
+
 Root hook JSON descriptors, symlinks, and `.apm-pin` markers are not
 deployed. JavaScript and TypeScript hook bundles get a minimal
 `package.json` sidecar with the source package's Node `type` (defaulting

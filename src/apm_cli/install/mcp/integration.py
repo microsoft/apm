@@ -27,6 +27,7 @@ def run_owned_mcp_integration(
     verbose: bool = False,
 ) -> int:
     """Reconcile one bundle owner's MCP servers and persist ownership."""
+    from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_integrator import MCPIntegrator as _OwnedMCPIntegrator
 
@@ -73,6 +74,7 @@ def run_owned_mcp_integration(
                 runtime=target,
                 project_root=project_root,
                 user_scope=user_scope,
+                scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
                 fail_on_write_error=True,
             )
             names.difference_update(stale_for_target)
@@ -263,6 +265,16 @@ def run_mcp_integration(  # noqa: PLR0913
                 project_root=project_root,
                 user_scope=user_scope,
             )
+        if target_decision is not None:
+            from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
+
+            active_runtimes = target_decision.runtime_targets_for_scope(user_scope=user_scope)
+            if active_runtimes is not None:
+                migrate_legacy_project_target_servers(
+                    old_mcp_target_servers,
+                    active_runtimes=set(active_runtimes),
+                    user_scope=user_scope,
+                )
         managed_target_servers = {
             target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
         }

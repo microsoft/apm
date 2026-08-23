@@ -407,8 +407,17 @@ def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
     assert view.problems == ()
 
 
-def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) -> None:
-    """A Claude-skill filesystem shape does not waive non-virtual manifests."""
+def test_manifestless_local_claude_skill_waived(tmp_path: Path) -> None:
+    """A local Claude-skill filesystem shape waives its missing manifest.
+
+    A local ``path:`` dependency is resolved directly from the filesystem
+    (it can point anywhere, including outside the repo, e.g. ``../sibling``)
+    rather than materialised into ``apm_modules/`` -- not a download target,
+    so the same defined-by-shape waiver that applies to virtual subdirectory
+    packages applies here too, gated by the on-disk shape actually being a
+    valid Claude skill (probed below, unlike the cold-cache fallback used
+    for virtual packages whose directory may not exist yet).
+    """
     root = _write_manifest(tmp_path, name="root")
     skill_dir = tmp_path / "packages" / "skill"
     skill_dir.mkdir(parents=True)
@@ -417,6 +426,44 @@ def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) ->
         repo_url="_local/skill",
         source="local",
         local_path="./packages/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert view.problems == ()
+
+
+def test_manifestless_local_package_without_skill_shape_records_problem(
+    tmp_path: Path,
+) -> None:
+    """A local lock bit does not waive an unrecognized on-disk shape."""
+    root = _write_manifest(tmp_path, name="root")
+    skill_dir = tmp_path / "packages" / "skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "not-a-skill.txt").write_text("nope\n", encoding="utf-8")
+    locked = LockedDependency(
+        repo_url="_local/skill",
+        source="local",
+        local_path="./packages/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_missing_local_claude_skill_records_problem(tmp_path: Path) -> None:
+    """A missing local directory cannot use the virtual cold-cache waiver."""
+    root = _write_manifest(tmp_path, name="root")
+    locked = LockedDependency(
+        repo_url="_local/missing-skill",
+        source="local",
+        local_path="./packages/missing-skill",
         package_type="claude_skill",
         depth=1,
     )

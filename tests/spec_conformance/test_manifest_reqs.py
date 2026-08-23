@@ -22,6 +22,7 @@ from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage
@@ -791,7 +792,8 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be rejected before target-scoped",
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
-        "[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),\n[req-tg-010](#req-tg-010), [req-sc-001](#req-sc-001),",
+        "[req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),\n"
+        "[req-tg-012](#req-tg-012), [req-sc-001](#req-sc-001),",
     )
 
 
@@ -950,6 +952,43 @@ def test_agent_plugin_deployment_boundary_precedes_all_mutation(tmp_path) -> Non
         skill_subset=None,
         dry_run=False,
     )
+
+
+@pytest.mark.req("req-tg-012")
+def test_plugin_root_hook_resolution_preserves_quoting_and_warns(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Split-quoted roots resolve, while malformed roots remain visible."""
+    package = tmp_path / "package"
+    script = package / "hooks" / "probe.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("print('ok')\n", encoding="utf-8")
+    integrator = HookIntegrator()
+
+    for source_command in (
+        'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py',
+        r"python3 '${CLAUDE_PLUGIN_ROOT}'\hooks\probe.py",
+    ):
+        command, scripts = integrator._rewrite_command_for_target(
+            source_command,
+            package,
+            "plugin",
+            "claude",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in command
+        assert command.count('"') == 2
+        assert len(scripts) == 1
+    assert "Unresolved plugin-root reference" not in capsys.readouterr().out
+
+    integrator._rewrite_command_for_target(
+        "python3 \"${CLAUDE_PLUGIN_ROOT}'/hooks/probe.py",
+        package,
+        "plugin",
+        "claude",
+    )
+    assert "Unresolved plugin-root reference" in capsys.readouterr().out
 
 
 @pytest.mark.req("req-sc-014")

@@ -27,6 +27,7 @@ from ..utils.archive import (
     projected_archive_path,
     validate_archive_format,
 )
+from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import ensure_path_within, safe_rmtree
 from .export_common import (
@@ -469,14 +470,11 @@ def export_agent_plugin_bundle(
 
         mcp_path = staged_bundle / "mcp.json"
         mcp_path.parent.mkdir(parents=True, exist_ok=True)
-        mcp_path.write_text(
-            json.dumps(mcp_document, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        write_text_lf(mcp_path, json.dumps(mcp_document, indent=2, sort_keys=True) + "\n")
 
-        (staged_bundle / "plugin.json").write_text(
+        write_text_lf(
+            staged_bundle / "plugin.json",
             json.dumps(plugin_json, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
         )
 
         for doc_name in ("README.md", "LICENSE", "CHANGELOG.md", "CHANGELOG"):
@@ -498,7 +496,7 @@ def export_agent_plugin_bundle(
             bundle_files=bundle_files,
             packed_at=lockfile.generated_at,
         )
-        (staged_bundle / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")
+        write_text_lf(staged_bundle / "apm.lock.yaml", enriched_yaml)
 
         _validate_agent_plugin_round_trip(
             staged_bundle,

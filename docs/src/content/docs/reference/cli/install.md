@@ -103,7 +103,7 @@ in `apm.yml`, then run `apm install` again.
 |---|---|---|
 | `--mcp NAME` | unset | Add an MCP server entry to `apm.yml` and install it. Pair with the flags below or pass an executable after `--`. |
 | `--transport stdio\|http\|sse\|streamable-http` | inferred | Inferred from `--url` or the post-`--` argv when omitted. |
-| `--url URL` | unset | Endpoint for `http`, `sse`, or `streamable-http` transports. Scheme must be `http` or `https`. |
+| `--url URL` | unset | Endpoint for `http`, `sse`, or `streamable-http` transports. Scheme must be `http` or `https`. Codex requires HTTPS for non-loopback endpoints; plain HTTP is accepted only for literal loopback endpoints such as `localhost`, `ip6-localhost`, `127.0.0.0/8`, or `::1`. |
 | `--env KEY=VALUE` | unset | Environment variable for stdio MCP servers. Repeatable. |
 | `--header KEY=VALUE` | unset | HTTP header for remote MCP servers. Repeatable. Requires `--url`. |
 | `--mcp-version VER` | unset | Pin a registry MCP entry to a specific version. |
@@ -128,6 +128,7 @@ in `apm.yml`, then run `apm install` again.
 - **Enterprise marketplace gate.** When installing from a `*.ghe.com` marketplace, bare cross-repo `repo:` fields (e.g. `repo: owner/repo`) are refused before any network request runs, preventing dependency-confusion attacks. Host-qualify the field to proceed: `repo: corp.ghe.com/owner/repo` for an enterprise dep, or `repo: github.com/owner/repo` for a declared cross-host dep.
 - **Security scan.** Source files are scanned for hidden Unicode and other tag-character / bidi-override patterns before deployment. Critical findings block the package; the install exits `1`. Use `--force` to deploy anyway, or run `apm audit --strip` first to remediate.
 - **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths.
+- **Unresolved hook roots.** A hook command that leaves a supported `${PLUGIN_ROOT}` alias unresolved emits a warning naming the package and a concrete repair. Balance quotes around the complete package-relative path, keep it inside the package, then run `apm install` again. See [Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks) for accepted quoting forms.
 - **Declared plugin components.** Every path explicitly listed under a recognized plugin manifest's `agents`, `skills`, `commands`, or `hooks` field must resolve inside that plugin root. A missing or escaping path fails before deployment and lockfile commit; remove the declaration or add the component, then reinstall. Omitted fields and empty lists remain valid.
 - **Default registry routing.** When a default registry is configured (project `registries.default` in `apm.yml` or `registry.<name>.default true` in `~/.apm/config.json`), unscoped `owner/repo#ref` shorthand deps passed to `apm install` route to the registry instead of GitHub. A `#<version>` selector is required; omitting it exits `1`. The selector may be a semver range (`^1.0.0`), an exact version (`1.2.3`), or a non-semver label (`main`, `stable`, `v1.4.2`) -- the registry exact-matches non-semver selectors against its published version list. GitHub probe is skipped for these deps; use the `git:` URL form in `apm.yml` to force the GitHub path (e.g., `- git: https://github.com/owner/repo.git`).
 

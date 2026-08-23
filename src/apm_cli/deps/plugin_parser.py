@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
 
@@ -319,8 +320,12 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     # Generate apm.yml from plugin metadata, merging with existing manifest
     apm_yml_content = _generate_apm_yml(manifest, existing_manifest=existing_manifest)
 
-    with open(apm_yml_path, "w", encoding="utf-8") as f:
-        f.write(apm_yml_content)
+    # LF-deterministic write (apm#2619): this synthetic manifest lands inside
+    # the installed package tree that compute_package_hash() hashes raw, so a
+    # platform-native text-mode write (CRLF on Windows) would make the
+    # lockfile content_hash diverge across OSes. Mirrors the #2223 fix for
+    # download_virtual_file_package().
+    write_text_lf(apm_yml_path, apm_yml_content)
 
     return apm_yml_path
 
@@ -862,11 +867,15 @@ def _map_plugin_artifacts(
     # or an inline object.  Handle all three forms.
     hooks_value = manifest.get("hooks")
     if isinstance(hooks_value, dict):
-        # Inline hooks object -> write as .apm/hooks/hooks.json
+        # Inline hooks object -> write as .apm/hooks/hooks.json.
+        # LF-deterministic + UTF-8 write (apm#2619): this file lands inside
+        # the hashed package tree, so a platform-native write (CRLF on
+        # Windows, locale codec) would make the lockfile content_hash
+        # diverge across OSes.
         target_hooks = apm_dir / "hooks"
         _assert_no_symlink_descendants(target_hooks)
         target_hooks.mkdir(parents=True, exist_ok=True)
-        (target_hooks / "hooks.json").write_text(json.dumps(hooks_value, indent=2))
+        write_text_lf(target_hooks / "hooks.json", json.dumps(hooks_value, indent=2))
     elif isinstance(hooks_value, str) and (plugin_path / hooks_value).is_file():
         # Config file path (e.g. "hooks": "hooks.json")
         src_file = plugin_path / hooks_value

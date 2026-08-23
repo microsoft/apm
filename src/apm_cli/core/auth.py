@@ -35,8 +35,9 @@ import re
 import sys
 import threading
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
 from apm_cli.core.host_providers import (
@@ -138,6 +139,16 @@ _GIT_CHILD_TOKEN_ENV_NAMES = frozenset(
     }
 )
 _GIT_CHILD_TOKEN_ENV_PREFIXES = ("GITHUB_APM_PAT_",)
+
+# Git localises its diagnostics through gettext, but APM classifies clone
+# failures by matching English signal strings (see
+# ``AuthResolver.is_public_github_auth_failure``). A translated stderr makes an
+# authentication failure unrecognisable, which suppresses the token retry. The
+# ``C`` locale has no message catalogue, so git emits its untranslated source
+# strings. ``LANGUAGE`` takes precedence over ``LC_ALL`` for translations and
+# must be neutralised too. GitPython already does this for every command it
+# runs; this keeps APM's own subprocess calls consistent with it.
+_GIT_MESSAGE_LOCALE_ENV: Mapping[str, str] = MappingProxyType({"LC_ALL": "C", "LANGUAGE": "C"})
 
 
 # ---------------------------------------------------------------------------
@@ -1208,6 +1219,7 @@ class AuthResolver:
         AuthResolver._clear_git_auth_env(env)
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = "echo"
+        env.update(_GIT_MESSAGE_LOCALE_ENV)
         if token and host_kind == "ado" and scheme in {"basic", "bearer"}:
             # ADO credentials use an Authorization header, never argv or
             # GIT_TOKEN. This keeps PATs and bearer JWTs out of process lists.

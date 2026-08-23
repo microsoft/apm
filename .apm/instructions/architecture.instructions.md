@@ -52,12 +52,13 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Frozen install mutation eligibility | install/service.py (InstallService) | `src/apm_cli/install/service.py` |
 | Install invocation option defaults | install/request.py (InstallRequest) | `src/apm_cli/install/request.py`; `src/apm_cli/commands/install.py` |
 | Neutral hook source grammar and shape -> per-target native | hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir) + per-target renderers | `src/apm_cli/hook_contract.py`; `src/apm_cli/integration/hook_ir.py`; `src/apm_cli/integration/hook_native_formats.py`; `src/apm_cli/integration/hook_integrator.py`; `src/apm_cli/integration/hook_ownership.py` |
+| Plugin-root hook command vocabulary + parsing | integration/hook_command_paths.py | `src/apm_cli/integration/hook_command_paths.py` |
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) | `src/apm_cli/integration/base_integrator.py` |
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) | `install.ps1` |
 | Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) | `src/apm_cli/cache/url_normalize.py` |
 | Self-update release -> installer ref + VERSION | commands/self_update.py (_ResolvedSelfUpdateRelease) | `src/apm_cli/commands/self_update.py` |
 | Dependency comparison identity vs display-cased materialization path | models/dependency/identity.py + materialization.py + DependencyReference | `src/apm_cli/models/dependency/identity.py`; `src/apm_cli/models/dependency/materialization.py`; `src/apm_cli/models/dependency/reference.py` |
-| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) | `src/apm_cli/policy/discovery.py` |
+| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) | `src/apm_cli/policy/discovery.py` |
 | Post-uninstall dependency reachability | deps/reachability.py (compute_forward_reachable_keys) | `src/apm_cli/deps/reachability.py` |
 | CI audit scratch materialization | install/audit_replay.py (prepare_ci_audit_replay) | `src/apm_cli/install/audit_replay.py` |
 | GitHub API throttle classification | deps/github_rate_limit.py | `src/apm_cli/deps/github_rate_limit.py` |
@@ -66,6 +67,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | MCP package launcher selection and argv shape (container and non-container) | adapters/client/base.py (MCPClientAdapter) | `src/apm_cli/adapters/client/base.py` |
 | Dependency CLI identifier parsing + uninstall selection | models/dependency/selection.py (via DependencyReference) | `src/apm_cli/models/dependency/selection.py` |
 | JetBrains Copilot MCP config path | adapters/client/intellij.py | `src/apm_cli/adapters/client/intellij.py` |
+| Copilot CLI MCP config paths | adapters/client/copilot.py | `src/apm_cli/adapters/client/copilot.py` |
 | Marketplace tag-pattern validation and expansion | marketplace/tag_pattern.py | `src/apm_cli/marketplace/tag_pattern.py` |
 | Local marketplace package-version manifest precedence | marketplace/version_check.py (_read_local_version) | `src/apm_cli/marketplace/version_check.py` |
 | applyTo normalization and hidden-tool placement | utils/patterns.py (normalize_apply_to); compilation/context_optimizer.py (ContextOptimizer) | `src/apm_cli/utils/patterns.py`; `src/apm_cli/compilation/context_optimizer.py` |
@@ -76,6 +78,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Agent Plugin producer portable-surface admission | bundle/agent_plugin_exporter.py (_require_portable_agent_plugin) | `src/apm_cli/bundle/agent_plugin_exporter.py` |
 | APMPackage interpreted-manifest construction | models/apm_package.py (APMPackage.from_mapping) | `src/apm_cli/models/apm_package.py` |
 | Agent Plugin compatibility package projection | agent_plugins/projection.py (project_agent_plugin_package) | `src/apm_cli/agent_plugins/projection.py`; `src/apm_cli/models/validation.py` |
+| Network host literal parsing and loopback classification | utils/net.py (parse_host_address, is_loopback_host) | `src/apm_cli/utils/net.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

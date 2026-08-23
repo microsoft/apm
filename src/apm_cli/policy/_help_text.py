@@ -13,8 +13,8 @@ Adding or removing a form here without a matching change in
 
 POLICY_SOURCE_FORMS_HELP = (
     "Accepts: 'org' (auto-discover from your project's git remote -- "
-    "tries .github, .apm, and _apm repos in order; "
-    "on Azure DevOps only _apm is tried), "
+    "tries .github-private, .github, .apm, and _apm repos in order; "
+    "on Azure DevOps apm/apm-policy is tried, then legacy _apm/_apm after 404), "
     "'owner/repo' (defaults to github.com), an https:// URL, or a "
     "local file path."
 )

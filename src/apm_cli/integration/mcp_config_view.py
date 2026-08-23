@@ -215,7 +215,7 @@ def _allows_missing_manifest(
         return True
 
     dependency_ref = dependency.to_dependency_ref()
-    if not dependency_ref.is_virtual_subdirectory():
+    if not dependency_ref.is_virtual_subdirectory() and dependency.source != "local":
         return False
 
     # ``apm audit --ci`` runs without materialising ``apm_modules/``: the drift
@@ -223,11 +223,18 @@ def _allows_missing_manifest(
     # CLI, then audit -- no ``apm install``) never populates the real modules
     # tree.  When the package directory is absent we cannot probe the on-disk
     # shape, so fall back to the frozen lockfile classification -- a virtual
-    # ``claude_skill`` legitimately ships no ``apm.yml`` by design.  Once the
-    # modules ARE materialised the strict shape probe below still runs and
-    # guards against a mislabeled or malformed installed package.
+    # ``claude_skill`` legitimately ships no ``apm.yml`` by design.  A local
+    # dependency's path is resolved directly from the filesystem (not
+    # materialised into ``apm_modules/``) and can point anywhere, including
+    # outside the repo, so this fallback does not apply to it -- if a local
+    # path is missing, that is a real problem, not an absent-by-design shape.
+    # Once the modules ARE materialised the strict shape probe below still
+    # runs and guards against a mislabeled or malformed installed package.
     if not package_dir.exists():
-        return dependency.package_type == PackageType.CLAUDE_SKILL.value
+        return (
+            dependency.source != "local"
+            and dependency.package_type == PackageType.CLAUDE_SKILL.value
+        )
 
     package_type, _ = detect_package_type(package_dir)
     return (

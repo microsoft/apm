@@ -29,6 +29,7 @@ from ..utils.archive import (
     write_tar_archive,
     write_zip_archive,
 )
+from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ..utils.paths import portable_relpath
@@ -1000,22 +1001,18 @@ def export_plugin_bundle(
 
     # 12. Write merged hooks.json
     if merged_hooks:
-        (bundle_dir / "hooks.json").write_text(
-            json.dumps(merged_hooks, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        write_text_lf(bundle_dir / "hooks.json", json.dumps(merged_hooks, indent=2, sort_keys=True))
 
     # 13. Write merged .mcp.json
     if merged_mcp:
-        (bundle_dir / ".mcp.json").write_text(
+        write_text_lf(
+            bundle_dir / ".mcp.json",
             json.dumps({"mcpServers": merged_mcp}, indent=2, sort_keys=True),
-            encoding="utf-8",
         )
 
     # 14. Write plugin.json with updated component paths
     plugin_json = _update_plugin_json_paths(plugin_json, output_files, logger=logger)
-    (bundle_dir / "plugin.json").write_text(
-        json.dumps(plugin_json, indent=2, sort_keys=False), encoding="utf-8"
-    )
+    write_text_lf(bundle_dir / "plugin.json", json.dumps(plugin_json, indent=2, sort_keys=False))
 
     # 14b. Write enriched lockfile with bundle_files manifest (issue #1098).
     # Walk the bundle and hash every file (excluding the lockfile itself,
@@ -1045,7 +1042,7 @@ def export_plugin_bundle(
             target or "all",
             bundle_files=bundle_files,
         )
-        (bundle_dir / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")
+        write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
     result = PackResult(bundle_path=bundle_dir, files=output_files)
 
