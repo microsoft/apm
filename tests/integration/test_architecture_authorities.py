@@ -218,7 +218,10 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "| Agent Plugin producer portable-surface admission |" in architecture
     assert "| APMPackage interpreted-manifest construction |" in architecture
     assert "| Agent Plugin compatibility package projection |" in architecture
-    assert "| Neutral hook source grammar and shape -> per-target native |" in architecture
+    assert (
+        "| Neutral hook source grammar, per-target native shape, and "
+        "shared-config APM-owned drift projection |"
+    ) in architecture
     assert "src/apm_cli/hook_contract.py" in architecture
     assert architecture == (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
