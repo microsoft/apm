@@ -37,6 +37,26 @@ _METADATA_HOSTS = {
 }
 
 
+def _redact_url_userinfo(url: str) -> str:
+    """Return *url* without userinfo, or a safe placeholder if malformed."""
+    try:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(url)
+        if parsed.username is None and parsed.password is None:
+            return url
+        host = parsed.hostname
+        if host is None:
+            return "<redacted-url>"
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        return urlunparse(parsed._replace(netloc=host))
+    except (ValueError, TypeError):
+        return "<redacted-url>"
+
+
 def _is_internal_or_metadata_host(host: str) -> bool:
     """Return True when ``host`` resolves/parses to an internal IP.
 
@@ -76,7 +96,7 @@ def warn_ssrf_url(url: str | None, logger) -> None:
         return
     if _is_internal_or_metadata_host(host):
         logger.warning(
-            f"URL '{url}' points to an internal or metadata address; "
+            f"URL '{_redact_url_userinfo(url)}' points to an internal or metadata address; "
             f"verify intent before installing."
         )
 

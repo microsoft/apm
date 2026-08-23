@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   authentication failure unrecognisable and private-repo installs failed with
   misleading network guidance. Git subprocesses in the authentication retry
   path now run with `LC_ALL=C` and `LANGUAGE=C`. (by @Naofel-eal, closes #2533)
+- Codex MCP configuration now accepts plain HTTP for loopback endpoints while
+  retaining HTTPS for every non-loopback host. (by @normandev92, #2468)
 
 ### Changed
 

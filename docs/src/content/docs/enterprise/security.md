@@ -456,10 +456,8 @@ use `apm approve` or `apm deny`.
 
 APM integrates MCP (Model Context Protocol) server configurations from packages. Trust is explicit and scoped by dependency depth.
 
-The Codex adapter requires HTTPS for non-loopback remote MCP endpoints.
-It accepts plain HTTP only for loopback addresses (`localhost`,
-`127.0.0.0/8`, and `::1`), where traffic stays on the local machine.
-Unrecognized host forms fail closed and continue to require HTTPS.
+For Codex remote transport requirements, see
+[stdio vs HTTP servers](../consumer/install-mcp-servers/#stdio-vs-http-servers).
 
 ### Direct dependencies
 

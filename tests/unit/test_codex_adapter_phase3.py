@@ -299,8 +299,8 @@ class TestConfigureMcpServer:
     @pytest.mark.parametrize(
         "url",
         [
-            "http://localhost:5500/mcp",
-            "http://127.0.0.1:3000/mcp",
+            "HTTP://LOCALHOST.:5500/mcp",
+            "http://user:topsecret@127.0.0.2:3000/mcp",
             "http://[::1]:8080/mcp",
         ],
     )
@@ -317,7 +317,48 @@ class TestConfigureMcpServer:
         assert result is True
         config_text = (tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8")
         servers = tomlkit.parse(config_text)["mcp_servers"]
-        assert url in [server.get("url") for server in servers.values()]
+        stored_url = next(server["url"] for server in servers.values())
+        assert stored_url == url
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://10.0.0.1/mcp",
+            "http://169.254.169.254/mcp",
+            "http://224.0.0.1/mcp",
+            "http://0.0.0.0/mcp",
+            "http://example.com/mcp",
+            "http://8.8.8.8/mcp",
+            "http://2130706433/mcp",
+            "http://0x7f000001/mcp",
+        ],
+    )
+    def test_rejects_http_remote_on_nonliteral_loopback_host(self, tmp_path: Path, url: str) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server_info = {
+            "remotes": [{"url": url, "transport_type": "streamable-http"}],
+            "packages": [],
+        }
+        with patch.object(adapter, "_fetch_server_info", return_value=server_info):
+            assert adapter.configure_mcp_server("owner/http-nonloopback-server") is False
+
+    def test_rejected_http_remote_does_not_log_url_userinfo(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server_info = {
+            "remotes": [
+                {
+                    "url": "http://user:topsecret@example.com/mcp",
+                    "transport_type": "streamable-http",
+                }
+            ],
+            "packages": [],
+        }
+        with (
+            patch.object(adapter, "_fetch_server_info", return_value=server_info),
+            patch("apm_cli.adapters.client.codex._rich_warning") as warning,
+        ):
+            assert adapter.configure_mcp_server("owner/http-public-server") is False
+        assert "topsecret" not in warning.call_args.args[0]
 
     def test_uses_explicit_server_name_as_key(self, tmp_path: Path, capsys) -> None:
         adapter = _make_adapter(project_root=tmp_path)

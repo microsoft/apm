@@ -267,13 +267,17 @@ class CodexClientAdapter(MCPClientAdapter):
                 )
                 return None
 
-            parsed_remote = urlparse(remote_url)
-            scheme = parsed_remote.scheme.lower()
+            try:
+                parsed_remote = urlparse(remote_url)
+                scheme = parsed_remote.scheme.lower()
+                insecure_loopback = scheme == "http" and is_loopback_host(parsed_remote.hostname)
+            except ValueError:
+                scheme = ""
+                insecure_loopback = False
             # Codex CLI itself accepts plain-http loopback URLs (its docs use
             # http://localhost examples), and local dev servers rarely carry
             # certs -- so loopback http is allowed. Any other non-https host is
             # still rejected to avoid cleartext bearer tokens in transit.
-            insecure_loopback = scheme == "http" and is_loopback_host(parsed_remote.hostname)
             if scheme != "https" and not insecure_loopback:
                 _rich_warning(
                     f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "

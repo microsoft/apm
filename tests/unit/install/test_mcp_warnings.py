@@ -150,6 +150,23 @@ class TestWarnSsrfUrl:
         assert match is not None, f"warning message has no quoted URL: {msg!r}"
         assert urlparse(match.group(1)).hostname == "127.0.0.1"
 
+    def test_internal_url_warning_redacts_userinfo(self):
+        logger = self._make_logger()
+        warn_ssrf_url("http://user:topsecret@127.0.0.1:8080/api", logger)
+
+        message = logger.warning.call_args.args[0]
+        assert "topsecret" not in message
+        import re
+        from urllib.parse import urlparse
+
+        match = re.search(r"URL '([^']+)'", message)
+        assert match is not None
+        parsed = urlparse(match.group(1))
+        assert parsed.hostname == "127.0.0.1"
+        assert parsed.port == 8080
+        assert parsed.username is None
+        assert parsed.password is None
+
     def test_metadata_url_warns(self):
         logger = self._make_logger()
         warn_ssrf_url("http://169.254.169.254/latest/meta-data", logger)
