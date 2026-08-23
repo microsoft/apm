@@ -105,7 +105,9 @@ def normalize_repo_url(url: str) -> str:
             port = None
         # Reconstruct the authority (Step 3 lowercase host, Step 4 drop password)
         # IPv6 literals require brackets in a reconstructed URI authority.
-        rendered_host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+        rendered_host = (
+            f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+        )
         authority = f"{username}@{rendered_host}" if username else rendered_host
         if port:
             authority = f"{authority}:{port}"
