@@ -151,7 +151,8 @@ def test_export_invalid_timestamp_exits_2(runner, tmp_path, timestamp):
         assert "Expected timezone-aware ISO 8601 format" in result.stderr
 
 
-def test_export_without_generated_at_uses_fixed_epoch(runner, tmp_path):
+def test_export_without_generated_at_uses_fixed_epoch(runner, tmp_path, monkeypatch):
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
     with runner.isolated_filesystem(temp_dir=tmp_path):
         _seed(Path.cwd())
         lock_path = Path("apm.lock.yaml")
