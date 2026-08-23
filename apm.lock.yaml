@@ -134,9 +134,9 @@ dependencies:
   - .agents/skills/apm-triage-panel/apm.yml
   - .agents/skills/apm-triage-panel/assets/triage-template.md
   deployed_file_hashes:
-    .agents/skills/apm-triage-panel/SKILL.md: sha256:2ef70329aefd0cbec1302aad3975f6caa0a27654d58005bba622ef1021267d1e
+    .agents/skills/apm-triage-panel/SKILL.md: sha256:9be296adfad117b54d3f86a0524c3eff92adbd2330cda16e5ea3804537084301
     .agents/skills/apm-triage-panel/apm.yml: sha256:e8b7946f433abdc8342241483963bac2895182916ea66f5aa39497d00c7930a4
-    .agents/skills/apm-triage-panel/assets/triage-template.md: sha256:69a027959eaec5335668e087c86babd814ba20cf21662ed524cf285b178e21d1
+    .agents/skills/apm-triage-panel/assets/triage-template.md: sha256:ea67af2e1f333fcc8e5e6cb01dbacc3d4807c2b7097834c16e38dc23f2914fde
   source: local
   local_path: ../apm-triage-panel
   declaring_parent: ./packages/apm-issue-autopilot
