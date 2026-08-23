@@ -9,8 +9,8 @@ Strategy: hermetic -- mocks registry, runtime, console.
 from __future__ import annotations
 
 import json
-from urllib.parse import urlparse
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 import tomlkit
@@ -248,9 +248,7 @@ def test_install_loopback_http_remote_is_byte_idempotent_for_requested_targets(
         "codex": ["loopback-remote"],
         "copilot": ["loopback-remote"],
     }
-    assert {
-        row["runtime"] for row in json.loads(first_lock)["deployments"]
-    } == {"codex", "copilot"}
+    assert {row["runtime"] for row in json.loads(first_lock)["deployments"]} == {"codex", "copilot"}
     first_configs = (codex_config_path.read_bytes(), copilot_config_path.read_bytes())
 
     retry = CliRunner().invoke(cli, ["install", "--no-policy"])

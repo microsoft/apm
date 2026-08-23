@@ -53,9 +53,6 @@ def is_loopback_host(host: str | None) -> bool:
         addr = ipaddress.ip_address(lowered)
     except ValueError:
         return False
-    return (
-        isinstance(addr, ipaddress.IPv4Address)
-        and addr.is_loopback
-        or isinstance(addr, ipaddress.IPv6Address)
-        and addr == _IPV6_LOOPBACK
+    return (isinstance(addr, ipaddress.IPv4Address) and addr.is_loopback) or (
+        isinstance(addr, ipaddress.IPv6Address) and addr == _IPV6_LOOPBACK
     )

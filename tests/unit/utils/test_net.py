@@ -55,7 +55,7 @@ def test_loopback_hosts_detected(host: str) -> None:
         "10.0.0.1",
         "169.254.169.254",
         "8.8.8.8",
-        "0.0.0.0",
+        "0.0.0.0",  # noqa: S104 - test input for unspecified-address rejection.
         "224.0.0.1",
         "2130706433",
         "0x7f000001",

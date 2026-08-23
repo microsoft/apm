@@ -333,7 +333,9 @@ class TestConfigureMcpServer:
             "http://0x7f000001/mcp",
         ],
     )
-    def test_rejects_http_remote_on_nonliteral_loopback_host(self, tmp_path: Path, url: str) -> None:
+    def test_rejects_http_remote_on_nonliteral_loopback_host(
+        self, tmp_path: Path, url: str
+    ) -> None:
         adapter = _make_adapter(project_root=tmp_path)
         server_info = {
             "remotes": [{"url": url, "transport_type": "streamable-http"}],
