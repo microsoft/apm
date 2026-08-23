@@ -469,6 +469,12 @@ def integrate_package_primitives(  # noqa: PLR0913
         _agg_paths: list[str] = []
         _agg_hook_payloads: list = []
         _label = _prim_name
+        if _prim_name == "instructions":
+            _integrator.preflight_instructions_for_targets(
+                targets,
+                package_info,
+                project_root,
+            )
         for _target in targets:
             _mapping = _target.primitives.get(_prim_name)
             if _mapping is None:

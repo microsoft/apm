@@ -301,7 +301,7 @@ print("ordinary Markdown")
                 "install",
                 "../packages/local-skills",
                 "--target",
-                "claude",
+                "copilot,cursor",
             ],
             cwd=consumer,
             capture_output=True,
@@ -311,8 +311,9 @@ print("ordinary Markdown")
 
         assert result.returncode != 0, result.stdout + result.stderr
         output = result.stdout + result.stderr
-        assert not (consumer / ".claude/rules/a-good.md").exists()
-        assert not (consumer / ".claude/rules/test-skill.md").exists()
+        assert not (consumer / ".github/instructions/a-good.instructions.md").exists()
+        assert not (consumer / ".cursor/rules/a-good.mdc").exists()
+        assert not (consumer / ".cursor/rules/test-skill.mdc").exists()
         assert "Fix or remove the invalid frontmatter, then rerun apm install." in output
 
     def test_install_cursor_quotes_multiline_control_characters(

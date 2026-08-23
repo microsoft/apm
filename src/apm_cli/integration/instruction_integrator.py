@@ -42,6 +42,13 @@ class InstructionIntegrator(BaseIntegrator):
     # Deploys via write_text_lf -> compare adopt candidates in LF mode.
     _LF_NORMALIZED_DEPLOY = True
 
+    def __init__(self):
+        super().__init__()
+        self._prepared_rule_plans: dict[
+            tuple[str, str, str, str, str],
+            dict[Path, tuple[Path, str, int]],
+        ] = {}
+
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
     _FORMAT_CONVERTERS: ClassVar[dict[str, str]] = {
@@ -107,6 +114,78 @@ class InstructionIntegrator(BaseIntegrator):
                 ) from exc
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
+
+    @staticmethod
+    def _plan_key(
+        package_path: Path,
+        project_root: Path,
+        deploy_dir: Path,
+        extension: str,
+        fmt: str,
+    ) -> tuple[str, str, str, str, str]:
+        """Return the per-package, per-target identity for a prepared rule plan."""
+        return (
+            str(package_path.resolve()),
+            str(project_root.resolve()),
+            str(deploy_dir.resolve()),
+            extension,
+            fmt,
+        )
+
+    def _prepare_rule_plan(
+        self,
+        instruction_files: list[Path],
+        deploy_dir: Path,
+        extension: str,
+        fmt: str,
+    ) -> dict[Path, tuple[Path, str, int]]:
+        """Render every converted rule without writing target files."""
+        plan: dict[Path, tuple[Path, str, int]] = {}
+        for source_file in instruction_files:
+            stem = source_file.name
+            if stem.endswith(".instructions.md"):
+                stem = stem[: -len(".instructions.md")]
+            target_path = deploy_dir / f"{stem}{extension}"
+            ensure_path_within(target_path, deploy_dir)
+            content, links_resolved = self._render_instruction(source_file, target_path, fmt)
+            plan[source_file] = (target_path, content, links_resolved)
+        return plan
+
+    def preflight_instructions_for_targets(
+        self,
+        targets: list[TargetProfile],
+        package_info,
+        project_root: Path,
+    ) -> None:
+        """Prepare all converted targets before any selected target writes."""
+        self._prepared_rule_plans.clear()
+        instruction_files = self.find_instruction_files(package_info.install_path)
+        if not instruction_files:
+            return
+
+        self.init_link_resolver(package_info, project_root)
+        package_path = Path(package_info.install_path)
+        for target in targets:
+            mapping = target.primitives.get("instructions")
+            if not mapping or not mapping.output_compare:
+                continue
+            if not target.auto_create and not (project_root / target.root_dir).is_dir():
+                continue
+            effective_root = mapping.deploy_root or target.root_dir
+            deploy_dir = project_root / effective_root / mapping.subdir
+            key = self._plan_key(
+                package_path,
+                project_root,
+                deploy_dir,
+                mapping.extension,
+                mapping.format_id,
+            )
+            self._prepared_rule_plans[key] = self._prepare_rule_plan(
+                instruction_files,
+                deploy_dir,
+                mapping.extension,
+                mapping.format_id,
+            )
 
     # ------------------------------------------------------------------
     # Target-driven API (data-driven dispatch)
@@ -182,19 +261,25 @@ class InstructionIntegrator(BaseIntegrator):
         files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
-        rendered_rules: dict[Path, tuple[Path, str, int]] = {}
-
+        plan_key = self._plan_key(
+            Path(package_info.install_path),
+            project_root,
+            deploy_dir,
+            mapping.extension,
+            fmt,
+        )
+        rendered_rules = self._prepared_rule_plans.pop(plan_key, None)
         if apm_owned_rule_dir:
-            # Render the entire package before writing any rule. A parser
-            # rejection in one source must not leave earlier files active.
-            for source_file in instruction_files:
-                stem = source_file.name
-                if stem.endswith(".instructions.md"):
-                    stem = stem[: -len(".instructions.md")]
-                target_path = deploy_dir / f"{stem}{mapping.extension}"
-                ensure_path_within(target_path, deploy_dir)
-                content, links_resolved = self._render_instruction(source_file, target_path, fmt)
-                rendered_rules[source_file] = (target_path, content, links_resolved)
+            # Direct integrator callers may bypass install-level preflight.
+            if rendered_rules is None:
+                rendered_rules = self._prepare_rule_plan(
+                    instruction_files,
+                    deploy_dir,
+                    mapping.extension,
+                    fmt,
+                )
+        else:
+            rendered_rules = {}
 
         for source_file in instruction_files:
             if apm_owned_rule_dir:
