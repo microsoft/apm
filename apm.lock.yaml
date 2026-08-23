@@ -2063,7 +2063,7 @@ deployments:
   owners:
   - local:packages/apm-triage-panel
   active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:2ef70329aefd0cbec1302aad3975f6caa0a27654d58005bba622ef1021267d1e
+  content_hash: sha256:9be296adfad117b54d3f86a0524c3eff92adbd2330cda16e5ea3804537084301
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-triage-panel/apm.yml
@@ -2081,7 +2081,7 @@ deployments:
   owners:
   - local:packages/apm-triage-panel
   active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:69a027959eaec5335668e087c86babd814ba20cf21662ed524cf285b178e21d1
+  content_hash: sha256:ea67af2e1f333fcc8e5e6cb01dbacc3d4807c2b7097834c16e38dc23f2914fde
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd
