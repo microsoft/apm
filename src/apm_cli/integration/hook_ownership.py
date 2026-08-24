@@ -74,6 +74,7 @@ def project_apm_owned_hook_entries(
     sidecar is APM-owned and maps matching native entries back to their
     ``_apm_source`` markers; retain only that marked slice for comparison.
     """
+
     def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
@@ -105,7 +106,9 @@ def project_apm_owned_hook_entries(
             if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
         )
         config_counts = Counter(
-            json.dumps(entry, sort_keys=True) for entry in container.get(event_name, []) if isinstance(entry, dict)
+            json.dumps(entry, sort_keys=True)
+            for entry in container.get(event_name, [])
+            if isinstance(entry, dict)
         )
         if any(config_counts[key] > count for key, count in owned_counts.items()):
             raise ValueError("ambiguous duplicate APM-owned hook entry")
