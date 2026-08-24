@@ -20,7 +20,6 @@ It deliberately depends only on stdlib + click (for the typed
 from __future__ import annotations
 
 import contextlib
-import ipaddress
 import os
 from collections.abc import Iterator, Mapping, Sequence
 from urllib.parse import urlparse, urlunparse
@@ -28,6 +27,7 @@ from urllib.parse import urlparse, urlunparse
 import click
 
 from ...models.dependency.mcp import _ALLOWED_URL_SCHEMES
+from ...utils.net import is_loopback_host, parse_host_address
 
 # Defensive cap on registry URL length to keep apm.yml diffs reviewable
 # and to bound any downstream URL parsing/logging surface.
@@ -69,24 +69,12 @@ def _is_local_or_metadata_host(host: str | None) -> bool:
     if not host:
         return False
     lowered = host.lower()
-    if lowered in ("localhost", "ip6-localhost", "ip6-loopback"):
+    if is_loopback_host(lowered):
         return True
-    try:
-        addr = ipaddress.ip_address(lowered)
-    except ValueError:
-        # urlparse keeps decimal-encoded forms like '2130706433' (== 127.0.0.1)
-        # as the hostname string. Try int parse to catch that obfuscation.
-        try:
-            addr = ipaddress.ip_address(int(lowered))
-        except (ValueError, TypeError):
-            return False
-    return (
-        addr.is_loopback
-        or addr.is_link_local
-        or addr.is_private
-        or addr.is_multicast
-        or addr.is_unspecified
-    )
+    addr = parse_host_address(lowered)
+    if addr is None:
+        return False
+    return addr.is_link_local or addr.is_private or addr.is_multicast or addr.is_unspecified
 
 
 def validate_registry_url(value: str | None) -> str | None:

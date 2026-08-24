@@ -293,6 +293,8 @@ class MCPIntegrator:
                 "args": list(dep.args) if dep.args else [],
                 "env": dict(dep.env) if dep.env else {},
             }
+            if dep.cwd is not None:
+                info["_raw_stdio"]["cwd"] = dep.cwd
 
         if dep.transport in ("http", "sse", "streamable-http"):
             # Build as a remote endpoint
@@ -620,8 +622,15 @@ class MCPIntegrator:
             )
 
         if "copilot" in target_runtimes:
+            from apm_cli.factory import ClientFactory
+
+            copilot_client = ClientFactory.create_client(
+                "copilot",
+                project_root=project_root_path,
+                user_scope=scope is not InstallScope.PROJECT,
+            )
             _clean_json_mcp_config(
-                Path.home() / ".copilot" / "mcp-config.json",
+                Path(copilot_client.get_config_path()),
                 expanded_stale,
                 logger,
                 "Copilot CLI config",

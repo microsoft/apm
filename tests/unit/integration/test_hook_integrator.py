@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from apm_cli.core.deployment_state import MaterializationStatus
+from apm_cli.integration.hook_command_paths import normalize_quoted_plugin_root
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,  # noqa: F401
     HookIntegrator,
@@ -1672,6 +1673,255 @@ class TestScriptPathRewriting:
 
         assert ".claude/hooks/my-pkg/hooks/run.sh" in cmd
         assert len(scripts) == 1
+
+    def test_rewrite_plugin_root_with_quote_before_separator(self, temp_project):
+        """A quote between the variable and the separator must not defeat the matcher."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py',
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert ".github/hooks/scripts/my-pkg/hooks/probe.py" in cmd
+        assert len(scripts) == 1
+        assert cmd.count('"') % 2 == 0
+
+    def test_rewrite_plugin_root_with_single_quote_before_separator(self, temp_project):
+        """Single quotes normalize to an expandable, balanced command."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "python3 '${CLAUDE_PLUGIN_ROOT}'/hooks/probe.py",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert ".github/hooks/scripts/my-pkg/hooks/probe.py" in cmd
+        assert len(scripts) == 1
+        assert "'" not in cmd
+        assert cmd.count('"') == 2
+
+    def test_quote_before_separator_matches_fully_quoted_spelling(self, temp_project):
+        """Both spellings must produce the same rewritten command."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "run.sh").write_text("#!/bin/bash", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        split_quote, split_scripts = integrator._rewrite_command_for_target(
+            'bash "${CLAUDE_PLUGIN_ROOT}"/hooks/run.sh',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+        wrapped_quote, wrapped_scripts = integrator._rewrite_command_for_target(
+            'bash "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh"',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert split_quote == wrapped_quote
+        assert len(split_scripts) == len(wrapped_scripts) == 1
+
+    @pytest.mark.parametrize("operator", ("&&", ";", "|"))
+    def test_quote_before_separator_stops_before_shell_operator(self, temp_project, operator):
+        """Adjacent shell operators must remain outside the rewritten path."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        cmd, scripts = HookIntegrator()._rewrite_command_for_target(
+            f'python3 "${{CLAUDE_PLUGIN_ROOT}}"/hooks/probe.py{operator}echo done',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert f"{operator}echo done" in cmd
+        assert cmd.count('"') == 2
+        assert len(scripts) == 1
+
+    def test_quote_before_separator_preserves_escaped_space(self, temp_project):
+        """An escaped space remains part of the balanced quoted script path."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "my script.py").write_text("print('ok')", encoding="utf-8")
+
+        cmd, scripts = HookIntegrator()._rewrite_command_for_target(
+            r'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/my\ script.py',
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert ".claude/hooks/my-pkg/hooks/my script.py" in cmd
+        assert cmd.count('"') == 2
+        assert len(scripts) == 1
+
+    def test_quote_normalization_handles_long_escaped_input(self):
+        """Long escaped input must normalize without pathological matching."""
+        escaped_path = r"\ " * 5000
+
+        normalized = normalize_quoted_plugin_root(
+            f'python3 "${{CLAUDE_PLUGIN_ROOT}}"/hooks/{escaped_path}probe.py'
+        )
+
+        assert normalized.startswith('python3 "${CLAUDE_PLUGIN_ROOT}/hooks/')
+        assert normalized.endswith('probe.py"')
+
+    def test_missing_script_with_quote_before_separator_warns(self, temp_project, capsys):
+        """An unresolvable plugin-root reference must not be silently dropped."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        integrator = HookIntegrator()
+        _, scripts = integrator._rewrite_command_for_target(
+            'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/absent.py',
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert len(scripts) == 0
+        assert "Hook script not found" in capsys.readouterr().out
+
+    def test_unparseable_plugin_root_reference_warns(self, temp_project, capsys):
+        """A reference the matcher cannot parse must still produce a diagnostic."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            'echo "${CLAUDE_PLUGIN_ROOT}"',
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert len(scripts) == 0
+        assert cmd == 'echo "${CLAUDE_PLUGIN_ROOT}"'
+        output = capsys.readouterr().out
+        assert "Plugin-root reference has no path" in output
+        assert "Add a package-relative path after the token" in output
+
+    def test_unparseable_plugin_root_warning_escapes_control_characters(self, temp_project, capsys):
+        """A package-controlled residual cannot inject terminal controls."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        HookIntegrator()._rewrite_command_for_target(
+            'echo "${CLAUDE_PLUGIN_ROOT}\x1b[31m"',
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        out = capsys.readouterr().out
+        assert "\x1b[31m" not in out
+        assert "${CLAUDE_PLUGIN_ROOT}?[31m" in out
+
+    def test_missing_plugin_root_path_warning_escapes_control_characters(
+        self, temp_project, capsys
+    ):
+        """A matched missing path cannot inject terminal controls."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        HookIntegrator()._rewrite_command_for_target(
+            "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/missing\x1b[31m.py",
+            pkg_dir,
+            "unsafe-package",
+            "vscode",
+        )
+
+        out = capsys.readouterr().out
+        assert "\x1b[31m" not in out
+        assert "unsafe-package" in out
+        assert "missing?[31m.py" in "".join(out.split())
+
+    def test_mismatched_quotes_around_plugin_root_warns(self, temp_project, capsys):
+        """Mismatched quotes are not normalized, so the residual scan must report them."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        _, scripts = integrator._rewrite_command_for_target(
+            "python3 \"${CLAUDE_PLUGIN_ROOT}'/hooks/probe.py",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert len(scripts) == 0
+        output = capsys.readouterr().out
+        assert "Unresolved plugin-root reference" in output
+        assert "Ensure the quote marks match" in output
+
+    def test_plugin_root_path_traversal_warns(self, temp_project, capsys):
+        """A rejected traversal must remain visible to the package author."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        _, scripts = HookIntegrator()._rewrite_command_for_target(
+            "python3 ${CLAUDE_PLUGIN_ROOT}/../outside.py",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert scripts == []
+        output = capsys.readouterr().out
+        assert "Hook path escapes package 'my-pkg'" in output
+        assert "Keepthepathinsidethepackage" in "".join(output.split())
+        assert "Hook script not found" not in output
+
+    def test_resolved_plugin_root_emits_no_residual_warning(self, temp_project, capsys):
+        """The residual scan must stay quiet when every reference was rewritten."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "probe.py").write_text("print('ok')", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        for command in (
+            "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/probe.py",
+            'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/probe.py"',
+            'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py',
+        ):
+            integrator._rewrite_command_for_target(command, pkg_dir, "my-pkg", "vscode")
+            assert "Unresolved plugin-root reference" not in capsys.readouterr().out
+
+    def test_missing_script_warns_once_not_twice(self, temp_project, capsys):
+        """A matched-but-missing script must not also trip the residual scan."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        integrator = HookIntegrator()
+        integrator._rewrite_command_for_target(
+            "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/absent.py",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        out = capsys.readouterr().out
+        assert "Hook script not found" in out
+        assert "Unresolved plugin-root reference" not in out
 
     def test_rewrite_claude_project_powershell_path_is_cwd_independent(self, temp_project):
         """Claude project PowerShell hooks must use Claude's project-root variable."""

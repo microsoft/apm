@@ -21,8 +21,8 @@ def check_executable_approval(
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
     *,
     ctx: InstallContext | None = None,
-) -> tuple[bool, bool, bool, bool]:
-    """Return ``(hooks_approved, bin_approved, mcp_approved, canvas_approved)`` for a package.
+) -> tuple[bool, bool, bool, bool, bool]:
+    """Return hook, bin, MCP, canvas, and LSP approval for a package.
 
     Local project content (``_local``) is always trusted.  Dependency
     packages are checked against the ``allowExecutables`` block.  When
@@ -34,12 +34,13 @@ def check_executable_approval(
     """
     is_local = package_name == "_local"
     if is_local or allow_executables is None:
-        return True, True, True, True
+        return True, True, True, True, True
 
     from apm_cli.security.executables import (
         EXEC_TYPE_BIN,
         EXEC_TYPE_CANVAS,
         EXEC_TYPE_HOOKS,
+        EXEC_TYPE_LSP,
         EXEC_TYPE_MCP,
         build_approval_key,
         is_package_approved,
@@ -78,10 +79,11 @@ def check_executable_approval(
     canvas_ok = any(
         is_package_approved(allow_executables, k, EXEC_TYPE_CANVAS) for k in candidate_keys
     )
+    lsp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_LSP) for k in candidate_keys)
 
     # Track blocked packages for the post-loop approval prompt, and record the
     # lockfile exec_status for the audit (Gap B) from the same scan.
-    blocked = not hooks_ok or not bin_ok or not mcp_ok or not canvas_ok
+    blocked = not hooks_ok or not bin_ok or not mcp_ok or not canvas_ok or not lsp_ok
     needs_status = ctx is not None and getattr(ctx, "exec_trust_ctx", None) is not None
     if ctx is not None and (blocked or needs_status):
         from apm_cli.security.executables import scan_package_executables
@@ -103,7 +105,7 @@ def check_executable_approval(
             if status is not None:
                 ctx.package_exec_status[package_name] = status
 
-    return hooks_ok, bin_ok, mcp_ok, canvas_ok
+    return hooks_ok, bin_ok, mcp_ok, canvas_ok, lsp_ok
 
 
 def resolve_package_key(package_info: Any, package_name: str) -> str:

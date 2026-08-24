@@ -67,6 +67,26 @@ def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60):
     )
 
 
+def _write_targeted_package(
+    root: Path,
+    name: str,
+    primitive_path: str,
+    filename: str,
+    content: str,
+) -> Path:
+    """Create one local package with a primitive for a selected global target."""
+    package = root / name
+    package.mkdir()
+    (package / "apm.yml").write_text(
+        yaml.dump({"name": name, "version": "1.0.0", "description": f"{name} fixture"}),
+        encoding="utf-8",
+    )
+    primitive_dir = package / primitive_path
+    primitive_dir.mkdir(parents=True)
+    (primitive_dir / filename).write_text(content, encoding="utf-8")
+    return package
+
+
 @pytest.fixture
 def local_package(tmp_path):
     """Create a minimal local APM package for testing global install.
@@ -436,6 +456,45 @@ class TestGlobalGeminiScope:
 class TestGlobalUninstallLifecycle:
     """Test uninstall --global removes packages from user-scope metadata."""
 
+    @staticmethod
+    def _install_survivor_and_removed_target_packages(
+        apm_binary_path: Path, fake_home: Path, tmp_path: Path
+    ) -> tuple[Path, Path, Path]:
+        """Install global agent-skills survivor and OpenCode removal fixtures."""
+        survivor = _write_targeted_package(
+            tmp_path,
+            "survivor-target-cleanup",
+            ".apm/skills/survivor",
+            "SKILL.md",
+            "---\nname: survivor\ndescription: Survives removal.\n---\n# Survivor\n",
+        )
+        removed = _write_targeted_package(
+            tmp_path,
+            "removed-target-cleanup",
+            ".apm/agents",
+            "orphan.agent.md",
+            "---\nname: orphan\ndescription: Must be cleaned.\n---\n# Orphan\n",
+        )
+        survivor_install = _run_apm(
+            apm_binary_path,
+            ["install", "--global", str(survivor), "--target", "agent-skills"],
+            fake_home,
+            fake_home,
+        )
+        assert survivor_install.returncode == 0, survivor_install.stdout + survivor_install.stderr
+        removed_install = _run_apm(
+            apm_binary_path,
+            ["install", "--global", str(removed), "--target", "opencode"],
+            fake_home,
+            fake_home,
+        )
+        assert removed_install.returncode == 0, removed_install.stdout + removed_install.stderr
+        survivor_file = fake_home / ".agents" / "skills" / "survivor" / "SKILL.md"
+        removed_file = fake_home / ".config" / "opencode" / "agents" / "orphan.md"
+        assert survivor_file.exists()
+        assert removed_file.exists()
+        return removed, survivor_file, removed_file
+
     def test_uninstall_removes_package_from_user_manifest(self, apm_binary_path, fake_home):
         """Uninstall --global should remove the package entry from ~/.apm/apm.yml."""
         apm_dir = fake_home / ".apm"
@@ -496,6 +555,69 @@ class TestGlobalUninstallLifecycle:
         assert "not found" in combined.lower() or "not in apm.yml" in combined.lower(), (
             f"Expected 'not found' warning: {combined}"
         )
+
+    def test_uninstall_global_cleans_removed_only_target_before_state_removal(
+        self,
+        apm_binary_path,
+        fake_home,
+        tmp_path,
+    ):
+        """A removed OpenCode agent cannot survive a manifest with agent-skills only."""
+        removed, survivor_file, removed_file = self._install_survivor_and_removed_target_packages(
+            apm_binary_path, fake_home, tmp_path
+        )
+
+        apm_dir = fake_home / ".apm"
+        uninstall_result = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", str(removed)],
+            fake_home,
+            fake_home,
+        )
+        assert uninstall_result.returncode == 0, uninstall_result.stdout + uninstall_result.stderr
+
+        assert not removed_file.exists()
+        assert survivor_file.exists()
+        manifest = yaml.safe_load((apm_dir / "apm.yml").read_text(encoding="utf-8"))
+        assert isinstance(manifest, dict)
+        manifest_text = yaml.safe_dump(manifest)
+        assert "removed-target-cleanup" not in manifest_text
+        assert "survivor-target-cleanup" in manifest_text
+        lockfile_text = (apm_dir / "apm.lock.yaml").read_text(encoding="utf-8")
+        assert "removed-target-cleanup" not in lockfile_text
+        assert "survivor-target-cleanup" in lockfile_text
+        assert not (apm_dir / "apm_modules" / "_local" / "removed-target-cleanup").exists()
+        assert (apm_dir / "apm_modules" / "_local" / "survivor-target-cleanup").exists()
+
+    def test_uninstall_global_preserves_state_for_user_edited_removed_target_file(
+        self,
+        apm_binary_path,
+        fake_home,
+        tmp_path,
+    ):
+        """A retained edited file leaves all removal state available for retry."""
+        removed, survivor_file, removed_file = self._install_survivor_and_removed_target_packages(
+            apm_binary_path, fake_home, tmp_path
+        )
+        removed_file.write_text("# user edit\n", encoding="utf-8")
+
+        result = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", str(removed)],
+            fake_home,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        apm_dir = fake_home / ".apm"
+        assert result.returncode != 0, combined
+        assert ".config/opencode/agents/orphan.md" in combined
+        assert "retry uninstall" in combined
+        assert removed_file.exists()
+        assert survivor_file.exists()
+        assert "removed-target-cleanup" in (apm_dir / "apm.yml").read_text(encoding="utf-8")
+        assert "removed-target-cleanup" in (apm_dir / "apm.lock.yaml").read_text(encoding="utf-8")
+        assert (apm_dir / "apm_modules" / "_local" / "removed-target-cleanup").exists()
 
 
 # ---------------------------------------------------------------------------

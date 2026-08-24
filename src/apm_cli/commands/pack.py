@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from ..bundle.formats import BundleFormat, cli_format_choices, resolve_bundle_format
 from ..bundle.unpacker import unpack_bundle
 from ..core.build_orchestrator import (
     BuildError,
@@ -36,19 +37,23 @@ is embedded in each bundle.
 
 Examples:
 
+\b
   # Bundle only (most common -- just dependencies: in apm.yml):
-  apm pack                              # Claude Code plugin (default)
-  apm pack --target claude --archive
+  apm pack                              # Legacy Claude plugin bundle (current default)
+  apm pack --format agent-plugin        # Portable Agent Plugins v1 bundle
   apm pack --format apm -o ./dist       # Legacy APM bundle layout
 
+\b
   # Marketplace only (marketplace: in apm.yml, no dependencies:):
   apm pack
   apm pack --offline --dry-run
 
+\b
   # Both (apm.yml has dependencies: AND marketplace: blocks):
   apm pack
   apm pack --archive --offline
 
+\b
   # Marketplace output paths are normally configured in apm.yml:
   # marketplace.claude.output / marketplace.codex.output
 
@@ -151,11 +156,23 @@ def _parse_marketplace_filter(
 
 @click.command(name="pack", help=_PACK_HELP)
 @click.option(
+    "--claude-plugin",
+    "select_claude_plugin",
+    is_flag=True,
+    default=False,
+    help="Select the legacy Claude plugin bundle output (current no-flag default).",
+)
+@click.option(
     "--format",
     "fmt",
-    type=click.Choice(["plugin", "apm"]),
-    default="plugin",
-    help="Bundle format. 'plugin' (default) emits a Claude Code plugin directory with plugin.json. 'apm' produces the legacy APM bundle layout (kept for tooling that still consumes it).",
+    type=click.Choice(cli_format_choices(), case_sensitive=False),
+    default=None,
+    help=(
+        "Bundle format selector. 'agent-plugin' emits portable Agent Plugins v1; "
+        "'plugin' is the compatibility alias for the legacy Claude plugin bundle; "
+        "'claude' / 'claude-plugin' also emit that bundle; and 'apm' emits the "
+        "legacy APM bundle layout. The current no-flag default is 'claude-plugin'."
+    ),
 )
 @click.option(
     "--target",
@@ -280,6 +297,7 @@ def _parse_marketplace_filter(
 @click.pass_context
 def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     ctx,
+    select_claude_plugin,
     fmt,
     target,
     archive,
@@ -299,6 +317,14 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
+
+    try:
+        bundle_format = resolve_bundle_format(
+            fmt,
+            claude_plugin=select_claude_plugin,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
 
     # Error when --archive-format is explicitly set but --archive is not.
     if (
@@ -350,7 +376,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     options = BuildOptions(
         project_root=project_root,
         apm_yml_path=project_root / "apm.yml",
-        bundle_format=fmt,
+        bundle_format=bundle_format,
         bundle_target=effective_target,
         bundle_archive=archive,
         bundle_archive_format=archive_format,
@@ -505,7 +531,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         envelope = {
             "ok": True,
             "dry_run": dry_run,
-            "warnings": [],
+            "warnings": list(result.warnings),
             "errors": [],
             "marketplace": {"outputs": []},
             "bundle": None,
@@ -516,7 +542,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         for sub in result.producer_results:
             if sub.kind is OutputKind.MARKETPLACE and sub.payload is not None:
                 payload = sub.payload.to_json_dict()
-                envelope["warnings"] = payload.get("warnings", [])
                 envelope["marketplace"] = payload.get("marketplace", {"outputs": []})
             elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
                 envelope["plugin_manifests"] = sub.payload
@@ -535,7 +560,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             _render_bundle_result(
                 logger,
                 sub.payload,
-                fmt,
+                bundle_format,
                 target,
                 dry_run,
                 show_zip_migration_notice=(
@@ -617,6 +642,9 @@ def _render_bundle_result(
     if pack_result is None:
         return
 
+    for warn_msg in getattr(pack_result, "warnings", ()) or ():
+        logger.warning(warn_msg)
+
     mapping_summary = _mapping_summary(pack_result.path_mappings)
 
     if dry_run:
@@ -658,12 +686,16 @@ def _render_bundle_result(
             logger.verbose_detail(
                 "    Tip: use --archive-format tar.gz for smaller archives on text-heavy bundles."
             )
-        if fmt == "plugin":
+        if fmt == BundleFormat.AGENT_PLUGIN:
             logger.progress(
-                "Plugin bundle ready -- contains plugin.json plus "
-                "plugin-native directories (agents/, skills/, commands/, ...) "
-                "and an embedded apm.lock.yaml for install-time integrity "
-                "verification."
+                "Agent Plugin bundle ready -- contains canonical plugin.json, "
+                "mcp.json, supported skills/, and an embedded apm.lock.yaml "
+                "for integrity verification."
+            )
+        elif fmt == BundleFormat.CLAUDE_PLUGIN:
+            logger.progress(
+                "Claude plugin bundle ready -- contains plugin.json plus "
+                "plugin-native directories and an embedded apm.lock.yaml."
             )
         # Issue #1207: target-agnostic bundles install into any consumer
         # project.  Print a copy-pasteable share line so packing creates

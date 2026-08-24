@@ -56,10 +56,9 @@ _CASES = (
     _TargetCase(
         runtime="copilot",
         manifest_target="copilot",
-        config_path=PurePosixPath("mcp-config.json"),
+        config_path=PurePosixPath(".github/mcp.json"),
         config_section="mcpServers",
         env_operand=f"{_ENV_NAME}=${{{_ENV_NAME}}}",
-        external_config_root=True,
     ),
     _TargetCase(
         runtime="codex",

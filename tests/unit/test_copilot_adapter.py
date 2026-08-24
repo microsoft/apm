@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
+from apm_cli.models.dependency.mcp import TrustedEnvLiteral
 
 
 class TestCopilotRemoteTransportValidation(unittest.TestCase):
@@ -405,6 +406,28 @@ class TestCopilotEnvTranslationStdioEnv(unittest.TestCase):
         ]
         resolved = adapter._resolve_environment_variables(env_vars, env_overrides=None)
         self.assertEqual(resolved.get("GITHUB_TOOLSETS"), "context")
+
+    def test_agent_plugin_runtime_paths_are_persisted_as_literals(self):
+        adapter = self._adapter()
+        env_vars = {
+            "PLUGIN_ROOT": TrustedEnvLiteral("/retained/plugin"),
+            "PLUGIN_DATA": TrustedEnvLiteral("/retained/data"),
+        }
+
+        resolved = adapter._resolve_environment_variables(env_vars, env_overrides=None)
+
+        self.assertEqual(resolved, env_vars)
+        self.assertEqual(adapter._last_env_placeholder_keys, set())
+
+    def test_plugin_runtime_name_without_provenance_is_not_trusted(self):
+        adapter = self._adapter()
+
+        resolved = adapter._resolve_environment_variables(
+            {"PLUGIN_ROOT": "/attacker/chosen"},
+            env_overrides=None,
+        )
+
+        self.assertEqual(resolved, {"PLUGIN_ROOT": "${PLUGIN_ROOT}"})
 
 
 class TestCopilotEnvTranslationStdioArgs(unittest.TestCase):

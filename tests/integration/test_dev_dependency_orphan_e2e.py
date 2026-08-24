@@ -61,6 +61,8 @@ def test_dev_dependency_survives_audit_and_prune(tmp_path: Path, apm_binary_path
     assert len(lockfile.dependencies) == 1
     locked_dependency = next(iter(lockfile.dependencies.values()))
     assert locked_dependency.is_dev is True
+    assert locked_dependency.package_type == "apm_package"
+    assert locked_dependency.name == "dev-package"
 
     audit = _run(apm_binary_path, project, "audit", "--ci")
     assert audit.returncode == 0, f"audit stdout:\n{audit.stdout}\naudit stderr:\n{audit.stderr}"

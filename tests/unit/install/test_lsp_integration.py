@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from apm_cli.install.lsp.integration import run_lsp_integration
+import pytest
+
+from apm_cli.deps.lockfile import LockFile
+from apm_cli.install.lsp.integration import run_lsp_integration, run_owned_lsp_integration
 from apm_cli.models.dependency.lsp import LSPDependency
 
 # ---------------------------------------------------------------------------
@@ -41,6 +44,64 @@ def _mock_lock(*, lsp_servers=None, lsp_configs=None):
 
 
 _PATCH_TARGET = "apm_cli.integration.lsp_integrator.LSPIntegrator"
+
+
+class TestOwnedLspIntegration:
+    """Bundle LSP state is reconciled by stable owner identity."""
+
+    @patch(_PATCH_TARGET)
+    def test_records_owner_and_removes_only_its_stale_servers(
+        self, mock_integrator, tmp_path
+    ) -> None:
+        lock_path = tmp_path / "apm.lock.yaml"
+        LockFile(
+            lsp_servers=["old", "project"],
+            lsp_configs={"old": {}, "project": {}},
+            lsp_config_provenance={"old": "bundle#1"},
+        ).write(lock_path)
+        dependency = _make_dep("new")
+        mock_integrator.install.return_value = 1
+        mock_integrator.get_server_names.return_value = {"new"}
+        mock_integrator.get_server_configs.return_value = {"new": dependency.to_lsp_json_entry()}
+
+        count = run_owned_lsp_integration(
+            dependencies=[dependency],
+            owner="bundle#1",
+            lock_path=lock_path,
+            project_root=tmp_path,
+            user_scope=False,
+            target_runtimes=["copilot"],
+            logger=_mock_logger(),
+        )
+
+        assert count == 1
+        mock_integrator.remove_stale.assert_called_once()
+        assert mock_integrator.remove_stale.call_args.args[0] == {"old"}
+        lockfile = LockFile.read(lock_path)
+        assert lockfile is not None
+        assert lockfile.lsp_servers == ["new", "project"]
+        assert lockfile.lsp_config_provenance == {"new": "bundle#1"}
+
+    @patch(_PATCH_TARGET)
+    def test_rejects_name_owned_by_another_source(self, mock_integrator, tmp_path) -> None:
+        lock_path = tmp_path / "apm.lock.yaml"
+        LockFile(
+            lsp_servers=["pyright"],
+            lsp_configs={"pyright": {}},
+            lsp_config_provenance={"pyright": "other#1"},
+        ).write(lock_path)
+        mock_integrator.get_server_names.return_value = {"pyright"}
+
+        with pytest.raises(ValueError, match="conflicts with another owner"):
+            run_owned_lsp_integration(
+                dependencies=[_make_dep("pyright")],
+                owner="bundle#1",
+                lock_path=lock_path,
+                project_root=tmp_path,
+                user_scope=False,
+                target_runtimes=["copilot"],
+                logger=_mock_logger(),
+            )
 
 
 # ===========================================================================
@@ -97,6 +158,32 @@ class TestRunLspIntegration:
 
         assert count == 1
         mock_integrator.install.assert_called_once()
+
+    @patch(_PATCH_TARGET)
+    def test_filters_unapproved_lsp_dependencies(self, mock_integrator, tmp_path):
+        """An explicit executable gate blocks LSP servers until approved."""
+        apm_package = MagicMock()
+        apm_package.get_lsp_dependencies.return_value = [_make_dep("pyright")]
+        apm_package.allow_executables = {}
+        mock_integrator.collect_transitive.return_value = []
+        mock_integrator.get_server_names.return_value = set()
+        mock_integrator.get_server_configs.return_value = {}
+        modules = tmp_path / "apm_modules"
+        modules.mkdir()
+
+        count = run_lsp_integration(
+            apm_package=apm_package,
+            apm_modules_path=modules,
+            lock_path=tmp_path / "apm.lock.yaml",
+            existing_lock=None,
+            project_root=tmp_path,
+            user_scope=False,
+            should_install=True,
+            logger=_mock_logger(),
+        )
+
+        assert count == 0
+        mock_integrator.install.assert_not_called()
 
     @patch(_PATCH_TARGET)
     def test_resolves_targets_for_install(self, mock_integrator, tmp_path):

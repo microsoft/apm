@@ -413,8 +413,9 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 APM auto-discovers org policy from the project's git remote by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub API-compatible
-hosts. Azure DevOps hosts use `_apm` only, because ADO rejects dot-prefixed
-repository names. Repositories with no detectable git remote (unpacked bundles,
+hosts. Azure DevOps hosts use repository `apm-policy` in project `apm`, because ADO rejects underscore-prefixed
+repository names. APM tries legacy `_apm/_apm` only after the primary location
+returns 404, and warns so you can migrate. Repositories with no detectable git remote (unpacked bundles,
 temp dirs) emit an explicit "could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today**  --  it works on
@@ -659,8 +660,8 @@ as `[x]` errors and exit `1`.
 
 Checklist to publish a policy:
 
-1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `_apm`
-   project/repo on Azure DevOps).
+1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `apm`
+   project and `apm-policy` repository on Azure DevOps).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming

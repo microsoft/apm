@@ -289,7 +289,7 @@ def test_required_pack_install_compile_audit_closes_regular_package_state(
         (
             "pack",
             "--format",
-            "plugin",
+            "claude-plugin",
             "--archive",
             "--archive-format",
             "zip",

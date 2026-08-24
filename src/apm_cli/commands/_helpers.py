@@ -13,6 +13,7 @@ import click
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
+from ..agent_plugins.validation import is_valid_plugin_name as _is_valid_agent_plugin_name
 from ..constants import (
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
@@ -613,33 +614,52 @@ def _get_default_config(project_name):
 
 
 def _validate_plugin_name(name):
-    """Validate plugin name is kebab-case (lowercase, numbers, hyphens).
-
-    Returns True if valid, False otherwise.
-    """
-    import re
-
-    return bool(re.match(r"^[a-z][a-z0-9-]{0,63}$", name))
+    """Validate a plugin name through the Agent Plugins contract owner."""
+    return _is_valid_agent_plugin_name(name)
 
 
-def _create_plugin_json(config):
+def _create_plugin_json(config, mode: str = "agent", target_path: Path | None = None):
     """Create plugin.json file with package metadata.
 
     Args:
         config: dict with name, version, description, author keys.
+        mode: "agent" to emit Agent Plugins v1 scaffold, or "claude" to
+              preserve the legacy Claude-compatible scaffold.
+        target_path: Optional output path. Defaults to ``plugin.json``.
     """
     import json
 
-    plugin_data = {
-        "name": config["name"],
-        "version": config.get("version", "0.1.0"),
-        "description": config.get("description", ""),
-        "author": {"name": config.get("author", "")},
-        "license": "MIT",
-    }
+    if mode == "claude":
+        # Preserve legacy Claude scaffold byte-for-byte
+        plugin_data = {
+            "name": config["name"],
+            "version": config.get("version", "0.1.0"),
+            "description": config.get("description", ""),
+            "author": {"name": config.get("author", "")},
+            "license": "MIT",
+        }
+    else:
+        # Agent Plugins v1 canonical scaffold
+        from ..agent_plugins.constants import (
+            COM_MICROSOFT_APM_NAMESPACE,
+            COM_MICROSOFT_APM_SCHEMA_VERSION,
+            PLUGIN_SCHEMA_ID,
+        )
 
-    with open("plugin.json", "w", encoding="utf-8") as f:
-        f.write(json.dumps(plugin_data, indent=2) + "\n")
+        plugin_data = {
+            "$schema": PLUGIN_SCHEMA_ID,
+            "name": config["name"],
+            "version": config.get("version", "0.1.0"),
+            "description": config.get("description", ""),
+            "author": {"name": config.get("author", "")},
+            "license": "MIT",
+            "extensions": {
+                COM_MICROSOFT_APM_NAMESPACE: {"schemaVersion": COM_MICROSOFT_APM_SCHEMA_VERSION}
+            },
+        }
+
+    output_path = target_path or Path("plugin.json")
+    output_path.write_text(json.dumps(plugin_data, indent=2) + "\n", encoding="utf-8")
 
 
 def _create_minimal_apm_yml(config, plugin=False, target_path=None):

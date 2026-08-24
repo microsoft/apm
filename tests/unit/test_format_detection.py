@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 
 from apm_cli.models.format_detection import (
+    AgentPluginDetector,
+    AgentPluginFormatEvidence,
     ApmYmlDetector,
     ApmYmlFormatEvidence,
     ClaudePluginDetector,
@@ -73,6 +75,48 @@ class TestApmYmlDetector:
         ev = ApmYmlDetector().detect(tmp_path)
         assert ev is not None
         assert ev.declares_dependencies is False
+
+
+# ---------------------------------------------------------------------------
+# AgentPluginDetector
+# ---------------------------------------------------------------------------
+
+
+class TestAgentPluginDetector:
+    """Tests for AgentPluginDetector."""
+
+    def test_returns_none_when_no_schema_family(self, tmp_path: Path) -> None:
+        (tmp_path / "plugin.json").write_text("{}")
+        assert AgentPluginDetector().detect(tmp_path) is None
+
+    def test_returns_evidence_when_agent_schema_present(self, tmp_path: Path) -> None:
+        (tmp_path / "plugin.json").write_text(
+            '{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",'
+            '"name":"valid-plugin"}'
+        )
+        ev = AgentPluginDetector().detect(tmp_path)
+        assert isinstance(ev, AgentPluginFormatEvidence)
+        assert ev.supported is True
+
+    def test_returns_unsupported_evidence_for_unknown_agent_version(self, tmp_path: Path) -> None:
+        (tmp_path / "plugin.json").write_text(
+            '{"$schema":"https://agent-plugins.org/schemas/2.0.0/plugin.schema.json"}'
+        )
+        ev = AgentPluginDetector().detect(tmp_path)
+        assert isinstance(ev, AgentPluginFormatEvidence)
+        assert ev.supported is False
+
+    def test_manifest_authority_conflict_is_invalid_evidence(self, tmp_path: Path) -> None:
+        (tmp_path / "plugin.json").write_text(
+            '{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",'
+            '"name":"native-plugin","version":"1.0.0"}'
+        )
+        (tmp_path / "apm.yml").write_text("name: other\nversion: 1.0.0\n")
+
+        ev = AgentPluginDetector().detect(tmp_path)
+
+        assert isinstance(ev, AgentPluginFormatEvidence)
+        assert ev.supported is False
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +221,16 @@ class TestClaudePluginDetector:
         assert isinstance(ev, ClaudePluginFormatEvidence)
         assert ev.plugin_json_path == tmp_path / "plugin.json"
         assert ev.has_claude_plugin_dir is False
+
+    def test_rejected_root_symlink_is_not_probed_as_claude_evidence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path.parent / f"{tmp_path.name}-target.json"
+        target.write_text('{"name":"legacy-or-native"}', encoding="utf-8")
+        (tmp_path / "plugin.json").symlink_to(target)
+
+        assert ClaudePluginDetector().detect(tmp_path) is None
 
     def test_returns_evidence_for_claude_plugin_dir(self, tmp_path: Path) -> None:
         (tmp_path / ".claude-plugin").mkdir()
@@ -286,12 +340,14 @@ class TestNormalizationPlanner:
         apm_yml: ApmYmlFormatEvidence | None = None,
         skill_md: SkillMdFormatEvidence | None = None,
         hook_json: HookJsonFormatEvidence | None = None,
+        agent_plugin: AgentPluginFormatEvidence | None = None,
         claude_plugin: ClaudePluginFormatEvidence | None = None,
     ) -> DetectionReport:
         return DetectionReport(
             apm_yml=apm_yml,
             skill_md=skill_md,
             hook_json=hook_json,
+            agent_plugin=agent_plugin,
             claude_plugin=claude_plugin,
         )
 
@@ -304,6 +360,19 @@ class TestNormalizationPlanner:
             plugin_json_path=plugin_json_path,
             has_claude_plugin_dir=has_claude_plugin_dir,
             plugin_dirs_present=(),
+        )
+
+    def _agent_plugin_evidence(
+        self,
+        plugin_json_path: Path | None = None,
+        supported: bool = True,
+    ) -> AgentPluginFormatEvidence:
+        return AgentPluginFormatEvidence(
+            plugin_json_path=plugin_json_path,
+            schema_id="https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+            if plugin_json_path is not None
+            else None,
+            supported=supported,
         )
 
     def _apm_yml_evidence(
@@ -341,6 +410,26 @@ class TestNormalizationPlanner:
         pkg_type, plugin_json = NormalizationPlanner().plan(report)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
         assert plugin_json is None
+
+    def test_agent_plugin_wins_over_claude_plugin(self, tmp_path: Path) -> None:
+        plugin_path = tmp_path / "plugin.json"
+        report = self._make_report(
+            agent_plugin=self._agent_plugin_evidence(plugin_json_path=plugin_path, supported=True),
+            claude_plugin=self._plugin_evidence(plugin_json_path=plugin_path),
+        )
+        pkg_type, plugin_json = NormalizationPlanner().plan(report)
+        assert pkg_type == PackageType.AGENT_PLUGIN
+        assert plugin_json == plugin_path
+
+    def test_unsupported_agent_plugin_rejected(self, tmp_path: Path) -> None:
+        plugin_path = tmp_path / "plugin.json"
+        report = self._make_report(
+            agent_plugin=self._agent_plugin_evidence(plugin_json_path=plugin_path, supported=False),
+            claude_plugin=self._plugin_evidence(plugin_json_path=plugin_path),
+        )
+        pkg_type, plugin_json = NormalizationPlanner().plan(report)
+        assert pkg_type == PackageType.INVALID
+        assert plugin_json == plugin_path
 
     def test_hybrid(self) -> None:
         report = self._make_report(

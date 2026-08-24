@@ -399,6 +399,33 @@ class TestCodexClientAdapter:
         result = adapter.configure_mcp_server("test/server", server_info_cache=cache)
         assert result is True
 
+    def test_configure_mcp_server_writes_loopback_http_remote(self, tmp_path: Path) -> None:
+        """A cached loopback HTTP remote reaches the Codex TOML file."""
+        adapter = CodexClientAdapter(project_root=tmp_path)
+        server_info = {
+            "id": "local",
+            "name": "local-server",
+            "packages": [],
+            "remotes": [
+                {
+                    "url": "http://localhost:5500/mcp",
+                    "transport_type": "streamable-http",
+                }
+            ],
+        }
+
+        assert adapter.configure_mcp_server(
+            "local/server", server_info_cache={"local/server": server_info}
+        )
+
+        import toml
+
+        data = toml.load(Path(adapter.get_config_path()))
+        stored_url = next(iter(data["mcp_servers"].values()))["url"]
+        parsed = urllib.parse.urlparse(stored_url)
+        assert parsed.scheme == "http"
+        assert parsed.hostname == "localhost"
+
     def test_format_server_config_sse_remote_returns_none(self, tmp_path: Path) -> None:
         """SSE remote-only servers return None (unsupported by Codex)."""
         adapter = CodexClientAdapter(project_root=tmp_path)
@@ -1776,7 +1803,7 @@ class TestBundlePacker:
 
         self._make_minimal_project(tmp_path)
         out_dir = tmp_path / "out"
-        result = pack_bundle(tmp_path, out_dir, dry_run=True)
+        result = pack_bundle(tmp_path, out_dir, fmt="apm", dry_run=True)
         assert ".agents/skills/dep/run.py" in result.files
         assert result.lockfile_enriched is True
         # Output dir should NOT be created in dry run
@@ -1788,7 +1815,7 @@ class TestBundlePacker:
 
         (tmp_path / "apm.yml").write_text("name: test-pkg\nversion: 1.0.0\n")
         with pytest.raises(FileNotFoundError, match=r"apm\.lock\.yaml"):
-            pack_bundle(tmp_path, tmp_path / "out")
+            pack_bundle(tmp_path, tmp_path / "out", fmt="apm")
 
     def test_pack_bundle_missing_deployed_file_raises(self, tmp_path: Path) -> None:
         """Raises ValueError when deployed files are missing on disk."""
@@ -1797,7 +1824,7 @@ class TestBundlePacker:
         # Create lockfile but NOT the deployed file
         self._make_minimal_project(tmp_path, with_file=False)
         with pytest.raises(ValueError, match="missing on disk"):
-            pack_bundle(tmp_path, tmp_path / "out")
+            pack_bundle(tmp_path, tmp_path / "out", fmt="apm")
 
     def test_pack_bundle_unsafe_path_raises(self, tmp_path: Path) -> None:
         """Raises ValueError for path traversal in deployed_files."""
@@ -1813,7 +1840,7 @@ class TestBundlePacker:
         lf = LockFile(dependencies={"evil-dep": dep})
         (tmp_path / "apm.lock.yaml").write_text(lf.to_yaml())
         with pytest.raises(ValueError, match="unsafe path"):
-            pack_bundle(tmp_path, tmp_path / "out")
+            pack_bundle(tmp_path, tmp_path / "out", fmt="apm")
 
     def test_pack_bundle_no_apm_yml_still_works(self, tmp_path: Path) -> None:
         """pack_bundle works even when apm.yml is missing (uses dir name)."""
@@ -1823,7 +1850,7 @@ class TestBundlePacker:
         # No apm.yml, but we have a lockfile (no deps = no files to collect)
         lf = LockFile()
         (tmp_path / "apm.lock.yaml").write_text(lf.to_yaml())
-        result = pack_bundle(tmp_path, tmp_path / "out", dry_run=True)
+        result = pack_bundle(tmp_path, tmp_path / "out", fmt="apm", dry_run=True)
         assert result.files == []
 
     def test_pack_bundle_local_dep_raises(self, tmp_path: Path) -> None:
@@ -1837,7 +1864,7 @@ class TestBundlePacker:
         lf = LockFile()
         (tmp_path / "apm.lock.yaml").write_text(lf.to_yaml())
         with pytest.raises(ValueError, match="local path dependency"):
-            pack_bundle(tmp_path, tmp_path / "out")
+            pack_bundle(tmp_path, tmp_path / "out", fmt="apm")
 
     def test_pack_bundle_writes_output_dir(self, tmp_path: Path) -> None:
         """Non-dry-run pack creates the output bundle directory."""

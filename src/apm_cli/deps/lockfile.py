@@ -48,6 +48,19 @@ class UnsupportedLockfileVersionError(LockfileFormatError):
     """Raised when a lockfile declares a version this client cannot read."""
 
 
+def require_supported_lockfile_version(data: object) -> str:
+    """Return a supported declared version or fail closed."""
+    if not isinstance(data, dict):
+        raise LockfileFormatError("Lockfile root must be a mapping")
+    version = data.get("lockfile_version", "1")
+    if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
+        supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
+        raise UnsupportedLockfileVersionError(
+            f"Unsupported lockfile version {version!r}; supported versions: {supported}"
+        )
+    return version
+
+
 def _validate_lockfile_container(data: object) -> dict[str, Any]:
     """Validate version and top-level container shapes before construction."""
     if not isinstance(data, dict):
@@ -55,12 +68,7 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
     data = dict(data)
     # Pre-versioned lockfiles are a supported legacy v1 migration input.
     # Explicit unknown/newer versions still fail closed below.
-    version = data.get("lockfile_version", "1")
-    if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
-        supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
-        raise UnsupportedLockfileVersionError(
-            f"Unsupported lockfile version {version!r}; supported versions: {supported}"
-        )
+    require_supported_lockfile_version(data)
     list_fields = (
         "dependencies",
         "deployments",
@@ -73,6 +81,7 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         "mcp_target_servers",
         "mcp_config_provenance",
         "lsp_configs",
+        "lsp_config_provenance",
         "local_deployed_file_hashes",
     )
     for field_name in list_fields:
@@ -712,6 +721,7 @@ class LockFile:
     mcp_config_provenance: dict[str, str | list[str]] = field(default_factory=dict)
     lsp_servers: list[str] = field(default_factory=list)
     lsp_configs: dict[str, dict] = field(default_factory=dict)
+    lsp_config_provenance: dict[str, str] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
     deployment_ledger: DeploymentLedger = field(
@@ -778,6 +788,10 @@ class LockFile:
                 return True
         return False
 
+    def _required_lockfile_version(self) -> str:
+        """Return the minimum schema version required by current lock state."""
+        return "2" if self._needs_v2() else "1"
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -785,13 +799,11 @@ class LockFile:
         if not self.deployment_ledger.records:
             self.deployment_ledger = DeploymentLedgerCodec.from_lockfile(self)
         DeploymentLedgerCodec.apply_to_lockfile(self.deployment_ledger, self)
-        # Opportunistic v1<->v2 derivation (design §6.1, invariant §2.1.4):
+        # Content-driven v1<->v2 derivation:
         # the lockfile_version field always reflects current content at
         # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
-        # that mutate ``self.dependencies`` directly or remove the last
-        # registry / git-semver dep need the field re-derived here so the
-        # on-disk version is correct in both directions.
-        self.lockfile_version = "2" if self._needs_v2() else "1"
+        # that mutate content directly need the field re-derived here.
+        self.lockfile_version = self._required_lockfile_version()
         emit_version = self.lockfile_version
         # The synthesized self-entry (key ".") is an in-memory normalization
         # of the flat local_deployed_files / local_deployed_file_hashes
@@ -824,6 +836,8 @@ class LockFile:
                 data["lsp_servers"] = sorted(self.lsp_servers)
             if self.lsp_configs:
                 data["lsp_configs"] = dict(sorted(self.lsp_configs.items()))
+            if self.lsp_config_provenance:
+                data["lsp_config_provenance"] = dict(sorted(self.lsp_config_provenance.items()))
             if self.local_deployed_files:
                 data["local_deployed_files"] = sorted(self.local_deployed_files)
             if self.local_deployed_file_hashes:
@@ -868,6 +882,7 @@ class LockFile:
         lock.mcp_config_provenance = dict(data.get("mcp_config_provenance") or {})
         lock.lsp_servers = list(data.get("lsp_servers", []))
         lock.lsp_configs = dict(data.get("lsp_configs") or {})
+        lock.lsp_config_provenance = dict(data.get("lsp_config_provenance") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
         # Synthesize a virtual self-entry representing the project's own
@@ -1042,13 +1057,13 @@ class LockFile:
             return False
         if self.lsp_configs != other.lsp_configs:
             return False
-        if sorted(self.local_deployed_files) != sorted(other.local_deployed_files):
+        if self.lsp_config_provenance != other.lsp_config_provenance:
             return False
         # Issue #887: include hash dict in equivalence so post-install
         # hash updates persist even when the file list is unchanged.
-        if dict(self.local_deployed_file_hashes) != dict(other.local_deployed_file_hashes):  # noqa: SIM103
-            return False
-        return True
+        return sorted(self.local_deployed_files) == sorted(other.local_deployed_files) and dict(
+            self.local_deployed_file_hashes
+        ) == dict(other.local_deployed_file_hashes)
 
     @classmethod
     def installed_paths_for_project(cls, project_root: Path) -> list[str]:

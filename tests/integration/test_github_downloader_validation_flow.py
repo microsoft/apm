@@ -527,6 +527,54 @@ class TestDownloadWholeRepositoryPersistentCache:
         assert "GIT_HTTP_EXTRAHEADER" not in cache_env
 
 
+class TestDownloadWholeRepositoryPersistentCacheAgentPluginRejection:
+    """Regression test: a rejected Agent Plugin on the cache fast path must not
+    leave a partially-populated target_path on disk.
+
+    Covers the gap where `except AgentPluginError: raise` skipped the cleanup
+    performed by the sibling `except Exception` branch a few lines below.
+    """
+
+    def test_rejected_agent_plugin_cleans_up_target_path(self, tmp_path):
+        from apm_cli.agent_plugins.errors import AgentPluginManifestError
+        from apm_cli.models.apm_package import DependencyReference
+
+        dep_ref = DependencyReference.parse("http://gitlab.com/owner/native-plugin.git#main")
+        cached_checkout = tmp_path / "cached"
+        cached_checkout.mkdir()
+        (cached_checkout / "plugin.json").write_text("{}", encoding="utf-8")
+
+        dl = _make_downloader()
+        persistent_cache = MagicMock()
+        persistent_cache.get_checkout.return_value = cached_checkout
+        dl.persistent_git_cache = persistent_cache
+
+        resolved_ref = MagicMock()
+        resolved_ref.resolved_commit = "a" * 40
+        resolved_ref.ref_name = "main"
+
+        target_path = tmp_path / "target"
+
+        with (
+            patch.object(dl, "_parse_artifactory_base_url", return_value=None),
+            patch.object(dl, "_is_artifactory_only", return_value=False),
+            patch.object(dl, "resolve_git_reference", return_value=resolved_ref),
+            patch("apm_cli.utils.file_ops.robust_copy2"),
+            patch("apm_cli.utils.file_ops.robust_copytree"),
+            patch(
+                "apm_cli.bundle.local_bundle.route_agent_plugin_package",
+                side_effect=AgentPluginManifestError("unsupported schema"),
+            ),
+            patch("apm_cli.deps.github_downloader._rmtree") as mock_rmtree,
+        ):
+            with pytest.raises(AgentPluginManifestError):
+                dl.download_package(dep_ref, target_path)
+
+        assert any(call.args[0] == target_path for call in mock_rmtree.call_args_list), (
+            f"target_path was not cleaned up; _rmtree calls: {mock_rmtree.call_args_list}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # download_subdirectory -- PermissionError / OSError paths
 # (lines 1299-1321)

@@ -246,14 +246,18 @@ def test_all_public_graph_lifecycle_never_resolves_or_leaks_credentials(
         assert all(not observation.authorization_present for observation in repository_requests)
 
 
-def test_private_github_fallback_resolves_once_and_completes_lifecycle(
+def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """One private dependency uses one path-scoped credential fallback."""
+    """A localized private clone retries once with a path-scoped credential."""
     isolated = IsolatedApmEnvironment.create(
         tmp_path / "private-scenario",
-        base_env=dict(os.environ),
+        base_env={
+            **os.environ,
+            "LC_ALL": "id_ID.UTF-8",
+            "LANGUAGE": "id_ID:id",
+        },
     )
     base_environment = isolated.subprocess_env()
     packages = LocalPackageFactory(isolated.package_root)
@@ -323,6 +327,8 @@ def test_private_github_fallback_resolves_once_and_completes_lifecycle(
 
         remote_events = _remote_events(shim)
         assert remote_events
+        assert all(event["lc_all"] == "C" for event in remote_events)
+        assert all(event["language"] == "C" for event in remote_events)
         remote_attempts = [remote for event in remote_events for remote in event["remotes"]]
         assert remote_attempts[0]["authenticated_url"] is False
         assert any(remote["authenticated_url"] is True for remote in remote_attempts)

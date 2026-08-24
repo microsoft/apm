@@ -115,6 +115,24 @@ class TestDumpYaml:
         assert "- a" in raw
         assert "{" not in raw
 
+    @pytest.mark.windows_compat
+    def test_dump_writes_lf_only_bytes(self, tmp_path):
+        """On-disk bytes use LF exclusively on every platform (apm#2619).
+
+        Callers such as ``stamp_plugin_version`` rewrite ``apm.yml`` INSIDE
+        an installed package tree that ``compute_package_hash`` hashes raw,
+        so a platform-native CRLF write on Windows would make the lockfile
+        ``content_hash`` diverge from POSIX for identical upstream content.
+        """
+        p = tmp_path / "test.yml"
+        dump_yaml(
+            {"name": "skills", "version": "2c7ec5e", "description": "", "type": "hybrid"},
+            p,
+        )
+        raw = p.read_bytes()
+        assert b"\r" not in raw
+        assert raw.endswith(b"\n")
+
 
 class TestYamlToStr:
     """Tests for yaml_to_str()."""

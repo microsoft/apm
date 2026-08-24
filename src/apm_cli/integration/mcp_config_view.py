@@ -209,13 +209,33 @@ def _package_manifest_path(
 def _allows_missing_manifest(
     dependency: LockedDependency,
     package_dir: Path,
+    logger: _McpViewLogger | None = None,
 ) -> bool:
     """Return whether the package contract permits an absent apm.yml."""
     if dependency.package_type == PackageType.SKILL_BUNDLE.value:
         return True
 
+    # A git- or registry-sourced apm_package dep whose directory is absent
+    # is in a cold-cache state: the package has not been fetched yet.
+    # ``apm install --frozen`` (and ``apm audit --ci``) will hydrate it from
+    # the lock pins, so the absent manifest is not drift -- it is simply
+    # pending installation.  Local apm_package deps must always exist (they
+    # are path-anchored to the developer's filesystem) and are NOT exempted.
+    if (
+        not package_dir.exists()
+        and dependency.package_type == PackageType.APM_PACKAGE.value
+        and dependency.source != "local"
+    ):
+        if logger is not None:
+            dep_label = dependency.name or package_dir.name
+            logger.verbose_detail(
+                f"Skipping MCP check for '{dep_label}' -- "
+                "package dir absent (cold cache; will hydrate from lock pins)"
+            )
+        return True
+
     dependency_ref = dependency.to_dependency_ref()
-    if not dependency_ref.is_virtual_subdirectory():
+    if not dependency_ref.is_virtual_subdirectory() and dependency.source != "local":
         return False
 
     # ``apm audit --ci`` runs without materialising ``apm_modules/``: the drift
@@ -223,11 +243,18 @@ def _allows_missing_manifest(
     # CLI, then audit -- no ``apm install``) never populates the real modules
     # tree.  When the package directory is absent we cannot probe the on-disk
     # shape, so fall back to the frozen lockfile classification -- a virtual
-    # ``claude_skill`` legitimately ships no ``apm.yml`` by design.  Once the
-    # modules ARE materialised the strict shape probe below still runs and
-    # guards against a mislabeled or malformed installed package.
+    # ``claude_skill`` legitimately ships no ``apm.yml`` by design.  A local
+    # dependency's path is resolved directly from the filesystem (not
+    # materialised into ``apm_modules/``) and can point anywhere, including
+    # outside the repo, so this fallback does not apply to it -- if a local
+    # path is missing, that is a real problem, not an absent-by-design shape.
+    # Once the modules ARE materialised the strict shape probe below still
+    # runs and guards against a mislabeled or malformed installed package.
     if not package_dir.exists():
-        return dependency.package_type == PackageType.CLAUDE_SKILL.value
+        return (
+            dependency.source != "local"
+            and dependency.package_type == PackageType.CLAUDE_SKILL.value
+        )
 
     package_type, _ = detect_package_type(package_dir)
     return (
@@ -286,7 +313,7 @@ def _collect_locked_dependencies(
             continue
 
         if not manifest_path.exists():
-            if _allows_missing_manifest(dependency, manifest_path.parent):
+            if _allows_missing_manifest(dependency, manifest_path.parent, logger):
                 continue
             problems.append(
                 McpSourceProblem(

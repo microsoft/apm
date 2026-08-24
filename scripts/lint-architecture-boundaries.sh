@@ -45,6 +45,38 @@ check_pattern \
     src/apm_cli/bundle/packer.py \
     src/apm_cli/install/mcp/integration.py \
     src/apm_cli/commands/uninstall/engine.py
+if ! bash scripts/check_bundle_format_authority.sh; then
+    violations=$((violations + 1))
+fi
+if ! python3 scripts/check_removed_agent_plugin_lifecycle.py --root "$ROOT"; then
+    violations=$((violations + 1))
+fi
+if ! python3 scripts/check_plugin_skill_declaration_authority.py "$ROOT"; then
+    violations=$((violations + 1))
+fi
+install_wrapper_defaults=$(python3 - <<'PY'
+import ast
+from pathlib import Path
+
+tree = ast.parse(Path("src/apm_cli/commands/install.py").read_text(encoding="utf-8"))
+wrapper = next(
+    node
+    for node in tree.body
+    if isinstance(node, ast.FunctionDef) and node.name == "_install_apm_dependencies"
+)
+positional = wrapper.args.args[-len(wrapper.args.defaults):]
+allowed = {"update_refs", "verbose", "only_packages"}
+print(",".join(arg.arg for arg in positional if arg.arg not in allowed))
+PY
+)
+if [ -n "$install_wrapper_defaults" ] \
+    || ! grep -q 'request = InstallRequest(' src/apm_cli/commands/install.py \
+    || ! grep -q '^[[:space:]]*trust_bin: bool | None = None$' \
+        src/apm_cli/install/request.py; then
+    echo "[x] Install invocation defaults must remain owned by InstallRequest"
+    [ -n "$install_wrapper_defaults" ] && echo "$install_wrapper_defaults"
+    violations=$((violations + 1))
+fi
 effective_target_owner="src/apm_cli/core/target_detection.py"
 effective_target_definition_count=$(grep -Ec \
     '^def resolve_effective_target_decision\(' "$effective_target_owner" || true)
@@ -72,6 +104,20 @@ if [ "$effective_target_definition_count" -ne 1 ] \
     [ -n "$effective_target_context_hits" ] && echo "$effective_target_context_hits"
     violations=$((violations + 1))
 fi
+copilot_mcp_path_owner="src/apm_cli/adapters/client/copilot.py"
+copilot_mcp_path_duplicate_hits=$(
+    find src/apm_cli -type f -name '*.py' ! -path "$copilot_mcp_path_owner" \
+        -exec grep -En '(\.github/mcp\.json|mcp-config\.json)' {} + \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q 'COPILOT_HOME' "$copilot_mcp_path_owner" \
+    || ! grep -q 'ClientFactory.create_client(' src/apm_cli/integration/mcp_integrator.py \
+    || [ -n "$copilot_mcp_path_duplicate_hits" ]; then
+    echo "[x] Copilot CLI MCP paths must come from the Copilot adapter"
+    [ -n "$copilot_mcp_path_duplicate_hits" ] && echo "$copilot_mcp_path_duplicate_hits"
+    violations=$((violations + 1))
+fi
 check_pattern \
     "Install orchestration must not branch on native locator target names" \
     'name == "copilot-(app|cowork)"|name in \{.*copilot-(app|cowork)' \
@@ -93,8 +139,48 @@ if [ "$experimental_hint_definition_count" -ne 1 ] \
     [ -n "$experimental_hint_duplicate_hits" ] && echo "$experimental_hint_duplicate_hits"
     violations=$((violations + 1))
 fi
+network_host_owner="src/apm_cli/utils/net.py"
+network_host_definition_count=$(grep -Ec \
+    '^def (parse_host_address|is_loopback_host)\(' "$network_host_owner" || true)
+network_host_duplicate_hits=$(
+    grep -rEn --include='*.py' \
+        '^def (_host_to_ip_literal|parse_host_address|is_loopback_host)\(' \
+        src/apm_cli \
+        | grep -v "^${network_host_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$network_host_definition_count" -ne 2 ] \
+    || ! grep -q 'from ..utils.net import parse_host_address' \
+        src/apm_cli/core/script_executors.py \
+    || ! grep -q 'literal = parse_host_address(host)' \
+        src/apm_cli/core/script_executors.py \
+    || ! grep -q 'from ...utils.net import parse_host_address' \
+        src/apm_cli/install/mcp/warnings.py \
+    || ! grep -q 'ip = parse_host_address(bare)' \
+        src/apm_cli/install/mcp/warnings.py \
+    || [ -n "$network_host_duplicate_hits" ]; then
+    echo "[x] Network host parsing and loopback classification must use utils/net.py"
+    [ -n "$network_host_duplicate_hits" ] && echo "$network_host_duplicate_hits"
+    violations=$((violations + 1))
+fi
+agent_plugin_loader="src/apm_cli/agent_plugins/loader.py"
+agent_plugin_component_output=$(python3 scripts/check_agent_plugin_component_ir.py 2>&1)
+agent_plugin_component_status=$?
+if [ "$agent_plugin_component_status" -ne 0 ]; then
+    echo "[x] Agent Plugin component IR must remain canonical and inventory-backed"
+    echo "$agent_plugin_component_output"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC2: validate-before-mutate boundaries"
+generated_bundle_writer_output=$(python3 scripts/check_generated_bundle_text_writers.py 2>&1)
+generated_bundle_writer_status=$?
+if [ "$generated_bundle_writer_status" -ne 0 ]; then
+    echo "[x] Generated bundle metadata writes must use deterministic LF"
+    echo "$generated_bundle_writer_output"
+    violations=$((violations + 1))
+fi
 compiled_write_hits=$(
     grep -rEn \
         'write_text_lf|atomic_write_text|\.write_text\(|open\([^)]*["'\'']w' \
@@ -123,6 +209,14 @@ if [ "$nested_worktree_walk_count" -ne 1 ] \
     || [ -n "$nested_worktree_rglob_hits" ]; then
     echo "[x] Nested worktree cleanup must prune .git-file roots"
     [ -n "$nested_worktree_rglob_hits" ] && echo "$nested_worktree_rglob_hits"
+    violations=$((violations + 1))
+fi
+agents_source_attribution_output=$(python3 scripts/check_agents_source_attribution_owner.py \
+    "$distributed_compiler" 2>&1)
+agents_source_attribution_status=$?
+if [ "$agents_source_attribution_status" -ne 0 ]; then
+    echo "[x] AGENTS.md cosmetics must use the canonical source_attribution config boolean"
+    echo "$agents_source_attribution_output"
     violations=$((violations + 1))
 fi
 hook_file="src/apm_cli/integration/hook_integrator.py"
@@ -219,6 +313,35 @@ if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
     violations=$((violations + 1))
 fi
 policy_file="src/apm_cli/policy/discovery.py"
+ado_policy_project_owner_count=$(grep -Ec '^ADO_POLICY_PROJECT = "apm"$' "$policy_file" || true)
+ado_policy_repository_owner_count=$(grep -Ec '^ADO_POLICY_REPOSITORY = "apm-policy"$' "$policy_file" || true)
+ado_policy_coordinate_consumers=$(grep -Ec \
+    'project=ADO_POLICY_PROJECT|ADO_POLICY_PROJECT, ADO_POLICY_REPOSITORY' "$policy_file" || true)
+ado_policy_coordinate_duplicates=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*ADO_POLICY_(PROJECT|REPOSITORY)[[:space:]]*=' \
+        src/apm_cli \
+        | grep -Fv "${policy_file}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+ado_policy_coordinate_literal_consumers=$(
+    grep -En \
+        'project[[:space:]]*=[[:space:]]*["'\'']apm["'\'']|repo[[:space:]]*=[[:space:]]*["'\'']apm-policy["'\'']' \
+        "$policy_file" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$ado_policy_project_owner_count" -ne 1 ] \
+    || [ "$ado_policy_repository_owner_count" -ne 1 ] \
+    || [ "$ado_policy_coordinate_consumers" -ne 2 ] \
+    || [ -n "$ado_policy_coordinate_duplicates" ] \
+    || [ -n "$ado_policy_coordinate_literal_consumers" ]; then
+    echo "[x] ADO policy coordinate must come from discovery.py constants"
+    [ -n "$ado_policy_coordinate_duplicates" ] && echo "$ado_policy_coordinate_duplicates"
+    [ -n "$ado_policy_coordinate_literal_consumers" ] && echo "$ado_policy_coordinate_literal_consumers"
+    violations=$((violations + 1))
+fi
 policy_named_defs=$(grep -Ec \
     '^[[:space:]]*def [[:alnum:]_]*(policy_to_dict|serialize_policy)[[:alnum:]_]*\(' \
     "$policy_file" || true)
@@ -456,8 +579,11 @@ claude_skill_cached_body=$(awk '
     flag {print}
 ' "$claude_skill_metadata_consumer")
 claude_skill_cached_branch=$(printf '%s\n' "$claude_skill_cached_body" | awk '
-    /elif pkg_type == PackageType.CLAUDE_SKILL:/ {flag=1}
-    flag && /^        else:/ {exit}
+    /elif pkg_type == PackageType.CLAUDE_SKILL:/ {
+        flag=1
+        branch_indent=match($0, /[^ ]/)
+    }
+    flag && /^[[:space:]]*else:/ && match($0, /[^ ]/) == branch_indent {exit}
     flag {print}
 ')
 if ! printf '%s\n' "$claude_skill_owner_body" | grep -q 'load_frontmatter' \
@@ -652,9 +778,16 @@ check_pattern \
 
 echo "[*] AC6: neutral IR and schema contracts"
 check_pattern \
-    "Neutral hook IR must not contain native harness vocabulary" \
-    'copilot|gemini|antigravity|timeoutSec|powershell|_apm_source|["'\'']hooks["'\'']' \
-    src/apm_cli/integration/hook_ir.py
+    "Neutral hook IR must not contain target-renderer vocabulary" \
+    'copilot|gemini|antigravity' \
+    src/apm_cli/hook_contract.py
+hook_command_key_owners=$(grep -rEl '^HOOK_COMMAND_KEYS: tuple' src/apm_cli --include='*.py' | wc -l | tr -d ' ')
+if [ "$hook_command_key_owners" -ne 1 ] \
+    || ! grep -q '^HOOK_COMMAND_KEYS: tuple' src/apm_cli/hook_contract.py \
+    || grep -q 'integration.hook_integrator' src/apm_cli/agent_plugins/loader.py; then
+    echo "[x] Neutral hook source grammar must route through hook_contract.py"
+    violations=$((violations + 1))
+fi
 hook_routing_gate_hits=$(python3 scripts/check_hook_file_routing_owner.py 2>&1)
 hook_routing_gate_status=$?
 if [ "$hook_routing_gate_status" -ne 0 ]; then
@@ -828,6 +961,17 @@ if ! grep -q 'transport_plan = transport_selector.select(' "$semver_transport_ro
     echo "[x] Git ref transport must route through TransportSelector into RefResolver"
     violations=$((violations + 1))
 fi
+git_semver_eligibility_owner="src/apm_cli/install/helpers/ref_reuse.py"
+git_semver_ingress="src/apm_cli/commands/install.py"
+if [ "$(grep -Ec '^def is_git_semver_resolution_eligible\(' "$git_semver_eligibility_owner")" -ne 1 ] \
+    || ! grep -q 'if not is_git_semver_resolution_eligible(dep_ref):' \
+        "$git_semver_eligibility_owner" \
+    || ! grep -q 'is_git_semver_resolution_eligible(dep_ref)' "$git_semver_ingress" \
+    || grep -Eq 'dep_ref\.ref_kind[[:space:]]*==[[:space:]]*["'\'']semver["'\'']' \
+        "$git_semver_ingress"; then
+    echo "[x] Git semver preflight eligibility must route through ref_reuse.py"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC14: ADO lock-coordinate authority"
 if ! grep -q 'with_derived_provider_coordinates' \
@@ -883,6 +1027,17 @@ if ! grep -q '^def dependency_hook_source_marker(' "$hook_ownership_owner" \
         "$hook_ownership_consumer" \
     || grep -q '^    def _dependency_hook_source' "$hook_ownership_consumer"; then
     echo "[x] Merged-hook ownership markers must route through integration/hook_ownership.py"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC15d: plugin-root hook command parsing authority"
+plugin_root_owner="src/apm_cli/integration/hook_command_paths.py"
+plugin_root_consumer="src/apm_cli/integration/hook_integrator.py"
+if ! grep -q '^PLUGIN_ROOT_NAMES = (' "$plugin_root_owner" \
+    || grep -Eq 'CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|KIRO_PLUGIN_ROOT' \
+        "$plugin_root_consumer" \
+    || grep -Fq '"PLUGIN_ROOT"' "$plugin_root_consumer"; then
+    echo "[x] Plugin-root hook command parsing must route through hook_command_paths.py"
     violations=$((violations + 1))
 fi
 
@@ -1549,6 +1704,12 @@ if [ "$mcp_runtime_variable_owner_defs" -ne 1 ] \
     || ! grep -q '^    def _substitute_runtime_variables(' "$mcp_container_owner" \
     || ! grep -q 'cls\._substitute_runtime_variables(' src/apm_cli/adapters/client/vscode.py; then
     echo "[x] MCP runtime argument variables must route through MCPClientAdapter"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC34: hash-visible generated files use canonical LF writers"
+if ! python3 scripts/check_hash_visible_lf_writes.py; then
+    echo "[x] Hash-visible generated files must route through canonical LF writers"
     violations=$((violations + 1))
 fi
 

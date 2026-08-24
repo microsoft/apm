@@ -11,7 +11,9 @@ from dataclasses import replace
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Optional, Protocol
 
+from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
+from ..models.validation import validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from ..utils.paths import portable_relpath
 from .dependency_graph import (
@@ -1127,6 +1129,27 @@ class APMDependencyResolver:
             if not install_path.exists():
                 return None
 
+        # Native Agent Plugins must retain their projected compatibility package
+        # so recursive resolution can see APM-only dependencies without requiring
+        # or synthesizing an apm.yml compatibility manifest.
+        dep_source_path = self._compute_dep_source_path(dep_ref, parent_pkg, install_path)
+        native_detection = route_agent_plugin_package(install_path)
+        if native_detection is not None:
+            validation = validate_apm_package(
+                install_path,
+                source_path=dep_source_path,
+                agent_plugin_detection=native_detection,
+            )
+            if not validation.is_valid:
+                raise ValueError("; ".join(validation.errors))
+            if validation.package is None:
+                raise ValueError(
+                    f"Agent Plugin validation produced no package metadata: {install_path}"
+                )
+            if not validation.package.source:
+                validation.package.source = dep_ref.repo_url
+            return validation.package
+
         # Look for apm.yml in the install path
         apm_yml_path = install_path / "apm.yml"
         if not apm_yml_path.exists():
@@ -1149,7 +1172,6 @@ class APMDependencyResolver:
         # on the declaring package's source dir (#857). For local deps this
         # is the *original* user source; for remote deps it is the clone in
         # apm_modules.
-        dep_source_path = self._compute_dep_source_path(dep_ref, parent_pkg, install_path)
         try:
             package = APMPackage.from_apm_yml(apm_yml_path, source_path=dep_source_path)
             # Ensure source is set for tracking. TODO(#940): the cache key

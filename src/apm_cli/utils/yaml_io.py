@@ -483,10 +483,21 @@ def dump_yaml(
     octal literal that ``safe_load`` materialised without a digit cap) is
     therefore raised BEFORE the file is opened, so an unserialisable payload
     can never truncate the existing file to zero bytes.
+
+    The file is written with deterministic LF line endings (via
+    :func:`apm_cli.utils.atomic_io.write_text_lf`, the codebase's single
+    LF-write policy). Several callers rewrite ``apm.yml`` INSIDE an
+    installed package tree that
+    :func:`apm_cli.utils.content_hash.compute_package_hash` hashes raw
+    (``stamp_plugin_version``, the persistent-cache version stamp), so a
+    platform-native write would make ``content_hash`` -- and therefore the
+    lockfile -- diverge between Windows and POSIX (apm#2619, same class as
+    apm#1952/apm#2187).
     """
+    from .atomic_io import write_text_lf
+
     text = yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    write_text_lf(Path(path), text)
 
 
 def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:

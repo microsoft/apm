@@ -38,6 +38,15 @@ class TestIsInternalOrMetadataHost:
     def test_ipv6_loopback_returns_true(self):
         assert _is_internal_or_metadata_host("::1") is True
 
+    def test_decimal_encoded_loopback_returns_true(self):
+        assert _is_internal_or_metadata_host("2130706433") is True
+
+    def test_hex_encoded_loopback_returns_true(self):
+        assert _is_internal_or_metadata_host("0x7f000001") is True
+
+    def test_trailing_dot_loopback_returns_true(self):
+        assert _is_internal_or_metadata_host("127.0.0.1.") is True
+
     # -- cloud metadata endpoints --
 
     def test_aws_imds_returns_true(self):
@@ -140,6 +149,23 @@ class TestWarnSsrfUrl:
         match = re.search(r"URL '([^']+)'", msg)
         assert match is not None, f"warning message has no quoted URL: {msg!r}"
         assert urlparse(match.group(1)).hostname == "127.0.0.1"
+
+    def test_internal_url_warning_redacts_userinfo(self):
+        logger = self._make_logger()
+        warn_ssrf_url("http://user:topsecret@127.0.0.1:8080/api", logger)
+
+        message = logger.warning.call_args.args[0]
+        assert "topsecret" not in message
+        import re
+        from urllib.parse import urlparse
+
+        match = re.search(r"URL '([^']+)'", message)
+        assert match is not None
+        parsed = urlparse(match.group(1))
+        assert parsed.hostname == "127.0.0.1"
+        assert parsed.port == 8080
+        assert parsed.username is None
+        assert parsed.password is None
 
     def test_metadata_url_warns(self):
         logger = self._make_logger()

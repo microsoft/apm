@@ -532,9 +532,17 @@ def test_invalid_or_unmatched_patterns_fail_without_consumer_writes(
             "main",
         ),
         "tag-pattern-malformed",
+    )
+    malformed_output = " ".join((malformed.stdout + malformed.stderr).split())
+    assert "contains 1 unsupported or malformed plugin entry" in malformed_output
+    malformed_validation = _run(
+        scenario,
+        malformed_workspace,
+        ("marketplace", "validate", _MARKETPLACE),
+        "tag-pattern-malformed-validation",
         expected_returncode=1,
     )
-    malformed_output = malformed.stdout + malformed.stderr
+    malformed_output = malformed_validation.stdout + malformed_validation.stderr
     assert "source.tag_pattern" in malformed_output
     assert "must contain exactly one {version} placeholder" in malformed_output
     _assert_same_state(

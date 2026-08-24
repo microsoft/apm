@@ -19,9 +19,11 @@ import jsonschema
 import pytest
 
 from apm_cli.adapters.client.base import MCPClientAdapter
+from apm_cli.deps.plugin_parser import normalize_plugin_directory
 from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage
@@ -297,6 +299,110 @@ def test_consumer_diagnoses_empty_skill_subset_match(tmp_path: Path) -> None:
         "Selected skill names for dependencies that expose selectable skills",
         "MUST emit a default-visible diagnostic",
         "requested skill names, and the available skill names",
+    )
+
+
+@pytest.mark.req("req-mf-022")
+def test_consumer_names_skills_a_plugin_collection_exposes(tmp_path: Path) -> None:
+    """The available-names half of req-mf-022 must answer with the real set.
+
+    Section 8.1 counts a plugin collection with a named-skills container
+    among the layouts that expose selectable skills. Such a container,
+    declared in the plugin manifest, was normalized under its own name --
+    one level below the depth enumeration reads -- so a subset that matched
+    nothing reported `(none)` as available for a dependency exposing two.
+    The diagnostic fired as required and named the wrong set (#2530).
+    """
+    from apm_cli.models.validation import PackageType
+
+    plugin = tmp_path / "dotnet-advanced"
+    plugin_json = plugin / ".claude-plugin" / "plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text(
+        '{"name": "dotnet-advanced", "version": "1.0.0", "skills": ["./skills/"]}',
+        encoding="utf-8",
+    )
+    for name in ("csharp-scripts", "dotnet-pinvoke"):
+        skill = plugin / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    normalize_plugin_directory(plugin, plugin_json)
+
+    # The declared container names the skills; it is not itself one.
+    normalized = plugin / ".apm" / "skills"
+    assert not (normalized / "skills").exists()
+    assert (normalized / "csharp-scripts" / "SKILL.md").is_file()
+
+    available = SkillIntegrator.available_skill_names(
+        SimpleNamespace(install_path=plugin, package_type=PackageType.MARKETPLACE_PLUGIN)
+    )
+    assert available == frozenset({"csharp-scripts", "dotnet-pinvoke"})
+
+    diagnostics = DiagnosticCollector()
+    SkillIntegrator._warn_no_skill_filter_match(
+        available,
+        ("missing",),
+        "acme/dotnet-advanced",
+        diagnostics=diagnostics,
+    )
+    warning = diagnostics.by_category()[CATEGORY_WARNING][0]
+    assert "Available: csharp-scripts, dotnet-pinvoke" in warning.message
+    assert "Available: (none)" not in warning.message
+
+    assert_spec_contains("with a named-skills container")
+
+
+@pytest.mark.req("req-pr-006")
+def test_plugin_skills_declaration_is_authoritative(tmp_path: Path) -> None:
+    """req-pr-006 resolves plugin names from the declaration, not the tree.
+
+    Section 8.1 settles which set that is for a plugin collection: artifacts
+    are mapped per the plugin manifest, so the resolved declaration is the
+    container of individually addressable entries. Deployment re-derived the
+    set from the raw pre-resolution `skills/` directory instead, so a plugin
+    declaring one of two sibling skills reported -- and deployed -- both. The
+    diagnostic named a skill the consumer had no manifest basis to offer
+    (#2537).
+    """
+    from apm_cli.models.validation import PackageType
+
+    plugin = tmp_path / "selective"
+    plugin_json = plugin / ".claude-plugin" / "plugin.json"
+    plugin_json.parent.mkdir(parents=True)
+    plugin_json.write_text(
+        '{"name": "selective", "version": "1.0.0", "skills": ["./skills/declared"]}',
+        encoding="utf-8",
+    )
+    for name in ("declared", "undeclared"):
+        skill = plugin / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    normalize_plugin_directory(plugin, plugin_json)
+
+    available = SkillIntegrator.available_skill_names(
+        SimpleNamespace(install_path=plugin, package_type=PackageType.MARKETPLACE_PLUGIN)
+    )
+    assert available == frozenset({"declared"})
+
+    diagnostics = DiagnosticCollector()
+    SkillIntegrator._warn_no_skill_filter_match(
+        available,
+        ("undeclared",),
+        "acme/selective",
+        diagnostics=diagnostics,
+    )
+    warning = diagnostics.by_category()[CATEGORY_WARNING][0]
+    assert "Available: declared" in warning.message
+    assert "undeclared" not in warning.message.split("Available:")[1]
+
+    assert_spec_contains(
+        "Only an omitted",
+        "list of strings and replaces that",
+        "an explicit empty list contributes no skills",
+        "missing, unreadable, malformed, escaping,",
+        "Only the resulting names are eligible for enumeration",
     )
 
 
@@ -791,7 +897,8 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be rejected before target-scoped",
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
-        "[req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),\n[req-tg-010](#req-tg-010), [req-sc-001](#req-sc-001),",
+        "[req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),\n"
+        "[req-tg-012](#req-tg-012), [req-sc-001](#req-sc-001),",
     )
 
 
@@ -923,6 +1030,70 @@ def test_project_scoped_native_hook_command_is_portably_anchored() -> None:
         "MUST NOT embed an absolute consumer",
         "MUST reject a\nhook path containing a dollar sign or backtick",
     )
+
+
+@pytest.mark.req("req-tg-011")
+def test_agent_plugin_undeployable_without_native_lifecycle() -> None:
+    """A schema-bearing Agent Plugin dependency fails closed, tree unchanged."""
+    assert_spec_contains(
+        "MUST treat a\nschema-bearing Agent Plugins v1 dependency as undeployable",
+        "MUST refuse deployment with one actionable diagnostic",
+        "MUST leave the project tree byte-identical to its pre-install state",
+        "MUST NOT fall back to\nlegacy primitive projection",
+    )
+
+
+@pytest.mark.req("req-tg-011")
+def test_agent_plugin_deployment_boundary_precedes_all_mutation(tmp_path) -> None:
+    """Bind the real install-boundary contract: no target/integrator mutation runs."""
+    from tests.unit.install.test_agent_plugin_deployment_boundary import (
+        test_services_gate_precedes_all_target_and_integrator_mutation as _run_boundary_contract,
+    )
+
+    _run_boundary_contract(
+        tmp_path,
+        force=False,
+        trust_bin=None,
+        skill_subset=None,
+        dry_run=False,
+    )
+
+
+@pytest.mark.req("req-tg-012")
+def test_plugin_root_hook_resolution_preserves_quoting_and_warns(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Split-quoted roots resolve, while malformed roots remain visible."""
+    package = tmp_path / "package"
+    script = package / "hooks" / "probe.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("print('ok')\n", encoding="utf-8")
+    integrator = HookIntegrator()
+
+    for source_command in (
+        'python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py',
+        r"python3 '${CLAUDE_PLUGIN_ROOT}'\hooks\probe.py",
+    ):
+        command, scripts = integrator._rewrite_command_for_target(
+            source_command,
+            package,
+            "plugin",
+            "claude",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in command
+        assert command.count('"') == 2
+        assert len(scripts) == 1
+    assert "Unresolved plugin-root reference" not in capsys.readouterr().out
+
+    integrator._rewrite_command_for_target(
+        "python3 \"${CLAUDE_PLUGIN_ROOT}'/hooks/probe.py",
+        package,
+        "plugin",
+        "claude",
+    )
+    assert "Unresolved plugin-root reference" in capsys.readouterr().out
 
 
 @pytest.mark.req("req-sc-014")

@@ -13,7 +13,9 @@ from ..utils.archive import (
     write_tar_archive,
     write_zip_archive,
 )
+from ..utils.atomic_io import write_text_lf
 from .attest import verify_attested_file
+from .formats import BundleFormat, coerce_bundle_format
 from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
 
 
@@ -23,6 +25,7 @@ class PackResult:
 
     bundle_path: Path
     files: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     lockfile_enriched: bool = False
     mapped_count: int = 0
     path_mappings: dict[str, str] = field(default_factory=dict)
@@ -31,7 +34,7 @@ class PackResult:
 def pack_bundle(
     project_root: Path,
     output_dir: Path,
-    fmt: str = "apm",
+    fmt: str | BundleFormat | None = None,
     target: str | list[str] | None = None,
     archive: bool = False,
     archive_format: str = "zip",
@@ -44,7 +47,11 @@ def pack_bundle(
     Args:
         project_root: Root of the project containing ``apm.lock.yaml`` and ``apm.yml``.
         output_dir: Directory where the bundle will be created.
-        fmt: Bundle format  -- ``"plugin"`` (default, Claude Code plugin layout) or ``"apm"`` (legacy APM bundle).
+        fmt: Bundle format -- ``"claude-plugin"`` (legacy Claude bundle;
+            ``"plugin"`` and ``"claude"`` are compatibility aliases),
+            ``"agent-plugin"`` (portable Agent Plugins v1), or ``"apm"``
+            (legacy APM bundle). ``None`` routes through the preferred-format
+            seam in ``bundle.formats``.
         target: Target filter  -- ``"copilot"``, ``"claude"``, ``"all"``, a list of
             target strings (e.g. ``["claude", "vscode"]``), or *None*
             (auto-detect from apm.yml / project structure).
@@ -62,12 +69,25 @@ def pack_bundle(
     """
     # 1. Read lockfile (migrate legacy apm.lock → apm.lock.yaml if needed)
     migrate_lockfile_if_needed(project_root)
+    bundle_format = coerce_bundle_format(fmt)
 
-    # Plugin format: delegate to dedicated exporter
-    if fmt == "plugin":
-        from .plugin_exporter import export_plugin_bundle
+    if bundle_format is BundleFormat.AGENT_PLUGIN:
+        from .agent_plugin_exporter import export_agent_plugin_bundle
 
-        return export_plugin_bundle(
+        return export_agent_plugin_bundle(
+            project_root=project_root,
+            output_dir=output_dir,
+            target=target,
+            archive=archive,
+            archive_format=archive_format,
+            dry_run=dry_run,
+            force=force,
+            logger=logger,
+        )
+    if bundle_format is BundleFormat.CLAUDE_PLUGIN:
+        from .claude_plugin_exporter import export_claude_plugin_bundle
+
+        return export_claude_plugin_bundle(
             project_root=project_root,
             output_dir=output_dir,
             target=target,
@@ -314,8 +334,8 @@ def pack_bundle(
             shutil.copy2(src, dest, follow_symlinks=False)
 
     # 8. Enrich lockfile copy and write to bundle
-    enriched_yaml = enrich_lockfile_for_pack(lockfile, fmt, effective_target)
-    (bundle_dir / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")
+    enriched_yaml = enrich_lockfile_for_pack(lockfile, bundle_format.lock_value, effective_target)
+    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
     result = PackResult(
         bundle_path=bundle_dir,
