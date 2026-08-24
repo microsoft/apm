@@ -29,6 +29,10 @@ export async function getPrs() {
   return fetchJson("/api/prs");
 }
 
+export async function refreshData() {
+  return postJson("/refresh-data", {});
+}
+
 export async function getIssueDetail(number) {
   return fetchJson(`/api/issue/${number}`);
 }

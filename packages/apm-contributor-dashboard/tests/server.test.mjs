@@ -47,6 +47,8 @@ function createMockDeps(overrides = {}) {
         ],
         getLastUpdated: () => "12:00:00",
         getLastError: () => null,
+        refreshData: async () => ({ ok: true, error: null }),
+        refreshIntervalMs: 900_000,
         repo: "test/repo",
         distDir: DIST_DIR,
         csrfToken: TEST_CSRF_TOKEN,
@@ -177,6 +179,17 @@ describe("GET /api/prs", () => {
         assert.equal(json.prs.length, 1);
         assert.equal(json.prs[0].number, 10);
         assert.equal(json.lastUpdated, "12:00:00");
+    });
+});
+
+describe("POST /refresh-data", () => {
+    before(() => setupServer());
+    after(teardownServer);
+
+    it("runs the injected refresh operation", async () => {
+        const { res, json } = await postJSON("/refresh-data", {});
+        assert.equal(res.status, 200);
+        assert.deepEqual(json, { ok: true, error: null });
     });
 });
 
@@ -592,9 +605,11 @@ describe("Static file serving", () => {
 
     it("GET / returns HTML with no-cache", async () => {
         const res = await fetch(`${baseUrl}/`);
+        const html = await res.text();
         assert.equal(res.status, 200);
         assert.ok(res.headers.get("content-type").includes("text/html"));
         assert.equal(res.headers.get("cache-control"), "no-cache");
+        assert.ok(html.includes("window.__APM_DASHBOARD_REFRESH_INTERVAL_MS__=900000"));
     });
 
     it("GET /unknown-route returns HTML (SPA fallback)", async () => {
