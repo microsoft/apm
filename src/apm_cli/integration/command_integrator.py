@@ -187,8 +187,17 @@ class CommandIntegrator(BaseIntegrator):
         return True
 
     def find_prompt_files(self, package_path: Path) -> list[Path]:
-        """Find all .prompt.md files in a package."""
-        return self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"])
+        """Find all .prompt.md files in a package.
+
+        The package root is searched flat; ``.apm/prompts/`` is searched recursively so
+        a namespaced command survives to the target.  See PromptIntegrator for why the
+        two halves differ.
+        """
+        files = self.find_files_by_glob(package_path, "*.prompt.md")
+        apm_prompts = package_path / ".apm" / "prompts"
+        if apm_prompts.exists():
+            files += self.find_files_by_glob(apm_prompts, "**/*.prompt.md")
+        return files
 
     def _transform_prompt_to_command(
         self,
@@ -510,6 +519,7 @@ class CommandIntegrator(BaseIntegrator):
         self.init_link_resolver(package_info, project_root)
 
         commands_dir = target_root / mapping.subdir
+        pkg_prompts_dir = package_info.install_path / ".apm" / "prompts"
         files_integrated = 0
         files_skipped = 0
         files_adopted = 0
@@ -556,7 +566,12 @@ class CommandIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
 
-            target_path = commands_dir / f"{base_name}{mapping.extension}"
+            # Preserve the author's sub-directory under .apm/prompts/.  Harnesses that
+            # namespace commands by directory read it back: Claude Code surfaces
+            # commands/opsx/propose.md as /opsx:propose.  A flat prompt yields () and
+            # lands exactly where it always has.
+            namespace = self.primitive_namespace(prompt_file, pkg_prompts_dir)
+            target_path = commands_dir.joinpath(*namespace, f"{base_name}{mapping.extension}")
 
             # Defense-in-depth: assert the resolved target stays inside
             # the commands directory even if validate_path_segments was

@@ -22,8 +22,13 @@ class PromptIntegrator(BaseIntegrator):
         """Find all .prompt.md files in a package.
 
         Searches in:
-        - Package root directory
-        - .apm/prompts/ subdirectory
+        - Package root directory (flat)
+        - .apm/prompts/ subdirectory, recursively
+
+        The recursive half mirrors AgentIntegrator.find_agent_files, which has always
+        used ``**/*.agent.md`` under ``.apm/agents/``.  Prompts were the odd type out:
+        a package authoring ``.apm/prompts/opsx/propose.prompt.md`` had that file
+        silently dropped, never deployed and never reported.
 
         Args:
             package_path: Path to the package directory
@@ -31,7 +36,11 @@ class PromptIntegrator(BaseIntegrator):
         Returns:
             List[Path]: List of absolute paths to .prompt.md files
         """
-        return self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"])
+        files = self.find_files_by_glob(package_path, "*.prompt.md")
+        apm_prompts = package_path / ".apm" / "prompts"
+        if apm_prompts.exists():
+            files += self.find_files_by_glob(apm_prompts, "**/*.prompt.md")
+        return files
 
     def copy_prompt(self, source: Path, target: Path) -> int:
         """Copy prompt file verbatim with link resolution.
@@ -284,7 +293,13 @@ class PromptIntegrator(BaseIntegrator):
                 continue
 
             target_filename = self.get_target_filename(source_file, package_info.package.name)
-            target_path = prompts_dir / target_filename
+            # Preserve the author's sub-directory under .apm/prompts/ so a namespaced
+            # prompt keeps its namespace at the target.  Flat prompts get () here and
+            # land exactly where they always have.
+            namespace = self.primitive_namespace(
+                source_file, package_info.install_path / ".apm" / "prompts"
+            )
+            target_path = prompts_dir.joinpath(*namespace, target_filename)
             # Defense-in-depth: target_filename is derived from source
             # file name; assert containment under prompts_dir to mirror
             # the guard already present in command/instruction
@@ -313,6 +328,11 @@ class PromptIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
 
+            # Namespaced prompts deploy into a sub-directory that may not exist yet;
+            # write_text_lf requires the parent.  Created only once the file has
+            # cleared adoption and collision checks, so a skipped prompt leaves no
+            # empty directory behind.
+            target_path.parent.mkdir(parents=True, exist_ok=True)
             links_resolved = self.copy_prompt(source_file, target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
