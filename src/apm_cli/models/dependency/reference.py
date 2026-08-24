@@ -1152,8 +1152,11 @@ class DependencyReference(ProviderCoordinateMixin):
         )
         is_gitlab_host = validated_host is not None and is_gitlab_hostname(validated_host)
 
-        if is_ado and "_git" in path_segments:
+        try:
             git_idx = path_segments.index("_git")
+        except ValueError:
+            pass
+        else:
             path_segments = path_segments[:git_idx] + path_segments[git_idx + 1 :]
 
         # Detect Artifactory VCS paths (artifactory/{repo-key}/{owner}/{repo})
@@ -1319,8 +1322,11 @@ class DependencyReference(ProviderCoordinateMixin):
         """
         parts = repo_url.split("/")
 
-        if "_git" in parts:
+        try:
             git_idx = parts.index("_git")
+        except ValueError:
+            pass
+        else:
             parts = parts[:git_idx] + parts[git_idx + 1 :]
 
         host = None
@@ -1394,8 +1400,11 @@ class DependencyReference(ProviderCoordinateMixin):
         """
         parts = repo_url.split("/")
 
-        if "_git" in parts:
+        try:
             git_idx = parts.index("_git")
+        except ValueError:
+            pass
+        else:
             parts = parts[:git_idx] + parts[git_idx + 1 :]
 
         parts[0], port = _split_shorthand_host_port(parts[0])
@@ -1500,8 +1509,11 @@ class DependencyReference(ProviderCoordinateMixin):
             path = path[:-4]
 
         path_parts = [urllib.parse.unquote(p) for p in path.split("/")]
-        if "_git" in path_parts:
+        try:
             git_idx = path_parts.index("_git")
+        except ValueError:
+            pass
+        else:
             path_parts = path_parts[:git_idx] + path_parts[git_idx + 1 :]
 
         is_ado_host = is_azure_devops_hostname(hostname)
