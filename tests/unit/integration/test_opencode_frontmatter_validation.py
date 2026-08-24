@@ -221,8 +221,8 @@ class TestValidateOpencodeFrontmatter:
 
 
 class TestOpencodeInstallEmitsWarnings:
-    """End-to-end: integrate_agents_for_target() emits diagnostics.warn()
-    for OpenCode-incompatible frontmatter before deploying the file."""
+    """End-to-end: integrate_agents_for_target() converts tools format and emits
+    diagnostics.warn() for remaining OpenCode-incompatible frontmatter."""
 
     def setup_method(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -245,7 +245,7 @@ class TestOpencodeInstallEmitsWarnings:
         agent_path.write_text(f"---\n{frontmatter}\n---\n\n# Demo\n")
         return pkg
 
-    def test_tools_as_list_emits_warning(self):
+    def test_tools_as_list_converted_no_warning(self):
         pkg = self._write_agent("tools:\n  - Read\n  - Grep\n")
         pkg_info = _make_package_info(pkg)
         diagnostics = DiagnosticCollector()
@@ -255,12 +255,9 @@ class TestOpencodeInstallEmitsWarnings:
         )
 
         assert result.files_integrated == 1
+        # Phase 2: list is converted to object; no tools warning should appear.
         msgs = _warning_messages(diagnostics)
-        # Warning must name the offending file AND prefix it with the
-        # owning package so multi-package installs are diagnosable.
-        assert any("tools" in m and "test-pkg/demo.agent.md" in m and "Fix:" in m for m in msgs), (
-            msgs
-        )
+        assert not any("tools" in m for m in msgs), msgs
 
     def test_tools_as_dict_no_warning(self):
         pkg = self._write_agent("tools:\n  Read: true\n  Grep: false\n")
@@ -298,10 +295,8 @@ class TestOpencodeInstallEmitsWarnings:
         msgs = _warning_messages(diagnostics)
         assert not any("OpenCode agent" in m for m in msgs), msgs
 
-    def test_file_is_still_deployed_when_warning_emitted(self):
-        # Warnings must NOT block install: file lands in .opencode/agents/
-        # so users can fix the source and reinstall, and so other valid
-        # agents in the same package are not held up by the bad one.
+    def test_file_is_deployed_after_tools_conversion(self):
+        # Phase 2: tools list is converted and the file is deployed.
         pkg = self._write_agent("tools:\n  - Read\n")
         pkg_info = _make_package_info(pkg)
         diagnostics = DiagnosticCollector()
@@ -316,7 +311,7 @@ class TestOpencodeInstallEmitsWarnings:
 
     def test_rendered_package_name_is_sanitized(self, capsys):
         """OpenCode wrapper attribution must not reintroduce terminal controls."""
-        pkg = self._write_agent("tools:\n  - Read\n")
+        pkg = self._write_agent('color: "cyan"\n')
         pkg_info = _make_package_info(pkg, name="evil\x1b[31mpkg\nnext")
         diagnostics = DiagnosticCollector()
 
@@ -346,16 +341,15 @@ class TestOpencodeInstallEmitsWarnings:
         )
 
     def test_diagnostics_none_does_not_crash(self):
-        # Defensive guard: _warn_opencode_frontmatter must early-return
-        # when the install path is called without a DiagnosticCollector,
-        # so a future caller that omits the collector never crashes the
-        # install on otherwise-valid agent files.
+        # Defensive guard: _write_opencode_agent must not crash when
+        # called without a DiagnosticCollector.
         from apm_cli.integration.agent_integrator import AgentIntegrator
 
         agent_path = self.project_root / "demo.agent.md"
         agent_path.write_text("---\ntools:\n  - Read\n---\n\nBody\n")
-        # Must not raise even though the frontmatter would normally warn.
-        AgentIntegrator._warn_opencode_frontmatter(agent_path, None, "test-pkg")
+        target = self.project_root / "out" / "demo.md"
+        target.parent.mkdir(exist_ok=True)
+        AgentIntegrator()._write_opencode_agent(agent_path, target, diagnostics=None)
 
     @pytest.mark.parametrize("target_name", ["copilot", "claude", "codex", "windsurf", "cursor"])
     def test_non_opencode_targets_do_not_emit_opencode_warning(self, target_name):
