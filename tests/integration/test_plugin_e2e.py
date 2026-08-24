@@ -483,6 +483,7 @@ class TestPluginHeroScenarios:
         (plugin_dir / "SKILL.md").write_text(
             "---\nname: root-frontmatter-skill\ndescription: Root skill.\n---\n\n# Root skill\n"
         )
+        (plugin_dir / ".apm-pin").write_text("internal cache marker\n")
         (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
             json.dumps(
                 {
@@ -501,20 +502,41 @@ class TestPluginHeroScenarios:
         (project / ".github").mkdir()
         (project / ".github" / "copilot-instructions.md").write_text("# test\n")
 
+        dry_run = _run_apm_command(
+            apm_binary_path,
+            ["install", "--dry-run", str(plugin_dir)],
+            project,
+        )
+        assert dry_run.returncode == 0, f"Root skill dry run failed:\n{dry_run.stderr}"
+        assert not (project / "apm.lock.yaml").exists()
+        assert not (project / ".agents" / "skills").exists()
+        assert not (project / ".claude" / "skills").exists()
+        assert not (plugin_dir / ".apm").exists()
+
         first_install = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
         assert first_install.returncode == 0, (
             f"Root skill install failed:\n{first_install.stdout}\n{first_install.stderr}"
         )
 
-        deployed_skills = list((project / ".agents" / "skills").rglob("SKILL.md"))
+        deployed_skills = [
+            skill
+            for skills_root in (project / ".agents" / "skills", project / ".claude" / "skills")
+            if skills_root.exists()
+            for skill in skills_root.rglob("SKILL.md")
+        ]
         assert len(deployed_skills) == 1
         deployed_skill = deployed_skills[0]
         assert "name: root-frontmatter-skill" in deployed_skill.read_text()
         assert not list(deployed_skill.parent.rglob(".apm"))
+        assert not list(deployed_skill.parent.rglob(".apm-pin"))
         tree_after_install = {
             path.relative_to(deployed_skill.parent): path.read_text()
             for path in deployed_skill.parent.rglob("*")
             if path.is_file()
+        }
+        assert set(tree_after_install) == {
+            Path("SKILL.md"),
+            Path(".claude-plugin/plugin.json"),
         }
 
         reinstall = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
@@ -529,6 +551,44 @@ class TestPluginHeroScenarios:
         uninstall = _run_apm_command(apm_binary_path, ["uninstall", str(plugin_dir)], project)
         assert uninstall.returncode == 0, f"Root skill uninstall failed:\n{uninstall.stderr}"
         assert not deployed_skill.exists()
+
+    @pytest.mark.requires_apm_binary
+    def test_prepositioned_command_source_deploys_through_local_install(
+        self, apm_binary_path, tmp_path
+    ):
+        """A declared command source under .apm remains usable package input."""
+        workspace = tmp_path / "workspace"
+        plugin_dir = workspace / "prepositioned-commands-plugin"
+        command_dir = plugin_dir / ".apm" / "custom-commands"
+        command_dir.mkdir(parents=True)
+        (command_dir / "run.md").write_text("# Run\n", encoding="utf-8")
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "prepositioned-commands-plugin",
+                    "version": "1.0.0",
+                    "commands": [".apm/custom-commands"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        project = workspace / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: prepositioned-commands-test\nversion: 1.0.0\ndependencies:\n  apm: []\n",
+            encoding="utf-8",
+        )
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text("# test\n", encoding="utf-8")
+
+        install = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
+
+        assert install.returncode == 0, f"Command plugin install failed:\n{install.stderr}"
+        assert (project / ".github" / "prompts" / "run.prompt.md").read_text(
+            encoding="utf-8"
+        ) == "# Run\n"
 
 
 # ===========================================================================

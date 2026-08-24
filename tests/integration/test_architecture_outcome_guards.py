@@ -415,42 +415,6 @@ def test_skill_enumeration_falls_back_to_the_normalized_container(
     assert SkillIntegrator.available_skill_names(info) == expected
 
 
-def test_skill_enumeration_falls_back_to_the_normalized_container(
-    tmp_path: Path,
-) -> None:
-    """The ``.apm/skills/`` fallback is the route every plugin package takes.
-
-    A root ``skills/`` bundle wins only while it actually holds a skill. With
-    no such bundle -- or with one carrying no ``SKILL.md`` at all -- routing
-    must fall back to the normalized container ``_map_plugin_artifacts``
-    writes, or ``--skill`` is back to enumerating nothing (#2530).
-    """
-    from apm_cli.integration.skill_integrator import SkillIntegrator
-    from apm_cli.models.validation import PackageType
-
-    package = tmp_path / "pkg"
-    normalized = package / ".apm" / "skills"
-    for name in ("csharp-scripts", "dotnet-pinvoke"):
-        skill = normalized / name
-        skill.mkdir(parents=True)
-        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
-
-    info = MagicMock(install_path=package, package_type=PackageType.MARKETPLACE_PLUGIN)
-    expected = frozenset({"csharp-scripts", "dotnet-pinvoke"})
-
-    assert SkillIntegrator.skill_source_dir(package) == normalized
-    assert SkillIntegrator.available_skill_names(info) == expected
-
-    # Existing is not the test -- holding a skill is. A root ``skills/`` with
-    # nothing selectable in it must not shadow the normalized container.
-    root_bundle = package / "skills"
-    (root_bundle / "docs").mkdir(parents=True)
-    (root_bundle / "README.md").write_text("# not a skill\n", encoding="utf-8")
-
-    assert SkillIntegrator.skill_source_dir(package) == normalized
-    assert SkillIntegrator.available_skill_names(info) == expected
-
-
 def test_stale_persisted_skill_pin_warns_instead_of_silent_noop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

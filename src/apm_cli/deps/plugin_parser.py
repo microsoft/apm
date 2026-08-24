@@ -162,7 +162,7 @@ def _iter_command_source_files(
     try:
         source_root = source.resolve()
     except OSError:
-        _logger.warning("Skipping command source with an unresolvable staging boundary")
+        _surface_warning("Skipping command source with an unresolvable staging boundary", _logger)
         return
 
     if source_root == target_root:
@@ -236,7 +236,7 @@ def _map_plugin_skills(
     manifest: dict[str, Any],
     resolve_sources: Callable[[str, str], list[Path]],
     is_same_path: Callable[[Path, Path], bool],
-    ignore_non_content: Callable[..., set[str]],
+    ignore_non_content: Callable[..., list[str]],
 ) -> None:
     """Materialize parser-authorized plugin skills and persist their receipt."""
     skill_sources = resolve_sources("skills", "skills")
@@ -1023,16 +1023,16 @@ def _map_plugin_artifacts(
     staging_parent = apm_dir.parent.resolve()
     staging_name = apm_dir.name
 
-    def ignore_non_content_and_staging(directory: str, contents: list[str]) -> set[str]:
+    def ignore_non_content_and_staging(directory: str, contents: list[str]) -> list[str]:
         """Exclude internal artifacts and the staging root from component copies."""
-        ignored = ignore_non_content(directory, contents)
+        ignored = set(ignore_non_content(directory, contents))
         try:
             copying_from_plugin_root = Path(directory).resolve() == staging_parent
         except OSError:
             copying_from_plugin_root = True
         if copying_from_plugin_root and staging_name in contents:
             ignored.add(staging_name)
-        return ignored
+        return list(ignored)
 
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.

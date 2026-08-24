@@ -1826,12 +1826,15 @@ class TestRootDeclaredComponents:
 
         _map_plugin_artifacts(plugin_dir, apm_dir, {"name": "plug", component: ["./"]})
 
-        component_root = apm_dir / {
-            "agents": "agents",
-            "skills": "skills/plug",
-            "commands": "prompts",
-            "hooks": "hooks",
-        }[component]
+        component_root = (
+            apm_dir
+            / {
+                "agents": "agents",
+                "skills": "skills/plug",
+                "commands": "prompts",
+                "hooks": "hooks",
+            }[component]
+        )
         deployed_files = {
             path.relative_to(component_root).as_posix()
             for path in component_root.rglob("*")
@@ -1864,6 +1867,7 @@ class TestRootDeclaredComponents:
         }
 
         assert second_tree == first_tree
+
 
 @pytest.mark.windows_compat
 class TestSyntheticManifestLineEndings:

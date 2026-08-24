@@ -1062,6 +1062,9 @@ class SkillIntegrator(BaseIntegrator):
         """
         self.init_link_resolver(package_info, project_root)
         package_path = package_info.install_path
+        from apm_cli.models.validation import PackageType
+
+        is_plugin = package_info.package_type is PackageType.MARKETPLACE_PLUGIN
 
         # Use the source folder name as the skill name
         # e.g., apm_modules/ComposioHQ/awesome-claude-skills/mcp-builder -> mcp-builder
@@ -1202,15 +1205,18 @@ class SkillIntegrator(BaseIntegrator):
             target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
             _base_ignore = build_copy_ignore(skip_bin=skip_bin)
 
-            _apm_filter = shutil.ignore_patterns(".apm")
+            _internal_filter = shutil.ignore_patterns(
+                ".apm",
+                *(("apm.yml",) if is_plugin else ()),
+            )
 
-            def _ignore_non_content_and_apm(directory, contents):
+            def _ignore_non_content_and_internal(directory, contents):
                 return list(
                     set(_base_ignore(directory, contents))  # noqa: B023
-                    | set(_apm_filter(directory, contents))  # noqa: B023
+                    | set(_internal_filter(directory, contents))  # noqa: B023
                 )
 
-            shutil.copytree(package_path, target_skill_dir, ignore=_ignore_non_content_and_apm)
+            shutil.copytree(package_path, target_skill_dir, ignore=_ignore_non_content_and_internal)
             self._resolve_markdown_links_in_skill_bundle(package_path, target_skill_dir)
             all_target_paths.append(target_skill_dir)
 
