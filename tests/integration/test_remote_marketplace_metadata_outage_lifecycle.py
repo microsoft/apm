@@ -44,11 +44,13 @@ version: 1.0.0
 marketplace:
   owner:
     name: APM Lifecycle Tests
+  outputs: [codex, claude]
   packages:
     - name: adapt-nifi-flows-to-2-x
       source: Netcracker/qubership-nifi
       subdir: agent-packages/adapt-nifi-flows-to-2-x
       ref: {_SHA}
+      category: Productivity
 """,
         encoding="utf-8",
     )
@@ -96,6 +98,8 @@ def test_remote_metadata_outage_never_certifies_degraded_marketplace(
     plugin.pop("version")
     artifact.write_text(json.dumps(on_disk, indent=2) + "\n", encoding="utf-8")
     truncated_bytes = artifact.read_bytes()
+    codex_artifact = project_root / ".agents" / "plugins" / "marketplace.json"
+    codex_bytes = codex_artifact.read_bytes()
 
     dry_run, uncertifiable = runner.run_sequence(
         (
@@ -111,7 +115,24 @@ def test_remote_metadata_outage_never_certifies_degraded_marketplace(
     assert "metadata enrichment failed" in (dry_run.stdout + dry_run.stderr)
     assert "adapt-nifi-flows-to-2-x" in (dry_run.stdout + dry_run.stderr)
     assert artifact.read_bytes() == truncated_bytes
+    assert codex_artifact.read_bytes() == codex_bytes
     assert "cannot certify regenerated metadata" in (uncertifiable.stdout + uncertifiable.stderr)
+
+    strict, strict_retry = runner.run_sequence(
+        (
+            ("pack", "--strict-metadata"),
+            ("pack", "--strict-metadata"),
+        ),
+        expected_returncodes=(5, 5),
+        scenario_id="remote-metadata-outage-strict",
+        cwd=project_root,
+        env=_blocked_transport_environment(),
+    )
+
+    assert "metadata enrichment failed" in (strict.stdout + strict.stderr)
+    assert "metadata enrichment failed" in (strict_retry.stdout + strict_retry.stderr)
+    assert artifact.read_bytes() == truncated_bytes
+    assert codex_artifact.read_bytes() == codex_bytes
 
     restored = runner.run(
         ("pack", "--check-clean", "--dry-run"),

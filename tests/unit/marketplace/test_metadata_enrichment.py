@@ -4,15 +4,27 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.pack import pack_cmd
+from apm_cli.core.build_orchestrator import (
+    BuildOptions as OrchestratorBuildOptions,
+)
+from apm_cli.core.build_orchestrator import (
+    BuildOrchestrator,
+    MarketplaceProducer,
+    MetadataEnrichmentError,
+    OutputKind,
+    ProducerResult,
+)
 from apm_cli.marketplace.builder import (
     BuildOptions,
+    MarketplaceBuilder,
     MetadataEnrichmentOutcome,
     MetadataEnrichmentResult,
-    MarketplaceBuilder,
     ResolvedPackage,
 )
 from apm_cli.marketplace.drift_check import check_marketplace_drift
@@ -33,6 +45,7 @@ marketplace:
     - name: remote-tool
       source: acme/remote-tool
       ref: 0123456789abcdef0123456789abcdef01234567
+      category: Productivity
 """,
         encoding="utf-8",
     )
@@ -95,6 +108,19 @@ def test_metadata_outcomes_preserve_success_empty_failed_offline_and_local(
     assert result.certifiable
     assert result.warnings == ()
     assert [outcome.status for outcome in result.outcomes] == ["empty", "local"]
+
+
+def test_metadata_outcome_mapping_uses_the_precomputed_package_index() -> None:
+    """Mapper lookups do not rescan every preserved metadata outcome."""
+    result = MetadataEnrichmentResult(
+        (
+            MetadataEnrichmentOutcome("first", "fetched", (("version", "1.0.0"),)),
+            MetadataEnrichmentOutcome("second", "empty"),
+        )
+    )
+
+    assert dict(result) == {"first": {"version": "1.0.0"}}
+    assert result["first"] == {"version": "1.0.0"}
 
 
 def test_drift_refuses_uncertifiable_metadata_before_comparing_output(
@@ -170,8 +196,83 @@ def test_pack_json_warns_and_strict_metadata_prevents_writes(
     strict_payload = json.loads(strict.output)
     assert strict_payload["errors"][0]["code"] == "metadata_incomplete"
     assert strict_payload["metadata_enrichment"]["certifiable"] is False
-    assert strict_payload["metadata_enrichment"]["outcomes"] == payload["metadata_enrichment"][
-        "outcomes"
-    ]
+    assert (
+        strict_payload["metadata_enrichment"]["outcomes"]
+        == payload["metadata_enrichment"]["outcomes"]
+    )
     assert strict_payload["warnings"] == payload["warnings"]
     assert not artifact.exists()
+
+
+def test_pack_json_reports_the_final_clean_check_metadata_outcome(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A later clean-check fetch failure must replace an earlier success in JSON."""
+    _write_config(tmp_path)
+    outcomes = iter(
+        (
+            MetadataEnrichmentOutcome(
+                "remote-tool",
+                "fetched",
+                values=(("description", "available"), ("version", "1.0.0")),
+            ),
+            MetadataEnrichmentOutcome("remote-tool", "failed", cause="transport closed"),
+        )
+    )
+    monkeypatch.setattr(MarketplaceBuilder, "_ensure_auth", lambda _self: None)
+    monkeypatch.setattr(
+        MarketplaceBuilder,
+        "_fetch_remote_metadata_outcome",
+        lambda _self, _pkg: next(outcomes),
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--json"])
+
+    assert result.exit_code == 4, result.output
+    payload = json.loads(result.output)
+    assert payload["metadata_enrichment"]["certifiable"] is False
+    assert payload["metadata_enrichment"]["outcomes"] == [
+        {"package": "remote-tool", "status": "failed", "cause": "transport closed"}
+    ]
+    assert payload["errors"][0]["code"] == "marketplace_metadata_uncertifiable"
+
+
+def test_strict_metadata_preflight_prevents_bundle_and_marketplace_mutations(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Strict metadata failure must precede every requested artifact producer."""
+    _write_config(tmp_path)
+    config_path = tmp_path / "apm.yml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "  packages:", "  outputs: [codex, claude]\n  packages:"
+        )
+        + "dependencies: {}\n",
+        encoding="utf-8",
+    )
+    bundle = MagicMock(spec=["kind", "produce"])
+    bundle.kind = OutputKind.BUNDLE
+    bundle.produce.return_value = ProducerResult(kind=OutputKind.BUNDLE)
+    marketplace = MarketplaceProducer()
+    monkeypatch.setattr(MarketplaceBuilder, "_ensure_auth", lambda _self: None)
+    monkeypatch.setattr(
+        MarketplaceBuilder,
+        "_fetch_remote_metadata_outcome",
+        lambda _self, pkg: MetadataEnrichmentOutcome(pkg.name, "failed", cause="transport closed"),
+    )
+    options = OrchestratorBuildOptions(
+        project_root=tmp_path,
+        apm_yml_path=tmp_path / "apm.yml",
+        marketplace_strict_metadata=True,
+    )
+
+    for _ in range(2):
+        with pytest.raises(MetadataEnrichmentError, match="metadata enrichment failed"):
+            BuildOrchestrator(producers=[bundle, marketplace]).run(options)
+        assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()
+        assert not (tmp_path / ".agents" / "plugins" / "marketplace.json").exists()
+
+    bundle.produce.assert_not_called()

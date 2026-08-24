@@ -9,7 +9,7 @@ from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional  # noqa: F401, UP035
-from unittest.mock import patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -1560,9 +1560,13 @@ class TestDuplicateNameWarnings:
             "acme/pkg-beta": _make_refs("v1.0.0"),
         }
         report = _build_with_mock(tmp_path, yml, refs)
-        assert all("Duplicate marketplace package name" not in warning for warning in report.warnings)
+        assert all(
+            "Duplicate marketplace package name" not in warning for warning in report.warnings
+        )
         assert len(report.warnings) == 2
-        assert all("metadata enrichment skipped by --offline" in warning for warning in report.warnings)
+        assert all(
+            "metadata enrichment skipped by --offline" in warning for warning in report.warnings
+        )
 
     def test_duplicate_names_produce_warning(self, tmp_path: Path) -> None:
         """Bypass yml_schema by feeding resolved packages directly."""
@@ -1874,11 +1878,15 @@ class TestFetchRemoteMetadata:
         assert result is not None
         assert result["version"] == "1.0"
 
-    def test_auth_header_added_when_token_present(self, tmp_path: Path) -> None:
-        """When _github_token is set, Authorization header is included."""
+    def test_auth_header_uses_the_resolver_selected_token(self, tmp_path: Path) -> None:
+        """Metadata reads use the credential supplied by AuthResolver."""
         pkg = self._make_pkg()
         builder = self._make_builder(tmp_path)
-        builder._github_token = "ghp_faketoken123"
+        resolver = MagicMock()
+        builder._auth_resolver = resolver
+        resolver.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: operation(
+            "ghp_faketoken123", {}
+        )
         yaml_body = b"description: Private plugin\nversion: 1.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch(
@@ -1892,12 +1900,21 @@ class TestFetchRemoteMetadata:
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") == "token ghp_faketoken123"
+        resolver.try_with_fallback.assert_called_once_with(
+            "github.com",
+            ANY,
+            org="acme",
+            path="acme/my-tool",
+            unauth_first=False,
+        )
 
-    def test_no_auth_header_when_no_token(self, tmp_path: Path) -> None:
-        """When _github_token is None, no Authorization header is set."""
+    def test_no_auth_header_when_resolver_has_no_token(self, tmp_path: Path) -> None:
+        """Metadata reads omit Authorization when AuthResolver has no token."""
         pkg = self._make_pkg()
         builder = self._make_builder(tmp_path)
-        builder._github_token = None
+        builder._auth_resolver = SimpleNamespace(
+            try_with_fallback=lambda _host, operation, **_kwargs: operation(None, {})
+        )
         yaml_body = b"description: Public plugin\nversion: 2.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch(

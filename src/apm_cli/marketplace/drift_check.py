@@ -24,7 +24,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from apm_cli.marketplace.builder import MarketplaceBuilder, ResolveResult
+from apm_cli.marketplace.builder import (
+    MarketplaceBuilder,
+    MetadataEnrichmentResult,
+    ResolveResult,
+)
 from apm_cli.marketplace.output_profiles import (
     MARKETPLACE_OUTPUTS,
     resolve_effective_output_path,
@@ -73,6 +77,7 @@ class DriftReport:
 
     ok: bool
     outputs: tuple[DriftOutputReport, ...] = field(default_factory=tuple)
+    metadata_enrichment: MetadataEnrichmentResult = field(default_factory=MetadataEnrichmentResult)
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -167,6 +172,7 @@ def check_marketplace_drift(
     # Honor the configured outputs list (claude / codex / ...).
     configured = tuple(config.outputs) if config.outputs else ("claude",)
     output_reports: list[DriftOutputReport] = []
+    metadata_enrichment = MetadataEnrichmentResult()
 
     for name in configured:
         profile = MARKETPLACE_OUTPUTS.get(name)
@@ -185,6 +191,8 @@ def check_marketplace_drift(
         )
 
         remote_metadata = builder.remote_metadata_for_profile(profile, resolve_result.entries)
+        if remote_metadata is not None:
+            metadata_enrichment = remote_metadata
         if remote_metadata is not None and not remote_metadata.certifiable:
             # Do not compare two equally degraded documents. The builder owns
             # whether the regenerated metadata may certify this output.
@@ -251,7 +259,11 @@ def check_marketplace_drift(
 
     output_reports.sort(key=lambda r: r.format)
     overall_ok = all(r.status == "unchanged" for r in output_reports)
-    return DriftReport(ok=overall_ok, outputs=tuple(output_reports))
+    return DriftReport(
+        ok=overall_ok,
+        outputs=tuple(output_reports),
+        metadata_enrichment=metadata_enrichment,
+    )
 
 
 def render_diff_lines(report: DriftOutputReport, limit: int = _MAX_DIFFS_RENDERED) -> list[str]:

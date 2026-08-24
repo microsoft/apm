@@ -88,8 +88,7 @@ class MetadataEnrichmentError(BuildError):
         """Preserve the canonical result for the CLI's error envelope."""
         self.metadata_enrichment = metadata_enrichment
         super().__init__(
-            "Marketplace metadata is incomplete: "
-            + " ".join(metadata_enrichment.warnings)
+            "Marketplace metadata is incomplete: " + " ".join(metadata_enrichment.warnings)
         )
 
 
@@ -151,11 +150,11 @@ class MarketplaceProducer:
 
     kind = OutputKind.MARKETPLACE
 
-    def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
+    def prepare(self, options: BuildOptions) -> _MarketplaceBuildPlan:
+        """Resolve every selected marketplace output before any artifact write."""
         from ..marketplace.builder import (
             BuildOptions as MktBuildOptions,
         )
-        from ..marketplace.builder import BuildReport as MarketplaceBuildReport
         from ..marketplace.builder import (
             MarketplaceBuilder,
         )
@@ -199,15 +198,12 @@ class MarketplaceProducer:
         # exists so any downstream diagnostics report a real location.
         builder._yml_path = yml_for_builder
 
-        resolve_result = None
-        output_reports = []
-        outputs: list[Path] = []
-
         # Apply --marketplace filter: skip outputs not in the requested set
         active_outputs = list(config.outputs)
         if options.marketplace_formats is not None:
             active_outputs = [o for o in active_outputs if o in options.marketplace_formats]
 
+        output_profiles: list[Any] = []
         for output_name in active_outputs:
             profile = MARKETPLACE_OUTPUTS.get(output_name)
             if profile is None:
@@ -216,40 +212,77 @@ class MarketplaceProducer:
                     f"Unknown marketplace output target: {output_name!r}. "
                     f"Valid targets: {valid_targets}"
                 )
+            output_profiles.append(profile)
+
+        try:
+            resolve_result = builder.resolve()
+        except MktBuildError as exc:
+            raise BuildError(str(exc)) from exc
+
+        planned_outputs: list[_PlannedMarketplaceOutput] = []
+        for profile in output_profiles:
+            from ..marketplace.output_profiles import resolve_effective_output_path
+
+            output_path = resolve_effective_output_path(
+                config,
+                profile,
+                project_root,
+                options.marketplace_path_overrides,
+            )
+            planned_outputs.append(
+                _PlannedMarketplaceOutput(
+                    profile=profile,
+                    output_path=output_path,
+                    metadata=builder.remote_metadata_for_profile(profile, resolve_result.entries),
+                )
+            )
+
+        return _MarketplaceBuildPlan(
+            builder=builder,
+            resolve_result=resolve_result,
+            warnings=warnings,
+            outputs=tuple(planned_outputs),
+        )
+
+    @staticmethod
+    def validate_strict_metadata(plan: _MarketplaceBuildPlan) -> None:
+        """Fail before mutation when a selected output cannot be certified."""
+        for output in plan.outputs:
+            if output.metadata is not None and not output.metadata.certifiable:
+                raise MetadataEnrichmentError(output.metadata)
+
+    def produce_prepared(
+        self,
+        plan: _MarketplaceBuildPlan,
+        options: BuildOptions,
+    ) -> ProducerResult:
+        """Write a marketplace plan whose metadata has already been resolved."""
+        from ..marketplace.builder import BuildReport as MarketplaceBuildReport
+        from ..marketplace.errors import BuildError as MktBuildError
+
+        if options.marketplace_strict_metadata:
+            self.validate_strict_metadata(plan)
+
+        output_reports = []
+        outputs: list[Path] = []
+        for output in plan.outputs:
             try:
-                if resolve_result is None:
-                    resolve_result = builder.resolve()
-                resolved = resolve_result.entries
-
-                from ..marketplace.output_profiles import resolve_effective_output_path
-
-                output_path = resolve_effective_output_path(
-                    config,
-                    profile,
-                    project_root,
-                    options.marketplace_path_overrides,
-                )
-                profile_metadata = builder.remote_metadata_for_profile(profile, resolved)
-                if profile_metadata is not None:
-                    if options.marketplace_strict_metadata and not profile_metadata.certifiable:
-                        raise MetadataEnrichmentError(profile_metadata)
-
-                output_report = builder.write_output(
-                    profile,
-                    resolved,
-                    output_path,
+                output_report = plan.builder.write_output(
+                    output.profile,
+                    plan.resolve_result.entries,
+                    output.output_path,
                     include_diff=True,
-                    remote_metadata=profile_metadata,
-                    errors=resolve_result.errors,
+                    remote_metadata=output.metadata,
+                    errors=plan.resolve_result.errors,
                 )
-                output_reports.extend(output_report.outputs)
-                if output_report.output_path is not None:
-                    outputs.append(Path(output_report.output_path))
             except MktBuildError as exc:
                 raise BuildError(str(exc)) from exc
+            output_reports.extend(output_report.outputs)
+            if output_report.output_path is not None:
+                outputs.append(Path(output_report.output_path))
 
         marketplace_report = MarketplaceBuildReport(outputs=tuple(output_reports))
-        warnings.extend(marketplace_report.warnings)
+        warnings = [*plan.warnings, *marketplace_report.warnings]
 
         return ProducerResult(
             kind=OutputKind.MARKETPLACE,
@@ -257,6 +290,29 @@ class MarketplaceProducer:
             warnings=warnings,
             payload=marketplace_report,
         )
+
+    def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
+        """Prepare and write every selected marketplace output."""
+        return self.produce_prepared(self.prepare(options), options)
+
+
+@dataclass(frozen=True)
+class _PlannedMarketplaceOutput:
+    """One resolved marketplace output ready for a later write."""
+
+    profile: Any
+    output_path: Path
+    metadata: Any
+
+
+@dataclass(frozen=True)
+class _MarketplaceBuildPlan:
+    """All marketplace inputs resolved before an artifact producer writes."""
+
+    builder: Any
+    resolve_result: Any
+    warnings: list[str]
+    outputs: tuple[_PlannedMarketplaceOutput, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -462,10 +518,21 @@ class BuildOrchestrator:
             )
 
         result = BuildResult()
+        marketplace_plans: dict[MarketplaceProducer, _MarketplaceBuildPlan] = {}
+        if options.marketplace_strict_metadata and OutputKind.MARKETPLACE in outputs_needed:
+            for producer in self._producers:
+                if isinstance(producer, MarketplaceProducer):
+                    plan = producer.prepare(options)
+                    producer.validate_strict_metadata(plan)
+                    marketplace_plans[producer] = plan
+
         for producer in self._producers:
             if producer.kind not in outputs_needed:
                 continue
-            sub = producer.produce(options, logger)
+            if isinstance(producer, MarketplaceProducer) and producer in marketplace_plans:
+                sub = producer.produce_prepared(marketplace_plans[producer], options)
+            else:
+                sub = producer.produce(options, logger)
             result.outputs.extend(sub.outputs)
             result.warnings.extend(sub.warnings)
             result.producer_results.append(sub)

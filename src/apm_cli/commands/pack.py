@@ -307,7 +307,7 @@ def _parse_marketplace_filter(
     ),
 )
 @click.pass_context
-def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
+def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
     ctx,
     select_claude_plugin,
     fmt,
@@ -432,6 +432,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     # -- Release gates (--check-versions / --check-clean) --
     version_alignment_payload: dict | None = None
     drift_payload: dict | None = None
+    drift_metadata_enrichment = None
     gate_errors: list[dict] = []
     version_gate_failed = False
     drift_gate_failed = False
@@ -521,6 +522,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                     options.marketplace_path_overrides,
                 )
                 drift_payload = d_report.to_json_dict()
+                drift_metadata_enrichment = d_report.metadata_enrichment
                 if d_report.ok:
                     if not json_output:
                         formats = ", ".join(o.format for o in d_report.outputs)
@@ -573,9 +575,17 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                         messages = (
                             out.metadata_warnings
                             if out.status == "uncertifiable"
-                            else (next(msg for msg in d_report.error_messages() if msg.startswith(out.path)),)
+                            else (
+                                next(
+                                    msg
+                                    for msg in d_report.error_messages()
+                                    if msg.startswith(out.path)
+                                ),
+                            )
                         )
-                        gate_errors.extend({"code": code, "message": message} for message in messages)
+                        gate_errors.extend(
+                            {"code": code, "message": message} for message in messages
+                        )
 
     # -- JSON output mode: consistent envelope --
     if json_output:
@@ -601,6 +611,8 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                 )
             elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
                 envelope["plugin_manifests"] = sub.payload
+        if drift_metadata_enrichment is not None:
+            envelope["metadata_enrichment"] = drift_metadata_enrichment.to_json_dict()
         if gate_errors:
             envelope["errors"] = list(envelope["errors"]) + gate_errors
             envelope["ok"] = False

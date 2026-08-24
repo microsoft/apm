@@ -20,7 +20,7 @@ set -euo pipefail
 VERSION="${VERSION:?VERSION must be set, e.g. v1.2.3}"
 
 apm pack --check-versions --check-clean --json > gate-report.json
-apm pack --json > pack-report.json
+apm pack --check-versions --strict-metadata --json > pack-report.json
 
 for f in build/*.zip .claude-plugin/marketplace.json; do
   [ -f "$f" ] || continue
@@ -45,10 +45,9 @@ What each command does:
   match what a fresh pack would produce, or if remote Claude package metadata
   could not be fetched to certify that regeneration -- see
   [Marketplace artifacts](../../reference/cli/pack/#marketplace-artifacts)
-  for the failure modes. `--json` writes a machine-readable summary to stdout;
-  human logs go to stderr.
-- `apm pack --strict-metadata --json` then writes release artifacts only after
-  remote metadata is certifiable.
+  for the failure modes. `apm pack --check-versions --strict-metadata`
+  generates the release artifacts only after remote metadata is certifiable.
+  `--json` writes a machine-readable summary to stdout; human logs go to stderr.
 - `sha256sum` produces one sidecar per artifact. Consumers verify
   with `sha256sum -c <file>.sha256`.
 - `gh release create` uploads the bundle, the marketplace artifact,
@@ -118,7 +117,7 @@ artifact format.
       - run: pip install apm-cli
       - run: |
           apm pack --check-versions --check-clean --json > gate-report.json
-          apm pack --json > pack-report.json
+          apm pack --check-versions --strict-metadata --json > pack-report.json
           for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
@@ -142,7 +141,7 @@ release:
   script:
     - pip install apm-cli
     - apm pack --check-versions --check-clean --json > gate-report.json
-    - apm pack --json > pack-report.json
+    - apm pack --check-versions --strict-metadata --json > pack-report.json
     - |
       for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
@@ -167,7 +166,7 @@ pipeline {
         sh '''
           pip install apm-cli
           apm pack --check-versions --check-clean --json > gate-report.json
-          apm pack --json > pack-report.json
+          apm pack --check-versions --strict-metadata --json > pack-report.json
           for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
@@ -195,7 +194,7 @@ steps:
     inputs: { versionSpec: "3.12" }
   - script: pip install apm-cli
   - script: apm pack --check-versions --check-clean --json > gate-report.json
-  - script: apm pack --json > pack-report.json
+  - script: apm pack --check-versions --strict-metadata --json > pack-report.json
   - script: |
       for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
@@ -220,7 +219,7 @@ steps:
 | 1    | runtime           | Build or network error. Inspect the JSON report; rerun.                                          |
 | 2    | schema            | `apm.yml` is invalid. Fix the manifest before tagging.                                           |
 | 3    | `--check-versions`| Per-package versions disagree with `marketplace.versioning.strategy`. See [Versioning strategies](../versioning-strategies/). |
-| 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack, or remote Claude package metadata was unfetchable. Run `apm pack` locally, commit the diff (or `git commit --amend --no-edit` to fold into the current commit), then re-tag and push the updated tag (`git tag -f vX.Y.Z && git push --force-with-lease origin vX.Y.Z`). |
+| 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack, or remote Claude package metadata was unfetchable. For drift, run `apm pack` locally, commit the diff, then re-tag. For metadata unavailability, restore the remote source or CI credentials and rerun; committing a regenerated file cannot certify unavailable metadata. |
 | 5    | `--strict-metadata`| Remote Claude package metadata could not be fetched, so `apm pack` refused to write. Retry with network access, or omit `--strict-metadata` when the default warning is acceptable. |
 
 The gates never write to disk -- they only refuse to release.

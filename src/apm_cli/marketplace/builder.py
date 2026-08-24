@@ -94,9 +94,9 @@ __all__ = [
     "BuildDiagnostic",
     "BuildOptions",
     "BuildReport",
+    "MarketplaceBuilder",
     "MetadataEnrichmentOutcome",
     "MetadataEnrichmentResult",
-    "MarketplaceBuilder",
     "ResolveResult",
     "ResolvedPackage",
 ]
@@ -158,18 +158,28 @@ class MetadataEnrichmentResult(Mapping[str, dict[str, str]]):
     """
 
     outcomes: tuple[MetadataEnrichmentOutcome, ...] = ()
+    _metadata_by_package: dict[str, dict[str, str]] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        """Index mapper-ready metadata once for every output composition."""
+        object.__setattr__(
+            self,
+            "_metadata_by_package",
+            {outcome.package: dict(outcome.values) for outcome in self.outcomes if outcome.values},
+        )
 
     def __getitem__(self, package: str) -> dict[str, str]:
-        for outcome in self.outcomes:
-            if outcome.package == package and outcome.values:
-                return outcome.metadata
-        raise KeyError(package)
+        return dict(self._metadata_by_package[package])
 
     def __iter__(self) -> Iterator[str]:
-        return (outcome.package for outcome in self.outcomes if outcome.values)
+        return iter(self._metadata_by_package)
 
     def __len__(self) -> int:
-        return sum(bool(outcome.values) for outcome in self.outcomes)
+        return len(self._metadata_by_package)
 
     @property
     def certifiable(self) -> bool:
@@ -183,14 +193,14 @@ class MetadataEnrichmentResult(Mapping[str, dict[str, str]]):
         for outcome in self.outcomes:
             if outcome.status == "offline":
                 warnings.append(
-                    f"[!] Package '{outcome.package}': metadata enrichment skipped by "
+                    f"Package '{outcome.package}': metadata enrichment skipped by "
                     "--offline. Add description/version to the marketplace entry or "
                     "rerun without --offline."
                 )
             elif outcome.status == "failed":
                 cause = outcome.cause or "unknown failure"
                 warnings.append(
-                    f"[!] Package '{outcome.package}': metadata enrichment failed "
+                    f"Package '{outcome.package}': metadata enrichment failed "
                     f"({cause}). Add description/version to the marketplace entry or "
                     "retry with network access."
                 )
@@ -1113,6 +1123,8 @@ class MarketplaceBuilder:
         is skipped.
         """
         try:
+            from ..core.auth import AuthResolver
+
             path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
             file_path = f"{path_prefix}apm.yml"
 
@@ -1122,15 +1134,11 @@ class MarketplaceBuilder:
             effective_host = pkg.host or self._host
             if pkg.host is None or pkg.host == self._host:
                 host_info = self._host_info
-                token = self._github_token
             else:
-                from ..core.auth import AuthResolver  # lazy import
-
                 try:
                     host_info = AuthResolver.classify_host(effective_host)
                 except Exception:
                     host_info = None
-                token = self._resolve_token_for_host(effective_host)
 
             host_kind = host_info.kind if host_info else "github"
 
@@ -1147,43 +1155,36 @@ class MarketplaceBuilder:
                     cause=f"metadata fetch is unsupported for host '{effective_host}'",
                 )
 
-            if host_kind == "ghe_cloud" and not token:
-                logger.debug(
-                    "Skipping metadata fetch for %s (GHE Cloud requires auth)",
-                    pkg.name,
-                )
-                return MetadataEnrichmentOutcome(
-                    pkg.name,
-                    "failed",
-                    cause="GitHub Enterprise Cloud metadata requires authentication",
-                )
+            auth_resolver = self._auth_resolver
 
-            if effective_host == "github.com":
-                raw_url = (
-                    f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
-                )
-                req = urllib.request.Request(raw_url)  # noqa: S310
-                if token:
-                    req.add_header("Authorization", f"token {token}")
-                try:
-                    with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        raw = _read_capped_text(resp)
-                except urllib.error.HTTPError as exc:
-                    if exc.code != 404:
-                        raise
-                    api_base = (
-                        host_info.api_base if host_info else None
-                    ) or "https://api.github.com"
-                    rest_url = (
-                        f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
+            def _open_metadata(token: str | None, _git_env: dict[str, str]) -> str:
+                """Fetch the manifest with the credential selected for this attempt."""
+                if effective_host == "github.com":
+                    raw_url = (
+                        f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
                     )
-                    req = urllib.request.Request(rest_url)  # noqa: S310
-                    req.add_header("Accept", "application/vnd.github.raw")
+                    req = urllib.request.Request(raw_url)  # noqa: S310
                     if token:
                         req.add_header("Authorization", f"token {token}")
-                    with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        raw = _read_capped_text(resp)
-            else:
+                    try:
+                        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+                            return _read_capped_text(resp)
+                    except urllib.error.HTTPError as exc:
+                        if exc.code != 404:
+                            raise
+                        api_base = (
+                            host_info.api_base if host_info else None
+                        ) or "https://api.github.com"
+                        rest_url = (
+                            f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
+                        )
+                        req = urllib.request.Request(rest_url)  # noqa: S310
+                        req.add_header("Accept", "application/vnd.github.raw")
+                        if token:
+                            req.add_header("Authorization", f"token {token}")
+                        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+                            return _read_capped_text(resp)
+
                 api_base = (
                     host_info.api_base if host_info else None
                 ) or f"https://{effective_host}/api/v3"
@@ -1192,9 +1193,22 @@ class MarketplaceBuilder:
                 req.add_header("Accept", "application/vnd.github.raw")
                 if token:
                     req.add_header("Authorization", f"token {token}")
-
                 with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                    raw = _read_capped_text(resp)
+                    return _read_capped_text(resp)
+
+            org = pkg.source_repo.split("/", 1)[0] if pkg.source_repo else None
+            if auth_resolver is None:
+                # Legacy direct callers do not enter the concurrent prefetch
+                # path, which initializes AuthResolver before worker threads.
+                raw = _open_metadata(self._github_token, {})
+            else:
+                raw = auth_resolver.try_with_fallback(
+                    effective_host,
+                    _open_metadata,
+                    org=org,
+                    path=pkg.source_repo,
+                    unauth_first=False,
+                )
             data = load_yaml_str(raw)
             if not isinstance(data, dict):
                 return MetadataEnrichmentOutcome(pkg.name, "empty")
@@ -1318,7 +1332,10 @@ class MarketplaceBuilder:
                         metadata = future.result()
                         with self._metadata_fetch_outcomes_lock:
                             outcome = self._metadata_fetch_outcomes.pop(pkg.name, None)
-                        if isinstance(outcome, MetadataEnrichmentOutcome) and outcome.package == pkg.name:
+                        if (
+                            isinstance(outcome, MetadataEnrichmentOutcome)
+                            and outcome.package == pkg.name
+                        ):
                             outcomes_by_package[pkg.name] = outcome
                         else:
                             # Preserve the legacy extension seam: callers that
