@@ -96,7 +96,9 @@ def project_apm_owned_hook_entries(
     container = {event_name: list(entries) for event_name, entries in raw_container.items()}
     for event_name, sidecar_entries in sidecar.items():
         if not isinstance(sidecar_entries, list):
-            raise ValueError("ownership sidecar events must be lists")
+            if sidecar_entries:
+                raise ValueError("ownership sidecar events must be lists")
+            continue
         owned_counts = Counter(
             json.dumps(
                 {key: value for key, value in entry.items() if key != "_apm_source"},
