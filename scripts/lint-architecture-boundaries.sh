@@ -976,7 +976,28 @@ if [ -n "$auth_header_dictmerge_hits" ]; then
     violations=$((violations + 1))
 fi
 
-echo "[*] AC20: public github.com anonymous-first auth authority"
+echo "[*] AC20: Git auth-config retain/reindex authority"
+git_auth_config_owner="src/apm_cli/utils/git_env.py"
+git_auth_config_predicate_bypasses=$(
+    grep -rEn --include='*.py' \
+        '^[[:space:]]*(if|elif|return).*extraheader.*in|^[[:space:]]*(if|elif|return).*authorization:' \
+        src/apm_cli/core/auth.py \
+        src/apm_cli/utils/github_host.py \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q '^def is_git_auth_channel_entry(' "$git_auth_config_owner" \
+    || ! grep -q '^def retain_and_reindex_git_config(' "$git_auth_config_owner" \
+    || ! grep -q '^[[:space:]]*retain_and_reindex_git_config' src/apm_cli/core/auth.py \
+    || ! grep -q '^[[:space:]]*retain_and_reindex_git_config' src/apm_cli/utils/github_host.py \
+    || [ -n "$git_auth_config_predicate_bypasses" ]; then
+    echo "[x] Git auth-config retain/reindex must route through utils/git_env.py"
+    [ -n "$git_auth_config_predicate_bypasses" ] \
+        && echo "$git_auth_config_predicate_bypasses"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC21: public github.com anonymous-first auth authority"
 public_github_auth_owner="src/apm_cli/core/auth.py"
 public_github_auth_duplicate_defs=$(
     grep -rEn --include='*.py' \

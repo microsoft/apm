@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Iterable, Mapping, MutableMapping
 
 from apm_cli.utils.subprocess_env import external_process_env
 
@@ -48,6 +49,53 @@ _STRIP_GIT_VARS: frozenset[str] = frozenset(
         "GIT_SHALLOW_FILE",
     }
 )
+
+
+def is_git_auth_channel_entry(key: str, value: str) -> bool:
+    """Return whether an indexed Git config entry can carry authorization."""
+    return "extraheader" in key.lower() or value.strip().lower().startswith("authorization:")
+
+
+def _git_config_count(env: Mapping[str, str]) -> int:
+    """Return a safe count for the process-scoped indexed Git config."""
+    try:
+        return max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
+    except ValueError:
+        return 0
+
+
+def retain_and_reindex_git_config(
+    env: MutableMapping[str, str],
+    additional_entries: Iterable[tuple[str, str]] = (),
+) -> None:
+    """Remove auth entries, preserve safe entries, and re-index the Git config.
+
+    Existing indexed entries that match :func:`is_git_auth_channel_entry` are
+    discarded. Non-auth entries are retained in order, orphaned indexed
+    variables are removed, and ``additional_entries`` are appended afterward.
+    The latter is used when a caller intentionally installs a fresh auth
+    header after inherited auth channels have been removed.
+    """
+    retained: list[tuple[str, str]] = []
+    for index in range(_git_config_count(env)):
+        key = env.get(f"GIT_CONFIG_KEY_{index}", "")
+        value = env.get(f"GIT_CONFIG_VALUE_{index}", "")
+        if key and not is_git_auth_channel_entry(key, value):
+            retained.append((key, value))
+
+    for key in tuple(env):
+        if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(key, None)
+    env.pop("GIT_CONFIG_COUNT", None)
+
+    retained.extend(additional_entries)
+    if not retained:
+        return
+
+    env["GIT_CONFIG_COUNT"] = str(len(retained))
+    for index, (key, value) in enumerate(retained):
+        env[f"GIT_CONFIG_KEY_{index}"] = key
+        env[f"GIT_CONFIG_VALUE_{index}"] = value
 
 
 def get_git_executable() -> str:

@@ -26,6 +26,66 @@ def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     assert "Policy cache metadata must redact URL credentials at its canonical writer" in guard
 
 
+def test_git_auth_config_retain_reindex_has_single_owner() -> None:
+    """Auth cleanup and header injection must share one Git config owner."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/utils/git_env.py").read_text(encoding="utf-8")
+    auth = (root / "src/apm_cli/core/auth.py").read_text(encoding="utf-8")
+    github_host = (root / "src/apm_cli/utils/github_host.py").read_text(encoding="utf-8")
+    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("def is_git_auth_channel_entry(") == 1
+    assert owner.count("def retain_and_reindex_git_config(") == 1
+    assert "        retain_and_reindex_git_config(env)" in auth
+    assert "    retain_and_reindex_git_config(" in github_host
+    assert "Git auth-config retain/reindex" in architecture
+    assert "Git auth-config retain/reindex must route through utils/git_env.py" in guard
+
+
+def test_git_auth_config_guard_rejects_parallel_predicate(tmp_path: Path) -> None:
+    """The boundary guard must reject a second inline auth-channel predicate."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/utils/github_host.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8")
+        + (
+            '\n\ndef _parallel_git_auth_channel_entry(key: str, value: str) -> bool:\n'
+            '    return "extraheader" in key.lower() or '
+            'value.strip().lower().startswith("authorization:")\n'
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Git auth-config retain/reindex must route through utils/git_env.py" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("guard", "replacement"),
     [

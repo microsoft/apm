@@ -43,6 +43,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Legacy MCP runtime ownership-key migration | install/mcp/ownership.py (migrate_legacy_project_target_servers) | `src/apm_cli/install/mcp/ownership.py` |
 | Behavioral test taxonomy classification | module-level pytestmark (taxonomy inventory verifies) | `tests/quality/taxonomy_inventory_plugin.py`; `tests/quality/test_test_taxonomy.py` |
 | Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py | `src/apm_cli/core/auth.py`; `src/apm_cli/core/host_providers.py` |
+| Git auth-config retain/reindex | utils/git_env.py (retain_and_reindex_git_config) | `src/apm_cli/utils/git_env.py` |
 | Runtime descriptors | runtime/registry.py | `src/apm_cli/runtime/registry.py` |
 | User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |
 | Compiled-output writes (atomic) | CompiledOutputWriter | `src/apm_cli/compilation/output_writer.py` |
