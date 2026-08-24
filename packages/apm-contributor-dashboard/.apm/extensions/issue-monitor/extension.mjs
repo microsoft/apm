@@ -134,7 +134,7 @@ async function fetchAndMatchPRs() {
         // Workflow runs use REST and only need refreshing when a PR head changes.
         const branchRunPromises = prs.map(async (pr) => {
             if (!pr.headRefName) return;
-            const fingerprint = `${pr.headRefOid || pr.headRefName}:${pr.updatedAt || ""}`;
+            const fingerprint = pr.headRefOid || pr.headRefName;
             const cached = prWorkflowCache.get(pr.number);
             if (cached?.fingerprint === fingerprint) {
                 pr.workflowRuns = cached.workflowRuns;

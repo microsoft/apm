@@ -191,6 +191,20 @@ describe("POST /refresh-data", () => {
         assert.equal(res.status, 200);
         assert.deepEqual(json, { ok: true, error: null });
     });
+
+    it("rejects malformed JSON before refreshing", async () => {
+        const res = await fetch(`${baseUrl}/refresh-data`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
+            body: "{",
+        });
+        assert.equal(res.status, 400);
+        const json = await res.json();
+        assert.equal(json.ok, false);
+    });
 });
 
 describe("GET /api/issue/:n", () => {
@@ -806,6 +820,21 @@ describe("POST body size limits", () => {
                 "X-Canvas-Token": TEST_CSRF_TOKEN,
             },
             body: JSON.stringify(oversizedBody),
+        });
+        assert.equal(res.status, 413);
+        const json = await res.json();
+        assert.equal(json.ok, false);
+        assert.ok(String(json.error).includes("limit"));
+    });
+
+    it("returns 413 for oversized refresh payloads", async () => {
+        const res = await fetch(`${baseUrl}/refresh-data`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
+            body: JSON.stringify({ padding: "x".repeat(70 * 1024) }),
         });
         assert.equal(res.status, 413);
         const json = await res.json();

@@ -364,7 +364,26 @@ export function createHandler(deps) {
 
         // POST /refresh-data
         if (req.method === "POST" && req.url === "/refresh-data") {
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             res.setHeader("Content-Type", "application/json");
+            try {
+                const body = JSON.parse(raw);
+                if (!body || Array.isArray(body) || typeof body !== "object") {
+                    throw new TypeError("Request body must be a JSON object");
+                }
+            } catch (e) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+                return;
+            }
             if (typeof refreshData !== "function") {
                 res.writeHead(503);
                 res.end(JSON.stringify({ ok: false, error: "Refresh is unavailable" }));
