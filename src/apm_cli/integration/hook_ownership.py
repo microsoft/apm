@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections import deque
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 
@@ -74,21 +74,41 @@ def project_apm_owned_hook_entries(
     sidecar is APM-owned and maps matching native entries back to their
     ``_apm_source`` markers; retain only that marked slice for comparison.
     """
-    config = json.loads(config_bytes)
-    sidecar = json.loads(sidecar_bytes)
+    def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    config = json.loads(config_bytes, object_pairs_hook=_reject_duplicate_keys)
+    sidecar = json.loads(sidecar_bytes, object_pairs_hook=_reject_duplicate_keys)
     if not isinstance(config, dict) or not isinstance(sidecar, dict):
         raise ValueError("merged hook config and ownership sidecar must be JSON objects")
 
     raw_container = config.get(event_container_key)
-    container = (
-        {
-            event_name: list(entries)
-            for event_name, entries in raw_container.items()
-            if isinstance(entries, list)
-        }
-        if isinstance(raw_container, dict)
-        else {}
-    )
+    if not isinstance(raw_container, dict):
+        raise ValueError(f"merged hook config requires a {event_container_key} object")
+    if any(not isinstance(entries, list) for entries in raw_container.values()):
+        raise ValueError("merged hook events must be lists")
+    container = {event_name: list(entries) for event_name, entries in raw_container.items()}
+    for event_name, sidecar_entries in sidecar.items():
+        if not isinstance(sidecar_entries, list):
+            raise ValueError("ownership sidecar events must be lists")
+        owned_counts = Counter(
+            json.dumps(
+                {key: value for key, value in entry.items() if key != "_apm_source"},
+                sort_keys=True,
+            )
+            for entry in sidecar_entries
+            if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
+        )
+        config_counts = Counter(
+            json.dumps(entry, sort_keys=True) for entry in container.get(event_name, []) if isinstance(entry, dict)
+        )
+        if any(config_counts[key] > count for key, count in owned_counts.items()):
+            raise ValueError("ambiguous duplicate APM-owned hook entry")
     reinject_apm_source_from_sidecar(container, sidecar)
 
     owned: dict[str, list[dict[str, Any]]] = {}
