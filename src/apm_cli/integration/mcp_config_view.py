@@ -220,15 +220,20 @@ def _allows_missing_manifest(
         # from lock pins after frozen validation completes.
         if dependency.source == "local":
             return False
-        if dependency.package_type == PackageType.APM_PACKAGE.value:
-            if logger is not None:
-                dep_label = dependency.name or package_dir.name
-                logger.verbose_detail(
-                    f"Skipping MCP check for '{dep_label}' -- "
-                    "package dir absent (cold cache; will hydrate from lock pins)"
-                )
-            return True
-        return dependency.package_type == PackageType.CLAUDE_SKILL.value
+        accepted_types = {
+            PackageType.APM_PACKAGE.value: "APM package",
+            PackageType.CLAUDE_SKILL.value: "Claude skill",
+        }
+        accepted_kind = accepted_types.get(dependency.package_type)
+        if accepted_kind is None:
+            return False
+        if logger is not None:
+            dep_label = dependency.name or package_dir.name
+            logger.verbose_detail(
+                f"Skipping MCP check for '{dep_label}' -- locked {accepted_kind}; "
+                "package dir absent (cold cache; will hydrate from lock pins)"
+            )
+        return True
 
     # A materialized Claude skill legitimately has no apm.yml, whether it was
     # declared at the repository root or in a virtual subdirectory. The lock

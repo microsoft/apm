@@ -187,8 +187,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrites and transport policy across anonymous and authenticated retries;
   policy cache metadata and diagnostics also omit credentials embedded in
   direct policy URLs. (#2422)
-- `apm install --frozen` no longer reports repo-root `claude_skill`
-  dependencies as lockfile drift in projects that also carry MCP state. APM
+- `apm install --frozen` no longer reports repo-root Claude skills as
+  lockfile drift in projects that also carry MCP state. APM
   trusts the locked type before remote materialization and validates the skill
   shape when present, for repository-root and subdirectory skills. (#2446)
 

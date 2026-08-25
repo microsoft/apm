@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -819,20 +820,23 @@ def test_absent_local_apm_package_dep_still_records_problem(tmp_path: Path) -> N
     assert "manifest not found" in view.problems[0].message
 
 
-def test_cold_cache_exemption_emits_verbose_trace(tmp_path: Path) -> None:
-    """The cold-cache skip path emits a verbose_detail log via the logger (CL-2).
-
-    When an absent non-local apm_package dep is skipped, the logger must receive
-    a verbose_detail message containing the dep label and a diagnostic hint.
-    This regression-traps the logger.verbose_detail() call added in the fix.
-    """
+@pytest.mark.parametrize(
+    ("package_type", "expected_kind"),
+    (("apm_package", "APM package"), ("claude_skill", "Claude skill")),
+)
+def test_cold_cache_exemption_emits_verbose_trace(
+    tmp_path: Path,
+    package_type: str,
+    expected_kind: str,
+) -> None:
+    """Each remote cold-cache waiver explains its locked type in verbose mode."""
     root = _write_manifest(tmp_path, name="root")
     modules_root = tmp_path / "apm_modules"
     locked = LockedDependency(
         repo_url="owner/some-pkg",
         resolved_ref="v1.0.0",
         resolved_commit="a" * 40,
-        package_type="apm_package",
+        package_type=package_type,
         depth=1,
         name="some-pkg",
     )
@@ -848,9 +852,7 @@ def test_cold_cache_exemption_emits_verbose_trace(tmp_path: Path) -> None:
     )
 
     assert view.problems == ()
-    # The exemption must produce exactly one verbose_detail message
     cold_cache_details = [d for d in logger.details if "cold cache" in d.lower()]
-    assert len(cold_cache_details) == 1, (
-        f"Expected one cold-cache verbose_detail; got: {logger.details}"
-    )
+    assert len(cold_cache_details) == 1
     assert "some-pkg" in cold_cache_details[0]
+    assert expected_kind in cold_cache_details[0]
