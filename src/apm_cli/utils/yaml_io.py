@@ -452,7 +452,7 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
-def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
+def load_frontmatter(fd: Any, encoding: str = "utf-8-sig") -> Any:
     """Parse Markdown front matter with the bounded YAML loader.
 
     Drop-in for ``frontmatter.load(fd)``: accepts a path string or an open
@@ -463,6 +463,11 @@ def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
     the same ``frontmatter.Post`` (``.metadata`` / ``.content``) as the stock
     call; raises ``yaml.YAMLError`` on malformed or over-budget front matter,
     which every existing caller already treats as fail-closed.
+
+    ``utf-8-sig`` transparently strips a leading BOM when present and is
+    otherwise identical to ``utf-8``, so a BOM'd instruction file (written by
+    PowerShell's ``Out-File``, ``>``, or Notepad) no longer survives into the
+    ``---`` fence and silently drops its ``applyTo`` scope (apm#2683).
     """
     import frontmatter
 
