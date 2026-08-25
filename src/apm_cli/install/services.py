@@ -199,7 +199,7 @@ def _warn_target_reconcile_failure(
     )
 
 
-def integrate_package_primitives(  # noqa: PLR0913
+def integrate_package_primitives(  # noqa: C901, PLR0913
     package_info: Any,
     project_root: Path,
     *,
