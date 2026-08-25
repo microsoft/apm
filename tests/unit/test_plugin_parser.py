@@ -1,9 +1,9 @@
 """Unit tests for plugin_parser.py and find_plugin_json helper."""
 
 import json
-import logging
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -612,7 +612,7 @@ class TestMapPluginArtifacts:
         # Undeclared siblings stay out: the entry is a requirement, not a hint.
         assert not (normalized / "pairing").exists()
 
-    def test_declared_skills_entry_holding_no_skill_warns(self, tmp_path, caplog):
+    def test_declared_skills_entry_holding_no_skill_warns(self, tmp_path):
         """An entry that is neither a skill nor a container must say so.
 
         A container whose skills sit two levels down reaches no deployable
@@ -629,14 +629,15 @@ class TestMapPluginArtifacts:
 
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
-        with caplog.at_level(logging.WARNING, logger="apm_cli.deps.plugin_parser"):
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
             _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
 
-        assert "skills" in caplog.text
-        assert "no SKILL.md" in caplog.text
-        assert "--skill" in caplog.text
+        warning = rich_warning.call_args.args[0]
+        assert "skills" in warning
+        assert "no SKILL.md" in warning
+        assert "--skill" in warning
 
-    def test_declared_skills_container_does_not_warn(self, tmp_path, caplog):
+    def test_declared_skills_container_does_not_warn(self, tmp_path):
         """The healthy shapes stay quiet -- a warning nobody can act on is noise."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
@@ -646,10 +647,10 @@ class TestMapPluginArtifacts:
 
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
-        with caplog.at_level(logging.WARNING, logger="apm_cli.deps.plugin_parser"):
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
             _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
 
-        assert "no SKILL.md" not in caplog.text
+        rich_warning.assert_not_called()
 
     def test_custom_commands_path(self, tmp_path):
         """Manifest commands field redirects command discovery."""
