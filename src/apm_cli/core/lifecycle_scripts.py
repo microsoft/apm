@@ -344,10 +344,18 @@ def parse_project_script_file(path: Path) -> list[ScriptEntry]:
 
 
 def _get_policy_scripts_dir() -> Path:
-    """Return the platform-specific policy scripts directory."""
+    """Return the platform-specific policy scripts directory.
+
+    ``ProgramData`` is not a fixed ``C:`` path on Windows -- it's stored in
+    the registry as an unexpanded ``%SystemDrive%\\ProgramData`` and only
+    equals ``C:\\ProgramData`` when the system drive is ``C:``. Resolving it
+    from the environment (which Windows always populates) instead of a
+    literal keeps the admin policy tier readable on a machine whose system
+    drive differs (apm#2684).
+    """
     system = platform.system()
     if system == "Windows":
-        return Path(r"C:\ProgramData\APM\policy.d")
+        return Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "APM" / "policy.d"
     return Path("/etc/apm/policy.d")
 
 

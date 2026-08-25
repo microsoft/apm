@@ -16,6 +16,7 @@ from apm_cli.core.lifecycle_scripts import (
     PackageInfo,
     ScriptEntry,
     _entries_from_lifecycle_map,
+    _get_policy_scripts_dir,
     build_runner_from_context,
     discover_scripts,
     parse_apm_yml_lifecycle,
@@ -151,6 +152,22 @@ class TestParseApmYmlLifecycle:
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo ok"}]}},
         )
         assert parse_project_script_file(path) == parse_apm_yml_lifecycle(path, "project")
+
+
+class TestGetPolicyScriptsDir:
+    def test_windows_honours_programdata_env_var(self, monkeypatch) -> None:
+        monkeypatch.setattr("platform.system", lambda: "Windows")
+        monkeypatch.setenv("PROGRAMDATA", r"D:\ProgramData")
+        assert _get_policy_scripts_dir() == Path(r"D:\ProgramData") / "APM" / "policy.d"
+
+    def test_windows_falls_back_to_c_drive_when_unset(self, monkeypatch) -> None:
+        monkeypatch.setattr("platform.system", lambda: "Windows")
+        monkeypatch.delenv("PROGRAMDATA", raising=False)
+        assert _get_policy_scripts_dir() == Path(r"C:\ProgramData") / "APM" / "policy.d"
+
+    def test_non_windows_uses_etc(self, monkeypatch) -> None:
+        monkeypatch.setattr("platform.system", lambda: "Linux")
+        assert _get_policy_scripts_dir() == Path("/etc/apm/policy.d")
 
 
 class TestDiscoverScripts:
