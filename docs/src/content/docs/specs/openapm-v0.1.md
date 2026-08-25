@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **116 normative statements** indexed in
+- OpenAPM v0.1 carries **117 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2231,6 +2231,11 @@ derived leaf name maps to more than one canonical source contributes no
 skill. Only the resulting names are eligible for enumeration, selection,
 or deployment.
 
+<a id="req-pr-007"></a>
+**[req-pr-007]** A conforming **consumer** implementation MUST, when
+copying a declared Plugin collection component source, exclude every
+consumer-generated staging subtree within that source.
+
 A package **exposes selectable skills** when layout resolution identifies a
 container for individually addressable named skill entries, whether that
 container currently yields zero or more entries. This includes an APM package
@@ -2565,7 +2570,8 @@ without a spec revision. The current matrix is in the companion
   [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
   [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
   [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
-  [req-tg-012](#req-tg-012), [req-pr-006](#req-pr-006).
+  [req-tg-012](#req-tg-012), [req-pr-006](#req-pr-006),
+  [req-pr-007](#req-pr-007).
 
 ---
 
@@ -3123,7 +3129,7 @@ conformance statement identifying:
 [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
-[req-pr-006](#req-pr-006),
+[req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
@@ -3555,6 +3561,7 @@ renumbering of conformance classes.
 | [req-pr-004](#req-pr-004)                | MUST    | 7.8     | producer    |
 | [req-pr-005](#req-pr-005)                | SHOULD  | 7.8     | producer    |
 | [req-pr-006](#req-pr-006)                | MUST    | 8.1     | consumer    |
+| [req-pr-007](#req-pr-007)                | MUST    | 8.1     | consumer    |
 | [req-tg-001](#req-tg-001)                | MUST    | 8.4     | consumer    |
 | [req-tg-002](#req-tg-002)                | MUST    | 8.5     | consumer    |
 | [req-tg-003](#req-tg-003)                | MUST    | 8.5     | consumer    |
@@ -3585,7 +3592,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 116** (111 MUST, 5 SHOULD).
+**Total normative statements: 117** (112 MUST, 5 SHOULD).
 
 ---
 
@@ -3627,6 +3634,7 @@ renumbering of conformance classes.
 | 0.1.29  | 2026-08-22 | Spec-citation fold for the Agent Plugins v1 native-lifecycle deployment boundary (closes #2522 Mode-B silent-extension gate). Added [req-tg-011] (Section 8.5.5, consumer MUST): a consumer MUST treat a schema-bearing Agent Plugins v1 dependency as undeployable until it exposes a machine-verifiable native lifecycle for that dependency; before any target handler or primitive integrator runs, the consumer MUST refuse deployment with one actionable diagnostic, MUST leave the project tree unchanged, MUST NOT fall back to legacy primitive projection, and MUST reach the identical single-diagnostic outcome whether the dependency is materialized alone, mixed with ordinary dependencies in the same install, or under `--dry-run`. Section 8.7 and Appendix C updated. Statement count: 112 -> 113 (108 MUST, 5 SHOULD). |
 | 0.1.30  | 2026-08-23 | Spec-citation fold for plugin-root hook command resolution (closes #2639 Mode-B silent-extension gate). Added [req-tg-012] (Section 8.5.6, consumer MUST): a consumer that resolves plugin-root placeholders treats a matching quoted placeholder followed by an outside path separator equivalently to the fully quoted path, preserves balanced expandable quoting, and emits a default-visible diagnostic instead of silently deploying any supported placeholder that remains unresolved. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 114 -> 115 (110 MUST, 5 SHOULD). |
 | 0.1.31  | 2026-08-23 | Spec-citation fold for authoritative legacy plugin skill declarations (closes #2537). Added [req-pr-006] (Section 8.1, consumer MUST): omitted `skills` alone enables conventional discovery; a string or list replaces discovery; explicit empty, invalid, escaping, symlinked, and duplicate-derived entries contribute no skills; declared containers contribute only immediate child skills; and only resulting names are eligible for enumeration, selection, or deployment. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 115 -> 116 (111 MUST, 5 SHOULD). |
+| 0.1.32  | 2026-08-25 | Spec-citation fold for root-declared Plugin component staging containment (closes #2556). Added [req-pr-007] (Section 8.1, consumer MUST): a consumer copying a declared Plugin collection component source excludes every consumer-generated staging subtree within that source. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 116 -> 117 (112 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

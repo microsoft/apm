@@ -70,7 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (closes #2530)
 - Root-declared plugin components (Claude Code single-skill shape
   `"skills": ["./"]`, and the same for agents/commands/hooks) no longer cause
-  infinite recursion or unbounded writes during `apm install`. (closes #2556)
+  infinite recursion or unbounded writes during `apm install`.
+  `docs/src/content/docs/specs/openapm-v0.1.md` now explicitly requires
+  containment of consumer-generated staging output. (closes #2556)
 - Multi-target `apm compile` now avoids repeating expensive project analysis
   for each target, making multi-target runs scale like single-target runs
   without changing generated output. (closes #2482)

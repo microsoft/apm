@@ -1010,7 +1010,7 @@ def _map_plugin_artifacts(
     if manifest is None:
         manifest = {}
 
-    from apm_cli.security.gate import ignore_non_content
+    from apm_cli.security.gate import ignore_non_content as _ignore_non_content
 
     if apm_dir.is_symlink():
         raise PluginIntegrityError(
@@ -1023,9 +1023,9 @@ def _map_plugin_artifacts(
     staging_parent = apm_dir.parent.resolve()
     staging_name = apm_dir.name
 
-    def ignore_non_content_and_staging(directory: str, contents: list[str]) -> list[str]:
-        """Exclude internal artifacts and the staging root from component copies."""
-        ignored = set(ignore_non_content(directory, contents))
+    def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
+        """Compose the canonical content filter with staging-root containment."""
+        ignored = set(_ignore_non_content(directory, contents))
         try:
             copying_from_plugin_root = Path(directory).resolve() == staging_parent
         except OSError:
@@ -1108,7 +1108,7 @@ def _map_plugin_artifacts(
                 d,
                 target_agents,
                 dirs_exist_ok=True,
-                ignore=ignore_non_content_and_staging,
+                ignore=ignore_non_content,
             )
         if agent_files:
             target_agents.mkdir(parents=True, exist_ok=True)
@@ -1124,7 +1124,7 @@ def _map_plugin_artifacts(
         manifest,
         _resolve_sources,
         _is_same_path,
-        ignore_non_content_and_staging,
+        ignore_non_content,
     )
 
     # Map commands/ -> .apm/prompts/ (normalize .md -> .prompt.md)
@@ -1158,7 +1158,7 @@ def _map_plugin_artifacts(
                     target_prompts_root,
                     staging_root,
                     staging_parent,
-                    ignore_non_content,
+                    _ignore_non_content,
                 ):
                     _copy_command_file(source_file, target_prompts, rel_to=source_root)
 
@@ -1200,7 +1200,7 @@ def _map_plugin_artifacts(
                     d,
                     target_hooks,
                     dirs_exist_ok=True,
-                    ignore=ignore_non_content_and_staging,
+                    ignore=ignore_non_content,
                 )
 
     # Pass-through files required for MCP/LSP plugins to function

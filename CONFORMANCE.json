@@ -835,6 +835,17 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-pr-007",
+      "keyword": "MUST",
+      "section": "8.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_root_declared_plugin_component_excludes_generated_staging_tree"
+      ]
+    },
+    {
       "conformance_class": "registry",
       "id": "req-rg-001",
       "keyword": "MUST",
@@ -1325,7 +1336,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 85,
+      "active": 86,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1349,5 +1360,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 116
+  "total_requirements": 117
 }
