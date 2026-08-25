@@ -20,8 +20,9 @@ exist (e.g. a private homelab MCP server bound to a loopback address).
 
 from __future__ import annotations
 
-import ipaddress
 import socket
+
+from ...utils.net import parse_host_address
 
 # F7: tokens that would be evaluated by a real shell but are NOT evaluated
 # when an MCP stdio server runs through ``execve``-style spawning.
@@ -36,6 +37,26 @@ _METADATA_HOSTS = {
 }
 
 
+def _redact_url_userinfo(url: str) -> str:
+    """Return *url* without userinfo, or a safe placeholder if malformed."""
+    try:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(url)
+        if parsed.username is None and parsed.password is None:
+            return url
+        host = parsed.hostname
+        if host is None:
+            return "<redacted-url>"
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        return urlunparse(parsed._replace(netloc=host))
+    except (ValueError, TypeError):
+        return "<redacted-url>"
+
+
 def _is_internal_or_metadata_host(host: str) -> bool:
     """Return True when ``host`` resolves/parses to an internal IP.
 
@@ -46,28 +67,19 @@ def _is_internal_or_metadata_host(host: str) -> bool:
         return False
     if host in _METADATA_HOSTS:
         return True
-    candidates: list = [host]
     # Strip brackets from IPv6 literals.
     bare = host.strip("[]")
-    if bare != host:
-        candidates.append(bare)
-    # Resolve hostname when it is not already an IP literal.
-    try:
-        ipaddress.ip_address(bare)
-    except ValueError:
+    ip = parse_host_address(bare)
+    if ip is None:
         try:
             resolved = socket.gethostbyname(bare)
-            candidates.append(resolved)
+            ip = parse_host_address(resolved)
         except (OSError, UnicodeError):
-            pass
-    for c in candidates:
-        try:
-            ip = ipaddress.ip_address(c)
-        except ValueError:
-            continue
+            return False
+    if ip is not None:
         if ip.is_loopback or ip.is_link_local or ip.is_private:
             return True
-        if c in _METADATA_HOSTS:
+        if str(ip) in _METADATA_HOSTS:
             return True
     return False
 
@@ -84,7 +96,7 @@ def warn_ssrf_url(url: str | None, logger) -> None:
         return
     if _is_internal_or_metadata_host(host):
         logger.warning(
-            f"URL '{url}' points to an internal or metadata address; "
+            f"URL '{_redact_url_userinfo(url)}' points to an internal or metadata address; "
             f"verify intent before installing."
         )
 

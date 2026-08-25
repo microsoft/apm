@@ -64,6 +64,14 @@ class _BoundedSafeLoader(yaml.SafeLoader):
     ``load_yaml`` consumer uniformly, including the non-trust
     ``apm lifecycle validate`` / ``test`` paths that never run
     ``_is_fingerprint_safe``.
+
+    **Two-budget strategy (fix for issue #2389):** ``_guard_expansion`` now
+    pre-scans for aliases via ``_has_aliases`` before computing expansion
+    weights. Anchor-free documents (no shared node objects in the composed
+    graph) cannot amplify -- their weight scales linearly with input size -- so the
+    tight expansion budget is skipped entirely for them. Only documents that
+    contain aliases are subjected to the 5M weight cap. The merge-entry and
+    depth guards are orthogonal and unaffected.
     """
 
     _MAX_MERGE_ENTRIES = 100_000
@@ -85,36 +93,99 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             getattr(node, "start_mark", None),
         )
 
+    @staticmethod
+    def _has_aliases(root: yaml.nodes.Node) -> bool:
+        """Return True if the composed node graph contains any shared nodes.
+
+        PyYAML represents every ``*alias`` reference as a pointer to the same
+        node object.  If any node's ``id()`` is encountered more than once
+        during a full graph traversal the document contains aliases (or a
+        self-referential cycle), meaning alias-expansion amplification is
+        possible.  Anchor-free documents are pure trees whose node objects are
+        never shared, so this returns False for them.
+
+        The traversal is iterative (no Python recursion) so it is safe for
+        deeply nested anchor-free documents that would otherwise hit the
+        default 1000-frame recursion limit.  It uses two sets:
+
+        * ``active`` -- node IDs currently on the active DFS path (pre-order
+          entered, post-order not yet exited).  A hit here means a back-edge
+          (cycle / self-referential anchor).
+        * ``seen`` -- node IDs fully visited from a previous DFS path.  A hit
+          here means a cross-edge (classic alias reachable from two parents).
+
+        Both cases indicate shared nodes; we return True immediately.
+        """
+        seen: set[int] = set()
+        active: set[int] = set()
+        # Work stack entries: (node, entering).
+        #   entering=True  -> first visit; check for alias, push exit + children.
+        #   entering=False -> post-visit; move node from active to seen.
+        work: list[tuple[yaml.nodes.Node, bool]] = [(root, True)]
+        while work:
+            node, entering = work.pop()
+            nid = id(node)
+            if entering:
+                if nid in active or nid in seen:
+                    return True
+                active.add(nid)
+                # Schedule post-visit before children so it fires after them.
+                work.append((node, False))
+                if isinstance(node, yaml.nodes.MappingNode):
+                    # Push in reverse so leftmost key is processed first.
+                    for key_node, value_node in reversed(node.value):
+                        work.append((value_node, True))
+                        work.append((key_node, True))
+                elif isinstance(node, yaml.nodes.SequenceNode):
+                    for child in reversed(node.value):
+                        work.append((child, True))
+            else:
+                active.discard(nid)
+                seen.add(nid)
+        return False
+
     def _guard_expansion(self, root: Any) -> None:
-        # Bound the LOGICAL (alias-expanded) size of the composed node graph
-        # BEFORE construction. PyYAML shares one node object across every
-        # ``*alias`` reference, so a pure-alias billion-laughs graph
-        # (``lN: &lN [*l(N-1), *l(N-1)]``) is only O(N) objects yet expands
-        # to O(2^N) the moment any consumer materializes it (``str()``,
-        # deepcopy, re-serialize). It carries no ``<<`` so the merge-entry
-        # budget never engages, and non-trust consumers
-        # (``apm lifecycle validate`` / ``test``) never run the post-parse
-        # ``_is_fingerprint_safe`` guard -- so without this the bomb wedges
-        # them. We compute a memoized per-node expansion weight (shared nodes
-        # are walked once but summed per occurrence by each parent) and fail
-        # closed as a ``yaml.YAMLError`` the instant the running total crosses
-        # the budget. A self-referential anchor (``a: &a [*a]``) is a cycle in
-        # the node graph; the in-progress sentinel detects it and fails closed
-        # rather than recursing forever. The budget is orders of magnitude
-        # above any legitimate config, so real anchors/aliases still resolve.
+        # Two-budget alias-expansion guard (issue #2389):
+        #
+        # Anchor-free documents (no shared node objects in the composed graph)
+        # cannot produce alias-expansion amplification -- their total weight
+        # scales linearly with literal input size (O(N)).  Applying the tight 5M cap to
+        # them produces false-positive rejections of legitimate large lockfiles
+        # (APM's own generated output).  We therefore pre-scan with
+        # _has_aliases: if the graph is alias-free, return immediately.
+        #
+        # Only alias-containing documents proceed to the full weight check:
+        # PyYAML shares one node object across every ``*alias`` reference, so
+        # a pure-alias billion-laughs graph (``lN: &lN [*l(N-1), *l(N-1)]``)
+        # is only O(N) objects yet expands to O(2^N) the moment any consumer
+        # materializes it (``str()``, deepcopy, re-serialize).  It carries no
+        # ``<<`` so the merge-entry budget never engages, and non-trust
+        # consumers (``apm lifecycle validate`` / ``test``) never run the
+        # post-parse ``_is_fingerprint_safe`` guard -- so without this the
+        # bomb wedges them.  We compute a memoized per-node expansion weight
+        # (shared nodes are walked once but summed per occurrence by each
+        # parent) and fail closed as a ``yaml.YAMLError`` the instant the
+        # running total crosses the budget.  A self-referential anchor
+        # (``a: &a [*a]``) is detected as aliases-present by _has_aliases and
+        # then caught by the in-progress sentinel below.
         #
         # Leaf weight is BYTE-AWARE, not a flat 1: PyYAML's representer reports
         # ``ignore_aliases() == True`` for ``str`` / ``int`` / ``float`` /
         # ``bytes`` / ``bool``, so on the dump side (``dump_yaml`` /
         # ``yaml_to_str``) a shared scalar is NOT re-anchored -- its full text
-        # is re-emitted once PER alias occurrence. A single ~50KB anchored
+        # is re-emitted once PER alias occurrence.  A single ~50KB anchored
         # scalar aliased tens of thousands of times therefore composes as only
         # O(N) nodes (passing a node-count guard) yet re-serializes to ~GBs and
         # hangs/OOMs the emitter -- reachable pre-trust on the
-        # ``apm install`` / ``apm uninstall`` apm.yml round-trip. Charging each
-        # scalar occurrence its emitted byte length makes the budget model the
-        # real dump-amplification cost, so the bomb fails closed at parse while
-        # a single large scalar (referenced a handful of times) still resolves.
+        # ``apm install`` / ``apm uninstall`` apm.yml round-trip.  Charging
+        # each scalar occurrence its emitted byte length makes the budget model
+        # the real dump-amplification cost, so the bomb fails closed at parse
+        # while a single large scalar (referenced a handful of times) still
+        # resolves.
+        if not self._has_aliases(root):
+            # Anchor-free document: literal tree, no amplification possible.
+            return
+
         weights: dict[int, int] = {}
 
         def weight(node: Any) -> int:
@@ -412,10 +483,21 @@ def dump_yaml(
     octal literal that ``safe_load`` materialised without a digit cap) is
     therefore raised BEFORE the file is opened, so an unserialisable payload
     can never truncate the existing file to zero bytes.
+
+    The file is written with deterministic LF line endings (via
+    :func:`apm_cli.utils.atomic_io.write_text_lf`, the codebase's single
+    LF-write policy). Several callers rewrite ``apm.yml`` INSIDE an
+    installed package tree that
+    :func:`apm_cli.utils.content_hash.compute_package_hash` hashes raw
+    (``stamp_plugin_version``, the persistent-cache version stamp), so a
+    platform-native write would make ``content_hash`` -- and therefore the
+    lockfile -- diverge between Windows and POSIX (apm#2619, same class as
+    apm#1952/apm#2187).
     """
+    from .atomic_io import write_text_lf
+
     text = yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    write_text_lf(Path(path), text)
 
 
 def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:

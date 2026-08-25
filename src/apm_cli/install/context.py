@@ -68,6 +68,7 @@ class InstallContext:
     target_override_source: str | None = None
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
+    trust_bin: bool | None = None
     transaction: Any = None  # InstallTransaction
 
     dry_run: bool = False

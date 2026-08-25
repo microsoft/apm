@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from apm_cli.core.errors import ConflictingTargetsError, EmptyTargetsListError, UnknownTargetError
+from apm_cli.core.errors import ConflictingTargetsError, EmptyTargetsListError
 from apm_cli.install.target_filter import (
     filter_targets_for_dependency,
     resolve_effective_package_targets,
@@ -170,7 +170,6 @@ def test_manifest_package_target_spellings_are_deterministic(
         ({"target": ""}, ValueError),
         ({"target": []}, ValueError),
         ({"target": [""]}, ValueError),
-        ({"targets": ["vscode"]}, UnknownTargetError),
         ({"targets": []}, EmptyTargetsListError),
         ({"targets": ""}, EmptyTargetsListError),
         ({"targets": None}, EmptyTargetsListError),
@@ -184,7 +183,6 @@ def test_manifest_package_target_spellings_are_deterministic(
         "empty-scalar",
         "empty-list-under-scalar",
         "blank-item-under-scalar",
-        "plural-alias",
         "empty-plural",
         "empty-scalar-under-plural",
         "null-plural",

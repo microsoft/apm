@@ -22,7 +22,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../../reference
 | Codex CLI            | `.codex/`                            | Skills, MCP                            |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
 | Antigravity CLI      | explicit `--target antigravity`       | Rules, skills, hooks, MCP              |
-| OpenCode             | `.opencode/`                         | Skills, MCP                            |
+| OpenCode             | `.opencode/`                         | Agents, commands, skills, compiled instructions, MCP |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Agents + Skills + Hooks + MCP |
 | JetBrains Copilot    | user-scope config dir (global)       | MCP (user-scope path, `${env:VAR}` substitution); file primitives use the Copilot profile |

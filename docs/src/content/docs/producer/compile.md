@@ -271,6 +271,9 @@ root-context targets:
 - `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
 
+OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
+retains explicit sections for `applyTo` instructions as well.
+
 ### Overwrite protection
 
 When a root file exists but contains no APM marker, it is treated as

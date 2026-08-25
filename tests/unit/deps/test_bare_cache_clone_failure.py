@@ -96,6 +96,34 @@ def test_clone_failure_message_explains_explicit_ssh_publickey_failure() -> None
     assert "token-backed HTTPS" in message
 
 
+def test_clone_failure_message_explains_batchmode_no_auth_methods() -> None:
+    """BatchMode=yes 'no supported authentication methods remain' should surface ssh-add hint.
+
+    When APM sets -o BatchMode=yes and the user's SSH key is passphrase-protected
+    but no ssh-agent has the decrypted key cached, OpenSSH skips the encrypted key
+    and may emit this message before failing with 'Permission denied (publickey)'.
+    """
+    message = _clone_failure_message(
+        stderr=b"no supported authentication methods remain\nfatal: Could not read from remote repository.\n",
+        attempt_scheme="ssh",
+    )
+
+    assert "SSH key authentication failed" in message
+    assert "ssh-add <key-file>" in message
+    assert "token-backed HTTPS" in message
+
+
+def test_clone_failure_message_explains_batchmode_no_more_auth_methods() -> None:
+    """Alternative OpenSSH BatchMode=yes output variant triggers ssh-add hint."""
+    message = _clone_failure_message(
+        stderr=b"no more authentication methods to try\nPermission denied.\n",
+        attempt_scheme="ssh",
+    )
+
+    assert "SSH key authentication failed" in message
+    assert "ssh-add <key-file>" in message
+
+
 def test_clone_failure_message_does_not_echo_captured_ssh_stderr() -> None:
     """Classification input must not become user-visible output."""
     message = _clone_failure_message(

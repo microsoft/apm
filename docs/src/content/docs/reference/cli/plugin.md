@@ -39,11 +39,13 @@ apm plugin init my-skill --target copilot,claude --yes
 | `PROJECT_NAME` | Optional positional. If provided, scaffolds into a new subdirectory of that name; otherwise writes into the current directory. Must be non-empty kebab-case without path separators and must not be `..`. If a filesystem root has no directory name, APM uses `my-project`. |
 | `--yes`, `-y` | Skip interactive prompts and use auto-detected defaults. |
 | `--target` | Comma-separated target list (e.g. `copilot,claude,codex`). Skips the target prompt and writes selections directly. |
+| `--claude-plugin` | Scaffold the Claude-compatible layout. This is what `apm plugin init` writes with zero flags. |
+| `--format [plugin\|agent-plugin\|claude\|claude-plugin]` | `agent-plugin` scaffolds a portable [Agent Plugins v1](../pack/#agent-plugin-bundle---format-agent-plugin) manifest instead; `plugin`, `claude`, and `claude-plugin` all select the current Claude-compatible default. Mutually exclusive with `--claude-plugin`. |
 | `--verbose`, `-v` | Show detailed output. |
 
 ## Migration from `apm init --plugin`
 
-If you've used `apm init --plugin` before, here's the move: run `apm plugin init` instead. The generated files are byte-for-byte identical.
+If you've used `apm init --plugin` before, run `apm plugin init` instead. Both scaffold the same Claude-compatible layout by default.
 
 The legacy `apm init --plugin` flag still works and still produces the same output, but prints a deprecation warning on stderr.
 
@@ -78,3 +80,4 @@ The top-level `apm.yml` carries the marketplace authoring config; each plugin li
 ## See also
 
 - [`apm marketplace`](../marketplace/) -- author and publish marketplaces that index your plugins.
+- [`apm pack`](../pack/) -- build the Claude plugin bundle or the portable Agent Plugins v1 bundle from a scaffolded project.

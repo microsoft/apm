@@ -5,13 +5,14 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from types import MappingProxyType
 from unittest.mock import MagicMock, call, patch
 from urllib.parse import urlparse
 
 import pytest
 import requests
 
-from apm_cli.core.auth import AuthResolver
+from apm_cli.core.auth import _GIT_MESSAGE_LOCALE_ENV, AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
@@ -35,6 +36,28 @@ class _HttpStatusError(RuntimeError):
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
         super().__init__(f"HTTP {status_code}")
+
+
+_UNTRANSLATED_AUTH_STDERR = (
+    "fatal: Authentication failed for 'https://github.com/acme/private.git/'"
+)
+_TRANSLATED_AUTH_STDERR = "fatal: Autentikasi gagal untuk 'https://github.com/acme/private.git/'"
+
+
+def _localized_git_stderr(env: dict[str, str]) -> str:
+    """Return git's auth failure the way gettext would render it under *env*.
+
+    Git resolves its message catalogue from ``LANGUAGE`` first, then
+    ``LC_ALL``; the ``C`` locale has no catalogue, so the untranslated
+    source string surfaces. Reproducing that precedence here is what makes
+    the retry contract fail when the locale is left inherited. The
+    translated form is git's own ``id`` catalogue entry, chosen because it
+    is a real translation that stays within printable ASCII.
+    """
+    catalogue = env.get("LANGUAGE") or env.get("LC_ALL") or ""
+    if catalogue.startswith("C"):
+        return _UNTRANSLATED_AUTH_STDERR
+    return _TRANSLATED_AUTH_STDERR
 
 
 def _indexed_git_config(env: dict[str, str]) -> list[tuple[str, str]]:
@@ -85,6 +108,8 @@ def _assert_anonymous_attempt_env(env: dict[str, str]) -> None:
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["GIT_ASKPASS"] == "echo"
     assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["LC_ALL"] == "C"
+    assert env["LANGUAGE"] == "C"
     if os.name == "nt":
         assert Path(env["GIT_CONFIG_GLOBAL"]).is_file()
     else:
@@ -455,6 +480,70 @@ def test_public_github_auth_failure_classifier_signal_vocabulary(
 ) -> None:
     """Every documented auth and non-auth signal stays in its intended bucket."""
     assert AuthResolver.is_public_github_auth_failure(failure) is expected
+
+
+@pytest.mark.parametrize(
+    "locale_environment",
+    (
+        {"LC_ALL": "id_ID.UTF-8", "LANGUAGE": "id_ID:id"},
+        {"LANG": "de_DE.UTF-8"},
+        {"LC_MESSAGES": "ja_JP.UTF-8"},
+    ),
+)
+def test_git_message_locale_is_normalized_over_inherited_locale(
+    locale_environment: dict[str, str],
+) -> None:
+    """An inherited locale never reaches git, whichever variable carries it."""
+    with patch.dict(os.environ, locale_environment, clear=True):
+        env = AuthResolver._build_git_env()
+
+    assert env["LC_ALL"] == "C"
+    assert env["LANGUAGE"] == "C"
+
+
+def test_git_message_locale_constant_rejects_mutation() -> None:
+    """The pinned locale cannot be reopened by a caller holding the constant."""
+    assert isinstance(_GIT_MESSAGE_LOCALE_ENV, MappingProxyType)
+
+    with pytest.raises(TypeError):
+        _GIT_MESSAGE_LOCALE_ENV["LC_ALL"] = "id_ID.UTF-8"  # type: ignore[index]
+
+    assert AuthResolver._build_git_env()["LC_ALL"] == "C"
+
+
+def test_translated_clone_failure_still_retries_with_a_token() -> None:
+    """A localised git stderr stays classifiable, so the token retry happens."""
+    manager = MagicMock(spec=GitHubTokenManager)
+    manager.setup_environment.side_effect = lambda: dict(os.environ)
+    manager.get_token_for_purpose.return_value = None
+    manager.resolve_credential_from_gh_cli.return_value = None
+    manager.resolve_credential_from_git.return_value = "private-token"
+    resolver = AuthResolver(token_manager=manager)
+    dep_ref = DependencyReference.parse("https://github.com/acme/private.git#main")
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def clone_action(url: str, env: dict[str, str], _target: Path) -> None:
+        calls.append((url, env))
+        if urlparse(url).username is not None:
+            return
+        raise subprocess.CalledProcessError(
+            128,
+            ("git", "clone"),
+            stderr=_localized_git_stderr(env),
+        )
+
+    with patch.dict(os.environ, {"LC_ALL": "id_ID.UTF-8", "LANGUAGE": "id_ID:id"}, clear=True):
+        downloader = _public_downloader(resolver)
+        downloader._execute_transport_plan(
+            dep_ref.repo_url,
+            Path("unused-target"),
+            dep_ref=dep_ref,
+            clone_action=clone_action,
+        )
+
+    assert len(calls) == 2
+    assert urlparse(calls[0][0]).username is None
+    assert urlparse(calls[1][0]).username is not None
 
 
 def test_clear_git_auth_env_only_removes_real_auth_channels() -> None:

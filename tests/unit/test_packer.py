@@ -260,7 +260,7 @@ class TestPackBundle:
         project = _setup_project(tmp_path, deployed, target="vscode")
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, dry_run=True)
+        result = pack_bundle(project, out, fmt="apm", dry_run=True)
 
         assert set(result.files) == set(deployed)
         # Nothing written to disk
@@ -301,7 +301,7 @@ class TestPackBundle:
         out = tmp_path / "build"
 
         with pytest.raises(FileNotFoundError, match="apm.lock.yaml not found"):  # noqa: RUF043
-            pack_bundle(project, out)
+            pack_bundle(project, out, fmt="apm")
 
     def test_pack_missing_deployed_file(self, tmp_path):
         project = tmp_path / "project"
@@ -334,7 +334,7 @@ class TestPackBundle:
         lockfile.write(project / "apm.lock.yaml")
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out)
+        result = pack_bundle(project, out, fmt="apm")
 
         assert result.files == []
         assert result.bundle_path.exists()
@@ -344,7 +344,7 @@ class TestPackBundle:
         project = _setup_project(tmp_path, deployed)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, target="vscode")
+        result = pack_bundle(project, out, fmt="apm", target="vscode")
 
         assert result.files == [".github/agents/a.md"]
         assert not (result.bundle_path / ".claude").exists()
@@ -359,7 +359,7 @@ class TestPackBundle:
         project = _setup_project(tmp_path, deployed)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, target="claude")
+        result = pack_bundle(project, out, fmt="apm", target="claude")
 
         assert result.mapped_count == 3
         assert ".claude/skills/my-plugin/SKILL.md" in result.files
@@ -375,7 +375,7 @@ class TestPackBundle:
         project = _setup_project(tmp_path, deployed)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, target="claude", dry_run=True)
+        result = pack_bundle(project, out, fmt="apm", target="claude", dry_run=True)
 
         assert ".claude/skills/x/SKILL.md" in result.files
         assert result.mapped_count == 1
@@ -389,7 +389,7 @@ class TestPackBundle:
         project = _setup_project(tmp_path, deployed)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, target="claude")
+        result = pack_bundle(project, out, fmt="apm", target="claude")
 
         lock_yaml = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())
         bundle_deployed = lock_yaml["dependencies"][0]["deployed_files"]
@@ -407,7 +407,7 @@ class TestPackBundle:
         project = _setup_project(tmp_path, deployed)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, target="claude")
+        result = pack_bundle(project, out, fmt="apm", target="claude")
 
         # Should contain .claude/ version (direct match), not duplicate
         assert result.files.count(".claude/skills/x/SKILL.md") == 1
@@ -418,7 +418,7 @@ class TestPackBundle:
         project = _setup_project(tmp_path, deployed, target="vscode")
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out)
+        result = pack_bundle(project, out, fmt="apm")
 
         lock_yaml = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())
         assert "pack" in lock_yaml
@@ -432,7 +432,7 @@ class TestPackBundle:
         out = tmp_path / "build"
 
         original_content = (project / "apm.lock.yaml").read_text()
-        pack_bundle(project, out)
+        pack_bundle(project, out, fmt="apm")
 
         assert (project / "apm.lock.yaml").read_text() == original_content
 
@@ -449,7 +449,7 @@ class TestPackBundle:
         lockfile.write(project / "apm.lock.yaml")
 
         with pytest.raises(ValueError, match="unsafe path"):
-            pack_bundle(project, tmp_path / "out")
+            pack_bundle(project, tmp_path / "out", fmt="apm")
 
 
 class TestPackSecurityScan:
@@ -462,7 +462,7 @@ class TestPackSecurityScan:
         out = tmp_path / "build"
 
         with patch("apm_cli.utils.console._rich_warning") as mock_warn:
-            result = pack_bundle(project, out)
+            result = pack_bundle(project, out, fmt="apm")
 
         mock_warn.assert_not_called()
         assert result.bundle_path.exists()
@@ -480,7 +480,7 @@ class TestPackSecurityScan:
         out = tmp_path / "build"
 
         with patch("apm_cli.utils.console._rich_warning") as mock_warn:
-            result = pack_bundle(project, out)
+            result = pack_bundle(project, out, fmt="apm")
 
         # Bundle created successfully — pack never blocks
         assert result.bundle_path.exists()
@@ -509,7 +509,7 @@ class TestPackSecurityScan:
         out = tmp_path / "build"
 
         with patch("apm_cli.utils.console._rich_warning") as mock_warn:
-            result = pack_bundle(project, out)
+            result = pack_bundle(project, out, fmt="apm")
 
         # No warning — the symlink target's hidden chars are not scanned
         mock_warn.assert_not_called()
@@ -529,7 +529,7 @@ class TestPackBundleTraversalDeployed:
         lockfile.write(project / "apm.lock.yaml")
 
         with pytest.raises(ValueError, match="unsafe path"):
-            pack_bundle(project, tmp_path / "out")
+            pack_bundle(project, tmp_path / "out", fmt="apm")
 
 
 class TestFilterFilesByTargetList:
@@ -566,7 +566,13 @@ class TestPackBundleMultiTarget:
         project = _setup_project(tmp_path, deployed)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, target=["claude", "vscode"], dry_run=True)
+        result = pack_bundle(
+            project,
+            out,
+            fmt="apm",
+            target=["claude", "vscode"],
+            dry_run=True,
+        )
 
         assert ".github/agents/a.md" in result.files
         assert ".claude/commands/b.md" in result.files
@@ -578,7 +584,7 @@ class TestPackBundleMultiTarget:
         project = _setup_project(tmp_path, deployed)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, target=["claude", "vscode"])
+        result = pack_bundle(project, out, fmt="apm", target=["claude", "vscode"])
 
         assert result.bundle_path.exists()
         assert (result.bundle_path / ".github/agents/a.md").exists()
@@ -590,7 +596,7 @@ class TestPackBundleMultiTarget:
         project = _setup_project(tmp_path, deployed)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, target=["claude", "vscode"])
+        result = pack_bundle(project, out, fmt="apm", target=["claude", "vscode"])
 
         lock_yaml = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())
         assert lock_yaml["pack"]["target"] == "claude,vscode"
@@ -605,7 +611,7 @@ class TestPackBundleMultiTarget:
         apm_yml = {"name": "test-pkg", "version": "1.0.0", "target": ["claude", "copilot"]}
         (project / "apm.yml").write_text(yaml.dump(apm_yml), encoding="utf-8")
 
-        result = pack_bundle(project, out, target=None, dry_run=True)
+        result = pack_bundle(project, out, fmt="apm", target=None, dry_run=True)
 
         # Should include files from both .github/ (copilot) and .claude/ (claude)
         assert ".github/agents/a.md" in result.files
@@ -1032,7 +1038,7 @@ class TestPackHybridDescriptionWarning:
             def warning(self, msg):
                 recorded.append(msg)
 
-        pack_bundle(project, out, dry_run=True, logger=_Logger())
+        pack_bundle(project, out, fmt="apm", dry_run=True, logger=_Logger())
 
         assert any("apm.yml is missing 'description'" in m for m in recorded), (
             f"Expected pack-time HYBRID warning, got: {recorded}"
@@ -1051,7 +1057,7 @@ class TestPackHybridDescriptionWarning:
             def warning(self, msg):
                 recorded.append(msg)
 
-        pack_bundle(project, out, dry_run=True, logger=_Logger())
+        pack_bundle(project, out, fmt="apm", dry_run=True, logger=_Logger())
 
         assert not any("missing 'description'" in m for m in recorded), (
             f"Did not expect HYBRID warning, got: {recorded}"
@@ -1068,7 +1074,7 @@ class TestPackHybridDescriptionWarning:
             def warning(self, msg):
                 recorded.append(msg)
 
-        pack_bundle(project, out, dry_run=True, logger=_Logger())
+        pack_bundle(project, out, fmt="apm", dry_run=True, logger=_Logger())
 
         assert not any("missing 'description'" in m for m in recorded), (
             f"Did not expect HYBRID warning when SKILL.md also lacks description, got: {recorded}"

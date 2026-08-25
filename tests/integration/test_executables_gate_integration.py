@@ -28,6 +28,7 @@ from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_CANVAS,
     EXEC_TYPE_HOOKS,
+    EXEC_TYPE_LSP,
     EXEC_TYPE_MCP,
     ExecutableDeclaration,
     build_approval_key,
@@ -375,7 +376,7 @@ class TestCheckExecutableApprovalIntegration:
 
     def test_local_always_approved(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "_local", "")
-        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval(
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
             "_local", pkg_info, {"deny-all": {}}
         )
         assert hooks_ok is True
@@ -383,29 +384,47 @@ class TestCheckExecutableApprovalIntegration:
 
     def test_none_allow_executables_means_all_approved(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "any-pkg", "1.0")
-        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("any-pkg", pkg_info, None)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
+            "any-pkg", pkg_info, None
+        )
         assert hooks_ok is True
         assert bin_ok is True
 
     def test_empty_allow_executables_blocks_all(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
-        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, {})
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
+            "pkg", pkg_info, {}
+        )
         assert hooks_ok is False
         assert bin_ok is False
 
     def test_approved_package_passes(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
         allow = {"pkg#1.0": {"hooks": True, "bin": True}}
-        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, allow)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
+            "pkg", pkg_info, allow
+        )
         assert hooks_ok is True
         assert bin_ok is True
 
     def test_partial_approval(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
         allow = {"pkg#1.0": {"hooks": True, "bin": False}}
-        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, allow)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
+            "pkg", pkg_info, allow
+        )
         assert hooks_ok is True
         assert bin_ok is False
+
+    def test_lsp_approval_is_enforced(self, tmp_path: Path) -> None:
+        pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
+        allow = {"pkg#1.0": {"lsp": True}}
+
+        _hooks_ok, _bin_ok, _mcp_ok, _canvas_ok, lsp_ok = check_executable_approval(
+            "pkg", pkg_info, allow
+        )
+
+        assert lsp_ok is True
 
     def test_dep_ref_key_takes_priority(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
@@ -414,7 +433,9 @@ class TestCheckExecutableApprovalIntegration:
         pkg_info.dependency_ref = dep_ref
 
         allow = {"github:owner/repo#v1.0": {"hooks": True, "bin": True}}
-        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, allow)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
+            "pkg", pkg_info, allow
+        )
         assert hooks_ok is True
         assert bin_ok is True
 
@@ -426,7 +447,9 @@ class TestCheckExecutableApprovalIntegration:
 
         # Approved under name#version, not dep-ref
         allow = {"pkg#1.0": {"hooks": True, "bin": True}}
-        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, allow)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
+            "pkg", pkg_info, allow
+        )
         assert hooks_ok is True
         assert bin_ok is True
 
@@ -581,6 +604,7 @@ class TestConstantsIntegration:
         # #1865 expanded the executable gate to cover MCP and canvas.
         assert EXEC_TYPE_MCP in ENFORCED_EXEC_TYPES
         assert EXEC_TYPE_CANVAS in ENFORCED_EXEC_TYPES
+        assert EXEC_TYPE_LSP in ENFORCED_EXEC_TYPES
 
     def test_hooks_and_bin_in_enforced(self) -> None:
         assert EXEC_TYPE_HOOKS in ENFORCED_EXEC_TYPES

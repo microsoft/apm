@@ -9,33 +9,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm pack --check-versions` now reads `plugin.json` for local Plugin
-  collections without `apm.yml`; when present, `apm.yml` remains authoritative.
-  (#2454)
-- Kiro IDE/CLI v3 now receives agents from `.apm/agents/` as Markdown files
-  under `.kiro/agents/<relative-stem>.md`. Only `description`, `model`, and
-  `tools` frontmatter fields are forwarded; `name` and unknown fields are
-  stripped. Tools are permission-bearing: APM fails closed (no partial write)
-  if any tool value is outside the approved Kiro capability set (`read`,
-  `write`, `shell`, `web`, `subagent`, `knowledge`, `context`, `todo_list`,
-  `@mcp`, `@builtin`, `*`). Nested source paths under `.apm/agents/` are
-  preserved, and the targets matrix is updated to reflect the new `agents`
-  primitive for `kiro`. Sources: https://kiro.dev/docs/custom-agents/ and
-  https://kiro.dev/docs/cli/v3/ (accessed 2026-08-03). (#2089)
-- Stable Grok Build target support for native `.grok/` rules, agents, commands,
-  and skills, plus compiled `AGENTS.md` context.
-- Registry object-form dependencies (`- id: owner/repo`) now accept a `skills:` subset
-  and a `targets:` subset, matching git-longhand parity. `to_apm_yml_entry()` also
-  correctly round-trips registry deps as dict form instead of collapsing them to a
-- Registry object-form dependencies (`- id: owner/repo`) now support `skills:` and
-  `targets:` subset installs, matching git-longhand parity -- no need to switch to
-  verbose git-longhand form just to narrow what gets deployed. Registry deps also now
-  serialize correctly as object-form entries in `apm.yml` instead of collapsing to a
-  plain git string. (by @nadav-y, #2166)
+- `apm install --frozen` no longer fails on a cold cache when git-sourced
+  `apm_package` dependencies declare MCP servers; frozen hydration now
+  succeeds as expected before any packages are fetched. (closes #2456)
+- `apm install` now accepts `--trust-bin` / `--no-trust-bin` for per-invocation
+  consent over marketplace-plugin `bin/` executable deployment. `--trust-bin`
+  approves deployment silently; `--no-trust-bin` skips `bin/` even when policy
+  permits it. The `allowExecutables` policy gate still takes precedence. (closes #1620)
+- `apm pack --format agent-plugin` and
+  `apm plugin init --format agent-plugin` now emit strict, portable Agent
+  Plugins 1.0 bundles. The existing no-flag default and `--format plugin` alias
+  both remain Claude-compatible; exact-schema Agent Plugins are admitted as
+  whole units and blocked before deployment until a native client lifecycle
+  qualifies, never projected as legacy primitives. (by @sergio-sisternes-epam;
+  closes #2522) (#2654)
 
 ### Fixed
 
-- `apm compile --clean` preserves APM-generated `AGENTS.md` files tracked by nested Git worktrees. (#2473)
+- Marketplace `sourceBase` and full HTTPS repository paths now preserve safe
+  percent-encoded segments, enabling Azure DevOps project names such as
+  `My%20Projects`. (by @aryansk; fixes #2554) (#2584)
+- `apm lock export --timestamp` now rejects malformed or timezone-naive values
+  before they enter CycloneDX or SPDX metadata. (by @manideep-malyala; fixes
+  #2659) (#2660)
+- Generated bundle and plugin metadata now uses deterministic LF line endings,
+  keeping generated metadata byte-stable across operating systems. Existing
+  generated plugin manifests on Windows may have a one-time line-ending-only
+  diff on their next forced rewrite; project YAML files are unchanged. (#2624)
+- Lockfiles generated on Windows for marketplace-plugin / skill-subset git
+  dependencies now pass `apm install --frozen` on Linux, and vice versa. APM
+  writes synthetic `apm.yml` and inline-hooks `.apm/hooks/hooks.json` files
+  with deterministic LF line endings so their `content_hash` is identical on
+  every OS. Existing Windows lockfiles may retain the old CRLF-domain hash;
+  keep the lockfile so its `resolved_commit` pins remain intact while the
+  automatic one-time repair tracked in #2628 lands. (closes #2619)
+- `apm compile` now reduces matching work for literal scoped `applyTo` patterns
+  in large repositories while preserving historical placement. It shares a
+  source inventory across discovery and placement while preserving cleanup
+  behavior, and preserves commas in character classes. (#2595)
+- Hook commands such as `"${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py` now rewrite to
+  `"${CLAUDE_PLUGIN_ROOT}/hooks/probe.py"` and warn when a supported plugin-root
+  placeholder remains unresolved instead of silently deploying a dead hook.
+  OpenAPM v0.1 (`docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012`) binds
+  the behavior.
+  (by @MohammedAlkindi; closes #2639) (#2645)
+- `apm install` now resolves positional virtual-subdirectory git semver ranges before literal-ref preflight, while preserving registry version validation. (by @aryansk; closes #2514) (#2590)
+- `apm uninstall --global` now cleans removed-only target files before deleting their ownership state, while preserving files owned by surviving packages. (#2658)
+- Windows binary is now Authenticode-signed in the release workflow, eliminating
+  the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
+  PyInstaller bundles. (#2435)
+- `apm install --skill <name>` now matches on plugins whose manifest declares
+  the conventional skills container (`"skills": ["./skills/"]`). The declared
+  container was normalized under its own name, burying every skill at
+  `.apm/skills/skills/<name>/` -- one level below the depth `--skill`
+  enumeration, deployment, the `bin/` security scan and primitive counting all
+  read, so selection reported `Available: (none)` even though a bare install
+  deployed those same skills. A declared entry that is itself a skill
+  (`"skills": "./skills/engineering/tdd"`) still lands under its own leaf name
+  instead of spilling a bare `SKILL.md` into the shared skills root.
+  (closes #2530)
+- Root-declared plugin components (Claude Code single-skill shape
+  `"skills": ["./"]`, and the same for agents/commands/hooks) no longer cause
+  infinite recursion or unbounded writes during `apm install`.
+  `docs/src/content/docs/specs/openapm-v0.1.md` now explicitly requires
+  containment of consumer-generated staging output. (closes #2556)
+- Multi-target `apm compile` now avoids repeating expensive project analysis
+  for each target, making multi-target runs scale like single-target runs
+  without changing generated output. (closes #2482)
+- `deployed-files-present` no longer false-positives on gitignored deploy
+  paths (e.g. `.agents/`), enabling `apm audit --ci` to pass on a fresh
+  checkout when deployed outputs are intentionally not committed. (closes
+  #2452, thanks @sergio-sisternes-epam)
+- YAML expansion guard no longer rejects large anchor-free lockfiles (150K+
+  entries) with a false-positive "billion-laughs" error. APM-generated
+  lockfiles with no anchors or aliases now load without error. (#2389)
+- `apm install` no longer skips the credential retry on non-English machines.
+  Git localises its diagnostics through gettext, so a translated stderr made an
+  authentication failure unrecognisable and private-repo installs failed with
+  misleading network guidance. Git subprocesses in the authentication retry
+  path now run with `LC_ALL=C` and `LANGUAGE=C`. (by @Naofel-eal, closes #2533)
+- Codex MCP configuration now accepts plain HTTP for loopback endpoints while
+  retaining HTTPS for every non-loopback host. (by @normandev92, #2468)
+
+### Changed
+
+- **BREAKING:** A plugin `skills` declaration now exclusively controls which
+  skills deploy. Declare every intended skill (or its immediate container), or
+  remove the key to retain conventional `skills/` discovery; undeclared
+  siblings no longer deploy. An explicit `"skills": []` deploys no skills and
+  reports one actionable migration diagnostic when it shadows root skills.
+  (closes #2537)
+- `apm install` now emits a trust-posture warning (via `[!]`) when a marketplace
+  plugin deploys executables to Claude Code's PATH without an explicit `--trust-bin`
+  flag. In non-interactive (non-TTY) contexts the default is `--no-trust-bin`.
+  Pass `--trust-bin` to suppress the warning and deploy, or `apm approve` for
+  persistent per-package approval.
+### Fixed
+
+- Codex MCP configuration now accepts plain HTTP for loopback endpoints while
+  retaining HTTPS for every non-loopback host. (by @normandev92, #2468)
+
+### Removed
+
+- Retired the credential-dependent roadmap project sync. Release commitments
+  now live solely in the active milestone. (#2672)
+
+## [0.28.0] - 2026-08-04
+
+### Added
+
+- New xAI Grok targets: `grok-build` deploys native `.grok/` rules, agents,
+  commands, and skills alongside compiled `AGENTS.md` context, and the
+  explicit-only experimental `grok-cloud` target deploys skills to project or
+  user `.grok/skills/`. (closes #2419, #2420)
+- Kiro IDE/CLI v3 now receives agents from `.apm/agents/` as Markdown files
+  under `.kiro/agents/<relative-stem>.md`, forwarding only `description`,
+  `model`, and `tools` frontmatter. Tools are permission-bearing, so APM fails
+  closed with no partial write when a tool value falls outside Kiro's approved
+  capability set. (closes #2089, #2440)
+- Registry object-form dependencies (`- id: owner/repo`) now support `skills:`
+  and `targets:` subset installs, matching git-longhand parity -- no need to
+  switch to verbose git-longhand form just to narrow what gets deployed.
+  Registry deps also serialize back to `apm.yml` as object-form entries instead
+  of collapsing to a plain git string. (by @nadav-y, #2166)
+- `apm pack --check-versions` now reads `plugin.json` for local Plugin
+  collections without `apm.yml`; when present, `apm.yml` remains authoritative.
+  (#2454)
+
+### Fixed
+
+- `apm install` now re-downloads an aliased dependency after its `ref:` changes
+  in `apm.yml`. Previously the pinned-ref and already-resolved cache-reuse
+  shortcuts skipped the fetch, so `apm_modules/<alias>/` and every primitive
+  deployed from it stayed on the old revision. (#2484)
+- `apm install --target all` no longer aborts on targets that have no MCP
+  client, such as `grok-build`. Non-MCP targets are skipped with a note instead
+  of raising `Unsupported client type`. (#2484)
+- `apm outdated` no longer exits 1 when the Rich progress renderer fails. The
+  command now owns its own `Console` instead of borrowing Rich's process-global
+  singleton, and falls back to plain-text progress if rendering still raises.
+  (#2507)
+- `apm init` and install-time auto-bootstrap now reject empty or
+  whitespace-only project names, falling back to `my-project` at a filesystem
+  root. APM no longer writes an `apm.yml` that every later install, lock, or
+  compile command rejects. (by @nadav-y, #2200)
+- `apm pack` now treats `dependencies: {}` as a declared mapping and emits the
+  local bundle; omitted or null `dependencies:` still produce no bundle.
+  (closes #2431, #2458)
+- `apm compile --clean` preserves APM-generated `AGENTS.md` files tracked by
+  nested Git worktrees. (#2473)
 - Required MCP runtime defaults are now overrideable prompts, while secret
   defaults remain hidden and VS Code OCI launchers resolve every runtime
   placeholder without writing secret values to `mcp.json`. (#2455)
@@ -43,13 +165,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is skipped, so CI cannot report success after an incomplete local audit.
   (#2460)
 - Claude project hooks now run reliably when Claude launches them outside the
-  repository while keeping generated settings portable across clones. (#2408)
+  repository while keeping generated settings portable across clones.
+  (closes #2408, #2442)
 - Marketplace package sources now accept full HTTPS repository URLs with nested
   paths while retaining strict shorthand validation. (#2439)
 - YAML-list `applyTo` entries now preserve every pattern during compilation
   and target-native instruction conversion, including explicitly targeted
   supported hidden tool roots. (#2441)
-- `apm pack --check-clean` now honors `--marketplace-path` overrides. (#2427)
+- `apm pack --check-clean` now honors `--marketplace-path` overrides.
+  (closes #2427, #2461)
+- `apm marketplace validate` now reports malformed plugin structures without
+  rewriting the registered marketplace or its source manifest. (#2445)
+- Azure DevOps policy discovery now uses the valid `apm` project and
+  `apm-policy` repository for organization policy files, with a 404-only
+  compatibility fallback for legacy `_apm/_apm` locations. (#2450)
 - Release publication now excludes opt-in live ADO PAT tests and credentials; those tests fail closed in the Auth Acceptance workflow instead. (#2426)
 - Release promotions now run marker-bounded lifecycle integration on macOS Intel
   while retaining the full corpus on macOS ARM and Linux, preventing Intel
@@ -58,11 +187,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrites and transport policy across anonymous and authenticated retries;
   policy cache metadata and diagnostics also omit credentials embedded in
   direct policy URLs. (#2422)
-- `apm install --frozen` no longer reports a repo-root `claude_skill` dependency
-  as lockfile drift in projects that also carry MCP state. The absent `apm.yml`
-  is waived from the locked package type and the installed shape, regardless of
-  whether the skill was declared as a repository root or as a subdirectory.
-  (#2446)
+- `apm install --frozen` no longer reports repo-root `claude_skill`
+  dependencies as lockfile drift in projects that also carry MCP state. APM
+  trusts the locked type before remote materialization and validates the skill
+  shape when present, for repository-root and subdirectory skills. (#2446)
 
 ### Performance
 

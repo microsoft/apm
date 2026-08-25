@@ -34,6 +34,7 @@ def analyze_sources(
     manifest_source: str,
     lockfile_source: str,
     post_local_source: str,
+    uninstall_source: str | None = None,
 ) -> list[str]:
     """Return violations of target-file contraction ownership."""
     manifest_calls = _function_calls(manifest_source)
@@ -65,6 +66,12 @@ def analyze_sources(
         violations.append(
             "post-deps local must route target contraction through reconcile_deployed_block"
         )
+    if uninstall_source is not None:
+        uninstall_calls = _function_calls(uninstall_source)
+        if _MANIFEST_OWNER not in uninstall_calls.get("uninstall", set()):
+            violations.append(
+                "uninstall must route removed target files through manifest_reconcile"
+            )
     return violations
 
 
@@ -73,10 +80,12 @@ def analyze_paths(root: Path) -> list[str]:
     manifest_path = root / "src/apm_cli/install/manifest_reconcile.py"
     lockfile_path = root / "src/apm_cli/install/phases/lockfile.py"
     post_local_path = root / "src/apm_cli/install/phases/post_deps_local.py"
+    uninstall_path = root / "src/apm_cli/commands/uninstall/cli.py"
     return analyze_sources(
         manifest_path.read_text(encoding="utf-8"),
         lockfile_path.read_text(encoding="utf-8"),
         post_local_path.read_text(encoding="utf-8"),
+        uninstall_path.read_text(encoding="utf-8"),
     )
 
 

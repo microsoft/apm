@@ -135,7 +135,8 @@ unresolved required entries fail closed.
 
 | Harness | File | Scope | Format |
 |---|---|---|---|
-| GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |
+| GitHub Copilot CLI | `.github/mcp.json` | project | JSON `mcpServers` |
+| GitHub Copilot CLI | `$COPILOT_HOME/mcp-config.json` (`-g`, unset/blank: `~/.copilot/mcp-config.json`) | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
@@ -165,10 +166,11 @@ write.
 The same effective decision drives package, MCP, and LSP phases; APM does
 not re-resolve each phase independently.
 
-At project scope, the canonical `copilot` target writes MCP state to VS Code's
-`.vscode/mcp.json`. At global scope it writes Copilot CLI's
-`~/.copilot/mcp-config.json`. Use the legacy `--runtime copilot` override only
-when a project-scoped command must address the Copilot CLI adapter directly.
+At project scope, the `copilot` target writes MCP state to
+`.github/mcp.json`, which Copilot CLI discovers from the repository. The
+`vscode` target writes only `.vscode/mcp.json`. At global scope, `copilot`
+writes `$COPILOT_HOME/mcp-config.json`, or `~/.copilot/mcp-config.json` when
+`COPILOT_HOME` is unset.
 
 **Portability boundary:** A committed target list makes lockfile MCP ownership
 deterministic across machines with different installed harnesses. If `targets:`
@@ -211,7 +213,8 @@ permissions to check. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to
-`~/.copilot/mcp-config.json`, Claude Code to
+`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set, otherwise
+`~/.copilot/mcp-config.json`; Claude Code to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
 non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
@@ -237,6 +240,17 @@ MCP defines two transport families. APM exposes both:
   remote endpoint. Requires `url:` (http or https only -- websockets
   and `file://` are rejected). Use `--header KEY=VALUE` (repeatable)
   for HTTP headers such as `Authorization`.
+
+Codex requires HTTPS for non-loopback remote endpoints. Plain HTTP is
+accepted only for literal loopback addresses such as `localhost`,
+`ip6-localhost`, `127.0.0.0/8`, and `::1`, which keeps local development
+servers usable without sending cleartext traffic off the machine. For example:
+
+```sh
+apm install --target codex --mcp local-dev --url http://localhost:3000/mcp
+```
+
+This writes the endpoint to the Codex MCP configuration.
 
 `--transport` is inferred when omitted: a `--url` implies a remote
 transport, a post-`--` command implies `stdio`. The mutually-exclusive

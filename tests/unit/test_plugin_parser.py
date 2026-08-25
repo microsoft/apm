@@ -1,7 +1,8 @@
 """Unit tests for plugin_parser.py and find_plugin_json helper."""
 
 import json
-import os  # noqa: F401
+import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,11 @@ from apm_cli.deps.plugin_parser import (
     PluginIntegrityError,
     _extract_mcp_servers,
     _generate_apm_yml,
+    _holds_skill_dirs,
     _map_plugin_artifacts,
     _mcp_servers_to_apm_deps,
     normalize_plugin_directory,
+    normalized_plugin_skill_sources,
     parse_plugin_manifest,
     synthesize_apm_yml_from_plugin,
     validate_plugin_package,
@@ -110,6 +113,79 @@ class TestParsePluginManifest:
             parse_plugin_manifest(pj)
 
 
+class TestHoldsSkillDirs:
+    """Direct coverage for the per-entry classifier behind #2530.
+
+    Fixtures reach it through ``_map_plugin_artifacts``, which exercises the
+    two healthy shapes -- a skill, and a container of them. The branches that
+    say "neither" are the ones deciding whether unrecognized content merges
+    into the shared skills root, and they were only ever reached transitively.
+    Pin them here: anything a wrong answer lets through lands in
+    ``.apm/skills/`` under no name of its own.
+    """
+
+    def test_own_skill_md_wins_over_a_nested_one(self, tmp_path):
+        """Carrying ``SKILL.md`` settles it -- children are not consulted.
+
+        Both shapes are present here, so this pins the precedence rather
+        than restating either branch: merging such an entry would spill a
+        bare ``SKILL.md`` into the shared skills root under no name at all.
+        """
+        skill = tmp_path / "engineering"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("# engineering", encoding="utf-8")
+        (skill / "tdd").mkdir()
+        (skill / "tdd" / "SKILL.md").write_text("# tdd", encoding="utf-8")
+
+        assert _holds_skill_dirs(skill) is False
+
+    def test_directory_of_skill_directories_is_a_container(self, tmp_path):
+        container = tmp_path / "skills"
+        (container / "tdd").mkdir(parents=True)
+        (container / "tdd" / "SKILL.md").write_text("# tdd", encoding="utf-8")
+
+        assert _holds_skill_dirs(container) is True
+
+    def test_empty_directory_is_not_a_container(self, tmp_path):
+        empty = tmp_path / "skills"
+        empty.mkdir()
+
+        # ``any()`` over nothing is False, so an empty declared container
+        # keeps its own name rather than merging -- there is nothing to
+        # merge, and treating it as a container would be a guess.
+        assert _holds_skill_dirs(empty) is False
+
+    def test_directory_whose_skills_sit_two_levels_down_is_not_a_container(self, tmp_path):
+        container = tmp_path / "skills"
+        (container / "engineering" / "tdd").mkdir(parents=True)
+        (container / "engineering" / "tdd" / "SKILL.md").write_text("# tdd", encoding="utf-8")
+
+        assert _holds_skill_dirs(container) is False
+
+    def test_missing_directory_is_not_a_container(self, tmp_path):
+        # ``iterdir`` raises FileNotFoundError -- an OSError -- rather than
+        # yielding nothing. A declared entry that vanished between
+        # resolution and mapping must not be read as a merge instruction.
+        assert _holds_skill_dirs(tmp_path / "gone") is False
+
+    def test_unreadable_directory_is_not_a_container(self, tmp_path, monkeypatch):
+        """A directory APM cannot list must fail closed, not merge blind.
+
+        Permission errors are the shape this guards on POSIX; they are
+        raised here directly because chmod is advisory for root and a no-op
+        for directory listing on Windows.
+        """
+        unreadable = tmp_path / "skills"
+        unreadable.mkdir()
+
+        def _deny(self):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "iterdir", _deny)
+
+        assert _holds_skill_dirs(unreadable) is False
+
+
 class TestMapPluginArtifacts:
     def test_map_agents_directory(self, tmp_path):
         plugin_dir = tmp_path / "plugin"
@@ -140,6 +216,133 @@ class TestMapPluginArtifacts:
 
         assert (apm_dir / "skills" / "my-skill" / "SKILL.md").exists()
 
+    def test_skill_receipt_reconciles_removed_declarations(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        for name in ("alpha", "beta"):
+            skill = plugin_dir / "skills" / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        _map_plugin_artifacts(plugin_dir, apm_dir, {"skills": ["./skills/"]})
+        assert set(normalized_plugin_skill_sources(plugin_dir)[0]) == {"alpha", "beta"}
+
+        _map_plugin_artifacts(plugin_dir, apm_dir, {"skills": []})
+
+        sources, declared = normalized_plugin_skill_sources(plugin_dir)
+        assert sources == {}
+        assert declared is True
+        assert not (apm_dir / "skills" / "alpha").exists()
+        assert not (apm_dir / "skills" / "beta").exists()
+
+    def test_skill_receipt_removes_prior_skills_for_file_only_declaration(self, tmp_path):
+        """A file-only declaration must remove prior parser-owned skill directories."""
+        plugin_dir = tmp_path / "plugin"
+        for name in ("alpha", "beta"):
+            skill = plugin_dir / "skills" / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        _map_plugin_artifacts(plugin_dir, apm_dir, {"skills": ["./skills/"]})
+        (plugin_dir / "loose.md").write_text("# not a skill\n", encoding="utf-8")
+        _map_plugin_artifacts(plugin_dir, apm_dir, {"skills": ["./loose.md"]})
+
+        assert normalized_plugin_skill_sources(plugin_dir) == ({}, True)
+        assert not (apm_dir / "skills" / "alpha").exists()
+        assert not (apm_dir / "skills" / "beta").exists()
+
+    def test_skill_receipt_preserves_nested_declared_source(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        skill = plugin_dir / "skills" / "engineering" / "tdd"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# tdd", encoding="utf-8")
+
+        _map_plugin_artifacts(
+            plugin_dir,
+            plugin_dir / ".apm",
+            {"skills": ["./skills/engineering/tdd"]},
+        )
+
+        sources, declared = normalized_plugin_skill_sources(plugin_dir)
+        assert declared is True
+        assert sources == {"tdd": skill}
+        assert (plugin_dir / ".apm" / "skills" / "tdd" / "SKILL.md").is_file()
+
+    def test_duplicate_declared_skill_leaf_names_fail_closed(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        for parent in ("engineering", "operations"):
+            skill = plugin_dir / "skills" / parent / "runbook"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {parent}", encoding="utf-8")
+
+        _map_plugin_artifacts(
+            plugin_dir,
+            plugin_dir / ".apm",
+            {"skills": ["./skills/engineering/runbook", "./skills/operations/runbook"]},
+        )
+
+        sources, declared = normalized_plugin_skill_sources(plugin_dir)
+        assert declared is True
+        assert sources == {}
+
+    def test_malformed_skills_declaration_disables_default_discovery(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        skill = plugin_dir / "skills" / "alpha"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# alpha", encoding="utf-8")
+
+        _map_plugin_artifacts(plugin_dir, plugin_dir / ".apm", {"skills": {"path": "./skills"}})
+
+        sources, declared = normalized_plugin_skill_sources(plugin_dir)
+        assert declared is False
+        assert sources == {}
+
+    def test_skill_receipt_ignores_untracked_staged_normalized_skill(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        staged = plugin_dir / ".apm" / "skills" / "untracked"
+        staged.mkdir(parents=True)
+        (staged / "SKILL.md").write_text("# untracked", encoding="utf-8")
+
+        _map_plugin_artifacts(plugin_dir, plugin_dir / ".apm", {"skills": []})
+
+        assert normalized_plugin_skill_sources(plugin_dir) == ({}, True)
+
+    def test_plugin_artifact_mapping_rejects_symlinked_apm_destination(self, tmp_path):
+        """A plugin cannot redirect normalization cleanup through ``.apm``."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        external = tmp_path / "external"
+        sentinel = external / "skills" / "sentinel"
+        sentinel.mkdir(parents=True)
+        (sentinel / "SKILL.md").write_text("# sentinel", encoding="utf-8")
+        try:
+            (plugin_dir / ".apm").symlink_to(external, target_is_directory=True)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        with pytest.raises(PluginIntegrityError, match="symlinked destination"):
+            _map_plugin_artifacts(plugin_dir, plugin_dir / ".apm", {"skills": []})
+
+        assert (sentinel / "SKILL.md").is_file()
+
+    def test_plugin_artifact_mapping_canonicalizes_a_symlinked_plugin_root(self, tmp_path):
+        """A safe symlink to the plugin root still yields a valid receipt."""
+        plugin_dir = tmp_path / "plugin"
+        skill = plugin_dir / "skills" / "alpha"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# alpha", encoding="utf-8")
+        alias = tmp_path / "plugin-alias"
+        try:
+            alias.symlink_to(plugin_dir, target_is_directory=True)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        _map_plugin_artifacts(alias, alias / ".apm", {"skills": ["./skills/alpha"]})
+
+        assert normalized_plugin_skill_sources(alias) == ({"alpha": skill}, True)
+
     def test_map_commands_to_prompts(self, tmp_path):
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
@@ -159,6 +362,40 @@ class TestMapPluginArtifacts:
         assert (prompts / "run.prompt.md").read_text() == "# Run"
         # Already .prompt.md stays unchanged
         assert (prompts / "already.prompt.md").exists()
+
+    def test_prepositioned_apm_command_source_is_preserved(self, tmp_path):
+        """A declared command source under .apm is input, not generated output."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        apm_dir = plugin_dir / ".apm"
+        source = apm_dir / "custom-commands"
+        source.mkdir(parents=True)
+        (source / "run.md").write_text("# Run")
+
+        _map_plugin_artifacts(
+            plugin_dir,
+            apm_dir,
+            manifest={"commands": [".apm/custom-commands"]},
+        )
+
+        assert (apm_dir / "prompts" / "run.prompt.md").read_text() == "# Run"
+
+    def test_command_source_skips_fifo(self, tmp_path):
+        """Command mapping must not block while opening a named pipe."""
+        plugin_dir = tmp_path / "plugin"
+        command_dir = plugin_dir / "commands"
+        command_dir.mkdir(parents=True)
+        fifo = command_dir / "wait"
+        try:
+            os.mkfifo(fifo)
+        except (AttributeError, OSError):
+            pytest.skip("Named pipes are not supported on this platform")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"commands": "commands"})
+
+        assert not (apm_dir / "prompts" / "wait").exists()
 
     def test_map_hooks_directory(self, tmp_path):
         plugin_dir = tmp_path / "plugin"
@@ -254,6 +491,139 @@ class TestMapPluginArtifacts:
         # Each array entry becomes a named subdirectory
         assert (apm_dir / "skills" / "skills" / "SKILL.md").read_text() == "# A"
         assert (apm_dir / "skills" / "extra-skills" / "SKILL.md").read_text() == "# B"
+
+    def test_declared_skills_container_flattens_to_one_level(self, tmp_path):
+        """A declared container merges its skills instead of nesting itself.
+
+        Regression for #2530: ``"skills": ["./skills/"]`` names the
+        conventional container, not a skill. Copying it under its own name
+        buried every skill at ``.apm/skills/skills/<name>/`` -- one level
+        below where deployment, ``--skill`` enumeration, the bin/ security
+        scan and primitive counting all look.
+        """
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        container = plugin_dir / "skills"
+        for name in ("csharp-scripts", "dotnet-pinvoke"):
+            skill = container / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
+
+        normalized = apm_dir / "skills"
+        assert not (normalized / "skills").exists()
+        assert (normalized / "csharp-scripts" / "SKILL.md").read_text() == "# csharp-scripts"
+        assert (normalized / "dotnet-pinvoke" / "SKILL.md").read_text() == "# dotnet-pinvoke"
+
+    def test_declared_skills_string_single_skill_keeps_leaf_name(self, tmp_path):
+        """The string form classifies per entry too, not only the array form.
+
+        ``"skills": "./skills/engineering/tdd"`` names one skill. Merging its
+        contents would spill a bare ``SKILL.md`` into the shared skills root
+        under no name, leaving ``--skill`` with nothing to match -- the #2530
+        symptom reached through the other manifest shape.
+        """
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        skill = plugin_dir / "skills" / "engineering" / "tdd"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# tdd", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(
+            plugin_dir,
+            apm_dir,
+            manifest={"skills": "./skills/engineering/tdd"},
+        )
+
+        normalized = apm_dir / "skills"
+        assert (normalized / "tdd" / "SKILL.md").read_text() == "# tdd"
+        assert not (normalized / "SKILL.md").exists()
+
+    def test_declared_skills_string_container_flattens(self, tmp_path):
+        """The string form of a container merges, same as the array form."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        for name in ("alpha", "beta"):
+            skill = plugin_dir / "skills" / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(f"# {name}", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": "./skills/"})
+
+        normalized = apm_dir / "skills"
+        assert not (normalized / "skills").exists()
+        assert (normalized / "alpha" / "SKILL.md").read_text() == "# alpha"
+        assert (normalized / "beta" / "SKILL.md").read_text() == "# beta"
+
+    def test_declared_nested_skill_path_keeps_leaf_name(self, tmp_path):
+        """A declared entry that IS a skill lands under its own leaf name."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        skill = plugin_dir / "skills" / "engineering" / "tdd"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# tdd", encoding="utf-8")
+        sibling = plugin_dir / "skills" / "engineering" / "pairing"
+        sibling.mkdir(parents=True)
+        (sibling / "SKILL.md").write_text("# pairing", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(
+            plugin_dir,
+            apm_dir,
+            manifest={"skills": ["./skills/engineering/tdd"]},
+        )
+
+        normalized = apm_dir / "skills"
+        assert (normalized / "tdd" / "SKILL.md").read_text() == "# tdd"
+        # Undeclared siblings stay out: the entry is a requirement, not a hint.
+        assert not (normalized / "pairing").exists()
+
+    def test_declared_skills_entry_holding_no_skill_warns(self, tmp_path, caplog):
+        """An entry that is neither a skill nor a container must say so.
+
+        A container whose skills sit two levels down reaches no deployable
+        depth under either mapping. The copy stays put -- the entry keeps its
+        own name so unrecognized content stays out of the shared skills root
+        -- but the plugin author gets the one line that #2530 lacked instead
+        of an install that looks clean and deploys nothing.
+        """
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        buried = plugin_dir / "skills" / "engineering" / "tdd"
+        buried.mkdir(parents=True)
+        (buried / "SKILL.md").write_text("# tdd", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        with caplog.at_level(logging.WARNING, logger="apm_cli.deps.plugin_parser"):
+            _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
+
+        assert "skills" in caplog.text
+        assert "no SKILL.md" in caplog.text
+        assert "--skill" in caplog.text
+
+    def test_declared_skills_container_does_not_warn(self, tmp_path, caplog):
+        """The healthy shapes stay quiet -- a warning nobody can act on is noise."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        skill = plugin_dir / "skills" / "csharp-scripts"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# csharp-scripts", encoding="utf-8")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        with caplog.at_level(logging.WARNING, logger="apm_cli.deps.plugin_parser"):
+            _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
+
+        assert "no SKILL.md" not in caplog.text
 
     def test_custom_commands_path(self, tmp_path):
         """Manifest commands field redirects command discovery."""
@@ -1411,3 +1781,148 @@ class TestSynthesizePreservesExistingManifest:
         # Fallback still produces a usable apm.yml from plugin metadata.
         result = self._read_apm_yml(tmp_path)
         assert result["name"] == "bad-pkg"
+
+
+class TestRootDeclaredComponents:
+    """Root declarations must copy only source content into the component tree."""
+
+    @staticmethod
+    def _plugin(tmp_path, component: str) -> tuple[Path, bool]:
+        plugin_dir = tmp_path / "plug"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / "SKILL.md").write_text("# hello\n", encoding="utf-8")
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "plug", component: ["./"]}),
+            encoding="utf-8",
+        )
+        (plugin_dir / ".apm-pin").write_text("internal cache marker\n", encoding="utf-8")
+        linked = plugin_dir / "linked.md"
+        try:
+            linked.symlink_to(plugin_dir / "SKILL.md")
+        except OSError:
+            return plugin_dir, False
+        return plugin_dir, True
+
+    @pytest.mark.parametrize(
+        ("component", "expected_files"),
+        [
+            ("agents", {"SKILL.md", ".claude-plugin/plugin.json"}),
+            ("skills", {"SKILL.md", ".claude-plugin/plugin.json"}),
+            ("commands", {"SKILL.prompt.md", ".claude-plugin/plugin.json"}),
+            ("hooks", {"SKILL.md", ".claude-plugin/plugin.json"}),
+        ],
+    )
+    def test_root_component_excludes_internal_and_symlinked_content(
+        self,
+        tmp_path,
+        component: str,
+        expected_files: set[str],
+    ) -> None:
+        """A root declaration has a stable, finite deployment tree."""
+        plugin_dir, has_symlink = self._plugin(tmp_path, component)
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+
+        _map_plugin_artifacts(plugin_dir, apm_dir, {"name": "plug", component: ["./"]})
+
+        component_root = (
+            apm_dir
+            / {
+                "agents": "agents",
+                "skills": "skills/plug",
+                "commands": "prompts",
+                "hooks": "hooks",
+            }[component]
+        )
+        deployed_files = {
+            path.relative_to(component_root).as_posix()
+            for path in component_root.rglob("*")
+            if path.is_file()
+        }
+        assert deployed_files == expected_files
+        assert not list(component_root.rglob(".apm"))
+        assert not list(component_root.rglob(".apm-pin"))
+        if has_symlink:
+            assert "linked.md" not in deployed_files
+
+    def test_root_declared_skills_are_idempotent(self, tmp_path) -> None:
+        """Re-materializing a root declaration preserves an identical tree."""
+        plugin_dir, _ = self._plugin(tmp_path, "skills")
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        manifest = {"name": "plug", "skills": ["./"]}
+
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest)
+        first_tree = {
+            path.relative_to(apm_dir).as_posix(): path.read_bytes()
+            for path in apm_dir.rglob("*")
+            if path.is_file()
+        }
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest)
+        second_tree = {
+            path.relative_to(apm_dir).as_posix(): path.read_bytes()
+            for path in apm_dir.rglob("*")
+            if path.is_file()
+        }
+
+        assert second_tree == first_tree
+
+
+@pytest.mark.windows_compat
+class TestSyntheticManifestLineEndings:
+    """apm#2619: synthetic apm.yml bytes must be platform-invariant (LF).
+
+    The synthesized manifest is written by APM itself (not checked out by
+    git) into a package tree that ``compute_package_hash`` hashes raw. A
+    platform-native text-mode write (CRLF on Windows) made the lockfile
+    ``content_hash`` diverge across OSes for byte-identical upstream
+    content. Same bug class as #2187 / PR #2223, which only covered
+    ``download_virtual_file_package``.
+    """
+
+    def test_synthesized_apm_yml_is_lf_only(self, tmp_path):
+        plugin = tmp_path / "plug"
+        skill = plugin / "skills" / "demo"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_bytes(
+            b"---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n"
+        )
+
+        apm_yml_path = synthesize_apm_yml_from_plugin(plugin, {"name": "plug"})
+
+        raw = apm_yml_path.read_bytes()
+        assert b"\r" not in raw
+        assert raw.endswith(b"\n")
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are not enforced on Windows")
+    def test_synthesized_apm_yml_preserves_existing_mode(self, tmp_path):
+        """Rewriting a dual-format manifest must not replace its POSIX mode."""
+        plugin = tmp_path / "plug"
+        plugin.mkdir()
+        apm_yml = plugin / "apm.yml"
+        apm_yml.write_text("name: plug\nversion: 0.0.0\n", encoding="utf-8")
+        apm_yml.chmod(0o644)
+
+        synthesize_apm_yml_from_plugin(plugin, {"name": "plug"})
+
+        assert apm_yml.stat().st_mode & 0o777 == 0o644
+
+    def test_inline_hooks_json_is_lf_only(self, tmp_path):
+        """Inline plugin.json hooks are serialized into the hashed tree as
+        .apm/hooks/hooks.json -- the bytes must be LF-only and UTF-8."""
+        plugin = tmp_path / "plug"
+        plugin.mkdir()
+        apm_dir = plugin / ".apm"
+        apm_dir.mkdir()
+        hooks = {
+            "PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hi"}]}
+            ]
+        }
+
+        _map_plugin_artifacts(plugin, apm_dir, {"name": "plug", "hooks": hooks})
+
+        raw = (apm_dir / "hooks" / "hooks.json").read_bytes()
+        assert b"\r" not in raw
+        assert json.loads(raw.decode("utf-8")) == hooks

@@ -57,22 +57,29 @@ class TestDependenciesAggregator(unittest.TestCase):
         self.assertEqual(mock_frontmatter_load.call_count, 2)
 
     @patch("apm_cli.deps.aggregator.scan_workflows_for_dependencies")
-    @patch("apm_cli.utils.yaml_io.open", new_callable=mock_open)
-    @patch("apm_cli.utils.yaml_io.yaml.safe_dump")
-    def test_sync_workflow_dependencies(self, mock_yaml_dump, mock_file, mock_scan):
-        """Test syncing workflow dependencies to apm.yml."""
+    def test_sync_workflow_dependencies(self, mock_scan):
+        """Test syncing workflow dependencies to apm.yml.
+
+        Asserts the written bytes (round-trippable YAML, LF-only line
+        endings per apm#2619) instead of mocking the writer's exact
+        open() signature, which pinned an implementation detail.
+        """
         # Mock scan_workflows_for_dependencies to return a set of servers
         mock_scan.return_value = {"server1", "server2", "server3"}
 
-        # Call the function
-        success, servers = sync_workflow_dependencies("test.yml")
+        with tempfile.TemporaryDirectory() as td:
+            out_path = os.path.join(td, "test.yml")
+            success, servers = sync_workflow_dependencies(out_path)
 
-        # Verify the results
-        self.assertTrue(success)
-        self.assertEqual(set(servers), {"server1", "server2", "server3"})
-        self.assertEqual(mock_scan.call_count, 1)
-        mock_file.assert_called_once_with("test.yml", "w", encoding="utf-8")
-        mock_yaml_dump.assert_called_once()
+            # Verify the results
+            self.assertTrue(success)
+            self.assertEqual(set(servers), {"server1", "server2", "server3"})
+            self.assertEqual(mock_scan.call_count, 1)
+            with open(out_path, "rb") as f:
+                raw = f.read()
+            self.assertNotIn(b"\r", raw)  # LF-deterministic on every OS
+            data = yaml.safe_load(raw.decode("utf-8"))
+            self.assertEqual(data["servers"], ["server1", "server2", "server3"])
 
 
 class TestDependenciesVerifier(unittest.TestCase):

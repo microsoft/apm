@@ -1,6 +1,6 @@
 ---
 title: "Install failures"
-description: "Diagnose and recover from apm install failures: auth, network, lockfile, cache, and partial installs."
+description: "Diagnose and recover from apm install failures: auth, network, lockfile, cache, partial installs, and Windows Defender false positives."
 sidebar:
   order: 2
 ---
@@ -290,3 +290,48 @@ APM_DEBUG=1 apm install --verbose 2>&1 | tee install.log
 ```
 
 If you file an issue, attach `install.log`, the relevant `apm.yml` and `apm.lock.yaml`, and the output of `apm cache info`.
+
+## 7. Windows Defender flags the APM binary
+
+**Symptom:** Windows Defender (or another enterprise AV) quarantines or removes
+the APM executable with a detection such as `Trojan:Script/Wacatac.H!ml` or a
+similar generic ML-based heuristic name.
+
+**Why it happens:** PyInstaller-packed binaries use a self-extracting-archive
+bootloader pattern that triggers ML-based AV heuristics, particularly on
+unsigned executables. This is a false positive -- the APM binary contains no
+malicious code.
+
+**Long-term fix:** Recent APM releases ship with Authenticode code signatures.
+Signed binaries carry a trusted publisher identity and do not trigger these
+heuristics. Upgrade to the latest release.
+
+**Workarounds for older releases or enterprise policies that block new
+downloads:**
+
+1. **Add a Defender exclusion for the install directory** (PowerShell, admin):
+
+   ```powershell
+   Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Programs\apm"
+   ```
+
+   Remove the exclusion once you have upgraded to a signed release:
+
+   ```powershell
+   Remove-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Programs\apm"
+   ```
+
+2. **Install via pip** -- the PyPI package (`apm-cli`) is a pure Python wheel
+   and is not affected by PE-level AV heuristics:
+
+   ```bash
+   pip install apm-cli
+   apm --version
+   ```
+
+   Requires Python 3.10+. See [pip install](../../getting-started/installation/#pip-install).
+
+3. **Submit the binary to Microsoft** if your organisation needs the detection
+   cleared for an older release: use the
+   [Microsoft Security Intelligence submission portal](https://www.microsoft.com/en-us/wdsi/filesubmission)
+   and select "Incorrect detection (False positive)" with the quarantined file.

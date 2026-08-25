@@ -182,7 +182,7 @@ supported for backward compatibility and accepts legacy CLI aliases such as
 | `claude` | Emits `CLAUDE.md` at the project root. |
 | `grok-build` | Emits `AGENTS.md` and deploys to `.grok/rules/`, `.grok/agents/`, `.grok/commands/`, `.grok/skills/`. |
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`. |
-| `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`. |
+| `opencode` | Emits `AGENTS.md`, `.opencode/agents/`, `.opencode/commands/`, and `.agents/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
 | `antigravity` | Emits `AGENTS.md` and deploys rules, skills, hooks, and MCP config under `.agents/`. |
@@ -812,7 +812,7 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) 
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
 | `chatmode` | `string` | unset | | Chatmode filter for compilation. |
 | `resolve_links` | `bool` | `true` | | Resolve relative Markdown links in primitives. |
-| `source_attribution` | `bool` | `false` | | Include source-file origin comments in compiled output (opt-in). |
+| `source_attribution` | `bool` | `false` | | Include the cosmetic compile annotations -- source-file origin comments, the APM version comment, and the generated-by footer -- in compiled output (opt-in). Applies to every compile target, including `AGENTS.md` targets. |
 | `exclude` | `list<string>` or `string` | `[]` | Glob patterns | Directories to skip during compilation (e.g. `apm_modules/**`). |
 | `placement` | `object` | unset | | Placement tuning. See Section 6.1. |
 | `agents_md` | `object` | unset | | AGENTS.md output tuning. See Section 6.2. |
@@ -949,7 +949,7 @@ When `sourceBase` is set, relative package sources compose onto that base. For e
 
 A relative `source` may use arbitrary path depth. A value whose leading segments form a host-prefixed shape (`<host.tld>/<owner>/<repo>`) or a full `https://` URL is always treated as a per-entry override and ignores `sourceBase`. A value that looks like it is trying to name a host (a dotted, FQDN-like first segment) but does **not** form a valid override shape is rejected at parse time rather than silently composed onto the base -- this avoids a confused-deputy footgun. To target a different host, use an explicit host-prefixed override or a full `https://` URL instead of a relative source.
 
-`sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
+`sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Path segments may percent-encode UTF-8 bytes, such as `My%20Projects`. Empty, `.`, `..`, malformed escapes, encoded separators, and recursive encodings are refused. Full HTTPS `packages[].source` paths follow the same safe percent-encoding rules. APM keeps the encoded URL in generated output while using decoded ADO coordinates for repository and authentication lookup.
 
 Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps
 -- authenticate via the standard APM token chain -- see the

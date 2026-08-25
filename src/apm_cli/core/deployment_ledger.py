@@ -285,6 +285,30 @@ class DeploymentLedgerCodec:
         )
 
     @staticmethod
+    def replace_legacy_owners(
+        lockfile: LockFile,
+        updates: dict[str, tuple[list[str], dict[str, str]]],
+    ) -> None:
+        """Apply compatibility ownership updates through one ledger rebuild."""
+        if not updates:
+            return
+        prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+        prior_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+        for owner, (files, hashes) in updates.items():
+            if owner == ".":
+                lockfile.local_deployed_files = list(files)
+                lockfile.local_deployed_file_hashes = dict(hashes)
+                continue
+            dependency = lockfile.dependencies[owner]
+            dependency.deployed_files = list(files)
+            dependency.deployed_file_hashes = dict(hashes)
+        DeploymentLedgerCodec._rebuild_from_legacy(
+            lockfile,
+            prior_bundle_paths,
+            prior_ledger=prior_ledger,
+        )
+
+    @staticmethod
     def record_local_bundle_files(
         lockfile: LockFile,
         files: list[str],

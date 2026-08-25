@@ -148,7 +148,7 @@ def _run_lifecycle_scenario(
         lifecycle_actions=(
             LifecycleAction(("install", "--target", "copilot")),
             LifecycleAction(("compile", "--target", "copilot", "--force-instructions")),
-            LifecycleAction(("pack", "--offline")),
+            LifecycleAction(("pack", "--claude-plugin", "--offline")),
             LifecycleAction(_AUDIT_ARGS),
         ),
     )

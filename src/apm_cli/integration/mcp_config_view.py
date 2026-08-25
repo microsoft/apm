@@ -209,22 +209,30 @@ def _package_manifest_path(
 def _allows_missing_manifest(
     dependency: LockedDependency,
     package_dir: Path,
+    logger: _McpViewLogger | None = None,
 ) -> bool:
     """Return whether the package contract permits an absent apm.yml."""
     if dependency.package_type == PackageType.SKILL_BUNDLE.value:
         return True
 
-    # ``apm audit --ci`` runs without materialising ``apm_modules/``: the drift
-    # replay uses a throwaway scratch dir, and a setup-only CI job (install the
-    # CLI, then audit -- no ``apm install``) never populates the real modules
-    # tree.  When the package directory is absent we cannot probe the on-disk
-    # shape, so fall back to the frozen lockfile classification -- a
-    # ``claude_skill`` legitimately ships no ``apm.yml`` by design, whether it
-    # was declared as a repository root or as a subdirectory.  Once the modules
-    # ARE materialised the strict shape probe below still runs and guards
-    # against a mislabeled or malformed installed package.
     if not package_dir.exists():
+        # Local paths are expected to exist; remote packages can be hydrated
+        # from lock pins after frozen validation completes.
+        if dependency.source == "local":
+            return False
+        if dependency.package_type == PackageType.APM_PACKAGE.value:
+            if logger is not None:
+                dep_label = dependency.name or package_dir.name
+                logger.verbose_detail(
+                    f"Skipping MCP check for '{dep_label}' -- "
+                    "package dir absent (cold cache; will hydrate from lock pins)"
+                )
+            return True
         return dependency.package_type == PackageType.CLAUDE_SKILL.value
+
+    # A materialized Claude skill legitimately has no apm.yml, whether it was
+    # declared at the repository root or in a virtual subdirectory. The lock
+    # type and installed shape must agree before the manifest is waived.
 
     package_type, _ = detect_package_type(package_dir)
     return (
@@ -283,7 +291,7 @@ def _collect_locked_dependencies(
             continue
 
         if not manifest_path.exists():
-            if _allows_missing_manifest(dependency, manifest_path.parent):
+            if _allows_missing_manifest(dependency, manifest_path.parent, logger):
                 continue
             problems.append(
                 McpSourceProblem(

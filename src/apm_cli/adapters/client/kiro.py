@@ -116,6 +116,8 @@ class KiroClientAdapter(CopilotClientAdapter):
         raw = server_info.get("_raw_stdio")
         if raw:
             config: dict[str, Any] = {"command": raw["command"]}
+            if raw.get("cwd") is not None:
+                config["cwd"] = raw["cwd"]
             resolved_env_for_args: dict[str, Any] = {}
             if raw.get("env"):
                 resolved_env_for_args = self._resolve_environment_variables(

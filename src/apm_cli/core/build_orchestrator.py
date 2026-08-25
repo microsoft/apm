@@ -22,6 +22,7 @@ from typing import Any, Protocol
 
 import yaml
 
+from ..bundle.formats import BundleFormat
 from ..utils.yaml_io import load_yaml
 
 
@@ -40,7 +41,7 @@ class BuildOptions:
     project_root: Path
     apm_yml_path: Path
     # Bundle-only options
-    bundle_format: str = "plugin"
+    bundle_format: BundleFormat | str | None = None
     bundle_target: Any = None
     bundle_archive: bool = False
     bundle_archive_format: str = "zip"
@@ -122,6 +123,7 @@ class BundleProducer:
         return ProducerResult(
             kind=OutputKind.BUNDLE,
             outputs=outputs,
+            warnings=list(getattr(pack_result, "warnings", ()) or ()),
             payload=pack_result,
         )
 
@@ -251,6 +253,7 @@ class PluginManifestProducer:
     kind = OutputKind.PLUGIN_MANIFEST
 
     def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
+        from ..bundle.formats import BundleFormat, coerce_bundle_format
         from .apm_yml import parse_targets_field
         from .errors import (
             ConflictingTargetsError,
@@ -261,7 +264,7 @@ class PluginManifestProducer:
             PLUGIN_ECOSYSTEM_PATHS,
             PLUGIN_MANIFEST_ECOSYSTEMS,
             build_plugin_manifest,
-            write_plugin_manifest,
+            write_plugin_manifest_with_outcome,
         )
 
         # Read raw apm.yml to obtain targets.
@@ -290,11 +293,32 @@ class PluginManifestProducer:
         seen_paths: set[str] = set()
         ecosystems: list[str] = []
         for target in targets:
+            if (
+                target == "claude"
+                and coerce_bundle_format(options.bundle_format) is not BundleFormat.CLAUDE_PLUGIN
+            ):
+                continue
             if target in PLUGIN_MANIFEST_ECOSYSTEMS:
                 path = PLUGIN_ECOSYSTEM_PATHS.get(target, "")
                 if path and path not in seen_paths:
                     seen_paths.add(path)
                     ecosystems.append(target)
+        has_agent_sources = any(
+            (options.project_root / relative).exists()
+            for relative in (".apm", "skills", "mcp.json", ".mcp.json", ".lsp.json")
+        )
+        if (
+            coerce_bundle_format(options.bundle_format) is BundleFormat.AGENT_PLUGIN
+            and targets
+            and set(targets) <= {"claude"}
+            and not ecosystems
+            and not has_agent_sources
+        ):
+            raise BuildError(
+                "The selected targets only request Claude plugin metadata, but Agent Plugin "
+                "output is active. Run 'apm pack --claude-plugin' for the historical Claude "
+                "layout, or add dependencies to produce an Agent Plugin bundle."
+            )
 
         outputs: list[Path] = []
         warnings: list[str] = []
@@ -311,7 +335,7 @@ class PluginManifestProducer:
             )
             rel_path = PLUGIN_ECOSYSTEM_PATHS.get(ecosystem, "")
             target_path = str(options.project_root / rel_path) if rel_path else ecosystem
-            output_path = write_plugin_manifest(
+            write_result = write_plugin_manifest_with_outcome(
                 options.project_root,
                 manifest,
                 ecosystem,
@@ -319,14 +343,12 @@ class PluginManifestProducer:
                 force=options.bundle_force,
                 logger=logger,
             )
-            if options.dry_run:
-                # write returns None in dry-run; the path would have been written.
+            if write_result.action == "dry_run":
                 dry_run_paths.append(target_path)
-            elif output_path is not None:
-                outputs.append(output_path)
-                written.append(str(output_path))
+            elif write_result.action == "written" and write_result.path is not None:
+                outputs.append(write_result.path)
+                written.append(str(write_result.path))
             else:
-                # Non-dry-run None means an existing file was preserved (no --force).
                 skipped.append(target_path)
 
         return ProducerResult(

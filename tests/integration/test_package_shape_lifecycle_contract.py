@@ -507,7 +507,7 @@ def _packed_local_bundle_consumer(fixture: _Fixture) -> None:
         (
             ("install", *_TARGET_ARGS),
             ("compile", "--target", "copilot", "--force-instructions"),
-            ("pack", "--format", "plugin", "--offline"),
+            ("pack", "--format", "claude-plugin", "--offline"),
         ),
     )
     bundle = producer.root / "build" / f"{producer.name}-0.1.0"
@@ -646,7 +646,7 @@ def test_tampered_local_bundle_fails_before_consumer_state_writes(
         fixture,
         producer.root,
         "tampered-local-bundle-producer",
-        (("install", *_TARGET_ARGS), ("pack", "--format", "plugin", "--offline")),
+        (("install", *_TARGET_ARGS), ("pack", "--format", "claude-plugin", "--offline")),
     )
     bundle = producer.root / "build" / f"{producer.name}-0.1.0"
     tampered = fixture.isolated.work_root / "tampered-bundle"

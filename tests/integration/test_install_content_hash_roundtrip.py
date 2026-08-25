@@ -322,3 +322,52 @@ def test_virtual_lock_replays_across_synthetic_manifest_newline_domains(
     assert audit_payload["passed"] is True
     checks = {check["name"]: check for check in audit_payload["checks"]}
     assert checks["content-integrity"]["passed"] is True
+
+
+@pytest.mark.windows_compat
+def test_marketplace_plugin_synthetic_manifest_hash_is_newline_invariant(
+    tmp_path: Path,
+) -> None:
+    """apm#2619: the synthesize + stamp chain must yield LF manifests.
+
+    Marketplace-plugin downloads (both ``download_package`` and
+    ``download_subdirectory_package``) run ``validate_apm_package`` --
+    which synthesizes ``apm.yml`` and serializes inline hooks to
+    ``.apm/hooks/hooks.json`` -- and then ``stamp_plugin_version`` --
+    which rewrites ``apm.yml`` with the short commit SHA. All of these
+    writes land inside the tree ``compute_package_hash`` hashes raw, so
+    platform-native line endings made the lockfile ``content_hash`` differ
+    between Windows (CRLF) and POSIX (LF) for byte-identical upstream
+    content.
+
+    The fixture is imported from the CRLF-invariance probe so the 3-OS CI
+    workflow and this test always exercise the same tree shape.
+    """
+    from apm_cli.deps.package_validator import stamp_plugin_version
+    from apm_cli.models.validation import PackageType, validate_apm_package
+    from scripts.crlf_invariance_probe import PROBE_STAMP_SHA, build_synthetic_plugin_fixture
+
+    pkg = tmp_path / "pkg"
+    build_synthetic_plugin_fixture(pkg)
+
+    result = validate_apm_package(pkg)
+    assert result.is_valid, result.errors
+    assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+    stamp_plugin_version(
+        result.package,
+        result.package_type,
+        PROBE_STAMP_SHA,
+        pkg,
+    )
+    assert result.package.version == PROBE_STAMP_SHA[:7]
+
+    manifest = (pkg / "apm.yml").read_bytes()
+    assert b"\r" not in manifest  # LF-deterministic on every OS
+    hooks_json = (pkg / ".apm" / "hooks" / "hooks.json").read_bytes()
+    assert b"\r" not in hooks_json  # inline hooks writer, second fix site
+
+    lf_hash = compute_package_hash(pkg)
+    # The manifest is hash-visible: CRLF-ifying it changes the package
+    # hash. This is exactly why the production writers must emit LF bytes.
+    (pkg / "apm.yml").write_bytes(manifest.replace(b"\n", b"\r\n"))
+    assert compute_package_hash(pkg) != lf_hash

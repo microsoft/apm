@@ -27,6 +27,7 @@ from ...utils.github_host import default_host, is_github_hostname
 # list-form ``argv`` so there is no shell-expansion vector.
 _ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
 _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
+_PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE = r"^(?:[a-zA-Z0-9._~-]|%[0-9A-Fa-f]{2})+$"
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
 _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}

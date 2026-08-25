@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.requires_apm_binary
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -67,6 +67,26 @@ def _run_apm(apm_binary_path, args, cwd, fake_home, timeout=60):
     )
 
 
+def _write_targeted_package(
+    root: Path,
+    name: str,
+    primitive_path: str,
+    filename: str,
+    content: str,
+) -> Path:
+    """Create one local package with a primitive for a selected global target."""
+    package = root / name
+    package.mkdir()
+    (package / "apm.yml").write_text(
+        yaml.dump({"name": name, "version": "1.0.0", "description": f"{name} fixture"}),
+        encoding="utf-8",
+    )
+    primitive_dir = package / primitive_path
+    primitive_dir.mkdir(parents=True)
+    (primitive_dir / filename).write_text(content, encoding="utf-8")
+    return package
+
+
 @pytest.fixture
 def local_package(tmp_path):
     """Create a minimal local APM package for testing global install.
@@ -94,6 +114,29 @@ def local_package(tmp_path):
     (instructions_dir / "test.instructions.md").write_text(
         "---\napplyTo: '**'\n---\n# Test instruction\nTest content."
     )
+    return pkg
+
+
+@pytest.fixture
+def opencode_package(tmp_path):
+    """Create a local package with global and scoped instructions plus a skill."""
+    pkg = tmp_path / "opencode-package"
+    pkg.mkdir()
+    (pkg / "apm.yml").write_text("name: opencode-package\nversion: 1.0.0\n", encoding="utf-8")
+    (pkg / "SKILL.md").write_text("# OpenCode package\n", encoding="utf-8")
+    instructions = pkg / ".apm" / "instructions"
+    instructions.mkdir(parents=True)
+    (instructions / "global.instructions.md").write_text(
+        "---\ndescription: Global marker\n---\nGLOBAL_OPENCODE_MARKER\n",
+        encoding="utf-8",
+    )
+    (instructions / "python.instructions.md").write_text(
+        "---\napplyTo: '**/*.py'\ndescription: Python marker\n---\nSCOPED_OPENCODE_MARKER\n",
+        encoding="utf-8",
+    )
+    skill = pkg / ".apm" / "skills" / "reviewer"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Reviewer\n", encoding="utf-8")
     return pkg
 
 
@@ -433,8 +476,137 @@ class TestGlobalGeminiScope:
         assert "user scope" in combined.lower(), f"Uninstall did not run in user scope: {combined}"
 
 
+class TestGlobalOpenCodeScope:
+    """Verify the native OpenCode user-scope lifecycle through the installed CLI."""
+
+    @pytest.mark.lifecycle_smoke
+    def test_opencode_skill_and_scoped_instruction_lifecycle(
+        self, apm_binary_path, fake_home, opencode_package
+    ):
+        """OpenCode preserves native project and user-scope ownership."""
+        project_root = fake_home.parent / "project"
+        project_root.mkdir()
+        (project_root / ".opencode").mkdir()
+        project_install = _run_apm(
+            apm_binary_path,
+            ["install", str(opencode_package), "--target", "opencode"],
+            project_root,
+            fake_home,
+        )
+        assert project_install.returncode == 0, project_install.stdout + project_install.stderr
+        project_skill = project_root / ".agents" / "skills" / "reviewer" / "SKILL.md"
+        assert project_skill.is_file()
+
+        project_compile = _run_apm(
+            apm_binary_path,
+            ["compile", "--target", "opencode"],
+            project_root,
+            fake_home,
+        )
+        assert project_compile.returncode == 0, project_compile.stdout + project_compile.stderr
+        project_agents = (project_root / "AGENTS.md").read_text(encoding="utf-8")
+        assert "GLOBAL_OPENCODE_MARKER" in project_agents
+        assert "SCOPED_OPENCODE_MARKER" in project_agents
+
+        opencode_root = fake_home / ".config" / "opencode"
+        opencode_root.mkdir(parents=True)
+        claude_root = fake_home / ".claude"
+        claude_root.mkdir()
+        foreign_skill = fake_home / ".agents" / "skills" / "foreign" / "SKILL.md"
+        foreign_skill.parent.mkdir(parents=True)
+        foreign_skill.write_text("# Foreign\n", encoding="utf-8")
+        foreign_native_skill = opencode_root / "skills" / "foreign" / "SKILL.md"
+        foreign_native_skill.parent.mkdir(parents=True)
+        foreign_native_skill.write_text("# Foreign native\n", encoding="utf-8")
+
+        install = _run_apm(
+            apm_binary_path,
+            ["install", "--global", str(opencode_package), "--target", "opencode"],
+            fake_home,
+            fake_home,
+        )
+        assert install.returncode == 0, install.stdout + install.stderr
+
+        native_skill = opencode_root / "skills" / "reviewer" / "SKILL.md"
+        assert native_skill.is_file()
+        assert not (fake_home / ".agents" / "skills" / "reviewer" / "SKILL.md").exists()
+
+        compile_result = _run_apm(apm_binary_path, ["compile", "--global"], fake_home, fake_home)
+        assert compile_result.returncode == 0, compile_result.stdout + compile_result.stderr
+        opencode_agents = (opencode_root / "AGENTS.md").read_text(encoding="utf-8")
+        assert "GLOBAL_OPENCODE_MARKER" in opencode_agents
+        assert "## Files matching `**/*.py`" in opencode_agents
+        assert "SCOPED_OPENCODE_MARKER" in opencode_agents
+
+        claude_agents = (claude_root / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "GLOBAL_OPENCODE_MARKER" in claude_agents
+        assert "SCOPED_OPENCODE_MARKER" not in claude_agents
+
+        lock_path = fake_home / ".apm" / "apm.lock.yaml"
+        first_lock = lock_path.read_bytes()
+        assert ".config/opencode/skills/reviewer/SKILL.md" in first_lock.decode("utf-8")
+        first_agents = opencode_agents.encode("utf-8")
+        repeat = _run_apm(apm_binary_path, ["compile", "--global"], fake_home, fake_home)
+        assert repeat.returncode == 0, repeat.stdout + repeat.stderr
+        assert lock_path.read_bytes() == first_lock
+        assert (opencode_root / "AGENTS.md").read_bytes() == first_agents
+
+        uninstall = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", str(opencode_package)],
+            fake_home,
+            fake_home,
+        )
+        assert uninstall.returncode == 0, uninstall.stdout + uninstall.stderr
+        assert not native_skill.exists()
+        assert foreign_skill.read_text(encoding="utf-8") == "# Foreign\n"
+        assert foreign_native_skill.read_text(encoding="utf-8") == "# Foreign native\n"
+        assert project_skill.is_file()
+        assert (project_root / "AGENTS.md").read_text(encoding="utf-8") == project_agents
+        assert (claude_root / "CLAUDE.md").read_text(encoding="utf-8") == claude_agents
+
+
 class TestGlobalUninstallLifecycle:
     """Test uninstall --global removes packages from user-scope metadata."""
+
+    @staticmethod
+    def _install_survivor_and_removed_target_packages(
+        apm_binary_path: Path, fake_home: Path, tmp_path: Path
+    ) -> tuple[Path, Path, Path]:
+        """Install global agent-skills survivor and OpenCode removal fixtures."""
+        survivor = _write_targeted_package(
+            tmp_path,
+            "survivor-target-cleanup",
+            ".apm/skills/survivor",
+            "SKILL.md",
+            "---\nname: survivor\ndescription: Survives removal.\n---\n# Survivor\n",
+        )
+        removed = _write_targeted_package(
+            tmp_path,
+            "removed-target-cleanup",
+            ".apm/agents",
+            "orphan.agent.md",
+            "---\nname: orphan\ndescription: Must be cleaned.\n---\n# Orphan\n",
+        )
+        survivor_install = _run_apm(
+            apm_binary_path,
+            ["install", "--global", str(survivor), "--target", "agent-skills"],
+            fake_home,
+            fake_home,
+        )
+        assert survivor_install.returncode == 0, survivor_install.stdout + survivor_install.stderr
+        removed_install = _run_apm(
+            apm_binary_path,
+            ["install", "--global", str(removed), "--target", "opencode"],
+            fake_home,
+            fake_home,
+        )
+        assert removed_install.returncode == 0, removed_install.stdout + removed_install.stderr
+        survivor_file = fake_home / ".agents" / "skills" / "survivor" / "SKILL.md"
+        removed_file = fake_home / ".config" / "opencode" / "agents" / "orphan.md"
+        assert survivor_file.exists()
+        assert removed_file.exists()
+        return removed, survivor_file, removed_file
 
     def test_uninstall_removes_package_from_user_manifest(self, apm_binary_path, fake_home):
         """Uninstall --global should remove the package entry from ~/.apm/apm.yml."""
@@ -496,6 +668,69 @@ class TestGlobalUninstallLifecycle:
         assert "not found" in combined.lower() or "not in apm.yml" in combined.lower(), (
             f"Expected 'not found' warning: {combined}"
         )
+
+    def test_uninstall_global_cleans_removed_only_target_before_state_removal(
+        self,
+        apm_binary_path,
+        fake_home,
+        tmp_path,
+    ):
+        """A removed OpenCode agent cannot survive a manifest with agent-skills only."""
+        removed, survivor_file, removed_file = self._install_survivor_and_removed_target_packages(
+            apm_binary_path, fake_home, tmp_path
+        )
+
+        apm_dir = fake_home / ".apm"
+        uninstall_result = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", str(removed)],
+            fake_home,
+            fake_home,
+        )
+        assert uninstall_result.returncode == 0, uninstall_result.stdout + uninstall_result.stderr
+
+        assert not removed_file.exists()
+        assert survivor_file.exists()
+        manifest = yaml.safe_load((apm_dir / "apm.yml").read_text(encoding="utf-8"))
+        assert isinstance(manifest, dict)
+        manifest_text = yaml.safe_dump(manifest)
+        assert "removed-target-cleanup" not in manifest_text
+        assert "survivor-target-cleanup" in manifest_text
+        lockfile_text = (apm_dir / "apm.lock.yaml").read_text(encoding="utf-8")
+        assert "removed-target-cleanup" not in lockfile_text
+        assert "survivor-target-cleanup" in lockfile_text
+        assert not (apm_dir / "apm_modules" / "_local" / "removed-target-cleanup").exists()
+        assert (apm_dir / "apm_modules" / "_local" / "survivor-target-cleanup").exists()
+
+    def test_uninstall_global_preserves_state_for_user_edited_removed_target_file(
+        self,
+        apm_binary_path,
+        fake_home,
+        tmp_path,
+    ):
+        """A retained edited file leaves all removal state available for retry."""
+        removed, survivor_file, removed_file = self._install_survivor_and_removed_target_packages(
+            apm_binary_path, fake_home, tmp_path
+        )
+        removed_file.write_text("# user edit\n", encoding="utf-8")
+
+        result = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", str(removed)],
+            fake_home,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        apm_dir = fake_home / ".apm"
+        assert result.returncode != 0, combined
+        assert ".config/opencode/agents/orphan.md" in combined
+        assert "retry uninstall" in combined
+        assert removed_file.exists()
+        assert survivor_file.exists()
+        assert "removed-target-cleanup" in (apm_dir / "apm.yml").read_text(encoding="utf-8")
+        assert "removed-target-cleanup" in (apm_dir / "apm.lock.yaml").read_text(encoding="utf-8")
+        assert (apm_dir / "apm_modules" / "_local" / "removed-target-cleanup").exists()
 
 
 # ---------------------------------------------------------------------------

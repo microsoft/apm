@@ -154,10 +154,10 @@ onto it and the `dev.azure.com` host is kept on the consumer side:
 
 ```yaml
 marketplace:
-  sourceBase: https://dev.azure.com/contoso/platform/_git
+  sourceBase: https://dev.azure.com/contoso/My%20Projects/_git
   packages:
     - name: agent-skills
-      source: agent-skills          # -> .../contoso/platform/_git/agent-skills
+      source: agent-skills          # -> .../contoso/My%20Projects/_git/agent-skills
       ref: 3f2a9b1c
 ```
 
@@ -167,6 +167,10 @@ use `ADO_APM_PAT`, and use the portless root-hosted
 `https://host/Collection/Project/_git` form for `sourceBase`. Server does not
 use the Azure CLI bearer. See
 [authentication](../../getting-started/authentication/#azure-devops).
+
+Percent-encode ADO path spaces, for example `My%20Projects`. The generated
+URL keeps that encoded spelling, while APM uses the decoded organization,
+project, and repository identity for resolution and authentication.
 
 Before:
 

@@ -202,6 +202,7 @@ def _capture_portable_mcp_state(
         project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
+            PurePosixPath(".github/mcp.json"),
             PurePosixPath(".vscode/mcp.json"),
         ),
         external_roots=external_roots,
@@ -287,7 +288,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
     assert seed_lock is not None
     assert seed_lock.mcp_target_servers == {
         "codex": ["portable-server"],
-        "vscode": ["portable-server"],
+        "copilot": ["portable-server"],
     }
     seed_ledger = DeploymentLedgerCodec.from_lockfile(seed_lock)
     seed_rows = tuple(
@@ -295,7 +296,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
         for _key, record in sorted(seed_ledger.records.items())
         if record.locator.target == "mcp"
     )
-    assert {record.locator.runtime for record in seed_rows} == {"codex", "vscode"}
+    assert {record.locator.runtime for record in seed_rows} == {"codex", "copilot"}
 
     seed_codex_config = project.root / ".codex" / "config.toml"
     seed_codex_config.unlink()
@@ -400,7 +401,7 @@ def test_declared_mcp_targets_are_portable_across_installed_binary_lifecycles(
         assert lockfile is not None
         assert lockfile.mcp_target_servers == {
             "codex": ["portable-server"],
-            "vscode": ["portable-server"],
+            "copilot": ["portable-server"],
         }
         ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
         rows = tuple(
@@ -478,7 +479,9 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """MCP reinstall must restore lock provenance, deployment ownership, and audit closure."""
+    """VS Code stays untouched when Copilot migrates MCP ownership to .github."""
+    from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
     server = {
         "name": "project-contract-server",
         "registry": False,
@@ -494,10 +497,19 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     runner = _runner(apm_binary_path)
     environment = fixture.isolated.subprocess_env()
     manifest_bytes = (fixture.project_root / "apm.yml").read_bytes()
-    install_args = (
+    vscode_install_args = (
         "install",
         "--runtime",
         "vscode",
+        "--target",
+        "vscode",
+        "--trust-transitive-mcp",
+        "--no-policy",
+    )
+    copilot_install_args = (
+        "install",
+        "--runtime",
+        "copilot",
         "--target",
         "copilot",
         "--trust-transitive-mcp",
@@ -505,24 +517,51 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     )
 
     runner.run_sequence(
-        (install_args,),
+        (vscode_install_args,),
         expected_returncodes=(0,),
-        scenario_id="project-mcp-initial-install",
+        scenario_id="project-mcp-vscode-install",
         cwd=fixture.project_root,
         env=environment,
     )
-    first = LifecycleStateSnapshot.capture(
+    vscode_installed = LifecycleStateSnapshot.capture(
         fixture.project_root,
         config_paths=(PurePosixPath(".vscode/mcp.json"),),
     )
-    assert first.manifest_bytes == manifest_bytes
-    assert first.deployment_records
-    assert b"project-contract-server" in first.mcp_state_bytes
-    assert first.file(".vscode/mcp.json").kind == "file"
+    assert vscode_installed.manifest_bytes == manifest_bytes
+    assert vscode_installed.deployment_records
+    assert b"project-contract-server" in vscode_installed.mcp_state_bytes
+    assert vscode_installed.file(".vscode/mcp.json").kind == "file"
+    vscode_bytes = vscode_installed.file(".vscode/mcp.json").content
+
+    runner.run_sequence(
+        (copilot_install_args,),
+        expected_returncodes=(0,),
+        scenario_id="project-mcp-copilot-install",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    copilot_installed = LifecycleStateSnapshot.capture(
+        fixture.project_root,
+        config_paths=(
+            PurePosixPath(".github/mcp.json"),
+            PurePosixPath(".vscode/mcp.json"),
+        ),
+    )
+    assert copilot_installed.file(".vscode/mcp.json").content == vscode_bytes
+    copilot_config = fixture.project_root / ".github" / "mcp.json"
+    assert CopilotClientAdapter(project_root=fixture.project_root).get_config_path() == str(
+        copilot_config
+    )
+    mcp_servers = json.loads(copilot_config.read_text(encoding="utf-8"))["mcpServers"]
+    assert mcp_servers["project-contract-server"]["command"] == "echo"
+    assert mcp_servers["project-contract-server"]["args"] == ["project-contract"]
+    copilot_lock = LockFile.read(fixture.project_root / "apm.lock.yaml")
+    assert copilot_lock is not None
+    assert copilot_lock.mcp_target_servers == {"copilot": ["project-contract-server"]}
     assert (
         _audit_payload(
             runner,
-            scenario_id="project-mcp-initial-audit",
+            scenario_id="project-mcp-copilot-audit",
             cwd=fixture.project_root,
             environment=environment,
         )["passed"]
@@ -530,20 +569,20 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     )
 
     runner.run_sequence(
-        (install_args,),
+        (copilot_install_args,),
         expected_returncodes=(0,),
-        scenario_id="project-mcp-reinstall",
+        scenario_id="project-mcp-copilot-reinstall",
         cwd=fixture.project_root,
         env=environment,
     )
     reinstalled = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(PurePosixPath(".vscode/mcp.json"),),
+        config_paths=(
+            PurePosixPath(".github/mcp.json"),
+            PurePosixPath(".vscode/mcp.json"),
+        ),
     )
-    assert reinstalled.manifest_bytes == first.manifest_bytes
-    assert reinstalled.file(".vscode/mcp.json").content == first.file(".vscode/mcp.json").content
-    assert reinstalled.mcp_state_bytes == first.mcp_state_bytes
-    assert reinstalled.semantic_bytes == first.semantic_bytes
+    _assert_exact_lifecycle_state(copilot_installed, reinstalled)
 
     lock_data = load_yaml(fixture.project_root / "apm.lock.yaml")
     assert isinstance(lock_data, dict)
@@ -564,7 +603,7 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     assert _check(broken, "content-integrity")["passed"] is False
 
     runner.run_sequence(
-        (install_args,),
+        (copilot_install_args,),
         expected_returncodes=(0,),
         scenario_id="project-mcp-repair-install",
         cwd=fixture.project_root,
@@ -572,7 +611,10 @@ def test_project_mcp_reinstall_repairs_canonical_ownership(
     )
     repaired = LifecycleStateSnapshot.capture(
         fixture.project_root,
-        config_paths=(PurePosixPath(".vscode/mcp.json"),),
+        config_paths=(
+            PurePosixPath(".github/mcp.json"),
+            PurePosixPath(".vscode/mcp.json"),
+        ),
     )
     assert repaired.manifest_bytes == manifest_bytes
     assert repaired.mcp_state_bytes == reinstalled.mcp_state_bytes
@@ -752,15 +794,15 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
-    assert broad.file(".vscode/mcp.json").kind == "file"
+    assert broad.file(".github/mcp.json").kind == "file"
     assert b"managed-contract-server" in broad.file(".codex/config.toml").content
     assert b"user-authored" in broad.file(".codex/config.toml").content
     assert b"trust_level" in broad.file(".codex/config.toml").content
     assert (
-        b'"target_servers":{"codex":["managed-contract-server"],"vscode":["managed-contract-server"]}'
+        b'"target_servers":{"codex":["managed-contract-server"],"copilot":["managed-contract-server"]}'
         in (broad.mcp_state_bytes)
     )
 
@@ -779,7 +821,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
     codex_bytes = narrow.file(".codex/config.toml").content
@@ -787,7 +829,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
     assert b"managed-contract-server" not in codex_bytes
     assert b"user-authored" in codex_bytes
     assert b"trust_level" in codex_bytes
-    assert b'"target_servers":{"vscode":["managed-contract-server"]}' in narrow.mcp_state_bytes
+    assert b'"target_servers":{"copilot":["managed-contract-server"]}' in narrow.mcp_state_bytes
     assert unrelated_codex_file.read_bytes() == unrelated_codex_bytes
 
     runner.run_sequence(
@@ -801,7 +843,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
     _assert_semantic_lifecycle_state(narrow, converged)
@@ -811,7 +853,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
     assert (
@@ -827,7 +869,7 @@ def test_mcp_target_contraction_removes_only_apm_owned_native_config(
         fixture.project_root,
         config_paths=(
             PurePosixPath(".codex/config.toml"),
-            PurePosixPath(".vscode/mcp.json"),
+            PurePosixPath(".github/mcp.json"),
         ),
     )
     _assert_exact_lifecycle_state(before_audit, after_audit)
@@ -1039,7 +1081,7 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
         cwd=fixture.project_root,
         env=environment,
     )
-    assert (fixture.project_root / ".vscode" / "mcp.json").is_file()
+    assert (fixture.project_root / ".github" / "mcp.json").is_file()
     assert (fixture.project_root / ".github" / "lsp.json").is_file()
     assert (
         fixture.project_root
@@ -1228,11 +1270,11 @@ def test_saved_target_drives_declared_mcp_and_lsp_without_package(
     )
 
 
-def test_saved_copilot_target_projects_to_vscode_for_direct_mcp(
+def test_saved_copilot_target_projects_to_copilot_for_direct_mcp(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """A saved Copilot profile must use the project-scoped VS Code MCP runtime."""
+    """A saved Copilot profile must use the project-scoped Copilot MCP runtime."""
     isolated = IsolatedApmEnvironment.create(
         tmp_path / "saved-copilot-direct-mcp",
         base_env=dict(os.environ),
@@ -1256,7 +1298,7 @@ def test_saved_copilot_target_projects_to_vscode_for_direct_mcp(
         env=environment,
     )
 
-    assert (project / ".vscode" / "mcp.json").is_file()
+    assert (project / ".github" / "mcp.json").is_file()
     assert not (isolated.home / ".copilot" / "mcp-config.json").exists()
 
 
@@ -1487,7 +1529,7 @@ def test_manifest_and_explicit_target_precedence_for_mcp_and_lsp(
         cwd=project.root,
         env=environment,
     )
-    assert (project.root / ".vscode" / "mcp.json").is_file()
+    assert (project.root / ".github" / "mcp.json").is_file()
     assert (project.root / ".github" / "lsp.json").is_file()
     assert not (project.root / ".mcp.json").exists()
     assert not (project.root / ".lsp.json").exists()

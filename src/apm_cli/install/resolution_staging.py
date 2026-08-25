@@ -16,6 +16,7 @@ class ResolutionStagingSession:
     def __init__(self, apm_modules_dir: Path) -> None:
         """Create an empty staging session rooted below ``apm_modules``."""
         self._modules_dir = apm_modules_dir
+        self._modules_existed = apm_modules_dir.exists()
         self._staging_root = apm_modules_dir / ".apm-resolution-staging" / uuid.uuid4().hex
         self._backups: dict[Path, Path | None] = {}
         self._relocations: list[tuple[Path, Path]] = []
@@ -81,6 +82,8 @@ class ResolutionStagingSession:
                 if backup is not None and backup.exists():
                     path.parent.mkdir(parents=True, exist_ok=True)
                     backup.replace(path)
+                else:
+                    self._remove_empty_parents(path.parent)
             for source, destination in reversed(self._relocations):
                 if destination.exists():
                     source.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +93,12 @@ class ResolutionStagingSession:
                         destination.replace(source)
                 self._remove_empty_parents(destination.parent)
             self._remove_staging_root()
+            if (
+                not self._modules_existed
+                and self._modules_dir.exists()
+                and not any(self._modules_dir.iterdir())
+            ):
+                self._modules_dir.rmdir()
             self._backups.clear()
             self._relocations.clear()
 

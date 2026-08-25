@@ -1,7 +1,7 @@
 """Executable primitive approval gate (npm v12-inspired opt-in model).
 
-APM packages can declare four kinds of executable primitives -- hooks,
-MCP servers, bin/ executables, and canvas extensions -- that run arbitrary
+APM packages can declare five kinds of executable primitives -- hooks,
+MCP servers, LSP servers, bin/ executables, and canvas extensions -- that run arbitrary
 code on the developer's machine.  When the consuming project declares an
 ``allowExecutables`` block in its ``apm.yml``, this module enforces a
 deny-by-default policy: none of these primitives are deployed unless
@@ -29,12 +29,25 @@ EXEC_TYPE_HOOKS = "hooks"
 EXEC_TYPE_MCP = "mcp"
 EXEC_TYPE_BIN = "bin"
 EXEC_TYPE_CANVAS = "canvas"
+EXEC_TYPE_LSP = "lsp"
 
 # Types with active enforcement in the install gate.
-ENFORCED_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_BIN, EXEC_TYPE_MCP, EXEC_TYPE_CANVAS)
+ENFORCED_EXEC_TYPES = (
+    EXEC_TYPE_HOOKS,
+    EXEC_TYPE_BIN,
+    EXEC_TYPE_MCP,
+    EXEC_TYPE_CANVAS,
+    EXEC_TYPE_LSP,
+)
 
 # All recognised exec-type keys (for manifest validation).
-ALL_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP, EXEC_TYPE_BIN, EXEC_TYPE_CANVAS)
+ALL_EXEC_TYPES = (
+    EXEC_TYPE_HOOKS,
+    EXEC_TYPE_MCP,
+    EXEC_TYPE_BIN,
+    EXEC_TYPE_CANVAS,
+    EXEC_TYPE_LSP,
+)
 
 
 @dataclass(frozen=True)
@@ -50,10 +63,12 @@ class ExecutableDeclaration:
             (only set when *is_transitive* is True).
         hook_count: Number of hook files discovered.
         mcp_count: Number of MCP server entries discovered.
+        lsp_count: Number of LSP server entries discovered.
         bin_count: Number of bin/ executables discovered.
         canvas_count: Number of canvas extensions discovered.
         hook_details: Per-hook summaries for ``inspect`` display.
         mcp_details: Per-MCP-server summaries.
+        lsp_details: Per-LSP-server summaries.
         bin_details: Per-binary summaries.
         canvas_details: Per-canvas summaries.
     """
@@ -64,10 +79,12 @@ class ExecutableDeclaration:
     parent_name: str | None = None
     hook_count: int = 0
     mcp_count: int = 0
+    lsp_count: int = 0
     bin_count: int = 0
     canvas_count: int = 0
     hook_details: list[str] = field(default_factory=list)
     mcp_details: list[str] = field(default_factory=list)
+    lsp_details: list[str] = field(default_factory=list)
     bin_details: list[str] = field(default_factory=list)
     canvas_details: list[str] = field(default_factory=list)
 
@@ -75,7 +92,11 @@ class ExecutableDeclaration:
     def has_executables(self) -> bool:
         """Return True if this package declares enforced executable primitives."""
         return (
-            self.hook_count > 0 or self.bin_count > 0 or self.mcp_count > 0 or self.canvas_count > 0
+            self.hook_count > 0
+            or self.bin_count > 0
+            or self.mcp_count > 0
+            or self.canvas_count > 0
+            or self.lsp_count > 0
         )
 
     @property
@@ -90,6 +111,8 @@ class ExecutableDeclaration:
             types.append(EXEC_TYPE_BIN)
         if self.canvas_count > 0:
             types.append(EXEC_TYPE_CANVAS)
+        if self.lsp_count > 0:
+            types.append(EXEC_TYPE_LSP)
         return types
 
     def summary_line(self) -> str:
@@ -103,6 +126,8 @@ class ExecutableDeclaration:
             parts.append(f"{self.bin_count} bin executable(s)")
         if self.canvas_count:
             parts.append(f"{self.canvas_count} canvas extension(s)")
+        if self.lsp_count:
+            parts.append(f"{self.lsp_count} LSP server(s)")
         return ", ".join(parts)
 
 
@@ -123,7 +148,7 @@ def is_package_approved(
             consuming project's ``apm.yml``.  ``None`` means no block
             exists (nothing approved).
         package_key: The approval key (e.g. ``owner/repo#v1.0``).
-        exec_type: One of ``hooks``, ``mcp``, ``bin``, ``canvas``.
+        exec_type: One of ``hooks``, ``mcp``, ``lsp``, ``bin``, ``canvas``.
 
     Returns:
         ``True`` only when the block contains a matching entry with
@@ -405,8 +430,8 @@ def scan_package_executables(
     - ``.apm/hooks/*.json`` and ``hooks/*.json`` -- hook definitions
       (mirrors :meth:`HookIntegrator.find_hook_files`)
     - ``bin/`` directory -- bin executables
-    - MCP is declared in the package's ``apm.yml`` under
-      ``dependencies.mcp``, not as files -- so we parse that instead.
+    - MCP and LSP are declared in the package's ``apm.yml`` under
+      ``dependencies.mcp`` and ``dependencies.lsp`` -- so we parse those.
     - ``.apm/extensions/<name>/extension.mjs`` -- canvas extension bundles
       (mirrors :meth:`CanvasIntegrator.find_canvas_bundles`)
 
@@ -447,6 +472,8 @@ def scan_package_executables(
     # 3. MCP servers: parse from apm.yml dependencies.mcp
     mcp_count = 0
     mcp_details: list[str] = []
+    lsp_count = 0
+    lsp_details: list[str] = []
     apm_yml = install_path / "apm.yml"
     if apm_yml.is_file():
         try:
@@ -464,6 +491,14 @@ def scan_package_executables(
                                 mcp_details.append(entry)
                             elif isinstance(entry, dict):
                                 mcp_details.append(entry.get("name", str(entry)))
+                    lsp_list = deps.get("lsp", [])
+                    if isinstance(lsp_list, list):
+                        lsp_count = len(lsp_list)
+                        for entry in lsp_list:
+                            if isinstance(entry, str):
+                                lsp_details.append(entry)
+                            elif isinstance(entry, dict):
+                                lsp_details.append(entry.get("name", str(entry)))
         except Exception:
             pass  # Non-fatal: if we cannot parse, treat as zero MCP
 
@@ -486,10 +521,12 @@ def scan_package_executables(
         parent_name=parent_name,
         hook_count=len(hook_files),
         mcp_count=mcp_count,
+        lsp_count=lsp_count,
         bin_count=len(bin_files),
         canvas_count=len(canvas_dirs),
         hook_details=hook_details,
         mcp_details=mcp_details,
+        lsp_details=lsp_details,
         bin_details=bin_details,
         canvas_details=canvas_details,
     )
@@ -798,42 +835,75 @@ def effective_allow_executables(
     return build_effective_exec_map(policy=None, project_data=data)
 
 
+def _filter_service_dependencies_by_allow_executables(
+    dependencies: list,
+    project_allow_execs: dict | None,
+    logger: Any,
+    *,
+    exec_type: str,
+    service_label: str,
+) -> list:
+    """Filter named service dependencies through the executable approval map."""
+    if project_allow_execs is None or not dependencies:
+        return dependencies
+    _allow_execs = effective_allow_executables(project_allow_execs)
+    if _allow_execs is None:
+        return dependencies
+    _filtered = []
+    for _dep in dependencies:
+        _slug = _dep.name
+        # Fail-closed: keep a server only when it carries a name AND that name
+        # is approved.  A falsy/missing name is treated as NOT approved so an
+        # unnamed dep can never slip past the gate.
+        if _slug and is_package_approved(_allow_execs, _slug, exec_type):
+            _filtered.append(_dep)
+        elif _slug:
+            logger.verbose_detail(
+                f"Skipping {service_label} server from '{_slug}': executables not trusted yet. "
+                f"Run 'apm approve {_slug}' to trust it."
+            )
+        else:
+            logger.verbose_detail(
+                f"Skipping an unnamed {service_label} server: executables not trusted yet. "
+                "Identify it in apm.yml and run 'apm approve <package>' to trust it."
+            )
+    if len(_filtered) < len(dependencies):
+        logger.warning(
+            f"Filtered {len(dependencies) - len(_filtered)} {service_label} server(s) whose "
+            "executables are not trusted yet.",
+            symbol="warning",
+        )
+    return _filtered
+
+
 def filter_mcp_by_allow_executables(
     mcp_deps: list,
     project_allow_execs: dict | None,
     logger: Any,
 ) -> list:
-    """Filter MCP deps not approved in allowExecutables. Returns filtered list."""
-    if project_allow_execs is None or not mcp_deps:
-        return mcp_deps
-    _allow_execs = effective_allow_executables(project_allow_execs)
-    if _allow_execs is None:
-        return mcp_deps
-    _filtered = []
-    for _dep in mcp_deps:
-        _slug = _dep.name
-        # Fail-closed: keep a server only when it carries a name AND that name
-        # is approved.  A falsy/missing name is treated as NOT approved so an
-        # unnamed dep can never slip past the gate.
-        if _slug and is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
-            _filtered.append(_dep)
-        elif _slug:
-            logger.verbose_detail(
-                f"Skipping MCP server from '{_slug}': executables not trusted yet. "
-                f"Run 'apm approve {_slug}' to trust it."
-            )
-        else:
-            logger.verbose_detail(
-                "Skipping an unnamed MCP server: executables not trusted yet. "
-                "Identify it in apm.yml and run 'apm approve <package>' to trust it."
-            )
-    if len(_filtered) < len(mcp_deps):
-        logger.warning(
-            f"Filtered {len(mcp_deps) - len(_filtered)} MCP server(s) whose "
-            "executables are not trusted yet.",
-            symbol="warning",
-        )
-    return _filtered
+    """Filter MCP deps not approved in allowExecutables."""
+    return _filter_service_dependencies_by_allow_executables(
+        mcp_deps,
+        project_allow_execs,
+        logger,
+        exec_type=EXEC_TYPE_MCP,
+        service_label="MCP",
+    )
+
+
+def filter_lsp_by_allow_executables(
+    lsp_deps: list,
+    project_allow_execs: dict | None,
+    logger: Any,
+) -> list:
+    """Filter LSP deps not approved in allowExecutables."""
+    return _filter_service_dependencies_by_allow_executables(
+        lsp_deps,
+        project_allow_execs,
+        logger,
+        exec_type=EXEC_TYPE_LSP,
+        service_label="LSP",
+    )
 
 
 def read_bundle_allow_executables(apm_yml_path: Path, logger: Any) -> dict | None:

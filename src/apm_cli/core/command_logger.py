@@ -144,6 +144,17 @@ class CommandLogger:
         if self.verbose:
             _rich_echo(message, color="dim")
 
+    def stale_cleanup(self, dep_key: str, count: int):
+        """Log target-scoped stale-file cleanup at default verbosity."""
+        if count <= 0:
+            return
+        noun = "file" if count == 1 else "files"
+        _rich_info(f"Cleaned {count} stale {noun} from {dep_key}", symbol="info")
+
+    def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
+        """Explain that a user-edited managed file was retained."""
+        _rich_warning(f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.")
+
     def tree_item(self, message: str):
         """Log a tree sub-item (└─ line) under a package block.
 

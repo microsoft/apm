@@ -374,6 +374,31 @@ def _materialize_install_path(
     return candidate
 
 
+def _normalize_legacy_local_plugin_for_replay(
+    lock_dep: LockedDependency,
+    install_path: Path,
+    apm_modules_dir: Path,
+) -> Path:
+    """Normalize a local legacy plugin only in the scratch replay tree."""
+    from apm_cli.agent_plugins.loader import detect_agent_plugin
+    from apm_cli.deps.plugin_parser import normalize_plugin_directory
+    from apm_cli.utils.helpers import find_plugin_json
+
+    if detect_agent_plugin(install_path) is not None:
+        return install_path
+
+    plugin_json = find_plugin_json(install_path)
+    if plugin_json is None:
+        return install_path
+
+    replay_path = lock_dep.to_dependency_ref().get_install_path(apm_modules_dir)
+    _copy_install_tree(install_path, replay_path)
+    # The canonical loader has already excluded native Agent Plugin inputs.
+    manifest_path = replay_path / plugin_json.relative_to(install_path)
+    normalize_plugin_directory(replay_path, manifest_path)
+    return replay_path
+
+
 def _build_package_info(
     lock_dep: LockedDependency,
     install_path: Path,
@@ -618,6 +643,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         registry_resolver=registry_resolver,
                         registries=registries,
                     )
+                    if lock_dep.source == "local":
+                        install_path = _normalize_legacy_local_plugin_for_replay(
+                            lock_dep,
+                            install_path,
+                            apm_modules_dir,
+                        )
 
                 package_info = _build_package_info(lock_dep, install_path)
                 if lock_dep.local_path == _SELF_KEY:

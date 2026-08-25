@@ -14,12 +14,12 @@ def migrate_legacy_project_target_servers(
     active_runtimes: set[str],
     user_scope: bool,
 ) -> None:
-    """Move legacy project Copilot ownership to the VS Code runtime key."""
-    if user_scope or "vscode" not in active_runtimes or "copilot" in active_runtimes:
+    """Move legacy project VS Code ownership to the Copilot runtime key."""
+    if user_scope or "copilot" not in active_runtimes or "vscode" in active_runtimes:
         return
-    legacy_servers = target_servers.pop("copilot", set())
+    legacy_servers = target_servers.pop("vscode", set())
     if legacy_servers:
-        target_servers.setdefault("vscode", set()).update(legacy_servers)
+        target_servers.setdefault("copilot", set()).update(legacy_servers)
 
 
 def adopt_legacy_mcp_target_servers(
