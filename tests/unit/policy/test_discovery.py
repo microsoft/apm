@@ -1160,6 +1160,45 @@ class TestGitlabPolicyInheritance(unittest.TestCase):
         self.assertEqual(mock_fetch.call_args.kwargs["repo"], "baseline")
         self.assertEqual(mock_fetch.call_args.kwargs["host"], "gitlab.com")
 
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_preserves_leaf_port(self, mock_fetch):
+        """GitLab inheritance keeps the leaf server port in the adapter."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with (
+            patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            _fetch_chain_parent(
+                "platform/baseline",
+                current_source="org:gitlab.example.test:8443/contoso/apm-policy",
+                leaf_host="gitlab.example.test",
+                leaf_port=8443,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(mock_fetch.call_args.kwargs["host"], "gitlab.example.test")
+        self.assertEqual(mock_fetch.call_args.kwargs["port"], 8443)
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_accepts_same_host_qualified_reference(self, mock_fetch):
+        """A qualified parent on the pinned GitLab host stays adapter-local."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _fetch_chain_parent(
+                "gitlab.com/platform/baseline",
+                current_source="org:gitlab.com/contoso/apm-policy",
+                leaf_host="gitlab.com",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "platform")
+        self.assertEqual(mock_fetch.call_args.kwargs["repo"], "baseline")
+
 
 class TestFetchAdoContents(unittest.TestCase):
     """Test _fetch_ado_contents for Azure DevOps Items API."""
@@ -1695,6 +1734,21 @@ class TestFetchGitlabContents(unittest.TestCase):
         resolver.build_error_context.assert_called_once_with(
             "gitlab.com", "fetch org policy", org="contoso"
         )
+
+    @patch("apm_cli.core.auth.AuthResolver")
+    @patch("apm_cli.policy._gitlab.requests.get")
+    def test_request_exception_redacts_header_value(self, mock_get, mock_resolver_cls):
+        """Request validation errors must not render credential-bearing headers."""
+        from requests.exceptions import InvalidHeader
+
+        self._resolver(mock_resolver_cls, "glpat_secret")
+        mock_get.side_effect = InvalidHeader("Invalid header PRIVATE-TOKEN: glpat_secret")
+
+        content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
+
+        self.assertIsNone(content)
+        self.assertEqual(error, "Request error fetching policy from gitlab.com/contoso/apm-policy")
+        self.assertNotIn("glpat_secret", error)
 
     @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy._gitlab.requests.get")

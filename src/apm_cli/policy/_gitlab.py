@@ -110,6 +110,7 @@ def _fetch_gitlab_chain_parent(
     *,
     current_source: str,
     leaf_host: str,
+    port: int | None,
     project_root: Path,
     no_cache: bool,
     cache_only: bool,
@@ -131,6 +132,18 @@ def _fetch_gitlab_chain_parent(
         org = current_org
     else:
         parts = parent_ref.strip("/").split("/")
+        if len(parts) == 3:
+            try:
+                explicit = urlsplit(f"//{parts[0]}")
+            except ValueError:
+                explicit = None
+            if (
+                explicit is not None
+                and explicit.hostname is not None
+                and explicit.hostname.lower() == leaf_host.lower()
+                and explicit.port == port
+            ):
+                parts = parts[1:]
         if len(parts) != 2:
             return PolicyFetchResult(
                 source=f"org:{parent_ref}",
@@ -142,6 +155,7 @@ def _fetch_gitlab_chain_parent(
         org=org,
         repo=repo,
         host=leaf_host,
+        port=port,
         project_root=project_root,
         no_cache=no_cache,
         cache_only=cache_only,
@@ -351,5 +365,5 @@ def _fetch_gitlab_contents(
             **error_kwargs,
         )
         return None, f"{exc}: Access denied to {repo_ref}{remediation}"
-    except Exception as e:
-        return None, f"Error fetching policy from {repo_ref}: {e}"
+    except requests.exceptions.RequestException:
+        return None, f"Request error fetching policy from {repo_ref}"

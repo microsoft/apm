@@ -384,14 +384,14 @@ def _redact_policy_ref(ref: str) -> str:
     return f"{prefix}{safe_url}"
 
 
-def _derive_leaf_host(source: str, project_root: Path) -> str | None:
-    """Derive the origin host of the leaf policy.
+def _derive_leaf_identity(source: str, project_root: Path) -> tuple[str | None, int | None]:
+    """Derive the credential-pinned host and port of the leaf policy.
 
     The leaf host pins which host an ``extends:`` reference may resolve
     against (Security Finding F1 -- prevents credential leakage to
     attacker-controlled hosts via cross-host extends chains).
 
-    Returns the host in lowercase, or None if it cannot be determined.
+    Returns the lowercase host and optional port, or ``(None, None)``.
 
     Source forms:
     * ``url:https://<host>/...`` -> ``<host>``
@@ -408,27 +408,38 @@ def _derive_leaf_host(source: str, project_root: Path) -> str | None:
         try:
             parsed = urlparse(bare)
             if parsed.hostname:
-                return parsed.hostname.lower()
-        except Exception:
-            return None
-        return None
+                return parsed.hostname.lower(), parsed.port
+        except ValueError:
+            return None, None
+        return None, None
 
     if source.startswith("org:") or (bare and "://" not in bare and bare.count("/") >= 1):
         parts = bare.split("/")
         if len(parts) >= 3:
-            return parts[0].lower()
+            try:
+                parsed = urlsplit(f"//{parts[0]}")
+                if parsed.hostname:
+                    return parsed.hostname.lower(), parsed.port
+            except ValueError:
+                return None, None
+            return None, None
         if len(parts) == 2:
             # owner/repo shorthand defaults to github.com (matches
             # _fetch_github_contents convention).
-            return "github.com"
+            return "github.com", None
 
     # File source (or unrecognized): fall back to project's git remote.
-    org_and_host = _extract_org_from_git_remote(project_root)
-    if org_and_host is not None:
-        _, host = org_and_host
+    identity = _extract_org_host_port_from_git_remote(project_root)
+    if identity is not None:
+        _, host, port = identity
         if host:
-            return host.lower()
-    return None
+            return host.lower(), port
+    return None, None
+
+
+def _derive_leaf_host(source: str, project_root: Path) -> str | None:
+    """Derive the credential-pinned host of the leaf policy."""
+    return _derive_leaf_identity(source, project_root)[0]
 
 
 def _extract_extends_host(ref: str) -> str | None:
@@ -453,7 +464,10 @@ def _extract_extends_host(ref: str) -> str | None:
         return None
     parts = ref.split("/")
     if len(parts) >= 3:
-        return parts[0].lower()
+        try:
+            return (urlsplit(f"//{parts[0]}").hostname or "").lower() or None
+        except ValueError:
+            return None
     return None
 
 
@@ -539,6 +553,7 @@ def _fetch_chain_parent(
     project_root: Path,
     no_cache: bool,
     cache_only: bool = False,
+    leaf_port: int | None = None,
 ) -> PolicyFetchResult:
     """Fetch one parent through the leaf host's policy backend."""
     cache_kwargs = {"cache_only": True} if cache_only else {}
@@ -580,6 +595,7 @@ def _fetch_chain_parent(
             parent_ref,
             current_source=current_source,
             leaf_host=leaf_host,
+            port=leaf_port,
             project_root=project_root,
             no_cache=no_cache,
             cache_only=cache_only,
@@ -625,7 +641,7 @@ def _resolve_and_persist_chain(
     leaf_source = fetch_result.source
     leaf_cache_ref = fetch_result.cache_ref or _strip_source_prefix(leaf_source)
 
-    leaf_host = _derive_leaf_host(leaf_source, project_root)
+    leaf_host, leaf_port = _derive_leaf_identity(leaf_source, project_root)
 
     # Ordered ancestors collected as we walk parents.  Built leaf-first
     # for traversal convenience; reversed before merging.
@@ -672,6 +688,7 @@ def _resolve_and_persist_chain(
             next_ref,
             current_source=chain_sources[-1],
             leaf_host=leaf_host,
+            leaf_port=leaf_port,
             project_root=project_root,
             no_cache=no_cache,
             cache_only=cache_only,
