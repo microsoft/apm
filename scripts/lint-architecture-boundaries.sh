@@ -467,6 +467,25 @@ if [ "$gitlab_adapter_definition_count" -ne 4 ] \
     [ -n "$gitlab_adapter_duplicate_hits" ] && echo "$gitlab_adapter_duplicate_hits"
     violations=$((violations + 1))
 fi
+gitlab_facade_branch=$(awk '
+    /^[[:space:]]*elif is_gitlab_hostname\(host\):/ {
+        capture=1
+        branch_indent=match($0, /[^[:space:]]/) - 1
+        next
+    }
+    capture && /^[[:space:]]*else:/ && match($0, /[^[:space:]]/) - 1 == branch_indent {exit}
+    capture {print}
+' "$policy_file")
+gitlab_facade_orchestration_hits=$(
+    printf '%s\n' "$gitlab_facade_branch" \
+        | grep -E '(_read_cache_entry|_write_cache|requests\.|AuthResolver|subprocess\.run|_fetch_gitlab_contents|_gitlab_project_state_via_git)' \
+        || true
+)
+if [ -n "$gitlab_facade_orchestration_hits" ]; then
+    echo "[x] GitLab policy cache and transport must remain in policy/_gitlab.py"
+    echo "$gitlab_facade_orchestration_hits"
+    violations=$((violations + 1))
+fi
 local_bundle_handler="src/apm_cli/install/local_bundle_handler.py"
 if ! grep -q \
     'from ..policy.install_preflight import run_policy_preflight' \

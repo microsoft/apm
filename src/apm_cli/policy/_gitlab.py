@@ -16,6 +16,7 @@ from urllib.parse import quote, urlsplit
 import requests
 
 from .parser import PolicyValidationError, load_policy
+from .schema import ApmPolicy
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -173,22 +174,12 @@ def _fetch_from_gitlab_repo(
     expected_hash: str | None = None,
     cache_only: bool = False,
 ) -> PolicyFetchResult:
-    """Fetch apm-policy.yml from a GitLab project.
-
-    Mirrors ``_fetch_from_ado_repo`` but uses ``_fetch_gitlab_contents``
-    (GitLab Repository Files API) instead of ``_fetch_ado_contents``.
-    """
+    """Fetch apm-policy.yml from a GitLab project through this adapter."""
     from .discovery import (
         PolicyFetchResult,
         _cache_entry_files_exist,
         _cache_only_policy_result,
-        _compute_hash_normalized,
-        _detect_garbage,
-        _is_policy_empty,
         _read_cache_entry,
-        _stale_fallback_or_error,
-        _verify_hash_pin,
-        _write_cache,
     )
 
     try:
@@ -209,17 +200,7 @@ def _fetch_from_gitlab_repo(
     if not no_cache:
         cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
         if cache_entry is not None and not cache_entry.stale:
-            outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
-            return PolicyFetchResult(
-                policy=cache_entry.policy,
-                source=cache_entry.source,
-                cached=True,
-                cache_age_seconds=cache_entry.age_seconds,
-                outcome=outcome,
-                raw_bytes_hash=cache_entry.raw_bytes_hash or None,
-                expected_hash=expected_hash,
-                warnings=cache_entry.warnings,
-            )
+            return _gitlab_cached_policy_result(cache_entry, expected_hash)
 
     if cache_only:
         return _cache_only_policy_result(
@@ -240,58 +221,158 @@ def _fetch_from_gitlab_repo(
     )
 
     if error:
-        # A typed 404 is GitLab's clean policy-absence signal. A 410 is
-        # ambiguous: self-managed GitLab can return it for both a missing
-        # project and a disabled Files API. Only authenticated Git can
-        # establish reachability; a nonzero Git result is authorization-
-        # ambiguous and must not silently bypass governance.
-        if error.startswith("gitlab-status:404:"):
-            return PolicyFetchResult(source=source_label, outcome="absent")
-        if error.startswith("gitlab-status:410:"):
-            _gitlab_project_state_via_git(org=org, repo=repo, host=host, port=port)
-        return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
+        return _gitlab_fetch_error_result(
+            error,
+            cache_entry=cache_entry,
+            source_label=source_label,
+            org=org,
+            repo=repo,
+            host=host,
+            port=port,
+        )
 
     if content is None:
         return PolicyFetchResult(source=source_label, outcome="absent")
 
-    garbage_result = _detect_garbage(content, repo_ref, source_label, cache_entry)
-    if garbage_result is not None:
-        return garbage_result
+    return _gitlab_content_result(
+        content,
+        repo_ref=repo_ref,
+        source_label=source_label,
+        project_root=project_root,
+        expected_hash=expected_hash,
+        cache_entry=cache_entry,
+    )
 
-    mismatch = _verify_hash_pin(content, expected_hash, source_label)
-    if mismatch is not None:
-        return mismatch
+
+def _gitlab_cached_policy_result(
+    cache_entry: _CacheEntry,
+    expected_hash: str | None,
+) -> PolicyFetchResult:
+    """Build the cache-hit result without sharing another provider's flow."""
+    from .discovery import PolicyFetchResult, _is_policy_empty
+
+    result = PolicyFetchResult(
+        policy=cache_entry.policy,
+        source=cache_entry.source,
+        expected_hash=expected_hash,
+        warnings=cache_entry.warnings,
+    )
+    result.cached = True
+    result.cache_age_seconds = cache_entry.age_seconds
+    result.raw_bytes_hash = cache_entry.raw_bytes_hash or None
+    result.outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
+    return result
+
+
+def _gitlab_fetch_error_result(
+    error: str,
+    *,
+    cache_entry: _CacheEntry | None,
+    source_label: str,
+    org: str,
+    repo: str,
+    host: str,
+    port: int | None,
+) -> PolicyFetchResult:
+    """Preserve GitLab's typed absence and fail-closed ambiguous outcomes."""
+    from .discovery import PolicyFetchResult, _stale_fallback_or_error
+
+    if error.startswith("gitlab-status:404:"):
+        return PolicyFetchResult(source=source_label, outcome="absent")
+    if error.startswith("gitlab-status:410:"):
+        _gitlab_project_state_via_git(org=org, repo=repo, host=host, port=port)
+    return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
+
+
+def _gitlab_content_result(
+    content: str,
+    *,
+    repo_ref: str,
+    source_label: str,
+    project_root: Path,
+    expected_hash: str | None,
+    cache_entry: _CacheEntry | None,
+) -> PolicyFetchResult:
+    """Parse, validate, and cache fetched GitLab policy content."""
+    from .discovery import (
+        PolicyFetchResult,
+        _compute_hash_normalized,
+        _detect_garbage,
+        _verify_hash_pin,
+    )
+
+    for validation in (
+        lambda: _detect_garbage(content, repo_ref, source_label, cache_entry),
+        lambda: _verify_hash_pin(content, expected_hash, source_label),
+    ):
+        validation_result = validation()
+        if validation_result is not None:
+            return validation_result
 
     try:
         policy, warnings = load_policy(content)
-    except PolicyValidationError as e:
+    except PolicyValidationError as exc:
         return PolicyFetchResult(
-            error=f"Invalid policy in {repo_ref}: {e}",
+            error=f"Invalid policy in {repo_ref}: {exc}",
             source=source_label,
             outcome="malformed",
-            warnings=e.warnings,
+            warnings=exc.warnings,
         )
 
-    chain_refs = [repo_ref]
     actual_hash = _compute_hash_normalized(content, expected_hash)
     if policy.extends is None:
-        _write_cache(
-            repo_ref,
-            policy,
-            project_root,
-            chain_refs=chain_refs,
-            raw_bytes_hash=actual_hash,
-            warnings=warnings,
-        )
-    outcome = "empty" if _is_policy_empty(policy) else "found"
-    return PolicyFetchResult(
-        policy=policy,
+        _cache_gitlab_leaf_policy(repo_ref, policy, project_root, actual_hash, warnings)
+    return _gitlab_fresh_policy_result(
+        policy,
+        source_label=source_label,
+        expected_hash=expected_hash,
+        actual_hash=actual_hash,
+        warnings=warnings,
+    )
+
+
+def _cache_gitlab_leaf_policy(
+    repo_ref: str,
+    policy: ApmPolicy,
+    project_root: Path,
+    actual_hash: str,
+    warnings: list[str],
+) -> None:
+    """Persist an unextended GitLab leaf through the canonical cache writer."""
+    from .discovery import _write_cache
+
+    _write_cache(
+        repo_ref,
+        policy,
+        project_root,
+        **{
+            "chain_refs": [repo_ref],
+            "raw_bytes_hash": actual_hash,
+            "warnings": warnings,
+        },
+    )
+
+
+def _gitlab_fresh_policy_result(
+    policy: ApmPolicy,
+    *,
+    source_label: str,
+    expected_hash: str | None,
+    actual_hash: str,
+    warnings: list[str],
+) -> PolicyFetchResult:
+    """Build a fresh GitLab policy result with canonical value fields."""
+    from .discovery import PolicyFetchResult, _is_policy_empty
+
+    result = PolicyFetchResult(
         source=source_label,
-        outcome=outcome,
-        raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
         warnings=warnings,
     )
+    result.policy = policy
+    result.raw_bytes_hash = actual_hash
+    result.outcome = "empty" if _is_policy_empty(policy) else "found"
+    return result
 
 
 def _fetch_gitlab_contents(
@@ -322,27 +403,14 @@ def _fetch_gitlab_contents(
 
     auth_resolver = AuthResolver()
 
-    def _request(token: str | None, _git_env: dict[str, str]):
-        headers = AuthResolver.gitlab_rest_headers(token)
-        response = requests.get(
-            api_url,
-            headers=headers,
-            timeout=10,
-            allow_redirects=False,
-        )
-        if response.status_code in (401, 403):
-            raise RuntimeError(f"{response.status_code}: unauthorized")
-        return response
-
     try:
-        resp = auth_resolver.try_with_fallback(
-            host,
-            _request,
+        resp = _authenticated_gitlab_request(
+            auth_resolver,
+            api_url=api_url,
+            host=host,
             org=org,
             port=port,
-            path=project_path,
-            host_type="gitlab",
-            unauth_first=False,
+            project_path=project_path,
         )
         if resp.status_code in (404, 410):
             return None, f"gitlab-status:{resp.status_code}: Policy file not found"
@@ -356,14 +424,66 @@ def _fetch_gitlab_contents(
     except requests.exceptions.ConnectionError:
         return None, f"Connection error fetching policy from {repo_ref}"
     except RuntimeError as exc:
-        error_kwargs = {"org": org}
-        if port is not None:
-            error_kwargs["port"] = port
-        remediation = auth_resolver.build_error_context(
-            host,
-            "fetch org policy",
-            **error_kwargs,
+        return None, _gitlab_access_denied_error(
+            auth_resolver,
+            exc,
+            host=host,
+            org=org,
+            port=port,
+            repo_ref=repo_ref,
         )
-        return None, f"{exc}: Access denied to {repo_ref}{remediation}"
     except requests.exceptions.RequestException:
         return None, f"Request error fetching policy from {repo_ref}"
+
+
+def _authenticated_gitlab_request(
+    auth_resolver: AuthResolver,
+    *,
+    api_url: str,
+    host: str,
+    org: str,
+    port: int | None,
+    project_path: str,
+) -> requests.Response:
+    """Run the GitLab REST request through the selected AuthResolver credential."""
+    from ..core.auth import AuthResolver
+
+    def _request(token: str | None, _git_env: dict[str, str]):
+        response = requests.get(
+            api_url,
+            headers=AuthResolver.gitlab_rest_headers(token),
+            timeout=10,
+            allow_redirects=False,
+        )
+        if response.status_code in (401, 403):
+            raise RuntimeError(f"{response.status_code}: unauthorized")
+        return response
+
+    return auth_resolver.try_with_fallback(
+        host,
+        _request,
+        **{
+            "org": org,
+            "port": port,
+            "path": project_path,
+            "host_type": "gitlab",
+            "unauth_first": False,
+        },
+    )
+
+
+def _gitlab_access_denied_error(
+    auth_resolver: AuthResolver,
+    error: RuntimeError,
+    *,
+    host: str,
+    org: str,
+    port: int | None,
+    repo_ref: str,
+) -> str:
+    """Render remediation without exposing the selected GitLab credential."""
+    context = {"org": org}
+    if port is not None:
+        context["port"] = port
+    remediation = auth_resolver.build_error_context(host, "fetch org policy", **context)
+    return f"{error}: Access denied to {repo_ref}{remediation}"

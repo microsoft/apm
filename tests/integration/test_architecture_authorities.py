@@ -983,6 +983,7 @@ def test_gitlab_policy_discovery_routes_through_private_adapter() -> None:
     assert adapter.count("def _gitlab_project_state_via_git(") == 1
     assert adapter.count("def _fetch_gitlab_chain_parent(") == 1
     assert "GitLab policy discovery must route through policy/_gitlab.py" in guard
+    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in guard
 
 
 def test_gitlab_policy_adapter_guard_rejects_facade_bypass(tmp_path: Path) -> None:
@@ -1023,6 +1024,94 @@ def test_gitlab_policy_adapter_guard_rejects_facade_bypass(tmp_path: Path) -> No
 
     assert result.returncode == 1
     assert "GitLab policy discovery must route through policy/_gitlab.py" in result.stdout
+
+
+def test_gitlab_policy_adapter_guard_rejects_facade_cache_orchestration(tmp_path: Path) -> None:
+    """The facade cannot add GitLab cache work beside the private adapter."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
+    marker = "        elif is_gitlab_hostname(host):\n"
+    facade_path.write_text(
+        facade_path.read_text(encoding="utf-8").replace(
+            marker,
+            f"{marker}            _read_cache_entry('gitlab-cache', project_root)\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in result.stdout
+
+
+def test_gitlab_policy_adapter_guard_survives_nested_facade_else(tmp_path: Path) -> None:
+    """A nested branch cannot hide facade-side GitLab cache orchestration."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
+    marker = "        elif is_gitlab_hostname(host):\n"
+    facade_path.write_text(
+        facade_path.read_text(encoding="utf-8").replace(
+            marker,
+            (
+                f"{marker}            if True:\n"
+                "                pass\n"
+                "            else:\n"
+                "                pass\n"
+                "            _read_cache_entry('gitlab-cache', project_root)\n"
+            ),
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in result.stdout
 
 
 @pytest.mark.parametrize(
