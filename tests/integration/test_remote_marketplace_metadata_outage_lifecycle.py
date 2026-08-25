@@ -41,6 +41,7 @@ def _write_project(project_root: Path) -> None:
 name: remote-metadata-outage
 description: Remote metadata outage lifecycle fixture
 version: 1.0.0
+dependencies: {{}}
 marketplace:
   owner:
     name: APM Lifecycle Tests
@@ -71,6 +72,15 @@ def _blocked_transport_environment() -> dict[str, str]:
     return environment
 
 
+def _bundle_snapshot(bundle_path: Path) -> dict[Path, bytes]:
+    """Capture a bundle's file content so failure paths cannot hide mutation."""
+    return {
+        path.relative_to(bundle_path): path.read_bytes()
+        for path in bundle_path.rglob("*")
+        if path.is_file()
+    }
+
+
 def test_remote_metadata_outage_never_certifies_degraded_marketplace(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -79,6 +89,7 @@ def test_remote_metadata_outage_never_certifies_degraded_marketplace(
     project_root = tmp_path / "remote-metadata-outage"
     project_root.mkdir()
     _write_project(project_root)
+    (project_root / "apm.lock.yaml").write_text("dependencies: []\n", encoding="utf-8")
     runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=300)
     available_environment = dict(os.environ)
 
@@ -100,6 +111,8 @@ def test_remote_metadata_outage_never_certifies_degraded_marketplace(
     truncated_bytes = artifact.read_bytes()
     codex_artifact = project_root / ".agents" / "plugins" / "marketplace.json"
     codex_bytes = codex_artifact.read_bytes()
+    bundle_path = project_root / "build" / "remote-metadata-outage-1.0.0"
+    bundle_snapshot = _bundle_snapshot(bundle_path)
 
     dry_run, uncertifiable = runner.run_sequence(
         (
@@ -116,6 +129,7 @@ def test_remote_metadata_outage_never_certifies_degraded_marketplace(
     assert "adapt-nifi-flows-to-2-x" in (dry_run.stdout + dry_run.stderr)
     assert artifact.read_bytes() == truncated_bytes
     assert codex_artifact.read_bytes() == codex_bytes
+    assert _bundle_snapshot(bundle_path) == bundle_snapshot
     assert "cannot certify regenerated metadata" in (uncertifiable.stdout + uncertifiable.stderr)
 
     strict, strict_retry = runner.run_sequence(
@@ -133,6 +147,7 @@ def test_remote_metadata_outage_never_certifies_degraded_marketplace(
     assert "metadata enrichment failed" in (strict_retry.stdout + strict_retry.stderr)
     assert artifact.read_bytes() == truncated_bytes
     assert codex_artifact.read_bytes() == codex_bytes
+    assert _bundle_snapshot(bundle_path) == bundle_snapshot
 
     restored = runner.run(
         ("pack", "--check-clean", "--dry-run"),

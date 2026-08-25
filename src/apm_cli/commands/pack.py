@@ -388,6 +388,7 @@ def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
             "pack.target metadata only and is ignored by 'apm install'."
         )
         effective_target = target
+    effective_dry_run = dry_run or check_clean
     options = BuildOptions(
         project_root=project_root,
         apm_yml_path=project_root / "apm.yml",
@@ -417,7 +418,7 @@ def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
                     BuildReport.failure_to_json_dict(
                         errors=[{"code": "metadata_incomplete", "message": str(exc)}],
                         warnings=list(exc.metadata_enrichment.warnings),
-                        dry_run=dry_run,
+                        dry_run=effective_dry_run,
                         metadata_enrichment=exc.metadata_enrichment,
                     )
                 )

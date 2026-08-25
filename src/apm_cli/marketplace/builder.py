@@ -1159,6 +1159,10 @@ class MarketplaceBuilder:
 
             def _open_metadata(token: str | None, _git_env: dict[str, str]) -> str:
                 """Fetch the manifest with the credential selected for this attempt."""
+                if host_kind == "ghe_cloud" and token is None:
+                    raise PermissionError(
+                        f"metadata fetch for '{effective_host}' requires a credential"
+                    )
                 if effective_host == "github.com":
                     raw_url = (
                         f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"

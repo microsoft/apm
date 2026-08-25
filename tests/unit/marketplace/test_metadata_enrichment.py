@@ -204,6 +204,34 @@ def test_pack_json_warns_and_strict_metadata_prevents_writes(
     assert not artifact.exists()
 
 
+def test_check_clean_never_writes_before_reporting_uncertifiable_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The clean gate must not overwrite an artifact before reporting failure."""
+    _write_config(tmp_path)
+    monkeypatch.setattr(MarketplaceBuilder, "_ensure_auth", lambda _self: None)
+    monkeypatch.setattr(
+        MarketplaceBuilder,
+        "_fetch_remote_metadata_outcome",
+        lambda _self, pkg: MetadataEnrichmentOutcome(pkg.name, "failed", cause="transport closed"),
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    initial = runner.invoke(pack_cmd, [])
+
+    assert initial.exit_code == 0, initial.output
+    artifact = tmp_path / ".claude-plugin" / "marketplace.json"
+    artifact.write_text('{"sentinel": "unchanged"}\n', encoding="utf-8")
+    before = artifact.read_bytes()
+
+    clean_check = runner.invoke(pack_cmd, ["--check-clean"])
+
+    assert clean_check.exit_code == 4, clean_check.output
+    assert artifact.read_bytes() == before
+
+
 def test_pack_json_reports_the_final_clean_check_metadata_outcome(
     tmp_path: Path,
     monkeypatch,
