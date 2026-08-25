@@ -311,6 +311,7 @@ class InstallService:
                 lockfile,
                 modules_dir,
                 trust_transitive_self_defined=request.trust_transitive_mcp,
+                logger=request.logger,
             )
             # On a cold cache, absent non-local apm_package deps have not been
             # fetched yet and contribute nothing to current_mcp.configs, even

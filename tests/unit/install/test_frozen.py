@@ -136,8 +136,12 @@ class TestEnforceFrozen:
 
         assert any("stale-mcp" in reason for reason in exc_info.value.reasons)
 
+    @pytest.mark.parametrize("materialized", (True, False), ids=("warm", "cold"))
     def test_mcp_project_accepts_manifestless_repo_root_skill(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        materialized: bool,
     ) -> None:
         """A repo-root Claude skill is not frozen lockfile drift (#2443)."""
         from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
@@ -172,10 +176,16 @@ class TestEnforceFrozen:
         lock.mcp_configs = {server.name: server.to_dict()}
         lock.save(tmp_path / "apm.lock.yaml")
         skill_dir = locked_dep.to_dependency_ref().get_install_path(tmp_path / "apm_modules")
-        skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+        if materialized:
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
 
-        InstallService.enforce_frozen(InstallRequest(apm_package=package, frozen=True))
+        logger = MagicMock()
+        InstallService.enforce_frozen(
+            InstallRequest(apm_package=package, frozen=True, logger=logger)
+        )
+        messages = [call.args[0] for call in logger.verbose_detail.call_args_list]
+        assert any("locked Claude skill" in message for message in messages) is (not materialized)
 
 
 class TestEnforceFrozenColdCache:
@@ -381,3 +391,4 @@ class TestEnforceFrozenColdCache:
         assert len(cold_cache_logs) >= 1, (
             f"Expected at least one cold-cache verbose log from enforce_frozen; got: {recording_logger.verbose_messages}"
         )
+        assert any("locked APM package" in message for message in recording_logger.verbose_messages)
