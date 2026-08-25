@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest.mock import patch
 
 import yaml
 
@@ -335,11 +336,15 @@ class TestLspServersToApmDeps:
             }
         }
 
-        with caplog.at_level(logging.WARNING, logger="apm"):
+        with (
+            caplog.at_level(logging.WARNING, logger="apm"),
+            patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning,
+        ):
             deps = _lsp_servers_to_apm_deps(servers, tmp_path)
 
         assert len(deps) == 1
         assert "defines both 'extensionToLanguage' and 'fileExtensions'" in caplog.text
+        rich_warning.assert_not_called()
 
     def test_warmup_timeout_ms_alias_accepted(self, tmp_path):
         servers = {
@@ -354,7 +359,7 @@ class TestLspServersToApmDeps:
         assert deps[0]["startupTimeout"] == 120000
         assert "warmupTimeoutMs" not in deps[0]
 
-    def test_official_dotnet_plugin_lsp_json_accepted(self, tmp_path):
+    def test_official_dotnet_plugin_lsp_json_accepted(self, tmp_path, caplog):
         """End-to-end regression for #2509: the exact server config shipped by
         the official dotnet/skills dotnet plugin must survive intake."""
         lsp_json = tmp_path / ".lsp.json"
@@ -385,7 +390,8 @@ class TestLspServersToApmDeps:
             )
         )
         servers = _extract_lsp_servers(tmp_path, {})
-        deps = _lsp_servers_to_apm_deps(servers, tmp_path)
+        with caplog.at_level(logging.WARNING, logger="apm"):
+            deps = _lsp_servers_to_apm_deps(servers, tmp_path)
         assert len(deps) == 1
         d = deps[0]
         assert d["name"] == "csharp"
@@ -396,6 +402,10 @@ class TestLspServersToApmDeps:
         assert "fileExtensions" not in d
         assert "warmupTimeoutMs" not in d
         assert "cwd" not in d
+        assert (
+            "uses unsupported 'cwd'; the consumer runtime chooses the working directory"
+            in caplog.text
+        )
 
     def test_invalid_copilot_alias_keeps_default_warning(self, tmp_path, caplog):
         """Invalid alias values remain visible through the normal warning path."""
@@ -411,6 +421,7 @@ class TestLspServersToApmDeps:
 
         assert deps == []
         assert "Skipping invalid LSP server 'invalid'" in caplog.text
+        assert "after normalizing 'fileExtensions' to 'extensionToLanguage'" in caplog.text
 
     def test_wrapped_lsp_json_produces_valid_deps(self, tmp_path):
         """End-to-end: .lsp.json with lspServers wrapper yields valid deps."""

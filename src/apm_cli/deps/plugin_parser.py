@@ -99,15 +99,18 @@ def _assert_no_symlink_descendants(target: Path) -> None:
 
 
 def _surface_warning(message: str, logger: logging.Logger) -> None:
-    """Emit a warning to both the stdlib logger and the rich console.
+    """Emit one warning through logging or the rich-console fallback.
 
     The ``apm`` stdlib logger has no handlers configured by default, so
     ``logger.warning`` calls are silently dropped in non-debug runs. For
     user-visible plugin-parse issues (skipped MCP servers, validation
-    failures), also route through ``_rich_warning`` so the user sees them
-    even without ``--verbose``. Falls back gracefully if Rich is unavailable.
+    failures), route through ``_rich_warning`` when logging has no output
+    handler. Falls back gracefully if Rich is unavailable.
     """
     logger.warning(message)
+    handlers = (*logger.handlers, *logging.getLogger().handlers)
+    if any(not isinstance(handler, logging.NullHandler) for handler in handlers):
+        return
     try:  # noqa: SIM105
         _rich_warning(message, symbol="warning")
     except Exception:
@@ -1016,6 +1019,7 @@ def _lsp_servers_to_apm_deps(
             continue
 
         dep: dict[str, Any] = {"name": name}
+        aliases_used: list[tuple[str, str]] = []
 
         # Copy all recognized fields
         for key in (
@@ -1039,6 +1043,7 @@ def _lsp_servers_to_apm_deps(
         for canonical, alias in _LSP_FIELD_ALIASES:
             if dep.get(canonical) is None and alias in cfg:
                 dep[canonical] = cfg[alias]
+                aliases_used.append((alias, canonical))
                 logger.debug(
                     "Normalizing LSP server '%s' from plugin '%s': '%s' to '%s'",
                     name,
@@ -1057,10 +1062,10 @@ def _lsp_servers_to_apm_deps(
         # started by the consumer runtime in its own working directory.
         # Ignore it explicitly rather than letting it look like a typo.
         if "cwd" in cfg:
-            logger.debug(
-                "LSP server '%s' from plugin '%s': ignoring unsupported 'cwd'",
-                name,
-                plugin_path.name,
+            _surface_warning(
+                f"LSP server '{name}' from plugin '{plugin_path.name}' uses unsupported "
+                "'cwd'; the consumer runtime chooses the working directory.",
+                logger,
             )
 
         # Route through the validation chokepoint
@@ -1068,8 +1073,15 @@ def _lsp_servers_to_apm_deps(
             LSPDependency.from_dict(dep)
         except Exception as exc:
             if warn_on_invalid:
+                alias_context = ""
+                if aliases_used:
+                    normalized = ", ".join(
+                        f"'{alias}' to '{canonical}'" for alias, canonical in aliases_used
+                    )
+                    alias_context = f" after normalizing {normalized}"
                 _surface_warning(
-                    f"Skipping invalid LSP server '{name}' from plugin '{plugin_path.name}': {exc}",
+                    f"Skipping invalid LSP server '{name}' from plugin "
+                    f"'{plugin_path.name}'{alias_context}: {exc}",
                     logger,
                 )
             continue

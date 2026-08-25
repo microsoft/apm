@@ -571,7 +571,9 @@ server map or a `{ "lspServers": { ... } }` envelope. For Copilot-dialect
 plugin input, APM accepts `fileExtensions` as an alias for
 `extensionToLanguage` and `warmupTimeoutMs` as an alias for
 `startupTimeout`; a non-null canonical value wins when both are supplied,
-while a null canonical value falls back to its alias.
+while a null canonical value falls back to its alias. APM ignores the
+unsupported Copilot `cwd` field and warns that the consumer runtime chooses
+the working directory.
 
 ## Version pinning
 

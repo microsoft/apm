@@ -567,7 +567,6 @@ class TestPluginHeroScenarios:
         assert (project / "apm.lock.yaml").read_bytes() == initial_lock_bytes
         assert runtime_path.read_bytes() == initial_runtime_bytes
 
-
     @pytest.mark.requires_apm_binary
     def test_root_declared_skill_lifecycle_is_bounded(self, apm_binary_path, tmp_path):
         """A root-declared plugin skill installs, reinstalls, and uninstalls cleanly."""
