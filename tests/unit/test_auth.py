@@ -5,7 +5,7 @@ import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
@@ -1099,6 +1099,21 @@ class TestBuildGitEnvBearerIsolation:
         encoded = header_values[0].split(" ", 2)[2]
         assert base64.b64decode(encoded).decode() == ":ado-pat"
 
+    def test_gitlab_git_env_uses_safe_basic_header(self):
+        """GitLab subprocesses receive a header, not a raw token variable."""
+        with patch.dict(os.environ, {"GIT_TOKEN": "stale-token"}, clear=True):
+            env = AuthResolver._build_git_env("glpat_fresh", host_kind="gitlab")
+
+        assert "GIT_TOKEN" not in env
+        header_values = [
+            value
+            for key, value in env.items()
+            if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization: Basic ")
+        ]
+        assert len(header_values) == 1
+        encoded = header_values[0].split(" ", 2)[2]
+        assert base64.b64decode(encoded).decode() == "oauth2:glpat_fresh"
+
     def test_bearer_env_preserves_retained_git_config_entries(self):
         """#2368: the bearer header must not clobber entries _clear_git_auth_env retained.
 
@@ -1431,6 +1446,30 @@ class TestTryWithFallbackPathDisambiguation:
 
                 resolver.try_with_fallback("github.com", op)
         assert seen_kwargs == [{"host": "github.com", "port": None, "path": None}]
+
+    def test_gitlab_auth_first_resolution_uses_repository_path(self):
+        """GitLab policy reads preserve credential.useHttpPath selection."""
+        resolver = AuthResolver()
+        host_info = AuthResolver.classify_host("gitlab.example.test", host_type="gitlab")
+        context = MagicMock(token=None, host_info=host_info, git_env={})
+
+        with patch.object(resolver, "resolve", return_value=context) as mock_resolve:
+            result = resolver.try_with_fallback(
+                "gitlab.example.test",
+                lambda token, env: "ok",
+                org="contoso",
+                path="contoso/apm-policy",
+                host_type="gitlab",
+            )
+
+        assert result == "ok"
+        mock_resolve.assert_called_once_with(
+            "gitlab.example.test",
+            "contoso",
+            port=None,
+            host_type="gitlab",
+            path="contoso/apm-policy",
+        )
 
 
 class TestGhCliShortCircuitsCredentialFill:

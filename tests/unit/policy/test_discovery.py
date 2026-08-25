@@ -10,13 +10,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 from urllib.parse import parse_qs, quote, urlparse, urlsplit
 
 from apm_cli.core.auth import AuthResolver as _RealAuthResolver
 from apm_cli.policy._gitlab import (
     _fetch_from_gitlab_repo,
     _fetch_gitlab_contents,
+    _gitlab_project_state_via_git,
 )
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,  # noqa: F401
@@ -1701,12 +1702,13 @@ class TestFetchGitlabContents(unittest.TestCase):
         self._resolver(mock_resolver_cls, "my-gitlab-token")
         mock_resp = MagicMock()
         mock_resp.status_code = 302
-        mock_resp.headers = {"Location": "https://evil.example.com"}
+        mock_resp.headers = {"Location": "https://token:secret@evil.example.com/?token=secret"}
         mock_get.return_value = mock_resp
 
         content, error = _fetch_gitlab_contents("contoso", "apm-policy", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("redirect", error.lower())
+        self.assertNotIn("secret", error)
 
     @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy._gitlab.requests.get")
@@ -1790,10 +1792,12 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
             self.assertIsNone(result.error)
             self.assertFalse((root / ".apm").exists())
 
-    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git", return_value=False)
+    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git", return_value=None)
     @patch("apm_cli.policy._gitlab._fetch_gitlab_contents")
-    def test_confirmed_missing_project_410_is_absent(self, mock_fetch, mock_project_state):
-        """A 410 is clean absence only after Git confirms the project is missing."""
+    def test_ambiguous_410_fails_closed_when_project_state_is_unavailable(
+        self, mock_fetch, mock_project_state
+    ):
+        """A 410 never turns into absence when Git cannot prove reachability."""
         mock_fetch.return_value = (None, "gitlab-status:410: Policy file not found")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1806,8 +1810,8 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
                 no_cache=True,
             )
             self.assertFalse(result.found)
-            self.assertEqual(result.outcome, "absent")
-            self.assertIsNone(result.error)
+            self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+            self.assertIsNotNone(result.error)
             self.assertFalse((root / ".apm").exists())
         mock_project_state.assert_called_once()
 
@@ -1831,6 +1835,86 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
         self.assertIsNotNone(result.error)
         self.assertFalse((root / ".apm").exists())
         mock_project_state.assert_called_once()
+
+    @patch("apm_cli.policy._gitlab.subprocess.run")
+    @patch("apm_cli.core.auth.AuthResolver")
+    def test_git_reachability_probe_uses_bounded_auth_resolver_credentials(
+        self, mock_resolver_cls, mock_run
+    ):
+        resolver = mock_resolver_cls.return_value
+        result = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = result
+
+        def try_with_fallback(host, operation, **kwargs):
+            return operation(
+                "glpat_secret",
+                {
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "http.extraheader",
+                    "GIT_CONFIG_VALUE_0": "Authorization: Basic c2FmZQ==",
+                    "GIT_TOKEN": "glpat_secret",
+                },
+            )
+
+        resolver.try_with_fallback.side_effect = try_with_fallback
+
+        state = _gitlab_project_state_via_git(
+            org="contoso",
+            repo="apm-policy",
+            host="gitlab.example.test",
+            port=8443,
+        )
+
+        self.assertTrue(state)
+        mock_run.assert_called_once()
+        command = mock_run.call_args.args[0]
+        self.assertEqual(
+            command,
+            [
+                "git",
+                "ls-remote",
+                "--exit-code",
+                "https://gitlab.example.test:8443/contoso/apm-policy.git",
+                "HEAD",
+            ],
+        )
+        run_kwargs = mock_run.call_args.kwargs
+        self.assertEqual(run_kwargs["timeout"], 10)
+        self.assertEqual(run_kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertNotIn("GIT_TOKEN", run_kwargs["env"])
+        header_values = [
+            value for key, value in run_kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")
+        ]
+        self.assertTrue(any(value.startswith("Authorization: Basic ") for value in header_values))
+        resolver.try_with_fallback.assert_called_once_with(
+            "gitlab.example.test",
+            ANY,
+            org="contoso",
+            port=8443,
+            path="contoso/apm-policy",
+            host_type="gitlab",
+            unauth_first=False,
+        )
+
+    @patch("apm_cli.policy._gitlab.subprocess.run")
+    @patch("apm_cli.core.auth.AuthResolver")
+    def test_git_reachability_probe_fails_closed_for_concealed_project(
+        self, mock_resolver_cls, mock_run
+    ):
+        resolver = mock_resolver_cls.return_value
+        mock_run.return_value = MagicMock(returncode=128, stderr="remote: Project not found")
+        resolver.try_with_fallback.side_effect = lambda host, operation, **kwargs: operation(
+            "glpat_secret", {}
+        )
+
+        state = _gitlab_project_state_via_git(
+            org="contoso",
+            repo="apm-policy",
+            host="gitlab.example.test",
+            port=None,
+        )
+
+        self.assertIsNone(state)
 
     @patch("apm_cli.policy._gitlab._fetch_gitlab_contents")
     def test_auth_failure_fails_closed(self, mock_fetch):

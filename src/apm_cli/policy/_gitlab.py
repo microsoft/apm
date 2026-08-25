@@ -72,22 +72,23 @@ def _gitlab_project_state_via_git(
 
     def _probe(_token: str | None, git_env: dict[str, str]) -> bool | None:
         try:
-            # auth-delegated: AuthResolver supplies the resolved Git credential environment.
+            probe_env = {**os.environ, **git_env, "GIT_TERMINAL_PROMPT": "0"}
+            # A mocked or legacy resolver environment must not reintroduce
+            # the deprecated raw-token transport into this subprocess.
+            probe_env.pop("GIT_TOKEN", None)
+            # auth-delegated: AuthResolver supplies the selected Git credential header.
             result = subprocess.run(
                 ["git", "ls-remote", "--exit-code", project_url, "HEAD"],
                 capture_output=True,
                 text=True,
                 timeout=10,
-                env={**os.environ, **git_env, "GIT_TERMINAL_PROMPT": "0"},
+                env=probe_env,
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
         if result.returncode == 0:
             return True
-        stderr = result.stderr.lower()
-        if "repository not found" in stderr or "project not found" in stderr:
-            return False
         return None
 
     try:
@@ -228,12 +229,12 @@ def _fetch_from_gitlab_repo(
         # A typed 404 is GitLab's clean policy-absence signal. A 410 is
         # ambiguous: self-managed GitLab can return it for both a missing
         # project and a disabled Files API. Only authenticated Git can
-        # disambiguate that case without silently bypassing governance.
+        # establish reachability; a nonzero Git result is authorization-
+        # ambiguous and must not silently bypass governance.
         if error.startswith("gitlab-status:404:"):
             return PolicyFetchResult(source=source_label, outcome="absent")
         if error.startswith("gitlab-status:410:"):
-            if _gitlab_project_state_via_git(org=org, repo=repo, host=host, port=port) is False:
-                return PolicyFetchResult(source=source_label, outcome="absent")
+            _gitlab_project_state_via_git(org=org, repo=repo, host=host, port=port)
         return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
 
     if content is None:
@@ -332,10 +333,7 @@ def _fetch_gitlab_contents(
         if resp.status_code in (404, 410):
             return None, f"gitlab-status:{resp.status_code}: Policy file not found"
         if 300 <= resp.status_code < 400:
-            location = resp.headers.get("Location", "<no Location header>")
-            return None, (
-                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
-            )
+            return None, f"Refusing HTTP redirect ({resp.status_code}) from {api_url}"
         if resp.status_code != 200:
             return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
         return resp.text, None

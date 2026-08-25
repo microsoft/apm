@@ -585,9 +585,10 @@ class AuthResolver:
             ``git credential fill`` request so helpers configured with
             ``credential.useHttpPath = true`` can disambiguate per-URL
             (notably Git Credential Manager for multi-account users).
-            Primary auth-first resolution stays host-scoped; the path is
-            applied when public github.com anonymous-first fallback proves
-            credentials may be required.
+            GitLab auth-first resolution also uses the path because private
+            policy repositories may rely on per-URL credentials. Public
+            github.com anonymous-first fallback uses it only after credentials
+            may be required.
         host_type:
             Optional manifest provider hint. Forwarded through classification
             and credential resolution so the inner owner matches its caller.
@@ -621,6 +622,7 @@ class AuthResolver:
                 org,
                 port=port,
                 host_type=host_type,
+                path=path if host_info.kind == "gitlab" else None,
             )
             host_info = auth_ctx.host_info
         unauth_env = (
@@ -1211,7 +1213,7 @@ class AuthResolver:
     ) -> dict:
         """Pre-built env dict for subprocess git calls.
 
-        ADO PATs and bearer tokens use an Authorization header via
+        ADO and GitLab tokens use an Authorization header via
         GIT_CONFIG_COUNT/KEY/VALUE. Other host classes retain GIT_TOKEN.
         """
         env = dict(base_env) if base_env is not None else os.environ.copy()
@@ -1220,9 +1222,10 @@ class AuthResolver:
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = "echo"
         env.update(_GIT_MESSAGE_LOCALE_ENV)
-        if token and host_kind == "ado" and scheme in {"basic", "bearer"}:
+        if token and host_kind in {"ado", "gitlab"} and scheme in {"basic", "bearer"}:
             # ADO credentials use an Authorization header, never argv or
-            # GIT_TOKEN. This keeps PATs and bearer JWTs out of process lists.
+            # GIT_TOKEN. GitLab uses the same header transport so its tokens
+            # reach Git subprocesses without entering process arguments.
             #
             # #2368: set (append-after-retained) rather than dict-merge, so the
             # non-auth entries _clear_git_auth_env just retained (e.g.
@@ -1232,6 +1235,9 @@ class AuthResolver:
             if scheme == "bearer":
                 credential = token
                 header_scheme = "Bearer"
+            elif host_kind == "gitlab":
+                credential = base64.b64encode(f"oauth2:{token}".encode()).decode()
+                header_scheme = "Basic"
             else:
                 credential = base64.b64encode(f":{token}".encode()).decode()
                 header_scheme = "Basic"

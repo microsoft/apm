@@ -73,12 +73,12 @@ On GitHub and GitHub API-compatible hosts, the `.github-private` repo is preferr
 | 1 | `apm-policy` | GitLab (gitlab.com and self-managed) |
 
 ```
-<group>/
+<top-level-group>/
   apm-policy/
-    apm-policy.yml         # auto-discovered by every project in <group>
+    apm-policy.yml         # auto-discovered by projects whose remote starts with <top-level-group>/
 ```
 
-Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project without `apm-policy` (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
+GitLab discovery uses only the top-level group: APM takes the first path segment from the project remote and looks for `<top-level-group>/apm-policy`. It does not search nested subgroup scopes. Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project without `apm-policy` (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
 
 :::caution[Self-managed GitLab requires GITLAB_HOST or APM_GITLAB_HOSTS]
 An arbitrary FQDN is never auto-classified as GitLab -- the same domain shape could be Bitbucket, Gitea, or a plain git server. `gitlab.com` is recognised automatically, but a self-managed instance (e.g. `gitlab.example.com`) is only recognised once you set `GITLAB_HOST=gitlab.example.com` (or `APM_GITLAB_HOSTS` for more than one instance). Without it, APM falls through to the GitHub-style cascade above, which is invalid on GitLab and behaves exactly like the unfixed discovery this section describes. This mirrors `GITHUB_HOST` for GitHub Enterprise Server and `ADO_HOST` for on-prem Azure DevOps Server -- see [Environment Variables](../../reference/environment-variables/).

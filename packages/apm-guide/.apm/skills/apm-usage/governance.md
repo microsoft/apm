@@ -415,7 +415,8 @@ APM auto-discovers org policy from the project's git remote by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
 API-compatible hosts. Azure DevOps hosts use repository `apm-policy` in project
 `apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab uses
-`<group>/apm-policy/apm-policy.yml`; configure a self-managed host with
+`<top-level-group>/apm-policy/apm-policy.yml`, derived from the first remote
+path segment; nested subgroup scopes are not searched. Configure a self-managed host with
 `GITLAB_HOST` or `APM_GITLAB_HOSTS`, and use `APM_GITLAB_POLICY_REPO` to select
 another project name. Repositories with no detectable git remote (unpacked
 bundles, temp dirs) emit an explicit "could not determine org" line and skip
@@ -664,7 +665,7 @@ as `[x]` errors and exit `1`.
 Checklist to publish a policy:
 
 1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `apm`
-   project and `apm-policy` repository on Azure DevOps, or `apm-policy` under the GitLab group).
+   project and `apm-policy` repository on Azure DevOps, or `apm-policy` under the top-level GitLab group).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming

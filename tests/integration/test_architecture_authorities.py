@@ -968,6 +968,7 @@ def test_user_root_scoped_instruction_eligibility_has_single_owner(tmp_path: Pat
         in result.stdout
     )
 
+
 def test_gitlab_policy_discovery_routes_through_private_adapter() -> None:
     """GitLab policy transport must not bypass the discovery facade's adapter."""
     root = Path(__file__).parents[2]

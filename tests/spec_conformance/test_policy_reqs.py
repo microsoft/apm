@@ -128,18 +128,17 @@ def test_policy_gitlab_discovery_provider_is_a_distinct_convention():
     default, and requires that "a consumer MUST NOT hard-code a
     host-specific discovery convention as the sole discovery path." GitLab
     rejects project paths starting with `.` or `_`, so it cannot reuse the
-    GitHub-default or ADO candidate conventions -- it needs (and has) its
-    own, distinct from both.
+    GitHub-default candidate conventions -- it needs (and has) its own
+    valid GitLab project convention. GitLab and ADO intentionally share the
+    ``apm-policy`` leaf name while resolving it under different coordinates.
     """
     from apm_cli.policy.discovery import _policy_repo_candidates
 
     github_candidates = _policy_repo_candidates("github.com")
-    ado_candidates = _policy_repo_candidates("dev.azure.com")
     gitlab_candidates = _policy_repo_candidates("gitlab.com")
 
     assert gitlab_candidates == ("apm-policy",)
     assert gitlab_candidates != github_candidates
-    assert gitlab_candidates != ado_candidates
     assert all(not name.startswith((".", "_")) for name in gitlab_candidates)
     assert_spec_contains("gitlab-project-yml")
 
