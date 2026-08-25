@@ -436,7 +436,7 @@ requirements:
     keyword: MUST
     section: "8.1"
     conformance_class: consumer
-    notes: "declared Plugin component copying excludes consumer-generated staging subtrees within its source"
+    notes: "declared Plugin component copying canonicalizes its non-symlink source root and prunes the current operation's materialization subtree"
   - id: req-sc-001
     keyword: MUST
     section: "10.4"

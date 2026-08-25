@@ -2233,8 +2233,11 @@ or deployment.
 
 <a id="req-pr-007"></a>
 **[req-pr-007]** A conforming **consumer** implementation MUST, when
-copying a declared Plugin collection component source, exclude every
-consumer-generated staging subtree within that source.
+copying a declared Plugin collection component source, canonicalize the
+non-symlink source root selected for that component. A consumer-generated
+staging subtree is the materialization root created by the current operation
+and every descendant of that root. The consumer MUST prune every such staging
+subtree before traversing the source.
 
 A package **exposes selectable skills** when layout resolution identifies a
 container for individually addressable named skill entries, whether that
@@ -3634,7 +3637,7 @@ renumbering of conformance classes.
 | 0.1.29  | 2026-08-22 | Spec-citation fold for the Agent Plugins v1 native-lifecycle deployment boundary (closes #2522 Mode-B silent-extension gate). Added [req-tg-011] (Section 8.5.5, consumer MUST): a consumer MUST treat a schema-bearing Agent Plugins v1 dependency as undeployable until it exposes a machine-verifiable native lifecycle for that dependency; before any target handler or primitive integrator runs, the consumer MUST refuse deployment with one actionable diagnostic, MUST leave the project tree unchanged, MUST NOT fall back to legacy primitive projection, and MUST reach the identical single-diagnostic outcome whether the dependency is materialized alone, mixed with ordinary dependencies in the same install, or under `--dry-run`. Section 8.7 and Appendix C updated. Statement count: 112 -> 113 (108 MUST, 5 SHOULD). |
 | 0.1.30  | 2026-08-23 | Spec-citation fold for plugin-root hook command resolution (closes #2639 Mode-B silent-extension gate). Added [req-tg-012] (Section 8.5.6, consumer MUST): a consumer that resolves plugin-root placeholders treats a matching quoted placeholder followed by an outside path separator equivalently to the fully quoted path, preserves balanced expandable quoting, and emits a default-visible diagnostic instead of silently deploying any supported placeholder that remains unresolved. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 114 -> 115 (110 MUST, 5 SHOULD). |
 | 0.1.31  | 2026-08-23 | Spec-citation fold for authoritative legacy plugin skill declarations (closes #2537). Added [req-pr-006] (Section 8.1, consumer MUST): omitted `skills` alone enables conventional discovery; a string or list replaces discovery; explicit empty, invalid, escaping, symlinked, and duplicate-derived entries contribute no skills; declared containers contribute only immediate child skills; and only resulting names are eligible for enumeration, selection, or deployment. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 115 -> 116 (111 MUST, 5 SHOULD). |
-| 0.1.32  | 2026-08-25 | Spec-citation fold for root-declared Plugin component staging containment (closes #2556). Added [req-pr-007] (Section 8.1, consumer MUST): a consumer copying a declared Plugin collection component source excludes every consumer-generated staging subtree within that source. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 116 -> 117 (112 MUST, 5 SHOULD). |
+| 0.1.32  | 2026-08-25 | Spec-citation fold for root-declared Plugin component staging containment (closes #2556). Added [req-pr-007] (Section 8.1, consumer MUST): a consumer canonicalizes the non-symlink component-source root and prunes the current operation's materialization subtree before traversal. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 116 -> 117 (112 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

@@ -398,7 +398,9 @@ def test_root_declared_plugin_component_excludes_generated_staging_tree(tmp_path
     assert first_tree == second_tree
     assert_spec_contains(
         "copying a declared Plugin collection component source",
-        "consumer-generated staging subtree within that source",
+        "canonicalize the\nnon-symlink source root",
+        "materialization root created by the current operation",
+        "MUST prune every such staging\nsubtree before traversing the source",
     )
 
 
