@@ -21,6 +21,7 @@ from .schema import ApmPolicy
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..core.auth import AuthResolver
     from .discovery import PolicyFetchResult, _CacheEntry
 
 # GitLab rejects project paths starting with ``.`` or ``_`` (see #2566), so
