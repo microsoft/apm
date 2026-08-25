@@ -1,26 +1,4 @@
-"""Auto-discover and fetch org-level apm-policy.yml files.
-Discovery flow:
-1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
-2. Determine host profile (default, ado, or gitlab) to select candidate repos
-3. Try candidate repos in precedence order (per host profile; apm-policy on GitLab)
-4. Fetch apm-policy.yml via GitHub Contents API, ADO Items API, or GitLab Files API
-5. Resolve inheritance chain via resolve_policy_chain
-6. Cache the **merged effective policy** with chain metadata
-7. Parse and return ApmPolicy
-Candidate repo precedence:
-- .github-private -- private org-wide config (preferred; GitHub-family hosts only)
-- .github  -- GitHub convention (GitHub-family hosts only)
-- .apm     -- cross-platform convention (GitHub-family hosts only)
-- _apm     -- GitHub-family fallback
-- apm-policy -- ADO default in the apm project and GitLab group-level default
-Supports:
-- GitHub.com and GitHub Enterprise (*.ghe.com)
-- Azure DevOps (dev.azure.com, *.visualstudio.com)
-- GitLab.com and self-managed GitLab (GITLAB_HOST / APM_GITLAB_HOSTS)
-- Manual override via --policy <path|url>
-- Cache with TTL (default 1 hour), stale fallback up to MAX_STALE_TTL
-- Atomic cache writes (temp file + os.replace)
-"""
+"""Discover, resolve, and cache org-level policy from GitHub, ADO, or GitLab."""
 
 from __future__ import annotations
 
@@ -85,13 +63,7 @@ _LEGACY_ADO_POLICY_WARNING = (
 
 
 def _policy_repo_candidates(host: str) -> tuple[str, ...]:
-    """Return candidate policy repo names for *host* in precedence order.
-
-    ADO hosts use ``apm-policy`` in the ``apm`` project, with a legacy
-    fallback handled separately. GitLab uses its own ``apm-policy`` default
-    because it rejects leading ``.`` and ``_`` project paths. All other hosts
-    try the full cascade.
-    """
+    """Return host-specific policy candidates."""
     if is_azure_devops_hostname(host):
         return _ADO_POLICY_REPOS
     if is_gitlab_hostname(host):
@@ -385,56 +357,31 @@ def _redact_policy_ref(ref: str) -> str:
 
 
 def _derive_leaf_identity(source: str, project_root: Path) -> tuple[str | None, int | None]:
-    """Derive the credential-pinned host and port of the leaf policy.
-
-    The leaf host pins which host an ``extends:`` reference may resolve
-    against (Security Finding F1 -- prevents credential leakage to
-    attacker-controlled hosts via cross-host extends chains).
-
-    Returns the lowercase host and optional port, or ``(None, None)``.
-
-    Source forms:
-    * ``url:https://<host>/...`` -> ``<host>``
-    * ``org:<host>/<owner>/<repo>`` (3+ slash-segments) -> ``<host>``
-    * ``org:<owner>/<repo>`` (2 slash-segments) -> ``github.com`` (default)
-    * ``file:<path>`` -> fall back to git remote of *project_root*
-    """
-    if not source:  # noqa: SIM108
-        bare = ""
-    else:
-        bare = _strip_source_prefix(source)
-
-    if source.startswith("url:") or bare.startswith("https://") or bare.startswith("http://"):
+    """Return the credential-pinned leaf host and optional port."""
+    bare = _strip_source_prefix(source) if source else ""
+    if source.startswith("url:") or bare.startswith(("https://", "http://")):
         try:
             parsed = urlparse(bare)
-            if parsed.hostname:
-                return parsed.hostname.lower(), parsed.port
-        except ValueError:
+            return (parsed.hostname.lower(), parsed.port) if parsed.hostname else (None, None)
+        except Exception:
             return None, None
-        return None, None
-
-    if source.startswith("org:") or (bare and "://" not in bare and bare.count("/") >= 1):
+    if source.startswith("org:") or (bare and "://" not in bare and "/" in bare):
         parts = bare.split("/")
         if len(parts) >= 3:
             try:
                 parsed = urlsplit(f"//{parts[0]}")
-                if parsed.hostname:
-                    return parsed.hostname.lower(), parsed.port
+                return (parsed.hostname.lower(), parsed.port) if parsed.hostname else (None, None)
             except ValueError:
                 return None, None
-            return None, None
         if len(parts) == 2:
-            # owner/repo shorthand defaults to github.com (matches
-            # _fetch_github_contents convention).
             return "github.com", None
-
-    # File source (or unrecognized): fall back to project's git remote.
+    org_and_host = _extract_org_from_git_remote(project_root)
+    if org_and_host is None:
+        return None, None
+    _, host = org_and_host
     identity = _extract_org_host_port_from_git_remote(project_root)
-    if identity is not None:
-        _, host, port = identity
-        if host:
-            return host.lower(), port
-    return None, None
+    port = identity[2] if identity is not None and identity[1].lower() == host.lower() else None
+    return host.lower(), port
 
 
 def _derive_leaf_host(source: str, project_root: Path) -> str | None:
