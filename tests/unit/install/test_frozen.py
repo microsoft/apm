@@ -171,15 +171,11 @@ class TestEnforceFrozen:
         lock.mcp_servers = [server.name]
         lock.mcp_configs = {server.name: server.to_dict()}
         lock.save(tmp_path / "apm.lock.yaml")
-        skill_dir = locked_dep.to_dependency_ref().get_install_path(
-            tmp_path / "apm_modules"
-        )
+        skill_dir = locked_dep.to_dependency_ref().get_install_path(tmp_path / "apm_modules")
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
 
-        InstallService.enforce_frozen(
-            InstallRequest(apm_package=package, frozen=True)
-        )
+        InstallService.enforce_frozen(InstallRequest(apm_package=package, frozen=True))
 
 
 class TestEnforceFrozenColdCache:

@@ -278,8 +278,7 @@ def test_manifestless_repo_root_skill_with_mcp_survives_frozen_replay(
     source_root = isolated.package_root / "repo-root-skill"
     source_root.mkdir(parents=True)
     (source_root / "SKILL.md").write_text(
-        "---\nname: repo-root-skill\ndescription: Frozen replay fixture\n---\n"
-        "# Repo root skill\n",
+        "---\nname: repo-root-skill\ndescription: Frozen replay fixture\n---\n# Repo root skill\n",
         encoding="utf-8",
     )
     assert not (source_root / "apm.yml").exists()
