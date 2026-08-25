@@ -256,6 +256,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flag. In non-interactive (non-TTY) contexts the default is `--no-trust-bin`.
   Pass `--trust-bin` to suppress the warning and deploy, or `apm approve` for
   persistent per-package approval.
+- OpenAPM spec amendment 0.1.28 reconciles the Section 4.2.1 canonical
+  `target` set with the shipped target registry. `copilot-cowork`,
+  `kiro`, and `grok-build` were registered targets that the spec omitted,
+  which made them nominally non-conforming under `req-mf-005` (a producer
+  MUST reject any target outside the canonical set). `copilot-cowork` is
+  also recorded as explicit-only, so `req-tg-001` excludes it from `all`.
+  The `req-mf-005` conformance test now compares the spec against
+  `manifest_target_names()` instead of grepping the spec for its own list,
+  so a new target cannot ship without a spec amendment. No normative
+  statement count change.
 
 ### Removed
 
