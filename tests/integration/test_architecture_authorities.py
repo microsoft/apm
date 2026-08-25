@@ -3499,7 +3499,8 @@ def test_policy_cache_serializer_boundary_is_registered() -> None:
     root = Path(__file__).parents[2]
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     owner_row = (
-        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |"
+        "| Cached policy shape | policy/discovery.py "
+        "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |"
     )
     assert ("Cached policy shape must route through policy/discovery.py::_policy_to_dict") in guard
     for token in ("_policy_to_dict", "_serialize_policy", "_write_cache"):
@@ -3635,7 +3636,8 @@ def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
 
     owner_rows = (
         "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |",
-        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |",
+        "| Cached policy shape | policy/discovery.py "
+        "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |",
     )
     source_text = source.read_text(encoding="utf-8")
     for owner_row in owner_rows:
