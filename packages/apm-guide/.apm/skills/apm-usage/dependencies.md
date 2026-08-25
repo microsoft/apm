@@ -573,7 +573,9 @@ plugin input, APM accepts `fileExtensions` as an alias for
 `startupTimeout`; a non-null canonical value wins when both are supplied,
 while a null canonical value falls back to its alias. APM ignores the
 unsupported Copilot `cwd` field and warns that the consumer runtime chooses
-the working directory.
+the working directory. Copilot output uses `fileExtensions` and
+`warmupTimeoutMs`; manifests and lockfiles retain `extensionToLanguage` and
+`startupTimeout`.
 
 ## Version pinning
 

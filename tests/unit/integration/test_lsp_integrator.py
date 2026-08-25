@@ -222,7 +222,7 @@ class TestInstallUserScope:
 
 class TestInstallCopilotTarget:
     def test_writes_project_lsp_json_with_file_extensions(self, tmp_path):
-        deps = [_make_dep("pyright")]
+        deps = [_make_dep("pyright", startup_timeout=120000)]
 
         count = LSPIntegrator.install(
             deps,
@@ -240,6 +240,7 @@ class TestInstallCopilotTarget:
                     "command": "pyright-langserver",
                     "args": [],
                     "fileExtensions": {".py": "python"},
+                    "warmupTimeoutMs": 120000,
                 }
             }
         }

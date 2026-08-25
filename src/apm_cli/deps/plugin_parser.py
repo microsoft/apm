@@ -99,23 +99,11 @@ def _assert_no_symlink_descendants(target: Path) -> None:
 
 
 def _surface_warning(message: str, logger: logging.Logger) -> None:
-    """Emit one warning through logging or the rich-console fallback.
-
-    The ``apm`` stdlib logger has no handlers configured by default, so
-    ``logger.warning`` calls are silently dropped in non-debug runs. For
-    user-visible plugin-parse issues (skipped MCP servers, validation
-    failures), route through ``_rich_warning`` when logging has no output
-    handler. Falls back gracefully if Rich is unavailable.
-    """
-    logger.warning(message)
-    handlers = (*logger.handlers, *logging.getLogger().handlers)
-    if any(not isinstance(handler, logging.NullHandler) for handler in handlers):
-        return
-    try:  # noqa: SIM105
+    """Emit one standard user-facing warning, with logging as fallback."""
+    try:
         _rich_warning(message, symbol="warning")
     except Exception:
-        # Console output is best-effort; never mask the underlying warning.
-        pass
+        logger.warning(message)
 
 
 def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> bool:
@@ -1051,7 +1039,7 @@ def _lsp_servers_to_apm_deps(
                     alias,
                     canonical,
                 )
-            elif canonical in dep and alias in cfg:
+            elif canonical in dep and alias in cfg and dep[canonical] != cfg[alias]:
                 _surface_warning(
                     f"LSP server '{name}' from plugin '{plugin_path.name}' defines both "
                     f"'{canonical}' and '{alias}'; using '{canonical}'.",

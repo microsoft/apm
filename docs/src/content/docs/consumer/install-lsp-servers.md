@@ -174,7 +174,9 @@ Plugins authored for Copilot CLI may use `fileExtensions` instead of
 APM normalizes those aliases before validation. A non-null canonical value
 wins when both are present; a null canonical value falls back to its alias.
 APM ignores the unsupported Copilot `cwd` field and warns that the consumer
-runtime chooses the working directory.
+runtime chooses the working directory. Copilot output uses `fileExtensions`
+and `warmupTimeoutMs`; canonical manifests and lockfiles retain
+`extensionToLanguage` and `startupTimeout`.
 
 ## Runtime support
 

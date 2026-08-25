@@ -496,6 +496,7 @@ class TestPluginHeroScenarios:
                         "csharp": {
                             "command": "dnx",
                             "args": ["roslyn-language-server", "--stdio"],
+                            "cwd": "${PLUGIN_ROOT}",
                             "fileExtensions": {".cs": "csharp"},
                             "warmupTimeoutMs": 120000,
                         }
@@ -525,6 +526,10 @@ class TestPluginHeroScenarios:
             project,
         )
         assert initial_install.returncode == 0, initial_install.stdout + initial_install.stderr
+        install_output = initial_install.stdout + initial_install.stderr
+        assert install_output.count("uses unsupported 'cwd'") == 1
+        assert "consumer runtime chooses the working directory" in install_output
+        assert "[!] LSP server 'csharp'" in install_output
 
         lock = LockFile.read(project / "apm.lock.yaml")
         assert lock is not None
@@ -543,7 +548,7 @@ class TestPluginHeroScenarios:
             "args": ["roslyn-language-server", "--stdio"],
             "command": "dnx",
             "fileExtensions": {".cs": "csharp"},
-            "startupTimeout": 120000,
+            "warmupTimeoutMs": 120000,
         }
         initial_lock_bytes = (project / "apm.lock.yaml").read_bytes()
         initial_runtime_bytes = runtime_path.read_bytes()
