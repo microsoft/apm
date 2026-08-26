@@ -1,0 +1,41 @@
+"""Shared component-collection surface for bundle output profiles."""
+
+from .plugin_exporter import (
+    _cache_would_contribute_hooks_or_mcp,
+    _cache_would_contribute_primitives,
+    _collect_apm_components,
+    _collect_deployed_components,
+    _collect_explicit_local_components,
+    _collect_hooks_from_apm,
+    _collect_hooks_from_root,
+    _collect_root_plugin_components,
+    _deep_merge,
+    _dep_install_path,
+    _get_dev_dependency_urls,
+    _merge_file_map,
+    _sanitize_bundle_name,
+    _scan_bundle_sources,
+    _warn_no_local_primitives,
+    _warn_skipped_root_components,
+    _write_bundle_sources,
+)
+
+__all__ = [
+    "_cache_would_contribute_hooks_or_mcp",
+    "_cache_would_contribute_primitives",
+    "_collect_apm_components",
+    "_collect_deployed_components",
+    "_collect_explicit_local_components",
+    "_collect_hooks_from_apm",
+    "_collect_hooks_from_root",
+    "_collect_root_plugin_components",
+    "_deep_merge",
+    "_dep_install_path",
+    "_get_dev_dependency_urls",
+    "_merge_file_map",
+    "_sanitize_bundle_name",
+    "_scan_bundle_sources",
+    "_warn_no_local_primitives",
+    "_warn_skipped_root_components",
+    "_write_bundle_sources",
+]

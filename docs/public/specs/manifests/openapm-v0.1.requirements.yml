@@ -286,6 +286,11 @@ requirements:
     section: "6.8"
     conformance_class: governance
     notes: "a canonical deployment-ledger owner absent from apm.lock.yaml is a hard integrity failure independent of security.audit.fail_on_drift; audit exits non-zero in both default and CI modes and refuses to mutate deployed bytes while ownership is invalid"
+  - id: req-pl-017
+    keyword: MUST
+    section: "6.8"
+    conformance_class: governance
+    notes: "Azure DevOps organization-policy discovery uses a distinct primary apm/apm-policy cache first and permits a distinct _apm/_apm fallback only after HTTP 404; non-404 failures do not fall back and legacy success warns"
   - id: req-rs-001
     keyword: MUST
     section: "7.2"
@@ -412,6 +417,26 @@ requirements:
     section: "8.5.4"
     conformance_class: consumer
     notes: "project-scoped native hooks use a portable project-directory environment anchor and reject shell-expansion path syntax"
+  - id: req-tg-011
+    keyword: MUST
+    section: "8.5.5"
+    conformance_class: consumer
+    notes: "a schema-bearing Agent Plugins v1 dependency is undeployable until a native lifecycle is machine-verifiable; the consumer fails closed with one diagnostic and an unchanged tree, uniformly across solo, mixed-batch, and dry-run installs"
+  - id: req-tg-012
+    keyword: MUST
+    section: "8.5.6"
+    conformance_class: consumer
+    notes: "implementation-defined plugin-root placeholders preserve balanced expandable double quoting across split-quote forward- or backslash path spelling and unresolved placeholders emit a default-visible diagnostic"
+  - id: req-pr-006
+    keyword: MUST
+    section: "8.1"
+    conformance_class: consumer
+    notes: "legacy plugin skills declarations replace discovery; invalid, escaping, symlinked, and duplicate-derived entries fail closed"
+  - id: req-pr-007
+    keyword: MUST
+    section: "8.1"
+    conformance_class: consumer
+    notes: "declared Plugin component copying canonicalizes its non-symlink source root and prunes the current operation's materialization subtree"
   - id: req-sc-001
     keyword: MUST
     section: "10.4"
@@ -470,6 +495,12 @@ requirements:
     section: "10.15"
     conformance_class: consumer
     notes: "per-invocation consent for bin/ deployment defaults to deny when stdout is not a TTY; explicit opt-in overrides; allowExecutables policy gate evaluated first"
+  - id: req-sc-015
+    keyword: MUST
+    section: "10.16"
+    conformance_class: consumer
+    oracle: tests/fixtures/spec-conformance/source-plan/req-sc-015.json
+    notes: "one post-authorization source-file set drives every install and uninstall re-integration scan and primitive materialization; source-only files and symlink entries are excluded"
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

@@ -8,10 +8,17 @@ Commands declare *intent* via ScanPolicy; the gate handles the rest.
 from __future__ import annotations
 
 import os
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from ..utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+    validate_path_segments,
+)
 from ..utils.paths import portable_relpath
 from .content_scanner import ContentScanner, ScanFinding
 
@@ -81,14 +88,30 @@ class SecurityGate:
         *,
         policy: ScanPolicy = BLOCK_POLICY,
         force: bool = False,
+        path_filter=None,
+        paths: Collection[str] | None = None,
     ) -> ScanVerdict:
-        """Walk *root*, scan every regular file, return a verdict.
+        """Walk *root*, scan accepted regular files, and return a verdict.
 
         Symlinks are never followed (``followlinks=False``, ``is_symlink()``).
-        All files are scanned to produce a complete findings report.
+        When provided, *path_filter* receives a portable source-relative path
+        and selects the files included in the findings report.
+        When *paths* is provided, scan only those portable root-relative files
+        instead of walking *root*. Other callers retain the generic walk.
         """
         findings_by_file: dict[str, list[ScanFinding]] = {}
         scanned_files: set[str] = set()
+
+        if paths is not None:
+            candidates = (_explicit_scan_candidate(root, relative) for relative in sorted(paths))
+            return SecurityGate._scan_candidates(
+                candidates,
+                root,
+                findings_by_file,
+                scanned_files,
+                policy,
+                force,
+            )
 
         for dirpath, _dirs, filenames in os.walk(root, followlinks=False):
             for fname in filenames:
@@ -96,6 +119,8 @@ class SecurityGate:
                 if fpath.is_symlink():
                     continue
                 rel = portable_relpath(fpath, root)
+                if path_filter is not None and not path_filter(rel):
+                    continue
                 scanned_files.add(rel)
                 try:
                     file_findings = ContentScanner.scan_file(fpath)
@@ -104,6 +129,35 @@ class SecurityGate:
                 if file_findings:
                     findings_by_file[rel] = file_findings
 
+        return SecurityGate._build_verdict(
+            findings_by_file,
+            len(scanned_files),
+            policy,
+            force,
+            scanned_files=frozenset(scanned_files),
+        )
+
+    @staticmethod
+    def _scan_candidates(
+        candidates,
+        root: Path,
+        findings_by_file: dict[str, list[ScanFinding]],
+        scanned_files: set[str],
+        policy: ScanPolicy,
+        force: bool,
+    ) -> ScanVerdict:
+        """Scan explicit source paths without traversing unrelated directories."""
+        for fpath in candidates:
+            if fpath.is_symlink() or not fpath.is_file():
+                continue
+            rel = portable_relpath(fpath, root)
+            scanned_files.add(rel)
+            try:
+                file_findings = ContentScanner.scan_file(fpath)
+            except OSError:
+                continue
+            if file_findings:
+                findings_by_file[rel] = file_findings
         return SecurityGate._build_verdict(
             findings_by_file,
             len(scanned_files),
@@ -245,6 +299,19 @@ class SecurityGate:
 def ignore_symlinks(directory: str, contents: list[str]) -> list[str]:
     """``shutil.copytree`` ignore callback that filters out symlinks."""
     return [c for c in contents if (Path(directory) / c).is_symlink()]
+
+
+def _explicit_scan_candidate(root: Path, relative: str) -> Path:
+    """Return a contained explicit scan path with no symlinked components."""
+    path = Path(relative)
+    if not relative or path.is_absolute():
+        raise PathTraversalError(f"Explicit scan path must be root-relative: {relative!r}")
+    validate_path_segments(relative, context="explicit scan path", reject_empty=True)
+    candidate = root / path
+    if has_symlink_component(root, candidate):
+        raise PathTraversalError(f"Explicit scan path contains a symlink: {relative!r}")
+    ensure_path_within(candidate, root)
+    return candidate
 
 
 def ignore_non_content(directory: str, contents: list[str]) -> list[str]:

@@ -232,9 +232,13 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        # Per-shard timeout is ~1/4 of the original 30 min budget plus
-        # headroom for the slowest shard (HOME-group tests).
-        timeout-minutes: 15
+        # Per-shard timeout raised to 20 min (#2502 diagnosis): shard 1 holds
+        # all test_architecture_authorities.py tests (alphabetically first),
+        # which includes ~29 shutil.copytree+bash guard tests that take
+        # 50-60 s each. CI runner variance puts total shard time at 13-15 min;
+        # the original 15 min budget has no headroom and causes intermittent
+        # merge-queue failures. 20 min gives a reliable 5-min buffer.
+        timeout-minutes: 20
 
       - name: Rename coverage data for shard
         if: always()

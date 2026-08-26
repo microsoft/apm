@@ -2,7 +2,7 @@
 
 ## Supported package layouts
 
-APM recognizes five layouts. The shape of the package root tells APM
+APM recognizes six layouts. The shape of the package root tells APM
 how to install it:
 
 | Root signal | Author intent | Install semantic |
@@ -11,7 +11,8 @@ how to install it:
 | `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
-| `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Not yet installable -- fails closed |
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
 also uses APM dependency resolution. APM installs it as a skill -- it
@@ -177,6 +178,14 @@ When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at
 runtime. Claude-family merged targets (Claude, Cursor, Codex, Gemini,
 Antigravity, and Windsurf), Copilot, and Kiro receive the same bundle.
+
+For portable hook scripts, quote the complete package-relative path:
+`"${PLUGIN_ROOT}/scripts/my hook.sh"`. A split-quoted path such as
+`"${PLUGIN_ROOT}"/scripts/my\ hook.sh` is also accepted. If install reports an
+unresolved plugin-root token, follow the package-specific repair: balance the
+quotes, add a relative path, or keep the path inside the package. Then run
+`apm install` again.
+
 Root hook JSON descriptors, symlinks, and `.apm-pin` markers are not
 deployed. JavaScript and TypeScript hook bundles get a minimal
 `package.json` sidecar with the source package's Node `type` (defaulting
@@ -506,9 +515,19 @@ my-skill/
 
 ### 7. Marketplace Plugin (`plugin.json`)
 
-Packaged distribution format created with `apm pack --format plugin`.
+Packaged distribution format created with `apm pack` (the default, no-flag
+Claude plugin bundle). This is the Claude-compatible `plugin.json` layout,
+distinct from the portable Agent Plugins v1 `plugin.json` produced by
+`apm pack --format agent-plugin` -- see [Package Types](../../../../../docs/src/content/docs/reference/package-types.md#agent-plugin-pluginjson-with-an-agent-plugins-schema)
+for the portable format.
 
 When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json` automatically -- authors no longer need to maintain this file manually. The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). See the apm pack reference (reference/cli/pack/#plugin-manifests) for output paths, credential stripping, and per-ecosystem differences, or run `apm pack --help`.
+
+When a marketplace `plugin.json` declares `skills`, that declaration is the
+complete deploy list: declare each skill directory or an immediate container.
+An omitted key discovers root `skills/`; an explicit `[]` deploys none. If APM
+reports `plugin.json declares no deployable skills`, add the intended paths or
+remove the key to restore discovery.
 
 #### Shipping `bin/` executables (Claude Code only)
 
@@ -584,12 +603,15 @@ preserved through to the consumer. APM appends each repository name without a
 `.git` suffix. Authentication uses `ADO_APM_PAT` when set, or an Azure CLI
 bearer credential when the PAT is unset and `az` is signed in:
 
+Percent-encode spaces in ADO paths, such as `My%20Projects`. The generated
+source URL preserves the encoding while APM resolves its decoded ADO identity.
+
 ```yaml
 marketplace:
-  sourceBase: https://dev.azure.com/contoso/platform/_git
+  sourceBase: https://dev.azure.com/contoso/My%20Projects/_git
   packages:
     - name: agent-skills
-      source: agent-skills          # -> contoso/platform/_git/agent-skills
+      source: agent-skills          # -> contoso/My%20Projects/_git/agent-skills
       ref: 3f2a9b1c
 ```
 

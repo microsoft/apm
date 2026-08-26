@@ -22,6 +22,7 @@ the blast radius of a deeper DI rewrite.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.request import InstallRequest
@@ -29,7 +30,65 @@ from apm_cli.models.results import InstallDisposition
 
 if TYPE_CHECKING:
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
+    from apm_cli.deps.lockfile import LockFile
     from apm_cli.models.results import InstallResult
+
+
+def _absent_apm_package_mcp_configs(
+    lockfile: LockFile,
+    modules_dir: Path,
+) -> dict[str, dict]:
+    """Return MCP configs stored for absent non-local apm_package deps (cold cache).
+
+    On a fresh checkout (cold cache) git and registry apm_package deps have not
+    been fetched yet, so ``CurrentMcpConfigView.derive`` cannot read their
+    ``apm.yml`` files. ``--frozen`` will hydrate them from the lock pins and
+    produce exactly the MCP state recorded in the lockfile. To avoid false
+    ``lock_only`` drift entries, we augment the derived current-state with the
+    locked configs for those absent packages so both sides of the comparison
+    carry the same values.
+
+    Correlation uses ``mcp_config_provenance`` (server -> declaring package
+    name) and the dep's self-asserted ``name`` / install-dir name as declarer
+    candidates. Only servers whose EVERY owner is an absent package are
+    included; shared servers remain subject to full comparison.
+    """
+    from apm_cli.models.validation import PackageType
+
+    # Short-circuit: if modules_dir itself is absent every remote dep is absent,
+    # but we still need to walk dependencies to build absent_declarers.  However,
+    # when modules_dir does not exist we can skip the per-dep exists() stat entirely
+    # because all remote deps are guaranteed absent.
+    modules_dir_exists = modules_dir.exists()
+
+    absent_declarers: set[str] = set()
+    for dep in lockfile.dependencies.values():
+        if dep.package_type != PackageType.APM_PACKAGE.value:
+            continue
+        if dep.source == "local":
+            continue
+        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+        if not modules_dir_exists or not install_path.exists():
+            # The declarer used when this package contributed MCP was:
+            #   package.apm_yml.name  (stored in dep.name by the lock writer)
+            #   or the install-directory name (fallback)
+            if dep.name:
+                absent_declarers.add(dep.name)
+            absent_declarers.add(install_path.name)
+
+    if not absent_declarers or not lockfile.mcp_config_provenance:
+        return {}
+
+    augment: dict[str, dict] = {}
+    for server_name, owner in lockfile.mcp_config_provenance.items():
+        owners: set[str] = {owner} if isinstance(owner, str) else set(owner)
+        # Only include servers that are exclusively from absent packages; any
+        # server co-owned by a present package is still subject to live comparison.
+        if owners and owners.issubset(absent_declarers):
+            config = lockfile.mcp_configs.get(server_name)
+            if config is not None:
+                augment[server_name] = config
+    return augment
 
 
 class InstallNotAvailableError(RuntimeError):
@@ -103,6 +162,7 @@ class InstallService:
             plan_callback=request.plan_callback,
             refresh=request.refresh,
             lockfile_only=request.lockfile_only,
+            trust_bin=request.trust_bin,
             transaction=request.transaction,
         )
 
@@ -240,18 +300,31 @@ class InstallService:
 
         satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
         from apm_cli.core.scope import get_modules_dir
-        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView, McpConfigDiff
 
         root_mcp = list(request.apm_package.get_all_mcp_dependencies())
         check_mcp = bool(root_mcp) or bool(lockfile.mcp_configs) or bool(lockfile.mcp_servers)
         if check_mcp:
+            modules_dir = get_modules_dir(request.scope)
             current_mcp = CurrentMcpConfigView.derive(
                 request.apm_package,
                 lockfile,
-                get_modules_dir(request.scope),
+                modules_dir,
                 trust_transitive_self_defined=request.trust_transitive_mcp,
             )
-            config_diff = current_mcp.diff(lockfile.mcp_configs)
+            # On a cold cache, absent non-local apm_package deps have not been
+            # fetched yet and contribute nothing to current_mcp.configs, even
+            # though their MCP servers are stored in lockfile.mcp_configs. Augment
+            # the derived current state with those stored configs so the comparison
+            # produces no false lock_only entries for cold-cache hydration targets.
+            cold_cache_mcp = _absent_apm_package_mcp_configs(lockfile, modules_dir)
+            if cold_cache_mcp and request.logger is not None:
+                request.logger.verbose_detail(
+                    f"Restoring {len(cold_cache_mcp)} cold-cache MCP server(s) "
+                    "from lockfile; frozen check will hydrate after structural check."
+                )
+            effective_configs: dict = {**cold_cache_mcp, **current_mcp.configs}
+            config_diff = McpConfigDiff.between(effective_configs, lockfile.mcp_configs)
             if current_mcp.problems:
                 reasons.extend(
                     f"  - {problem.package_key}: {problem.message}"
@@ -264,7 +337,7 @@ class InstallService:
                     reasons.append(f"  - MCP server {name!r} is missing from apm.lock.yaml")
                 for name in sorted(config_diff.lock_only):
                     reasons.append(f"  - MCP server {name!r} is no longer declared in apm.yml")
-            expected_names = set(current_mcp.configs)
+            expected_names = set(effective_configs)
             locked_names = set(lockfile.mcp_servers)
             if expected_names != locked_names and config_diff.is_empty:
                 reasons.append("  - MCP server names in apm.lock.yaml are out of sync with apm.yml")

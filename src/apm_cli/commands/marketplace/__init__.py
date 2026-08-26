@@ -40,7 +40,11 @@ from ...marketplace.migration import (
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
-from ...utils.path_security import PathTraversalError, validate_path_segments
+from ...utils.path_security import (
+    PathTraversalError,
+    decode_url_path_segments,
+    validate_path_segments,
+)
 from .._helpers import _get_console, _is_interactive
 
 if TYPE_CHECKING:
@@ -312,12 +316,7 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
         embedded_host = (parsed.hostname or "").strip().lower()
         if not embedded_host:
             raise ValueError(f"HTTPS URL is missing a host: '{raw}'")
-        # Validate path segments for traversal markers.
-        from urllib.parse import unquote as _unquote
-
-        path_segments = [s for s in _unquote(parsed.path or "").split("/") if s]
-        for seg in path_segments:
-            validate_path_segments(seg, context="marketplace URL path", reject_empty=True)
+        path_segments = decode_url_path_segments(parsed.path, context="marketplace URL path")
         if not path_segments:
             raise ValueError(f"HTTPS URL is missing a repo path: '{raw}'")
         host_info = AuthResolver.classify_host(embedded_host)
@@ -339,10 +338,8 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
         return raw, kind, embedded_host
 
     # --- Shorthand (OWNER/REPO or HOST/OWNER/.../REPO) --------------------
-    from urllib.parse import unquote as _unquote
-
-    raw_decoded = _unquote(raw)
-    segments = [seg for seg in raw_decoded.split("/") if seg]
+    raw_segments = raw.split("/")
+    segments = list(decode_url_path_segments(raw, context="marketplace source path"))
     if len(segments) < 2:
         raise ValueError(
             f"Invalid format: '{raw}'. "
@@ -359,15 +356,15 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
             )
         embedded_host = segments[0].lower()
         segments = segments[1:]
+        raw_segments = raw_segments[1:]
 
     repo_name = segments[-1]
     owner_segments = segments[:-1]
     if not owner_segments or not repo_name:
         raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO'.")
 
-    owner_path = "/".join(owner_segments)
-    validate_path_segments(owner_path, context="marketplace owner path", reject_empty=True)
-    validate_path_segments(repo_name, context="marketplace repo name", reject_empty=True)
+    raw_owner_path = "/".join(raw_segments[: len(owner_segments)])
+    raw_repo_name = raw_segments[len(owner_segments)]
 
     if embedded_host and host_flag and host_flag.strip().lower() != embedded_host:
         import shlex as _shlex
@@ -383,7 +380,7 @@ def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, 
     resolved_host = (host_flag or "").strip().lower() or embedded_host or default_host()
     host_info = AuthResolver.classify_host(resolved_host)
     kind = _host_kind_to_fetcher_kind(host_info.kind)
-    url = f"https://{resolved_host}/{owner_path}/{repo_name}"
+    url = f"https://{resolved_host}/{raw_owner_path}/{raw_repo_name}"
     return url, kind, resolved_host
 
 

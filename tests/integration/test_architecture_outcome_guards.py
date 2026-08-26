@@ -122,6 +122,299 @@ def test_requested_plugin_skill_with_no_match_fails_closed(
     assert not (consumer / ".claude" / "skills" / "resolving-merge-conflicts").exists()
 
 
+def test_declared_skills_container_is_selectable_by_skill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--skill`` must subset a plugin that declares its skills container.
+
+    Regression for #2530: ``"skills": ["./skills/"]`` names the conventional
+    container. Normalizing it under its own name left the enumerator backing
+    ``--skill`` with nothing to match, so every requested name was rejected
+    with ``Available: (none)`` even though a bare install deployed them all.
+    """
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    plugin, consumer = _write_plugin_consumer(
+        tmp_path,
+        {
+            "name": "container-skills",
+            "version": "1.0.0",
+            "skills": ["./skills/"],
+        },
+    )
+    for name in ("csharp-scripts", "dotnet-pinvoke"):
+        skill = plugin / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install", "--skill", "csharp-scripts"])
+
+    assert result.exit_code == 0, result.output
+    assert "Available: (none)" not in result.output
+    deployed = consumer / ".claude" / "skills"
+    assert (deployed / "csharp-scripts" / "SKILL.md").is_file()
+    # Subsetting is the point: the sibling must stay out.
+    assert not (deployed / "dotnet-pinvoke").exists()
+
+
+def test_skill_enumeration_matches_the_directory_that_deploys(
+    tmp_path: Path,
+) -> None:
+    """``--skill`` validation and deployment must read one routing rule.
+
+    Regression for #2530: the enumerator carried a plugin-only branch that
+    read ``.apm/skills/`` while the deploy path preferred a root ``skills/``
+    bundle, so a selectable name and a deployable name could disagree. A
+    non-plugin keeps root-bundle precedence -- nothing normalizes its
+    ``skills/``, so the raw directory is the declaration.
+    """
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.models.validation import PackageType
+
+    package = tmp_path / "pkg"
+    for name in ("alpha", "beta"):
+        skill = package / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+    info = MagicMock(install_path=package, package_type=PackageType.SKILL_BUNDLE)
+
+    assert SkillIntegrator.skill_source_paths(package, PackageType.SKILL_BUNDLE) == {
+        "alpha": package / "skills" / "alpha",
+        "beta": package / "skills" / "beta",
+    }
+    assert SkillIntegrator.available_skill_names(info) == frozenset({"alpha", "beta"})
+
+
+def test_plugin_declaration_decides_which_skills_root_copy_stays_the_source(
+    tmp_path: Path,
+) -> None:
+    """A plugin's resolved declaration outranks its raw ``skills/`` tree.
+
+    Regression for #2537: the raw root directory is pre-resolution input.
+    Letting it decide deployed skills the manifest never declared and dropped
+    declared ones living outside the conventional container.
+
+    The root copy still supplies the *content* wherever it exists. It is
+    byte-identical to the normalized one but sits a level higher, so relative
+    links leaving the bundle keep resolving against the package root.
+    """
+    from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.models.validation import PackageType
+
+    package = tmp_path / "plugin"
+    for name in ("declared", "undeclared"):
+        skill = package / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    outside = package / "extra-skills" / "outside"
+    outside.mkdir(parents=True)
+    (outside / "SKILL.md").write_text("# outside\n", encoding="utf-8")
+    _map_plugin_artifacts(
+        package,
+        package / ".apm",
+        {"skills": ["./skills/declared", "./extra-skills/outside"]},
+    )
+
+    info = MagicMock(install_path=package, package_type=PackageType.MARKETPLACE_PLUGIN)
+
+    assert SkillIntegrator.available_skill_names(info) == frozenset({"declared", "outside"})
+    assert SkillIntegrator.skill_source_paths(package, PackageType.MARKETPLACE_PLUGIN) == {
+        "declared": package / "skills" / "declared",
+        "outside": package / "extra-skills" / "outside",
+    }
+
+
+def test_plugin_skill_links_leaving_the_bundle_survive_declaration_filtering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Honouring the declaration must not move where skill content is read from.
+
+    A skill's relative link that leaves the bundle is rewritten against the
+    package root. Sourcing the same skill from the normalized ``.apm/skills/``
+    copy instead of the root one puts it a level deeper, so that link silently
+    resolves somewhere else and lands in the target unrewritten (#2537).
+    """
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    plugin, consumer = _write_plugin_consumer(
+        tmp_path,
+        {"name": "linked-skills", "version": "1.0.0", "skills": ["./skills/"]},
+    )
+    (plugin / "docs").mkdir()
+    (plugin / "docs" / "guide.md").write_text("# guide\n", encoding="utf-8")
+    skill = plugin / "skills" / "alpha"
+    (skill / "references").mkdir(parents=True)
+    (skill / "references" / "r.md").write_text("# r\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: d\n---\n"
+        "internal: [ref](references/r.md)\n"
+        "escaping: [guide](../../docs/guide.md)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install"])
+    assert result.exit_code == 0, result.output
+
+    deployed = consumer / ".claude" / "skills" / "alpha"
+    body = (deployed / "SKILL.md").read_text(encoding="utf-8")
+    assert (deployed / "references" / "r.md").is_file()
+    assert "[ref](references/r.md)" in body
+    # Rewritten back at the package, not left pointing inside the target tree.
+    assert "../../docs/guide.md" not in body
+    assert "apm_modules" in body and "docs/guide.md" in body
+
+
+def test_plugin_empty_skills_declaration_resolves_to_nothing(
+    tmp_path: Path,
+) -> None:
+    """``"skills": []`` means no skills, not "fall back to the raw tree".
+
+    Regression for #2537: an empty resolution is a real answer. The same path
+    covers a declared component rejected for escaping the plugin root, which
+    must fail closed rather than deploy whatever the tree happens to hold.
+    """
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.models.validation import PackageType
+
+    package = tmp_path / "plugin"
+    skill = package / "skills" / "not-declared"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# not-declared\n", encoding="utf-8")
+
+    info = MagicMock(install_path=package, package_type=PackageType.MARKETPLACE_PLUGIN)
+
+    assert SkillIntegrator.available_skill_names(info) == frozenset()
+
+
+def test_staged_plugin_skill_is_not_promoted_after_empty_declaration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A staged normalized skill cannot bypass an empty parser receipt."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    plugin, consumer = _write_plugin_consumer(
+        tmp_path,
+        {"name": "staged-skills", "version": "1.0.0", "skills": []},
+    )
+    staged = plugin / ".apm" / "skills" / "staged"
+    staged.mkdir(parents=True)
+    (staged / "SKILL.md").write_text(
+        "---\nname: staged\ndescription: d\n---\n# staged\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install"])
+
+    assert result.exit_code == 0, result.output
+    assert "declares no deployable skills" not in result.output
+    assert not (consumer / ".claude" / "skills" / "staged").exists()
+
+
+def test_plugin_declaring_no_skills_says_which_ones_it_shadowed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A declaration that deploys nothing must not be indistinguishable from no skills.
+
+    Zero deployable skills is a legitimate answer -- most plugins ship none,
+    and none of them should be nagged. It stops being obvious once the package
+    carries a root ``skills/`` bundle whose contents used to deploy: after
+    #2537 the declaration decides, so exactly that shape needs one line
+    telling "no skills by design" apart from a declaration that ate them.
+    """
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    plugin, consumer = _write_plugin_consumer(
+        tmp_path,
+        {"name": "quiet-skills", "version": "1.0.0", "skills": []},
+    )
+    for name in ("alpha", "beta"):
+        skill = plugin / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: d\n---\n# {name}\n", encoding="utf-8"
+        )
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install"])
+
+    assert result.exit_code == 0, result.output
+    assert "declares no deployable skills" in result.output
+    assert "alpha, beta" in result.output
+    # The declaration is still authoritative -- the note explains, not undoes.
+    assert not (consumer / ".claude" / "skills" / "alpha").exists()
+
+
+def test_plugin_without_any_skills_stays_quiet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No root bundle means nothing was shadowed, so there is nothing to say."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    plugin, consumer = _write_plugin_consumer(
+        tmp_path,
+        {"name": "agents-only", "version": "1.0.0"},
+    )
+    agents = plugin / "agents"
+    agents.mkdir()
+    (agents / "helper.agent.md").write_text(
+        "---\nname: helper\ndescription: d\n---\n# helper\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install"])
+
+    assert result.exit_code == 0, result.output
+    assert "declares no deployable skills" not in result.output
+
+
+def test_skill_enumeration_falls_back_to_the_normalized_container(
+    tmp_path: Path,
+) -> None:
+    """Parser-authorized normalized skills remain enumerable (#2530)."""
+    from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+    from apm_cli.models.validation import PackageType
+
+    package = tmp_path / "pkg"
+    for name in ("csharp-scripts", "dotnet-pinvoke"):
+        skill = package / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    _map_plugin_artifacts(package, package / ".apm", {"skills": "./skills"})
+    normalized = package / ".apm" / "skills"
+
+    info = MagicMock(install_path=package, package_type=PackageType.MARKETPLACE_PLUGIN)
+    expected = frozenset({"csharp-scripts", "dotnet-pinvoke"})
+
+    assert normalized.is_dir()
+    assert SkillIntegrator.available_skill_names(info) == expected
+
+
 def test_stale_persisted_skill_pin_warns_instead_of_silent_noop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

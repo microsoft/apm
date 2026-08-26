@@ -21,6 +21,7 @@ def _make_dep(
     url: str | None = None,
     headers: dict[str, str] | None = None,
     tools: list[str] | None = None,
+    cwd: str | None = None,
 ) -> MagicMock:
     dep = MagicMock()
     dep.name = name
@@ -32,6 +33,7 @@ def _make_dep(
     dep.url = url
     dep.headers = headers
     dep.tools = tools
+    dep.cwd = cwd
     dep.package = None
     dep.version = None
     dep.registry = False if is_self_defined else None

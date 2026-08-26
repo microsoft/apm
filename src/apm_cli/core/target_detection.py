@@ -715,16 +715,12 @@ def parse_target_field(
     if len(raw_parts) == 1:
         return raw_parts[0]
 
-    # Multi-token: resolve aliases + dedupe, preserving input order.
+    # Multi-token: preserve the distinct Copilot and VS Code MCP destinations
+    # while resolving every other alias to its canonical profile.
     seen: set[str] = set()
     result: list[str] = []
     for p in raw_parts:
-        capability = get_target_capability(p)
-        canonical = (
-            capability.compile_family
-            if capability.compile_family in capability.aliases
-            else normalize_target_name(p)
-        )
+        canonical = p if p in {"copilot", "vscode"} else normalize_target_name(p)
         if canonical not in seen:
             seen.add(canonical)
             result.append(canonical)
@@ -859,10 +855,12 @@ class EffectiveTargetDecision:
         seen: set[str] = set()
         for target, capability in _target_capabilities(self.value):
             runtime = (
-                capability.compile_family
+                "vscode"
+                if target == "vscode" and "vscode" in capability.runtimes
+                else capability.name
+                if capability.name in capability.runtimes
+                else capability.compile_family
                 if capability.compile_family in capability.runtimes
-                else target
-                if target in capability.runtimes
                 else capability.runtimes[0]
                 if capability.runtimes
                 else capability.name
@@ -874,15 +872,8 @@ class EffectiveTargetDecision:
 
     def runtime_targets_for_scope(self, *, user_scope: bool) -> tuple[str, ...] | None:
         """Return MCP runtime identifiers adjusted for project or user scope."""
-        runtimes = self.runtime_targets
-        if (
-            not user_scope
-            or runtimes is None
-            or self.canonical_targets is None
-            or "copilot" not in self.canonical_targets
-        ):
-            return runtimes
-        return tuple("copilot" if target == "vscode" else target for target in runtimes)
+        del user_scope
+        return self.runtime_targets
 
     @cached_property
     def runtime_equivalents(self) -> tuple[str, ...] | None:
@@ -996,6 +987,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("cursor", "dir", ".cursor"),
     ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
     ("copilot", "file", ".github/copilot-instructions.md"),
+    ("copilot", "file", ".github/mcp.json"),  # architecture-authority-exempt: detection signal
     ("copilot", "dir", ".github/instructions"),
     ("copilot", "dir", ".github/agents"),
     ("copilot", "dir", ".github/prompts"),

@@ -1539,33 +1539,55 @@ class TestExportPluginBundle:
         ]
 
 
-class TestExportPluginBundleViaPackBundle:
-    """Verify pack_bundle(fmt='plugin') delegates correctly."""
+def _write_deployed_skill_at(project: Path, target: str, skill_name: str, body: str) -> list[str]:
+    """Deploy a valid portable skill under a specific target dir.
 
-    def test_fmt_plugin_delegates(self, tmp_path):
+    Two different targets (e.g. ``.github``/``.claude``) map to the same
+    plugin-native ``skills/<name>/SKILL.md`` output, letting two dependencies
+    collide on one portable-core path while each keeps its own attested file.
+    """
+    skill_dir = project / target / "skills" / skill_name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_file = skill_dir / "SKILL.md"
+    skill_file.write_text(
+        f"---\nname: {skill_name}\ndescription: {body}\n---\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return [skill_file.relative_to(project).as_posix()]
+
+
+class TestExportPluginBundleViaPackBundle:
+    """Verify ``agent-plugin`` delegates to the Agent Plugin exporter."""
+
+    def test_fmt_agent_plugin_delegates(self, tmp_path):
         from apm_cli.bundle.packer import pack_bundle
 
-        project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
+        project = _setup_plugin_project(tmp_path)
         out = tmp_path / "build"
 
-        result = pack_bundle(project, out, fmt="plugin")
+        result = pack_bundle(project, out, fmt="agent-plugin")
 
-        assert (result.bundle_path / "plugin.json").exists()
-        assert (result.bundle_path / "agents" / "a.agent.md").exists()
+        # Delegation to the Agent Plugin exporter is proven by the canonical
+        # ``$schema`` in plugin.json (the legacy Claude exporter omits it).
+        plugin_json = json.loads((result.bundle_path / "plugin.json").read_text())
+        assert "$schema" in plugin_json
+        # The portable producer never creates private or client-native roots.
+        assert not (result.bundle_path / "com.microsoft.apm").exists()
+        assert not (result.bundle_path / "agents").exists()
 
     def test_force_flag_passed_through(self, tmp_path):
         from apm_cli.bundle.packer import pack_bundle
 
         project = _setup_plugin_project(tmp_path)
-        deployed1 = _write_deployed_agent_at(project, ".github", "shared.agent.md", "from-first")
-        deployed2 = _write_deployed_agent_at(project, ".claude", "shared.agent.md", "from-second")
+        deployed1 = _write_deployed_skill_at(project, ".github", "shared", "from-first")
+        deployed2 = _write_deployed_skill_at(project, ".claude", "shared", "from-second")
         dep1 = LockedDependency(repo_url="acme/first", depth=1, deployed_files=deployed1)
         dep2 = LockedDependency(repo_url="acme/second", depth=1, deployed_files=deployed2)
         _write_lockfile(project, [dep1, dep2])
 
         out = tmp_path / "build"
         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
-            result = pack_bundle(project, out, fmt="plugin", force=True)
+            result = pack_bundle(project, out, fmt="agent-plugin", force=True)
 
-        content = (result.bundle_path / "agents" / "shared.agent.md").read_text()
-        assert content == "from-second"
+        content = (result.bundle_path / "skills" / "shared" / "SKILL.md").read_text()
+        assert "from-second" in content

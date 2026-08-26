@@ -1693,14 +1693,15 @@ class TestNormalizePluginDirectory:
         data = yaml.safe_load(path.read_text())
         assert data["name"] == tmp_path.name
 
-    def test_with_invalid_manifest_falls_back_to_dir_name(self, tmp_path: Path) -> None:
+    def test_with_invalid_manifest_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
+        from apm_cli.agent_plugins import AgentPluginLegacyBoundaryError
         from apm_cli.deps.plugin_parser import normalize_plugin_directory
 
         pj = tmp_path / "plugin.json"
         pj.write_text("{bad json", encoding="utf-8")
-        path = normalize_plugin_directory(tmp_path, pj)
-        data = yaml.safe_load(path.read_text())
-        assert data["name"] == tmp_path.name
+        with pytest.raises(AgentPluginLegacyBoundaryError, match="Invalid JSON"):
+            normalize_plugin_directory(tmp_path, pj)
+        assert not (tmp_path / "apm.yml").exists()
 
 
 class TestValidatePluginPackage:

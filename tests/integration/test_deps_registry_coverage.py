@@ -1508,6 +1508,172 @@ class TestRegistryPackageResolverDownloadPackage:
         # Resolution metadata recorded
         assert dep_ref.get_unique_key() in resolver.last_resolutions
 
+    def test_native_agent_plugin_archive_returns_projected_package_without_apm_yml(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+        from apm_cli.deps.registry.resolver import RegistryPackageResolver
+        from apm_cli.models.validation import PackageType
+
+        archive_data = _make_tar_gz(
+            {
+                "plugin.json": json.dumps(
+                    {
+                        "$schema": PLUGIN_SCHEMA_ID,
+                        "name": "native.plugin",
+                        "version": "1.0.0",
+                    }
+                ).encode("utf-8")
+            }
+        )
+        archive_digest = _sha256(archive_data)
+        fake_client = MagicMock()
+        fake_client.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.0",
+                digest=f"sha256:{archive_digest}",
+                published_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        fake_client.download_archive.return_value = (archive_data, "application/gzip")
+        fake_client.archive_url.return_value = (
+            "https://registry.example.com/v1/packages/acme/native/versions/1.0.0/download"
+        )
+        dep_ref = DependencyReference(
+            repo_url="acme/native",
+            source="registry",
+            registry_name="myregistry",
+            reference="^1.0.0",
+        )
+        resolver = RegistryPackageResolver(
+            {"myregistry": "https://registry.example.com"},
+            client_factory=lambda url, auth: fake_client,
+        )
+        target = tmp_path / "acme" / "native"
+
+        with patch("apm_cli.config.get_registry_config", return_value=None):
+            result = resolver.download_package(dep_ref, target)
+
+        assert result.package_type == PackageType.AGENT_PLUGIN
+        assert result.package is not None
+        assert result.package.name == "native.plugin"
+        assert result.package.agent_plugin is not None
+        assert not (target / "apm.yml").exists()
+
+    def test_unsupported_agent_plugin_archive_fails_before_legacy_projection(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import UnsupportedAgentPluginVersionError
+        from apm_cli.deps.registry.resolver import RegistryPackageResolver
+
+        archive_data = _make_tar_gz(
+            {
+                "plugin.json": json.dumps(
+                    {
+                        "$schema": ("https://agent-plugins.org/schemas/2.0.0/plugin.schema.json"),
+                        "name": "future.plugin",
+                    }
+                ).encode("utf-8")
+            }
+        )
+        archive_digest = _sha256(archive_data)
+        fake_client = MagicMock()
+        fake_client.list_versions.return_value = [
+            VersionEntry(
+                version="2.0.0",
+                digest=f"sha256:{archive_digest}",
+                published_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        fake_client.download_archive.return_value = (archive_data, "application/gzip")
+        dep_ref = DependencyReference(
+            repo_url="acme/future",
+            source="registry",
+            registry_name="myregistry",
+            reference="2.0.0",
+        )
+        resolver = RegistryPackageResolver(
+            {"myregistry": "https://registry.example.com"},
+            client_factory=lambda url, auth: fake_client,
+        )
+        target = tmp_path / "acme" / "future"
+
+        with (
+            patch("apm_cli.config.get_registry_config", return_value=None),
+            pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"),
+        ):
+            resolver.download_package(dep_ref, target)
+
+        assert not target.exists(), (
+            f"rejected Agent Plugin left a partially-materialized directory: "
+            f"{list(target.iterdir()) if target.exists() else None}"
+        )
+
+    def test_download_from_lockfile_rejects_unsupported_agent_plugin_and_cleans_up(
+        self, tmp_path: Path
+    ) -> None:
+        """download_from_lockfile must not leave the extracted tree on rejection.
+
+        Regression test: route_agent_plugin_package() raising on a foreign or
+        unsupported $schema previously escaped both registry call sites
+        (download_package and download_from_lockfile) with no cleanup, unlike
+        the equivalent github/artifactory ingress paths fixed elsewhere in
+        this PR. This covers the download_from_lockfile (locked-version
+        replay) call site.
+        """
+        from apm_cli.agent_plugins import UnsupportedAgentPluginVersionError
+        from apm_cli.deps.registry.resolver import RegistryPackageResolver
+
+        archive_data = _make_tar_gz(
+            {
+                "plugin.json": json.dumps(
+                    {
+                        "$schema": ("https://agent-plugins.org/schemas/2.0.0/plugin.schema.json"),
+                        "name": "future.plugin",
+                    }
+                ).encode("utf-8")
+            }
+        )
+        archive_digest = _sha256(archive_data)
+        resolved_url = (
+            "https://registry.example.com/v1/packages/acme/future/versions/2.0.0/download"
+        )
+
+        fake_client = MagicMock()
+        fake_client.fetch_from_url.return_value = (archive_data, "application/gzip")
+
+        dep_ref = DependencyReference(
+            repo_url="acme/future",
+            source="registry",
+            registry_name="myregistry",
+            reference="2.0.0",
+        )
+
+        resolver = RegistryPackageResolver(
+            {"myregistry": "https://registry.example.com"},
+            client_factory=lambda url, auth: fake_client,
+        )
+
+        target = tmp_path / "acme" / "future"
+
+        with (
+            patch("apm_cli.deps.registry.auth.resolve_for_url") as mock_rfu,
+            pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"),
+        ):
+            mock_rfu.return_value = _anon_auth()
+            resolver.download_from_lockfile(
+                dep_ref,
+                target,
+                resolved_url=resolved_url,
+                resolved_hash=f"sha256:{archive_digest}",
+                version="2.0.0",
+            )
+
+        assert not target.exists(), (
+            f"rejected Agent Plugin left a partially-materialized directory: "
+            f"{list(target.iterdir()) if target.exists() else None}"
+        )
+
     def test_download_package_no_versions_raises(self, tmp_path: Path) -> None:
         """download_package raises RegistryResolutionError when no versions exist."""
         from apm_cli.deps.registry.resolver import RegistryPackageResolver

@@ -818,7 +818,7 @@ class TestInstallProjectRootDetection:
 
         `.vscode/` exists on disk (as it would on one developer's machine
         but not another's). The declared Copilot target intentionally projects
-        to the VS Code project runtime; no additional runtime may be inferred.
+        to the Copilot CLI project runtime; no additional runtime may be inferred.
         """
         nested = tmp_path / "nested-project"
         (nested / ".vscode").mkdir(parents=True)
@@ -843,7 +843,7 @@ class TestInstallProjectRootDetection:
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert called_runtimes == {"vscode", "cursor", "opencode"}
+        assert called_runtimes == {"copilot", "cursor", "opencode"}
 
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
@@ -907,8 +907,8 @@ class TestInstallProjectRootDetection:
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert called_runtimes == {"vscode"}
-        logger.progress.assert_any_call("Targeting declared target from apm.yml: vscode")
+        assert called_runtimes == {"copilot"}
+        logger.progress.assert_any_call("Targeting declared target from apm.yml: copilot")
 
     @pytest.mark.parametrize(
         "apm_config",
@@ -1326,7 +1326,7 @@ class TestGateProjectScopedRuntimes:
         scsec R2: the previous catch only handled ConflictingTargets and
         EmptyTargets; UnknownTargetError leaked uncaught past the gate
         on entry paths that bypass the upstream manifest validator
-        (mcp_integrator_install.py, _wire_bundle_mcp_servers).
+        (mcp_integrator_install.py, _wire_legacy_bundle_mcp_servers).
         """
         result = self._gate(
             ["copilot", "claude"],
@@ -1341,7 +1341,7 @@ class TestGateProjectScopedRuntimes:
         assert "apm.yml 'targets' field is invalid" in out
 
     def test_explicit_target_csv_string_normalized(self, tmp_path):
-        """Legacy `_wire_bundle_mcp_servers` CSV input must normalize first.
+        """Legacy `_wire_legacy_bundle_mcp_servers` CSV input must normalize first.
 
         The canonical-name validator inside resolve_targets would reject
         the whole CSV "claude,copilot" as one unknown token -- the gate

@@ -6,7 +6,7 @@ Think `package.json`, `requirements.txt`, or `Cargo.toml` — but for AI agent c
 
 GitHub Copilot | Claude Code | Grok Build | Cursor | OpenCode | Codex | Gemini | Windsurf | Kiro
 
-**[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)** · **[Roadmap](https://github.com/orgs/microsoft/projects/2304)**
+**[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)** · **[v0.29 Roadmap](https://github.com/microsoft/apm/milestone/17)**
 
 ---
 
@@ -167,7 +167,8 @@ Use agentrc to author high-quality instructions, then package them with APM to s
 
 Created by [@danielmeppiel](https://github.com/danielmeppiel). Maintained by [@danielmeppiel](https://github.com/danielmeppiel) and [@sergio-sisternes-epam](https://github.com/sergio-sisternes-epam).
 
-- [Roadmap & Discussions](https://github.com/microsoft/apm/discussions/116)
+- [v0.29 Roadmap](https://github.com/microsoft/apm/milestone/17)
+- [Discussions](https://github.com/microsoft/apm/discussions)
 - [Contributing](CONTRIBUTING.md)
 - [AI Native Development guide](https://danielmeppiel.github.io/awesome-ai-native) — a practical learning path for AI-native development
 

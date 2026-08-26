@@ -544,9 +544,10 @@
       "keyword": "MUST",
       "section": "4.3.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_names_skills_a_plugin_collection_exposes"
       ]
     },
     {
@@ -687,8 +688,9 @@
       "keyword": "MUST",
       "section": "6.1.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_gitlab_discovery_provider_is_a_distinct_convention",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_provides_default_allow_list_shape"
       ]
     },
@@ -745,6 +747,17 @@
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_deployment_ledger_owner_is_hard_integrity_failure"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-017",
+      "keyword": "MUST",
+      "section": "6.8",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_ado_policy_coordinate_fallback_is_404_only"
       ]
     },
     {
@@ -809,6 +822,28 @@
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_resolution_reqs.py::test_producer_should_carry_primitive_descriptions"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-006",
+      "keyword": "MUST",
+      "section": "8.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_plugin_skills_declaration_is_authoritative"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-007",
+      "keyword": "MUST",
+      "section": "8.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_root_declared_plugin_component_excludes_generated_staging_tree"
       ]
     },
     {
@@ -1167,6 +1202,20 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-sc-015",
+      "keyword": "MUST",
+      "oracle": "tests/fixtures/spec-conformance/source-plan/req-sc-015.json",
+      "section": "10.16",
+      "status": "active",
+      "test_count": 3,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_fixture_oracle_covers_symlinked_content",
+        "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_limits_scanning_and_skill_materialization",
+        "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_requirement_covers_reintegration_and_symlinks"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-tg-001",
       "keyword": "MUST",
       "section": "8.4",
@@ -1274,18 +1323,41 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_project_scoped_native_hook_command_is_portably_anchored"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-011",
+      "keyword": "MUST",
+      "section": "8.5.5",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_agent_plugin_deployment_boundary_precedes_all_mutation",
+        "tests/spec_conformance/test_manifest_reqs.py::test_agent_plugin_undeployable_without_native_lifecycle"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-012",
+      "keyword": "MUST",
+      "section": "8.5.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_plugin_root_hook_resolution_preserves_quoting_and_warns"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 82,
+      "active": 87,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
     },
     "governance": {
-      "active": 16,
+      "active": 17,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0
@@ -1303,5 +1375,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 112
+  "total_requirements": 118
 }

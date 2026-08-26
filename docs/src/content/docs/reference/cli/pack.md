@@ -28,7 +28,8 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 
 | Flag | Default | Description |
 |---|---|---|
-| `--format plugin\|apm` | `plugin` | Bundle format. `plugin` emits a Claude Code plugin directory with `plugin.json` and plugin-native subdirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`). `apm` emits the legacy APM bundle layout, kept for tooling that still consumes it (e.g. `microsoft/apm-action@v1` restore mode). |
+| `--claude-plugin` | on (no-flag default) | Select the Claude Code plugin bundle: `plugin.json` plus plugin-native subdirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`). This is what `apm pack` produces with zero flags. |
+| `--format plugin\|agent-plugin\|claude\|claude-plugin\|apm` | `claude-plugin` | Bundle format selector. `agent-plugin` is the sole opt-in for the portable Agent Plugins v1 bundle. `plugin` is a compatibility alias for the Claude Code plugin bundle, not for `agent-plugin`. `claude` and `claude-plugin` also select the Claude Code plugin bundle (the no-flag default). `apm` emits the legacy APM bundle layout, kept for tooling that still consumes it (e.g. `microsoft/apm-action@v1` restore mode). Passing more than one selector (`--claude-plugin`, `--format`) is a usage error. |
 | `--archive` | off | Produce a `.zip` archive instead of a directory (previous default: `.tar.gz`; use `--archive-format tar.gz` for legacy CI pipelines). Bundle only. |
 | `--archive-format zip\|tar.gz` | `zip` | Archive format when `--archive` is set. `zip` is natively extractable on Windows and matches the format expected by Claude Code and plugin hosts. `tar.gz` is typically smaller for text-heavy bundles and preserves the previous default for pipelines that depend on it. |
 | `-o`, `--output PATH` | `./build` | Bundle output directory. Does not affect the `marketplace.json` path. |
@@ -56,9 +57,10 @@ update the downstream glob to `.zip`.
 ### Bundle only
 
 ```bash
-apm pack                              # plugin format (default), ./build/
-apm pack --archive                    # plugin bundle as .zip (default)
+apm pack                              # Claude plugin bundle (default), ./build/
+apm pack --archive                    # Claude plugin bundle as .zip (default)
 apm pack --archive --archive-format tar.gz  # legacy CI: produce .tar.gz instead
+apm pack --format agent-plugin        # explicit Agent Plugin v1 bundle
 apm pack --format apm -o ./dist       # legacy APM bundle layout
 ```
 
@@ -104,7 +106,7 @@ apm pack --archive --dry-run -v
 
 ## Output format
 
-### Plugin bundle (`--format plugin`, default)
+### Claude plugin bundle (`--claude-plugin`, default)
 
 A Claude Code plugin directory under `--output`. Contains:
 
@@ -120,9 +122,33 @@ A Claude Code plugin directory under `--output`. Contains:
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
 
+### Agent Plugin bundle (`--format agent-plugin`)
+
+An explicit opt-in. `apm pack --format agent-plugin` emits a strict, portable [Agent Plugins v1](https://agent-plugins.org) bundle instead of the Claude-compatible layout above. `--format plugin` does **not** select this bundle -- it is a compatibility alias for the Claude plugin bundle below.
+
+- `plugin.json` -- identifies the pinned Agent Plugins v1 schema (`$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"`), synthesised from `apm.yml` the same way as the Claude plugin manifest.
+- `skills/` -- standard skill bundles. This is the **only** primitive directory the Agent Plugin bundle carries.
+- `mcp.json` -- MCP server declarations from `apm.yml`/`apm.lock.yaml` (present even when empty).
+- `apm.lock.yaml`, and `README.md`/`LICENSE`/`CHANGELOG.md` when present at the project root.
+
+The portable schema deliberately scopes to `skills/` and MCP config so a bundle can be consumed by any Agent-Plugin-aware host, not just APM. Agents, commands, instructions, extensions, hooks, and LSP configuration stay in the Claude-compatible layout instead. If your source project has any of them, `apm pack --format agent-plugin` **fails before writing anything**:
+
+```text
+Cannot pack Agent Plugin: non-portable primitives would be discarded (agents, hooks).
+Agent Plugins v1 portable components are limited to root plugin.json, skills/, and
+root mcp.json. Use 'apm pack --format claude-plugin' to preserve agents, hooks in the
+legacy Claude client format.
+```
+
+LSP configuration gets its own guidance in the same error, since neither bundle format carries it: configure LSP servers directly in the target client instead.
+
+:::note[Planned]
+`apm install` does not yet deploy Agent Plugin bundles or packages -- installing one fails closed with an explicit message today, pending native Agent Plugins runtime integration. Use `--format agent-plugin` to produce a portable artifact for external Agent-Plugin-aware hosts; use the default Claude plugin bundle (or `--format apm`) for anything you need `apm install` to deploy right now.
+:::
+
 ### APM bundle (`--format apm`)
 
-The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. Installed dependencies are packed exclusively from lockfile-attested `deployed_files`, and each file is verified against its `deployed_file_hashes` SHA-256 before it is copied (the same integrity gate the `plugin` format applies) -- a file whose bytes no longer match its recorded hash fails the pack with `... does not match the hash recorded in apm.lock.yaml`. Files with no recorded hash (older lockfiles) pack without verification. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
+The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. Installed dependencies are packed exclusively from lockfile-attested `deployed_files`, and each file is verified against its `deployed_file_hashes` SHA-256 before it is copied (the same integrity gate the Claude plugin format applies) -- a file whose bytes no longer match its recorded hash fails the pack with `... does not match the hash recorded in apm.lock.yaml`. Files with no recorded hash (older lockfiles) pack without verification. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
 
 Example enriched lockfile fragment:
 
@@ -152,6 +178,12 @@ Ship one APM package; consumers get a native plugin for their tool of choice. Wh
 |---|---|
 | `claude` | `.claude-plugin/plugin.json` |
 | `copilot` | `.github/plugin/plugin.json` |
+
+This runs for the default Claude plugin build (`--claude-plugin`, or `--format plugin|claude|claude-plugin`, since `plugin` is a compatibility alias for the Claude plugin bundle). Under an
+explicit `--format agent-plugin` build, the Claude ecosystem
+manifest is skipped -- if `target:` names only `claude` and the project has no
+other agent sources, `apm pack --format agent-plugin` fails and tells you to use
+`apm pack --claude-plugin` instead.
 
 Add one line to `apm.yml` and pack:
 

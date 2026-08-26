@@ -41,7 +41,7 @@ priority/<one-optional>
 
 ## Milestone
 
-<milestone title, e.g. `0.9.x` or `0.10.0`, or `null`>
+<exact title copied from the open-milestone list, or `null`; never infer>
 
 ## Suggested next action
 
@@ -54,8 +54,8 @@ priority/<one-optional>
 Tone: warm, specific, README-grounded, ASCII-only.
 Cite the triage decision rubric reason in plain language.
 Link to the relevant README section
-(https://github.com/microsoft/apm#...) or the roadmap discussion
-(https://github.com/microsoft/apm/discussions/116) when relevant.
+(https://github.com/microsoft/apm#...) or the active release milestone
+(https://github.com/microsoft/apm/milestone/17) when relevant.
 End with a concrete next step the author can take.>
 ```
 

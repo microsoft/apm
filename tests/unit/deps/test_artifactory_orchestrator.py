@@ -11,6 +11,7 @@ route an ADO dep through Artifactory or fail to honor registry-only.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import types
@@ -233,6 +234,44 @@ class TestDownloadPackageDelegation:
         ):
             with pytest.raises(RuntimeError, match=r"Invalid APM package"):
                 orch.download_package(dep, target)
+
+    def test_native_agent_plugin_returns_projected_package_without_apm_yml(self, tmp_path):
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+        from apm_cli.models.validation import PackageType
+
+        orch, archive = self._orchestrator_with_validation_ok()
+        dep = _dep(
+            artifactory=True,
+            host="art.example.com",
+            artifactory_prefix="apm/github",
+            repo_url="owner/native",
+            reference="v1.0.0",
+        )
+        target = tmp_path / "pkg"
+
+        def materialize(*args, **kwargs):
+            del args, kwargs
+            target.mkdir(exist_ok=True)
+            (target / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "$schema": PLUGIN_SCHEMA_ID,
+                        "name": "native.plugin",
+                        "version": "1.0.0",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+        archive.download_artifactory_archive.side_effect = materialize
+
+        result = orch.download_package(dep, target)
+
+        assert result.package_type == PackageType.AGENT_PLUGIN
+        assert result.package is not None
+        assert result.package.name == "native.plugin"
+        assert result.package.agent_plugin is not None
+        assert not (target / "apm.yml").exists()
 
     def test_archive_runtime_error_propagates(self, tmp_path):
         orch, archive = self._orchestrator_with_validation_ok()

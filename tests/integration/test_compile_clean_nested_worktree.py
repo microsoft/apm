@@ -61,7 +61,10 @@ def test_compile_clean_preserves_nested_git_worktree_agents_file(
     parent.mkdir()
     _run_git(parent, environment, "init", "--initial-branch=main")
     (parent / ".gitignore").write_text(".worktrees/\n", encoding="utf-8")
-    (parent / "apm.yml").write_text("name: nested-worktree\nversion: 1.0.0\n", encoding="utf-8")
+    (parent / "apm.yml").write_text(
+        "name: nested-worktree\nversion: 1.0.0\ncompilation:\n  exclude:\n    - excluded\n",
+        encoding="utf-8",
+    )
     instructions = parent / ".apm" / "instructions"
     instructions.mkdir(parents=True)
     (instructions / "root.instructions.md").write_text(
@@ -86,6 +89,13 @@ def test_compile_clean_preserves_nested_git_worktree_agents_file(
     parent_orphan = parent / "stale" / "AGENTS.md"
     parent_orphan.parent.mkdir()
     parent_orphan.write_bytes(_GENERATED_AGENTS)
+    excluded_orphan = parent / "excluded" / "AGENTS.md"
+    excluded_orphan.parent.mkdir()
+    excluded_orphan.write_bytes(_GENERATED_AGENTS)
+    hand_authored = parent / "hand-authored" / "AGENTS.md"
+    hand_authored.parent.mkdir()
+    hand_authored.write_bytes(b"# Team-owned instructions\n")
+    hand_authored_before = hand_authored.read_bytes()
 
     result = ApmLifecycleRunner((str(apm_binary_path),)).run(
         ("compile", "--clean"),
@@ -96,6 +106,8 @@ def test_compile_clean_preserves_nested_git_worktree_agents_file(
 
     assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
     assert not parent_orphan.exists()
+    assert not excluded_orphan.exists()
+    assert hand_authored.read_bytes() == hand_authored_before
     assert nested_agents.read_bytes() == nested_agents_before
     assert nested_descendant_agents.read_bytes() == nested_descendant_agents_before
     assert _run_git(nested, environment, "status", "--porcelain").stdout == ""

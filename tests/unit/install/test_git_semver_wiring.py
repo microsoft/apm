@@ -19,6 +19,7 @@ import pytest
 from apm_cli.deps.git_semver_resolver import GitSemverResolution
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.drift import detect_ref_change
+from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.models.dependency.reference import DependencyReference
@@ -37,6 +38,29 @@ def _make_dep_ref(*, reference="^1.2.0", source="github", is_local=False, artifa
 
 
 class TestMaybeResolveGitSemver:
+    @pytest.mark.parametrize(
+        ("source", "is_local", "artifactory_prefix", "reference", "expected"),
+        [
+            ("git", False, None, "^1.2.0", True),
+            (None, False, None, "~1.2.0", True),
+            ("registry", False, None, "^1.2.0", False),
+            ("git", True, None, "^1.2.0", False),
+            ("git", False, "proxy", "^1.2.0", False),
+            ("git", False, None, "v1.2.0", False),
+        ],
+    )
+    def test_git_semver_eligibility_is_source_aware(
+        self, source, is_local, artifactory_prefix, reference, expected
+    ):
+        dep = _make_dep_ref(
+            source=source,
+            is_local=is_local,
+            artifactory_prefix=artifactory_prefix,
+            reference=reference,
+        )
+
+        assert is_git_semver_resolution_eligible(dep) is expected
+
     def test_returns_none_for_local_dep(self):
         dep = _make_dep_ref(is_local=True)
         assert (

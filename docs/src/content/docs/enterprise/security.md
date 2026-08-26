@@ -150,16 +150,17 @@ Researchers have found hidden Unicode characters embedded in popular shared rule
 
 ### Pre-deployment gate
 
-During `apm install`, source files in `apm_modules/` are scanned **before** any integrator copies them to target directories:
+During `apm install`, APM resolves the authorized targets, selected skill subset, and executable approvals, then scans only the source files selected for deployment **before** any integrator copies them to target directories. Source-only files are neither scanned nor deployed by this step:
 
 ```
-download → scan source → block or deploy → report
+download -> authorize deploy set -> scan selected files -> block or deploy -> report
 ```
 
-- **Critical findings block deployment.** The package is downloaded and cached so you can inspect it (`apm_modules/owner/package/`), but nothing reaches agent-readable directories.
+- **Critical findings block deployment.** Nothing reaches agent-readable directories. The package remains cached in `apm_modules/owner/package/` so you can inspect and fix the reported files.
 - **Warnings are non-blocking.** Zero-width characters are flagged in the diagnostics summary. Files are deployed normally.
 - **`--force` overrides the block.** Consistent with existing collision semantics — an explicit "I know what I'm doing."
 - **Multi-package installs continue.** A blocked package doesn't stop other packages from installing. After all packages are processed, `apm install` exits with code 1 if any package was blocked — failing the CI step.
+- **Removal reconciliation uses the same gate.** During `apm uninstall`, each surviving package is scanned before its integrations are rebuilt; a hostile survivor is skipped and the command warns. During `apm prune`, a hostile hook survivor aborts hook reconciliation before cleanup, leaving the prior hook state in place and warning that reconciliation failed. Fix the reported package source, then run `apm install` to rebuild its files.
 
 ### Compile and pack scanning
 
@@ -306,7 +307,7 @@ Trust boundaries:
 
 1. **`bundle_files` keys are untrusted.** They come from the bundle's own `apm.lock.yaml` and are validated for traversal sequences before any filesystem path is constructed; resolved destinations must remain within the deploy root. Unsafe entries are rejected and the install aborts.
 2. **`plugin.json` is bundle metadata, never deployed.** It is recognized case-insensitively and skipped in both the manifest-driven deploy loop and the lockfile-less fallback walk so case-folding filesystems (HFS+, NTFS) cannot smuggle a renamed file past the skip.
-3. **`.mcp.json` is bundle metadata, never deployed verbatim.** It is recognized case-insensitively and skipped from the deploy loop. APM includes valid bundle MCP entries in cached policy preflight, so MCP allow/deny, transport, and self-defined rules run before deployment. After files deploy, `apm install` routes each entry through `MCPIntegrator.install` as a self-defined dependency, so the consumer's resolved target(s) get the servers in their own native MCP config (Claude `.mcp.json`, Copilot `~/.copilot/mcp-config.json`, VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`, etc.). `MCPIntegrator` enforces the same validation and runtime gating used by `apm.yml`-declared servers; per-server parse errors are isolated and do not block the rest of the install.
+3. **`.mcp.json` is bundle metadata, never deployed verbatim.** It is recognized case-insensitively and skipped from the deploy loop. APM includes valid bundle MCP entries in cached policy preflight, so MCP allow/deny, transport, and self-defined rules run before deployment. After files deploy, `apm install` routes each entry through `MCPIntegrator.install` as a self-defined dependency, so the consumer's resolved targets get the server in their native MCP configs (Claude `.mcp.json`, Copilot CLI `.github/mcp.json` (project) or `$COPILOT_HOME/mcp-config.json` (global), VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`, etc.). `MCPIntegrator` enforces the same validation and runtime gating used by `apm.yml`-declared servers; per-server parse errors are isolated and do not block the rest of the install.
 4. **Slug validation.** The bundle's `id` (used as `<slug>` for staged instructions and the install label) is rejected if it contains traversal sequences or characters outside `[A-Za-z0-9._-]`.
 
 ### Symlink handling
@@ -366,7 +367,7 @@ When APM deploys a file, it checks whether a file already exists at the target p
 APM separates production and development dependencies:
 
 - **Production dependencies** (`dependencies.apm`) are included in plugin bundles and shared packages.
-- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output (both plugin format -- the default -- and `--format apm`).
+- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output in every bundle format (the default Claude plugin format, the explicit Agent Plugin format, and the legacy `--format apm`).
 - **Development MCP servers** in the root project's `devDependencies.mcp` are active for authoring, but the same section in a direct or transitive dependency package never propagates into the consumer's target config or provenance.
 
 This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
@@ -456,6 +457,9 @@ use `apm approve` or `apm deny`.
 
 APM integrates MCP (Model Context Protocol) server configurations from packages. Trust is explicit and scoped by dependency depth.
 
+For Codex remote transport requirements, see
+[stdio vs HTTP servers](../../consumer/install-mcp-servers/#stdio-vs-http-servers).
+
 ### Direct dependencies
 
 MCP servers declared by your direct dependencies (packages listed in your `apm.yml`) are auto-trusted. You explicitly chose to depend on these packages, so their MCP server declarations are accepted.
@@ -528,7 +532,11 @@ For an org standardizing on APM:
 
 ### Can a package embed hidden instructions?
 
-Not without detection. APM scans all package source files before deployment. Critical hidden characters (tag characters, bidi overrides) block deployment. `apm audit` provides on-demand scanning for any file, including those obtained outside APM.
+APM scans every authorized deployable source file for the hidden Unicode
+categories listed above before copying it. Critical tag characters and bidi
+overrides block deployment unless `--force` is used; warning-class findings do
+not. Source-only files are not deployed by this step. Use `apm audit` to scan
+other files, including those obtained outside APM.
 
 ### How do I audit what APM installed?
 

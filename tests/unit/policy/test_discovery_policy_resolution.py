@@ -293,25 +293,25 @@ class TestValidateExtendsHost:
     [
         (
             "org",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
-            ("contoso", "_apm", "_apm", "dev.azure.com"),
+            ("contoso", "apm", "apm-policy", "dev.azure.com"),
         ),
         (
             "governance/policy",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
             ("contoso", "governance", "policy", "dev.azure.com"),
         ),
         (
             "dev.azure.com/contoso/governance/policy",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
             ("contoso", "governance", "policy", "dev.azure.com"),
         ),
         (
             "contoso.visualstudio.com/governance/policy",
-            "org:contoso.visualstudio.com/contoso/_apm/_apm",
+            "org:contoso.visualstudio.com/contoso/apm/apm-policy",
             "contoso.visualstudio.com",
             ("contoso", "governance", "policy", "contoso.visualstudio.com"),
         ),
@@ -319,7 +319,7 @@ class TestValidateExtendsHost:
             "org",
             "org:contoso.visualstudio.com/contoso/team/policy",
             "contoso.visualstudio.com",
-            ("contoso", "_apm", "_apm", "contoso.visualstudio.com"),
+            ("contoso", "apm", "apm-policy", "contoso.visualstudio.com"),
         ),
     ],
 )
@@ -335,16 +335,16 @@ def test_resolve_ado_parent_ref_supported_forms(
 @pytest.mark.parametrize(
     ("parent_ref", "current_source", "leaf_host"),
     [
-        ("", "org:dev.azure.com/contoso/_apm/_apm", "dev.azure.com"),
-        ("governance", "org:dev.azure.com/contoso/_apm/_apm", "dev.azure.com"),
+        ("", "org:dev.azure.com/contoso/apm/apm-policy", "dev.azure.com"),
+        ("governance", "org:dev.azure.com/contoso/apm/apm-policy", "dev.azure.com"),
         (
             "dev.azure.com/contoso/governance",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
         ),
         (
             "github.example.com/contoso/policy",
-            "org:dev.azure.com/contoso/_apm/_apm",
+            "org:dev.azure.com/contoso/apm/apm-policy",
             "dev.azure.com",
         ),
         ("org", "org:malformed", "dev.azure.com"),

@@ -101,7 +101,7 @@ class TestModuleLevelHelpers(unittest.TestCase):
 
 class TestGetConfigPath(unittest.TestCase):
     def test_returns_path_under_home_copilot(self) -> None:
-        adapter = _make_adapter()
+        adapter = _make_adapter(user_scope=True)
         config_path = adapter.get_config_path()
         self.assertIn(".copilot", config_path)
         self.assertTrue(config_path.endswith("mcp-config.json"))

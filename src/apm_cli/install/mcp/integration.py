@@ -12,6 +12,87 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.dependency.mcp import MCPDependency
+
+
+def run_owned_mcp_integration(
+    *,
+    dependencies: list["MCPDependency"],
+    owner: str,
+    lock_path: Path,
+    project_root: Path,
+    user_scope: bool,
+    target_runtimes: list[str],
+    logger=None,
+    verbose: bool = False,
+) -> int:
+    """Reconcile one bundle owner's MCP servers and persist ownership."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.mcp_integrator import MCPIntegrator as _OwnedMCPIntegrator
+
+    lockfile = LockFile.read(lock_path) or LockFile()
+    owner_token = f"bundle:{owner}"
+    old_owned = {
+        name
+        for name, provenance in lockfile.mcp_config_provenance.items()
+        if provenance == owner_token
+    }
+    new_names = _OwnedMCPIntegrator.get_server_names(dependencies)
+    conflicts = {
+        name
+        for name in new_names
+        if (existing := lockfile.mcp_config_provenance.get(name)) is not None
+        and existing != owner_token
+    }
+    if conflicts:
+        raise ValueError(
+            "Bundle MCP server name conflicts with another owner: " + ", ".join(sorted(conflicts))
+        )
+
+    managed_targets = {target: set(names) for target, names in lockfile.mcp_target_servers.items()}
+    count = 0
+    if dependencies:
+        count = _OwnedMCPIntegrator.install(
+            dependencies,
+            verbose=verbose,
+            stored_mcp_configs=lockfile.mcp_configs,
+            apm_config={"targets": target_runtimes, "scripts": {}},
+            project_root=project_root,
+            user_scope=user_scope,
+            explicit_target=target_runtimes,
+            logger=logger,
+            managed_target_servers=managed_targets,
+            fail_on_write_error=True,
+        )
+    stale = old_owned - new_names
+    for target, names in list(managed_targets.items()):
+        stale_for_target = stale & names
+        if stale_for_target:
+            _OwnedMCPIntegrator.remove_stale(
+                stale_for_target,
+                runtime=target,
+                project_root=project_root,
+                user_scope=user_scope,
+                scope=InstallScope.USER if user_scope else InstallScope.PROJECT,
+                fail_on_write_error=True,
+            )
+            names.difference_update(stale_for_target)
+
+    for name in old_owned:
+        lockfile.mcp_configs.pop(name, None)
+        lockfile.mcp_config_provenance.pop(name, None)
+    lockfile.mcp_servers = sorted((set(lockfile.mcp_servers) - old_owned) | new_names)
+    lockfile.mcp_configs.update(_OwnedMCPIntegrator.get_server_configs(dependencies))
+    lockfile.mcp_config_provenance.update(dict.fromkeys(new_names, owner_token))
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lockfile,
+        {target: sorted(names) for target, names in managed_targets.items() if names},
+    )
+    lockfile.write(lock_path)
+    return count
 
 
 def _cleanup_runtimes(
@@ -184,6 +265,16 @@ def run_mcp_integration(  # noqa: PLR0913
                 project_root=project_root,
                 user_scope=user_scope,
             )
+        if target_decision is not None:
+            from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
+
+            active_runtimes = target_decision.runtime_targets_for_scope(user_scope=user_scope)
+            if active_runtimes is not None:
+                migrate_legacy_project_target_servers(
+                    old_mcp_target_servers,
+                    active_runtimes=set(active_runtimes),
+                    user_scope=user_scope,
+                )
         managed_target_servers = {
             target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
         }

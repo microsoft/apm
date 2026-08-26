@@ -8,6 +8,7 @@ the suite is fully hermetic and requires no network access or git installation.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -1126,6 +1127,115 @@ class TestDownloadPackage:
         ):
             result = downloader.download_package(dep, tmp_path / "pkg")
         assert result.package is pkg
+
+    def test_cache_hit_with_unsupported_schema_fails_instead_of_cloning(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import UnsupportedAgentPluginVersionError
+
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+        cached_dir = tmp_path / "cached"
+        cached_dir.mkdir()
+        (cached_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+                    "name": "future.plugin",
+                }
+            ),
+            encoding="utf-8",
+        )
+        cache = MagicMock()
+        cache.get_checkout.return_value = cached_dir
+        downloader.persistent_git_cache = cache
+        clone = MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", clone),
+            pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"),
+        ):
+            downloader.download_package(dep, tmp_path / "pkg")
+
+        clone.assert_not_called()
+
+    def test_native_agent_plugin_clone_returns_projected_package_without_apm_yml(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+        from apm_cli.models.validation import PackageType
+
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+        target = tmp_path / "pkg"
+
+        def clone_native(repo_url, clone_path, **kwargs):
+            del repo_url, kwargs
+            clone_path.mkdir(parents=True, exist_ok=True)
+            (clone_path / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "$schema": PLUGIN_SCHEMA_ID,
+                        "name": "native.plugin",
+                        "version": "1.0.0",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=clone_native),
+        ):
+            result = downloader.download_package(dep, target)
+
+        assert result.package_type == PackageType.AGENT_PLUGIN
+        assert result.package.name == "native.plugin"
+        assert result.package.agent_plugin is not None
+        assert not (target / "apm.yml").exists()
+
+    def test_unsupported_agent_plugin_clone_fails_before_legacy_projection(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import UnsupportedAgentPluginVersionError
+
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+        target = tmp_path / "pkg"
+
+        def clone_unsupported(repo_url, clone_path, **kwargs):
+            del repo_url, kwargs
+            clone_path.mkdir(parents=True, exist_ok=True)
+            (clone_path / "plugin.json").write_text(
+                json.dumps(
+                    {
+                        "$schema": ("https://agent-plugins.org/schemas/2.0.0/plugin.schema.json"),
+                        "name": "future.plugin",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return MagicMock()
+
+        with (
+            patch.object(downloader, "_is_artifactory_only", return_value=False),
+            patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+            patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=clone_unsupported),
+            pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"),
+        ):
+            downloader.download_package(dep, target)
+
+        assert not (target / "apm.yml").exists()
 
     def test_git_command_error_auth_failure_raises_runtime(
         self, downloader: GitHubPackageDownloader, tmp_path: Path

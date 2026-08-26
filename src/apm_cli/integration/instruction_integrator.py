@@ -60,15 +60,18 @@ class InstructionIntegrator(BaseIntegrator):
             return ""
         return normalize_apply_to(metadata.get("applyTo"), default="")
 
-    def find_instruction_files(self, package_path: Path) -> list[Path]:
+    def find_instruction_files(self, package_path: Path, source_plan=None) -> list[Path]:
         """Find all .instructions.md files in a package.
 
         Searches in .apm/instructions/ subdirectory.
         """
-        return self.find_files_by_glob(
-            package_path,
-            "*.instructions.md",
-            subdirs=[".apm/instructions"],
+        return self.filter_authorized_files(
+            self.find_files_by_glob(
+                package_path,
+                "*.instructions.md",
+                subdirs=[".apm/instructions"],
+            ),
+            source_plan,
         )
 
     def copy_instruction(self, source: Path, target: Path) -> int:
@@ -114,6 +117,7 @@ class InstructionIntegrator(BaseIntegrator):
         managed_files: set[str] | None = None,
         diagnostics=None,
         scope=None,
+        source_plan=None,
     ) -> IntegrationResult:
         """Integrate instructions for a single *target*.
 
@@ -141,7 +145,7 @@ class InstructionIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         self.init_link_resolver(package_info, project_root)
-        instruction_files = self.find_instruction_files(package_info.install_path)
+        instruction_files = self.find_instruction_files(package_info.install_path, source_plan)
         if not instruction_files:
             return IntegrationResult(0, 0, 0, [])
 

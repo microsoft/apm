@@ -277,6 +277,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 "command": raw["command"],
                 "args": raw["args"],
             }
+            if raw.get("cwd") is not None:
+                server_config["cwd"] = raw["cwd"]
             if raw.get("env"):
                 # Translate bare ${VAR} -> ${env:VAR} so VS Code's runtime env
                 # interpolation resolves them at server-start. ${input:...}

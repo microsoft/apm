@@ -58,13 +58,19 @@ class PackageValidator:
             result.add_error(f"Package path is not a directory: {package_path}")
             return result
 
-        # Check for apm.yml
+        from ..models.validation import PackageType, detect_package_type
+
+        pkg_type, plugin_json_path = detect_package_type(package_path)
+        if pkg_type == PackageType.AGENT_PLUGIN or (
+            pkg_type == PackageType.INVALID and plugin_json_path is not None
+        ):
+            return self.validate_package(package_path)
+
         apm_yml = package_path / "apm.yml"
         if not apm_yml.exists():
             result.add_error("Missing required file: apm.yml")
             return result
 
-        # Try to parse apm.yml
         try:
             package = APMPackage.from_apm_yml(apm_yml)
             result.package = package
@@ -74,9 +80,6 @@ class PackageValidator:
 
         # Check for .apm directory -- only mandatory for APM_PACKAGE layout.
         # HYBRID and CLAUDE_SKILL packages may ship without .apm/.
-        from ..models.validation import PackageType, detect_package_type
-
-        pkg_type, _ = detect_package_type(package_path)
         apm_dir = package_path / ".apm"
         if pkg_type in (PackageType.APM_PACKAGE, PackageType.INVALID) or pkg_type is None:
             if not apm_dir.exists():
@@ -264,12 +267,15 @@ def stamp_plugin_version(
 ) -> None:
     """Stamp the package version with the short commit SHA when missing.
 
-    Plugins published as marketplace bundles (no ``apm.yml`` of their own)
+    Claude plugins published as marketplace bundles (no ``apm.yml`` of their own)
     receive a synthesized ``apm.yml`` with ``version: 0.0.0`` during
     validation. To give the lockfile and conflict detection a meaningful,
     stable version string we replace ``0.0.0`` with the first 7 characters
     of the resolved commit SHA -- both on the in-memory ``package`` object
     and in the on-disk ``apm.yml`` so subsequent reloads agree.
+
+    Native Agent Plugin versions remain owned by ``plugin.identity`` and are
+    never stamped from transport metadata.
 
     Idempotent: only acts when ``package_type`` is MARKETPLACE_PLUGIN,
     ``package.version == "0.0.0"``, and a usable commit SHA is provided.

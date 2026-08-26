@@ -14,6 +14,779 @@ from types import ModuleType
 import pytest
 
 
+def test_generated_bundle_text_writes_are_lf_deterministic() -> None:
+    """Generated bundle text must route through the checked LF boundary."""
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        (sys.executable, "scripts/check_generated_bundle_text_writers.py", "--root", str(root)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "generated bundle text writers use deterministic LF" in result.stdout
+
+
+def test_removed_agent_plugin_lifecycle_tombstone_passes() -> None:
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        (sys.executable, "scripts/check_removed_agent_plugin_lifecycle.py", "--root", str(root)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_install_request_defaults_have_single_owner() -> None:
+    """The Click compatibility wrapper must not redeclare request defaults."""
+    root = Path(__file__).parents[2]
+    command_source = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
+    request_source = (root / "src/apm_cli/install/request.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(command_source)
+    wrapper = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_install_apm_dependencies"
+    )
+    positional = wrapper.args.args[-len(wrapper.args.defaults) :]
+
+    assert {arg.arg for arg in positional} == {"update_refs", "verbose", "only_packages"}
+    assert "request = InstallRequest(" in command_source
+    assert "trust_bin: bool | None = None" in request_source
+    assert "Install invocation defaults must remain owned by InstallRequest" in guard
+    assert "| Install invocation option defaults | install/request.py (InstallRequest) |" in (
+        architecture
+    )
+
+
+def test_uninstall_reintegration_routes_through_the_deployable_source_plan() -> None:
+    """Uninstall rebuild must not recreate a direct, unscanned write path."""
+    root = Path(__file__).parents[2]
+    engine = (root / "src/apm_cli/commands/uninstall/engine.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "integrate_package_primitives(" in engine
+    assert "integrate_package_skill(" not in engine
+    assert (
+        "Deployable hook paths must route through the shared target-aware source selector" in guard
+    )
+
+
+def test_git_semver_preflight_eligibility_has_single_owner() -> None:
+    """Positional ingress must consume, not duplicate, git-semver eligibility."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text(encoding="utf-8")
+    ingress = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert owner.count("def is_git_semver_resolution_eligible(") == 1
+    assert "if not is_git_semver_resolution_eligible(dep_ref):" in owner
+    assert "is_git_semver_resolution_eligible(dep_ref)" in ingress
+    assert 'dep_ref.ref_kind == "semver"' not in ingress
+    assert "Git semver preflight eligibility must route through ref_reuse.py" in guard
+    assert "| Git semver preflight eligibility and resolution |" in architecture
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source", "expected"),
+    [
+        (
+            "src/apm_cli/install/agent_plugin_state.py",
+            '"""Restored state module."""\n',
+            "removed lifecycle module exists",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "installed_plugins = []\n",
+            "removed lifecycle symbol 'installed_plugins'",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "def commit_agent_plugin_bundle():\n    pass\n",
+            "removed lifecycle symbol 'commit_agent_plugin_bundle'",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "class PreparedInstalledPluginState:\n    pass\n",
+            "removed lifecycle symbol 'PreparedInstalledPluginState'",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "class InstalledPluginRecordCodec:\n    pass\n",
+            "removed lifecycle symbol 'InstalledPluginRecordCodec'",
+        ),
+        (
+            "src/apm_cli/probe.py",
+            "def replace_installed_plugins():\n    pass\n",
+            "removed lifecycle symbol 'replace_installed_plugins'",
+        ),
+    ],
+)
+def test_removed_agent_plugin_lifecycle_tombstone_rejects_mutation(
+    tmp_path: Path, relative_path: str, source: str, expected: str
+) -> None:
+    root = Path(__file__).parents[2]
+    destination = tmp_path / relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(source, encoding="utf-8")
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/check_removed_agent_plugin_lifecycle.py"),
+            "--root",
+            str(tmp_path),
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert expected in result.stdout
+
+
+def test_agent_plugin_contract_has_single_owner() -> None:
+    """Native Agent Plugin interpretation must route through its loader."""
+    root = Path(__file__).parents[2]
+    loader = (root / "src/apm_cli/agent_plugins/loader.py").read_text(encoding="utf-8")
+    projection = (root / "src/apm_cli/agent_plugins/projection.py").read_text(encoding="utf-8")
+    package_owner = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
+    validation = (root / "src/apm_cli/models/validation.py").read_text(encoding="utf-8")
+    resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text(encoding="utf-8")
+    errors = (root / "src/apm_cli/agent_plugins/errors.py").read_text(encoding="utf-8")
+    assets = (root / "src/apm_cli/agent_plugins/assets.py").read_text(encoding="utf-8")
+    ir = (root / "src/apm_cli/agent_plugins/ir.py").read_text(encoding="utf-8")
+    skill_integrator = (root / "src/apm_cli/integration/skill_integrator.py").read_text(
+        encoding="utf-8"
+    )
+    detection = (root / "src/apm_cli/models/format_detection.py").read_text(encoding="utf-8")
+    legacy = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/check_bundle_format_authority.sh").read_text(encoding="utf-8")
+    boundary_guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+    validation_tree = ast.parse(validation)
+    agent_validation = next(
+        node
+        for node in validation_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_validate_agent_plugin"
+    )
+    agent_validation_source = ast.get_source_segment(validation, agent_validation) or ""
+
+    assert loader.count("def load_agent_plugin(") == 1
+    assert loader.count("def detect_agent_plugin(") == 1
+    assert projection.count("def project_agent_plugin_package(") == 1
+    assert package_owner.count("def from_mapping(") == 1
+    assert "normalize_plugin_directory" not in agent_validation_source
+    assert "package = project_agent_plugin_package(plugin)" in agent_validation_source
+    assert "result.package = package" in agent_validation_source
+    assert "return validation.package" in resolver
+    assert errors.count("class AgentPluginDeploymentBoundaryError(") == 1
+    assert errors.count("def enforce_agent_plugin_deployment_boundary(") == 1
+    assert "PackageType.AGENT_PLUGIN" not in skill_integrator
+    assert "APMPackage(" not in projection
+    assert "read_json_document" not in projection
+    assert "detect_agent_plugin(package_path)" in detection
+    assert "admit_legacy_plugin_manifest(plugin_path)" in legacy
+    assert "Agent Plugin classification must route through its loader" in guard
+    assert loader.count("def _discover_skills(") == 1
+    assert loader.count("def _discover_mcp_servers(") == 1
+    assert loader.count("AssetInventory(root)") == 1
+    assert "class AgentPluginAsset:" in ir
+    assert "sha256: str" in ir
+    assert "hashlib.sha256()" in assets
+    assert "if stat.S_ISLNK" in assets
+    assert "Agent Plugin component IR must remain canonical and inventory-backed" in boundary_guard
+    assert (
+        "| Agent Plugins v1 contract interpretation, component discovery, "
+        "and portable manifest authority |"
+    ) in architecture
+    assert "| Agent Plugin producer portable-surface admission |" in architecture
+    assert "| APMPackage interpreted-manifest construction |" in architecture
+    assert "| Agent Plugin compatibility package projection |" in architecture
+    assert (
+        "| Neutral hook source grammar, per-target native shape, and "
+        "shared-config APM-owned drift projection |"
+    ) in architecture
+    assert "src/apm_cli/hook_contract.py" in architecture
+    assert architecture == (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_plugin_skill_declaration_membership_has_single_owner() -> None:
+    """Legacy plugin parsing owns membership; integration only consumes it."""
+    root = Path(__file__).parents[2]
+    parser = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
+    integrator = root / "src/apm_cli/integration/skill_integrator.py"
+    guard = root / "scripts/check_plugin_skill_declaration_authority.py"
+    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert parser.count("def normalized_plugin_skill_sources(") == 1
+    assert "normalized_plugin_skill_sources(package_path)" in integrator.read_text(encoding="utf-8")
+    assert "Legacy plugin declared-skill membership" in architecture
+
+    result = subprocess.run(
+        (sys.executable, str(guard), str(root)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "old", "new"),
+    [
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "resolved, _ = normalized_plugin_skill_sources(package_path)",
+            'resolved = {name: package_path / "skills" / name for name in ()}',
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "resolved, _ = normalized_plugin_skill_sources(package_path)",
+            "resolved, _ = normalized_plugin_skill_sources(package_path)\n"
+            '            root_bundle = package_path / "skills"',
+        ),
+    ],
+)
+def test_plugin_skill_declaration_owner_guard_kills_mutations(
+    tmp_path: Path,
+    relative_path: str,
+    old: str,
+    new: str,
+) -> None:
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    for path in (
+        "src/apm_cli/deps/plugin_parser.py",
+        "src/apm_cli/integration/skill_integrator.py",
+    ):
+        destination = sandbox / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / path, destination)
+    mutation_path = sandbox / relative_path
+    source = mutation_path.read_text(encoding="utf-8")
+    assert old in source
+    mutation_path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/check_plugin_skill_declaration_authority.py"),
+            str(sandbox),
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Plugin skill declaration membership" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "old", "new"),
+    [
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            '    list(plugin.root.rglob("*"))\n    data = _project_apm_configuration(plugin)',
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "stat.S_ISLNK",
+            "False and stat.S_ISLNK",
+        ),
+        (
+            "src/apm_cli/agent_plugins/ir.py",
+            "    sha256: str",
+            "    digest: str",
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "                    self._reserve_bytes(len(chunk))",
+            "                    pass",
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "        return self._collect(component_root)\n\n    def list_component_candidates",
+            "        entry_count = self._entry_count\n"
+            "        try:\n"
+            "            return self._collect(component_root)\n"
+            "        finally:\n"
+            "            self._entry_count = entry_count\n\n"
+            "    def list_component_candidates",
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "ensure_path_within_resolved(path, self._root)",
+            "ensure_path_within(path, self._root)",
+        ),
+        (
+            "src/apm_cli/agent_plugins/assets.py",
+            "ensure_path_within_resolved(path, root)",
+            "ensure_path_within(path, root)",
+        ),
+        (
+            "src/apm_cli/agent_plugins/loader.py",
+            "    return any(entry.name == name for entry in entries)",
+            '    return any(entry.name == name for entry in Path(".").iterdir())',
+        ),
+        (
+            "src/apm_cli/agent_plugins/loader.py",
+            "primary.disposition is _CandidateDisposition.ABSENT",
+            "primary.disposition is _CandidateDisposition.REJECTED",
+        ),
+        (
+            "src/apm_cli/integration/hook_ir.py",
+            "from apm_cli.hook_contract import HookBinding, HookDocument, HookHandler\n",
+            "from apm_cli.hook_contract import HookBinding, HookDocument, HookHandler\n\n"
+            'HOOK_COMMAND_KEYS: tuple[str, ...] = ("command",)\n',
+        ),
+        (
+            "src/apm_cli/install/sources.py",
+            "                agent_plugin_detection=native_detection,\n",
+            "",
+        ),
+        (
+            "src/apm_cli/models/validation.py",
+            "agent_plugin_detection.manifest_path.parent.resolve() != package_root",
+            "False",
+        ),
+    ],
+)
+def test_agent_plugin_component_ir_mutations_are_killed(
+    tmp_path: Path,
+    relative_path: str,
+    old: str,
+    new: str,
+) -> None:
+    """Static owner guard kills every load-bearing component-IR mutation."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    paths = (
+        "src/apm_cli/agent_plugins/assets.py",
+        "src/apm_cli/agent_plugins/ir.py",
+        "src/apm_cli/agent_plugins/loader.py",
+        "src/apm_cli/agent_plugins/projection.py",
+        "src/apm_cli/hook_contract.py",
+        "src/apm_cli/integration/hook_ir.py",
+        "src/apm_cli/models/validation.py",
+        "src/apm_cli/install/sources.py",
+    )
+    for relative in paths:
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, destination)
+    mutation_path = sandbox / relative_path
+    source = mutation_path.read_text(encoding="utf-8")
+    assert old in source
+    mutation_path.write_text(source.replace(old, new), encoding="utf-8")
+
+    result = subprocess.run(
+        ("python3", "scripts/check_agent_plugin_component_ir.py", str(sandbox)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "old", "new", "message"),
+    [
+        (
+            "src/apm_cli/models/validation.py",
+            "package = project_agent_plugin_package(plugin)",
+            "package = None",
+            "Agent Plugin compatibility packages must route through the projection owner",
+        ),
+        (
+            "src/apm_cli/models/validation.py",
+            "package = project_agent_plugin_package(plugin)",
+            "package = project_agent_plugin_package(plugin)\n        package = None",
+            "native validation bypasses projection or enters normalization",
+        ),
+        (
+            "src/apm_cli/models/validation.py",
+            "    result.agent_plugin = plugin",
+            "    normalize_plugin_directory(package_path, plugin_json_path)\n"
+            "    result.agent_plugin = plugin",
+            "Agent Plugin classification must route through its loader, not Claude normalization",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            "if detect_agent_plugin(install_path) is not None:",
+            "if False:",
+            "Agent Plugin projection AST boundary failed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "APMPackage.from_mapping(",
+            "APMPackage(",
+            "Agent Plugin compatibility packages must route through the projection owner",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            "    plugin.manifest.path.read_text()\n    data = _project_apm_configuration(plugin)",
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            "    plugin.manifest.path.chmod(0o600)\n    data = _project_apm_configuration(plugin)",
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    data = _project_apm_configuration(plugin)",
+            '    json.JSONDecoder().decode("{}")\n    data = _project_apm_configuration(plugin)',
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "from .ir import AgentPlugin, thaw_frozen_json",
+            "from .ir import AgentPlugin, thaw_frozen_json\n"
+            "from json import loads as thaw_frozen_json",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "from .ir import AgentPlugin, thaw_frozen_json",
+            "from .ir import AgentPlugin, thaw_frozen_json\n"
+            '__import__("json").JSONDecoder().decode("{}")',
+            "projection call surface must remain pure",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    projected = thaw_frozen_json(configuration.values)",
+            "    projected = thaw(configuration.values)",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/agent_plugins/projection.py",
+            "    projected = thaw_frozen_json(configuration.values)",
+            "    thaw_frozen_json(configuration.values)\n    projected = {}",
+            "projection must thaw canonical FrozenJson",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "            return validation.package",
+            "            return None",
+            "Agent Plugin dependency loading must preserve the projected package",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "            return validation.package",
+            "            if False:\n"
+            "                return validation.package\n"
+            "            return None",
+            "Agent Plugin dependency loading must preserve the projected package",
+        ),
+        (
+            "src/apm_cli/models/apm_package.py",
+            "        result = cls.from_mapping(",
+            "        result = cls(",
+            "APMPackage file loading must route through from_mapping owner",
+        ),
+        (
+            "src/apm_cli/models/apm_package.py",
+            "        _apm_yml_cache[cache_key] = result",
+            "        result = None\n        _apm_yml_cache[cache_key] = result",
+            "APMPackage file loading must route through from_mapping owner",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "    enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "    from apm_cli.integration.dispatch import get_dispatch_table",
+            "    from apm_cli.integration.dispatch import get_dispatch_table\n\n"
+            "    enforce_agent_plugin_deployment_boundary(package_info)",
+            "native deployment gate must be the first integration action",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "package_info.package_type is not PackageType.AGENT_PLUGIN",
+            "package_info.package_type is PackageType.AGENT_PLUGIN",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "        return AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "    raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "    return None  # native package accepted",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            'getattr(package, "agent_plugin", None)',
+            'getattr(package, "legacy_plugin", None)',
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/integration/skill_package_routing.py",
+            "        PackageType.SKILL_BUNDLE,\n        PackageType.MARKETPLACE_PLUGIN,",
+            "        PackageType.SKILL_BUNDLE,\n"
+            "        PackageType.AGENT_PLUGIN,\n"
+            "        PackageType.MARKETPLACE_PLUGIN,",
+            "SkillIntegrator must not route AGENT_PLUGIN content",
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "        # Check if package type allows skill installation",
+            "        # Check if package type allows skill installation",
+            "integrate_package_skill must reject native packages",
+        ),
+        (
+            "src/apm_cli/integration/skill_integrator.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n\n"
+            "        package_path = package_info.install_path",
+            "        package_path = package_info.install_path",
+            "available_skill_names must reject native packages",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "        enforce_agent_plugin_deployment_boundary(materialization.package_info)",
+            "        pass  # native materialization accepted",
+            "native batch preflight must use the deployment boundary owner",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "    diagnostics.error(f",
+            "    diagnostics.warn(f",
+            "native deployment failure must remain a recorded non-success outcome",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            '    deltas["installed"] = 0',
+            '    deltas["installed"] = 1',
+            "native deployment failure must remain a recorded non-success outcome",
+        ),
+        (
+            "src/apm_cli/install/phases/integrate.py",
+            "    preflight_agent_plugin_materializations(materialized)",
+            "    pass  # native batch preflight removed",
+            "native batch preflight must run before the first package integration",
+        ),
+        (
+            "src/apm_cli/commands/install.py",
+            "            preflight_agent_plugin_dry_run(ctx, all_apm_deps)",
+            "            pass  # native dry-run preflight removed",
+            "dry-run native preflight must run before rendering success",
+        ),
+        (
+            "src/apm_cli/commands/install.py",
+            "                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)",
+            "                pass  # native local bundle accepted",
+            "Local bundles must hit the native boundary before deployment preparation",
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "        detection = route_agent_plugin_package(package_path)",
+            "        detection = None  # schema routing bypassed",
+            "Package ingress must converge through route_agent_plugin_package",
+        ),
+        (
+            "src/apm_cli/commands/install.py",
+            "    except AgentPluginError as e:",
+            "    except RuntimeError as e:",
+            "typed native bundle failures must render through logger.error",
+        ),
+        (
+            "src/apm_cli/bundle/local_bundle.py",
+            "    if schema_id == PLUGIN_SCHEMA_ID:",
+            "    if schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):",
+            "Plugin schema routing must live in bundle/local_bundle.py and select exact IDs",
+        ),
+        (
+            "src/apm_cli/agent_plugins/loader.py",
+            "        route = classify_plugin_manifest_schema(document)",
+            "        route = PluginSchemaRoute.LEGACY",
+            "Agent Plugin loading and legacy admission must share the schema router",
+        ),
+        (
+            "src/apm_cli/install/sources.py",
+            "                route_agent_plugin_package(original_src) if original_src.is_dir() else None",
+            "                None",
+            "Package ingress must converge through route_agent_plugin_package",
+        ),
+        (
+            "src/apm_cli/deps/github_downloader.py",
+            "                route_agent_plugin_package(target_path)",
+            "                pass  # persistent cache schema routing bypassed",
+            "Package ingress must converge through route_agent_plugin_package",
+        ),
+        (
+            "src/apm_cli/marketplace/resolver.py",
+            "    source_kind = source.kind",
+            "    route_agent_plugin_package(Path('.'))\n    source_kind = source.kind",
+            "Marketplace resolution must defer schema admission to materialized ingress",
+        ),
+        (
+            "src/apm_cli/deps/plugin_parser.py",
+            "        if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:",
+            "        if False:",
+            "Agent Plugin classification must route through its loader, not Claude normalization",
+        ),
+        (
+            "src/apm_cli/policy/ci_checks.py",
+            "        except AgentPluginDeploymentBoundaryError as exc:",
+            "        except RuntimeError as exc:",
+            "drift must translate native deployment failures into a failed CheckResult",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/cli.py",
+            "        _preflight_uninstall_survivors(\n"
+            "            surviving_deps,\n"
+            "            modules_dir,\n"
+            "            lockfile=lockfile,\n"
+            "            excluded_keys=removed_keys | builtins.set(projected_orphans),\n"
+            "            source_root=manifest_path.parent,\n"
+            "        )",
+            "        pass  # native preflight removed",
+            "uninstall survivor preflight must run before scripts, staging, "
+            "or destructive reconciliation",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/engine.py",
+            "    return preflight_reintegration_survivors(\n        installed_refs,",
+            "    return disabled_survivor_preflight(\n        installed_refs,",
+            "uninstall survivor preflight must use the native deployment boundary owner",
+        ),
+        (
+            "src/apm_cli/commands/uninstall/engine.py",
+            "            validation = validate_apm_package(source_path, source_path=source_path)",
+            "            continue  # declared local source accepted without validation",
+            "uninstall survivor preflight must use the native deployment boundary owner "
+            "against declared local sources",
+        ),
+        (
+            "src/apm_cli/install/local_bundle_handler.py",
+            "    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "    pass  # native local bundle accepted",
+            "native local bundles must fail before resolution or deployment",
+        ),
+        (
+            "src/apm_cli/install/local_bundle_handler.py",
+            "        enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "        if bundle_info.format == BundleFormat.AGENT_PLUGIN.value:\n"
+            "            enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "native local bundles must fail before resolution or deployment",
+        ),
+        (
+            "src/apm_cli/install/services.py",
+            "    enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)",
+            "    pass  # native opaque bundle accepted",
+            "opaque local bundle deployment must start at the native boundary",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "        enforce_agent_plugin_deployment_boundary(package_info)\n"
+            "        plan.append((dependency, package_info))",
+            "        plan.append((dependency, package_info))",
+            "survivor reintegration preflight must use the native deployment boundary owner",
+        ),
+        (
+            "src/apm_cli/commands/prune.py",
+            "        _preflight_prune_survivors(\n",
+            "        disabled_prune_survivor_preflight(\n",
+            "prune must preflight survivors through the native deployment boundary",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "        survivor_plan = preflight_reintegration_survivors(\n",
+            "        survivor_plan = list(\n",
+            "direct hook survivor reconciliation must preflight before mutation",
+        ),
+    ],
+)
+def test_agent_plugin_projection_guard_rejects_bypass(
+    tmp_path: Path,
+    relative_path: str,
+    old: str,
+    new: str,
+    message: str,
+) -> None:
+    """The boundary guard must reject projection and normalization bypasses."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    paths = (
+        "src/apm_cli/agent_plugins/ir.py",
+        "src/apm_cli/agent_plugins/errors.py",
+        "src/apm_cli/agent_plugins/loader.py",
+        "src/apm_cli/agent_plugins/projection.py",
+        "src/apm_cli/bundle/formats.py",
+        "src/apm_cli/bundle/local_bundle.py",
+        "src/apm_cli/deps/plugin_parser.py",
+        "src/apm_cli/deps/_shared.py",
+        "src/apm_cli/deps/apm_resolver.py",
+        "src/apm_cli/deps/github_downloader.py",
+        "src/apm_cli/deps/registry/resolver.py",
+        "src/apm_cli/install/drift.py",
+        "src/apm_cli/install/services.py",
+        "src/apm_cli/install/sources.py",
+        "src/apm_cli/install/template.py",
+        "src/apm_cli/install/phases/integrate.py",
+        "src/apm_cli/install/local_bundle_handler.py",
+        "src/apm_cli/integration/skill_integrator.py",
+        "src/apm_cli/integration/skill_package_routing.py",
+        "src/apm_cli/marketplace/resolver.py",
+        "src/apm_cli/policy/ci_checks.py",
+        "src/apm_cli/commands/uninstall/cli.py",
+        "src/apm_cli/commands/uninstall/engine.py",
+        "src/apm_cli/commands/install.py",
+        "src/apm_cli/commands/prune.py",
+        "src/apm_cli/integration/hook_integrator.py",
+        "src/apm_cli/models/apm_package.py",
+        "src/apm_cli/models/format_detection.py",
+        "src/apm_cli/models/validation.py",
+    )
+    for relative in paths:
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, destination)
+    mutation_path = sandbox / relative_path
+    source = mutation_path.read_text(encoding="utf-8")
+    assert old in source
+    mutation_path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/check_bundle_format_authority.sh", str(sandbox)),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert message in result.stdout + result.stderr
+
+
 def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     """Policy cache refs must be sanitized by the canonical writer."""
     root = Path(__file__).parents[2]
@@ -24,6 +797,321 @@ def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     assert '"repo_ref": _redact_policy_ref(repo_ref)' in owner
     assert '"chain_refs": [_redact_policy_ref(ref) for ref in persisted_chain_refs]' in owner
     assert "Policy cache metadata must redact URL credentials at its canonical writer" in guard
+
+
+def test_deployable_source_paths_have_single_authorized_plan() -> None:
+    """Security scanning and skill materialization must share one source plan."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/install/deployable_source_plan.py").read_text(encoding="utf-8")
+    services = (root / "src/apm_cli/install/services.py").read_text(encoding="utf-8")
+    scanner = (root / "src/apm_cli/install/helpers/security_scan.py").read_text(encoding="utf-8")
+    skills = (root / "src/apm_cli/integration/skill_integrator.py").read_text(encoding="utf-8")
+    path_security = (root / "src/apm_cli/utils/path_security.py").read_text(encoding="utf-8")
+    security_gate = (root / "src/apm_cli/security/gate.py").read_text(encoding="utf-8")
+    hook_ownership = (root / "src/apm_cli/integration/hook_ownership.py").read_text(
+        encoding="utf-8"
+    )
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("class DeployableSourcePlan:") == 1
+    assert "source_plan = DeployableSourcePlan.create(" in services
+    assert "source_plan.scan_security(" in scanner
+    assert "paths=self.paths" in owner
+    assert path_security.count("def has_symlink_component(") == 1
+    assert "has_symlink_component(source_root, path)" in owner
+    assert "has_symlink_component(root, candidate)" in security_gate
+    assert "has_symlink_component(apm_modules, package_path)" in hook_ownership
+    assert "source_plan=source_plan" in services
+    assert "source_plan.copy_ignore" in skills
+    assert "from apm_cli.install.exec_gate import plugin_bin_deployable" in skills
+    assert "HookIntegrator.select_deployable_hook_sources" in owner
+    assert "CanvasIntegrator.find_canvas_bundles" in owner
+    assert (
+        "Deployable hook paths must route through the shared target-aware source selector" in guard
+    )
+    hooks = (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8")
+    kiro_hooks = (root / "src/apm_cli/integration/kiro_hook_integrator.py").read_text(
+        encoding="utf-8"
+    )
+    assert "selected_bundle_files=hook_sources.bundle_for" in hooks
+    assert "selected_bundle_files=selected_bundle_files" in kiro_hooks
+    for integrator in (
+        "prompt_integrator.py",
+        "agent_integrator.py",
+        "command_integrator.py",
+        "instruction_integrator.py",
+        "hook_integrator.py",
+        "kiro_hook_integrator.py",
+        "canvas_integrator.py",
+    ):
+        content = (root / "src/apm_cli/integration" / integrator).read_text(encoding="utf-8")
+        assert "source_plan" in content
+
+    def function_body(signature: str) -> str:
+        return skills.split(signature, 1)[1].split("\n    def ", 1)[0]
+
+    assert "source_plan=source_plan" in function_body("def _integrate_native_skill(")
+    assert "source_plan=source_plan" in function_body("def _integrate_skill_bundle(")
+    assert "source_plan=source_plan" in function_body("def integrate_package_skill(")
+
+
+def test_deployable_source_plan_guard_rejects_parallel_classifier(tmp_path: Path) -> None:
+    """The boundary lint rejects a second deployable-path authority."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    duplicate = sandbox / "src/apm_cli/install/helpers/security_scan.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8") + "\n\nclass DeployableSourcePlan:\n    pass\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Deployable hook paths must route through the shared target-aware source selector" in (
+        result.stdout
+    )
+
+
+def test_plugin_bin_eligibility_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """The boundary lint rejects a second plugin bin eligibility decision."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    duplicate = sandbox / "src/apm_cli/install/services.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8")
+        + "\n\ndef _plugin_bin_deployable(*_args, **_kwargs):\n    return True\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Plugin bin deployment eligibility must route through install/exec_gate.py" in result.stdout
+    )
+
+
+def test_user_root_scoped_instruction_eligibility_has_single_owner(tmp_path: Path) -> None:
+    """Profile metadata, not a target-name branch, owns root-context eligibility."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git", ".venv", ".pytest_cache", "__pycache__", "build", "dist", "node_modules"
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/compilation/user_root_context.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8").replace(
+            "preserve_scoped_sections = scoped.include_scoped_in_user_root_context",
+            'preserve_scoped_sections = scoped.name == "opencode"',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "User-root scoped instruction eligibility must come from TargetProfile metadata"
+        in result.stdout
+    )
+
+
+def test_gitlab_policy_discovery_routes_through_private_adapter() -> None:
+    """GitLab policy transport must not bypass the discovery facade's adapter."""
+    root = Path(__file__).parents[2]
+    facade = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
+    adapter = (root / "src/apm_cli/policy/_gitlab.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert facade.count("_gitlab._fetch_from_gitlab_repo(") == 1
+    assert facade.count("_gitlab._fetch_gitlab_chain_parent(") == 1
+    assert adapter.count("def _fetch_from_gitlab_repo(") == 1
+    assert adapter.count("def _fetch_gitlab_contents(") == 1
+    assert adapter.count("def _gitlab_project_state_via_git(") == 1
+    assert adapter.count("def _fetch_gitlab_chain_parent(") == 1
+    assert "GitLab policy discovery must route through policy/_gitlab.py" in guard
+    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in guard
+
+
+def test_gitlab_policy_adapter_guard_rejects_facade_bypass(tmp_path: Path) -> None:
+    """The boundary guard rejects removing the GitLab inheritance adapter call."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
+    facade_path.write_text(
+        facade_path.read_text(encoding="utf-8").replace(
+            "_gitlab._fetch_from_gitlab_repo(",
+            "_fetch_from_repo(",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "GitLab policy discovery must route through policy/_gitlab.py" in result.stdout
+
+
+def test_gitlab_policy_adapter_guard_rejects_facade_cache_orchestration(tmp_path: Path) -> None:
+    """The facade cannot add GitLab cache work beside the private adapter."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
+    marker = "        elif is_gitlab_hostname(host):\n"
+    facade_path.write_text(
+        facade_path.read_text(encoding="utf-8").replace(
+            marker,
+            f"{marker}            _read_cache_entry('gitlab-cache', project_root)\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in result.stdout
+
+
+def test_gitlab_policy_adapter_guard_survives_nested_facade_else(tmp_path: Path) -> None:
+    """A nested branch cannot hide facade-side GitLab cache orchestration."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
+    marker = "        elif is_gitlab_hostname(host):\n"
+    facade_path.write_text(
+        facade_path.read_text(encoding="utf-8").replace(
+            marker,
+            (
+                f"{marker}            if True:\n"
+                "                pass\n"
+                "            else:\n"
+                "                pass\n"
+                "            _read_cache_entry('gitlab-cache', project_root)\n"
+            ),
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -90,6 +1178,138 @@ def test_experimental_target_hints_have_single_owner() -> None:
     assert "Experimental target hints must route through install/target_hints.py" in guard
 
 
+def test_network_host_parsing_has_single_owner() -> None:
+    """Host literal parsing and loopback classification must use utils/net.py."""
+    root = Path(__file__).parents[2]
+    owner_path = root / "src/apm_cli/utils/net.py"
+    owner = owner_path.read_text(encoding="utf-8")
+    script_executors = (root / "src/apm_cli/core/script_executors.py").read_text(encoding="utf-8")
+    mcp_warnings = (root / "src/apm_cli/install/mcp/warnings.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    duplicate_paths = [
+        path
+        for path in (root / "src/apm_cli").rglob("*.py")
+        if path != owner_path
+        and any(
+            definition in path.read_text(encoding="utf-8")
+            for definition in (
+                "def _host_to_ip_literal(",
+                "def parse_host_address(",
+                "def is_loopback_host(",
+            )
+        )
+    ]
+
+    assert owner.count("def parse_host_address(") == 1
+    assert owner.count("def is_loopback_host(") == 1
+    assert "from ..utils.net import parse_host_address" in script_executors
+    assert "literal = parse_host_address(host)" in script_executors
+    assert "from ...utils.net import parse_host_address" in mcp_warnings
+    assert "ip = parse_host_address(bare)" in mcp_warnings
+    assert duplicate_paths == []
+    assert "Network host parsing and loopback classification must use utils/net.py" in guard
+
+
+def test_network_host_parsing_guard_rejects_parallel_owner(tmp_path: Path) -> None:
+    """The boundary lint rejects a second host-literal parser."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    duplicate = sandbox / "src/apm_cli/install/mcp/registry.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8")
+        + "\n\ndef parse_host_address(host: str | None) -> None:\n"
+        + "    return None\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Network host parsing and loopback classification must use utils/net.py" in result.stdout
+
+
+def test_ado_policy_coordinate_has_single_owner() -> None:
+    """ADO discovery and inheritance must share the valid ADO coordinate."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    owner_row = (
+        "| Cached policy shape | policy/discovery.py "
+        "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |"
+    )
+
+    tree = ast.parse(owner)
+    names = [
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and node.id in {"ADO_POLICY_PROJECT", "ADO_POLICY_REPOSITORY"}
+    ]
+
+    assert names.count("ADO_POLICY_PROJECT") == 3
+    assert names.count("ADO_POLICY_REPOSITORY") == 4
+    assert "ADO policy coordinate must come from discovery.py constants" in guard
+    assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_ado_policy_coordinate_guard_rejects_literal_bypass(tmp_path: Path) -> None:
+    """The boundary guard must reject a second literal ADO coordinate."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    owner_path = sandbox / "src/apm_cli/policy/discovery.py"
+    owner_path.write_text(
+        owner_path.read_text(encoding="utf-8")
+        + '\n_PARALLEL_ADO_POLICY_COORDINATE = dict(project="apm", repo="apm-policy")\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "ADO policy coordinate must come from discovery.py constants" in result.stdout
+
+
 def test_intellij_mcp_config_path_has_single_owner() -> None:
     """JetBrains Copilot path selection must stay in its client adapter."""
     root = Path(__file__).parents[2]
@@ -139,6 +1359,57 @@ def test_intellij_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path
 
     assert result.returncode == 1
     assert "JetBrains Copilot MCP paths must come from the IntelliJ adapter" in result.stdout
+
+
+def test_copilot_mcp_config_paths_have_single_owner() -> None:
+    """Copilot cleanup and runtime inspection use the adapter-owned path."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/adapters/client/copilot.py").read_text(encoding="utf-8")
+    integrator = (root / "src/apm_cli/integration/mcp_integrator.py").read_text(encoding="utf-8")
+    runtime = (root / "src/apm_cli/runtime/copilot_runtime.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert owner.count("def get_config_path(") == 1
+    assert "COPILOT_HOME" in owner
+    assert 'ClientFactory.create_client(\n                "copilot",' in integrator
+    assert "CopilotClientAdapter(user_scope=True).get_config_path()" in runtime
+    assert "Copilot CLI MCP paths must come from the Copilot adapter" in guard
+
+
+def test_copilot_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path) -> None:
+    """The boundary lint rejects direct Copilot cleanup path selection."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    runtime = sandbox / "src/apm_cli/runtime/copilot_runtime.py"
+    runtime.write_text(
+        runtime.read_text(encoding="utf-8") + '\n_PARALLEL_COPILOT_MCP_PATH = ".github/mcp.json"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Copilot CLI MCP paths must come from the Copilot adapter" in result.stdout
 
 
 def test_local_marketplace_version_source_has_single_owner() -> None:
@@ -1007,11 +2278,12 @@ def test_drift_hook_membership_exemptions_use_canonical_registries() -> None:
     root = Path(__file__).parents[2]
     consumer = (root / "src/apm_cli/install/manifest_reconcile.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
-    body = consumer.split("def merge_hook_config_paths(", maxsplit=1)[1].split(
+    body = consumer.split("def merge_hook_config_projection_specs(", maxsplit=1)[1].split(
         "\ndef ",
         maxsplit=1,
     )[0]
 
+    assert "merge_hook_config_projection_specs(targets)" in consumer
     assert "_MERGE_HOOK_TARGETS" in body
     assert "_APM_HOOKS_SIDECAR" in body
     assert "settings.json" not in body
@@ -1387,6 +2659,50 @@ def _load_skill_subset_owner_checker() -> ModuleType:
     return module
 
 
+def _load_agents_source_attribution_owner_checker(root: Path) -> ModuleType:
+    """Import the AGENTS.md attribution authority checker as a module."""
+    module_name = "check_agents_source_attribution_owner"
+    script_path = root / "scripts" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_agents_source_attribution_uses_the_canonical_config_boolean() -> None:
+    """AGENTS.md cosmetics must not derive their flag from the source map."""
+    root = Path(__file__).parents[2]
+    checker = _load_agents_source_attribution_owner_checker(root)
+    compiler = root / "src/apm_cli/compilation/distributed_compiler.py"
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert checker.find_violations(compiler) == []
+    assert "AGENTS.md cosmetics must use the canonical source_attribution config boolean" in guard
+
+
+def test_agents_source_attribution_guard_rejects_placement_source_map(tmp_path: Path) -> None:
+    """The authority guard rejects restoring the source-map/config conflation."""
+    root = Path(__file__).parents[2]
+    checker = _load_agents_source_attribution_owner_checker(root)
+    compiler = root / "src/apm_cli/compilation/distributed_compiler.py"
+    mutated = tmp_path / "distributed_compiler.py"
+    mutated.write_text(
+        compiler.read_text(encoding="utf-8").replace(
+            "source_attribution=source_attribution,",
+            "source_attribution=p.source_attribution,",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    assert checker.find_violations(mutated) == [
+        f"{mutated}: compile_distributed must pass source_attribution=source_attribution to "
+        "_generate_agents_content, not the placement source map"
+    ]
+
+
 def _load_windows_stable_path_checker(root: Path) -> ModuleType:
     """Import scripts/check_windows_stable_path_owner.py as a module.
 
@@ -1455,7 +2771,7 @@ def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
     )
     (tmp_path / "apm.lock.yaml").write_text(lockfile.to_yaml(), encoding="utf-8")
 
-    result = pack_bundle(tmp_path, tmp_path / "out", dry_run=True)
+    result = pack_bundle(tmp_path, tmp_path / "out", fmt="apm", dry_run=True)
 
     assert result.files == [claude_file]
 
@@ -1521,6 +2837,10 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     integration_source = (root / "src/apm_cli/install/mcp/integration.py").read_text(
         encoding="utf-8"
     )
+    manifest_integration_source = integration_source.split(
+        "def run_mcp_integration(",
+        maxsplit=1,
+    )[1]
     ownership_source = (root / "src/apm_cli/install/mcp/ownership.py").read_text(encoding="utf-8")
 
     assert "parse_targets_field" in adapter_calls
@@ -1530,8 +2850,8 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     assert manifest_selection_calls[0].lineno < discovery_calls[0].lineno
     assert all(node.func.id != "parse_targets_field" for node in resolver_calls)
     assert 'return {"target": singular, "targets": list(plural)}' in target_projection
-    assert integration_source.index("parse_targets_field(mcp_apm_config)") < (
-        integration_source.index("MCPIntegrator.install(")
+    assert manifest_integration_source.index("parse_targets_field(mcp_apm_config)") < (
+        manifest_integration_source.index("MCPIntegrator.install(")
     )
     assert "AC21: MCP manifest target precedence authority" in guard
     assert (
@@ -1975,10 +3295,50 @@ def test_merged_hook_ownership_markers_have_one_owner() -> None:
 
     assert "def dependency_hook_source_marker(" in owner
     assert "def dependency_hook_sources(" in owner
+    assert "def project_apm_owned_hook_entries(" in owner
     assert "from apm_cli.integration.hook_ownership import (" in integrator
     assert "def _dependency_hook_source_marker(" not in integrator
-    assert "Merged-hook ownership markers must route through integration/hook_ownership.py" in guard
+    assert "Shared hook drift projection must route through hook_ownership.py" in guard
     assert "`src/apm_cli/integration/hook_ownership.py`" in architecture
+
+
+def test_shared_hook_drift_projection_guard_rejects_bypass(tmp_path: Path) -> None:
+    """The static guard rejects drift reintroducing whole-file shared-config comparison."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    drift_path = sandbox / "src/apm_cli/install/drift.py"
+    drift_path.write_text(
+        drift_path.read_text(encoding="utf-8").replace(
+            "project_apm_owned_hook_entries(",
+            "bypassed_hook_projection(",
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Shared hook drift projection must route through hook_ownership.py" in result.stdout
 
 
 def test_dependency_winner_selection_has_one_algorithm() -> None:
@@ -2139,7 +3499,8 @@ def test_policy_cache_serializer_boundary_is_registered() -> None:
     root = Path(__file__).parents[2]
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     owner_row = (
-        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |"
+        "| Cached policy shape | policy/discovery.py "
+        "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |"
     )
     assert ("Cached policy shape must route through policy/discovery.py::_policy_to_dict") in guard
     for token in ("_policy_to_dict", "_serialize_policy", "_write_cache"):
@@ -2275,7 +3636,8 @@ def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
 
     owner_rows = (
         "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |",
-        "| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy) |",
+        "| Cached policy shape | policy/discovery.py "
+        "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |",
     )
     source_text = source.read_text(encoding="utf-8")
     for owner_row in owner_rows:

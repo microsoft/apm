@@ -41,12 +41,20 @@ class TestLockfileEnrichment:
         assert parsed["dependencies"][0]["repo_url"] == "owner/repo"
         assert parsed["dependencies"][0]["resolved_commit"] == "abc123"
 
-    def test_preserves_lockfile_version(self):
+    @pytest.mark.parametrize(
+        ("fmt", "expected_format"),
+        [
+            ("plugin", "claude-plugin"),
+            ("agent-plugin", "agent-plugin"),
+        ],
+    )
+    def test_preserves_lockfile_version_and_normalizes_format(self, fmt, expected_format):
         lf = _make_lockfile()
-        result = enrich_lockfile_for_pack(lf, fmt="plugin", target="claude")
+        result = enrich_lockfile_for_pack(lf, fmt=fmt, target="claude")
         parsed = yaml.safe_load(result)
 
         assert parsed["lockfile_version"] == "1"
+        assert parsed["pack"]["format"] == expected_format
 
     def test_does_not_mutate_original(self):
         lf = _make_lockfile()

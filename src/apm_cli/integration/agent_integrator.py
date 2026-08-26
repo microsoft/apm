@@ -51,7 +51,7 @@ class AgentIntegrator(BaseIntegrator):
     # Deploys via write_text_lf -> compare adopt candidates in LF mode.
     _LF_NORMALIZED_DEPLOY = True
 
-    def find_agent_files(self, package_path: Path) -> list[Path]:
+    def find_agent_files(self, package_path: Path, source_plan=None) -> list[Path]:
         """Find all agent files in a package.
 
         Searches in:
@@ -75,7 +75,7 @@ class AgentIntegrator(BaseIntegrator):
             for f in self.find_files_by_glob(apm_agents, "**/*.md"):
                 if not f.name.endswith(".agent.md") and f not in files:
                     files.append(f)
-        return files
+        return self.filter_authorized_files(files, source_plan)
 
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
     # have been REMOVED as part of T5 (skill-strategy.md).
@@ -111,6 +111,7 @@ class AgentIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         scope=None,
+        source_plan=None,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
 
@@ -128,7 +129,7 @@ class AgentIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         self.init_link_resolver(package_info, project_root)
-        agent_files = self.find_agent_files(package_info.install_path)
+        agent_files = self.find_agent_files(package_info.install_path, source_plan)
         if not agent_files:
             return IntegrationResult(0, 0, 0, [])
 

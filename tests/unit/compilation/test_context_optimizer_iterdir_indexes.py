@@ -190,8 +190,8 @@ class TestNoIterdirCalls:
         optimizer._directory_cache[tmp_path / "src"].pattern_matches.clear()
 
         with patch(
-            "apm_cli.compilation.context_optimizer.os.listdir",
-            side_effect=AssertionError("relevance must not rescan the directory"),
+            "apm_cli.compilation.context_optimizer.CompileInventory.collect",
+            side_effect=AssertionError("relevance must not recollect the inventory"),
         ):
             assert optimizer._is_instruction_relevant(instruction, tmp_path / "src")
 

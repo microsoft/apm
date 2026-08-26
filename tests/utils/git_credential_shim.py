@@ -21,6 +21,8 @@ import base64
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+_LOCALIZED_AUTH_FAILURE = "fatal: Autentikasi gagal untuk 'https://github.com/fixture/private.git/'\n"
+
 
 def _config_entries():
     try:
@@ -119,6 +121,11 @@ def _strip_dumb_http_incompatible_options(args):
     return stripped
 
 
+def _uses_non_c_git_message_locale():
+    locale = os.environ.get("LANGUAGE") or os.environ.get("LC_ALL") or ""
+    return not locale.startswith("C")
+
+
 def main():
     args = sys.argv[1:]
     if args[:2] == ["credential", "fill"]:
@@ -162,13 +169,22 @@ def main():
             "credential_interactive": [
                 value for key, value in entries if key.lower() == "credential.interactive"
             ],
+            "lc_all": os.environ.get("LC_ALL"),
+            "language": os.environ.get("LANGUAGE"),
         }
     )
     completed = subprocess.run(
         [os.environ["APM_TEST_REAL_GIT"], *rewritten_args],
         env=os.environ,
         check=False,
+        capture_output=True,
+        text=True,
     )
+    sys.stdout.write(completed.stdout)
+    if completed.returncode and remotes and not authorizations and _uses_non_c_git_message_locale():
+        sys.stderr.write(_LOCALIZED_AUTH_FAILURE)
+    else:
+        sys.stderr.write(completed.stderr)
     return completed.returncode
 
 

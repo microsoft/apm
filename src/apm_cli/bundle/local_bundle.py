@@ -25,16 +25,26 @@ Public surface:
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from ..agent_plugins.constants import (
+    AGENT_PLUGINS_SCHEMA_PREFIX,
+    COM_MICROSOFT_APM_NAMESPACE,
+    PLUGIN_SCHEMA_ID,
+)
+from ..agent_plugins.errors import (
+    AgentPluginManifestError,
+    UnsupportedAgentPluginVersionError,
+)
+from ..agent_plugins.io import read_json_document
 from ..utils.archive import (
     MAX_ZIP_ENTRIES,
     MAX_ZIP_UNCOMPRESSED,
@@ -48,9 +58,53 @@ from ..utils.path_security import (
     validate_path_segments,
 )
 from ..utils.yaml_io import load_yaml_str
+from .formats import BundleFormat
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from ..agent_plugins.ir import AgentPlugin, AgentPluginDetection
 
 _MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
 _MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
+
+
+class PluginSchemaRoute(Enum):
+    """Admission route selected exclusively by root plugin.json."""
+
+    LEGACY = "legacy"
+    AGENT_PLUGIN = "agent_plugin"
+
+
+def classify_plugin_manifest_schema(document: Mapping[str, Any]) -> PluginSchemaRoute:
+    """Select native admission only for the exact supported schema identifier."""
+    if "$schema" not in document:
+        return PluginSchemaRoute.LEGACY
+    schema_id = document["$schema"]
+    if not isinstance(schema_id, str):
+        raise AgentPluginManifestError("Invalid root plugin.json: $schema must be a string")
+    if schema_id == PLUGIN_SCHEMA_ID:
+        return PluginSchemaRoute.AGENT_PLUGIN
+    if schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):
+        raise UnsupportedAgentPluginVersionError(
+            f"Unsupported Agent Plugins manifest schema: {schema_id}. "
+            f"This APM version supports only {PLUGIN_SCHEMA_ID}."
+        )
+    raise AgentPluginManifestError(
+        f"Unsupported schema-bearing plugin manifest: {schema_id}. "
+        f"APM accepts schema-bearing plugin.json only with {PLUGIN_SCHEMA_ID}; "
+        "remove $schema only for a schema-less legacy plugin."
+    )
+
+
+def route_agent_plugin_package(package_root: Path) -> AgentPluginDetection | None:
+    """Route one materialized package through canonical Agent Plugin admission."""
+    from ..agent_plugins.loader import detect_agent_plugin
+
+    detection = detect_agent_plugin(package_root)
+    if detection is not None and detection.error is not None:
+        raise detection.error
+    return detection
 
 
 @dataclass(frozen=True)
@@ -68,6 +122,8 @@ class LocalBundleInfo:
             the lockfile).
         pack_targets: Targets the bundle was packed for, derived from
             ``lockfile["pack"]["target"]``.  Empty list when unknown.
+        format: Bundle format family for the bundle root.
+        agent_plugin: Canonical IR for an admitted Agent Plugin bundle.
         is_archive: ``True`` when the source path was a ``.zip`` or ``.tar.gz``.
         temp_dir: Extraction directory for tarballs (caller must clean up).
             ``None`` for directory bundles.
@@ -78,6 +134,8 @@ class LocalBundleInfo:
     package_id: str
     lockfile: dict[str, Any] | None
     pack_targets: list[str] = field(default_factory=list)
+    format: str = BundleFormat.CLAUDE_PLUGIN.value
+    agent_plugin: AgentPlugin | None = None
     is_archive: bool = False
     temp_dir: Path | None = None
 
@@ -90,18 +148,41 @@ class LocalBundleInfo:
 def read_bundle_plugin_json(bundle_dir: Path) -> dict[str, Any]:
     """Parse ``plugin.json`` at *bundle_dir*; return ``{}`` if missing."""
     pj_path = bundle_dir / "plugin.json"
-    if not pj_path.is_file():
+    if not pj_path.exists() and not pj_path.is_symlink():
         return {}
     try:
-        data = json.loads(pj_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, RecursionError):
-        # json.JSONDecodeError is a ValueError subclass; the wider set also
-        # fails closed on a deeply-nested JSON (RecursionError) or an
-        # oversized-integer literal (bare ValueError from int_max_str_digits)
-        # in an untrusted bundle's plugin.json -- the same fail-closed posture
-        # parse_script_file / _load_trust_store take.
+        data = read_json_document(pj_path)
+    except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _reject_metadata_collisions(bundle_dir: Path) -> None:
+    """Reject case-colliding or duplicate canonical Agent metadata names."""
+    canonical_names = {"plugin.json", "mcp.json", "apm.lock.yaml"}
+    collisions: dict[str, list[str]] = {}
+    for entry in bundle_dir.iterdir():
+        folded = entry.name.casefold()
+        if folded in canonical_names:
+            collisions.setdefault(folded, []).append(entry.name)
+    invalid = {
+        name: entries
+        for name, entries in collisions.items()
+        if len(entries) != 1 or entries[0] != name
+    }
+    extension_root = bundle_dir / COM_MICROSOFT_APM_NAMESPACE
+    if extension_root.is_dir() and not extension_root.is_symlink():
+        lsp_entries = [
+            entry.name for entry in extension_root.iterdir() if entry.name.casefold() == "lsp.json"
+        ]
+        if len(lsp_entries) != 1 or lsp_entries[0] != "lsp.json":
+            if lsp_entries:
+                invalid["com.microsoft.apm/lsp.json"] = lsp_entries
+    if invalid:
+        detail = "; ".join(
+            f"{name}: {', '.join(sorted(entries))}" for name, entries in sorted(invalid.items())
+        )
+        raise ValueError(f"Bundle contains ambiguous metadata paths: {detail}")
 
 
 def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
@@ -113,7 +194,12 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
         data = load_yaml_str(lf_path.read_text(encoding="utf-8"))
     except (yaml.YAMLError, OSError):
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    from ..deps.lockfile import require_supported_lockfile_version
+
+    require_supported_lockfile_version(data)
+    return data
 
 
 def _extract_pack_targets(lockfile: dict[str, Any] | None) -> list[str]:
@@ -131,16 +217,45 @@ def _extract_pack_targets(lockfile: dict[str, Any] | None) -> list[str]:
     return []
 
 
-def _build_info(bundle_dir: Path, *, is_archive: bool, temp_dir: Path | None) -> LocalBundleInfo:
-    plugin_json = read_bundle_plugin_json(bundle_dir)
+def _build_info(
+    bundle_dir: Path,
+    *,
+    is_archive: bool,
+    temp_dir: Path | None,
+) -> LocalBundleInfo:
+    _reject_metadata_collisions(bundle_dir)
+    manifest_path = bundle_dir / "plugin.json"
+    try:
+        plugin_json = read_json_document(manifest_path, reject_duplicate_schema=True)
+    except (OSError, ValueError) as exc:
+        raise AgentPluginManifestError(f"Bundle plugin.json is missing or invalid: {exc}") from exc
+    if not isinstance(plugin_json, dict) or not plugin_json:
+        raise AgentPluginManifestError(
+            "Bundle plugin.json is missing or invalid: manifest must be a JSON object"
+        )
+    schema_route = classify_plugin_manifest_schema(plugin_json)
+    agent_plugin = None
+    if schema_route is PluginSchemaRoute.AGENT_PLUGIN:
+        from ..agent_plugins.loader import load_agent_plugin
+
+        agent_plugin = load_agent_plugin(bundle_dir)
     lockfile = _read_bundle_lockfile(bundle_dir)
-    package_id = (plugin_json.get("id") or "").strip() or bundle_dir.name
+    package_id = (
+        str(plugin_json.get("id") or plugin_json.get("name") or "").strip() or bundle_dir.name
+    )
+    bundle_format = (
+        BundleFormat.AGENT_PLUGIN.value
+        if schema_route is PluginSchemaRoute.AGENT_PLUGIN
+        else BundleFormat.CLAUDE_PLUGIN.value
+    )
     return LocalBundleInfo(
         source_dir=bundle_dir,
         plugin_json=plugin_json,
         package_id=package_id,
         lockfile=lockfile,
         pack_targets=_extract_pack_targets(lockfile),
+        format=bundle_format,
+        agent_plugin=agent_plugin,
         is_archive=is_archive,
         temp_dir=temp_dir,
     )
@@ -222,7 +337,15 @@ def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
     if bundle_root is None:
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None
-    return _build_info(bundle_root, is_archive=True, temp_dir=temp_dir)
+    try:
+        return _build_info(
+            bundle_root,
+            is_archive=True,
+            temp_dir=temp_dir,
+        )
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 
 def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
@@ -245,7 +368,11 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
     if path.is_dir():
         if not (path / "plugin.json").is_file():
             return None
-        return _build_info(path, is_archive=False, temp_dir=None)
+        return _build_info(
+            path,
+            is_archive=False,
+            temp_dir=None,
+        )
 
     if path.is_file() and path.name.lower().endswith(".zip"):
         return _extract_zip_bundle(path)
@@ -261,7 +388,15 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
         if bundle_root is None:
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
-        return _build_info(bundle_root, is_archive=True, temp_dir=temp_dir)
+        try:
+            return _build_info(
+                bundle_root,
+                is_archive=True,
+                temp_dir=temp_dir,
+            )
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
 
     return None
 
@@ -391,7 +526,12 @@ def check_target_mismatch(
     if "all" in bundle_set:
         return None
     install_set = {t.strip() for t in install_targets if t and t.strip()}
-    missing = sorted(bundle_set - install_set)
+    from ..core.target_detection import normalize_target_name
+
+    normalized_install = {normalize_target_name(target) for target in install_set}
+    missing = sorted(
+        target for target in bundle_set if normalize_target_name(target) not in normalized_install
+    )
     if not missing:
         return None
     return (
