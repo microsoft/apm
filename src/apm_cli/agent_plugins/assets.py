@@ -173,7 +173,12 @@ class AssetInventory:
                 f"component assets exceed the {MAX_COMPONENT_ASSET_BYTES}-byte package budget"
             )
 
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
         try:
             descriptor = os.open(path, flags)
         except OSError as exc:
@@ -211,17 +216,14 @@ class AssetInventory:
             current = path.lstat()
         except OSError as exc:
             raise AssetInventoryError(f"asset {relative} changed during inventory: {exc}") from exc
-        post_read_checks = (
-            stat.S_ISREG(current.st_mode),
-            bytes_read == initial.st_size,
-            (current.st_dev, current.st_ino, current.st_size)
-            == (initial.st_dev, initial.st_ino, initial.st_size),
-            current.st_mode & 0o111 == initial.st_mode & 0o111,
-        )
-        if not all(post_read_checks):
-            raise AssetInventoryError(
-                f"asset {relative} changed during inventory: post-read checks {post_read_checks}"
-            )
+        if (
+            not stat.S_ISREG(current.st_mode)
+            or bytes_read != initial.st_size
+            or (current.st_dev, current.st_ino, current.st_size)
+            != (initial.st_dev, initial.st_ino, initial.st_size)
+            or current.st_mode & 0o111 != initial.st_mode & 0o111
+        ):
+            raise AssetInventoryError(f"asset {relative} changed during inventory")
 
         asset = AgentPluginAsset(
             path=relative,
@@ -325,7 +327,12 @@ def _open_verified_asset(
         raise AssetInventoryError(f"asset {expected.path} cannot be verified: {exc}") from exc
     if stat.S_ISLNK(initial.st_mode) or not stat.S_ISREG(initial.st_mode):
         raise AssetInventoryError(f"asset {expected.path} is not a regular file")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
