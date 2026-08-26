@@ -17,6 +17,7 @@ from apm_cli.marketplace.builder import (
     BuildOptions,
     BuildReport,
     MarketplaceBuilder,
+    MetadataEnrichmentResult,
     ResolvedPackage,
 )
 from apm_cli.marketplace.errors import (
@@ -2320,6 +2321,15 @@ class TestResolveGitHubToken:
         mock_ctx.source = "GITHUB_APM_PAT"
         mock_resolver.resolve.return_value = mock_ctx
 
+        def invoke_with_token(
+            _host: str,
+            operation: Any,
+            **_kwargs: Any,
+        ) -> str:
+            return operation("ghp_prefetch_token", {})
+
+        mock_resolver.try_with_fallback.side_effect = invoke_with_token
+
         yml_path = _write_yml(tmp_path, _BASIC_YML)
         builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
         resolved = [
@@ -2343,11 +2353,14 @@ class TestResolveGitHubToken:
             results = builder._prefetch_metadata(resolved)
         # Token was resolved
         assert builder._github_token == "ghp_prefetch_token"
+        mock_resolver.resolve.assert_called_once_with("github.com")
+        mock_resolver.try_with_fallback.assert_called_once()
         # Request included auth header
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") == "token ghp_prefetch_token"
         # Result was populated
+        assert isinstance(results, MetadataEnrichmentResult)
         assert "auth-pkg" in results
         assert results["auth-pkg"]["description"] == "Auth test"
 
@@ -2359,6 +2372,15 @@ class TestResolveGitHubToken:
         mock_ctx = MagicMock()
         mock_ctx.token = None
         mock_resolver.resolve.return_value = mock_ctx
+
+        def invoke_without_token(
+            _host: str,
+            operation: Any,
+            **_kwargs: Any,
+        ) -> str:
+            return operation(None, {})
+
+        mock_resolver.try_with_fallback.side_effect = invoke_without_token
 
         yml_path = _write_yml(tmp_path, _BASIC_YML)
         builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
@@ -2383,11 +2405,14 @@ class TestResolveGitHubToken:
             results = builder._prefetch_metadata(resolved)
         # No token was set
         assert builder._github_token is None
+        mock_resolver.resolve.assert_called_once_with("github.com")
+        mock_resolver.try_with_fallback.assert_called_once()
         # Request had no auth header
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") is None
         # Result was still populated (public repo)
+        assert isinstance(results, MetadataEnrichmentResult)
         assert "public-pkg" in results
 
 
