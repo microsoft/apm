@@ -211,14 +211,17 @@ class AssetInventory:
             current = path.lstat()
         except OSError as exc:
             raise AssetInventoryError(f"asset {relative} changed during inventory: {exc}") from exc
-        if (
-            not stat.S_ISREG(current.st_mode)
-            or bytes_read != initial.st_size
-            or (current.st_dev, current.st_ino, current.st_size)
-            != (initial.st_dev, initial.st_ino, initial.st_size)
-            or current.st_mode & 0o111 != initial.st_mode & 0o111
-        ):
-            raise AssetInventoryError(f"asset {relative} changed during inventory")
+        post_read_checks = (
+            stat.S_ISREG(current.st_mode),
+            bytes_read == initial.st_size,
+            (current.st_dev, current.st_ino, current.st_size)
+            == (initial.st_dev, initial.st_ino, initial.st_size),
+            current.st_mode & 0o111 == initial.st_mode & 0o111,
+        )
+        if not all(post_read_checks):
+            raise AssetInventoryError(
+                f"asset {relative} changed during inventory: post-read checks {post_read_checks}"
+            )
 
         asset = AgentPluginAsset(
             path=relative,
