@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import get_args
@@ -112,6 +113,72 @@ def test_asset_digest_verification_rejects_post_load_mutation(tmp_path: Path) ->
     with pytest.raises(AssetInventoryError, match="no longer matches"):
         with open_verified_asset(tmp_path, asset):
             pass
+
+
+@pytest.mark.windows_compat
+def test_inventory_accepts_portable_descriptor_mode_difference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Path and descriptor mode emulation must not reject an unchanged asset."""
+    _write_manifest(tmp_path)
+    _write_valid_skill(tmp_path, "portable")
+    real_fstat = os.fstat
+
+    def fstat_with_different_permission_bits(descriptor: int) -> os.stat_result:
+        result = real_fstat(descriptor)
+        return os.stat_result(
+            (
+                result.st_mode ^ stat.S_IWUSR,
+                result.st_ino,
+                result.st_dev,
+                result.st_nlink,
+                result.st_uid,
+                result.st_gid,
+                result.st_size,
+                result.st_atime,
+                result.st_mtime,
+                result.st_ctime,
+            )
+        )
+
+    monkeypatch.setattr(
+        "apm_cli.agent_plugins.assets.os.fstat",
+        fstat_with_different_permission_bits,
+    )
+
+    plugin = load_agent_plugin(tmp_path)
+
+    assert tuple(skill.directory_name for skill in plugin.components.skills) == ("portable",)
+    assert not any(diagnostic.code == "skill.assets.invalid" for diagnostic in plugin.diagnostics)
+    asset = plugin.components.skills[0].assets[0]
+    assert asset.sha256 == hashlib.sha256((tmp_path / asset.path).read_bytes()).hexdigest()
+    with open_verified_asset(tmp_path, asset) as handle:
+        assert handle.read() == (tmp_path / asset.path).read_bytes()
+
+
+@pytest.mark.windows_compat
+def test_inventory_rejects_path_replacement_before_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A changed pathname must not be mistaken for the descriptor inventory."""
+    from apm_cli.agent_plugins.assets import AssetInventory
+
+    asset_path = tmp_path / "asset.txt"
+    asset_path.write_text("original", encoding="utf-8")
+    moved = tmp_path / "original.txt"
+    real_open = os.open
+
+    def replace_then_open(path: Path, flags: int) -> int:
+        asset_path.rename(moved)
+        asset_path.write_text("replacement", encoding="utf-8")
+        return real_open(path, flags)
+
+    monkeypatch.setattr("apm_cli.agent_plugins.assets.os.open", replace_then_open)
+
+    with pytest.raises(AssetInventoryError, match="changed during inventory"):
+        AssetInventory(tmp_path).collect_file(asset_path)
 
 
 def test_verified_asset_descriptor_is_stable_after_path_replacement(tmp_path: Path) -> None:

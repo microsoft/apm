@@ -215,7 +215,7 @@ class AssetInventory:
             not stat.S_ISREG(current.st_mode)
             or bytes_read != initial.st_size
             or (current.st_dev, current.st_ino, current.st_size, current.st_mode)
-            != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mode)
+            != (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mode)
         ):
             raise AssetInventoryError(f"asset {relative} changed during inventory")
 
