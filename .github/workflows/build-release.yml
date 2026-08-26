@@ -357,7 +357,7 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 75
+        timeout-minutes: 60
 
       # ── PHASE 3: RELEASE VALIDATION ──
       - name: Prepare isolated release-validation environment

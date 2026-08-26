@@ -49,7 +49,7 @@ NON_LIVE_UNIX_INTEGRATION_STEPS = (
 )
 NON_LIVE_UNIX_TIMEOUT_MINUTES = {
     ("integration-tests", "Run integration tests (Unix)"): 30,
-    ("build-and-validate-macos-arm", "Run integration tests"): 75,
+    ("build-and-validate-macos-arm", "Run integration tests"): 60,
 }
 NON_LIVE_UNIX_PYTEST_ARGS = "-n 4 --dist loadgroup"
 NON_LIVE_MARK_EXPRESSION = "not live"
