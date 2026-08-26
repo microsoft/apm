@@ -1,5 +1,9 @@
 """Tests for the apm auth command."""
 
+import os
+import subprocess
+import sys
+import textwrap
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
@@ -59,8 +63,8 @@ class TestCheckToken:
     def test_github_uses_token_header(self):
         with patch("requests.get") as get:
             get.return_value = MagicMock(status_code=200)
-            ok, status = check_token("ghp_x", "github.com", "github")
-        assert (ok, status) == (True, 200)
+            verdict, status = check_token("ghp_x", "github.com", "github")
+        assert (verdict, status) == ("ok", 200)
         assert get.call_args.kwargs["headers"]["Authorization"] == "token ghp_x"
         assert "api.github.com/user" in get.call_args[0][0]
 
@@ -75,8 +79,8 @@ class TestCheckToken:
         """A GitLab OAuth session token is git-valid but not REST-valid."""
         with patch("requests.get") as get:
             get.return_value = MagicMock(status_code=401)
-            ok, status = check_token("oauth", "gitlab.com", "gitlab")
-        assert (ok, status) == (False, 401)
+            verdict, status = check_token("oauth", "gitlab.com", "gitlab")
+        assert (verdict, status) == ("rejected", 401)
 
     def test_ghes_uses_the_enterprise_api_base(self):
         with patch("requests.get") as get:
@@ -84,12 +88,39 @@ class TestCheckToken:
             check_token("ghp_x", "ghe.corp.example", "ghes")
         assert "api.github.com" not in get.call_args[0][0]
 
-    def test_network_failure_is_not_a_crash(self):
+    def test_unreachable_api_is_indeterminate_not_rejected(self):
+        """A plane / proxy / captive portal must not read as a bad token."""
         import requests
 
         with patch("requests.get", side_effect=requests.RequestException("boom")):
-            ok, status = check_token("t", "github.com", "github")
-        assert (ok, status) == (False, None)
+            verdict, status = check_token("t", "github.com", "github")
+        assert (verdict, status) == ("indeterminate", None)
+
+    def test_server_error_is_indeterminate(self):
+        """A 502 says nothing about the credential."""
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=502)
+            verdict, status = check_token("glpat-x", "gitlab.com", "gitlab")
+        assert (verdict, status) == ("indeterminate", 502)
+
+    def test_github_app_token_403_is_indeterminate(self):
+        """Actions' GITHUB_TOKEN (ghs_) has no user context.
+
+        GET /user answers 403 for an installation token even though it reads
+        repository contents fine -- which is what marketplace lookups use. A
+        pre-flight `apm auth github.com --check` must not fail the job.
+        """
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=403)
+            verdict, status = check_token("ghs_actions", "github.com", "github")
+        assert (verdict, status) == ("indeterminate", 403)
+
+    def test_plain_pat_403_is_still_rejected(self):
+        """The app-token carve-out must not swallow a genuine refusal."""
+        with patch("requests.get") as get:
+            get.return_value = MagicMock(status_code=403)
+            verdict, status = check_token("ghp_x", "github.com", "github")
+        assert (verdict, status) == ("rejected", 403)
 
 
 class TestResolveExistingToken:
@@ -130,7 +161,7 @@ class TestAuthFlow:
     def test_check_validates_and_reports(self):
         with (
             patch("apm_cli.commands.auth.resolve_existing_token", return_value=("t", "env")),
-            patch("apm_cli.commands.auth.check_token", return_value=(True, 200)),
+            patch("apm_cli.commands.auth.check_token", return_value=("ok", 200)),
         ):
             result = self.runner.invoke(auth, ["github.com", "--check"])
         assert result.exit_code == 0
@@ -143,7 +174,7 @@ class TestAuthFlow:
                 "apm_cli.commands.auth.resolve_existing_token",
                 return_value=("oauth", "GITLAB_APM_PAT"),
             ),
-            patch("apm_cli.commands.auth.check_token", return_value=(False, 401)),
+            patch("apm_cli.commands.auth.check_token", return_value=("rejected", 401)),
             patch("apm_cli.commands.auth.is_interactive", return_value=False),
             patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=False),
         ):
@@ -151,6 +182,24 @@ class TestAuthFlow:
         assert result.exit_code == 1
         assert "OAuth" in result.output
         assert "personal access token" in result.output
+
+    def test_unvalidatable_credential_is_kept_not_replaced(self):
+        """comment: unreachable API must not read as a rejected credential.
+
+        Non-interactive (CI) with a resolved token that cannot be validated:
+        the job must not fail, and the user must not be told to mint a PAT.
+        """
+        with (
+            patch(
+                "apm_cli.commands.auth.resolve_existing_token",
+                return_value=("ghs_actions", "GITHUB_TOKEN"),
+            ),
+            patch("apm_cli.commands.auth.is_interactive", return_value=False),
+            patch("apm_cli.commands.auth.check_token", return_value=("indeterminate", 403)),
+        ):
+            result = self.runner.invoke(auth, ["github.com", "--check"])
+        assert result.exit_code == 0
+        assert "rejected" not in result.output
 
     def test_non_interactive_without_token_exits_1(self):
         with (
@@ -191,7 +240,7 @@ class TestAuthFlow:
             patch("apm_cli.commands.auth.is_interactive", return_value=True),
             patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=False),
             patch("apm_cli.commands.auth.open_token_page"),
-            patch("apm_cli.commands.auth.check_token", return_value=(False, 401)),
+            patch("apm_cli.commands.auth.check_token", return_value=("rejected", 401)),
         ):
             result = self.runner.invoke(auth, ["gitlab.com", "--check"], input="bad\n")
         assert result.exit_code == 1
@@ -207,6 +256,51 @@ class TestAuthFlow:
         result = self.runner.invoke(auth, ["dev.azure.com"])
         assert result.exit_code == 1
         assert "No token flow" in result.output
+
+    def test_generic_host_error_names_the_env_var_to_set(self):
+        """'host class generic' is not actionable; GITHUB_HOST=<host> is.
+
+        ghe.corp.example is the example the docs offer, and it lands in
+        'generic' until its env hint is set.
+        """
+        with patch("apm_cli.commands.auth.resolve_existing_token", return_value=(None, "none")):
+            result = self.runner.invoke(auth, ["ghe.corp.example"])
+        assert result.exit_code == 1
+        assert "GITHUB_HOST=ghe.corp.example" in result.output
+        assert "GITLAB_HOST=ghe.corp.example" in result.output
+
+    def test_shadowing_warning_is_suppressed_for_env_var_credentials(self):
+        """Env vars beat helpers in _resolve_token, so nothing was shadowed.
+
+        Advising a keychain erase here would destroy the credential plain git
+        uses, to fix a problem the keychain was not causing.
+        """
+        with (
+            patch(
+                "apm_cli.commands.auth.resolve_existing_token",
+                return_value=("glpat-underscoped", "GITLAB_APM_PAT"),
+            ),
+            patch("apm_cli.commands.auth.check_token", return_value=("rejected", 403)),
+            patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=True),
+            patch("apm_cli.commands.auth.is_interactive", return_value=False),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com", "--check"])
+        assert "keychain" not in result.output
+        assert "osxkeychain erase" not in result.output
+
+    def test_shadowing_warning_still_fires_for_helper_credentials(self):
+        """The genuinely useful case must survive the gate."""
+        with (
+            patch(
+                "apm_cli.commands.auth.resolve_existing_token",
+                return_value=("stale", "git-credential-fill"),
+            ),
+            patch("apm_cli.commands.auth.check_token", return_value=("rejected", 401)),
+            patch("apm_cli.commands.auth.detect_shadowing_helper", return_value=True),
+            patch("apm_cli.commands.auth.is_interactive", return_value=False),
+        ):
+            result = self.runner.invoke(auth, ["gitlab.com", "--check"])
+        assert "keychain" in result.output
 
     def test_shadowing_keychain_is_reported_not_erased(self):
         with (
@@ -245,6 +339,49 @@ class TestExportMode:
             result = self.runner.invoke(auth, ["gitlab.com", "--export"])
         assert "GITLAB_APM_PAT" in result.stderr or "credential" in result.stderr
         assert "[+]" not in result.stdout
+
+    def test_subprocess_chatter_cannot_reach_the_eval(self):
+        """A real subprocess: the only shape that exercises fd 1.
+
+        ``CliRunner`` captures ``sys.stdout``, so it cannot see the file
+        descriptor that ``webbrowser.open``/``gh``/``git credential`` inherit.
+        A helper that printed to a chatty BROWSER used to land on the real
+        stdout ahead of the export line, where ``eval`` would run it.
+        """
+        script = textwrap.dedent(
+            """
+            import sys
+            from unittest.mock import patch
+            with patch(
+                "apm_cli.commands.auth.resolve_existing_token",
+                return_value=(None, "none"),
+            ), patch("apm_cli.commands.auth.is_interactive", return_value=True), patch(
+                "click.prompt", return_value="glpat-pasted"
+            ):
+                from apm_cli.commands.auth import auth
+                try:
+                    auth.main(["gitlab.com", "--export"], standalone_mode=False)
+                except SystemExit as exc:
+                    sys.exit(exc.code or 0)
+            """
+        )
+        env = {
+            **os.environ,
+            # webbrowser treats this as a BackgroundBrowser and inherits fd 1.
+            "BROWSER": "/bin/echo",
+            "PYTHONPATH": os.pathsep.join(sys.path),
+        }
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+        assert lines == ["export GITLAB_APM_PAT='glpat-pasted'"], (
+            f"stdout must carry only the export line, got: {proc.stdout!r}"
+        )
 
     def test_single_quote_in_token_cannot_break_out_of_the_quoting(self):
         """The output is eval'd, so a quote must not become shell syntax."""

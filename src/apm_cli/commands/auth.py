@@ -16,13 +16,19 @@ one-liner.
 
 Token resolution (see ``AuthResolver._resolve_token``) is APM's, not ours:
 ``GITLAB_APM_PAT`` -> ``GITLAB_TOKEN`` -> git credential helper for GitLab,
-and ``GITHUB_APM_PAT`` -> ``GITHUB_TOKEN`` -> ``gh auth token`` -> git
-credential helper for GitHub. Because the env vars are consulted first,
-exporting one is enough -- there is no need to wire an external CLI in as a
-git credential helper, and no need to evict a shadowing platform keychain
-entry. When a shadowing entry is detected we say so instead of deleting it:
-silently mutating a global credential store is not something a package
-manager should do on the user's behalf.
+and ``GITHUB_APM_PAT`` -> ``GITHUB_TOKEN`` -> ``GH_TOKEN`` -> ``gh auth
+token`` -> git credential helper for GitHub (``TOKEN_PRECEDENCE["modules"]``
+in ``token_manager``). Because the env vars are consulted first, exporting one
+is enough -- there is no need to wire an external CLI in as a git credential
+helper, and no need to evict a shadowing platform keychain entry.
+
+That ordering is also why the keychain-shadowing notice is gated: a helper can
+only shadow when a helper was actually consulted, so we mention it when the
+token came from ``git-credential-fill`` or when nothing resolved -- never when
+an env var answered. And when we do mention it we say so instead of deleting
+it: silently mutating a global credential store is not something a package
+manager should do on the user's behalf, doubly so when the entry it would
+erase is the one plain ``git push`` depends on.
 
 A note on what "working" means here. ``--check`` validates a token against
 the host's REST API, because a token git accepts is not automatically one the
@@ -30,6 +36,12 @@ API accepts -- a GitLab OAuth session token is valid for ``git clone`` but
 gets a 401 from the REST API, which is what marketplace lookups use. That
 check is opt-in: it costs a network round trip and, on GitHub, unauthenticated
 requests are capped at 60/hour per IP.
+
+``--check`` answers with three states, not two, because "the API said no" and
+"the API never answered" call for opposite advice. Only an outright rejection
+sends you off to mint a token; an unreachable API, a 5xx, or a GitHub App
+installation token that cannot be validated at all leaves the credential in
+place and exits 0. See ``check_token``.
 """
 
 from __future__ import annotations
@@ -95,8 +107,38 @@ def resolve_existing_token(host: str) -> tuple[str | None, str]:
     return getattr(ctx, "token", None), getattr(ctx, "source", "none")
 
 
-def check_token(token: str, host: str, host_kind: str) -> tuple[bool, int | None]:
-    """Validate *token* against the host's REST API. Returns ``(ok, status)``.
+def _unreachable_detail(status: int | None) -> str:
+    """Explain an ``indeterminate`` verdict without blaming the credential."""
+    if status is None:
+        return " (the API could not be reached)"
+    if status == 403:
+        return " (HTTP 403 -- an app/installation token has no user context)"
+    return f" (HTTP {status} from the API)"
+
+
+def check_token(token: str, host: str, host_kind: str) -> tuple[str, int | None]:
+    """Validate *token* against the host's REST API.
+
+    Returns ``(verdict, status)`` where *verdict* is one of:
+
+    ``"ok"``
+        The API accepted the credential.
+    ``"rejected"``
+        The API refused it and a new token is genuinely needed.
+    ``"indeterminate"``
+        We could not find out. The credential may well be fine, so the caller
+        must not tell the user to mint a replacement.
+
+    The distinction is the whole point. A two-state answer reports "your
+    credential was rejected" when the real story is a captive-portal wifi, a
+    502, or a rate limit -- sending the user off to create a PAT that fixes
+    nothing, and failing CI on a transient blip.
+
+    ``indeterminate`` also covers GitHub App installation tokens (``ghs_``),
+    including Actions' own ``GITHUB_TOKEN``: they have no user context, so
+    ``GET /user`` answers 403 even though the same token reads repository
+    contents -- which is what marketplace lookups actually do. We cannot
+    validate such a token here, and refusing to guess keeps CI green.
 
     Hits the identity endpoint rather than any repository, so the answer is
     "is this credential valid for the API" and does not depend on access to a
@@ -111,7 +153,8 @@ def check_token(token: str, host: str, host_kind: str) -> tuple[bool, int | None
     host_info = AuthResolver.classify_host(host)
     api_base = (host_info.api_base or "").rstrip("/")
     if not api_base:
-        return False, None
+        # No endpoint to ask -- that is ignorance, not a rejection.
+        return "indeterminate", None
 
     if host_kind in _GITHUB_KINDS:
         url = f"{api_base}/user"
@@ -128,8 +171,18 @@ def check_token(token: str, host: str, host_kind: str) -> tuple[bool, int | None
     try:
         status = requests.get(url, headers=headers, timeout=15).status_code
     except requests.RequestException:
-        return False, None
-    return status == 200, status
+        return "indeterminate", None
+
+    if status == 200:
+        return "ok", status
+    if status == 403 and AuthResolver.detect_token_type(token) == "github-app":
+        # An installation token has no user context; 403 here says nothing
+        # about whether it can read repositories.
+        return "indeterminate", status
+    if status in (401, 403):
+        return "rejected", status
+    # 5xx, rate limits, proxies: the host did not tell us about the token.
+    return "indeterminate", status
 
 
 def detect_shadowing_helper(host: str) -> bool:
@@ -242,9 +295,18 @@ def run_auth(
     host_kind = AuthResolver.classify_host(host).kind
     env_var = token_env_var(host_kind)
     if not env_var:
+        # 'generic' is also where a self-managed GHES/GitLab host lands when its
+        # env hint is unset -- APM classifies those by GITHUB_HOST / GITLAB_HOST,
+        # never by guessing from the hostname. Naming the variable is the
+        # actionable part; "host class 'generic'" on its own is not.
         logger.error(
-            f"No token flow for '{host}' (host class '{host_kind}'). APM resolves "
-            f"this host through git credentials; see 'apm doctor'."
+            f"No token flow for '{host}' (host class '{host_kind}').\n"
+            f"    If this is a self-managed GitHub Enterprise Server, set "
+            f"GITHUB_HOST={host} and re-run.\n"
+            f"    If it is a self-managed GitLab, set GITLAB_HOST={host} "
+            f"(or add it to APM_GITLAB_HOSTS) and re-run.\n"
+            f"    Otherwise APM resolves this host through git credentials; "
+            f"see 'apm doctor'."
         )
         return 1
 
@@ -262,9 +324,20 @@ def run_auth(
 
     if token:
         if check:
-            ok, status = check_token(token, host, host_kind)
-            if ok:
+            verdict, status = check_token(token, host, host_kind)
+            if verdict == "ok":
                 logger.success(f"{host}: credential from {source} works.", symbol="check")
+                if export:
+                    emit_export(token)
+                return 0
+            if verdict == "indeterminate":
+                # We could not validate it -- that is not evidence it is bad.
+                # Keep the credential and say what we do not know, rather than
+                # sending the user to mint a replacement that fixes nothing.
+                logger.warning(
+                    f"{host}: could not validate the credential from {source}"
+                    f"{_unreachable_detail(status)}. Keeping it."
+                )
                 if export:
                     emit_export(token)
                 return 0
@@ -288,7 +361,13 @@ def run_auth(
     else:
         logger.progress(f"{host}: no credential found.", symbol="info")
 
-    if detect_shadowing_helper(host):
+    # Only meaningful when a credential helper actually had a say. Env vars are
+    # consulted *before* any helper in ``_resolve_token``, so when the token
+    # came from one, the keychain entry never got a chance to shadow anything --
+    # and telling the user to erase it would destroy the credential plain
+    # ``git clone``/``git push`` relies on, to fix a problem it was not causing.
+    helper_could_be_shadowing = token is None or source == "git-credential-fill"
+    if helper_could_be_shadowing and detect_shadowing_helper(host):
         logger.warning(
             f"A macOS keychain entry for {host} may be shadowing newer "
             f"credentials. If authentication keeps failing, clear it with:\n"
@@ -313,15 +392,21 @@ def run_auth(
         return 1
 
     if check:
-        ok, status = check_token(pasted, host, host_kind)
-        if not ok:
+        verdict, status = check_token(pasted, host, host_kind)
+        if verdict == "rejected":
             detail = f" (HTTP {status})" if status else " (no response)"
             logger.error(
                 f"That token was rejected by the {host} API{detail}. "
                 f"Check it has scopes '{scopes}'."
             )
             return 1
-        logger.success("Token validated against the API.", symbol="check")
+        if verdict == "indeterminate":
+            logger.warning(
+                f"Could not validate the token against the {host} API"
+                f"{_unreachable_detail(status)}. Continuing."
+            )
+        else:
+            logger.success("Token validated against the API.", symbol="check")
 
     if export:
         emit_export(pasted)
@@ -333,6 +418,51 @@ def run_auth(
             symbol="info",
         )
     return 0
+
+
+def _run_auth_for_export(host: str, check: bool, verbose: bool) -> int:
+    """Run the auth flow with stdout reserved for the ``export`` line alone.
+
+    ``eval "$(apm auth <host> --export)"`` executes everything on stdout, so a
+    single stray byte there is executed as shell. Keeping that promise takes
+    two layers, because there are two ways to write to stdout:
+
+    1. **Python level** -- narration is redirected to ``sys.stderr`` for the
+       duration of the run. Streaming (rather than buffering and replaying)
+       matters: the flow blocks on ``click.prompt``, so a buffer would hold
+       "paste it below" and the token-page URL until after the paste they were
+       meant to precede, and would lose them entirely if the user hits Ctrl-C.
+
+    2. **File-descriptor level** -- ``redirect_stdout`` only rebinds
+       ``sys.stdout``; fd 1 still points at the terminal, and subprocesses
+       inherit it. ``webbrowser.open`` (``xdg-open``: "no method available"),
+       ``gh auth token`` and ``git credential fill`` all speak on that fd, so
+       fd 1 is pointed at stderr for the whole run and restored in ``finally``.
+
+    The export line is written once both layers have unwound, so it is the
+    only thing the caller's ``eval`` ever sees.
+    """
+    import contextlib
+
+    sink: list[str] = []
+    sys.stdout.flush()
+    real_stdout_fd = os.dup(1)
+    try:
+        # Point fd 1 at stderr so inherited-fd chatter cannot reach the eval.
+        os.dup2(2, 1)
+        with contextlib.redirect_stdout(sys.stderr):
+            try:
+                return run_auth(host, check, True, verbose, sink)
+            finally:
+                sys.stderr.flush()
+    finally:
+        os.dup2(real_stdout_fd, 1)
+        os.close(real_stdout_fd)
+        # Both layers have unwound here -- ``redirect_stdout`` restored
+        # ``sys.stdout`` on exit, and fd 1 is back -- so this is the only
+        # thing the caller's ``eval`` sees.
+        for line in sink:
+            click.echo(line)
 
 
 @click.command(
@@ -362,20 +492,7 @@ def auth(host, check, export_, verbose):
     ``apm marketplace add`` and ``apm install`` for that.
     """
     if export_:
-        # stdout must carry ONLY the export line, so eval "$(...)" is safe.
-        # CommandLogger writes to stdout, so capture that for the whole run,
-        # replay it on stderr, and put just the export line on real stdout.
-        import contextlib
-        import io
-
-        sink: list[str] = []
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            exit_code = run_auth(host, check, export_, verbose, sink)
-        sys.stderr.write(buf.getvalue())
-        sys.stderr.flush()
-        for line in sink:
-            click.echo(line)
+        exit_code = _run_auth_for_export(host, check, verbose)
     else:
         exit_code = run_auth(host, check, export_, verbose)
     if exit_code != 0:
