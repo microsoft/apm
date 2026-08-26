@@ -317,6 +317,21 @@ class TestLoadFrontmatter:
         with_bom.write_bytes(text.encode("utf-8-sig"))
         assert load_frontmatter(str(no_bom)).metadata == load_frontmatter(str(with_bom)).metadata
 
+    def test_already_open_stream_needs_utf8_sig_at_the_open_call(self, tmp_path):
+        """load_frontmatter's own encoding default can't help an already-open
+        stream (frontmatter.load reads it directly and ignores `encoding` in
+        that branch) -- every real caller has to open with utf-8-sig itself,
+        which is what src/apm_cli/primitives/parser.py and friends now do."""
+        text = '---\napplyTo: "**/*.py"\n---\nbody\n'
+        path = tmp_path / "withbom.md"
+        path.write_bytes(text.encode("utf-8-sig"))
+
+        with path.open(encoding="utf-8") as f:
+            assert load_frontmatter(f).metadata == {}
+
+        with path.open(encoding="utf-8-sig") as f:
+            assert load_frontmatter(f).metadata["applyTo"] == "**/*.py"
+
 
 class TestBoundedMergeHappyPath:
     """Legitimate YAML merge keys resolve through the bounded flatten_mapping."""
