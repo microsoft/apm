@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "my-server": {
+      "type": "local",
+      "tools": 

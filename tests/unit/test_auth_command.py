@@ -201,6 +201,24 @@ class TestAuthFlow:
         assert result.exit_code == 0
         assert "rejected" not in result.output
 
+    def test_unvalidatable_credential_still_exports(self):
+        """The CI path: GITHUB_TOKEN that cannot be validated must still export.
+
+        Short-circuiting on 'indeterminate' must not drop the export line --
+        that is the branch an Actions job running --check --export lands on.
+        """
+        with (
+            patch(
+                "apm_cli.commands.auth.resolve_existing_token",
+                return_value=("ghs_actions", "GITHUB_TOKEN"),
+            ),
+            patch("apm_cli.commands.auth.is_interactive", return_value=False),
+            patch("apm_cli.commands.auth.check_token", return_value=("indeterminate", 403)),
+        ):
+            result = self.runner.invoke(auth, ["github.com", "--check", "--export"])
+        assert result.exit_code == 0
+        assert "export GITHUB_APM_PAT='ghs_actions'" in result.stdout
+
     def test_non_interactive_without_token_exits_1(self):
         with (
             patch("apm_cli.commands.auth.resolve_existing_token", return_value=(None, "none")),
