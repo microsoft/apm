@@ -760,6 +760,8 @@ def test_agent_plugin_projection_guard_rejects_bypass(
         "src/apm_cli/commands/uninstall/cli.py",
         "src/apm_cli/commands/uninstall/engine.py",
         "src/apm_cli/commands/install.py",
+        "src/apm_cli/commands/pack.py",
+        "src/apm_cli/commands/plugin/init.py",
         "src/apm_cli/commands/prune.py",
         "src/apm_cli/integration/hook_integrator.py",
         "src/apm_cli/models/apm_package.py",
