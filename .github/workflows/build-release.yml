@@ -99,6 +99,7 @@ jobs:
       - name: Run smoke tests
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: uv run pytest tests/integration/test_runtime_smoke.py -v
@@ -228,6 +229,7 @@ jobs:
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           # Intel validates the promoted lifecycle subset against its native
           # binary. Live credential acceptance belongs to auth-acceptance.yml.
@@ -259,6 +261,7 @@ jobs:
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd /tmp/apm-isolated-test
@@ -342,6 +345,7 @@ jobs:
       - name: Run integration tests
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           # Scarce ARM runners force the full suite onto one runner, so
           # parallelise the non-live corpus in-process with xdist.
@@ -373,6 +377,7 @@ jobs:
       - name: Run release validation tests
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd /tmp/apm-isolated-test
@@ -440,6 +445,7 @@ jobs:
         if: matrix.platform != 'windows'
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}    # Primary: APM module access
           # The tag gate runs the non-live corpus on one runner. Four workers stay
           # below the merge gate's aggregate width while loadgroup preserves
@@ -456,6 +462,7 @@ jobs:
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           uv run pwsh scripts/windows/test-integration.ps1 -SkipBuild
@@ -543,6 +550,7 @@ jobs:
         if: matrix.platform != 'windows'
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd /tmp/apm-isolated-test
@@ -555,6 +563,7 @@ jobs:
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd D:\apm-isolated-test

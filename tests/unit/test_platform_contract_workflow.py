@@ -51,6 +51,17 @@ NON_LIVE_UNIX_PYTEST_ARGS = "-n 4 --dist loadgroup"
 NON_LIVE_MARK_EXPRESSION = "not live"
 INTEL_FOCUSED_INTEGRATION_STEP = "Run focused Intel integration tests"
 INTEL_FOCUSED_MARK_EXPRESSION = "lifecycle_smoke and not live"
+RUNTIME_SETUP_STEPS = (
+    ("build-and-test", "Run smoke tests"),
+    ("build-and-validate-macos-intel", INTEL_FOCUSED_INTEGRATION_STEP),
+    ("build-and-validate-macos-intel", "Run release validation tests"),
+    ("build-and-validate-macos-arm", "Run integration tests"),
+    ("build-and-validate-macos-arm", "Run release validation tests"),
+    ("integration-tests", "Run integration tests (Unix)"),
+    ("integration-tests", "Run integration tests (Windows)"),
+    ("release-validation", "Run release validation tests (Unix)"),
+    ("release-validation", "Run release validation tests (Windows)"),
+)
 
 
 def _workflow() -> dict:
@@ -169,6 +180,18 @@ def test_linux_and_arm_retain_non_live_corpus_grouped_parallelism() -> None:
 def test_intel_integration_is_marker_scoped_and_bounded() -> None:
     """Intel keeps focused native coverage without replaying the full corpus."""
     _assert_intel_focused_integration(_workflow())
+
+
+@pytest.mark.parametrize(("job_id", "step_name"), RUNTIME_SETUP_STEPS)
+def test_runtime_setup_uses_builtin_github_api_token(
+    job_id: str,
+    step_name: str,
+) -> None:
+    """Public runtime metadata must not use the private-module PAT."""
+    workflow = _workflow()
+    step = workflow_step(workflow_job(workflow, job_id), step_name)
+    assert step["env"]["GITHUB_API_TOKEN"] == "${{ github.token }}"
+    assert step["env"]["GITHUB_APM_PAT"] == "${{ secrets.GH_CLI_PAT }}"
 
 
 @pytest.mark.parametrize(
