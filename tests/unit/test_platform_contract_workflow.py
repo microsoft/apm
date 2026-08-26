@@ -47,6 +47,10 @@ NON_LIVE_UNIX_INTEGRATION_STEPS = (
     ("integration-tests", "Run integration tests (Unix)"),
     ("build-and-validate-macos-arm", "Run integration tests"),
 )
+NON_LIVE_UNIX_TIMEOUT_MINUTES = {
+    ("integration-tests", "Run integration tests (Unix)"): 30,
+    ("build-and-validate-macos-arm", "Run integration tests"): 75,
+}
 NON_LIVE_UNIX_PYTEST_ARGS = "-n 4 --dist loadgroup"
 NON_LIVE_MARK_EXPRESSION = "not live"
 INTEL_FOCUSED_INTEGRATION_STEP = "Run focused Intel integration tests"
@@ -137,7 +141,7 @@ def _assert_non_live_unix_integration_parallelism(workflow: dict) -> None:
         step = workflow_step(workflow_job(workflow, job_id), step_name)
         assert step["env"].get("PYTEST_MARK_EXPR") == NON_LIVE_MARK_EXPRESSION
         assert step["env"].get("PYTEST_EXTRA_ARGS") == NON_LIVE_UNIX_PYTEST_ARGS
-        assert step.get("timeout-minutes") == 30
+        assert step.get("timeout-minutes") == NON_LIVE_UNIX_TIMEOUT_MINUTES[(job_id, step_name)]
 
 
 def _assert_intel_focused_integration(workflow: dict) -> None:
@@ -219,10 +223,10 @@ def test_non_live_unix_timeout_mutation_is_rejected(
     job_id: str,
     step_name: str,
 ) -> None:
-    """Every non-live Unix release node remains bounded to 30 minutes."""
+    """Every non-live Unix release node retains its measured timeout bound."""
     workflow = deepcopy(_workflow())
     step = workflow_step(workflow_job(workflow, job_id), step_name)
-    step["timeout-minutes"] = 31
+    step["timeout-minutes"] = NON_LIVE_UNIX_TIMEOUT_MINUTES[(job_id, step_name)] + 1
 
     with pytest.raises(AssertionError):
         _assert_non_live_unix_integration_parallelism(workflow)

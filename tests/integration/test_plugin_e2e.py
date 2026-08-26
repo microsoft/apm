@@ -699,6 +699,8 @@ class TestPluginNetworkE2E:
         f"microsoft/apm/tests/fixtures/mock-marketplace-plugin/skills/test-skill#{FIXTURE_COMMIT}"
     )
     SKILL_PATH = "microsoft/apm/tests/fixtures/mock-marketplace-plugin/skills/test-skill"
+    MIXED_SKILL_REF = f"microsoft/apm/.apm/skills/devx-ux#{FIXTURE_COMMIT}"
+    MIXED_SKILL_PATH = "microsoft/apm/.apm/skills/devx-ux"
     NATIVE_PLUGIN_REF = (
         "github/awesome-copilot/plugins/context-engineering#"
         "71f7c9b1dc5044287b62fc700efc034da4065f87"
@@ -809,7 +811,7 @@ class TestPluginNetworkE2E:
             "dependencies:\n"
             "  apm:\n"
             f"    - {self.PLUGIN_REF}\n"
-            f"    - {self.SKILL_REF}\n"
+            f"    - {self.MIXED_SKILL_REF}\n"
         )
 
         result = subprocess.run(
@@ -826,12 +828,12 @@ class TestPluginNetworkE2E:
 
         # Both packages installed
         assert (temp_project / "apm_modules" / self.PLUGIN_PATH).is_dir()
-        review_path = temp_project / "apm_modules" / self.SKILL_PATH
-        # The skill may be installed as a virtual subdir or flattened — check either
-        skill_installed = review_path.is_dir() or any(
-            (temp_project / "apm_modules" / "microsoft").rglob("test-skill")
+        skill_path = temp_project / "apm_modules" / self.MIXED_SKILL_PATH
+        # The skill may be installed as a virtual subdir or flattened - check either.
+        skill_installed = skill_path.is_dir() or any(
+            (temp_project / "apm_modules" / "microsoft").rglob("devx-ux")
         )
-        assert skill_installed, "test-skill should be installed"
+        assert skill_installed, "devx-ux should be installed"
 
         # deps list — no orphans
         list_result = subprocess.run(
