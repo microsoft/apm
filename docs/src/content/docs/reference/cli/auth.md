@@ -24,6 +24,12 @@ only duplicate them.
 `HOST` is a host name (`github.com`, `gitlab.com`, `ghe.corp.example`), not a
 repository or marketplace URL.
 
+Self-managed hosts need their env hint set first, because APM classifies them
+from configuration rather than guessing from the hostname: `GITHUB_HOST` for
+GitHub Enterprise Server, `GITLAB_HOST` (or `APM_GITLAB_HOSTS`) for
+self-managed GitLab. Without it the host is `generic` and `apm auth` exits
+non-zero, naming the variable to set.
+
 ## How APM resolves tokens
 
 Environment variables are consulted **before** any git credential helper, so
@@ -32,7 +38,7 @@ exporting one is sufficient -- no git configuration change is required.
 | Host | Resolution order | Scopes |
 |---|---|---|
 | GitLab | `GITLAB_APM_PAT`, `GITLAB_TOKEN`, git credential helper | `read_repository,read_api` |
-| GitHub / GHES | `GITHUB_APM_PAT`, `GITHUB_TOKEN`, `gh auth token`, git credential helper | `repo` |
+| GitHub / GHES | `GITHUB_APM_PAT`, `GITHUB_TOKEN`, `GH_TOKEN`, `gh auth token`, git credential helper | `repo` |
 
 Azure DevOps and generic git hosts resolve differently and have no token page
 to point at; `apm auth` exits non-zero for them. Use [`apm doctor`](../doctor/)
@@ -76,6 +82,25 @@ session token** -- what `glab auth login` leaves behind -- returns `401` from
 the API. `--check` names that specific failure instead of leaving you with a
 confusing downstream error.
 
+### When the check cannot reach a verdict
+
+`--check` separates *rejected* from *could not find out*, and only the first
+means you need a new token:
+
+| Outcome | Reported as | Exit |
+|---|---|---|
+| API accepted the credential | validated | `0` |
+| API refused it (`401`, or `403` on a normal PAT) | rejected -- create a new token | `1` |
+| API unreachable, `5xx`, or rate-limited | could not validate; credential kept | `0` |
+| GitHub App installation token (`ghs_`) | could not validate; credential kept | `0` |
+
+The last two matter in CI. A captive portal or a transient `502` is not
+evidence your token is bad, so `apm auth --check` will not fail a build over
+one. GitHub Actions' own `GITHUB_TOKEN` is an installation token: it has no
+user context, so the identity endpoint answers `403` even though the token
+reads repository contents perfectly well. APM cannot validate such a token
+here and says so rather than rejecting a credential that works.
+
 ## Options
 
 | Flag | Description |
@@ -88,7 +113,7 @@ confusing downstream error.
 
 | Code | Meaning |
 |---|---|
-| `0` | A credential is available (and valid, with `--check`). |
+| `0` | A credential is available (and, with `--check`, either validated or not disprovable). |
 | `1` | No usable credential, `HOST` was not a host name, or the host has no token flow. |
 
 ## Non-interactive use
