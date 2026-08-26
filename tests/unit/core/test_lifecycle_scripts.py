@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
 from apm_cli.core.lifecycle_scripts import (
@@ -155,17 +156,17 @@ class TestParseApmYmlLifecycle:
 
 
 class TestGetPolicyScriptsDir:
-    def test_windows_honours_programdata_env_var(self, monkeypatch) -> None:
+    def test_windows_honours_programdata_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("platform.system", lambda: "Windows")
         monkeypatch.setenv("PROGRAMDATA", r"D:\ProgramData")
         assert _get_policy_scripts_dir() == Path(r"D:\ProgramData") / "APM" / "policy.d"
 
-    def test_windows_falls_back_to_c_drive_when_unset(self, monkeypatch) -> None:
+    def test_windows_falls_back_to_c_drive_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("platform.system", lambda: "Windows")
         monkeypatch.delenv("PROGRAMDATA", raising=False)
         assert _get_policy_scripts_dir() == Path(r"C:\ProgramData") / "APM" / "policy.d"
 
-    def test_non_windows_uses_etc(self, monkeypatch) -> None:
+    def test_non_windows_uses_etc(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("platform.system", lambda: "Linux")
         assert _get_policy_scripts_dir() == Path("/etc/apm/policy.d")
 
