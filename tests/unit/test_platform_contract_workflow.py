@@ -21,6 +21,7 @@ from tests.workflow_contracts import (
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build-release.yml"
+WINDOWS_RELEASE_VALIDATION = ROOT / "scripts" / "windows" / "test-release-validation.ps1"
 MACOS_VERSION_TEST_ID = (
     "tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs"
 )
@@ -196,6 +197,25 @@ def test_runtime_setup_uses_builtin_github_api_token(
     step = workflow_step(workflow_job(workflow, job_id), step_name)
     assert step["env"]["GITHUB_API_TOKEN"] == "${{ github.token }}"
     assert step["env"]["GITHUB_APM_PAT"] == "${{ secrets.GH_CLI_PAT }}"
+
+
+def test_release_validation_keeps_live_inference_decoupled() -> None:
+    """Release gates install runtimes but do not invoke paid live inference."""
+    workflow = _workflow()
+    job = workflow_job(workflow, "release-validation")
+    for step_name in (
+        "Run release validation tests (Unix)",
+        "Run release validation tests (Windows)",
+    ):
+        env = effective_env(workflow, job, workflow_step(job, step_name))
+        assert "APM_RUN_INFERENCE_TESTS" not in env
+        assert "GITHUB_TOKEN" not in env
+
+    script = WINDOWS_RELEASE_VALIDATION.read_text(encoding="utf-8")
+    assert script.count('$env:APM_RUN_INFERENCE_TESTS -eq "1"') >= 2
+    assert '$env:APM_RUN_INFERENCE_TESTS -ne "1"' in script
+    assert "$testsTotal = 4" in script
+    assert "$env:GITHUB_APM_PAT -or $env:GITHUB_TOKEN" in script
 
 
 @pytest.mark.parametrize(
