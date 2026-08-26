@@ -8,6 +8,7 @@ import os
 import stat
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 from typing import get_args
 
 import pytest
@@ -124,39 +125,16 @@ def test_inventory_accepts_portable_descriptor_mode_difference(
     _write_manifest(tmp_path)
     _write_valid_skill(tmp_path, "portable")
     real_fstat = os.fstat
-    real_lstat = Path.lstat
-    observed_lstats: list[tuple[int, int, int, int]] = []
-    observed_fstats: list[tuple[int, int, int, int]] = []
 
-    def record_lstat(path: Path) -> os.stat_result:
-        result = real_lstat(path)
-        if path.name == "SKILL.md":
-            observed_lstats.append(
-                (result.st_dev, result.st_ino, result.st_size, result.st_mode)
-            )
-        return result
-
-    def fstat_with_different_permission_bits(descriptor: int) -> os.stat_result:
+    def fstat_with_different_permission_bits(descriptor: int) -> SimpleNamespace:
         result = real_fstat(descriptor)
-        observed_fstats.append(
-            (result.st_dev, result.st_ino, result.st_size, result.st_mode)
-        )
-        return os.stat_result(
-            (
-                result.st_mode ^ stat.S_IWUSR,
-                result.st_ino,
-                result.st_dev,
-                result.st_nlink,
-                result.st_uid,
-                result.st_gid,
-                result.st_size,
-                result.st_atime,
-                result.st_mtime,
-                result.st_ctime,
-            )
+        return SimpleNamespace(
+            st_mode=result.st_mode ^ stat.S_IWUSR,
+            st_ino=result.st_ino,
+            st_dev=result.st_dev,
+            st_size=result.st_size,
         )
 
-    monkeypatch.setattr(Path, "lstat", record_lstat)
     monkeypatch.setattr(
         "apm_cli.agent_plugins.assets.os.fstat",
         fstat_with_different_permission_bits,
@@ -164,11 +142,7 @@ def test_inventory_accepts_portable_descriptor_mode_difference(
 
     plugin = load_agent_plugin(tmp_path)
 
-    assert tuple(skill.directory_name for skill in plugin.components.skills) == ("portable",), (
-        observed_lstats,
-        observed_fstats,
-        plugin.diagnostics,
-    )
+    assert tuple(skill.directory_name for skill in plugin.components.skills) == ("portable",)
     assert not any(diagnostic.code == "skill.assets.invalid" for diagnostic in plugin.diagnostics)
     asset = plugin.components.skills[0].assets[0]
     assert asset.sha256 == hashlib.sha256((tmp_path / asset.path).read_bytes()).hexdigest()

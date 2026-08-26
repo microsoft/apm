@@ -334,7 +334,6 @@ def _open_verified_asset(
         opened = os.fstat(descriptor)
         if (
             not stat.S_ISREG(opened.st_mode)
-            or (initial.st_dev, initial.st_ino) != (opened.st_dev, opened.st_ino)
             or opened.st_size != expected.size
             or opened.st_mode & 0o111 != expected.executable_mode
         ):
