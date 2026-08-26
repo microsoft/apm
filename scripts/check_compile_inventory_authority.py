@@ -51,6 +51,8 @@ def main() -> int:
             (
                 "source_inventory: CompileInventory | None = None",
                 "deploy_inventory: CompileInventory | None = None",
+                '(entry.path / ".git").is_file()',
+                "relative_path.is_relative_to(worktree_root)",
                 "for directory_path, (relative_path, files) in sorted(cleanup_directories.items()):",
             ),
         )
