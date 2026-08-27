@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import os
+import queue
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
+from tests.utils.git_credential_shim import GitCredentialShimFactory
 from tests.utils.local_git_repository import (
     GitCommit,
     LocalGitRepository,
@@ -16,6 +19,50 @@ from tests.utils.local_git_repository import (
 )
 
 _GIT_TIMEOUT_SECONDS = 10.0
+
+
+def test_git_credential_shim_streams_persistent_cat_file_output(tmp_path: Path) -> None:
+    """The shim must not buffer GitPython's persistent cat-file process."""
+    environment = _git_environment(tmp_path)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _run_git("init", str(repository), environment=environment)
+    readme = repository / "README.md"
+    readme.write_text("fixture\n", encoding="utf-8")
+    _run_git("-C", str(repository), "add", "README.md", environment=environment)
+    _run_git("-C", str(repository), "commit", "-m", "fixture", environment=environment)
+    real_git = Path(shutil.which("git") or "git").resolve()
+    shim = GitCredentialShimFactory(tmp_path / "shim").create(
+        base_env=environment,
+        real_git=real_git,
+        remote_map={},
+    )
+
+    process = subprocess.Popen(
+        ("git", "cat-file", "--batch-check"),
+        cwd=repository,
+        env=shim.environment,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    output: queue.Queue[str] = queue.Queue()
+    reader = threading.Thread(target=lambda: output.put(process.stdout.readline()), daemon=True)
+    try:
+        assert process.stdin is not None
+        process.stdin.write("HEAD\n")
+        process.stdin.flush()
+        reader.start()
+        reader.join(timeout=_GIT_TIMEOUT_SECONDS)
+        assert not reader.is_alive(), "cat-file output was buffered until process exit"
+        object_id, object_type, object_size = output.get_nowait().split()
+        assert len(object_id) == 40
+        assert object_type == "commit"
+        assert int(object_size) > 0
+    finally:
+        process.terminate()
+        process.wait(timeout=_GIT_TIMEOUT_SECONDS)
 
 
 def _git_environment(tmp_path: Path) -> dict[str, str]:

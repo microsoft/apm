@@ -141,6 +141,38 @@ def test_setup_codex_uses_token_for_metadata_fetch(tmp_path: Path, codex_platfor
     assert "ghp_test_token" not in curl_log
 
 
+def test_setup_codex_prefers_api_token_for_metadata_fetch(
+    tmp_path: Path,
+    codex_platform: str,
+) -> None:
+    asset_name = f"codex-{codex_platform}.tar.gz"
+    tarball = tmp_path / asset_name
+    metadata = tmp_path / "release.json"
+
+    write_fake_archive(tarball)
+    write_release_metadata(metadata, asset_name=asset_name, digest=sha256(tarball))
+
+    result = run_setup(
+        tmp_path,
+        release_json=metadata,
+        tarball=tarball,
+        env_updates={
+            "GITHUB_API_TOKEN": "api_token",
+            "GITHUB_TOKEN": "models_token",
+            "GITHUB_APM_PAT": "module_token",
+            "EXPECTED_AUTH_HEADER": "Authorization: Bearer api_token",
+        },
+    )
+    output = result.stdout + result.stderr
+    curl_log = (tmp_path / "curl.log").read_text(encoding="utf-8")
+
+    assert result.returncode == 0, output
+    assert "api auth=yes" in curl_log
+    for token in ("api_token", "models_token", "module_token"):
+        assert token not in output
+        assert token not in curl_log
+
+
 def test_setup_codex_uses_gh_token_for_metadata_fetch(tmp_path: Path, codex_platform: str) -> None:
     asset_name = f"codex-{codex_platform}.tar.gz"
     tarball = tmp_path / asset_name

@@ -760,6 +760,8 @@ def test_agent_plugin_projection_guard_rejects_bypass(
         "src/apm_cli/commands/uninstall/cli.py",
         "src/apm_cli/commands/uninstall/engine.py",
         "src/apm_cli/commands/install.py",
+        "src/apm_cli/commands/pack.py",
+        "src/apm_cli/commands/plugin/init.py",
         "src/apm_cli/commands/prune.py",
         "src/apm_cli/integration/hook_integrator.py",
         "src/apm_cli/models/apm_package.py",
@@ -1117,8 +1119,8 @@ def test_gitlab_policy_adapter_guard_survives_nested_facade_else(tmp_path: Path)
 @pytest.mark.parametrize(
     ("guard", "replacement"),
     [
-        ('(directory_path / ".git").is_file()', "False"),
-        ("child_dirs.clear()", "pass"),
+        ('(entry.path / ".git").is_file()', "False"),
+        ("relative_path.is_relative_to(worktree_root)", "False"),
     ],
 )
 def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
@@ -1142,6 +1144,7 @@ def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
     )
     compiler_path = sandbox / "src/apm_cli/compilation/distributed_compiler.py"
     source = compiler_path.read_text(encoding="utf-8")
+    assert source.count(guard) == 1
     compiler_path.write_text(
         source.replace(guard, replacement, 1),
         encoding="utf-8",
@@ -1157,7 +1160,7 @@ def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
     )
 
     assert result.returncode == 1
-    assert "Nested worktree cleanup must prune .git-file roots" in result.stdout
+    assert "Compile traversal must route through compilation/inventory.py" in result.stdout
 
 
 def test_experimental_target_hints_have_single_owner() -> None:

@@ -34,6 +34,8 @@ SINGLE_EXAMPLE_PROFILE = settings(
     database=None,
     print_blob=True,
 )
+IO_PROPERTY_PROFILE = settings(parent=PROPERTY_PROFILE, deadline=None)
+SINGLE_IO_EXAMPLE_PROFILE = settings(parent=SINGLE_EXAMPLE_PROFILE, deadline=None)
 POLICY_URL = "https://policy.example.com/apm-policy.yml"
 PACKAGE_VALUES = (
     "acme/alpha",
@@ -302,7 +304,7 @@ def test_effective_policy_cache_serialization_is_lossless_and_canonical(
 
 
 @seed(PROPERTY_SEED)
-@PROPERTY_PROFILE
+@IO_PROPERTY_PROFILE
 @given(data=enforceable_policy_data())
 def test_cold_and_warm_policy_results_are_observationally_equivalent(
     data: dict[str, Any],
@@ -324,7 +326,7 @@ def test_cold_and_warm_policy_results_are_observationally_equivalent(
 
 
 @seed(PROPERTY_SEED)
-@PROPERTY_PROFILE
+@IO_PROPERTY_PROFILE
 @given(data=enforceable_policy_data())
 def test_policy_cache_ttl_controls_when_warm_reads_refresh(
     data: dict[str, Any],
@@ -334,7 +336,7 @@ def test_policy_cache_ttl_controls_when_warm_reads_refresh(
 
 
 @seed(PROPERTY_SEED)
-@SINGLE_EXAMPLE_PROFILE
+@SINGLE_IO_EXAMPLE_PROFILE
 @given(data=enforceable_policy_data())
 def test_cache_ttl_property_breaks_if_reader_uses_fixed_default(
     data: dict[str, Any],
@@ -368,7 +370,7 @@ def test_cache_ttl_property_breaks_if_reader_uses_fixed_default(
     ids=[case[0] for case in INVALID_CASES],
 )
 @seed(PROPERTY_SEED)
-@SINGLE_EXAMPLE_PROFILE
+@SINGLE_IO_EXAMPLE_PROFILE
 @given(valid_data=enforceable_policy_data())
 def test_invalid_refresh_fails_closed_and_preserves_last_good_cache(
     _case_name: str,

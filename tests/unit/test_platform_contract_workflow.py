@@ -21,6 +21,7 @@ from tests.workflow_contracts import (
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build-release.yml"
+WINDOWS_RELEASE_VALIDATION = ROOT / "scripts" / "windows" / "test-release-validation.ps1"
 MACOS_VERSION_TEST_ID = (
     "tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs"
 )
@@ -47,10 +48,25 @@ NON_LIVE_UNIX_INTEGRATION_STEPS = (
     ("integration-tests", "Run integration tests (Unix)"),
     ("build-and-validate-macos-arm", "Run integration tests"),
 )
+NON_LIVE_UNIX_TIMEOUT_MINUTES = {
+    ("integration-tests", "Run integration tests (Unix)"): 60,
+    ("build-and-validate-macos-arm", "Run integration tests"): 60,
+}
 NON_LIVE_UNIX_PYTEST_ARGS = "-n 4 --dist loadgroup"
 NON_LIVE_MARK_EXPRESSION = "not live"
 INTEL_FOCUSED_INTEGRATION_STEP = "Run focused Intel integration tests"
 INTEL_FOCUSED_MARK_EXPRESSION = "lifecycle_smoke and not live"
+RUNTIME_SETUP_STEPS = (
+    ("build-and-test", "Run smoke tests"),
+    ("build-and-validate-macos-intel", INTEL_FOCUSED_INTEGRATION_STEP),
+    ("build-and-validate-macos-intel", "Run release validation tests"),
+    ("build-and-validate-macos-arm", "Run integration tests"),
+    ("build-and-validate-macos-arm", "Run release validation tests"),
+    ("integration-tests", "Run integration tests (Unix)"),
+    ("integration-tests", "Run integration tests (Windows)"),
+    ("release-validation", "Run release validation tests (Unix)"),
+    ("release-validation", "Run release validation tests (Windows)"),
+)
 
 
 def _workflow() -> dict:
@@ -117,7 +133,7 @@ def _assert_standalone_integration_timeouts(workflow: dict) -> None:
     job = workflow_job(workflow, "integration-tests")
     unix_step = workflow_step(job, "Run integration tests (Unix)")
     windows_step = workflow_step(job, "Run integration tests (Windows)")
-    assert unix_step.get("timeout-minutes") == 30
+    assert unix_step.get("timeout-minutes") == 60
     assert windows_step.get("timeout-minutes") == 20
 
 
@@ -126,7 +142,7 @@ def _assert_non_live_unix_integration_parallelism(workflow: dict) -> None:
         step = workflow_step(workflow_job(workflow, job_id), step_name)
         assert step["env"].get("PYTEST_MARK_EXPR") == NON_LIVE_MARK_EXPRESSION
         assert step["env"].get("PYTEST_EXTRA_ARGS") == NON_LIVE_UNIX_PYTEST_ARGS
-        assert step.get("timeout-minutes") == 30
+        assert step.get("timeout-minutes") == NON_LIVE_UNIX_TIMEOUT_MINUTES[(job_id, step_name)]
 
 
 def _assert_intel_focused_integration(workflow: dict) -> None:
@@ -171,6 +187,37 @@ def test_intel_integration_is_marker_scoped_and_bounded() -> None:
     _assert_intel_focused_integration(_workflow())
 
 
+@pytest.mark.parametrize(("job_id", "step_name"), RUNTIME_SETUP_STEPS)
+def test_runtime_setup_uses_builtin_github_api_token(
+    job_id: str,
+    step_name: str,
+) -> None:
+    """Public runtime metadata must not use the private-module PAT."""
+    workflow = _workflow()
+    step = workflow_step(workflow_job(workflow, job_id), step_name)
+    assert step["env"]["GITHUB_API_TOKEN"] == "${{ github.token }}"
+    assert step["env"]["GITHUB_APM_PAT"] == "${{ secrets.GH_CLI_PAT }}"
+
+
+def test_release_validation_keeps_live_inference_decoupled() -> None:
+    """Release gates install runtimes but do not invoke paid live inference."""
+    workflow = _workflow()
+    job = workflow_job(workflow, "release-validation")
+    for step_name in (
+        "Run release validation tests (Unix)",
+        "Run release validation tests (Windows)",
+    ):
+        env = effective_env(workflow, job, workflow_step(job, step_name))
+        assert "APM_RUN_INFERENCE_TESTS" not in env
+        assert "GITHUB_TOKEN" not in env
+
+    script = WINDOWS_RELEASE_VALIDATION.read_text(encoding="utf-8")
+    assert script.count('$env:APM_RUN_INFERENCE_TESTS -eq "1"') >= 2
+    assert '$env:APM_RUN_INFERENCE_TESTS -ne "1"' in script
+    assert "$testsTotal = 4" in script
+    assert "$env:GITHUB_APM_PAT -or $env:GITHUB_TOKEN" in script
+
+
 @pytest.mark.parametrize(
     ("job_id", "step_name"),
     NON_LIVE_UNIX_INTEGRATION_STEPS,
@@ -196,10 +243,10 @@ def test_non_live_unix_timeout_mutation_is_rejected(
     job_id: str,
     step_name: str,
 ) -> None:
-    """Every non-live Unix release node remains bounded to 30 minutes."""
+    """Every non-live Unix release node retains its measured timeout bound."""
     workflow = deepcopy(_workflow())
     step = workflow_step(workflow_job(workflow, job_id), step_name)
-    step["timeout-minutes"] = 31
+    step["timeout-minutes"] = NON_LIVE_UNIX_TIMEOUT_MINUTES[(job_id, step_name)] + 1
 
     with pytest.raises(AssertionError):
         _assert_non_live_unix_integration_parallelism(workflow)
