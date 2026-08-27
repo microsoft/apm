@@ -23,6 +23,17 @@ from ._builders import QUALIFIED_VERSION, write_agent_plugin
 pytestmark = pytest.mark.component
 
 
+def _flat(text: str) -> str:
+    """Collapse whitespace so assertions survive terminal-width word wrapping.
+
+    CommandLogger renders through rich, which re-wraps at the detected
+    terminal width. A CI runner and a developer terminal disagree on that
+    width, so a multi-word phrase can land with an embedded newline. Compare
+    against the whitespace-normalized output instead of the raw buffer.
+    """
+    return " ".join(text.split())
+
+
 def _write_project(project: Path, dependencies: list) -> None:
     project.mkdir(parents=True, exist_ok=True)
     (project / "apm.yml").write_text(
@@ -81,9 +92,10 @@ def test_settings_collision_renders_verbatim_without_double_prefix(
     result = _install(monkeypatch, project)
 
     assert result.exit_code != 0, result.output
-    assert "does not own it" in result.output or "already defines" in result.output
-    assert "Failed to install APM dependencies" not in result.output
-    assert "Failed to resolve APM dependencies" not in result.output
+    flat = _flat(result.output)
+    assert "does not own it" in flat or "already defines" in flat
+    assert "Failed to install APM dependencies" not in flat
+    assert "Failed to resolve APM dependencies" not in flat
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +125,7 @@ def test_dry_run_announces_the_settings_write(
     result = CliRunner().invoke(cli, ["prune", "--dry-run"], catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
-    assert "Would register 1 Agent Plugin with GitHub Copilot in" in result.output
+    assert "Would register 1 Agent Plugin with GitHub Copilot in" in _flat(result.output)
     # CommandLogger word-wraps long paths, so compare with whitespace stripped.
     assert str(_settings_path(project)) in "".join(result.output.split())
 
@@ -141,10 +153,11 @@ def test_malformed_settings_json_reports_human_message(
     result = _install(monkeypatch, project)
 
     assert result.exit_code != 0, result.output
-    assert "is not valid JSON" in result.output
-    assert "Your packages are already installed" in result.output
+    flat = _flat(result.output)
+    assert "is not valid JSON" in flat
+    assert "Your packages are already installed" in flat
     # The raw decoder message stays behind --verbose.
-    assert "Expecting property name" not in result.output
+    assert "Expecting property name" not in flat
 
 
 def test_malformed_settings_json_keeps_decoder_detail_under_verbose(
@@ -165,8 +178,9 @@ def test_malformed_settings_json_keeps_decoder_detail_under_verbose(
     result = _install(monkeypatch, project, "--verbose")
 
     assert result.exit_code != 0, result.output
-    assert "is not valid JSON" in result.output
-    assert "Expecting property name" in result.output
+    flat = _flat(result.output)
+    assert "is not valid JSON" in flat
+    assert "Expecting property name" in flat
 
 
 # ---------------------------------------------------------------------------
@@ -189,10 +203,9 @@ def test_install_summary_caps_the_inline_plugin_roster(
     result = _install(monkeypatch, project)
 
     assert result.exit_code == 0, result.output
-    assert "Registered 4 Agent Plugins with GitHub Copilot" in result.output
-    assert "and 1 more" in result.output
+    flat = _flat(result.output)
+    assert "Registered 4 Agent Plugins with GitHub Copilot" in flat
+    assert "and 1 more" in flat
     # The fourth name is pushed to verbose_detail, not the summary line.
-    summary_line = next(
-        line for line in result.output.splitlines() if "Registered 4 Agent Plugins" in line
-    )
-    assert "delta" not in summary_line
+    summary = flat.split("Registered 4 Agent Plugins with GitHub Copilot", 1)[1]
+    assert "delta" not in summary.split("[")[0]
