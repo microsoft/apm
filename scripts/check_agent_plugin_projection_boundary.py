@@ -301,6 +301,24 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             and isinstance(boundary_def.body[-1], ast.Raise)
             and _raise_name(boundary_def.body[-1]) == "AgentPluginDeploymentBoundaryError"
         )
+        admission_guards = [
+            node
+            for node in ast.walk(boundary_def)
+            if isinstance(node, ast.If)
+            and any(
+                isinstance(item, ast.Attribute) and item.attr == "supported"
+                for item in ast.walk(node.test)
+            )
+        ]
+        # Native admission must be a conjunction of "a capability was published"
+        # AND "it is supported". A disjunction would admit every native package
+        # whenever no capability was resolved -- the exact fail-open shape this
+        # boundary exists to prevent.
+        admission_is_conjunctive = len(admission_guards) == 1 and all(
+            isinstance(guard.test, ast.BoolOp) and isinstance(guard.test.op, ast.And)
+            for guard in admission_guards
+        )
+        consults_capability_owner = "current_native_registration" in _function_calls(boundary_def)
         if (
             len(native_package_guards) != 1
             or not native_package_guards[0].body
@@ -310,6 +328,8 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             or not has_native_bundle_check
             or not bundle_fails_closed
             or not package_fails_closed
+            or not admission_is_conjunctive
+            or not consults_capability_owner
         ):
             violations.append(
                 f"{errors_path}: native deployment boundary must fail closed on "

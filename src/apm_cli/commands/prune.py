@@ -1,5 +1,6 @@
 """APM prune command."""
 
+import contextlib
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import DeploymentLedgerCodec
 from ..core.deployment_state import LocatorKind
+from ..core.scope import InstallScope
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, get_lockfile_path
@@ -94,6 +96,7 @@ def prune(ctx, dry_run):
         apm prune --dry-run # Show what would be removed
     """
     logger = CommandLogger("prune", dry_run=dry_run)
+    registration_token = _publish_native_registration(Path.cwd())
     try:
         if not Path(APM_YML_FILENAME).exists():
             logger.error("No apm.yml found. Run 'apm init' first.")
@@ -168,6 +171,7 @@ def prune(ctx, dry_run):
                     "No orphaned packages found. apm_modules/ is clean.",
                     symbol="check",
                 )
+            _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
             return
 
         planned_pruned_keys = set(missing_orphaned_keys)
@@ -337,6 +341,8 @@ def prune(ctx, dry_run):
                 )
                 sys.exit(1)
 
+        _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
+
         logger.render_summary()
 
         if pruned_keys:
@@ -388,3 +394,52 @@ def prune(ctx, dry_run):
     except Exception as e:
         logger.error(f"Error pruning packages: {e}")
         sys.exit(1)
+    finally:
+        _retire_native_registration(registration_token)
+
+
+def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run: bool) -> None:
+    """Rebuild APM's Copilot plugin registration from surviving locked state."""
+    if dry_run:
+        return
+    try:
+        from ..copilot_plugins.registrar import resync_native_plugins
+
+        resync_native_plugins(
+            project_root=project_root,
+            modules_dir=apm_modules_dir,
+            scope=InstallScope.PROJECT,
+            lockfile=lockfile,
+            logger=logger,
+        )
+    except Exception as registration_error:
+        logger.warning(
+            "GitHub Copilot plugin registration could not be updated: "
+            f"{type(registration_error).__name__}: {registration_error}"
+        )
+
+
+def _publish_native_registration(project_root: Path):
+    """Publish the Copilot native-plugin capability for this prune."""
+    from ..copilot_plugins.capability import (
+        activate_native_registration,
+        resolve_native_registration_capability,
+    )
+    from ..integration.targets import resolve_targets
+
+    try:
+        targets = resolve_targets(project_root, user_scope=False)
+    except Exception:
+        targets = ()
+    return activate_native_registration(resolve_native_registration_capability(targets))
+
+
+def _retire_native_registration(token) -> None:
+    """Retire the published capability once the command finishes."""
+    from ..copilot_plugins.capability import reset_native_registration
+
+    if token is None:
+        return
+    # A token created in another context is not ours to reset.
+    with contextlib.suppress(ValueError):
+        reset_native_registration(token)

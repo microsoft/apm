@@ -1899,6 +1899,37 @@ if ! python3 scripts/check_hash_visible_lf_writes.py; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC35: native Copilot Agent Plugin registration authority"
+native_registration_owner_defs=$(grep -rEc \
+    '^def resolve_native_registration_capability\(' \
+    src/apm_cli --include='*.py' \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+native_catalog_owner_defs=$(grep -rEc \
+    '^def synchronize_copilot_plugins\(' \
+    src/apm_cli --include='*.py' \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+native_min_version_hits=$(
+    grep -rn "1\.0\.81-8" src/apm_cli --include='*.py' \
+        | grep -v 'src/apm_cli/copilot_plugins/constants.py' \
+        || true
+)
+native_settings_key_hits=$(
+    grep -rn "extraKnownMarketplaces\|enabledPlugins" src/apm_cli --include='*.py' \
+        | grep -v 'src/apm_cli/copilot_plugins/' \
+        || true
+)
+if [ "$native_registration_owner_defs" -ne 1 ] \
+    || [ "$native_catalog_owner_defs" -ne 1 ] \
+    || ! grep -q 'from apm_cli.copilot_plugins.capability import current_native_registration' \
+        src/apm_cli/agent_plugins/errors.py \
+    || [ -n "$native_min_version_hits" ] \
+    || [ -n "$native_settings_key_hits" ]; then
+    echo "[x] Native Copilot plugin registration must route through copilot_plugins/"
+    [ -n "$native_min_version_hits" ] && echo "$native_min_version_hits"
+    [ -n "$native_settings_key_hits" ] && echo "$native_settings_key_hits"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC18: bootstrap project-name authority"
 if ! uv run --extra dev python scripts/lint-bootstrap-project-name.py; then
     echo "[x] Manifest bootstrap names must route through core/project_name.py"

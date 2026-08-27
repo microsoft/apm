@@ -486,7 +486,7 @@ def test_mixed_dependency_batch_is_atomic_at_cli_boundary(
     assert native_integrator_calls == []
     output = " ".join(result.output.split())
     assert "Installed 1 APM" not in output
-    assert "no native harness is binary-qualified" in output
+    assert "Agent Plugins v1.0.0" in output
     assert "apm pack --claude-plugin" in output
     assert "ask the publisher for a legacy-compatible package" in output
 
@@ -567,7 +567,6 @@ def test_dry_run_renders_one_native_failure_with_real_install_parity(
 
     assert native_integrator_calls == []
     for phrase in (
-        "no native harness is binary-qualified",
         "apm pack --claude-plugin",
         "ask the publisher for a legacy-compatible package",
     ):
@@ -604,7 +603,7 @@ def test_dry_run_native_preflight_skips_apm_when_only_mcp_is_selected(
 
     assert result.exit_code == 0, result.output
     assert _tree_snapshot(project) == before
-    assert "no native harness is binary-qualified" not in result.output
+    assert "Agent Plugins v1.0.0" not in result.output
 
 
 def test_dry_run_native_detection_does_not_normalize_legacy_plugin_source(
@@ -775,7 +774,7 @@ def test_uninstall_cli_blocks_native_survivor_before_scripts_or_writes(
     assert result.exit_code == 1
     assert _tree_snapshot(project) == before
     assert fire_scripts.mock_calls == []
-    assert "no native harness is binary-qualified" in " ".join(result.output.split())
+    assert "Agent Plugins v1.0.0" in " ".join(result.output.split())
 
 
 def test_uninstall_allows_native_transitive_orphan_removal(
@@ -868,7 +867,7 @@ def test_prune_blocks_native_survivor_before_removal_or_reconciliation(
     assert remove.mock_calls == []
     assert sync.mock_calls == []
     assert integrate.mock_calls == []
-    assert "no native harness is binary-qualified" in " ".join(result.output.split())
+    assert "Agent Plugins v1.0.0" in " ".join(result.output.split())
 
 
 def test_prune_dry_run_does_not_reintegrate_native_survivors(
@@ -891,7 +890,7 @@ def test_prune_dry_run_does_not_reintegrate_native_survivors(
     assert _tree_snapshot(project) == before
     assert sync.mock_calls == []
     assert integrate.mock_calls == []
-    assert "no native harness is binary-qualified" not in result.output
+    assert "Agent Plugins v1.0.0" not in result.output
 
 
 def test_direct_hook_reconciliation_cannot_bypass_native_survivor_gate(

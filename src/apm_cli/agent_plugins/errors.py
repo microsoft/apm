@@ -9,16 +9,23 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from apm_cli.models.apm_package import DependencyReference, PackageInfo
 
-_AGENT_PLUGIN_RECOVERY = (
+AGENT_PLUGIN_RECOVERY = (
     "Use 'apm pack --claude-plugin' or ask the publisher for a legacy-compatible package."
 )
 AGENT_PLUGIN_DEPLOYMENT_BLOCKED = (
     "Agent Plugins v1.0.0 deployment is blocked because no native harness "
-    "is binary-qualified. " + _AGENT_PLUGIN_RECOVERY
+    "is binary-qualified. " + AGENT_PLUGIN_RECOVERY
+)
+AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED = (
+    "Agent Plugins v1.0.0 packages cannot be installed through the imperative "
+    "local-bundle route, which deploys loose primitives and owns no lockfile "
+    "row. Declare the plugin as a dependency in apm.yml (a local path works) "
+    "and run 'apm install --target copilot' so APM materializes it under "
+    "apm_modules and registers it natively with GitHub Copilot."
 )
 AGENT_PLUGIN_IR_MISSING = (
     "Native Agent Plugin canonical IR is missing, so deployment was blocked. "
-    + _AGENT_PLUGIN_RECOVERY
+    + AGENT_PLUGIN_RECOVERY
 )
 
 
@@ -55,15 +62,23 @@ def enforce_agent_plugin_deployment_boundary(
     *,
     bundle_info: Any | None = None,
 ) -> None:
-    """Block every native Agent Plugin deployment until IR integration exists."""
+    """Block native Agent Plugin deployment unless a qualified harness exists.
+
+    A native Agent Plugin is admitted only when the canonical capability owner
+    (:mod:`apm_cli.copilot_plugins.capability`) reports that GitHub Copilot can
+    load it live from APM's materialization. Everything else -- an unqualified
+    client, a non-Copilot target, a legacy bundle route, or missing canonical
+    IR -- stays fail-closed with a precise reason.
+    """
     from apm_cli.bundle.formats import BundleFormat
+    from apm_cli.copilot_plugins.capability import current_native_registration
     from apm_cli.models.validation import PackageType
 
     if (
         bundle_info is not None
         and getattr(bundle_info, "format", None) == BundleFormat.AGENT_PLUGIN.value
     ):
-        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
+        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED)
     if package_info is None:
         return
     if package_info.package_type is not PackageType.AGENT_PLUGIN:
@@ -71,6 +86,11 @@ def enforce_agent_plugin_deployment_boundary(
     package = getattr(package_info, "package", None)
     if package is None or getattr(package, "agent_plugin", None) is None:
         raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_IR_MISSING)
+    capability = current_native_registration()
+    if capability is not None and capability.supported:
+        return
+    if capability is not None and capability.reason:
+        raise AgentPluginDeploymentBoundaryError(capability.reason)
     raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
 
 

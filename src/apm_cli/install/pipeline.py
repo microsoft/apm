@@ -650,6 +650,15 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
             _run_phase("targets", _targets_phase, ctx)
 
         # --------------------------------------------------------------
+        # Phase 2.1: Publish the native Copilot plugin registration
+        # capability so the Agent Plugin deployment boundary can admit a
+        # verified plugin instead of blocking it (issue #2703).
+        # --------------------------------------------------------------
+        from .phases import copilot_plugins as _copilot_plugins_phase
+
+        _copilot_plugins_phase.activate(ctx)
+
+        # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)
         # Runs even in lockfile_only mode so that --target policy
         # constraints are enforced during resolution-only runs.
@@ -891,6 +900,14 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
 
         LockfileBuilder(ctx).build_and_save()
 
+        # ------------------------------------------------------------------
+        # Phase: Native GitHub Copilot Agent Plugin registration (#2703).
+        # Runs after the lockfile is canonical so the APM-owned marketplace
+        # is rebuilt from resolved state, not from in-flight guesses.
+        # ------------------------------------------------------------------
+        if not lockfile_only:
+            _run_phase("copilot_plugins", _copilot_plugins_phase, ctx)
+
         # Fail-closed integrity gate: when security.integrity.require_hashes is
         # on, every non-local lockfile entry must carry a content hash. A
         # missing hash stops the install (the key only asserts hash-presence on
@@ -958,4 +975,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
     finally:
+        from .phases import copilot_plugins as _copilot_plugins_cleanup
+
+        _copilot_plugins_cleanup.deactivate(ctx)
         ctx.tui.__exit__()

@@ -16,7 +16,7 @@ Pick the layout that matches the author's intent -- APM preserves it.
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Deploy each hook to the target's `hooks/` directory |
 | `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
-| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Not yet installable -- fails closed (see below) |
+| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered natively with GitHub Copilot `>=1.0.81-8` (see below) |
 
 ## APM package (`.apm/` directory)
 
@@ -260,19 +260,26 @@ my-plugin/
 +-- mcp.json
 ```
 
-:::note[Planned]
-`apm install` does not yet deploy Agent Plugin packages. Recognizing the
-schema fails the install closed with an explicit message rather than
-falling back to the Claude plugin artifact mapping above -- APM never
-partially dissects a recognized Agent Plugin through its normal primitive
-integrators. Ask the publisher for a Claude-compatible package
-(`apm pack --claude-plugin`) if you need to install it today.
+**What gets installed:** nothing is dissected. With `--target copilot` and a
+GitHub Copilot CLI at `>=1.0.81-8`, APM keeps the plugin whole under
+`apm_modules/` and registers it with Copilot as a live directory marketplace.
+Copilot loads the unit from APM's bytes -- it never copies it. See
+[Native Copilot plugins](../../consumer/copilot-agent-plugins/).
+
+:::caution[Fails closed elsewhere]
+Any other target, or a Copilot CLI older than `1.0.81-8`, refuses the install
+with an explicit capability error rather than falling back to the Claude
+plugin artifact mapping above -- APM never partially dissects a recognized
+Agent Plugin through its normal primitive integrators. Older Copilot clients
+copy plugins into private state, so APM will not install there. Ask the
+publisher for a Claude-compatible package (`apm pack --claude-plugin`) if you
+cannot upgrade.
 :::
 
 **When to choose:** you are producing a portable package with
-`apm pack --format agent-plugin` for other Agent-Plugin-aware hosts that read the
-Agent Plugins v1 schema directly -- not for installing through
-`apm install` yet. See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
+`apm pack --format agent-plugin` for GitHub Copilot and other
+Agent-Plugin-aware hosts that read the Agent Plugins v1 schema directly.
+See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
 
 ## See also
 

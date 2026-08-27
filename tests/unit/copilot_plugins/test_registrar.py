@@ -1,0 +1,437 @@
+"""APM-owned Copilot marketplace catalog and settings merge contracts."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from apm_cli.copilot_plugins.capability import NativeRegistrationCapability
+from apm_cli.copilot_plugins.catalog import CatalogSourceError, relative_plugin_source
+from apm_cli.copilot_plugins.constants import (
+    ENABLED_PLUGINS_KEY,
+    EXTRA_MARKETPLACES_KEY,
+)
+from apm_cli.copilot_plugins.registrar import (
+    ResolvedPluginCandidate,
+    catalog_path_for,
+    ledger_path_for,
+    registration_status,
+    synchronize_copilot_plugins,
+)
+from apm_cli.copilot_plugins.settings import (
+    CopilotSettingsCollisionError,
+    read_ledger,
+)
+from apm_cli.core.scope import InstallScope
+
+from ._builders import read_json, write_agent_plugin
+
+pytestmark = pytest.mark.component
+
+_QUALIFIED = NativeRegistrationCapability(
+    supported=True, detected_version="1.0.81-14", target="copilot"
+)
+_UNQUALIFIED = NativeRegistrationCapability(
+    supported=False, reason="Agent Plugins v1.0.0 packages need GitHub Copilot CLI >=1.0.81-8"
+)
+
+
+def _project(tmp_path: Path) -> tuple[Path, Path]:
+    project = tmp_path / "project"
+    modules = project / "apm_modules"
+    modules.mkdir(parents=True)
+    return project, modules
+
+
+def _sync(project: Path, modules: Path, candidates, capability=_QUALIFIED, **kwargs):
+    return synchronize_copilot_plugins(
+        project_root=project,
+        modules_dir=modules,
+        scope=kwargs.pop("scope", InstallScope.PROJECT),
+        candidates=candidates,
+        capability=capability,
+        **kwargs,
+    )
+
+
+def _settings(project: Path) -> Path:
+    return project / ".github" / "copilot" / "settings.local.json"
+
+
+def test_direct_and_transitive_plugins_land_in_one_aggregate_catalog(tmp_path: Path) -> None:
+    """One catalog per project holds direct and transitive plugins alike."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "acme" / "direct", name="direct-plugin")
+    write_agent_plugin(modules / "acme" / "nested" / "transitive", name="transitive-plugin")
+
+    result = _sync(
+        project,
+        modules,
+        [
+            ResolvedPluginCandidate("acme/direct", modules / "acme" / "direct"),
+            ResolvedPluginCandidate(
+                "acme/nested/transitive", modules / "acme" / "nested" / "transitive"
+            ),
+        ],
+    )
+
+    catalog = read_json(catalog_path_for(modules))
+    assert result.plugin_names == ("direct-plugin", "transitive-plugin")
+    assert catalog["name"] == "apm"
+    assert [entry["source"] for entry in catalog["plugins"]] == [
+        "./acme/direct",
+        "./acme/nested/transitive",
+    ]
+    assert catalog_path_for(modules) == modules / ".github" / "plugin" / "marketplace.json"
+
+
+def test_catalog_ordering_is_deterministic_regardless_of_input_order(
+    tmp_path: Path,
+) -> None:
+    """Catalog bytes do not depend on dependency iteration order."""
+    project, modules = _project(tmp_path)
+    for name in ("zeta", "alpha", "mid"):
+        write_agent_plugin(modules / name, name=f"{name}-plugin")
+    candidates = [
+        ResolvedPluginCandidate(name, modules / name) for name in ("zeta", "alpha", "mid")
+    ]
+
+    _sync(project, modules, candidates)
+    first = catalog_path_for(modules).read_bytes()
+    _sync(project, modules, list(reversed(candidates)))
+    second = catalog_path_for(modules).read_bytes()
+
+    assert first == second
+    assert [entry["name"] for entry in json.loads(first)["plugins"]] == [
+        "alpha-plugin",
+        "mid-plugin",
+        "zeta-plugin",
+    ]
+
+
+def test_duplicate_plugin_names_are_resolved_deterministically_with_a_warning(
+    tmp_path: Path,
+) -> None:
+    """Two dependencies claiming one plugin name never produce an ambiguous key."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "a-owner" / "pkg", name="shared-plugin", version="1.0.0")
+    write_agent_plugin(modules / "b-owner" / "pkg", name="shared-plugin", version="2.0.0")
+
+    result = _sync(
+        project,
+        modules,
+        [
+            ResolvedPluginCandidate("b-owner/pkg", modules / "b-owner" / "pkg"),
+            ResolvedPluginCandidate("a-owner/pkg", modules / "a-owner" / "pkg"),
+        ],
+    )
+
+    catalog = read_json(catalog_path_for(modules))
+    assert result.plugin_names == ("shared-plugin",)
+    assert catalog["plugins"][0]["source"] == "./a-owner/pkg"
+    assert len(result.collisions) == 1
+    assert "a-owner/pkg" in result.collisions[0]
+    assert "b-owner/pkg" in result.collisions[0]
+
+
+def test_legacy_packages_are_not_registered_natively(tmp_path: Path) -> None:
+    """A mixed graph registers only exact Agent Plugins."""
+    from ._builders import write_legacy_package
+
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "native", name="native-plugin")
+    write_legacy_package(modules / "legacy", name="legacy-package")
+
+    result = _sync(
+        project,
+        modules,
+        [
+            ResolvedPluginCandidate("native", modules / "native"),
+            ResolvedPluginCandidate("legacy", modules / "legacy"),
+        ],
+    )
+
+    assert result.plugin_names == ("native-plugin",)
+
+
+def test_project_settings_use_a_repository_relative_marketplace_path(
+    tmp_path: Path,
+) -> None:
+    """The registration survives clones and worktrees: no absolute paths."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+
+    _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+    settings = read_json(_settings(project))
+    source = settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"]
+    assert source == {"source": "directory", "path": "apm_modules"}
+    assert settings[ENABLED_PLUGINS_KEY] == {"portable-plugin@apm": True}
+
+
+def test_global_scope_records_an_absolute_marketplace_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user-scope registration is not anchored to any repository."""
+    home = tmp_path / "home"
+    modules = home / ".apm" / "apm_modules"
+    modules.mkdir(parents=True)
+    monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
+    write_agent_plugin(modules / "pkg", name="global-plugin")
+
+    _sync(
+        home,
+        modules,
+        [ResolvedPluginCandidate("pkg", modules / "pkg")],
+        scope=InstallScope.USER,
+    )
+
+    settings = read_json(home / ".copilot" / "settings.json")
+    assert settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"]["path"] == modules.as_posix()
+    assert settings[ENABLED_PLUGINS_KEY] == {"global-plugin@apm": True}
+
+
+def test_unrelated_user_settings_survive_the_merge(tmp_path: Path) -> None:
+    """APM owns two namespaced keys and touches nothing else."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+    settings_path = _settings(project)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "banner": "keep me",
+                EXTRA_MARKETPLACES_KEY: {"team": {"source": {"source": "directory", "path": "x"}}},
+                ENABLED_PLUGINS_KEY: {"team-plugin@team": True},
+            },
+            indent=2,
+        ),
+        encoding="ascii",
+    )
+
+    _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+    settings = read_json(settings_path)
+    assert settings["banner"] == "keep me"
+    assert settings[EXTRA_MARKETPLACES_KEY]["team"] == {
+        "source": {"source": "directory", "path": "x"}
+    }
+    assert settings[ENABLED_PLUGINS_KEY]["team-plugin@team"] is True
+    assert settings[ENABLED_PLUGINS_KEY]["portable-plugin@apm"] is True
+
+
+def test_foreign_apm_marketplace_entry_is_a_precise_collision(tmp_path: Path) -> None:
+    """APM never overwrites a namespaced entry it does not own."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+    settings_path = _settings(project)
+    settings_path.parent.mkdir(parents=True)
+    original = json.dumps(
+        {EXTRA_MARKETPLACES_KEY: {"apm": {"source": {"source": "git", "path": "elsewhere"}}}},
+        indent=2,
+    )
+    settings_path.write_text(original, encoding="ascii")
+
+    with pytest.raises(CopilotSettingsCollisionError, match=r"does not own it"):
+        _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+    assert settings_path.read_text(encoding="ascii") == original
+    assert not catalog_path_for(modules).exists()
+
+
+def test_foreign_enabled_plugin_key_is_a_precise_collision(tmp_path: Path) -> None:
+    """A user-authored ``<plugin>@apm`` enablement blocks the merge."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+    settings_path = _settings(project)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({ENABLED_PLUGINS_KEY: {"portable-plugin@apm": False}}, indent=2),
+        encoding="ascii",
+    )
+
+    with pytest.raises(CopilotSettingsCollisionError, match=r"does not own"):
+        _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+
+def test_registration_is_rebuilt_when_a_plugin_is_removed(tmp_path: Path) -> None:
+    """Uninstall drops only the affected rows and enablement keys."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "kept", name="kept-plugin")
+    write_agent_plugin(modules / "gone", name="gone-plugin")
+    candidates = [
+        ResolvedPluginCandidate("kept", modules / "kept"),
+        ResolvedPluginCandidate("gone", modules / "gone"),
+    ]
+    _sync(project, modules, candidates)
+
+    _sync(project, modules, candidates[:1])
+
+    catalog = read_json(catalog_path_for(modules))
+    settings = read_json(_settings(project))
+    assert [entry["name"] for entry in catalog["plugins"]] == ["kept-plugin"]
+    assert settings[ENABLED_PLUGINS_KEY] == {"kept-plugin@apm": True}
+    assert (modules / "gone" / "plugin.json").is_file()
+
+
+def test_emptying_the_graph_removes_the_apm_registration_entirely(tmp_path: Path) -> None:
+    """The last plugin leaving takes APM's catalog and settings rows with it."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+    settings_path = _settings(project)
+    _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+    _sync(project, modules, [])
+
+    settings = read_json(settings_path)
+    assert EXTRA_MARKETPLACES_KEY not in settings
+    assert ENABLED_PLUGINS_KEY not in settings
+    assert not catalog_path_for(modules).exists()
+    assert not ledger_path_for(modules).exists()
+    assert not (modules / ".github").exists()
+
+
+def test_removal_preserves_unrelated_settings(tmp_path: Path) -> None:
+    """Deregistration is surgical, never a settings reset."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+    settings_path = _settings(project)
+    _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+    document = read_json(settings_path)
+    document["banner"] = "keep me"
+    document[ENABLED_PLUGINS_KEY]["team-plugin@team"] = True
+    settings_path.write_text(json.dumps(document, indent=2), encoding="ascii")
+
+    _sync(project, modules, [])
+
+    settings = read_json(settings_path)
+    assert settings["banner"] == "keep me"
+    assert settings[ENABLED_PLUGINS_KEY] == {"team-plugin@team": True}
+
+
+def test_unqualified_capability_writes_nothing_at_all(tmp_path: Path) -> None:
+    """A refused capability leaves the workspace untouched."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+
+    result = _sync(
+        project,
+        modules,
+        [ResolvedPluginCandidate("pkg", modules / "pkg")],
+        capability=_UNQUALIFIED,
+    )
+
+    assert result.entries == []
+    assert result.skipped_reason is not None
+    assert not catalog_path_for(modules).exists()
+    assert not _settings(project).exists()
+
+
+def test_capability_regression_retracts_an_existing_registration(tmp_path: Path) -> None:
+    """Downgrading the client retracts APM's rows instead of leaving them live."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+    _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+    _sync(
+        project,
+        modules,
+        [ResolvedPluginCandidate("pkg", modules / "pkg")],
+        capability=_UNQUALIFIED,
+    )
+
+    assert not catalog_path_for(modules).exists()
+    assert read_json(_settings(project)) == {}
+
+
+def test_settings_write_failure_rolls_back_catalog_and_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partial registration is never left behind."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "kept", name="kept-plugin")
+    _sync(project, modules, [ResolvedPluginCandidate("kept", modules / "kept")])
+    catalog_before = catalog_path_for(modules).read_bytes()
+    ledger_before = ledger_path_for(modules).read_bytes()
+    write_agent_plugin(modules / "added", name="added-plugin")
+
+    import apm_cli.copilot_plugins.registrar as registrar_mod
+
+    original_atomic = registrar_mod.atomic_write_text
+
+    def _atomic(path, text, **kwargs):
+        if path.name == "settings.local.json":
+            raise OSError("settings write blocked")
+        return original_atomic(path, text, **kwargs)
+
+    monkeypatch.setattr(registrar_mod, "atomic_write_text", _atomic)
+
+    with pytest.raises(OSError, match=r"settings write blocked"):
+        _sync(
+            project,
+            modules,
+            [
+                ResolvedPluginCandidate("kept", modules / "kept"),
+                ResolvedPluginCandidate("added", modules / "added"),
+            ],
+        )
+
+    assert catalog_path_for(modules).read_bytes() == catalog_before
+    assert ledger_path_for(modules).read_bytes() == ledger_before
+
+
+def test_ledger_records_ownership_and_drives_status(tmp_path: Path) -> None:
+    """APM proves ownership from its ledger, not from path shape guessing."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+
+    _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+    ledger = read_ledger(ledger_path_for(modules))
+    assert ledger.marketplace_owned is True
+    assert ledger.enabled_plugins == ("portable-plugin@apm",)
+    assert registration_status(modules) == ("portable-plugin",)
+
+
+def test_shared_project_settings_are_reused_when_apm_already_owns_them(
+    tmp_path: Path,
+) -> None:
+    """Repository evidence wins over the machine-local default."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "pkg", name="portable-plugin")
+    shared = project / ".github" / "copilot" / "settings.json"
+    shared.parent.mkdir(parents=True)
+    shared.write_text("{}\n", encoding="ascii")
+    ledger_path = ledger_path_for(modules)
+    ledger_path.parent.mkdir(parents=True)
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "marketplace": "apm",
+                "marketplaceOwned": True,
+                "marketplacePath": "apm_modules",
+                "settingsPath": ".github/copilot/settings.json",
+                "enabledPlugins": [],
+            }
+        ),
+        encoding="ascii",
+    )
+
+    result = _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+    assert result.settings_path == shared
+    assert not _settings(project).exists()
+    assert read_json(shared)[ENABLED_PLUGINS_KEY] == {"portable-plugin@apm": True}
+
+
+def test_plugin_outside_the_marketplace_root_is_refused(tmp_path: Path) -> None:
+    """A catalog source must stay inside the APM materialization root."""
+    _, modules = _project(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with pytest.raises(CatalogSourceError):
+        relative_plugin_source(modules, outside)

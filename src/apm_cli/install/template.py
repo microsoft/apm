@@ -315,6 +315,10 @@ def _integrate_materialization(
         # Source-level install deltas are promoted only when primitives changed.
         if any(int_result[k] > 0 for k in mutation_keys):
             deltas["installed"] = 1
+        # A natively registered Agent Plugin deploys no primitives by design --
+        # Copilot loads the whole unit live -- but it is still an install.
+        if int_result.get("native_plugin"):
+            deltas["installed"] = 1
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
     except Exception as e:
         # Per-source error wording: each DependencySource subclass

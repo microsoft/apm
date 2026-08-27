@@ -211,12 +211,12 @@ apm install ./my-bundle.zip --as custom-name
 apm install ./my-bundle --target opencode
 ```
 
-:::note[Planned]
-This deploys Claude plugin bundles (the default `apm pack` output). A bundle
-produced with `apm pack --format agent-plugin` (portable Agent Plugins v1) is not
-deployable yet -- `apm install` fails closed and points you to a
-Claude-compatible package instead. See
-[Package Types](../../package-types/#agent-plugin-pluginjson-with-an-agent-plugins-schema).
+:::note[Claude bundles only]
+This imperative route deploys Claude plugin bundles (the default `apm pack`
+output). A portable Agent Plugins v1 package installs declaratively instead:
+declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
+whole and registers it with GitHub Copilot `>=1.0.81-8`. See
+[Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
 :::
 
 ### Install only a subset of skills from a bundle

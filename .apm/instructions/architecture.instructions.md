@@ -84,6 +84,8 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Network host literal parsing and loopback classification | utils/net.py (parse_host_address, is_loopback_host) | `src/apm_cli/utils/net.py` |
 | Legacy plugin declared-skill membership | deps/plugin_parser.py (_map_plugin_artifacts, normalized_plugin_skill_sources) | `src/apm_cli/deps/plugin_parser.py`; `src/apm_cli/integration/skill_integrator.py` |
 | User-root scoped instruction eligibility | integration/targets.py (TargetProfile.include_scoped_in_user_root_context) | `src/apm_cli/integration/targets.py` |
+| Native Agent Plugin registration admission (Copilot target + client capability) | copilot_plugins/capability.py (resolve_native_registration_capability, admits_native_plugin) | `src/apm_cli/copilot_plugins/capability.py` |
+| APM-owned Copilot marketplace catalog, settings entries, and ownership ledger | copilot_plugins/registrar.py (synchronize_copilot_plugins, resync_native_plugins) | `src/apm_cli/copilot_plugins/registrar.py`; `src/apm_cli/copilot_plugins/settings.py`; `src/apm_cli/copilot_plugins/catalog.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

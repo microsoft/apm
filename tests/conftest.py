@@ -22,6 +22,7 @@
 # by every worker before any test in any test directory runs, so this is
 # the earliest hook we have without writing a pytest plugin.
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
@@ -122,3 +123,28 @@ def _isolate_discovery_state():
     yield
     clear_discovery_cache()
     perf_stats.reset()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_copilot_plugin_capability(monkeypatch):
+    """Pin the Copilot CLI capability probe so tests never read the host.
+
+    Native Agent Plugin registration is gated on the installed Copilot CLI
+    version. Without this pin, a developer machine running a qualified
+    client would silently flip the deployment boundary from fail-closed to
+    admitted. Tests that exercise the native path opt in by overriding
+    ``APM_COPILOT_CLI_VERSION`` themselves.
+    """
+    from apm_cli.copilot_plugins.capability import _ACTIVE as _capability_var
+    from apm_cli.copilot_plugins.capability import (
+        VERSION_OVERRIDE_ENV,
+        reset_native_registration,
+    )
+
+    monkeypatch.setenv(VERSION_OVERRIDE_ENV, "0.0.0")
+    token = _capability_var.set(None)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(ValueError):
+            reset_native_registration(token)

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm install` now installs portable Agent Plugins 1.0 packages natively for
+  GitHub Copilot. The plugin stays whole under `apm_modules/`; APM generates
+  one directory marketplace at `apm_modules/.github/plugin/marketplace.json`
+  and merge-owns only `extraKnownMarketplaces.apm` plus its
+  `enabledPlugins["<plugin>@apm"]` entries in
+  `.github/copilot/settings.local.json` (project) or `~/.copilot/settings.json`
+  (global). Copilot loads the unit live -- no copy, no private-state writes,
+  no `--plugin-dir`. `apm update`, `apm uninstall`, and `apm prune` rebuild or
+  retire only APM-owned rows. Requires GitHub Copilot CLI `>=1.0.81-8`; older
+  clients and non-Copilot targets keep failing closed, now with a precise
+  capability and version error. (closes #2703)
+
 ## [0.29.0] - 2026-08-26
 
 ### Added

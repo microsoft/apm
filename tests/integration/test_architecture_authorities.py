@@ -518,8 +518,8 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         (
             "src/apm_cli/install/services.py",
             "    enforce_agent_plugin_deployment_boundary(package_info)\n\n"
-            "    from apm_cli.integration.dispatch import get_dispatch_table",
-            "    from apm_cli.integration.dispatch import get_dispatch_table\n\n"
+            "    from apm_cli.copilot_plugins.capability import admits_native_plugin",
+            "    from apm_cli.copilot_plugins.capability import admits_native_plugin\n\n"
             "    enforce_agent_plugin_deployment_boundary(package_info)",
             "native deployment gate must be the first integration action",
         ),
@@ -531,8 +531,20 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/agent_plugins/errors.py",
-            "        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
-            "        return AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED)",
+            "        return AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED)",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "    if capability is not None and capability.supported:",
+            "    if capability is None or capability.supported:",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "    capability = current_native_registration()",
+            "    capability = None",
             "native deployment boundary must fail closed",
         ),
         (

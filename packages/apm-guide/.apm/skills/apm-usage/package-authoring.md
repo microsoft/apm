@@ -12,7 +12,7 @@ how to install it:
 | `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
 | `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
-| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Not yet installable -- fails closed |
+| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered natively with GitHub Copilot CLI `>=1.0.81-8`; other targets and older clients fail closed |
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
 also uses APM dependency resolution. APM installs it as a skill -- it
