@@ -58,6 +58,12 @@ File primitives resolve targets in this order: `--target`, manifest
 `--runtime` / `--target`, then manifest targets, saved config, then
 auto-detection only when `apm.yml` declares no targets.
 
+`APM_COPILOT_CLI_VERSION` overrides the detected Copilot CLI version used by
+the native [Agent Plugin registration](../../../consumer/copilot-agent-plugins/#requirements)
+check. It exists for CI and test determinism, not to bypass the version floor:
+forcing it high on an unqualified client produces exactly the private-state
+copy the floor prevents.
+
 ### Policy and trust
 
 | Flag | Default | Description |

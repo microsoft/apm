@@ -264,7 +264,7 @@ my-plugin/
 GitHub Copilot CLI at `>=1.0.81-8`, APM keeps the plugin whole under
 `apm_modules/` and registers it with Copilot as a live directory marketplace.
 Copilot loads the unit from APM's bytes -- it never copies it. See
-[Native Copilot plugins](../../consumer/copilot-agent-plugins/).
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 :::caution[Fails closed elsewhere]
 Any other target, or a Copilot CLI older than `1.0.81-8`, refuses the install

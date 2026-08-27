@@ -35,3 +35,22 @@ apm install
 APM v0.21.0+ always writes `"version": 1` to `.cursor/hooks.json` on a
 fresh install. Existing files that already contain a `"version"` key are
 left untouched.
+
+---
+
+### Agent Plugin: "needs GitHub Copilot CLI >=1.0.81-8"
+
+**Symptom:** `apm install --target copilot` refuses an Agent Plugins 1.0
+package with `Agent Plugins v1.0.0 packages need GitHub Copilot CLI
+>=1.0.81-8 ... detected <version>`, and nothing is written. With no `copilot`
+binary on `PATH`, the message instead reads `GitHub Copilot CLI was not found
+on PATH`.
+
+**Cause:** Native registration loads the plugin live from `apm_modules`, which
+only the qualified Copilot CLI build supports. Older clients copy the plugin
+into private Copilot state, so APM fails closed instead of degrading silently.
+The same rule applies to non-Copilot targets.
+
+**Fix:** Install GitHub Copilot CLI `1.0.81-8` or newer (stable `1.0.81`
+qualifies), then re-run. See
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/#requirements).
