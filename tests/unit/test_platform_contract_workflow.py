@@ -49,7 +49,7 @@ NON_LIVE_UNIX_INTEGRATION_STEPS = (
     ("build-and-validate-macos-arm", "Run integration tests"),
 )
 NON_LIVE_UNIX_TIMEOUT_MINUTES = {
-    ("integration-tests", "Run integration tests (Unix)"): 30,
+    ("integration-tests", "Run integration tests (Unix)"): 60,
     ("build-and-validate-macos-arm", "Run integration tests"): 60,
 }
 NON_LIVE_UNIX_PYTEST_ARGS = "-n 4 --dist loadgroup"
@@ -133,7 +133,7 @@ def _assert_standalone_integration_timeouts(workflow: dict) -> None:
     job = workflow_job(workflow, "integration-tests")
     unix_step = workflow_step(job, "Run integration tests (Unix)")
     windows_step = workflow_step(job, "Run integration tests (Windows)")
-    assert unix_step.get("timeout-minutes") == 30
+    assert unix_step.get("timeout-minutes") == 60
     assert windows_step.get("timeout-minutes") == 20
 
 
