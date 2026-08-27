@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **118 normative statements** indexed in
+- OpenAPM v0.1 carries **119 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2531,10 +2531,13 @@ legacy primitive projection to satisfy this rule; the boundary fails
 closed rather than partially projecting the package.
 
 > **Editorial note.** This requirement governs the deployment boundary
-> only. It does not define a native Agent Plugin lifecycle; a native
-> lifecycle (and any preferred-default change) is reserved for a
-> future revision once a consumer implementation demonstrates a
-> qualified, machine-verifiable binary lifecycle.
+> only, and its conditional MUST stands unchanged. A qualified,
+> machine-verifiable consumer lifecycle now exists:
+> [req-tg-013](#req-tg-013) defines native registration for a consumer
+> that exposes one, and this boundary is the fail-closed fallback the
+> consumer takes whenever that lifecycle is unavailable. This
+> requirement still does not itself define that lifecycle, and it does
+> not mandate any preferred-default change.
 
 #### 8.5.6 Plugin-root hook command resolution
 
@@ -2557,6 +2560,41 @@ NOT silently deploy the unresolved command.
 > `"${PLUGIN_ROOT}"/hooks/probe.py` normalizes to
 > `"${PLUGIN_ROOT}/hooks/probe.py"`.
 
+#### 8.5.7 Agent Plugins v1 native-lifecycle registration
+
+<a id="req-tg-013"></a>
+**[req-tg-013]** A conforming **consumer** implementation that exposes a
+machine-verifiable native lifecycle for a schema-bearing Agent Plugins v1
+dependency -- the qualifying condition that [req-tg-011](#req-tg-011)
+reserves -- MAY register that dependency with a target-native plugin host
+through the target's native plugin registry instead of refusing it, and
+when it does so it MUST NOT additionally project that package's primitives,
+so a single dependency is deployed exactly once. The consumer MUST NOT copy
+the package into the target's private plugin state; the registration MUST
+reference the materialized package in place beneath the resolved dependency
+root. The consumer MUST record the registration in consumer-owned state and
+MUST prove ownership from that record rather than from the shape of a host
+value, so a later removal (`uninstall` or `prune`) retires exactly the
+entries the consumer created and leaves every unrelated host configuration
+byte-identical; the consumer MUST refuse the operation rather than overwrite
+a registry entry it does not own. A single aggregate registration per
+install scope MUST cover both the directly declared and the transitively
+resolved Agent Plugin dependencies of that scope. When the machine-verifiable
+lifecycle is not available -- the target-native plugin host is below the
+consumer's qualified floor, or absent -- the consumer MUST fall back to the
+[req-tg-011](#req-tg-011) fail-closed deployment boundary.
+
+> **Editorial note.** "Machine-verifiable" means the consumer confirms that
+> the target-native plugin host advertises the native directory-marketplace
+> lifecycle -- for example by comparing the host's reported version against a
+> fixed qualified floor -- before it registers rather than refuses. In this
+> implementation the qualifying host is the GitHub Copilot CLI at or above the
+> first release that loads a directory marketplace live from its real
+> directory; the consumer records its ownership in a namespaced marketplace
+> catalog and ledger under `apm_modules` and writes only its two namespaced
+> settings keys. This requirement does not prescribe that host or version for
+> other consumers.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2573,8 +2611,8 @@ without a spec revision. The current matrix is in the companion
   [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
   [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
   [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
-  [req-tg-012](#req-tg-012), [req-pr-006](#req-pr-006),
-  [req-pr-007](#req-pr-007).
+  [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
+  [req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007).
 
 ---
 
@@ -3164,7 +3202,8 @@ conformance statement identifying:
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
 [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
 [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
-[req-tg-012](#req-tg-012), [req-sc-001](#req-sc-001),
+[req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
+[req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
@@ -3612,6 +3651,7 @@ renumbering of conformance classes.
 | [req-tg-010](#req-tg-010)                | MUST    | 8.5.4   | consumer    |
 | [req-tg-011](#req-tg-011)                | MUST    | 8.5.5   | consumer    |
 | [req-tg-012](#req-tg-012)                | MUST    | 8.5.6   | consumer    |
+| [req-tg-013](#req-tg-013)                | MUST    | 8.5.7   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3631,7 +3671,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 118** (113 MUST, 5 SHOULD).
+**Total normative statements: 119** (114 MUST, 5 SHOULD).
 
 ---
 
@@ -3675,6 +3715,7 @@ renumbering of conformance classes.
 | 0.1.32  | 2026-08-23 | Spec-citation fold for authoritative legacy plugin skill declarations (closes #2537). Added [req-pr-006] (Section 8.1, consumer MUST): omitted `skills` alone enables conventional discovery; a string or list replaces discovery; explicit empty, invalid, escaping, symlinked, and duplicate-derived entries contribute no skills; declared containers contribute only immediate child skills; and only resulting names are eligible for enumeration, selection, or deployment. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 115 -> 116 (111 MUST, 5 SHOULD). |
 | 0.1.33  | 2026-08-23 | Spec-citation fold for authorized pre-deployment scan scope (closes #2490 Mode-B silent-extension gate). Added [req-sc-015] (Section 10.16, consumer MUST): a consumer derives one post-authorization source-file set for every install and uninstall re-integration materialization lifecycle; excludes symlink files and does not traverse symlinked directories; scans and materializes only that set; rejects a selected blocking finding before a source-derived target write; and does not scan or materialize source-only package files. Added row 20 to the Section 10.11 summary table. Reconciled with concurrent [req-pl-017] and [req-pr-006] and retained all amendments. Section 1.3, Section 11.3.2, and Appendix C updated. Statement count: 116 -> 117 (112 MUST, 5 SHOULD). |
 | 0.1.34  | 2026-08-25 | Spec-citation fold for root-declared Plugin component staging containment (closes #2556). Added [req-pr-007] (Section 8.1, consumer MUST): a consumer canonicalizes the non-symlink component-source root and prunes the current operation's materialization subtree before traversal. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 117 -> 118 (113 MUST, 5 SHOULD). |
+| 0.1.35  | 2026-08-27 | Stale-spec (Mode C) amendment recording that a qualified, machine-verifiable consumer lifecycle now exists. Added [req-tg-013] (Section 8.5.7, consumer MUST): a consumer that exposes a machine-verifiable native lifecycle MAY register a schema-bearing Agent Plugins v1 dependency with a target-native plugin host instead of refusing it, MUST NOT additionally project that package's primitives (deployed exactly once), MUST reference the materialized package in place rather than copy it into private plugin state, MUST record the registration in consumer-owned state proven by that record (not a value shape) so removal retires exactly the created entries and leaves unrelated host configuration byte-identical and never overwrites an entry it does not own, MUST cover directly declared and transitively resolved Agent Plugin dependencies in one aggregate registration per scope, and MUST fall back to the [req-tg-011] fail-closed boundary when the lifecycle is unavailable. Amended the [req-tg-011] editorial note to point at the new lifecycle while its conditional MUST stands unchanged. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 118 -> 119 (114 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

@@ -900,7 +900,7 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
         "[req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),\n"
-        "[req-tg-012](#req-tg-012), [req-sc-001](#req-sc-001),",
+        "[req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),",
     )
 
 
