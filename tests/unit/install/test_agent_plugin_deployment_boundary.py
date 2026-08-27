@@ -20,8 +20,8 @@ from apm_cli.cli import cli
 from apm_cli.commands.uninstall.cli import uninstall
 from apm_cli.commands.uninstall.engine import (
     _preflight_uninstall_survivors,
-    _sync_integrations_after_uninstall,
 )
+from apm_cli.copilot_plugins.constants import COPILOT_LIVE_PLUGIN_MIN_VERSION
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.outcome import finalize_install_result
 from apm_cli.install.services import (
@@ -487,8 +487,11 @@ def test_mixed_dependency_batch_is_atomic_at_cli_boundary(
     output = " ".join(result.output.split())
     assert "Installed 1 APM" not in output
     assert "Agent Plugins v1.0.0" in output
-    assert "apm pack --claude-plugin" in output
-    assert "ask the publisher for a legacy-compatible package" in output
+    assert "Upgrade the GitHub Copilot CLI to 1.0.81 or newer" in output
+    # The version-floor refusal must not hand a consumer producer-side repack
+    # advice: that fix contradicts "upgrade the client".
+    assert "apm pack --claude-plugin" not in output
+    assert "ask the publisher for a legacy-compatible package" not in output
 
 
 @pytest.mark.parametrize("include_ordinary", (False, True))
@@ -567,8 +570,8 @@ def test_dry_run_renders_one_native_failure_with_real_install_parity(
 
     assert native_integrator_calls == []
     for phrase in (
-        "apm pack --claude-plugin",
-        "ask the publisher for a legacy-compatible package",
+        f">={COPILOT_LIVE_PLUGIN_MIN_VERSION}",
+        "Upgrade the GitHub Copilot CLI to 1.0.81 or newer",
     ):
         assert outputs["real"].count(phrase) == outputs["dry-run"].count(phrase) == 1
 
@@ -676,7 +679,11 @@ def _write_uninstall_fixture(project: Path, native_source: Path) -> None:
     LockFile(dependencies=dependencies).write(project / "apm.lock.yaml")
 
 
-def test_uninstall_survivor_preflight_rejects_native_directly(tmp_path: Path) -> None:
+def test_uninstall_survivor_preflight_tolerates_unrefreshable_native(tmp_path: Path) -> None:
+    # A native survivor whose registration merely cannot be refreshed (the
+    # Copilot client is unqualified suite-wide via the hermetic fixture) must
+    # NOT brick an unrelated uninstall. The survivor is dropped from the
+    # rebuild plan and its bytes are left untouched instead of aborting.
     project = tmp_path / "project"
     project.mkdir()
     _write_uninstall_fixture(project, tmp_path / "outside.txt")
@@ -684,24 +691,20 @@ def test_uninstall_survivor_preflight_rejects_native_directly(tmp_path: Path) ->
     assert lockfile is not None
     before = _tree_snapshot(project)
 
-    with pytest.raises(AgentPluginDeploymentBoundaryError):
-        _preflight_uninstall_survivors(
-            ["owner/native"],
-            project / "apm_modules",
-            lockfile=lockfile,
-            excluded_keys={"owner/removed"},
-        )
+    warnings: list[str] = []
+    logger = MagicMock()
+    logger.warning = warnings.append
+    plan = _preflight_uninstall_survivors(
+        ["owner/native"],
+        project / "apm_modules",
+        lockfile=lockfile,
+        excluded_keys={"owner/removed"},
+        logger=logger,
+    )
 
-    with pytest.raises(AgentPluginDeploymentBoundaryError):
-        _sync_integrations_after_uninstall(
-            APMPackage.from_apm_yml(project / "apm.yml"),
-            project,
-            set(),
-            MagicMock(),
-            lockfile=lockfile,
-            modules_dir=project / "apm_modules",
-        )
-
+    assert [dep.get_unique_key() for dep, _ in plan] == []
+    assert any("could not be refreshed" in message for message in warnings)
+    assert any("apm uninstall owner/native" in message for message in warnings)
     assert _tree_snapshot(project) == before
 
 
@@ -736,32 +739,29 @@ def test_uninstall_preflight_uses_declared_local_source_for_shared_slot(
     )
     before = _tree_snapshot(project)
 
-    if surviving_native:
-        with pytest.raises(AgentPluginDeploymentBoundaryError):
-            _preflight_uninstall_survivors(
-                [survivor],
-                modules_dir,
-                source_root=project,
-            )
-    else:
-        plan = _preflight_uninstall_survivors(
-            [survivor],
-            modules_dir,
-            source_root=project,
-        )
-        assert plan == []
+    plan = _preflight_uninstall_survivors(
+        [survivor],
+        modules_dir,
+        source_root=project,
+    )
+    # Local survivors are validated then excluded from the rebuild plan; a
+    # native one whose client is unqualified is tolerated (warned) rather than
+    # aborting, so the plan is empty either way and nothing is written.
+    assert plan == []
 
     assert _tree_snapshot(project) == before
 
 
-def test_uninstall_cli_blocks_native_survivor_before_scripts_or_writes(
+def test_uninstall_cli_succeeds_with_unrefreshable_native_survivor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Uninstalling an unrelated package must SUCCEED even though a native
+    # survivor's registration cannot be refreshed (unqualified client).
     project = tmp_path / "project"
     project.mkdir()
     _write_uninstall_fixture(project, tmp_path / "outside.txt")
-    before = _tree_snapshot(project)
+    survivor_before = _tree_snapshot(project / "apm_modules" / "owner" / "native")
     monkeypatch.chdir(project)
     fire_scripts = MagicMock()
     monkeypatch.setattr(
@@ -771,10 +771,11 @@ def test_uninstall_cli_blocks_native_survivor_before_scripts_or_writes(
 
     result = CliRunner().invoke(uninstall, ["owner/removed"], catch_exceptions=False)
 
-    assert result.exit_code == 1
-    assert _tree_snapshot(project) == before
-    assert fire_scripts.mock_calls == []
-    assert "Agent Plugins v1.0.0" in " ".join(result.output.split())
+    assert result.exit_code == 0, result.output
+    # The native survivor's bytes are left untouched -- only APM's own view of
+    # the removed package changes.
+    assert _tree_snapshot(project / "apm_modules" / "owner" / "native") == survivor_before
+    assert not (project / "apm_modules" / "owner" / "removed").exists()
 
 
 def test_uninstall_allows_native_transitive_orphan_removal(
@@ -844,30 +845,26 @@ def _write_prune_fixture(project: Path, outside: Path) -> None:
     LockFile(dependencies=dependencies).write(project / "apm.lock.yaml")
 
 
-def test_prune_blocks_native_survivor_before_removal_or_reconciliation(
+def test_prune_succeeds_with_unrefreshable_native_survivor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Prune of an unrelated orphan must SUCCEED even though a native survivor's
+    # registration cannot be refreshed (unqualified client). The survivor is
+    # dropped from reintegration, so no escape write happens.
     project = tmp_path / "project"
     project.mkdir()
     _write_prune_fixture(project, tmp_path / "outside.txt")
-    before = _tree_snapshot(project)
-    remove = MagicMock()
-    sync = MagicMock()
+    survivor_before = _tree_snapshot(project / "apm_modules" / "owner" / "native")
     integrate = MagicMock()
-    monkeypatch.setattr("apm_cli.commands.prune.safe_rmtree", remove)
-    monkeypatch.setattr(HookIntegrator, "sync_integration", sync)
     monkeypatch.setattr(HookIntegrator, "integrate_hooks_for_target", integrate)
     monkeypatch.chdir(project)
 
     result = CliRunner().invoke(cli, ["prune"], catch_exceptions=False)
 
-    assert result.exit_code == 1, result.output
-    assert _tree_snapshot(project) == before
-    assert remove.mock_calls == []
-    assert sync.mock_calls == []
+    assert result.exit_code == 0, result.output
+    assert _tree_snapshot(project / "apm_modules" / "owner" / "native") == survivor_before
     assert integrate.mock_calls == []
-    assert "Agent Plugins v1.0.0" in " ".join(result.output.split())
 
 
 def test_prune_dry_run_does_not_reintegrate_native_survivors(
@@ -893,10 +890,13 @@ def test_prune_dry_run_does_not_reintegrate_native_survivors(
     assert "Agent Plugins v1.0.0" not in result.output
 
 
-def test_direct_hook_reconciliation_cannot_bypass_native_survivor_gate(
+def test_direct_hook_reconciliation_tolerates_unrefreshable_native_survivor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A native survivor with an unqualified client must not abort hook
+    # reconciliation for the rest of the tree: it is dropped from the rebuild
+    # plan and its bytes are left untouched.
     project = tmp_path / "project"
     project.mkdir()
     _write_prune_fixture(project, tmp_path / "outside.txt")
@@ -909,15 +909,15 @@ def test_direct_hook_reconciliation_cannot_bypass_native_survivor_gate(
     monkeypatch.setattr(HookIntegrator, "sync_integration", sync)
     monkeypatch.setattr(HookIntegrator, "integrate_hooks_for_target", integrate)
 
-    with pytest.raises(AgentPluginDeploymentBoundaryError):
-        HookIntegrator().reconcile_after_removal(
-            APMPackage.from_apm_yml(project / "apm.yml"),
-            project,
-            lockfile=lockfile,
-        )
+    HookIntegrator().reconcile_after_removal(
+        APMPackage.from_apm_yml(project / "apm.yml"),
+        project,
+        lockfile=lockfile,
+    )
 
+    # The native survivor is never reintegrated (dropped from the plan), so no
+    # escape write is possible and the tree is unchanged.
     assert _tree_snapshot(project) == before
-    assert sync.mock_calls == []
     assert integrate.mock_calls == []
 
 

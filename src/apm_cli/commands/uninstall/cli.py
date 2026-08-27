@@ -490,21 +490,13 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Rebuild the APM-owned Copilot plugin registration from the surviving
         # locked state: only APM's own rows disappear, user bytes never do.
-        try:
-            from ...copilot_plugins.registrar import resync_native_plugins
-
-            resync_native_plugins(
-                project_root=deploy_root,
-                modules_dir=modules_dir,
-                scope=scope,
-                lockfile=lockfile,
-                logger=logger,
-            )
-        except Exception as registration_error:
-            logger.warning(
-                "GitHub Copilot plugin registration could not be updated: "
-                f"{type(registration_error).__name__}: {registration_error}"
-            )
+        _resync_native_registration_after_uninstall(
+            deploy_root=deploy_root,
+            modules_dir=modules_dir,
+            scope=scope,
+            lockfile=lockfile,
+            logger=logger,
+        )
 
         # Final summary
         summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]
@@ -548,6 +540,33 @@ def _publish_native_registration(deploy_root, scope):
     except Exception:
         targets = ()
     return activate_native_registration(resolve_native_registration_capability(targets))
+
+
+def _resync_native_registration_after_uninstall(
+    *, deploy_root, modules_dir, scope, lockfile, logger
+) -> None:
+    """Rebuild APM-owned Copilot plugin rows from surviving locked state.
+
+    Downgrades registration failures to a warning so an unrelated uninstall
+    is never bricked by a Copilot settings collision or a missing client.
+    """
+    try:
+        from ...agent_plugins.errors import AgentPluginError
+        from ...copilot_plugins.registrar import resync_native_plugins
+        from ...copilot_plugins.settings import CopilotSettingsCollisionError
+
+        resync_native_plugins(
+            project_root=deploy_root,
+            modules_dir=modules_dir,
+            scope=scope,
+            lockfile=lockfile,
+            logger=logger,
+        )
+    except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
+        logger.warning(
+            f"GitHub Copilot plugin registration could not be updated: {registration_error} "
+            "Re-run 'apm install' to re-register once resolved."
+        )
 
 
 def _retire_native_registration(token) -> None:

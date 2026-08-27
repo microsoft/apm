@@ -270,7 +270,6 @@ def integrate_package_primitives(  # noqa: PLR0913
     """
     enforce_agent_plugin_deployment_boundary(package_info)
 
-    from apm_cli.copilot_plugins.capability import admits_native_plugin
     from apm_cli.integration.dispatch import get_dispatch_table
 
     from ..core.scope import InstallScope
@@ -289,13 +288,6 @@ def integrate_package_primitives(  # noqa: PLR0913
         "deployed_files": [],
         "native_plugin": False,
     }
-
-    # A natively registered Agent Plugin stays opaque: Copilot loads the whole
-    # unit live from apm_modules, so decomposing its skills or MCP servers here
-    # would double-load them. The registrar owns this package instead.
-    if admits_native_plugin(package_info):
-        result["native_plugin"] = True
-        return result
 
     deployed = result["deployed_files"]
 
@@ -382,6 +374,28 @@ def integrate_package_primitives(  # noqa: PLR0913
         logger=logger,
     ):
         return result
+
+    # A natively registered Agent Plugin stays opaque: Copilot loads the whole
+    # unit live from apm_modules, so decomposing its skills or MCP servers here
+    # would double-load them. The registrar owns this package instead. The
+    # short-circuit fires only AFTER target narrowing (so a dependency that
+    # excludes copilot is not registered) and AFTER the executable trust gate
+    # (so an Agent Plugin's MCP servers / bin cannot bypass a default-deny).
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
+    from apm_cli.install.native_plugin_admission import finalize_native_plugin
+
+    if admits_native_plugin(package_info):
+        return finalize_native_plugin(
+            result,
+            package_info,
+            package_name,
+            targets,
+            mcp_approved=_mcp_approved,
+            bin_approved=_bin_approved,
+            ctx=ctx,
+            diagnostics=diagnostics,
+            logger=logger,
+        )
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 

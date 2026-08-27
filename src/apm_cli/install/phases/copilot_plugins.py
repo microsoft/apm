@@ -23,6 +23,7 @@ from apm_cli.copilot_plugins.capability import (
     reset_native_registration,
     resolve_native_registration_capability,
 )
+from apm_cli.copilot_plugins.constants import COPILOT_LIVE_PLUGIN_MIN_VERSION
 from apm_cli.copilot_plugins.registrar import (
     ResolvedPluginCandidate,
     synchronize_copilot_plugins,
@@ -39,7 +40,34 @@ def activate(ctx: InstallContext) -> None:
     """Resolve and publish the native registration capability for this install."""
     capability = resolve_native_registration_capability(getattr(ctx, "targets", None))
     ctx.copilot_registration = capability
+    _log_capability_decision(ctx, capability)
     setattr(ctx, _REGISTRATION_ATTR, activate_native_registration(capability))
+
+
+def _log_capability_decision(ctx: InstallContext, capability) -> None:
+    """Trace the native-registration verdict at verbose level."""
+    logger = getattr(ctx, "logger", None)
+    if logger is None:
+        return
+    detected = capability.detected_version or "not detected"
+    verdict = "available" if capability.supported else "unavailable"
+    logger.verbose_detail(
+        f"Copilot native registration: {verdict} "
+        f"(client {detected}, floor {COPILOT_LIVE_PLUGIN_MIN_VERSION})"
+    )
+
+
+class ActivatePhase:
+    """Adapter so the activate step gets ``_run_phase`` timing like its siblings.
+
+    ``activate`` publishes the capability and can block on a ``copilot
+    --version`` subprocess, so it earns the same verbose ``Phase: ...`` timing
+    line the registration ``run`` seam gets.
+    """
+
+    @staticmethod
+    def run(ctx: InstallContext) -> None:
+        activate(ctx)
 
 
 def deactivate(ctx: InstallContext) -> None:
@@ -54,39 +82,52 @@ def deactivate(ctx: InstallContext) -> None:
 
 
 def resolved_candidates(ctx: InstallContext) -> list[ResolvedPluginCandidate]:
-    """Return the resolved dependency set the registration is built from."""
+    """Return the resolved dependency set the registration is built from.
+
+    One derivation feeds every lifecycle command: canonical locked state via
+    :func:`candidates_from_lockfile` (which filters the synthesized ``.``
+    self-entry and threads direct/target-subset), overlaid by the freshly
+    resolved ``deps_to_install`` entries so an in-flight install sees the
+    manifest's current target narrowing. Candidates whose executables the trust
+    gate denied or left pending are dropped so a natively registered plugin can
+    never smuggle an unapproved MCP server or bin past the gate.
+    """
+    from apm_cli.copilot_plugins.registrar import candidates_from_lockfile
+
     modules_dir = ctx.apm_modules_dir
     if modules_dir is None:
         return []
-    candidates: dict[str, ResolvedPluginCandidate] = {}
+    modules_dir = Path(modules_dir)
+    lockfile = getattr(ctx, "lockfile", None) or getattr(ctx, "existing_lockfile", None)
+    candidates: dict[str, ResolvedPluginCandidate] = {
+        candidate.dependency_key: candidate
+        for candidate in (
+            candidates_from_lockfile(lockfile, modules_dir) if lockfile is not None else []
+        )
+    }
     for dependency in getattr(ctx, "deps_to_install", None) or []:
         try:
             key = dependency.get_unique_key()
             install_path = dependency.get_install_path(modules_dir)
         except (AttributeError, ValueError):
             continue
+        target_subset = getattr(dependency, "target_subset", None)
         candidates[key] = ResolvedPluginCandidate(
-            dependency_key=key, install_path=Path(install_path)
+            dependency_key=key,
+            install_path=Path(install_path),
+            direct=getattr(dependency, "declaring_parent", None) is None,
+            target_subset=tuple(target_subset) if target_subset else None,
         )
-    lockfile = getattr(ctx, "lockfile", None) or getattr(ctx, "existing_lockfile", None)
-    for key, locked in getattr(lockfile, "dependencies", {}).items():
-        if key in candidates:
-            continue
-        install_path = _locked_install_path(locked, modules_dir)
-        if install_path is not None:
-            candidates[key] = ResolvedPluginCandidate(dependency_key=key, install_path=install_path)
-    return list(candidates.values())
+    blocked = _exec_blocked_keys(ctx)
+    return [candidate for key, candidate in candidates.items() if key not in blocked]
 
 
-def _locked_install_path(locked: object, modules_dir: Path) -> Path | None:
-    """Return the materialization path recorded for one locked dependency."""
-    to_reference = getattr(locked, "to_dependency_ref", None)
-    if to_reference is None:
-        return None
-    try:
-        return Path(to_reference().get_install_path(modules_dir))
-    except (ValueError, AttributeError):
-        return None
+def _exec_blocked_keys(ctx: InstallContext) -> set[str]:
+    """Return dependency keys whose executables the trust gate did not clear."""
+    from apm_cli.security.executables import TRUST_DENIED, TRUST_GATED
+
+    statuses = getattr(ctx, "package_exec_status", None) or {}
+    return {key for key, status in statuses.items() if status in (TRUST_DENIED, TRUST_GATED)}
 
 
 def run(ctx: InstallContext) -> None:
@@ -96,7 +137,7 @@ def run(ctx: InstallContext) -> None:
         return
     capability = getattr(ctx, "copilot_registration", None)
     try:
-        synchronize_copilot_plugins(
+        result = synchronize_copilot_plugins(
             project_root=ctx.project_root,
             modules_dir=Path(modules_dir),
             scope=ctx.scope,
@@ -105,7 +146,10 @@ def run(ctx: InstallContext) -> None:
             logger=ctx.logger,
             dry_run=bool(getattr(ctx, "dry_run", False)),
         )
-    except CopilotSettingsCollisionError as exc:
-        if ctx.diagnostics is not None:
-            ctx.diagnostics.error(str(exc), package="copilot-plugins")
+    except CopilotSettingsCollisionError:
+        # The collision message is surfaced verbatim by the typed passthrough
+        # in the pipeline; re-raise without a dead DiagnosticCollector entry
+        # (the raise propagates past the finalize phase that renders it).
         raise
+    if result.skipped_reason and ctx.logger is not None:
+        ctx.logger.verbose_detail(f"Copilot native registration skipped: {result.skipped_reason}")

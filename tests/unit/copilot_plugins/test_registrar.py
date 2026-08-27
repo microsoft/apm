@@ -111,29 +111,51 @@ def test_catalog_ordering_is_deterministic_regardless_of_input_order(
     ]
 
 
-def test_duplicate_plugin_names_are_resolved_deterministically_with_a_warning(
+def test_direct_dependency_wins_a_plugin_name_collision_against_a_transitive(
     tmp_path: Path,
 ) -> None:
-    """Two dependencies claiming one plugin name never produce an ambiguous key."""
+    """A directly declared plugin outranks a transitive one claiming its name."""
     project, modules = _project(tmp_path)
     write_agent_plugin(modules / "a-owner" / "pkg", name="shared-plugin", version="1.0.0")
-    write_agent_plugin(modules / "b-owner" / "pkg", name="shared-plugin", version="2.0.0")
+    write_agent_plugin(modules / "z-owner" / "pkg", name="shared-plugin", version="2.0.0")
 
     result = _sync(
         project,
         modules,
         [
-            ResolvedPluginCandidate("b-owner/pkg", modules / "b-owner" / "pkg"),
-            ResolvedPluginCandidate("a-owner/pkg", modules / "a-owner" / "pkg"),
+            # The attacker sorts first alphabetically AND is transitive; the
+            # direct dependency must still win.
+            ResolvedPluginCandidate("a-owner/pkg", modules / "a-owner" / "pkg", direct=False),
+            ResolvedPluginCandidate("z-owner/pkg", modules / "z-owner" / "pkg", direct=True),
         ],
     )
 
     catalog = read_json(catalog_path_for(modules))
     assert result.plugin_names == ("shared-plugin",)
-    assert catalog["plugins"][0]["source"] == "./a-owner/pkg"
+    assert catalog["plugins"][0]["source"] == "./z-owner/pkg"
     assert len(result.collisions) == 1
+    assert "z-owner/pkg" in result.collisions[0]
     assert "a-owner/pkg" in result.collisions[0]
-    assert "b-owner/pkg" in result.collisions[0]
+
+
+def test_same_precedence_plugin_name_collision_is_refused(tmp_path: Path) -> None:
+    """Two claimants of one plugin name at the same precedence refuse loudly."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "a-owner" / "pkg", name="shared-plugin", version="1.0.0")
+    write_agent_plugin(modules / "b-owner" / "pkg", name="shared-plugin", version="2.0.0")
+
+    with pytest.raises(CopilotSettingsCollisionError, match=r"shared-plugin"):
+        _sync(
+            project,
+            modules,
+            [
+                ResolvedPluginCandidate("a-owner/pkg", modules / "a-owner" / "pkg", direct=True),
+                ResolvedPluginCandidate("b-owner/pkg", modules / "b-owner" / "pkg", direct=True),
+            ],
+        )
+    # The whole registration is refused; nothing is written.
+    assert not catalog_path_for(modules).is_file()
+    assert not _settings(project).is_file()
 
 
 def test_legacy_packages_are_not_registered_natively(tmp_path: Path) -> None:
@@ -395,6 +417,30 @@ def test_ledger_records_ownership_and_drives_status(tmp_path: Path) -> None:
     assert registration_status(modules) == ("portable-plugin",)
 
 
+def test_transitive_dependency_cannot_repoint_a_recorded_registration(
+    tmp_path: Path,
+) -> None:
+    """A transitive dep claiming a name the ledger records for another owner refuses."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "z-owner" / "pkg", name="shared-plugin")
+    _sync(
+        project,
+        modules,
+        [ResolvedPluginCandidate("z-owner/pkg", modules / "z-owner" / "pkg", direct=True)],
+    )
+    assert read_ledger(ledger_path_for(modules)).owner_of("shared-plugin@apm") == "z-owner/pkg"
+
+    # A different, transitive dependency now claims the same plugin name. The
+    # ledger records z-owner/pkg as the owner, so re-pointing is refused.
+    write_agent_plugin(modules / "a-owner" / "pkg", name="shared-plugin")
+    with pytest.raises(CopilotSettingsCollisionError, match=r"shared-plugin"):
+        _sync(
+            project,
+            modules,
+            [ResolvedPluginCandidate("a-owner/pkg", modules / "a-owner" / "pkg", direct=False)],
+        )
+
+
 def test_shared_project_settings_are_reused_when_apm_already_owns_them(
     tmp_path: Path,
 ) -> None:
@@ -435,3 +481,70 @@ def test_plugin_outside_the_marketplace_root_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(CatalogSourceError):
         relative_plugin_source(modules, outside)
+
+
+def test_catalog_lives_strictly_under_the_modules_dir(tmp_path: Path) -> None:
+    """The APM catalog path is always inside modules_dir (item 10 boundary)."""
+    _, modules = _project(tmp_path)
+    catalog = catalog_path_for(modules)
+
+    # relative_to raises if catalog escapes modules_dir; pin it strictly under.
+    relative = catalog.relative_to(modules)
+    assert relative.parts[0] != ".."
+    assert catalog.parent.parent == modules / ".github"
+
+
+def test_registration_removal_never_climbs_above_the_modules_dir(tmp_path: Path) -> None:
+    """The empty-parent rmdir walk stops at modules_dir, never above it."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "acme" / "plugin", name="only-plugin")
+    _sync(project, modules, [ResolvedPluginCandidate("acme/plugin", modules / "acme" / "plugin")])
+    assert catalog_path_for(modules).is_file()
+
+    # Removing the last registration prunes the empty .github/plugin dirs but
+    # must never delete modules_dir or its parent.
+    _sync(project, modules, [])
+
+    assert not catalog_path_for(modules).exists()
+    assert not (modules / ".github" / "plugin").exists()
+    assert modules.is_dir()
+    assert modules.parent.is_dir()
+
+
+def test_prune_empty_parents_never_deletes_the_modules_dir(tmp_path: Path) -> None:
+    """The empty-parent walk halts at modules_dir even when it is empty."""
+    from apm_cli.copilot_plugins.registrar import _prune_empty_parents
+
+    _, modules = _project(tmp_path)
+    catalog = catalog_path_for(modules)
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    # Only the (now-empty) generated catalog tree exists under modules_dir.
+    _prune_empty_parents(catalog.parent, stop=modules)
+
+    assert modules.is_dir()
+    assert modules.parent.is_dir()
+    assert not (modules / ".github").exists()
+
+
+def test_unreadable_ledger_derives_removal_keys_from_the_catalog(tmp_path: Path) -> None:
+    """A corrupt ledger on the removal path falls back to catalog-derived keys.
+
+    Fail-OPEN removal (removing nothing while the catalog is deleted) would
+    orphan ``enabledPlugins`` entries, so an unreadable ledger is replaced by
+    one whose enabled keys are reconstructed from the on-disk catalog.
+    """
+    from apm_cli.copilot_plugins.registrar import _removal_ledger
+    from apm_cli.copilot_plugins.settings import RegistrationLedger
+
+    _, modules = _project(tmp_path)
+    catalog = catalog_path_for(modules)
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    catalog.write_text(
+        json.dumps({"name": "apm", "plugins": [{"name": "sentinel", "source": "./x"}]}),
+        encoding="ascii",
+    )
+
+    healed = _removal_ledger(RegistrationLedger(unreadable=True), catalog)
+
+    assert healed.marketplace_owned is True
+    assert healed.enabled_plugins == ("sentinel@apm",)

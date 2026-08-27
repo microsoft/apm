@@ -35,6 +35,9 @@ from .constants import (
 class CopilotSettingsCollisionError(ValueError):
     """Raised when a settings key APM must own is held by someone else."""
 
+    detail: str | None = None
+    """Verbose-only diagnostic (e.g. a raw JSON decoder message)."""
+
 
 @dataclass(frozen=True, slots=True)
 class RegistrationLedger:
@@ -44,10 +47,16 @@ class RegistrationLedger:
     marketplace_owned: bool = False
     enabled_plugins: tuple[str, ...] = ()
     marketplace_path: str | None = None
+    plugin_owners: dict[str, str] = field(default_factory=dict)
+    unreadable: bool = False
 
     def owns_enabled_key(self, key: str) -> bool:
         """Return ``True`` when APM previously wrote *key*."""
         return key in self.enabled_plugins
+
+    def owner_of(self, key: str) -> str | None:
+        """Return the dependency key that last owned *key*, if recorded."""
+        return self.plugin_owners.get(key)
 
 
 @dataclass
@@ -99,11 +108,21 @@ def read_settings_document(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
         raise CopilotSettingsCollisionError(
-            f"Cannot merge APM plugin registration into {path}: {exc}"
+            f"Cannot read {path} to register the Agent Plugin: {exc}"
         ) from exc
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        error = CopilotSettingsCollisionError(
+            f"{path} is not valid JSON, so APM cannot register the Agent "
+            "Plugin. Fix or delete the file, then re-run 'apm install'. Your "
+            "packages are already installed."
+        )
+        error.detail = str(exc)
+        raise error from exc
     if not isinstance(loaded, dict):
         raise CopilotSettingsCollisionError(
             f"Cannot merge APM plugin registration into {path}: "
@@ -118,17 +137,29 @@ def render_settings_document(document: dict[str, Any]) -> str:
 
 
 def read_ledger(path: Path) -> RegistrationLedger:
-    """Read the APM ownership ledger, returning an empty ledger when absent."""
+    """Read the APM ownership ledger, returning an empty ledger when absent.
+
+    A missing ledger is fail-closed on merge (APM owns nothing) and safe on
+    removal (nothing to retire). A ledger that EXISTS but cannot be parsed is
+    different: silently treating it as empty would fail OPEN on removal, so it
+    is flagged ``unreadable`` and callers refuse destructive operations.
+    """
     if not path.is_file():
         return RegistrationLedger()
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return RegistrationLedger()
+        return RegistrationLedger(unreadable=True)
     if not isinstance(loaded, dict):
-        return RegistrationLedger()
+        return RegistrationLedger(unreadable=True)
     settings_path = loaded.get("settingsPath")
     enabled = loaded.get("enabledPlugins")
+    owners_raw = loaded.get("pluginOwners")
+    owners = (
+        {k: v for k, v in owners_raw.items() if isinstance(k, str) and isinstance(v, str)}
+        if isinstance(owners_raw, dict)
+        else {}
+    )
     return RegistrationLedger(
         settings_path=Path(settings_path) if isinstance(settings_path, str) else None,
         marketplace_owned=bool(loaded.get("marketplaceOwned", False)),
@@ -138,6 +169,7 @@ def read_ledger(path: Path) -> RegistrationLedger:
             if isinstance(loaded.get("marketplacePath"), str)
             else None
         ),
+        plugin_owners=owners,
     )
 
 
@@ -148,6 +180,7 @@ def render_ledger(
     enabled_plugins: tuple[str, ...],
     project_root: Path,
     scope: InstallScope | Any,
+    plugin_owners: dict[str, str] | None = None,
 ) -> str:
     """Render the APM ownership ledger for the registration just written."""
     if is_user_scope(scope):
@@ -163,6 +196,7 @@ def render_ledger(
         "marketplacePath": marketplace_path,
         "settingsPath": recorded_settings,
         "enabledPlugins": list(enabled_plugins),
+        "pluginOwners": dict(sorted((plugin_owners or {}).items())),
     }
     return json.dumps(document, indent=2, ensure_ascii=True) + "\n"
 
@@ -194,7 +228,11 @@ def merge_registration(
 
     desired_marketplace = {"source": {"source": "directory", "path": marketplace_path}}
     existing_marketplace = marketplaces.get(APM_MARKETPLACE_NAME)
-    if existing_marketplace is not None and not ledger.marketplace_owned:
+    if (
+        existing_marketplace is not None
+        and not ledger.marketplace_owned
+        and existing_marketplace != desired_marketplace
+    ):
         raise CopilotSettingsCollisionError(
             f"{settings_path} already defines "
             f"{EXTRA_MARKETPLACES_KEY}['{APM_MARKETPLACE_NAME}'] and APM does not "
@@ -209,7 +247,7 @@ def merge_registration(
         result.added_keys.append(f"{EXTRA_MARKETPLACES_KEY}.{APM_MARKETPLACE_NAME}")
 
     for key in sorted(set(enabled_keys)):
-        if key in enabled and not ledger.owns_enabled_key(key):
+        if key in enabled and not ledger.owns_enabled_key(key) and enabled.get(key) is not True:
             raise CopilotSettingsCollisionError(
                 f"{settings_path} already enables '{key}' and APM does not own "
                 "that entry. Remove it, or rename the conflicting plugin, then "

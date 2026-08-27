@@ -55,6 +55,8 @@ class ResolvedPluginCandidate:
 
     dependency_key: str
     install_path: Path
+    direct: bool = False
+    target_subset: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -124,22 +126,59 @@ def marketplace_source_path(
     return portable_relpath(modules_dir, project_root)
 
 
+def _raise_or_note(strict: bool, collisions: list[str], message: str) -> None:
+    """Refuse loudly under strict policy, or record a note when advisory."""
+    if strict:
+        raise CopilotSettingsCollisionError(message)
+    collisions.append(message)
+
+
 def discover_native_plugins(
     candidates: Iterable[ResolvedPluginCandidate],
     *,
     modules_dir: Path,
+    ledger: Any | None = None,
+    strict: bool = True,
+    logger: Any | None = None,
 ) -> tuple[list[NativePluginEntry], list[str]]:
-    """Return catalog entries plus collision notes for the resolved set."""
+    """Return catalog entries plus collision notes for the resolved set.
+
+    A directly declared dependency always outranks a transitive one when both
+    claim a plugin name; the plugin name is attacker-controlled metadata, so a
+    transitive package can never silently capture a name a direct dependency
+    declares. Two claimants of the same precedence class are genuinely
+    ambiguous and refuse (strict) or warn (advisory). A per-dependency target
+    subset that excludes ``copilot`` drops the candidate entirely, and a
+    winner whose identity flips relative to the ledger's recorded owner is
+    refused unless the new winner is a direct dependency.
+    """
     from ..bundle.local_bundle import route_agent_plugin_package
+    from .constants import COPILOT_TARGET_NAME
 
     entries: list[NativePluginEntry] = []
     collisions: list[str] = []
     claimed: dict[str, NativePluginEntry] = {}
     seen_paths: set[Path] = set()
 
-    for candidate in sorted(candidates, key=lambda item: item.dependency_key):
+    def _drop(dependency_key: str, reason: str) -> None:
+        if logger is not None:
+            logger.verbose_detail(
+                f"    Copilot native registration skipped {dependency_key}: {reason}"
+            )
+
+    # Direct dependencies are considered first, then lexicographic dependency
+    # key, so the first claimant of a plugin name is the most authoritative.
+    ordered = sorted(candidates, key=lambda item: (not item.direct, item.dependency_key))
+    for candidate in ordered:
+        if (
+            candidate.target_subset is not None
+            and COPILOT_TARGET_NAME not in candidate.target_subset
+        ):
+            _drop(candidate.dependency_key, "its target subset excludes 'copilot'")
+            continue
         install_path = candidate.install_path
         if not install_path.is_dir():
+            _drop(candidate.dependency_key, "its install path is not a directory")
             continue
         resolved = install_path.resolve()
         if resolved in seen_paths:
@@ -147,7 +186,8 @@ def discover_native_plugins(
         seen_paths.add(resolved)
         try:
             detection = route_agent_plugin_package(install_path)
-        except AgentPluginError:
+        except AgentPluginError as exc:
+            _drop(candidate.dependency_key, f"Agent Plugin routing failed ({exc})")
             continue
         if detection is None or detection.plugin is None:
             continue
@@ -156,28 +196,52 @@ def discover_native_plugins(
                 dependency_key=candidate.dependency_key,
                 plugin=detection.plugin,
                 marketplace_root=modules_dir,
+                direct=candidate.direct,
             )
-        except CatalogSourceError:
+        except CatalogSourceError as exc:
+            _drop(candidate.dependency_key, f"its catalog entry could not be built ({exc})")
             continue
         previous = claimed.get(entry.plugin_name)
         if previous is not None:
-            collisions.append(
-                f"Agent Plugin name '{entry.plugin_name}' is provided by both "
-                f"{previous.dependency_key} and {entry.dependency_key}; "
-                f"registering {previous.dependency_key} and skipping "
-                f"{entry.dependency_key}. Rename one plugin to register both."
+            if previous.direct and not entry.direct:
+                collisions.append(
+                    f"Agent Plugin name '{entry.plugin_name}' is declared directly by "
+                    f"{previous.dependency_key} and transitively by "
+                    f"{entry.dependency_key}; registering the direct dependency "
+                    f"{previous.dependency_key} and skipping {entry.dependency_key}."
+                )
+                continue
+            _raise_or_note(
+                strict,
+                collisions,
+                f"Agent Plugin name '{entry.plugin_name}' is claimed by both "
+                f"{previous.dependency_key} and {entry.dependency_key} at the same "
+                "precedence; refusing to register an ambiguous plugin name. "
+                "Rename one plugin so both can register.",
             )
             continue
         claimed[entry.plugin_name] = entry
         entries.append(entry)
 
-    return order_entries(entries), collisions
+    ordered_entries = order_entries(entries)
+    if ledger is not None:
+        for entry in ordered_entries:
+            recorded = ledger.owner_of(entry.enabled_key)
+            if recorded is not None and recorded != entry.dependency_key and not entry.direct:
+                _raise_or_note(
+                    strict,
+                    collisions,
+                    f"Agent Plugin '{entry.plugin_name}' was registered by "
+                    f"{recorded} but is now claimed by the transitive dependency "
+                    f"{entry.dependency_key}; refusing to silently re-point the "
+                    "registration. Uninstall the previous owner first if this is "
+                    "intended.",
+                )
+    return ordered_entries, collisions
 
 
 def registration_status(modules_dir: Path) -> tuple[str, ...]:
     """Return the plugin names APM currently registers with Copilot."""
-    from .settings import read_ledger
-
     ledger = read_ledger(ledger_path_for(modules_dir))
     suffix = f"@{APM_MARKETPLACE_NAME}"
     return tuple(
@@ -187,10 +251,19 @@ def registration_status(modules_dir: Path) -> tuple[str, ...]:
 
 
 def candidates_from_lockfile(lockfile: Any, modules_dir: Path) -> list[ResolvedPluginCandidate]:
-    """Return registration candidates from canonical locked state."""
+    """Return registration candidates from canonical locked state.
+
+    The synthesized self-entry (dependency key ``.``) is never a registration
+    candidate; every other consumer of the dependency map filters it too.
+    Direct dependencies (no declaring parent, not resolved by a parent repo)
+    and any per-dependency target subset flow through so precedence and target
+    narrowing decisions have the same inputs as the install path.
+    """
+    from ..deps.lockfile import _SELF_KEY
+
     candidates: list[ResolvedPluginCandidate] = []
     for dep_key, locked in sorted(getattr(lockfile, "dependencies", {}).items()):
-        if dep_key == ".":
+        if dep_key == _SELF_KEY:
             continue
         to_reference = getattr(locked, "to_dependency_ref", None)
         if to_reference is None:
@@ -199,8 +272,18 @@ def candidates_from_lockfile(lockfile: Any, modules_dir: Path) -> list[ResolvedP
             install_path = to_reference().get_install_path(modules_dir)
         except (ValueError, AttributeError):
             continue
+        target_subset = getattr(locked, "target_subset", None)
+        direct = (
+            getattr(locked, "declaring_parent", None) is None
+            and getattr(locked, "resolved_by", None) is None
+        )
         candidates.append(
-            ResolvedPluginCandidate(dependency_key=dep_key, install_path=Path(install_path))
+            ResolvedPluginCandidate(
+                dependency_key=dep_key,
+                install_path=Path(install_path),
+                direct=direct,
+                target_subset=tuple(target_subset) if target_subset else None,
+            )
         )
     return candidates
 
@@ -214,11 +297,14 @@ def resync_native_plugins(
     logger: Any | None = None,
     dry_run: bool = False,
     targets: Any | None = None,
+    strict: bool = False,
 ) -> CopilotPluginSyncResult:
     """Rebuild the registration after a lifecycle command mutated locked state.
 
     Uninstall, prune, and restore all converge here so the APM-owned catalog
-    and settings entries never drift from ``apm.lock.yaml``.
+    and settings entries never drift from ``apm.lock.yaml``. These lifecycle
+    commands are advisory by default (``strict=False``): a residual plugin-name
+    collision is downgraded to a note instead of failing the whole command.
     """
     from ..integration.targets import resolve_targets
     from .capability import resolve_native_registration_capability
@@ -238,6 +324,7 @@ def resync_native_plugins(
         capability=capability,
         logger=logger,
         dry_run=dry_run,
+        strict=strict,
     )
 
 
@@ -250,6 +337,7 @@ def synchronize_copilot_plugins(
     capability: NativeRegistrationCapability | None,
     logger: Any | None = None,
     dry_run: bool = False,
+    strict: bool = True,
 ) -> CopilotPluginSyncResult:
     """Rebuild APM's Copilot plugin registration from resolved state."""
     catalog_path = catalog_path_for(modules_dir)
@@ -265,7 +353,9 @@ def synchronize_copilot_plugins(
     entries: list[NativePluginEntry] = []
     collisions: list[str] = []
     if capability is not None and capability.supported:
-        entries, collisions = discover_native_plugins(candidates, modules_dir=modules_dir)
+        entries, collisions = discover_native_plugins(
+            candidates, modules_dir=modules_dir, ledger=ledger, strict=strict, logger=logger
+        )
 
     settings_path = resolve_settings_path(scope, project_root, ledger)
     result = CopilotPluginSyncResult(
@@ -280,6 +370,16 @@ def synchronize_copilot_plugins(
 
     if dry_run:
         result.changed = bool(entries) or had_registration
+        if logger is not None:
+            if entries:
+                noun = "Agent Plugin" if len(entries) == 1 else "Agent Plugins"
+                logger.dry_run_notice(
+                    f"Would register {len(entries)} {noun} with GitHub Copilot in {settings_path}"
+                )
+            elif had_registration:
+                logger.dry_run_notice(
+                    f"Would remove the APM Copilot marketplace from {settings_path}"
+                )
         return result
 
     document = read_settings_document(settings_path)
@@ -288,6 +388,7 @@ def synchronize_copilot_plugins(
             modules_dir=modules_dir, project_root=project_root, scope=scope
         )
         enabled_keys = tuple(entry.enabled_key for entry in entries)
+        plugin_owners = {entry.enabled_key: entry.dependency_key for entry in entries}
         merge = merge_registration(
             document=document,
             settings_path=settings_path,
@@ -305,16 +406,21 @@ def synchronize_copilot_plugins(
                 enabled_plugins=enabled_keys,
                 project_root=project_root,
                 scope=scope,
+                plugin_owners=plugin_owners,
             ),
             settings_path=settings_path,
             settings_text=render_settings_document(merge.document),
             write_settings=merge.changed,
+            modules_dir=modules_dir,
         )
         result.changed = True
         _log_registration(logger, entries, settings_path)
         return result
 
-    removal = remove_registration(document=document, settings_path=settings_path, ledger=ledger)
+    removal_ledger = _removal_ledger(ledger, catalog_path)
+    removal = remove_registration(
+        document=document, settings_path=settings_path, ledger=removal_ledger
+    )
     _commit(
         catalog_path=catalog_path,
         catalog_text=None,
@@ -323,14 +429,54 @@ def synchronize_copilot_plugins(
         settings_path=settings_path,
         settings_text=render_settings_document(removal.document),
         write_settings=removal.changed and settings_path.is_file(),
+        modules_dir=modules_dir,
     )
     result.changed = removal.changed or had_registration
     if logger is not None and result.changed:
         logger.info(
-            f"Removed the APM Copilot plugin marketplace from {settings_path.name}",
+            f"Removed the APM Copilot plugin marketplace from {settings_path}",
             symbol="info",
         )
     return result
+
+
+def _removal_ledger(ledger: Any, catalog_path: Path) -> Any:
+    """Return the ledger to drive removal, healing an unreadable ledger.
+
+    A ledger that exists but cannot be parsed would otherwise remove nothing
+    (fail-OPEN) while the catalog is still deleted, leaving orphaned
+    ``enabledPlugins`` entries. When that happens, the still-present catalog is
+    the authoritative record of what APM owns, so removal keys are derived from
+    it instead.
+    """
+    if not getattr(ledger, "unreadable", False):
+        return ledger
+    from .settings import RegistrationLedger
+
+    return RegistrationLedger(
+        marketplace_owned=True,
+        enabled_plugins=_catalog_derived_enabled_keys(catalog_path),
+    )
+
+
+def _catalog_derived_enabled_keys(catalog_path: Path) -> tuple[str, ...]:
+    """Return ``<plugin>@apm`` keys derived from the on-disk catalog."""
+    import json
+
+    if not catalog_path.is_file():
+        return ()
+    try:
+        loaded = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+    plugins = loaded.get("plugins") if isinstance(loaded, dict) else None
+    if not isinstance(plugins, list):
+        return ()
+    keys = []
+    for plugin in plugins:
+        if isinstance(plugin, dict) and isinstance(plugin.get("name"), str):
+            keys.append(f"{plugin['name']}@{APM_MARKETPLACE_NAME}")
+    return tuple(sorted(set(keys)))
 
 
 def _commit(
@@ -342,6 +488,7 @@ def _commit(
     settings_path: Path,
     settings_text: str,
     write_settings: bool,
+    modules_dir: Path,
 ) -> None:
     """Apply catalog, ledger, and settings writes as one rollback unit."""
     staged = [_StagedWrite(catalog_path), _StagedWrite(ledger_path)]
@@ -361,12 +508,12 @@ def _commit(
         if write_settings:
             settings_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(settings_path, settings_text)
-    except (OSError, CopilotSettingsCollisionError):
+    except OSError:
         for write in reversed(staged):
             write.restore()
         raise
     if catalog_text is None and ledger_text is None:
-        _prune_empty_parents(catalog_path.parent, stop=catalog_path.parents[2])
+        _prune_empty_parents(catalog_path.parent, stop=modules_dir)
 
 
 def _remove_generated(path: Path) -> None:
@@ -402,10 +549,15 @@ def _log_registration(
     if logger is None or not entries:
         return
     noun = "Plugin" if len(entries) == 1 else "Plugins"
-    names = ", ".join(entry.plugin_name for entry in entries)
-    logger.info(
+    names = [entry.plugin_name for entry in entries]
+    shown = ", ".join(names[:3])
+    if len(names) > 3:
+        shown += f", and {len(names) - 3} more"
+    logger.success(
         f"Registered {len(entries)} Agent {noun} with GitHub Copilot "
-        f"via the '{APM_MARKETPLACE_NAME}' marketplace ({names})",
+        f"via the '{APM_MARKETPLACE_NAME}' marketplace ({shown})",
         symbol="check",
     )
+    if len(names) > 3:
+        logger.verbose_detail(f"    plugins: {', '.join(names)}")
     logger.verbose_detail(f"    settings: {settings_path}")

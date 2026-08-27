@@ -52,6 +52,7 @@ def _preflight_prune_survivors(
     *,
     lockfile: LockFile | None,
     excluded_keys: set[str],
+    logger=None,
 ) -> None:
     """Reject unsafe survivors before prune can mutate package or target state."""
     from ..agent_plugins.errors import preflight_reintegration_survivors
@@ -69,6 +70,7 @@ def _preflight_prune_survivors(
             if dependency.get_unique_key() not in excluded_keys
         ),
         apm_modules_dir,
+        on_warning=(logger.warning if logger is not None else None),
     )
 
 
@@ -188,6 +190,7 @@ def prune(ctx, dry_run):
                 apm_modules_dir,
                 lockfile=lockfile,
                 excluded_keys=planned_pruned_keys,
+                logger=logger,
             )
 
         if orphaned_packages:
@@ -400,10 +403,10 @@ def prune(ctx, dry_run):
 
 def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run: bool) -> None:
     """Rebuild APM's Copilot plugin registration from surviving locked state."""
-    if dry_run:
-        return
     try:
+        from ..agent_plugins.errors import AgentPluginError
         from ..copilot_plugins.registrar import resync_native_plugins
+        from ..copilot_plugins.settings import CopilotSettingsCollisionError
 
         resync_native_plugins(
             project_root=project_root,
@@ -411,11 +414,12 @@ def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_
             scope=InstallScope.PROJECT,
             lockfile=lockfile,
             logger=logger,
+            dry_run=dry_run,
         )
-    except Exception as registration_error:
+    except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
         logger.warning(
-            "GitHub Copilot plugin registration could not be updated: "
-            f"{type(registration_error).__name__}: {registration_error}"
+            f"GitHub Copilot plugin registration could not be updated: {registration_error} "
+            "Re-run 'apm install' to re-register once resolved."
         )
 
 

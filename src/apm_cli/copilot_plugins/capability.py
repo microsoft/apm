@@ -96,12 +96,30 @@ def probe_copilot_cli_version() -> str | None:
             encoding="utf-8",
             timeout=10,
             check=False,
+            env=_probe_environment(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
     if completed.returncode != 0:
         return None
     return normalize_client_version(completed.stdout or completed.stderr)
+
+
+def _probe_environment() -> dict[str, str]:
+    """Return a minimal env for the read-only version probe.
+
+    The probe is a third-party binary invocation, so it must never inherit
+    APM's credential surface (``GITHUB_APM_PAT`` / ``GITHUB_TOKEN`` /
+    ``ADO_APM_PAT`` and any cloud tokens). Only the variables the binary needs
+    to locate itself and resolve a home directory are forwarded.
+    """
+    allowed = ("PATH", "HOME", "SYSTEMROOT", "SystemRoot")
+    env: dict[str, str] = {}
+    for name in allowed:
+        value = os.environ.get(name)
+        if value is not None:
+            env[name] = value
+    return env
 
 
 def _target_names(targets: Iterable[Any] | None) -> tuple[str, ...]:
@@ -118,28 +136,38 @@ def _target_names(targets: Iterable[Any] | None) -> tuple[str, ...]:
 
 def unsupported_target_reason(target_names: Iterable[str]) -> str:
     """Return the precise error text for a non-Copilot target selection."""
-    from ..agent_plugins.errors import AGENT_PLUGIN_RECOVERY
-
     selected = ", ".join(sorted(set(target_names))) or "none"
     return (
         "Agent Plugins v1.0.0 packages install natively only for the "
         f"'{COPILOT_TARGET_NAME}' target; selected target(s): {selected}. "
-        "Re-run with --target copilot. " + AGENT_PLUGIN_RECOVERY
+        "Re-run with --target copilot."
+    )
+
+
+def undetected_client_reason() -> str:
+    """Return the error text for a Copilot CLI that is absent from PATH.
+
+    A missing binary is an installation problem, not a version-floor
+    problem, so its recovery action names installation instead of an
+    upgrade.
+    """
+    return (
+        "GitHub Copilot CLI was not found on PATH, so APM cannot register "
+        "Agent Plugins v1.0.0 packages natively. Install the GitHub Copilot "
+        "CLI (1.0.81 or newer), then re-run 'apm install --target copilot'."
     )
 
 
 def unqualified_client_reason(detected_version: str | None) -> str:
     """Return the precise error text for an unqualified Copilot CLI."""
-    from ..agent_plugins.errors import AGENT_PLUGIN_RECOVERY
-
     detected = detected_version or "not detected"
     return (
         "Agent Plugins v1.0.0 packages need GitHub Copilot CLI "
         f">={COPILOT_LIVE_PLUGIN_MIN_VERSION}, which loads a directory "
         "marketplace live from its real directory; detected "
         f"{detected}. Older clients copy the plugin into private Copilot "
-        "state, so APM refuses to install it there. Upgrade the Copilot CLI. "
-        + AGENT_PLUGIN_RECOVERY
+        "state, so APM refuses to install it there. Upgrade the GitHub "
+        "Copilot CLI to 1.0.81 or newer."
     )
 
 
@@ -164,6 +192,11 @@ def resolve_native_registration_capability(
             reason=unsupported_target_reason(names),
         )
     detected = (probe or probe_copilot_cli_version)()
+    if detected is None:
+        return NativeRegistrationCapability(
+            supported=False,
+            reason=undetected_client_reason(),
+        )
     if not is_qualified_client_version(detected):
         return NativeRegistrationCapability(
             supported=False,

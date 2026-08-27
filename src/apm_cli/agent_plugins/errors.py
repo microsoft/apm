@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -57,6 +57,18 @@ class AgentPluginDeploymentBoundaryError(AgentPluginError):
     """Raised when native Agent Plugin content reaches a deployment boundary."""
 
 
+class AgentPluginClientUnavailableError(AgentPluginDeploymentBoundaryError):
+    """Raised when a valid native plugin cannot be refreshed right now.
+
+    The plugin's canonical IR is present and valid, but the GitHub Copilot
+    client is absent from PATH or below the qualified floor, so its native
+    registration cannot be re-applied. For the package being actively
+    integrated this is still fatal, but for an already-installed SURVIVOR it is
+    recoverable: its existing registration bytes are left untouched and the
+    command continues.
+    """
+
+
 def enforce_agent_plugin_deployment_boundary(
     package_info: Any | None = None,
     *,
@@ -90,8 +102,8 @@ def enforce_agent_plugin_deployment_boundary(
     if capability is not None and capability.supported:
         return
     if capability is not None and capability.reason:
-        raise AgentPluginDeploymentBoundaryError(capability.reason)
-    raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
+        raise AgentPluginClientUnavailableError(capability.reason)
+    raise AgentPluginClientUnavailableError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
 
 
 def preflight_reintegration_survivors(
@@ -99,8 +111,19 @@ def preflight_reintegration_survivors(
     modules_dir: Path,
     *,
     require_valid_installed: bool = False,
+    on_warning: Callable[[str], None] | None = None,
 ) -> list[tuple[DependencyReference, PackageInfo]]:
-    """Validate installed survivors before clear-then-rebuild integration."""
+    """Validate installed survivors before clear-then-rebuild integration.
+
+    A survivor is a package NOT being acted on. If such a package is a native
+    Agent Plugin whose registration merely cannot be refreshed right now (the
+    Copilot client is absent or below the floor), aborting the whole command
+    would brick every unrelated ``apm install`` / ``update`` / ``uninstall``.
+    Instead the survivor is dropped from the rebuild plan -- its existing
+    registration bytes are left untouched -- and a warning naming the escape
+    route is surfaced. Structural corruption (missing IR, wrong route) is still
+    fatal.
+    """
     from apm_cli.models.apm_package import build_installed_package_info
 
     plan = []
@@ -124,6 +147,17 @@ def preflight_reintegration_survivors(
                     f"{dependency.get_identity()}"
                 )
             continue
-        enforce_agent_plugin_deployment_boundary(package_info)
+        try:
+            enforce_agent_plugin_deployment_boundary(package_info)
+        except AgentPluginClientUnavailableError:
+            identity = dependency.get_identity()
+            if on_warning is not None:
+                on_warning(
+                    f"GitHub Copilot plugin registration for '{identity}' could not "
+                    "be refreshed (Copilot CLI is absent or below the required "
+                    "version); its existing registration is left unchanged. To "
+                    f"remove it, run 'apm uninstall {identity}' or drop it from apm.yml."
+                )
+            continue
         plan.append((dependency, package_info))
     return plan

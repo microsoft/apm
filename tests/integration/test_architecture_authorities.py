@@ -518,8 +518,8 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         (
             "src/apm_cli/install/services.py",
             "    enforce_agent_plugin_deployment_boundary(package_info)\n\n"
-            "    from apm_cli.copilot_plugins.capability import admits_native_plugin",
-            "    from apm_cli.copilot_plugins.capability import admits_native_plugin\n\n"
+            "    from apm_cli.integration.dispatch import get_dispatch_table",
+            "    from apm_cli.integration.dispatch import get_dispatch_table\n\n"
             "    enforce_agent_plugin_deployment_boundary(package_info)",
             "native deployment gate must be the first integration action",
         ),
@@ -549,7 +549,7 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/agent_plugins/errors.py",
-            "    raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "    raise AgentPluginClientUnavailableError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
             "    return None  # native package accepted",
             "native deployment boundary must fail closed",
         ),
@@ -718,9 +718,8 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/agent_plugins/errors.py",
-            "        enforce_agent_plugin_deployment_boundary(package_info)\n"
-            "        plan.append((dependency, package_info))",
-            "        plan.append((dependency, package_info))",
+            "            enforce_agent_plugin_deployment_boundary(package_info)",
+            "            _ = package_info",
             "survivor reintegration preflight must use the native deployment boundary owner",
         ),
         (

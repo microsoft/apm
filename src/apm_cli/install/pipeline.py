@@ -47,6 +47,7 @@ from functools import wraps
 from typing import TYPE_CHECKING
 
 from ..agent_plugins.errors import AgentPluginError
+from ..copilot_plugins.settings import CopilotSettingsCollisionError
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
@@ -656,7 +657,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # --------------------------------------------------------------
         from .phases import copilot_plugins as _copilot_plugins_phase
 
-        _copilot_plugins_phase.activate(ctx)
+        _run_phase("copilot_activate", _copilot_plugins_phase.ActivatePhase, ctx)
 
         # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)
@@ -900,14 +901,6 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
 
         LockfileBuilder(ctx).build_and_save()
 
-        # ------------------------------------------------------------------
-        # Phase: Native GitHub Copilot Agent Plugin registration (#2703).
-        # Runs after the lockfile is canonical so the APM-owned marketplace
-        # is rebuilt from resolved state, not from in-flight guesses.
-        # ------------------------------------------------------------------
-        if not lockfile_only:
-            _run_phase("copilot_plugins", _copilot_plugins_phase, ctx)
-
         # Fail-closed integrity gate: when security.integrity.require_hashes is
         # on, every non-local lockfile entry must carry a content hash. A
         # missing hash stops the install (the key only asserts hash-presence on
@@ -934,6 +927,18 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
                 _run_phase("audit", _audit_phase, ctx)
             except PolicyViolationError:
                 raise
+
+        # ------------------------------------------------------------------
+        # Phase: Native GitHub Copilot Agent Plugin registration (#2703).
+        # Runs LAST -- after the lockfile is canonical, after the require-hashes
+        # integrity gate, and after the content-audit gate -- so the APM-owned
+        # marketplace catalog, ownership ledger, and enabled-plugin settings
+        # entries are written only for an install those gates actually allowed
+        # to complete. Writing earlier would leave Copilot loading a plugin a
+        # later gate refused.
+        # ------------------------------------------------------------------
+        if not lockfile_only:
+            _run_phase("copilot_plugins", _copilot_plugins_phase, ctx)
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
@@ -968,9 +973,14 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         raise
     except InstallFailureAlreadyRendered:
         raise
-    except (PathTraversalError, MaterializationPathCollisionError):
-        # Path-safety and package-directory collision errors already include
-        # actionable guidance; preserve them instead of adding generic wrappers.
+    except (PathTraversalError, MaterializationPathCollisionError, CopilotSettingsCollisionError):
+        # Path-safety, package-directory collision, and Copilot settings
+        # collision errors already include actionable guidance; re-raise them
+        # verbatim. A settings collision in particular means dependency
+        # resolution SUCCEEDED and the lockfile is written -- only the Copilot
+        # merge collided -- so wrapping it into "Failed to resolve APM
+        # dependencies: ..." would mis-attribute the failure and double-wrap
+        # once commands/install.py prefixes again.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904

@@ -133,46 +133,60 @@ def preflight_agent_plugin_materializations(
 
 
 def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> None:
-    """Reject a cached or local native package without mutating its source."""
+    """Reject a cached or local native package without mutating its source.
+
+    The native-registration capability is published for the duration of the
+    preview so an unqualified or absent Copilot client yields the SAME precise
+    reason a real install would ('upgrade the client' / 'install the client'),
+    instead of the generic 'no native harness' fallback.
+    """
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
-    from apm_cli.core.scope import get_modules_dir
+    from apm_cli.copilot_plugins.capability import native_registration_scope
+    from apm_cli.core.scope import get_modules_dir, is_user_scope
     from apm_cli.models.apm_package import PackageInfo
     from apm_cli.models.validation import validate_apm_package
 
     source_root = ctx.project_root
     modules_dir = get_modules_dir(ctx.scope)
-    for dependency in dependencies:
-        if dependency.is_local and dependency.local_path:
-            package_path = Path(dependency.local_path).expanduser()
-            if not package_path.is_absolute():
-                package_path = (source_root / package_path).resolve()
-        else:
-            package_path = dependency.get_install_path(modules_dir)
-        if not package_path.is_dir():
-            continue
-        detection = route_agent_plugin_package(package_path)
-        if detection is None:
-            continue
-        if dependency.is_local:
-            validation = validate_apm_package(
-                package_path,
-                source_path=package_path,
-                agent_plugin_detection=detection,
-            )
-        else:
-            validation = validate_apm_package(
-                package_path,
-                agent_plugin_detection=detection,
-            )
-        if validation.is_valid and validation.package is not None:
-            enforce_agent_plugin_deployment_boundary(
-                PackageInfo(
-                    package=validation.package,
-                    install_path=package_path,
-                    dependency_ref=dependency,
-                    package_type=validation.package_type,
+    try:
+        from apm_cli.integration.targets import resolve_targets
+
+        targets = resolve_targets(source_root, user_scope=is_user_scope(ctx.scope))
+    except Exception:
+        targets = getattr(ctx, "targets", None)
+    with native_registration_scope(targets):
+        for dependency in dependencies:
+            if dependency.is_local and dependency.local_path:
+                package_path = Path(dependency.local_path).expanduser()
+                if not package_path.is_absolute():
+                    package_path = (source_root / package_path).resolve()
+            else:
+                package_path = dependency.get_install_path(modules_dir)
+            if not package_path.is_dir():
+                continue
+            detection = route_agent_plugin_package(package_path)
+            if detection is None:
+                continue
+            if dependency.is_local:
+                validation = validate_apm_package(
+                    package_path,
+                    source_path=package_path,
+                    agent_plugin_detection=detection,
                 )
-            )
+            else:
+                validation = validate_apm_package(
+                    package_path,
+                    agent_plugin_detection=detection,
+                )
+            if validation.is_valid and validation.package is not None:
+                enforce_agent_plugin_deployment_boundary(
+                    PackageInfo(
+                        package=validation.package,
+                        install_path=package_path,
+                        dependency_ref=dependency,
+                        package_type=validation.package_type,
+                    )
+                )
 
 
 def _record_agent_plugin_boundary_diagnostic(

@@ -26,6 +26,7 @@ class NativePluginEntry:
     description: str | None
     source: str
     root: Path
+    direct: bool = False
 
     @property
     def enabled_key(self) -> str:
@@ -64,6 +65,7 @@ def build_entry(
     dependency_key: str,
     plugin: AgentPlugin,
     marketplace_root: Path,
+    direct: bool = False,
 ) -> NativePluginEntry:
     """Build one catalog entry from canonical Agent Plugin IR."""
     identity = plugin.identity
@@ -74,6 +76,7 @@ def build_entry(
         description=identity.description,
         source=relative_plugin_source(marketplace_root, plugin.root),
         root=plugin.root,
+        direct=direct,
     )
 
 

@@ -66,11 +66,12 @@ def _is_agent_plugin_root(path: Path) -> bool:
     """
     if not (path / "plugin.json").is_file():
         return False
+    from ...agent_plugins.errors import AgentPluginError
     from ...bundle.local_bundle import route_agent_plugin_package
 
     try:
         return route_agent_plugin_package(path) is not None
-    except Exception:
+    except (AgentPluginError, OSError):
         return False
 
 

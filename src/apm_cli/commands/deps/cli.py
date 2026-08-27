@@ -425,11 +425,12 @@ deps.add_command(_why_cmd)
 
 def _agent_plugin_version(candidate) -> str | None:
     """Return the declared version of a canonical Agent Plugin root."""
+    from ...agent_plugins.errors import AgentPluginError
     from ...bundle.local_bundle import route_agent_plugin_package
 
     try:
         detection = route_agent_plugin_package(candidate)
-    except Exception:
+    except (AgentPluginError, OSError):
         return None
     if detection is None or detection.plugin is None:
         return None
@@ -440,19 +441,25 @@ def _report_native_plugins(apm_dir, logger) -> None:
     """Report Agent Plugins APM registers natively with GitHub Copilot."""
     from pathlib import Path
 
+    from ...agent_plugins.errors import AgentPluginError
     from ...copilot_plugins.registrar import registration_status
 
     try:
         names = registration_status(Path(apm_dir) / "apm_modules")
-    except Exception:
+    except (AgentPluginError, OSError):
         return
     if not names:
         return
     noun = "Agent Plugin" if len(names) == 1 else "Agent Plugins"
+    shown = ", ".join(names[:3])
+    if len(names) > 3:
+        shown += f", and {len(names) - 3} more"
     logger.info(
-        f"{len(names)} {noun} registered natively with GitHub Copilot: {', '.join(names)}",
-        symbol="plugin",
+        f"{len(names)} {noun} registered natively with GitHub Copilot: {shown}",
+        symbol="info",
     )
+    if len(names) > 3:
+        logger.verbose_detail(f"    plugins: {', '.join(names)}")
 
 
 def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):

@@ -123,6 +123,17 @@ def _raise_name(node: ast.Raise) -> str:
     return _call_name(node.exc)
 
 
+# The boundary fails closed for the actively integrated package by raising the
+# deployment-boundary family. ``AgentPluginClientUnavailableError`` is a
+# subclass of ``AgentPluginDeploymentBoundaryError`` (a valid plugin whose
+# client cannot be refreshed right now); raising it is still a fail-closed
+# outcome for the active package, so both names are accepted here.
+_FAIL_CLOSED_BOUNDARY_RAISES = (
+    "AgentPluginDeploymentBoundaryError",
+    "AgentPluginClientUnavailableError",
+)
+
+
 def _assigns_subscript_value(
     node: ast.AST,
     *,
@@ -299,7 +310,7 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
         package_fails_closed = (
             bool(boundary_def.body)
             and isinstance(boundary_def.body[-1], ast.Raise)
-            and _raise_name(boundary_def.body[-1]) == "AgentPluginDeploymentBoundaryError"
+            and _raise_name(boundary_def.body[-1]) in _FAIL_CLOSED_BOUNDARY_RAISES
         )
         admission_guards = [
             node
