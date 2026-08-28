@@ -122,3 +122,28 @@ def _isolate_discovery_state():
     yield
     clear_discovery_cache()
     perf_stats.reset()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ssl_state():
+    """Restore process-global truststore injection between tests."""
+    import contextlib
+
+    try:
+        import truststore
+    except Exception:
+        truststore = None
+
+    if truststore is not None:
+        with contextlib.suppress(Exception):
+            truststore.extract_from_ssl()
+
+    from apm_cli.core.tls_trust import configure_process_tls_trust
+
+    configure_process_tls_trust.cache_clear()
+    yield
+    configure_process_tls_trust.cache_clear()
+
+    if truststore is not None:
+        with contextlib.suppress(Exception):
+            truststore.extract_from_ssl()

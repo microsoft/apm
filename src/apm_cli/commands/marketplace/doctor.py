@@ -195,6 +195,23 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
         )
     )
 
+    # Check 4: TLS trust source (informational)
+    try:
+        from ...core.tls_trust import describe_tls_trust
+
+        tls_source, tls_precedence = describe_tls_trust()
+        tls_detail = f"{tls_source}; precedence: {tls_precedence}"
+    except Exception as exc:
+        tls_detail = f"Unable to determine TLS trust source: {str(exc)[:60]}"
+    checks.append(
+        _DoctorCheck(
+            name="TLS trust",
+            passed=True,
+            detail=tls_detail,
+            informational=True,
+        )
+    )
+
     # Check 4: marketplace config presence + parsability
     project_root = Path.cwd()
     apm_path = project_root / "apm.yml"

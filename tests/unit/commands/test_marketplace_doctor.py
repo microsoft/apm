@@ -245,6 +245,27 @@ class TestDoctorAuthCheck:
         assert result.exit_code == 0  # no token is informational, not a failure
         assert "unauthenticated" in result.output.lower() or "rate limit" in result.output.lower()
 
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_tls_trust_source_is_reported(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+        ]
+
+        with patch(
+            "apm_cli.core.tls_trust.describe_tls_trust",
+            return_value=(
+                "OS trust store (truststore)",
+                "APM_DISABLE_TRUSTSTORE > explicit bundle > OS trust store > certifi fallback",
+            ),
+        ):
+            result = runner.invoke(cli, ["doctor"])
+
+        assert result.exit_code == 0
+        assert "TLS trust" in result.output
+        assert "OS trust store" in result.output
+
 
 # ---------------------------------------------------------------------------
 # Check 4: marketplace.yml

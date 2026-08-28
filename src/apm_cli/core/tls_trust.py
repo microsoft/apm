@@ -95,6 +95,26 @@ def log_tls_trust_status() -> None:
         logger.debug(message, *args)
 
 
+def describe_tls_trust(env: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """Return a user-facing trust source and precedence description."""
+    if _env_flag(_DISABLE_ENV_VAR, env):
+        source = f"bundled CA (certifi); {_DISABLE_ENV_VAR}=1 disables OS trust-store injection"
+    elif has_explicit_ca_override(env):
+        source = f"explicit CA bundle: {_explicit_ca_path(env)}"
+    elif _LAST_TLS_STATUS is not None:
+        message, args = _LAST_TLS_STATUS
+        rendered = message % args if args else message
+        source = rendered.removeprefix("TLS: ")
+    else:
+        source = "not selected yet; OS trust store preferred with certifi fallback"
+
+    precedence = (
+        "APM_DISABLE_TRUSTSTORE > REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE > "
+        "APM_EXTRA_CA_BUNDLE (when supported) > OS trust store > certifi fallback"
+    )
+    return source, precedence
+
+
 def _env_flag(name: str, env: Mapping[str, str] | None = None) -> bool:
     environ = os.environ if env is None else env
     return environ.get(name, "").strip().lower() in _TRUTHY
