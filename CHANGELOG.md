@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Lockfiles and warm `apm_modules` trees recorded by a pre-#2620 APM on
+  Windows are now migrated automatically: when a locked hash matches the
+  fresh tree re-hashed with only APM-authored files (synthetic `apm.yml`,
+  inline-hooks `hooks.json`) expanded to the legacy CRLF domain, the install
+  accepts it once, converges the tree to LF, warns, and re-records the
+  platform-independent hash. Any other mismatch still hard-fails the
+  supply-chain check, and `resolved_commit` pins are preserved. (#2628,
+  follow-up to #2619)
+
 ## [0.29.0] - 2026-08-26
 
 ### Added

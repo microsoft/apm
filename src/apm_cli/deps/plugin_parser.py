@@ -615,6 +615,14 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     # download_virtual_file_package().
     write_text_lf(apm_yml_path, apm_yml_content)
 
+    # The file content just changed: drop stale from_apm_yml cache entries,
+    # or a same-process re-download of this package would read the OLD
+    # instance (possibly already SHA-stamped) and skip re-stamping the
+    # freshly synthesized 0.0.0 manifest (apm#2619 migration fallout).
+    from ..models.apm_package import invalidate_apm_yml_cache_entry
+
+    invalidate_apm_yml_cache_entry(apm_yml_path)
+
     return apm_yml_path
 
 

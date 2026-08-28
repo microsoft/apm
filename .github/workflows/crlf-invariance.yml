@@ -23,6 +23,7 @@ on:
       - 'src/apm_cli/deps/package_validator.py'
       - 'src/apm_cli/deps/github_downloader.py'
       - 'src/apm_cli/models/validation.py'
+      - 'src/apm_cli/install/legacy_crlf.py'
       - 'scripts/crlf_invariance_probe.py'
       - '.github/workflows/crlf-invariance.yml'
   push:
@@ -35,6 +36,7 @@ on:
       - 'src/apm_cli/deps/package_validator.py'
       - 'src/apm_cli/deps/github_downloader.py'
       - 'src/apm_cli/models/validation.py'
+      - 'src/apm_cli/install/legacy_crlf.py'
       - 'scripts/crlf_invariance_probe.py'
       - '.github/workflows/crlf-invariance.yml'
   # Merge queues do not support path filtering; run unconditionally there so

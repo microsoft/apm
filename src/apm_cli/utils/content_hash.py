@@ -1,6 +1,7 @@
 """Deterministic SHA-256 content hashing for package integrity verification."""
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
@@ -20,6 +21,33 @@ _EXCLUDED_ROOT_FILES = {_APM_PIN_MARKER}
 
 # Well-known hash for empty/missing packages
 _EMPTY_HASH = "sha256:" + hashlib.sha256(b"").hexdigest()
+
+
+def _iter_package_files(package_path: Path) -> list[Path]:
+    """Enumerate the hashable files of a package tree.
+
+    Shared by :func:`compute_package_hash` and
+    :func:`compute_package_hash_with_overrides` so both digest exactly the
+    same file set: regular files only, symlinks skipped, excluded
+    directories pruned, root-level excluded files dropped, sorted
+    lexicographically by POSIX relative path for determinism.
+    """
+    regular_files: list[Path] = []
+    for item in package_path.rglob("*"):
+        # Skip symlinks
+        if item.is_symlink():
+            continue
+        # Skip excluded directories and their contents
+        rel = item.relative_to(package_path)
+        if any(part in _EXCLUDED_DIRS for part in rel.parts):
+            continue
+        if item.is_file():
+            if len(rel.parts) == 1 and rel.name in _EXCLUDED_ROOT_FILES:
+                continue
+            regular_files.append(rel)
+
+    regular_files.sort(key=lambda p: p.as_posix())
+    return regular_files
 
 
 def compute_package_hash(package_path: Path) -> str:
@@ -56,28 +84,55 @@ def compute_package_hash(package_path: Path) -> str:
     hasher = hashlib.sha256()
     file_count = 0
 
-    # Collect all regular files, skipping excluded dirs and symlinks
-    regular_files: list[Path] = []
-    for item in package_path.rglob("*"):
-        # Skip symlinks
-        if item.is_symlink():
-            continue
-        # Skip excluded directories and their contents
-        rel = item.relative_to(package_path)
-        if any(part in _EXCLUDED_DIRS for part in rel.parts):
-            continue
-        if item.is_file():
-            if len(rel.parts) == 1 and rel.name in _EXCLUDED_ROOT_FILES:
-                continue
-            regular_files.append(rel)
-
-    # Sort lexicographically by POSIX path for determinism
-    regular_files.sort(key=lambda p: p.as_posix())
-
-    for rel_path in regular_files:
+    for rel_path in _iter_package_files(package_path):
         # Hash the relative path then the file contents
         hasher.update(rel_path.as_posix().encode("utf-8"))
         hasher.update((package_path / rel_path).read_bytes())
+        file_count += 1
+
+    if file_count == 0:
+        return _EMPTY_HASH
+
+    return f"sha256:{hasher.hexdigest()}"
+
+
+def compute_package_hash_with_overrides(
+    package_path: Path,
+    overrides: Mapping[str, bytes],
+) -> str:
+    """Compute the package hash as if selected files held different bytes.
+
+    Identical to :func:`compute_package_hash` -- same file enumeration,
+    same digest layout -- except that for every file whose POSIX relative
+    path appears in ``overrides``, the mapped bytes are hashed in place of
+    the on-disk content. Files named in ``overrides`` that do not exist in
+    the enumerated tree contribute nothing (they are not phantom-added).
+
+    Used by the apm#2619 migration path
+    (:mod:`apm_cli.install.legacy_crlf`) to answer "would this tree match
+    the locked hash if the APM-authored synthetic files still carried
+    their legacy CRLF bytes?" without mutating the tree.
+
+    Args:
+        package_path: Root directory of the installed package.
+        overrides: POSIX relative path -> replacement bytes.
+
+    Returns:
+        Hash string in format ``"sha256:<hex_digest>"``.
+    """
+    if not package_path.is_dir():
+        return _EMPTY_HASH
+
+    hasher = hashlib.sha256()
+    file_count = 0
+
+    for rel_path in _iter_package_files(package_path):
+        posix = rel_path.as_posix()
+        hasher.update(posix.encode("utf-8"))
+        if posix in overrides:
+            hasher.update(overrides[posix])
+        else:
+            hasher.update((package_path / rel_path).read_bytes())
         file_count += 1
 
     if file_count == 0:

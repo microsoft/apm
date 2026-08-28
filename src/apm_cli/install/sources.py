@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.errors import DirectDependencyError
+from apm_cli.install.legacy_crlf import accept_legacy_crlf_mismatch, converge_warm_tree
 from apm_cli.install.registry_wiring import (
     get_registry_resolver,
     registry_resolution_for_cached_registry_dep,
@@ -614,6 +615,9 @@ class CachedDependencySource(DependencySource):
             )
         )
         if install_path.is_dir():
+            # apm#2619: converge legacy CRLF bytes in APM-authored files
+            # before recording, so the stale hash stops propagating.
+            converge_warm_tree(install_path, pkg_type, dep_ref, dep_key=dep_key, logger=logger)
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
@@ -881,14 +885,24 @@ class FreshDependencySource(DependencySource):
             ):
                 _fresh_hash = ctx.package_hashes[dep_key]
                 if _fresh_hash != dep_locked_chk.content_hash:
-                    safe_rmtree(install_path, ctx.apm_modules_dir)
-                    raise DirectDependencyError(
-                        f"Content hash mismatch for {dep_key}: "
-                        f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
-                        "The downloaded content differs from the lockfile record. "
-                        "This may indicate a supply-chain attack. Use "
-                        "'apm install --update' to accept new content and update the lockfile."
-                    )
+                    # apm#2619: accept only the provably-benign legacy CRLF
+                    # domain (warn + re-record); else keep the hard fail.
+                    if not accept_legacy_crlf_mismatch(
+                        install_path,
+                        getattr(package_info, "package_type", None),
+                        dep_ref,
+                        dep_key=dep_key,
+                        locked_hash=dep_locked_chk.content_hash,
+                        diagnostics=diagnostics,
+                    ):
+                        safe_rmtree(install_path, ctx.apm_modules_dir)
+                        raise DirectDependencyError(
+                            f"Content hash mismatch for {dep_key}: "
+                            f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
+                            "The downloaded content differs from the lockfile record. "
+                            "This may indicate a supply-chain attack. Use "
+                            "'apm install --update' to accept new content and update the lockfile."
+                        )
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value

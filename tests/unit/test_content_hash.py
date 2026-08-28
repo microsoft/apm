@@ -352,3 +352,56 @@ class TestLockfileContentHash:
         loaded_dep = loaded.get_dependency("owner/repo")
         assert loaded_dep is not None
         assert loaded_dep.content_hash == "sha256:deadbeef"
+
+
+@pytest.mark.windows_compat
+class TestComputePackageHashWithOverrides:
+    """apm#2619: override-hashing powers the legacy CRLF-domain equivalence check."""
+
+    def test_no_overrides_matches_plain_hash(self, tmp_path):
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "apm.yml").write_bytes(b"name: x\n")
+        (pkg / "README.md").write_bytes(b"# readme\n")
+
+        from apm_cli.utils.content_hash import compute_package_hash_with_overrides
+
+        assert compute_package_hash_with_overrides(pkg, {}) == compute_package_hash(pkg)
+
+    def test_override_matches_on_disk_replacement(self, tmp_path):
+        """Overriding bytes in memory equals actually writing those bytes."""
+        from apm_cli.utils.content_hash import compute_package_hash_with_overrides
+
+        pkg = tmp_path / "pkg"
+        sub = pkg / ".apm" / "hooks"
+        sub.mkdir(parents=True)
+        (pkg / "apm.yml").write_bytes(b"name: x\n")
+        (sub / "hooks.json").write_bytes(b"{}\n")
+
+        overridden = compute_package_hash_with_overrides(
+            pkg,
+            {"apm.yml": b"name: x\r\n", ".apm/hooks/hooks.json": b"{}\r\n"},
+        )
+
+        (pkg / "apm.yml").write_bytes(b"name: x\r\n")
+        (sub / "hooks.json").write_bytes(b"{}\r\n")
+        assert overridden == compute_package_hash(pkg)
+
+    def test_override_for_absent_file_is_ignored(self, tmp_path):
+        """Overrides never phantom-add files to the digest."""
+        from apm_cli.utils.content_hash import compute_package_hash_with_overrides
+
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "apm.yml").write_bytes(b"name: x\n")
+
+        plain = compute_package_hash(pkg)
+        assert compute_package_hash_with_overrides(pkg, {"ghost.md": b"boo"}) == plain
+
+    def test_missing_directory_returns_empty_hash(self, tmp_path):
+        from apm_cli.utils.content_hash import (
+            compute_package_hash_with_overrides,
+        )
+
+        absent = tmp_path / "nope"
+        assert compute_package_hash_with_overrides(absent, {}) == compute_package_hash(absent)

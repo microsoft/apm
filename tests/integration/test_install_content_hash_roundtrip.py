@@ -471,3 +471,238 @@ def test_marketplace_plugin_synthetic_manifest_hash_is_newline_invariant(
     # hash. This is exactly why the production writers must emit LF bytes.
     (pkg / "apm.yml").write_bytes(manifest.replace(b"\n", b"\r\n"))
     assert compute_package_hash(pkg) != lf_hash
+
+
+class _MarketplacePluginDownloader:
+    """Deterministic marketplace-plugin downloader running the REAL synthesize chain."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def download_package(
+        self, repo_ref: object, target_path: Path, *args: Any, **kwargs: Any
+    ) -> PackageInfo:
+        from apm_cli.deps.package_validator import stamp_plugin_version
+        from apm_cli.models.validation import validate_apm_package
+        from scripts.crlf_invariance_probe import PROBE_STAMP_SHA, build_synthetic_plugin_fixture
+
+        self.calls += 1
+        dep_ref = (
+            repo_ref
+            if isinstance(repo_ref, DependencyReference)
+            else DependencyReference.parse(str(repo_ref))
+        )
+        target_path = Path(target_path)
+        target_path.mkdir(parents=True, exist_ok=True)
+        build_synthetic_plugin_fixture(target_path)
+        result = validate_apm_package(target_path)
+        assert result.is_valid, result.errors
+        # Mirror the real download_package flow: marketplace plugins get
+        # their synthesized 0.0.0 version stamped with the short commit
+        # SHA. Load-bearing for the apm#2619 migration tests: a stale
+        # from_apm_yml cache entry (from a previous download in the same
+        # process) made this stamp skip on re-download, leaving an
+        # unstamped tree whose hash matched no lockfile domain.
+        stamp_plugin_version(result.package, result.package_type, PROBE_STAMP_SHA, target_path)
+        return PackageInfo(
+            package=result.package,
+            install_path=target_path,
+            installed_at=datetime.now().isoformat(),
+            dependency_ref=dep_ref,
+            resolved_reference=ResolvedReference(
+                original_ref="default",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit=None,
+                ref_name="default",
+            ),
+            package_type=result.package_type,
+        )
+
+
+# The two files APM itself authors inside the marketplace-plugin fixture tree.
+_APM_AUTHORED_FIXTURE_FILES = ("apm.yml", ".apm/hooks/hooks.json")
+
+
+def _install_marketplace_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, _MarketplacePluginDownloader, CliRunner]:
+    """First install of the marketplace fixture; returns (project, install_path, dl, runner)."""
+    project = tmp_path / "project"
+    _write_project(project)
+    downloader = _MarketplacePluginDownloader()
+
+    from apm_cli.deps import github_downloader as _ghd
+
+    monkeypatch.setattr(
+        _ghd.GitHubPackageDownloader, "download_package", downloader.download_package
+    )
+    runner = CliRunner()
+    first = _run_install(runner, project, monkeypatch)
+    assert first.exit_code == 0, first.output
+    install_path = project / "apm_modules" / "acme" / "fixture-pkg"
+    assert install_path.is_dir()
+    return project, install_path, downloader, runner
+
+
+def _crlf_domain_hash(tmp_path: Path, install_path: Path) -> str:
+    """Independently construct the pre-fix Windows (CRLF-domain) tree hash.
+
+    Copies the tree and CRLF-expands the APM-authored files by hand --
+    deliberately NOT via apm_cli.install.legacy_crlf, so these tests do not
+    verify the migration helpers against themselves.
+    """
+    legacy_tree = tmp_path / "legacy-domain-copy"
+    if legacy_tree.exists():
+        shutil.rmtree(legacy_tree)
+    shutil.copytree(install_path, legacy_tree)
+    for rel in _APM_AUTHORED_FIXTURE_FILES:
+        legacy_file = legacy_tree / rel
+        legacy_file.write_bytes(legacy_file.read_bytes().replace(b"\n", b"\r\n"))
+    return compute_package_hash(legacy_tree)
+
+
+def _rewrite_locked_hash(project: Path, dep_repo_url: str, new_hash: str) -> None:
+    lock_path = project / "apm.lock.yaml"
+    lockfile = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    for dep in lockfile.get("dependencies") or []:
+        if dep.get("repo_url") == dep_repo_url:
+            dep["content_hash"] = new_hash
+    lock_path.write_text(yaml.safe_dump(lockfile, sort_keys=False), encoding="utf-8")
+
+
+@pytest.mark.windows_compat
+def test_fresh_install_heals_legacy_crlf_domain_lockfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lockfile recorded by a pre-fix Windows APM installs, warns, converges.
+
+    apm#2619 migration: the locked content_hash is the CRLF-domain hash of
+    the APM-authored synthetic files. A post-fix fresh download produces
+    the LF-domain hash; instead of hard-failing as a supply-chain event,
+    the install must recognize the exact benign legacy difference, warn,
+    and re-record the platform-independent hash.
+    """
+    project, install_path, downloader, runner = _install_marketplace_fixture(tmp_path, monkeypatch)
+    lf_hash = _locked_dep(project)["content_hash"]
+
+    crlf_hash = _crlf_domain_hash(tmp_path, install_path)
+    assert crlf_hash != lf_hash
+
+    # Simulate the pre-fix Windows lockfile, then force a fresh download.
+    _rewrite_locked_hash(project, "acme/fixture-pkg", crlf_hash)
+    shutil.rmtree(install_path)
+
+    healed = _run_install(runner, project, monkeypatch)
+    assert healed.exit_code == 0, healed.output
+    assert "apm#2619" in healed.output
+    # The healed run re-downloads (resolve-phase BFS callback, plus the
+    # integrate-phase fresh acquire once the legacy hash fails the
+    # content-match) -- a one-time migration cost. The exact count is
+    # pipeline-internal; what matters is that a download happened and the
+    # lockfile converged to the platform-independent hash.
+    assert downloader.calls > 1
+    assert _locked_dep(project)["content_hash"] == lf_hash
+
+
+@pytest.mark.windows_compat
+def test_cached_install_converges_legacy_crlf_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A warm pre-fix Windows tree converges to the LF domain without re-download.
+
+    apm#2619 migration: the cached install path must rewrite the
+    APM-authored files (synthetic apm.yml, inline hooks.json) to LF before
+    re-recording the hash -- otherwise the stale CRLF-domain hash would be
+    copied into every regenerated lockfile forever.
+    """
+    project, install_path, downloader, runner = _install_marketplace_fixture(tmp_path, monkeypatch)
+    lf_hash = _locked_dep(project)["content_hash"]
+
+    # Simulate the fully-legacy state: CRLF tree AND CRLF-domain lockfile
+    # (so the cached-reuse content-hash fallback still matches).
+    for rel in _APM_AUTHORED_FIXTURE_FILES:
+        legacy_file = install_path / rel
+        legacy_file.write_bytes(legacy_file.read_bytes().replace(b"\n", b"\r\n"))
+    crlf_hash = compute_package_hash(install_path)
+    assert crlf_hash != lf_hash
+    _rewrite_locked_hash(project, "acme/fixture-pkg", crlf_hash)
+
+    second = _run_install(runner, project, monkeypatch)
+    assert second.exit_code == 0, second.output
+    assert downloader.calls == 1  # cached path, no re-download
+
+    for rel in _APM_AUTHORED_FIXTURE_FILES:
+        assert b"\r" not in (install_path / rel).read_bytes(), rel
+    assert _locked_dep(project)["content_hash"] == lf_hash
+    assert compute_package_hash(install_path) == lf_hash
+
+
+def test_fresh_install_still_blocks_genuine_hash_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: the apm#2619 heal must not weaken the supply-chain gate.
+
+    A locked hash that is NOT the CRLF-domain equivalent of the fresh tree
+    (here: an unrelated digest) must still hard-fail the install.
+    """
+    project, install_path, _downloader, runner = _install_marketplace_fixture(tmp_path, monkeypatch)
+
+    bogus = "sha256:" + "0" * 64
+    _rewrite_locked_hash(project, "acme/fixture-pkg", bogus)
+    shutil.rmtree(install_path)
+
+    monkeypatch.chdir(project)
+    with patch(_PATCH_UPDATES, return_value=None):
+        blocked = runner.invoke(cli, ["install"], catch_exceptions=True)
+    output = blocked.output + str(blocked.exception or "")
+    assert blocked.exit_code != 0 or blocked.exception is not None, output
+    assert "Content hash mismatch" in output, output
+
+
+@pytest.mark.windows_compat
+def test_marketplace_plugin_lockfile_replays_under_frozen_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hermetic marketplace-plugin lockfile write/read and --frozen replay.
+
+    The first install writes the lockfile; a fresh `apm install --frozen`
+    then re-downloads the plugin through the REAL synthesize+stamp chain in
+    the same process and must reproduce the recorded platform-independent
+    content_hash exactly. Deliberately does NOT clear the from_apm_yml parse
+    cache between the runs: a stale cached instance used to make the
+    re-download skip re-stamping, leaving a tree whose hash matched no
+    lockfile domain -- exactly the failure a frozen replay would trip.
+    """
+    project, install_path, downloader, runner = _install_marketplace_fixture(tmp_path, monkeypatch)
+    locked_before = _locked_dep(project)["content_hash"]
+    assert compute_package_hash(install_path) == locked_before
+
+    shutil.rmtree(install_path)
+
+    frozen = _run_command(runner, project, monkeypatch, ["install", "--frozen"])
+    assert frozen.exit_code == 0, frozen.output
+    assert downloader.calls > 1  # the replay re-downloaded, not reused
+    assert _locked_dep(project)["content_hash"] == locked_before
+    assert compute_package_hash(install_path) == locked_before
+
+
+@pytest.mark.windows_compat
+def test_frozen_replay_blocks_tampered_lockfile_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: --frozen replay keeps the supply-chain gate closed.
+
+    A locked content_hash that matches neither the fresh tree nor its
+    legacy CRLF domain must still hard-fail the frozen install.
+    """
+    project, install_path, _downloader, runner = _install_marketplace_fixture(tmp_path, monkeypatch)
+
+    _rewrite_locked_hash(project, "acme/fixture-pkg", "sha256:" + "0" * 64)
+    shutil.rmtree(install_path)
+
+    monkeypatch.chdir(project)
+    with patch(_PATCH_UPDATES, return_value=None):
+        blocked = runner.invoke(cli, ["install", "--frozen"], catch_exceptions=True)
+    output = blocked.output + str(blocked.exception or "")
+    assert blocked.exit_code != 0 or blocked.exception is not None, output
+    assert "Content hash mismatch" in output, output
