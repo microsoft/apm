@@ -58,10 +58,10 @@ pytestmark = [
     pytest.mark.requires_network_integration,
 ]
 
-COPILOT_RELEASE_TAG = "v1.0.81-14"
+COPILOT_RELEASE_TAG = "v1.0.81"
 COPILOT_ASSET = "copilot-darwin-arm64.tar.gz"
-COPILOT_ASSET_SHA256 = "faa3a6deae4cc6eda73c2ee72373cc45961ce0724158d492e8e466923b4e43fb"
-COPILOT_ASSET_SIZE = 84657857
+COPILOT_ASSET_SHA256 = "568b0d6fe88d573c171ab95887d33276802dda2c5ca3cee7d0fe438df2343be4"
+COPILOT_ASSET_SIZE = 84675389
 COPILOT_ASSET_URL = (
     f"https://github.com/github/copilot-cli/releases/download/{COPILOT_RELEASE_TAG}/{COPILOT_ASSET}"
 )
@@ -173,7 +173,7 @@ def _run_copilot(
 def copilot_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Download, digest-verify, and extract the pinned Copilot CLI artifact.
 
-    The digest is verified BEFORE the 84 MB payload is written to the tar or
+    The stable-release digest is verified BEFORE the 84 MB payload is written to the tar or
     executed (defect #5): the bytes are hashed in memory first, and only a
     size + sha256 match unlocks extraction.
     """

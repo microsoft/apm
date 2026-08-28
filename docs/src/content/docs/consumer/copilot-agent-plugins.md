@@ -80,10 +80,10 @@ still converges on re-install.
 
 ## Requirements
 
-Native loading needs GitHub Copilot CLI **1.0.81 or newer**. The exact floor
-is `1.0.81-8`, the first build where a directory-marketplace plugin loads live
-from its real directory; prerelease builds at or above that identifier also
-qualify. See the
+Native loading is qualified against stable GitHub Copilot CLI **1.0.81 or
+newer**. The exact capability floor remains `1.0.81-8`, the first build where a
+directory-marketplace plugin loads live from its real directory; stable
+`1.0.81` clears that SemVer floor. See the
 [GitHub Copilot CLI releases](https://github.com/github/copilot-cli/releases).
 On anything older, APM fails the install closed:
 

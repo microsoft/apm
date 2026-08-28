@@ -33,7 +33,7 @@ def _targets(*names: str) -> list[SimpleNamespace]:
         ("1.0.81-0", False),
         ("1.0.81-5", False),
         ("1.0.81-8", True),
-        ("1.0.81-14", True),
+        ("1.0.81", True),
         ("1.0.82", True),
         ("1.1.0", True),
         ("", False),
@@ -50,11 +50,17 @@ def test_minimum_version_constant_matches_documented_floor() -> None:
     assert COPILOT_LIVE_PLUGIN_MIN_VERSION == "1.0.81-8"
 
 
+def test_stable_release_is_admitted_and_previous_stable_is_refused() -> None:
+    """Stable 1.0.81 clears the prerelease floor while stable 1.0.80 does not."""
+    assert is_qualified_client_version("1.0.81") is True
+    assert is_qualified_client_version("1.0.80") is False
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("1.0.81-14", "1.0.81-14"),
-        ("GitHub Copilot CLI 1.0.81-14 (darwin-arm64)", "1.0.81-14"),
+        ("1.0.81", "1.0.81"),
+        ("GitHub Copilot CLI 1.0.81 (darwin-arm64)", "1.0.81"),
         ("\n1.0.80\n", "1.0.80"),
         ("unknown", None),
         (None, None),
@@ -71,7 +77,7 @@ def test_non_copilot_target_is_refused_with_a_precise_reason() -> None:
 
     def _probe() -> str:
         probed.append(1)
-        return "1.0.81-14"
+        return "1.0.81"
 
     capability = resolve_native_registration_capability(_targets("claude"), probe=_probe)
 
@@ -108,7 +114,7 @@ def test_missing_client_is_refused_with_install_guidance() -> None:
 def test_qualified_copilot_target_is_admitted() -> None:
     """A qualified client plus the Copilot target admits native registration."""
     capability = resolve_native_registration_capability(
-        _targets("copilot", "claude"), probe=lambda: "1.0.81-14"
+        _targets("copilot", "claude"), probe=lambda: "1.0.81"
     )
 
     assert capability.supported is True
@@ -125,9 +131,9 @@ def test_probe_reads_the_environment_override_without_touching_the_host(
         "apm_cli.runtime.utils.find_runtime_binary",
         lambda name: calls.append(name) or "copilot",
     )
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, "1.0.81-14")
+    monkeypatch.setenv(VERSION_OVERRIDE_ENV, "1.0.81")
 
-    assert probe_copilot_cli_version() == "1.0.81-14"
+    assert probe_copilot_cli_version() == "1.0.81"
     assert calls == []
 
 
@@ -156,13 +162,13 @@ def test_probe_shells_out_to_the_real_binary_when_no_override_is_set(
 ) -> None:
     """With no override, the probe runs the real binary and parses --version."""
     monkeypatch.delenv(VERSION_OVERRIDE_ENV, raising=False)
-    shim = _write_copilot_shim(tmp_path, "1.0.81-14")
+    shim = _write_copilot_shim(tmp_path, "1.0.81")
     monkeypatch.setattr(
         "apm_cli.runtime.utils.find_runtime_binary",
         lambda name: str(shim),
     )
 
-    assert probe_copilot_cli_version() == "1.0.81-14"
+    assert probe_copilot_cli_version() == "1.0.81"
 
 
 def test_probe_returns_none_when_the_binary_exits_non_zero(
@@ -211,7 +217,7 @@ def test_admission_requires_canonical_ir_even_when_the_client_qualifies() -> Non
         package=SimpleNamespace(agent_plugin=None),
     )
 
-    with native_registration_scope(_targets("copilot"), probe=lambda: "1.0.81-14"):
+    with native_registration_scope(_targets("copilot"), probe=lambda: "1.0.81"):
         assert admits_native_plugin(package_info) is False
 
 
@@ -219,7 +225,7 @@ def test_scope_retires_the_published_capability() -> None:
     """The capability never leaks past the command that published it."""
     from apm_cli.copilot_plugins.capability import current_native_registration
 
-    with native_registration_scope(_targets("copilot"), probe=lambda: "1.0.81-14") as cap:
+    with native_registration_scope(_targets("copilot"), probe=lambda: "1.0.81") as cap:
         assert isinstance(cap, NativeRegistrationCapability)
         assert current_native_registration() is cap
 
