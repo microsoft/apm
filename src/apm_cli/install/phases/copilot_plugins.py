@@ -169,11 +169,16 @@ def _declared_dependency_keys(ctx: InstallContext) -> frozenset[str]:
 
 
 def _exec_blocked_keys(ctx: InstallContext) -> set[str]:
-    """Return dependency keys whose executables the trust gate did not clear."""
-    from apm_cli.security.executables import TRUST_DENIED, TRUST_GATED
+    """Return dependency keys whose executables the trust gate did not clear.
+
+    Allowlist, not denylist, so it agrees with the severity ladder that ranks
+    an unrecognised status above ``denied``: only statuses in
+    :data:`~apm_cli.security.executables.REGISTRABLE_EXEC_STATUSES` pass.
+    """
+    from apm_cli.security.executables import REGISTRABLE_EXEC_STATUSES
 
     statuses = getattr(ctx, "package_exec_status", None) or {}
-    return {key for key, status in statuses.items() if status in (TRUST_DENIED, TRUST_GATED)}
+    return {key for key, status in statuses.items() if status not in REGISTRABLE_EXEC_STATUSES}
 
 
 def run(ctx: InstallContext) -> None:

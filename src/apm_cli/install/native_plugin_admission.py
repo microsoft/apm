@@ -38,6 +38,62 @@ def agent_plugin_exec_types(package_info: Any) -> tuple[str, ...]:
     return tuple(types)
 
 
+def plugin_root_exec_types(install_path: Any) -> tuple[str, ...]:
+    """Return exec trust types implied by NATIVE-layout components at the root.
+
+    ``scan_package_executables`` only understands APM's own ``.apm/`` layout
+    (``.apm/hooks/*.json``, ``bin/``, ``apm.yml`` mcp/lsp declarations,
+    ``.apm/extensions/<n>/extension.mjs``). An Agent Plugins v1 package is
+    materialized in the NATIVE root layout instead, so the very components
+    :data:`~apm_cli.agent_plugins.loader._IGNORED_PORTABLE_COMPONENT_PATHS`
+    records as present-but-unmodelled live at the plugin ROOT, where that
+    scanner never looks. Under this module's PRESENCE IS DEPLOYMENT premise --
+    Copilot loads the whole directory live -- an unapproved root
+    ``extensions/``, ``lsp.json`` or ``hooks/`` would otherwise execute with no
+    exec approval at all.
+
+    The mapping is driven off the loader's own constant so the two can never
+    drift: any unmapped ignored component still yields a trust type, so a new
+    entry there fails closed here rather than silently widening admission.
+    """
+    from pathlib import Path
+
+    from apm_cli.agent_plugins.loader import _IGNORED_PORTABLE_COMPONENT_PATHS
+    from apm_cli.security.executables import (
+        EXEC_TYPE_CANVAS,
+        EXEC_TYPE_HOOKS,
+        EXEC_TYPE_LSP,
+    )
+
+    if install_path is None:
+        return ()
+    root = Path(install_path)
+    mapping = {
+        "extensions": EXEC_TYPE_CANVAS,
+        "lsp.json": EXEC_TYPE_LSP,
+        "hooks": EXEC_TYPE_HOOKS,
+        # agents/commands/instructions carry prompt payloads Copilot loads
+        # live; they are not shell-executable, but an unapproved hook payload
+        # can hide beside them, so they map to the hooks gate rather than
+        # silently to nothing.
+        "agents": EXEC_TYPE_HOOKS,
+        "commands": EXEC_TYPE_HOOKS,
+        "instructions": EXEC_TYPE_HOOKS,
+    }
+    present: list[str] = []
+    for name in _IGNORED_PORTABLE_COMPONENT_PATHS:
+        try:
+            if not (root / name).exists():
+                continue
+        except OSError:
+            continue
+        present.append(mapping.get(name, EXEC_TYPE_HOOKS))
+    seen: dict[str, None] = {}
+    for exec_type in present:
+        seen.setdefault(exec_type, None)
+    return tuple(seen)
+
+
 def record_native_exec_status(
     ctx: InstallContext | None,
     package_name: str,
@@ -110,7 +166,9 @@ def finalize_native_plugin(
     # For a natively registered plugin, PRESENCE IS DEPLOYMENT: Copilot loads the
     # WHOLE directory live from apm_modules, so an unapproved hooks/agents/canvas/
     # lsp component the IR does not model still executes. Gate on the UNION of the
-    # IR exec types (mcp/bin) and every exec type physically on disk.
+    # IR exec types (mcp/bin), every exec type scan_package_executables finds in
+    # APM's own .apm/ layout, and every NATIVE root-layout component the scanner
+    # is blind to (see plugin_root_exec_types).
     on_disk_types: tuple[str, ...] = ()
     install_path = getattr(package_info, "install_path", None)
     if install_path is not None:
@@ -119,7 +177,9 @@ def finalize_native_plugin(
         on_disk_types = scan_package_executables(
             Path(install_path), package_name, version
         ).exec_types
-    present_types = set(ir_exec_types) | set(on_disk_types)
+    present_types = (
+        set(ir_exec_types) | set(on_disk_types) | set(plugin_root_exec_types(install_path))
+    )
 
     approvals = {
         EXEC_TYPE_MCP: mcp_approved,

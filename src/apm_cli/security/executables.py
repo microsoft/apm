@@ -230,6 +230,16 @@ def more_severe_exec_status(current: str | None, candidate: str | None) -> str |
     return candidate if _rank(candidate) > _rank(current) else current
 
 
+# The ONLY ``exec_status`` values that may reach native Copilot registration.
+# This is an ALLOWLIST on purpose. The severity ladder above ranks an unknown
+# status ABOVE ``denied`` (fail closed), so a denylist of
+# ``(TRUST_DENIED, TRUST_GATED)`` would disagree with it and let a status the
+# ladder calls worse-than-denied through the registration gate on forward
+# version skew -- e.g. a future APM writing ``quarantined`` that an older CLI
+# reads back. Both registration gates read this one definition.
+REGISTRABLE_EXEC_STATUSES: frozenset[str | None] = frozenset({None, TRUST_ABSENT, TRUST_DEPLOYED})
+
+
 @dataclass(frozen=True)
 class ExecDecision:
     """The resolved trust decision for one (package, exec_type) pair.

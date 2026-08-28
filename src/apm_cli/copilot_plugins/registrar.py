@@ -316,14 +316,17 @@ def candidates_from_lockfile(lockfile: Any, modules_dir: Path) -> list[ResolvedP
     phase, since its exec status is not yet persisted to the lockfile.
     """
     from ..deps.lockfile import _SELF_KEY
-    from ..security.executables import TRUST_DENIED, TRUST_GATED
+    from ..security.executables import REGISTRABLE_EXEC_STATUSES
 
     candidates: list[ResolvedPluginCandidate] = []
     for dep_key, locked in sorted(getattr(lockfile, "dependencies", {}).items()):
         if dep_key == _SELF_KEY:
             continue
         exec_status = getattr(locked, "exec_status", None)
-        if exec_status in (TRUST_DENIED, TRUST_GATED):
+        # Allowlist, not denylist: a status APM does not recognise is never
+        # registrable, matching the severity ladder that ranks unknown above
+        # `denied`.
+        if exec_status not in REGISTRABLE_EXEC_STATUSES:
             continue
         to_reference = getattr(locked, "to_dependency_ref", None)
         if to_reference is None:

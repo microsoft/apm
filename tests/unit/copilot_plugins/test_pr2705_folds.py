@@ -635,3 +635,112 @@ def test_transitive_dependency_is_not_marked_direct_on_the_install_path() -> Non
 
     assert by_key["owner/declared"].direct is True
     assert by_key["other/pulled-in"].direct is False
+
+
+def test_unknown_exec_status_is_not_registrable(tmp_path: Path) -> None:
+    """An unrecognised exec_status fails CLOSED at the registration gate.
+
+    The severity ladder ranks an unknown status ABOVE ``denied``, so a
+    denylist gate would disagree with it and admit, on forward version skew, a
+    status the ladder calls worse-than-denied. Both gates read the
+    ``REGISTRABLE_EXEC_STATUSES`` allowlist instead.
+    """
+    from apm_cli.copilot_plugins.registrar import candidates_from_lockfile
+    from apm_cli.deps.lockfile import LockedDependency
+
+    modules = tmp_path / "apm_modules"
+    lockfile = SimpleNamespace(
+        dependencies={
+            "github.com/testowner/futureplugin": LockedDependency(
+                repo_url="https://github.com/testowner/futureplugin",
+                resolved_commit="d" * 40,
+                exec_status="quarantined",
+            ),
+        }
+    )
+
+    keys = {c.dependency_key for c in candidates_from_lockfile(lockfile, modules)}
+
+    assert "github.com/testowner/futureplugin" not in keys
+
+
+def test_in_flight_gated_dependency_is_dropped_from_install_candidates(
+    tmp_path: Path,
+) -> None:
+    """The in-flight overlay re-adds every deps_to_install key AFTER the
+    lockfile gate ran, so its sibling guard is the only thing stopping a
+    package this very install gated from being registered natively.
+    """
+    from apm_cli.install.phases.copilot_plugins import resolved_candidates
+
+    key = "github.com/testowner/gatedplugin"
+
+    def _dep() -> SimpleNamespace:
+        return SimpleNamespace(
+            get_unique_key=lambda: key,
+            get_install_path=lambda modules: modules / "gatedplugin",
+            declaring_parent=None,
+            target_subset=None,
+        )
+
+    ctx = SimpleNamespace(
+        apm_modules_dir=tmp_path / "apm_modules",
+        lockfile=None,
+        existing_lockfile=None,
+        deps_to_install=[_dep()],
+        all_apm_deps=[_dep()],
+        package_exec_status={key: TRUST_GATED},
+    )
+
+    assert [c.dependency_key for c in resolved_candidates(ctx)] == []
+
+
+def test_root_layout_components_absent_from_ir_refuse_native_registration(
+    tmp_path: Path,
+) -> None:
+    """NATIVE root-layout components are exec-gated too.
+
+    ``scan_package_executables`` only understands APM's ``.apm/`` layout, so a
+    skills-only Agent Plugin carrying root ``extensions/``, ``lsp.json`` or
+    ``hooks/`` used to reach native registration with zero exec approvals --
+    even though Copilot loads the whole directory live.
+    """
+    from apm_cli.install.native_plugin_admission import plugin_root_exec_types
+
+    root = tmp_path / "plugin"
+    (root / "extensions" / "x").mkdir(parents=True)
+    (root / "extensions" / "x" / "extension.mjs").write_text("//\n", encoding="ascii")
+    (root / "lsp.json").write_text("{}\n", encoding="ascii")
+    (root / "hooks").mkdir()
+    (root / "hooks" / "pre.sh").write_text("#!/bin/sh\n", encoding="ascii")
+
+    types = set(plugin_root_exec_types(root))
+
+    assert "canvas" in types
+    assert "lsp" in types
+    assert "hooks" in types
+    assert plugin_root_exec_types(tmp_path / "empty") == ()
+
+
+def test_lazy_capability_probes_once_across_repeated_reads() -> None:
+    """The memoized holder shells out at most once no matter how many fields
+    a caller reads. The spawn-count guards only assert the CURRENT call
+    graph's read count, so the cache itself needs its own trap.
+    """
+    from apm_cli.copilot_plugins.capability import (
+        resolve_native_registration_capability,
+    )
+
+    counter = _ProbeCounter()
+    capability = resolve_native_registration_capability(
+        [SimpleNamespace(name="copilot")], probe=counter
+    )
+
+    assert counter.calls == 0
+    _ = (
+        capability.supported,
+        capability.reason,
+        capability.detected_version,
+        capability.supported,
+    )
+    assert counter.calls == 1
