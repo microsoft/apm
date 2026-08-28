@@ -597,3 +597,41 @@ def test_uninstall_and_prune_probe_at_most_once(
     prune = CliRunner().invoke(cli, ["prune"], catch_exceptions=False)
     assert prune.exit_code == 0, prune.output
     assert counter.calls <= 1
+
+
+def test_transitive_dependency_is_not_marked_direct_on_the_install_path() -> None:
+    """The in-flight overlay must not re-derive directness and mark everything direct.
+
+    ``ctx.deps_to_install`` is the full transitive closure, and
+    ``declaring_parent`` is only stamped on local path sub-dependencies, so
+    deriving ``direct`` from it marks every transitive git dependency direct.
+    That defeats both precedence gates in ``discover_native_plugins``: the
+    direct-beats-transitive branch never fires, and the ledger owner-flip
+    refusal (guarded on ``not entry.direct``) lets a transitive package
+    silently re-point an existing registration.
+    """
+    from apm_cli.install.phases.copilot_plugins import resolved_candidates
+
+    def _dep(key: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            get_unique_key=lambda key=key: key,
+            get_install_path=lambda modules, key=key: modules / key,
+            declaring_parent=None,
+            target_subset=None,
+        )
+
+    direct = _dep("owner/declared")
+    transitive = _dep("other/pulled-in")
+    ctx = SimpleNamespace(
+        apm_modules_dir=Path("apm_modules"),
+        lockfile=None,
+        existing_lockfile=None,
+        deps_to_install=[direct, transitive],
+        all_apm_deps=[direct],
+        package_exec_status={},
+    )
+
+    by_key = {candidate.dependency_key: candidate for candidate in resolved_candidates(ctx)}
+
+    assert by_key["owner/declared"].direct is True
+    assert by_key["other/pulled-in"].direct is False

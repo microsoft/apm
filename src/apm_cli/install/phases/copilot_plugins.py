@@ -102,6 +102,13 @@ def resolved_candidates(ctx: InstallContext) -> list[ResolvedPluginCandidate]:
     manifest's current target narrowing. Candidates whose executables the trust
     gate denied or left pending are dropped so a natively registered plugin can
     never smuggle an unapproved MCP server or bin past the gate.
+
+    Directness is NOT re-derived from the overlay. ``deps_to_install`` is the
+    full transitive closure and ``declaring_parent`` is only stamped on local
+    path sub-dependencies, so ``declaring_parent is None`` would mark every
+    transitive git dependency direct and defeat the plugin-name precedence
+    gate. The authority is the locked entry when one exists, else
+    ``ctx.all_apm_deps`` -- the dependencies the project author actually wrote.
     """
     from apm_cli.copilot_plugins.registrar import candidates_from_lockfile
 
@@ -118,6 +125,7 @@ def resolved_candidates(ctx: InstallContext) -> list[ResolvedPluginCandidate]:
             candidates_from_lockfile(lockfile, modules_dir) if lockfile is not None else []
         )
     }
+    declared = _declared_dependency_keys(ctx)
     # The in-flight overlay carries exec status not yet persisted to the
     # lockfile, so gate it here against the freshly captured trust state.
     blocked = _exec_blocked_keys(ctx)
@@ -132,15 +140,32 @@ def resolved_candidates(ctx: InstallContext) -> list[ResolvedPluginCandidate]:
             # lockfile candidate either.
             candidates.pop(key, None)
             continue
+        locked_candidate = candidates.get(key)
         target_subset = getattr(dependency, "target_subset", None)
         candidates[key] = ResolvedPluginCandidate(
             dependency_key=key,
             install_path=Path(install_path),
-            direct=getattr(dependency, "declaring_parent", None) is None,
+            direct=(locked_candidate.direct if locked_candidate is not None else key in declared),
             target_subset=tuple(target_subset) if target_subset else None,
             exec_status=(getattr(ctx, "package_exec_status", None) or {}).get(key),
         )
     return list(candidates.values())
+
+
+def _declared_dependency_keys(ctx: InstallContext) -> frozenset[str]:
+    """Return the dependency keys the project manifest itself declares.
+
+    ``ctx.all_apm_deps`` is documented as "what the project author wrote" --
+    direct regular plus dev dependencies, never the transitive closure -- so it
+    is the authority for directness on a first install with no lockfile yet.
+    """
+    declared: set[str] = set()
+    for dependency in getattr(ctx, "all_apm_deps", None) or []:
+        try:
+            declared.add(dependency.get_unique_key())
+        except (AttributeError, ValueError):
+            continue
+    return frozenset(declared)
 
 
 def _exec_blocked_keys(ctx: InstallContext) -> set[str]:
