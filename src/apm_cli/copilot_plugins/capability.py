@@ -48,6 +48,7 @@ class NativeRegistrationCapability:
     reason: str | None = None
     detected_version: str | None = None
     target: str | None = None
+    copilot_targeted: bool = False
 
     def require(self) -> None:
         """Raise the canonical boundary error when registration is unavailable."""
@@ -58,12 +59,72 @@ class NativeRegistrationCapability:
         raise AgentPluginDeploymentBoundaryError(self.reason or "")
 
 
+class _LazyNativeRegistrationCapability(NativeRegistrationCapability):
+    """Defer the client version probe until a capability field is first read.
+
+    Resolving the capability can spawn ``copilot --version`` (hundreds of
+    milliseconds). Publishing this lazy holder at the phase seam lets a command
+    that never admits a native Agent Plugin -- the overwhelmingly common case --
+    skip the probe entirely: :func:`admits_native_plugin` short-circuits on
+    ``package_type`` before reading any field here, and the registration phase
+    returns before consulting the capability when nothing is registrable. The
+    first real read resolves once and memoizes, so repeated reads -- and the
+    shared publish/resync reuse -- never re-probe.
+
+    Subclasses :class:`NativeRegistrationCapability` so every ``isinstance`` and
+    duck-typed reader keeps working unchanged.
+    """
+
+    __slots__ = ("_names", "_probe", "_resolved")
+
+    def __init__(self, names: tuple[str, ...], probe: Callable[[], str | None] | None) -> None:
+        object.__setattr__(self, "_names", names)
+        object.__setattr__(self, "_probe", probe)
+        object.__setattr__(self, "_resolved", None)
+        # Cheap, probe-free: known from the selected target names alone.
+        object.__setattr__(self, "copilot_targeted", COPILOT_TARGET_NAME in names)
+
+    def _resolve(self) -> NativeRegistrationCapability:
+        resolved = object.__getattribute__(self, "_resolved")
+        if resolved is None:
+            resolved = _resolve_capability_now(self._names, probe=self._probe)
+            object.__setattr__(self, "_resolved", resolved)
+        return resolved
+
+    @property
+    def supported(self) -> bool:  # type: ignore[override]
+        return self._resolve().supported
+
+    @property
+    def reason(self) -> str | None:  # type: ignore[override]
+        return self._resolve().reason
+
+    @property
+    def detected_version(self) -> str | None:  # type: ignore[override]
+        return self._resolve().detected_version
+
+    @property
+    def target(self) -> str | None:  # type: ignore[override]
+        return self._resolve().target
+
+
 def minimum_client_version() -> SemVer:
     """Return the parsed minimum qualified Copilot CLI version."""
     parsed = parse_semver(COPILOT_LIVE_PLUGIN_MIN_VERSION)
     if parsed is None:  # pragma: no cover - constant is validated by tests
         raise ValueError(f"Invalid minimum version constant: {COPILOT_LIVE_PLUGIN_MIN_VERSION}")
     return parsed
+
+
+def human_floor() -> str:
+    """Return the human-facing ``major.minor.patch`` version floor.
+
+    Derived from :data:`COPILOT_LIVE_PLUGIN_MIN_VERSION` so a future bump of the
+    constant updates every user-facing "upgrade to X" sentence at once, instead
+    of drifting against a hardcoded literal.
+    """
+    parsed = minimum_client_version()
+    return f"{parsed.major}.{parsed.minor}.{parsed.patch}"
 
 
 def normalize_client_version(raw: str | None) -> str | None:
@@ -154,20 +215,19 @@ def undetected_client_reason() -> str:
     return (
         "GitHub Copilot CLI was not found on PATH, so APM cannot register "
         "Agent Plugins v1.0.0 packages natively. Install the GitHub Copilot "
-        "CLI (1.0.81 or newer), then re-run 'apm install --target copilot'."
+        f"CLI ({human_floor()} or newer), then re-run 'apm install --target copilot'."
     )
 
 
-def unqualified_client_reason(detected_version: str | None) -> str:
+def unqualified_client_reason(detected_version: str) -> str:
     """Return the precise error text for an unqualified Copilot CLI."""
-    detected = detected_version or "not detected"
     return (
         "Agent Plugins v1.0.0 packages need GitHub Copilot CLI "
         f">={COPILOT_LIVE_PLUGIN_MIN_VERSION}, which loads a directory "
         "marketplace live from its real directory; detected "
-        f"{detected}. Older clients copy the plugin into private Copilot "
+        f"{detected_version}. Older clients copy the plugin into private Copilot "
         "state, so APM refuses to install it there. Upgrade the GitHub "
-        "Copilot CLI to 1.0.81 or newer."
+        f"Copilot CLI to {human_floor()} or newer."
     )
 
 
@@ -179,35 +239,56 @@ def is_qualified_client_version(version: str | None) -> bool:
     return parsed >= minimum_client_version()
 
 
-def resolve_native_registration_capability(
-    targets: Iterable[Any] | None,
+def _resolve_capability_now(
+    names: tuple[str, ...],
     *,
     probe: Callable[[], str | None] | None = None,
 ) -> NativeRegistrationCapability:
-    """Decide whether native Copilot plugin registration is available."""
-    names = _target_names(targets)
-    if COPILOT_TARGET_NAME not in names:
+    """Resolve the capability eagerly, probing the client when copilot is targeted."""
+    copilot_targeted = COPILOT_TARGET_NAME in names
+    if not copilot_targeted:
         return NativeRegistrationCapability(
             supported=False,
             reason=unsupported_target_reason(names),
+            copilot_targeted=False,
         )
     detected = (probe or probe_copilot_cli_version)()
     if detected is None:
         return NativeRegistrationCapability(
             supported=False,
             reason=undetected_client_reason(),
+            copilot_targeted=True,
         )
     if not is_qualified_client_version(detected):
         return NativeRegistrationCapability(
             supported=False,
             reason=unqualified_client_reason(detected),
             detected_version=detected,
+            copilot_targeted=True,
         )
     return NativeRegistrationCapability(
         supported=True,
         detected_version=detected,
         target=COPILOT_TARGET_NAME,
+        copilot_targeted=True,
     )
+
+
+def resolve_native_registration_capability(
+    targets: Iterable[Any] | None,
+    *,
+    probe: Callable[[], str | None] | None = None,
+) -> NativeRegistrationCapability:
+    """Decide whether native Copilot plugin registration is available.
+
+    Returns a lazy holder: the ``copilot --version`` probe fires on the first
+    read of ``supported``/``reason``/``detected_version``/``target``, not here.
+    Commands that never admit a native Agent Plugin therefore spawn no
+    subprocess. The result is duck-type compatible with
+    :class:`NativeRegistrationCapability`.
+    """
+    names = _target_names(targets)
+    return _LazyNativeRegistrationCapability(names, probe)
 
 
 def activate_native_registration(

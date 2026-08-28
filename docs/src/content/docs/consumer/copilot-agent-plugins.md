@@ -59,10 +59,14 @@ clones, worktrees, and moved checkouts. Global installs (`apm install -g`)
 write the same two keys to `$COPILOT_HOME/settings.json` (unset or blank:
 `~/.copilot/settings.json`) with an absolute path under `~/.apm/apm_modules`.
 
-APM merges only those two keys. Anything else in the file is preserved
-byte-for-byte in meaning; a pre-existing `apm` marketplace or `<plugin>@apm`
-entry that APM does not own fails the install with an explicit message
-instead of being overwritten.
+APM merges only those two keys and preserves everything else byte-for-byte.
+The install fails closed only when a pre-existing `apm` marketplace entry
+points somewhere other than APM's materialization root and the ledger does not
+record APM as its owner. An entry that already matches what APM would write is
+re-adopted silently, ledger or not. The `<plugin>@apm` enabled keys sit in
+APM's namespace: once APM owns the `apm` marketplace it sets the ones it needs
+and retires any leftover `@apm` key, so a lost ledger (`rm -rf apm_modules`)
+still converges on re-install.
 
 ## What APM does not do
 
@@ -76,11 +80,10 @@ instead of being overwritten.
 
 ## Requirements
 
-Native loading needs GitHub Copilot CLI **1.0.81-8 or newer**, the first
-build where a directory-marketplace plugin loads live from its real
-directory. Stable `1.0.81` satisfies the floor, so a normal upgrade is
-enough; `1.0.81-8` through `1.0.81-14` are prerelease builds of the same
-version and also qualify. See the
+Native loading needs GitHub Copilot CLI **1.0.81 or newer**. The exact floor
+is `1.0.81-8`, the first build where a directory-marketplace plugin loads live
+from its real directory; prerelease builds at or above that identifier also
+qualify. See the
 [GitHub Copilot CLI releases](https://github.com/github/copilot-cli/releases).
 On anything older, APM fails the install closed:
 
@@ -125,18 +128,20 @@ settings are folder-trust gated. Grant folder trust once; APM does not
 pre-seed trust on your behalf.
 
 **A settings collision.** APM refuses to overwrite an `apm` marketplace entry
-or `<plugin>@apm` key it does not own -- ownership is proven by the ledger at
-`apm_modules/.github/plugin/apm-registration.json`, not by guessing. Rename or
-remove the conflicting entry and re-run the install. If you deleted the ledger,
-APM can no longer prove it wrote those keys and treats them as a collision:
-remove the stale `extraKnownMarketplaces.apm` and
-`enabledPlugins["<plugin>@apm"]` entries by hand, then re-run `apm install` to
-regenerate the ledger.
+whose directory differs from what it would write when the ledger at
+`apm_modules/.github/plugin/apm-registration.json` does not record APM as its
+owner. Rename or remove that entry and re-run the install. Deleting the ledger
+is not a collision on its own: as long as the `apm` marketplace still matches,
+the next install re-adopts it and regenerates the ledger, so
+`rm -rf apm_modules && apm install` recovers with no hand-editing.
 
 **The merge fails on a settings file with comments.** APM rewrites the Copilot
-settings document as 2-space JSON. A settings file containing comments (JSONC)
-is not valid JSON, so the merge fails closed with an explicit message instead
-of discarding your comments. Convert it to plain JSON and re-run.
+settings document as 2-space JSON, so a file containing comments (JSONC) is not
+valid JSON. The merge fails closed with an explicit message -- and no packages
+are installed -- instead of discarding your comments. Fix the file (convert it
+to plain JSON) or delete it, then re-run `apm install`.
+
+## Why Copilot first
 
 GitHub Copilot is the first harness to expose a machine-verifiable native
 plugin lifecycle, which is why APM can register plugins with it live. APM is

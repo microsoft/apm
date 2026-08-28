@@ -21,13 +21,25 @@ from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
 from apm_cli.install.native_plugin_admission import finalize_native_plugin
 from apm_cli.security.executables import (
     TRUST_DENIED,
+    TRUST_GATED,
     build_exec_trust_context,
 )
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-from ._builders import QUALIFIED_VERSION, read_json, write_agent_plugin
+from ._builders import QUALIFIED_VERSION, read_json, write_agent_plugin, write_legacy_package
 
 pytestmark = pytest.mark.component
+
+
+def _flat(text: str) -> str:
+    """Collapse whitespace so assertions survive terminal-width word wrapping.
+
+    CommandLogger renders through rich, which re-wraps at the detected
+    terminal width. A CI runner and a developer terminal disagree on that
+    width, so a multi-word phrase can land with an embedded newline. Compare
+    against the whitespace-normalized output instead of the raw buffer.
+    """
+    return " ".join(text.split())
 
 
 def _write_project(project: Path, dependencies: list) -> None:
@@ -93,6 +105,96 @@ def test_dependency_target_restriction_excludes_native_registration(
     assert not ledger_path_for(_modules(project)).exists()
 
 
+def test_project_target_excluding_copilot_skips_plugin_and_installs_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PROJECT-level ``targets: [claude]`` skips the plugin, not the batch.
+
+    Regression for Item 4: a project that excludes copilot must treat an Agent
+    Plugin as non-applicable (skip + one warning), exactly like the
+    per-dependency subset already does -- NOT abort the whole install and strip
+    the unrelated ordinary package with it.
+    """
+    project = tmp_path / "project"
+    plain_src = tmp_path / "source" / "plainpkg"
+    plugin_src = tmp_path / "source" / "alpha"
+    write_legacy_package(plain_src, name="plainpkg")
+    write_agent_plugin(plugin_src, name="alpha")
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "description": "consumer",
+                "targets": ["claude"],
+                "dependencies": {"apm": [str(plain_src), str(plugin_src)]},
+            }
+        ),
+        encoding="ascii",
+    )
+
+    monkeypatch.setenv(VERSION_OVERRIDE_ENV, QUALIFIED_VERSION)
+    monkeypatch.chdir(project)
+    result = CliRunner().invoke(cli, ["install", "--no-policy"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    # The ordinary package installs; the plugin is skipped, not fatal.
+    assert (_modules(project) / "_local" / "plainpkg").exists()
+    assert not _settings_path(project).exists()
+    assert not catalog_path_for(_modules(project)).exists()
+
+
+# ---------------------------------------------------------------------------
+# Item 1: the executable trust gate lives in candidates_from_lockfile, the ONE
+# candidate source shared by install and every lifecycle resync. A locked entry
+# the scanner denied or left pending approval must never reach a resync, or a
+# later `apm prune` / `apm uninstall` would silently enable the very MCP server
+# the install refused.
+# ---------------------------------------------------------------------------
+
+
+def test_resync_gate_drops_exec_blocked_locked_dependencies(tmp_path: Path) -> None:
+    """A gated/denied locked dependency is excluded from resync candidates.
+
+    Panelist reproduction: a ``LockedDependency`` with
+    ``exec_status=gated_pending_approval`` (the default-deny outcome for an
+    Agent Plugin MCP server) must not resurface through the lifecycle path.
+    """
+    from apm_cli.copilot_plugins.registrar import candidates_from_lockfile
+    from apm_cli.deps.lockfile import LockedDependency
+
+    modules = tmp_path / "apm_modules"
+    gated = LockedDependency(
+        repo_url="https://github.com/testowner/gatedplugin",
+        resolved_commit="a" * 40,
+        exec_status=TRUST_GATED,
+    )
+    denied = LockedDependency(
+        repo_url="https://github.com/testowner/deniedplugin",
+        resolved_commit="b" * 40,
+        exec_status=TRUST_DENIED,
+    )
+    cleared = LockedDependency(
+        repo_url="https://github.com/testowner/clearedplugin",
+        resolved_commit="c" * 40,
+        exec_status=None,
+    )
+    lockfile = SimpleNamespace(
+        dependencies={
+            "github.com/testowner/gatedplugin": gated,
+            "github.com/testowner/deniedplugin": denied,
+            "github.com/testowner/clearedplugin": cleared,
+        }
+    )
+
+    keys = {c.dependency_key for c in candidates_from_lockfile(lockfile, modules)}
+
+    assert "github.com/testowner/gatedplugin" not in keys
+    assert "github.com/testowner/deniedplugin" not in keys
+    assert "github.com/testowner/clearedplugin" in keys
+
+
 # ---------------------------------------------------------------------------
 # Item 2: a denied executable policy refuses native registration but still
 # records a non-None lockfile exec_status.
@@ -117,21 +219,32 @@ def test_denied_exec_policy_refuses_native_registration_and_records_status() -> 
     )
     ctx = SimpleNamespace(exec_trust_ctx=trust_ctx, package_exec_status={})
     result = {"native_plugin": False}
+    collector = DiagnosticCollector()
 
     finalized = finalize_native_plugin(
         result,
         _native_package_info(),
         "owner/plugin",
         [SimpleNamespace(name="copilot")],
+        hooks_approved=True,
         mcp_approved=False,
         bin_approved=True,
+        canvas_approved=True,
+        lsp_approved=True,
         ctx=ctx,
-        diagnostics=DiagnosticCollector(),
+        diagnostics=collector,
         logger=None,
     )
 
     assert finalized["native_plugin"] is False
     assert ctx.package_exec_status["owner/plugin"] == TRUST_DENIED
+    # Item 6b/7c: exactly ONE user-facing refusal line, owned by the collector,
+    # naming the plugin and carrying the actionable fix in the message itself.
+    warnings = [d.message for d in collector._diagnostics]
+    assert len(warnings) == 1
+    refusal = _flat(warnings[0])
+    assert "not registered with GitHub Copilot" in refusal
+    assert "apm approve owner/plugin" in refusal
 
 
 def test_approved_exec_policy_admits_native_registration() -> None:
@@ -148,14 +261,89 @@ def test_approved_exec_policy_admits_native_registration() -> None:
         _native_package_info(),
         "owner/plugin",
         [SimpleNamespace(name="copilot")],
+        hooks_approved=True,
         mcp_approved=True,
         bin_approved=True,
+        canvas_approved=True,
+        lsp_approved=True,
         ctx=ctx,
         diagnostics=DiagnosticCollector(),
         logger=None,
     )
 
     assert finalized["native_plugin"] is True
+
+
+def test_record_native_exec_status_folds_and_never_downgrades() -> None:
+    """A partial MCP grant must not downgrade a worse status the gate recorded.
+
+    Item 2: ``check_executable_approval`` records the worst-case status over
+    ALL exec types on disk (e.g. an unbounded ``hooks`` leaves
+    ``gated_pending_approval``). The IR-derived status here sees only MCP/BIN,
+    so an MCP-only allow yields ``deployed``. Folding must keep the more severe
+    ``gated_pending_approval`` -- an assign would write a false ``deployed``
+    into the audited lockfile provenance field.
+    """
+    from apm_cli.install.native_plugin_admission import record_native_exec_status
+
+    trust_ctx = build_exec_trust_context(
+        policy=None,
+        project_data={"executables": {"allow": {"owner/plugin": {"mcp": True}}}},
+    )
+    # The exec gate already recorded a more severe status from the on-disk scan.
+    ctx = SimpleNamespace(
+        exec_trust_ctx=trust_ctx,
+        package_exec_status={"owner/plugin": TRUST_GATED},
+    )
+
+    record_native_exec_status(ctx, "owner/plugin", _native_package_info(), ("mcp",))
+
+    assert ctx.package_exec_status["owner/plugin"] == TRUST_GATED
+
+
+def test_on_disk_hooks_absent_from_ir_still_refuse_native_registration(
+    tmp_path: Path,
+) -> None:
+    """A live-loaded hooks component the IR never models must gate registration.
+
+    Item 3: for a natively registered plugin PRESENCE IS DEPLOYMENT -- Copilot
+    loads the whole apm_modules directory live. The IR only models MCP/BIN, so
+    an unapproved ``hooks/hooks.json`` on disk would execute with no gate unless
+    finalize unions the on-disk exec types with the IR-derived ones.
+    """
+    install_path = tmp_path / "plugin"
+    hooks_dir = install_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text("{}", encoding="ascii")
+
+    # IR declares NO executables (empty mcp_servers), so ir_exec_types is empty
+    # and only the on-disk scan can see the hooks component.
+    components = SimpleNamespace(mcp_servers=())
+    package = SimpleNamespace(agent_plugin=SimpleNamespace(components=components), version="1.0.0")
+    package_info = SimpleNamespace(
+        package=package,
+        dependency_ref=SimpleNamespace(canonical_string=lambda: "owner/plugin"),
+        install_path=install_path,
+    )
+    ctx = SimpleNamespace(exec_trust_ctx=None, package_exec_status={})
+    result = {"native_plugin": False}
+
+    finalized = finalize_native_plugin(
+        result,
+        package_info,
+        "owner/plugin",
+        [SimpleNamespace(name="copilot")],
+        hooks_approved=False,
+        mcp_approved=True,
+        bin_approved=True,
+        canvas_approved=True,
+        lsp_approved=True,
+        ctx=ctx,
+        diagnostics=DiagnosticCollector(),
+        logger=None,
+    )
+
+    assert finalized["native_plugin"] is False
 
 
 def test_finalize_drops_native_when_copilot_target_excluded() -> None:
@@ -168,8 +356,11 @@ def test_finalize_drops_native_when_copilot_target_excluded() -> None:
         _native_package_info(),
         "owner/plugin",
         [SimpleNamespace(name="claude")],
+        hooks_approved=True,
         mcp_approved=True,
         bin_approved=True,
+        canvas_approved=True,
+        lsp_approved=True,
         ctx=ctx,
         diagnostics=DiagnosticCollector(),
         logger=None,
@@ -282,6 +473,14 @@ def test_prune_never_touches_the_inner_skills_of_a_still_declared_plugin(
     )
     assert inner_skill.is_file()
 
+    # Make the inner skill orphan-SHAPED: give it its own apm.yml so that, absent
+    # the ``_is_agent_plugin_root`` nesting guard, prune's package scan would see a
+    # standalone, undeclared package here and delete it. With the guard intact it
+    # stays recognized as part of the plugin unit.
+    (inner_skill.parent / "apm.yml").write_text(
+        "name: sentinel-skill\nversion: 1.0.0\n", encoding="ascii"
+    )
+
     # An unrelated true orphan that prune should remove.
     orphan = _modules(project) / "owner" / "orphan"
     orphan.mkdir(parents=True)
@@ -291,8 +490,9 @@ def test_prune_never_touches_the_inner_skills_of_a_still_declared_plugin(
 
     assert result.exit_code == 0, result.output
     # The plugin's inner skill is part of the plugin unit, never a standalone
-    # orphan, so prune leaves it intact.
+    # orphan, so prune leaves it intact even though it now looks package-shaped.
     assert inner_skill.is_file()
+    assert (inner_skill.parent / "apm.yml").is_file()
     assert "sentinel-skill" not in result.output
 
 
@@ -335,4 +535,65 @@ def test_deps_list_reports_the_natively_registered_plugin_with_its_version(
     assert "sentinel" in result.output
     assert "2.3.4" in result.output
     assert "unknown" not in result.output
-    assert "registered natively with GitHub Copilot" in result.output
+    assert "registered natively with GitHub Copilot" in _flat(result.output)
+
+
+# ---------------------------------------------------------------------------
+# Item 5: the copilot --version probe stays lazy. A no-Agent-Plugin install
+# spawns ZERO probes; a full uninstall/prune spawns at most one.
+# ---------------------------------------------------------------------------
+
+
+class _ProbeCounter:
+    """A stand-in ``probe_copilot_cli_version`` that counts every spawn."""
+
+    def __init__(self, version: str = QUALIFIED_VERSION) -> None:
+        self.calls = 0
+        self._version = version
+
+    def __call__(self) -> str:
+        self.calls += 1
+        return self._version
+
+
+def _patch_probe(monkeypatch: pytest.MonkeyPatch) -> _ProbeCounter:
+    counter = _ProbeCounter()
+    monkeypatch.setattr("apm_cli.copilot_plugins.capability.probe_copilot_cli_version", counter)
+    return counter
+
+
+def test_zero_plugin_install_never_probes_the_copilot_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``--target copilot`` install with no Agent Plugin spawns 0 probes."""
+    project = tmp_path / "project"
+    ordinary = tmp_path / "source" / "plainpkg"
+    write_legacy_package(ordinary, name="plainpkg")
+    _write_project(project, [str(ordinary)])
+
+    counter = _patch_probe(monkeypatch)
+    result = _install(monkeypatch, project)
+
+    assert result.exit_code == 0, result.output
+    assert counter.calls == 0
+
+
+def test_uninstall_and_prune_probe_at_most_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full uninstall / prune resolves the capability at most once each."""
+    project = tmp_path / "project"
+    source = tmp_path / "source" / "sentinel"
+    write_agent_plugin(source, name="sentinel")
+    _write_project(project, [str(source)])
+    assert _install(monkeypatch, project).exit_code == 0
+
+    counter = _patch_probe(monkeypatch)
+    uninstall = CliRunner().invoke(cli, ["uninstall", str(source)], catch_exceptions=False)
+    assert uninstall.exit_code == 0, uninstall.output
+    assert counter.calls <= 1
+
+    counter.calls = 0
+    prune = CliRunner().invoke(cli, ["prune"], catch_exceptions=False)
+    assert prune.exit_code == 0, prune.output
+    assert counter.calls <= 1

@@ -644,20 +644,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # --------------------------------------------------------------
         # Phase 2: Target detection + integrator initialization.
         # Skipped in lockfile_only mode -- no primitives are deployed.
+        #
+        # Phase 2.1 (native Copilot plugin registration capability) shares
+        # this guard: it publishes the capability so the Agent Plugin
+        # deployment boundary can admit a verified plugin (issue #2703). In
+        # lockfile_only mode no primitives are deployed, so no native plugin
+        # can be admitted and the client probe would be pure waste.
         # --------------------------------------------------------------
         if not lockfile_only:
+            from .phases import copilot_plugins as _copilot_plugins_phase
             from .phases import targets as _targets_phase
 
             _run_phase("targets", _targets_phase, ctx)
-
-        # --------------------------------------------------------------
-        # Phase 2.1: Publish the native Copilot plugin registration
-        # capability so the Agent Plugin deployment boundary can admit a
-        # verified plugin instead of blocking it (issue #2703).
-        # --------------------------------------------------------------
-        from .phases import copilot_plugins as _copilot_plugins_phase
-
-        _run_phase("copilot_activate", _copilot_plugins_phase.ActivatePhase, ctx)
+            _run_phase("copilot_activate", _copilot_plugins_phase.ActivatePhase, ctx)
 
         # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)

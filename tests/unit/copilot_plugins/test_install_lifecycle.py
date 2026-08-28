@@ -136,10 +136,17 @@ def test_unqualified_client_fails_closed_and_writes_nothing(
     assert not _settings_path(project).exists()
 
 
-def test_non_copilot_target_stays_fail_closed(
+def test_non_copilot_target_skips_the_plugin_without_aborting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A qualified Copilot CLI does not unlock other targets."""
+    """A project that does not target copilot skips the plugin, exit 0.
+
+    A qualified Copilot CLI does not unlock other targets: the plugin is not
+    registered. But a project-level target set that excludes copilot is a
+    non-applicability, not a failure -- it is skipped with one warning and the
+    install still succeeds (Item 4). The fatal path is reserved for a package
+    that WAS selected for copilot but cannot be registered.
+    """
     project = tmp_path / "project"
     write_agent_plugin(tmp_path / "source" / "sentinel", name="sentinel")
     _write_project(project, [str(tmp_path / "source" / "sentinel")])
@@ -153,9 +160,10 @@ def test_non_copilot_target_stays_fail_closed(
     )
 
     output = " ".join(result.output.split())
-    assert result.exit_code == 1, result.output
+    assert result.exit_code == 0, result.output
     assert "'copilot' target" in output
     assert not catalog_path_for(_modules(project)).exists()
+    assert not _settings_path(project).exists()
 
 
 def test_mixed_graph_registers_the_plugin_and_deploys_the_legacy_package(

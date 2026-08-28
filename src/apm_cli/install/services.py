@@ -328,8 +328,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     if not targets:
         return result
 
-    # Executable approval gate (npm v12-style default-deny). hooks/bin gate
-    # below (~424, ~585); mcp/canvas unused (mcp filtered upstream, canvas re-derived ~433).
+    # Executable approval gate (npm v12-style default-deny); all five verdicts feed the gates.
     (
         _hooks_approved,
         _bin_approved,
@@ -390,8 +389,11 @@ def integrate_package_primitives(  # noqa: PLR0913
             package_info,
             package_name,
             targets,
+            hooks_approved=_hooks_approved,
             mcp_approved=_mcp_approved,
             bin_approved=_bin_approved,
+            canvas_approved=_canvas_approved,
+            lsp_approved=_lsp_approved,
             ctx=ctx,
             diagnostics=diagnostics,
             logger=logger,

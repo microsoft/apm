@@ -263,8 +263,10 @@ def test_foreign_apm_marketplace_entry_is_a_precise_collision(tmp_path: Path) ->
     assert not catalog_path_for(modules).exists()
 
 
-def test_foreign_enabled_plugin_key_is_a_precise_collision(tmp_path: Path) -> None:
-    """A user-authored ``<plugin>@apm`` enablement blocks the merge."""
+def test_foreign_enabled_plugin_key_is_adopted_within_the_apm_namespace(
+    tmp_path: Path,
+) -> None:
+    """APM owns the whole ``@apm`` namespace, so a stray value is corrected."""
     project, modules = _project(tmp_path)
     write_agent_plugin(modules / "pkg", name="portable-plugin")
     settings_path = _settings(project)
@@ -274,8 +276,10 @@ def test_foreign_enabled_plugin_key_is_a_precise_collision(tmp_path: Path) -> No
         encoding="ascii",
     )
 
-    with pytest.raises(CopilotSettingsCollisionError, match=r"does not own"):
-        _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+    _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
+
+    settings = read_json(settings_path)
+    assert settings[ENABLED_PLUGINS_KEY]["portable-plugin@apm"] is True
 
 
 def test_registration_is_rebuilt_when_a_plugin_is_removed(tmp_path: Path) -> None:
@@ -296,6 +300,80 @@ def test_registration_is_rebuilt_when_a_plugin_is_removed(tmp_path: Path) -> Non
     assert [entry["name"] for entry in catalog["plugins"]] == ["kept-plugin"]
     assert settings[ENABLED_PLUGINS_KEY] == {"kept-plugin@apm": True}
     assert (modules / "gone" / "plugin.json").is_file()
+
+
+def test_dropped_plugin_is_retired_across_ledger_loss(tmp_path: Path) -> None:
+    """A namespace sweep retires a dropped ``@apm`` key even with no ledger.
+
+    Reproduces the ``rm -rf apm_modules`` hazard: the ownership ledger lives
+    under the disposable materialization root, so after a wipe the settings
+    document still enables a plugin the manifest no longer declares, yet the
+    ledger cannot name it. APM owns the whole ``apm`` marketplace namespace by
+    construction, so the sweep retires the orphan regardless.
+    """
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "alpha", name="alpha")
+    write_agent_plugin(modules / "beta", name="beta")
+    settings_path = _settings(project)
+    _sync(
+        project,
+        modules,
+        [
+            ResolvedPluginCandidate("alpha", modules / "alpha"),
+            ResolvedPluginCandidate("beta", modules / "beta"),
+        ],
+    )
+    assert read_json(settings_path)[ENABLED_PLUGINS_KEY] == {
+        "alpha@apm": True,
+        "beta@apm": True,
+    }
+
+    # Simulate the ledger loss: the ledger is gone while the settings survive.
+    ledger_path_for(modules).unlink()
+
+    _sync(project, modules, [ResolvedPluginCandidate("alpha", modules / "alpha")])
+
+    settings = read_json(settings_path)
+    assert settings[ENABLED_PLUGINS_KEY] == {"alpha@apm": True}
+
+
+def test_namespace_sweep_retires_a_hand_written_apm_key_and_spares_other_namespaces(
+    tmp_path: Path,
+) -> None:
+    """Pin the blast radius of the namespace sweep in both directions.
+
+    APM claims the whole ``apm`` marketplace namespace, so a ``<name>@apm``
+    key naming a plugin APM's own catalog does not list is a dangling
+    activation and is retired even when a human typed it. That is deliberate
+    convergence, not an overwrite of unrelated state: a key in ANY other
+    marketplace namespace is untouched. Without this trap the sweep's reach
+    is only implied by the ledger-loss test.
+    """
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "alpha", name="alpha")
+    settings_path = _settings(project)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                ENABLED_PLUGINS_KEY: {
+                    "handwritten@apm": True,
+                    "vendor-tool@other-marketplace": True,
+                },
+                "banner": "keep me",
+            }
+        ),
+        encoding="ascii",
+    )
+
+    _sync(project, modules, [ResolvedPluginCandidate("alpha", modules / "alpha")])
+
+    settings = read_json(settings_path)
+    assert settings[ENABLED_PLUGINS_KEY] == {
+        "alpha@apm": True,
+        "vendor-tool@other-marketplace": True,
+    }
+    assert settings["banner"] == "keep me"
 
 
 def test_emptying_the_graph_removes_the_apm_registration_entirely(tmp_path: Path) -> None:

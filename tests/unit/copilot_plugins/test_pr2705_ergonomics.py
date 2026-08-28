@@ -155,7 +155,9 @@ def test_malformed_settings_json_reports_human_message(
     assert result.exit_code != 0, result.output
     flat = _flat(result.output)
     assert "is not valid JSON" in flat
-    assert "Your packages are already installed" in flat
+    assert "no packages were installed" in flat
+    # The reassurance must be truthful: nothing landed on disk.
+    assert not (project / "apm_modules").exists()
     # The raw decoder message stays behind --verbose.
     assert "Expecting property name" not in flat
 

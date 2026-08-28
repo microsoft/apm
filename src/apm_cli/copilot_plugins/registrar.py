@@ -57,6 +57,7 @@ class ResolvedPluginCandidate:
     install_path: Path
     direct: bool = False
     target_subset: tuple[str, ...] | None = None
+    exec_status: str | None = None
 
 
 @dataclass
@@ -151,14 +152,32 @@ def discover_native_plugins(
     subset that excludes ``copilot`` drops the candidate entirely, and a
     winner whose identity flips relative to the ledger's recorded owner is
     refused unless the new winner is a direct dependency.
+
+    Filesystem routing (probe-free) is split from entry building so callers that
+    must avoid the client version probe can first ask whether any Agent Plugin
+    is physically present.
+    """
+    routed = list(_routed_plugin_candidates(candidates, modules_dir=modules_dir, logger=logger))
+    return build_native_plugin_entries(
+        routed, modules_dir=modules_dir, ledger=ledger, strict=strict, logger=logger
+    )
+
+
+def _routed_plugin_candidates(
+    candidates: Iterable[ResolvedPluginCandidate],
+    *,
+    modules_dir: Path,
+    logger: Any | None = None,
+) -> Iterable[tuple[ResolvedPluginCandidate, Any]]:
+    """Yield ``(candidate, plugin)`` for every candidate that IS an Agent Plugin.
+
+    Pure filesystem work: no client probe, no collision decision. Candidates are
+    yielded in precedence order (direct first, then dependency key) so the entry
+    builder can resolve name collisions deterministically. Every skip emits a
+    named ``_drop`` trace, including the same-path dedupe branch.
     """
     from ..bundle.local_bundle import route_agent_plugin_package
     from .constants import COPILOT_TARGET_NAME
-
-    entries: list[NativePluginEntry] = []
-    collisions: list[str] = []
-    claimed: dict[str, NativePluginEntry] = {}
-    seen_paths: set[Path] = set()
 
     def _drop(dependency_key: str, reason: str) -> None:
         if logger is not None:
@@ -166,8 +185,7 @@ def discover_native_plugins(
                 f"    Copilot native registration skipped {dependency_key}: {reason}"
             )
 
-    # Direct dependencies are considered first, then lexicographic dependency
-    # key, so the first claimant of a plugin name is the most authoritative.
+    seen_paths: set[Path] = set()
     ordered = sorted(candidates, key=lambda item: (not item.direct, item.dependency_key))
     for candidate in ordered:
         if (
@@ -182,6 +200,7 @@ def discover_native_plugins(
             continue
         resolved = install_path.resolve()
         if resolved in seen_paths:
+            _drop(candidate.dependency_key, "another candidate already claims its install path")
             continue
         seen_paths.add(resolved)
         try:
@@ -191,10 +210,38 @@ def discover_native_plugins(
             continue
         if detection is None or detection.plugin is None:
             continue
+        yield candidate, detection.plugin
+
+
+def build_native_plugin_entries(
+    routed: Iterable[tuple[ResolvedPluginCandidate, Any]],
+    *,
+    modules_dir: Path,
+    ledger: Any | None = None,
+    strict: bool = True,
+    logger: Any | None = None,
+) -> tuple[list[NativePluginEntry], list[str]]:
+    """Build catalog entries from routed plugins, resolving name collisions.
+
+    Consumes the precedence-ordered stream from :func:`_routed_plugin_candidates`
+    and applies direct-wins name precedence, same-precedence ambiguity refusal,
+    and the ledger-owner identity-flip guard.
+    """
+
+    def _drop(dependency_key: str, reason: str) -> None:
+        if logger is not None:
+            logger.verbose_detail(
+                f"    Copilot native registration skipped {dependency_key}: {reason}"
+            )
+
+    entries: list[NativePluginEntry] = []
+    collisions: list[str] = []
+    claimed: dict[str, NativePluginEntry] = {}
+    for candidate, plugin in routed:
         try:
             entry = build_entry(
                 dependency_key=candidate.dependency_key,
-                plugin=detection.plugin,
+                plugin=plugin,
                 marketplace_root=modules_dir,
                 direct=candidate.direct,
             )
@@ -258,12 +305,25 @@ def candidates_from_lockfile(lockfile: Any, modules_dir: Path) -> list[ResolvedP
     Direct dependencies (no declaring parent, not resolved by a parent repo)
     and any per-dependency target subset flow through so precedence and target
     narrowing decisions have the same inputs as the install path.
+
+    This is the ONE executable trust gate shared by install and every lifecycle
+    command (uninstall, prune, restore): a locked entry whose executables the
+    scanner denied or left pending approval (``exec_status`` of
+    :data:`~apm_cli.security.executables.TRUST_DENIED` /
+    :data:`~apm_cli.security.executables.TRUST_GATED`) is dropped here, so a
+    resync can never silently enable an MCP server the install refused. The
+    in-flight ``deps_to_install`` overlay is gated separately by the install
+    phase, since its exec status is not yet persisted to the lockfile.
     """
     from ..deps.lockfile import _SELF_KEY
+    from ..security.executables import TRUST_DENIED, TRUST_GATED
 
     candidates: list[ResolvedPluginCandidate] = []
     for dep_key, locked in sorted(getattr(lockfile, "dependencies", {}).items()):
         if dep_key == _SELF_KEY:
+            continue
+        exec_status = getattr(locked, "exec_status", None)
+        if exec_status in (TRUST_DENIED, TRUST_GATED):
             continue
         to_reference = getattr(locked, "to_dependency_ref", None)
         if to_reference is None:
@@ -283,6 +343,7 @@ def candidates_from_lockfile(lockfile: Any, modules_dir: Path) -> list[ResolvedP
                 install_path=Path(install_path),
                 direct=direct,
                 target_subset=tuple(target_subset) if target_subset else None,
+                exec_status=exec_status,
             )
         )
     return candidates
@@ -307,14 +368,23 @@ def resync_native_plugins(
     collision is downgraded to a note instead of failing the whole command.
     """
     from ..integration.targets import resolve_targets
-    from .capability import resolve_native_registration_capability
-
-    resolved_targets = (
-        targets
-        if targets is not None
-        else resolve_targets(project_root, user_scope=is_user_scope(scope))
+    from .capability import (
+        current_native_registration,
+        resolve_native_registration_capability,
     )
-    capability = resolve_native_registration_capability(resolved_targets)
+
+    # Reuse the capability already published for this command when available, so
+    # a single lifecycle command never resolves targets -- or probes the client
+    # -- more than once. Only when nothing is published do we resolve fresh from
+    # the caller-supplied targets (or, as a last resort, re-derive them).
+    capability = current_native_registration()
+    if capability is None:
+        resolved_targets = (
+            targets
+            if targets is not None
+            else resolve_targets(project_root, user_scope=is_user_scope(scope))
+        )
+        capability = resolve_native_registration_capability(resolved_targets)
     candidates = candidates_from_lockfile(lockfile, modules_dir) if lockfile is not None else []
     return synchronize_copilot_plugins(
         project_root=project_root,
@@ -345,16 +415,23 @@ def synchronize_copilot_plugins(
     ledger = read_ledger(ledger_path)
     had_registration = ledger.marketplace_owned or bool(ledger.enabled_plugins)
 
-    if (capability is None or not capability.supported) and not had_registration:
-        return CopilotPluginSyncResult(
-            skipped_reason=(capability.reason if capability is not None else None)
-        )
+    # Probe-free discovery FIRST: routing is pure filesystem work, so a command
+    # with no Agent Plugin present and no prior registration returns here without
+    # ever reading the capability -- and therefore without spawning the
+    # `copilot --version` probe. This is the overwhelmingly common case.
+    routed = list(_routed_plugin_candidates(candidates, modules_dir=modules_dir, logger=logger))
+    if not routed and not had_registration:
+        return CopilotPluginSyncResult()
 
     entries: list[NativePluginEntry] = []
     collisions: list[str] = []
     if capability is not None and capability.supported:
-        entries, collisions = discover_native_plugins(
-            candidates, modules_dir=modules_dir, ledger=ledger, strict=strict, logger=logger
+        entries, collisions = build_native_plugin_entries(
+            routed, modules_dir=modules_dir, ledger=ledger, strict=strict, logger=logger
+        )
+    elif not had_registration:
+        return CopilotPluginSyncResult(
+            skipped_reason=(capability.reason if capability is not None else None)
         )
 
     settings_path = resolve_settings_path(scope, project_root, ledger)

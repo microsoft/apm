@@ -16,7 +16,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
+from apm_cli.agent_plugins.errors import (
+    AgentPluginDeploymentBoundaryError,
+    AgentPluginTargetExcludedError,
+)
 from apm_cli.install.package_resolution import effective_deploy_skill_subset
 from apm_cli.install.services import (
     IntegratorBundle,
@@ -127,9 +130,21 @@ def prepare_integration_materialization(
 def preflight_agent_plugin_materializations(
     prepared: list[tuple[DependencySource, Materialization]],
 ) -> None:
-    """Reject the batch once, before any package can mutate a target."""
+    """Reject the batch once, before any package can mutate a target.
+
+    A package that WAS selected for the copilot target but cannot be
+    registered (client absent or below the floor) aborts the whole batch
+    here -- it is a real, actionable failure. A package that simply is not
+    targeted at copilot (this project selected other targets) is NOT a
+    failure: it is skipped per-package during integration
+    (:func:`_record_agent_plugin_target_skip`), so it must not abort the
+    batch. ``AgentPluginTargetExcludedError`` carries that distinction.
+    """
     for _, materialization in prepared:
-        enforce_agent_plugin_deployment_boundary(materialization.package_info)
+        try:
+            enforce_agent_plugin_deployment_boundary(materialization.package_info)
+        except AgentPluginTargetExcludedError:
+            continue
 
 
 def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> None:
@@ -222,6 +237,29 @@ def _record_agent_plugin_boundary_failure(
     return deltas
 
 
+def _record_agent_plugin_target_skip(
+    source: DependencySource,
+    materialization: Materialization,
+    error: AgentPluginTargetExcludedError,
+) -> dict[str, int]:
+    """Record a non-fatal skip for a package this project does not target at copilot.
+
+    Mirrors the per-dependency ``targets:`` subset already handled in
+    ``finalize_native_plugin``: native registration is skipped, ONE warning
+    names the package, and the rest of the batch installs. This is a warning,
+    not an error, so the install still exits 0.
+    """
+    ctx = source.ctx
+    deltas = materialization.deltas
+    dep_ref = source.dep_ref
+    dep_key = materialization.dep_key
+    deltas["installed"] = 0
+    ctx.package_deployed_files[dep_key] = []
+    package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
+    ctx.diagnostics.warn(str(error), package=package_key)
+    return deltas
+
+
 def _integrate_materialization(
     source: DependencySource,
     m: Materialization,
@@ -242,6 +280,8 @@ def _integrate_materialization(
 
     try:
         enforce_agent_plugin_deployment_boundary(m.package_info)
+    except AgentPluginTargetExcludedError as exc:
+        return _record_agent_plugin_target_skip(source, m, exc)
     except AgentPluginDeploymentBoundaryError as exc:
         return _record_agent_plugin_boundary_failure(source, m, exc)
 

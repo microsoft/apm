@@ -45,15 +45,26 @@ def activate(ctx: InstallContext) -> None:
 
 
 def _log_capability_decision(ctx: InstallContext, capability) -> None:
-    """Trace the native-registration verdict at verbose level."""
+    """Trace the native-registration verdict at verbose level, probe-free.
+
+    Reads only ``copilot_targeted`` (known from the target names, no
+    subprocess). When copilot IS targeted the verdict depends on the client
+    probe, which is deferred until an Agent Plugin is actually integrated -- so a
+    zero-plugin install spawns nothing here. When copilot is NOT targeted the
+    client was never probed, so the line must not claim it was "not detected".
+    """
     logger = getattr(ctx, "logger", None)
     if logger is None:
         return
-    detected = capability.detected_version or "not detected"
-    verdict = "available" if capability.supported else "unavailable"
+    if not getattr(capability, "copilot_targeted", False):
+        logger.verbose_detail(
+            "Copilot native registration: unavailable (copilot target not "
+            f"selected, floor {COPILOT_LIVE_PLUGIN_MIN_VERSION})"
+        )
+        return
     logger.verbose_detail(
-        f"Copilot native registration: {verdict} "
-        f"(client {detected}, floor {COPILOT_LIVE_PLUGIN_MIN_VERSION})"
+        "Copilot native registration: client probe deferred until an Agent "
+        f"Plugin is integrated (floor {COPILOT_LIVE_PLUGIN_MIN_VERSION})"
     )
 
 
@@ -99,17 +110,27 @@ def resolved_candidates(ctx: InstallContext) -> list[ResolvedPluginCandidate]:
         return []
     modules_dir = Path(modules_dir)
     lockfile = getattr(ctx, "lockfile", None) or getattr(ctx, "existing_lockfile", None)
+    # candidates_from_lockfile already drops locked entries whose executables
+    # the trust gate denied or gated, so the shared gate lives in ONE place.
     candidates: dict[str, ResolvedPluginCandidate] = {
         candidate.dependency_key: candidate
         for candidate in (
             candidates_from_lockfile(lockfile, modules_dir) if lockfile is not None else []
         )
     }
+    # The in-flight overlay carries exec status not yet persisted to the
+    # lockfile, so gate it here against the freshly captured trust state.
+    blocked = _exec_blocked_keys(ctx)
     for dependency in getattr(ctx, "deps_to_install", None) or []:
         try:
             key = dependency.get_unique_key()
             install_path = dependency.get_install_path(modules_dir)
         except (AttributeError, ValueError):
+            continue
+        if key in blocked:
+            # A denied/gated in-flight package must not slip in via a stale
+            # lockfile candidate either.
+            candidates.pop(key, None)
             continue
         target_subset = getattr(dependency, "target_subset", None)
         candidates[key] = ResolvedPluginCandidate(
@@ -117,9 +138,9 @@ def resolved_candidates(ctx: InstallContext) -> list[ResolvedPluginCandidate]:
             install_path=Path(install_path),
             direct=getattr(dependency, "declaring_parent", None) is None,
             target_subset=tuple(target_subset) if target_subset else None,
+            exec_status=(getattr(ctx, "package_exec_status", None) or {}).get(key),
         )
-    blocked = _exec_blocked_keys(ctx)
-    return [candidate for key, candidate in candidates.items() if key not in blocked]
+    return list(candidates.values())
 
 
 def _exec_blocked_keys(ctx: InstallContext) -> set[str]:

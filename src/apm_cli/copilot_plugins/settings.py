@@ -50,10 +50,6 @@ class RegistrationLedger:
     plugin_owners: dict[str, str] = field(default_factory=dict)
     unreadable: bool = False
 
-    def owns_enabled_key(self, key: str) -> bool:
-        """Return ``True`` when APM previously wrote *key*."""
-        return key in self.enabled_plugins
-
     def owner_of(self, key: str) -> str | None:
         """Return the dependency key that last owned *key*, if recorded."""
         return self.plugin_owners.get(key)
@@ -117,9 +113,9 @@ def read_settings_document(path: Path) -> dict[str, Any]:
         loaded = json.loads(raw)
     except json.JSONDecodeError as exc:
         error = CopilotSettingsCollisionError(
-            f"{path} is not valid JSON, so APM cannot register the Agent "
-            "Plugin. Fix or delete the file, then re-run 'apm install'. Your "
-            "packages are already installed."
+            f"{path} is not valid JSON, so APM could not register the Agent "
+            "Plugin and no packages were installed. Fix or delete the file, "
+            "then re-run 'apm install'."
         )
         error.detail = str(exc)
         raise error from exc
@@ -247,19 +243,24 @@ def merge_registration(
         result.added_keys.append(f"{EXTRA_MARKETPLACES_KEY}.{APM_MARKETPLACE_NAME}")
 
     for key in sorted(set(enabled_keys)):
-        if key in enabled and not ledger.owns_enabled_key(key) and enabled.get(key) is not True:
-            raise CopilotSettingsCollisionError(
-                f"{settings_path} already enables '{key}' and APM does not own "
-                "that entry. Remove it, or rename the conflicting plugin, then "
-                "re-run the command."
-            )
         if enabled.get(key) is not True:
             enabled[key] = True
             result.changed = True
             result.added_keys.append(f"{ENABLED_PLUGINS_KEY}.{key}")
 
-    for stale in sorted(set(ledger.enabled_plugins) - set(enabled_keys)):
-        if stale in enabled:
+    # NAMESPACE sweep: the marketplace-ownership check above guarantees APM owns
+    # ``extraKnownMarketplaces.apm``, so by construction it owns the whole ``apm``
+    # marketplace namespace -- every ``<name>@apm`` enabled key belongs to APM.
+    # Retire each namespaced key no longer desired even when the ledger was lost
+    # (``rm -rf apm_modules``) and cannot name it; this keeps install fully
+    # convergent with no ledger at all. The ledger's own set is folded in so a
+    # non-namespaced key APM once wrote is still retired.
+    desired = set(enabled_keys)
+    apm_suffix = f"@{APM_MARKETPLACE_NAME}"
+    for stale in sorted(enabled):
+        if stale in desired:
+            continue
+        if stale.endswith(apm_suffix) or stale in ledger.enabled_plugins:
             del enabled[stale]
             result.changed = True
             result.removed_keys.append(f"{ENABLED_PLUGINS_KEY}.{stale}")

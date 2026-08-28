@@ -221,7 +221,8 @@ apm install ./my-bundle --target opencode
 This imperative route deploys Claude plugin bundles (the default `apm pack`
 output). A portable Agent Plugins v1 package installs declaratively instead:
 declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
-whole and registers it with GitHub Copilot `>=1.0.81-8`. See
+whole and registers it with GitHub Copilot CLI 1.0.81 or newer (floor
+`1.0.81-8`). See
 [Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
 :::
 

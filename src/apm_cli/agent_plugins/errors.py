@@ -69,6 +69,20 @@ class AgentPluginClientUnavailableError(AgentPluginDeploymentBoundaryError):
     """
 
 
+class AgentPluginTargetExcludedError(AgentPluginClientUnavailableError):
+    """Raised when this install simply does not target the ``copilot`` target.
+
+    Distinct from :class:`AgentPluginClientUnavailableError`: the client may be
+    perfectly qualified, but the effective target set (project-level or
+    per-dependency) never selected ``copilot``, so native registration is not
+    applicable. This is NON-fatal -- the package is skipped with one warning and
+    the rest of the batch installs -- whereas a copilot-targeted install whose
+    client is absent/unqualified stays fatal. Subclasses
+    :class:`AgentPluginClientUnavailableError` so survivor handling, which
+    already leaves such packages untouched, needs no change.
+    """
+
+
 def enforce_agent_plugin_deployment_boundary(
     package_info: Any | None = None,
     *,
@@ -101,6 +115,13 @@ def enforce_agent_plugin_deployment_boundary(
     capability = current_native_registration()
     if capability is not None and capability.supported:
         return
+    # Not supported. Distinguish "this install never selected the copilot
+    # target" (skippable, non-fatal) from "copilot WAS selected but its client
+    # is absent or below the floor" (fatal for the package being integrated).
+    # Reading copilot_targeted is probe-free, and reading .supported/.reason for
+    # a non-targeted capability short-circuits before the client probe.
+    if capability is not None and not getattr(capability, "copilot_targeted", True):
+        raise AgentPluginTargetExcludedError(capability.reason or AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
     if capability is not None and capability.reason:
         raise AgentPluginClientUnavailableError(capability.reason)
     raise AgentPluginClientUnavailableError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)

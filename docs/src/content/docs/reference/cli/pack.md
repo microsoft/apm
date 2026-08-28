@@ -143,7 +143,7 @@ legacy Claude client format.
 LSP configuration gets its own guidance in the same error, since neither bundle format carries it: configure LSP servers directly in the target client instead.
 
 :::note[Installing what you packed]
-Declare the packed plugin as a dependency in `apm.yml` and run `apm install --target copilot`: APM keeps the whole unit under `apm_modules/` and registers it with GitHub Copilot `>=1.0.81-8`, which loads it live. Older Copilot clients and non-Copilot targets fail closed with an explicit capability error -- use the default Claude plugin bundle (or `--format apm`) for those. See [Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
+Declare the packed plugin as a dependency in `apm.yml` and run `apm install --target copilot`: APM keeps the whole unit under `apm_modules/` and registers it with GitHub Copilot CLI 1.0.81 or newer (floor `1.0.81-8`), which loads it live. Older Copilot clients and non-Copilot targets fail closed with an explicit capability error -- use the default Claude plugin bundle (or `--format apm`) for those. See [Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
 :::
 
 ### APM bundle (`--format apm`)
