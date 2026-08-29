@@ -1357,8 +1357,8 @@
       "tests": [
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_lifecycle_registration_clauses_persist_in_spec",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_in_place_and_consumer_owned",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_unavailable_lifecycle_falls_back_to_the_boundary"
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_falls_back_to_the_boundary",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
       ]
     }
   ],
