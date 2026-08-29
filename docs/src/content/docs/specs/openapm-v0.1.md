@@ -2587,18 +2587,20 @@ is deployed exactly once. The consumer MUST NOT copy the package into the
 target's private plugin state; the registration MUST reference the materialized
 package in place beneath the resolved dependency root. A single aggregate
 registration per install scope MUST cover both directly declared and
-transitively resolved Agent Plugin dependencies without changing their
+transitively resolved Agent Plugin dependencies that passed the admission
+conditions above, without changing their
 `depth` and `resolved_by` lockfile fields defined in
 [Section 5.2](#52-per-entry-fields).
 
-When multiple dependencies declare the same plugin name, a directly declared
-dependency MUST win over a transitive dependency. Two claimants at the same
-precedence MUST cause the aggregate registration to fail with an actionable
-diagnostic naming both claimants. A consumer MUST NOT silently repoint a
-ledger-recorded owner to a different transitive claimant. A directly declared
-claimant MAY replace a recorded transitive owner under the direct-precedence
-rule, but the ownership record and registration MUST update in the same
-rollback unit.
+Only admitted Agent Plugin dependencies participate in plugin-name claimant
+selection and registration. Among admitted dependencies that declare the same
+plugin name, a directly declared dependency MUST win over a transitive
+dependency. Two admitted claimants at the same precedence MUST cause the
+aggregate registration to fail with an actionable diagnostic naming both
+claimants. A consumer MUST NOT silently repoint a ledger-recorded owner to a
+different admitted transitive claimant. An admitted directly declared claimant
+MAY replace a recorded transitive owner under the direct-precedence rule, but
+the ownership record and registration MUST update in the same rollback unit.
 A post-lifecycle reconciliation after uninstall, prune, or restore MAY
 downgrade a residual same-precedence or transitive-repoint collision to an
 actionable diagnostic so cleanup can continue, but it MUST omit every ambiguous
@@ -3778,7 +3780,7 @@ renumbering of conformance classes.
 | 0.1.33  | 2026-08-23 | Spec-citation fold for authorized pre-deployment scan scope (closes #2490 Mode-B silent-extension gate). Added [req-sc-015] (Section 10.16, consumer MUST): a consumer derives one post-authorization source-file set for every install and uninstall re-integration materialization lifecycle; excludes symlink files and does not traverse symlinked directories; scans and materializes only that set; rejects a selected blocking finding before a source-derived target write; and does not scan or materialize source-only package files. Added row 20 to the Section 10.11 summary table. Reconciled with concurrent [req-pl-017] and [req-pr-006] and retained all amendments. Section 1.3, Section 11.3.2, and Appendix C updated. Statement count: 116 -> 117 (112 MUST, 5 SHOULD). |
 | 0.1.34  | 2026-08-25 | Spec-citation fold for root-declared Plugin component staging containment (closes #2556). Added [req-pr-007] (Section 8.1, consumer MUST): a consumer canonicalizes the non-symlink component-source root and prunes the current operation's materialization subtree before traversal. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 117 -> 118 (113 MUST, 5 SHOULD). |
 | 0.1.35  | 2026-08-27 | Stale-spec (Mode C) amendment recording a machine-verifiable native Agent Plugins lifecycle. Added [req-tg-013] (Section 8.5.7, consumer MUST): schema, effective-target, integrity, security, and executable admission drives one aggregate direct-plus-transitive registration per scope without locating, invoking, or version-checking a host binary during lifecycle operations; packages remain materialized in place and opaque to legacy projection; direct dependencies win plugin-name collisions over transitive dependencies, same-precedence collisions fail, and recorded ownership does not silently repoint to a transitive claimant; a consumer-owned marketplace identifier and activation suffix are reserved only with the exact generated directory-marketplace entry; the ownership record is primary evidence, while missing-record recovery may re-adopt only that exact entry and reconcile the reserved namespace; foreign collisions and invalid JSON fail closed; unrelated JSON values are preserved semantically though stable serialization may reformat them; and catalog, ownership-record, and settings writes form one rollback unit. Revised [req-tg-011] to clarify that acquisition, materialization, and lock recording may precede target exclusion, which creates no target registration or primitive projection and does not block ordinary dependencies in the same batch. Compatibility is qualified at release or build time by the pinned real-host lifecycle suite; runtime availability is the operator's responsibility. Added the native plugin namespace and ownership-recovery threat to Section 10. Section 8.7, Section 11.3.2 Consumer enumeration, Appendix C, and conformance coverage updated. Statement count: 118 -> 119 (114 MUST, 5 SHOULD). |
-| 0.1.36  | 2026-08-29 | Editorial and defensive alignment for [req-tg-011] and [req-tg-013]. Named the [req-tg-008] result as the effective target intersection; required target contraction to retire consumer-owned native registration; required advisory uninstall, prune, and restore reconciliation to omit ambiguous or changed-owner plugin entries without blocking cleanup; restored exact removal boundaries; defined directory-marketplace entries; and added reserved namespace disclosure to Section 11.2. Added conformance coverage for direct-owner promotion, advisory collision cleanup, and transitive owner-repoint refusal. Statement count remains 119 (114 MUST, 5 SHOULD). |
+| 0.1.36  | 2026-08-29 | Editorial and defensive alignment for [req-tg-011] and [req-tg-013]. Named the [req-tg-008] result as the effective target intersection; scoped aggregate registration and plugin-name claimant selection to dependencies that passed admission; required target contraction to retire consumer-owned native registration; required advisory uninstall, prune, and restore reconciliation to omit ambiguous or changed-owner plugin entries without blocking cleanup; restored exact removal boundaries; defined directory-marketplace entries; and added reserved namespace disclosure to Section 11.2. Added conformance coverage for direct-owner promotion, advisory collision cleanup, and transitive owner-repoint refusal. Statement count remains 119 (114 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

@@ -71,10 +71,12 @@ still converges on re-install. Do not create manual `*@apm` activation keys;
 APM reconciliation may retire them. Keys using another marketplace suffix are
 preserved.
 
-If two dependencies declare the same plugin name, a direct dependency wins over
-a transitive dependency. Two claimants at the same precedence fail with an
-actionable collision instead of registering either one. A transitive dependency
-cannot silently replace the owner recorded in APM's ledger.
+Only plugins that pass target and security admission participate in
+registration and name-collision handling. If two admitted dependencies declare
+the same plugin name, a direct dependency wins over a transitive dependency.
+Two admitted claimants at the same precedence fail with an actionable collision
+instead of registering either one. An admitted transitive dependency cannot
+silently replace the owner recorded in APM's ledger.
 
 ## What APM does not do
 

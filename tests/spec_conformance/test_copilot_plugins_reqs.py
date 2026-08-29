@@ -384,8 +384,10 @@ def test_native_lifecycle_registration_clauses_persist_in_spec() -> None:
         "MUST preserve\nunrelated host JSON keys and values semantically",
         "Invalid JSON, including JSONC comments, MUST fail closed\nbefore overwrite",
         "MUST commit as\none rollback unit",
-        "directly declared\ndependency MUST win over a transitive dependency",
-        "MUST NOT silently repoint a\nledger-recorded owner",
+        "directly declared dependency MUST win over a transitive\ndependency",
+        "MUST NOT silently repoint a ledger-recorded owner to a\ndifferent admitted transitive claimant",
         "MUST omit every ambiguous\nor changed-owner entry",
         "Removal MUST retire only entries in that consumer-owned rollback unit",
+        "Only admitted Agent Plugin dependencies participate in plugin-name claimant\n"
+        "selection and registration",
     )
