@@ -37,6 +37,7 @@ from .identity import (
     _split_shorthand_host_port,
     build_canonical_dependency_string,
     build_dependency_unique_key,
+    case_insensitive_identity_prefix_segments,
     is_case_insensitive_package_identity,
     normalize_package_repo_url,
 )
@@ -137,6 +138,18 @@ class DependencyReference(ProviderCoordinateMixin):
     def has_case_insensitive_repo_identity(self) -> bool:
         """Return whether repository casing is presentation-only."""
         return is_case_insensitive_package_identity(
+            host=self.host,
+            source=self.source,
+            registry_prefix=self.artifactory_prefix,
+            is_local=self.is_local,
+            is_marketplace=self.is_marketplace,
+        )
+
+    @property
+    def case_insensitive_identity_prefix_segments(self) -> int:
+        """Return the repository-prefix length whose casing is presentation-only."""
+        return case_insensitive_identity_prefix_segments(
+            self.repo_url,
             host=self.host,
             source=self.source,
             registry_prefix=self.artifactory_prefix,

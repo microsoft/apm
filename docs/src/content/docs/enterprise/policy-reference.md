@@ -163,6 +163,8 @@ dependencies:
     - "contoso/security-rules#v2.0.0"     # Must be at specific version
 ```
 
+`allow`, `deny`, and `require` match GitHub and registry-backed packages case-insensitively (`Contoso/Repo` matches `contoso/repo`); other sources (non-GitHub hosts, ADO, local paths, marketplace, refs) stay case-sensitive. See [Identity casing](../../reference/policy-schema/#identity-casing) for the full breakdown.
+
 ### `require_resolution`
 
 Controls what happens when a required package's version conflicts with the repository's declared version:

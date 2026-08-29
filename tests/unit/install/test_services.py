@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
+from apm_cli.install.deployed_paths import skill_bundle_file_entries
 from apm_cli.install.services import (
     IntegratorBundle,
     _deployed_path_entry,
@@ -255,6 +256,25 @@ class TestDeployedPathEntry:
         result = _deployed_path_entry(target_path, project_root, targets=[])
         expected = f"{dir_prefix}/sub/file.md"
         assert result == expected
+
+
+def test_skill_bundle_file_entries_omit_python_compiled_artifacts(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    skill_dir = project_root / ".agents" / "skills" / "example"
+    scripts = skill_dir / "scripts"
+    cache = scripts / "__pycache__"
+    cache.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Example\n", encoding="utf-8")
+    (scripts / "helper.py").write_text("print('ok')\n", encoding="utf-8")
+    (scripts / "helper.pyc").write_bytes(b"legacy-bytecode")
+    (cache / "helper.cpython-312.pyc").write_bytes(b"cached-bytecode")
+
+    entries = skill_bundle_file_entries(skill_dir, project_root, targets=[])
+
+    assert entries == [
+        ".agents/skills/example/SKILL.md",
+        ".agents/skills/example/scripts/helper.py",
+    ]
 
 
 # ---------------------------------------------------------------------------

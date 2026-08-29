@@ -4069,11 +4069,19 @@ def test_dependency_identity_and_materialization_path_have_separate_owners() -> 
 
     assert "def build_dependency_unique_key(" in identity
     assert "key = normalize_package_repo_url(" in identity
+    assert "def classify_package_identity_case(" in identity
+    assert "def case_insensitive_identity_prefix_segments(" in identity
+    assert "def normalize_package_policy_identity(" in identity
+    assert "normalize_package_policy_identity" in (
+        root / "src/apm_cli/policy/matcher.py"
+    ).read_text(encoding="utf-8")
     assert "def build_materialization_path(" in materialization
     assert 'repo_parts = dependency.repo_url.split("/")' in materialization
     assert "def prepare_materialization_path(" in materialization
     assert "return build_materialization_path(self, apm_modules_dir)" in reference
-    owner_row = "| Dependency comparison identity vs display-cased materialization path |"
+    owner_row = (
+        "| Dependency comparison identity and policy casing vs display-cased materialization path |"
+    )
     assert owner_row in canonical_owners
     assert owner_row in owner_mirror
     assert "AC29: dependency identity and materialization path authority" in guard
@@ -4081,6 +4089,7 @@ def test_dependency_identity_and_materialization_path_have_separate_owners() -> 
         "Dependency identity may casefold only in identity.py; "
         "materialization must preserve source casing" in guard
     )
+    assert "Dependency policy casing must route through models/dependency/identity.py" in guard
 
 
 def test_dependency_materialization_owner_guard_rejects_canonical_path_reuse(
@@ -4127,6 +4136,64 @@ def test_dependency_materialization_owner_guard_rejects_canonical_path_reuse(
         "Dependency identity may casefold only in identity.py; "
         "materialization must preserve source casing" in result.stdout
     )
+
+
+def test_dependency_policy_case_guard_rejects_parallel_lowercase(
+    tmp_path: Path,
+) -> None:
+    """AC29 rejects policy-local case normalization outside identity.py."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    matcher_path = sandbox / "src/apm_cli/policy/matcher.py"
+    source = matcher_path.read_text(encoding="utf-8")
+    matcher_path.write_text(
+        source
+        + "\n\ndef _parallel_policy_casefold(value: str) -> str:\n"
+        + "    return value.lower()\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Dependency policy casing must route through models/dependency/identity.py" in result.stdout
+    )
+
+
+def test_generated_python_artifact_membership_has_one_authority() -> None:
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/security/gate.py").read_text(encoding="utf-8")
+    inventory = (root / "src/apm_cli/install/deployed_paths.py").read_text(encoding="utf-8")
+    cleanup = (root / "src/apm_cli/integration/cleanup.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+
+    assert "def is_generated_python_artifact(" in owner
+    assert "def is_python_bytecode_cache_path(" in owner
+    assert "is_generated_python_artifact(Path(c))" in owner
+    assert "is_generated_python_artifact(relative)" in inventory
+    assert "is_python_bytecode_cache_path(relative_child)" in cleanup
+    assert "AC35: generated Python artifact membership authority" in guard
 
 
 def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: Path) -> None:

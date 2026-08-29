@@ -15,22 +15,27 @@
 #
 # Documentation: https://microsoft.github.io/apm/integrations/gh-aw/
 #
-# Three user-facing forms (all valid, additive):
+# User-facing forms:
 #
 # 1. Public + default-token packages (no App credentials):
 #
 #    imports:
 #      - uses: shared/apm.md
 #        with:
+#          target: copilot
 #          packages:
 #            - microsoft/apm-sample-package
 #            - github/awesome-copilot/skills/review-and-refactor
+#
+#    To use the built-in token for private packages in the current repository,
+#    add `token-source: github-token` beside `target`.
 #
 # 2. Single GitHub App (one org) -- canonical shorthand:
 #
 #    imports:
 #      - uses: shared/apm.md
 #        with:
+#          target: copilot
 #          app-id: ${{ vars.APP_ID }}
 #          private-key: ${{ secrets.APP_PRIVATE_KEY }}
 #          owner: my-org
@@ -42,6 +47,7 @@
 #    imports:
 #      - uses: shared/apm.md
 #        with:
+#          target: copilot
 #          packages:
 #            - microsoft/apm-sample-package
 #          apps:
@@ -72,7 +78,7 @@
 #    imports:
 #      - uses: shared/apm.md
 #        with:
-#          apm-version: '0.20.0'
+#          apm-version: '0.28.0'
 #          target: copilot
 #          packages:
 #            - microsoft/apm-sample-package
@@ -84,10 +90,23 @@ import-schema:
       type: string
     required: false
     description: >
-      Public APM packages or packages reachable via the default token cascade
-      (GH_AW_PLUGINS_TOKEN, GH_AW_GITHUB_TOKEN, GITHUB_TOKEN). Optional. At
-      least one of `packages`, the single-app inputs, or `apps` must be provided.
-      Format: owner/repo or owner/repo/path/to/skill.
+      Public APM packages, private packages in the current repository reachable
+      by its read-only GITHUB_TOKEN, or cross-repository packages reachable via
+      GH_AW_PLUGINS_TOKEN or GH_AW_GITHUB_TOKEN. Optional. At least one of
+      `packages`, the single-app inputs, or `apps` must be provided. Format:
+      owner/repo or owner/repo/path/to/skill.
+
+  token-source:
+    type: string
+    required: false
+    default: cascade
+    description: >
+      Credential source for no-App package rows. Use `cascade` (default) for
+      GH_AW_PLUGINS_TOKEN, then GH_AW_GITHUB_TOKEN, then GITHUB_TOKEN. Use
+      `github-token` to select only the ephemeral built-in token, suitable for
+      packages readable by the current repository token. Private cross-repository
+      packages require `cascade` with an authorized token or App credentials.
+      App rows always use their minted installation token.
 
   # Single-app convenience form (canonical shorthand for one-org users)
   app-id:
@@ -156,17 +175,15 @@ import-schema:
   # APM compilation target (which agent harness layouts to deploy)
   target:
     type: string
-    required: false
-    default: all
+    required: true
     description: >
-      Target harness(es) for APM compilation. Controls which agent config
-      directories are generated in the bundle. Single token or comma-separated
-      list. Valid tokens: copilot, claude, cursor, codex, opencode, gemini,
-      windsurf, agent-skills, all. Default: all (every supported harness).
-      Set this to match the engine your gh-aw workflow targets for smaller,
-      faster bundles. The shared workflow runs apm-action in isolated mode,
-      so any apm.yml in the consumer repo is intentionally ignored -- this
-      input is the sole target signal.
+      Required target harness for APM compilation. Set this to the apm.yml
+      target matching the gh-aw engine (for example, copilot, claude, or
+      codex). A comma-separated list is accepted for multi-target workflows.
+      The deprecated value 'all' is not accepted here: apm-action writes it to
+      the isolated apm.yml, where it degrades to auto-detection in a workspace
+      with no harness markers. The shared workflow intentionally ignores any
+      apm.yml in the consumer repo, so this input is the sole target signal.
 
   # apm CLI version (overrides apm-action's pinned default)
   apm-version:
@@ -181,12 +198,12 @@ import-schema:
     # them, and apm-action restores whatever format it detects. The binding
     # contract (verify-shared-apm-matrix Job C) is that the format THIS
     # version produces is in the pinned apm-action's detected set. Keep it on
-    # the repo's current CLI line so the default path exercises the shipped
-    # pack format.
-    default: '0.21.0'
+    # the latest published release validated by Job C so the default path
+    # exercises a release consumers can install.
+    default: '0.28.0'
     description: >
       apm CLI version for apm-action to install, as a bare semver tag (e.g.
-      '0.21.0'); pass 'latest' to opt into floating to the newest release.
+      '0.28.0'); pass 'latest' to opt into floating to the newest release.
       Omit to use this workflow's pinned default. Applied to both the Pack
       and Restore apm-action steps so the CLI version cannot skew between
       packing and restoring.
@@ -199,10 +216,41 @@ jobs:
     outputs:
       matrix: ${{ steps.compute.outputs.matrix }}
     steps:
+      - name: Validate APM target
+        env:
+          AW_APM_TARGET: ${{ github.aw.import-inputs.target }}
+        run: |
+          set -euo pipefail
+          raw_target=${AW_APM_TARGET:-}
+          if [ -z "$(printf '%s' "$raw_target" | tr -d '[:space:]')" ]; then
+            echo "::error::shared/apm.md requires a non-empty target matching the workflow engine"
+            exit 1
+          fi
+          IFS=',' read -ra requested_targets <<< "$raw_target"
+          for requested in "${requested_targets[@]}"; do
+            normalized=$(printf '%s' "$requested" | tr -d '[:space:]' | tr 'A-Z' 'a-z')
+            if [ "$normalized" = "all" ]; then
+              echo "::error::target 'all' degrades to auto-detection in the isolated apm.yml; set a concrete target matching the workflow engine"
+              exit 1
+            fi
+          done
+      - name: Validate APM token source
+        env:
+          AW_APM_TOKEN_SOURCE: ${{ github.aw.import-inputs.token-source }}
+        run: |
+          set -euo pipefail
+          token_source=${AW_APM_TOKEN_SOURCE:-cascade}
+          case "$token_source" in
+            cascade|github-token) ;;
+            *)
+              echo "::error::invalid token-source '$token_source'; expected cascade or github-token"
+              exit 1
+              ;;
+          esac
       # SECURITY (S3): the matrix written to $GITHUB_OUTPUT below carries
       # NO secret values -- only routing metadata (id, kind, index, owner,
-      # repositories, packages, has-app). Credentials are resolved per-row
-      # in the apm job via $GITHUB_ENV (see "Resolve credentials" step).
+      # repositories, packages, has-app, token-source). Credentials are resolved
+      # per-row in the apm job via $GITHUB_ENV (see "Resolve credentials" step).
       # This avoids GitHub Actions' cross-job output redaction filter
       # (HostContext.SecretMasker.MaskSecrets in actions/runner), which
       # silently strips any job output whose value contains a registered
@@ -216,11 +264,13 @@ jobs:
           AW_APM_LEGACY_APP_ID: ${{ github.aw.import-inputs.app-id }}
           AW_APM_LEGACY_OWNER: ${{ github.aw.import-inputs.owner }}
           AW_APM_LEGACY_REPOS: ${{ github.aw.import-inputs.repositories }}
+          AW_APM_TOKEN_SOURCE: ${{ github.aw.import-inputs.token-source }}
         run: |
           set -euo pipefail
           packages_json=${AW_APM_PACKAGES:-null}
           apps_json=${AW_APM_APPS:-null}
           legacy_id=${AW_APM_LEGACY_APP_ID:-}
+          token_source=${AW_APM_TOKEN_SOURCE:-cascade}
 
           # gh-aw substitutes `${{ github.aw.import-inputs.packages }}` at
           # compile time using Go's default slice formatter, which emits
@@ -248,15 +298,16 @@ jobs:
             --arg legacy_id "$legacy_id" \
             --arg legacy_owner "${AW_APM_LEGACY_OWNER:-}" \
             --arg legacy_repos "${AW_APM_LEGACY_REPOS:-}" \
+            --arg token_source "$token_source" \
             'def slug(s): s | gsub("[^a-zA-Z0-9-]"; "-") | ascii_downcase | .[0:32];
              def with_id(g):
                g + (if (g.id // "") == "" then {id: ("auto-" + slug(g.owner // "default"))} else {} end);
              [
                (if (($packages // []) | length) > 0 and $legacy_id == ""
-                  then [{id:"default",kind:"default",index:0,owner:"",repositories:"",packages:$packages,("has-app"):"false"}]
+                  then [{id:"default",kind:"default",index:0,owner:"",repositories:"",packages:$packages,("has-app"):"false",("token-source"):$token_source}]
                   else [] end),
                (if $legacy_id != ""
-                  then [with_id({id:"legacy",kind:"legacy",index:0,owner:$legacy_owner,repositories:$legacy_repos,packages:($packages // []),("has-app"):"true"})]
+                  then [with_id({id:"legacy",kind:"legacy",index:0,owner:$legacy_owner,repositories:$legacy_repos,packages:($packages // []),("has-app"):"true",("token-source"):"app"})]
                   else [] end),
                (($apps // []) | to_entries | map(
                   with_id({
@@ -266,7 +317,8 @@ jobs:
                     owner: (.value.owner // ""),
                     repositories: (.value.repositories // ""),
                     packages: (.value.packages // []),
-                    ("has-app"): "true"
+                    ("has-app"): "true",
+                    ("token-source"): "app"
                   })))
              ] | add // []')
 
@@ -301,7 +353,8 @@ jobs:
   apm:
     runs-on: ubuntu-slim
     needs: [activation, apm-prep]
-    permissions: {}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.apm-prep.outputs.matrix) }}
@@ -380,12 +433,70 @@ jobs:
       - name: Mint installation token
         id: token
         if: ${{ matrix.group.has-app == 'true' }}
-        uses: actions/create-github-app-token@v3.1.1
+        uses: actions/create-github-app-token@v3.2.0
         with:
           app-id: ${{ env.ROW_APP_ID }}
           private-key: ${{ env.ROW_PRIVATE_KEY }}
           owner: ${{ matrix.group.owner != '' && matrix.group.owner || github.repository_owner }}
           repositories: ${{ matrix.group.repositories }}
+      - name: Select APM package token
+        id: package-token
+        env:
+          ROW_TOKEN_SOURCE: ${{ matrix.group.token-source }}
+          BUILTIN_TOKEN: ${{ matrix.group.token-source == 'github-token' && github.token || '' }}
+          APP_TOKEN: ${{ matrix.group.token-source == 'app' && steps.token.outputs.token || '' }}
+          CASCADE_TOKEN: ${{ matrix.group.token-source == 'cascade' && secrets.GH_AW_PLUGINS_TOKEN || matrix.group.token-source == 'cascade' && secrets.GH_AW_GITHUB_TOKEN || matrix.group.token-source == 'cascade' && secrets.GITHUB_TOKEN || '' }}
+          HAS_PLUGINS_TOKEN: ${{ matrix.group.token-source == 'cascade' && secrets.GH_AW_PLUGINS_TOKEN != '' }}
+          HAS_GH_AW_TOKEN: ${{ matrix.group.token-source == 'cascade' && secrets.GH_AW_GITHUB_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          case "$ROW_TOKEN_SOURCE" in
+            github-token)
+              selected=${BUILTIN_TOKEN:-}
+              tier=github-token
+              ;;
+            app)
+              selected=${APP_TOKEN:-}
+              tier=app
+              ;;
+            cascade)
+              selected=${CASCADE_TOKEN:-}
+              if [ "${HAS_PLUGINS_TOKEN:-false}" = "true" ]; then
+                tier=cascade:GH_AW_PLUGINS_TOKEN
+              elif [ "${HAS_GH_AW_TOKEN:-false}" = "true" ]; then
+                tier=cascade:GH_AW_GITHUB_TOKEN
+              else
+                tier=cascade:GITHUB_TOKEN
+              fi
+              ;;
+            *)
+              echo "::error::unexpected APM token source '$ROW_TOKEN_SOURCE'"
+              exit 1
+              ;;
+          esac
+          if [ -z "$(printf '%s' "$selected" | tr -d '[:space:]')" ]; then
+            case "$ROW_TOKEN_SOURCE" in
+              cascade)
+                echo "::error::selected APM token source 'cascade' is unavailable; configure GH_AW_PLUGINS_TOKEN or GH_AW_GITHUB_TOKEN, or ensure the built-in GITHUB_TOKEN is enabled"
+                ;;
+              github-token)
+                echo "::error::selected APM token source 'github-token' is unavailable; ensure GitHub Actions can issue the built-in GITHUB_TOKEN with contents: read"
+                ;;
+              app)
+                echo "::error::selected APM token source 'app' is unavailable; verify the App ID, private key, installation owner, and repository scope"
+                ;;
+            esac
+            exit 1
+          fi
+          case "$selected" in
+            *$'\n'*|*$'\r'*)
+              echo "::error::selected APM token must be a single line"
+              exit 1
+              ;;
+          esac
+          echo "::notice::APM package token source: $tier"
+          echo "::add-mask::$selected"
+          printf 'token=%s\n' "$selected" >> "$GITHUB_OUTPUT"
       - name: Render package list
         id: list
         env:
@@ -401,7 +512,14 @@ jobs:
         id: pack
         uses: microsoft/apm-action@v1.10.0
         env:
-          GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          # Pin APM's selected non-per-org credential chain end to end.
+          # GITHUB_APM_PAT has module-fetch precedence, GITHUB_TOKEN keeps
+          # apm-action's default from replacing it, and GH_TOKEN keeps a
+          # self-hosted runner's ambient gh login from rescuing a failed
+          # explicit identity.
+          GH_TOKEN: ${{ steps.package-token.outputs.token }}
+          GITHUB_APM_PAT: ${{ steps.package-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.package-token.outputs.token }}
         with:
           apm-version: ${{ github.aw.import-inputs.apm-version }}
           dependencies: ${{ steps.list.outputs.deps }}
@@ -412,7 +530,7 @@ jobs:
           working-directory: /tmp/gh-aw/apm-workspace
       - name: Upload APM bundle artifact
         if: success()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ needs.activation.outputs.artifact_prefix }}apm-${{ matrix.group.id }}
           path: ${{ steps.pack.outputs.bundle-path }}
@@ -514,9 +632,10 @@ job's pre-agent-steps then download all bundles and restore them in a single
 
 ### Authentication
 
-Three forms, additive:
+Credential forms, additive:
 
-- No App credentials: packages fetched via `GH_AW_PLUGINS_TOKEN || GH_AW_GITHUB_TOKEN || GITHUB_TOKEN`.
+- No App credentials, `token-source: cascade` (default): packages fetched via `GH_AW_PLUGINS_TOKEN || GH_AW_GITHUB_TOKEN || GITHUB_TOKEN`.
+- No App credentials, `token-source: github-token`: packages fetched only with the ephemeral built-in `GITHUB_TOKEN`. It has read access only to the current repository; private cross-repository packages require `cascade` with an authorized token or App credentials.
 - Single App (top-level `app-id` + `private-key` + `owner` + `repositories`):
   one installation token mints for one credential group; canonical shorthand for
   one-org users.

@@ -301,6 +301,16 @@ def ignore_symlinks(directory: str, contents: list[str]) -> list[str]:
     return [c for c in contents if (Path(directory) / c).is_symlink()]
 
 
+def is_generated_python_artifact(path: Path) -> bool:
+    """Return whether *path* is interpreter-generated Python bytecode."""
+    return "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}
+
+
+def is_python_bytecode_cache_path(path: Path) -> bool:
+    """Return whether *path* is bytecode stored under ``__pycache__``."""
+    return "__pycache__" in path.parts and path.suffix in {".pyc", ".pyo"}
+
+
 def _explicit_scan_candidate(root: Path, relative: str) -> Path:
     """Return a contained explicit scan path with no symlinked components."""
     path = Path(relative)
@@ -317,9 +327,10 @@ def _explicit_scan_candidate(root: Path, relative: str) -> Path:
 def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
     """``shutil.copytree`` ignore callback that filters non-content artifacts.
 
-    Excludes symlinks (security) and the ``.apm-pin`` cache marker, which
-    belongs exclusively in ``apm_modules/`` and must not leak into deploy
-    targets when skills are copied out.
+    Excludes symlinks (security), interpreter-generated Python bytecode, and
+    the ``.apm-pin`` cache marker, which belongs exclusively in
+    ``apm_modules/`` and must not leak into deploy targets when skills are
+    copied out.
     """
     # Local import keeps cache_pin as the single source of truth for the
     # marker filename. Module-level import is also safe (cache_pin has no
@@ -328,4 +339,10 @@ def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
     # bootstrap.
     from apm_cli.install.cache_pin import MARKER_FILENAME
 
-    return [c for c in contents if (Path(directory) / c).is_symlink() or c == MARKER_FILENAME]
+    return [
+        c
+        for c in contents
+        if (Path(directory) / c).is_symlink()
+        or c == MARKER_FILENAME
+        or is_generated_python_artifact(Path(c))
+    ]

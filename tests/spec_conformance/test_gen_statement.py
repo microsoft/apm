@@ -60,3 +60,12 @@ def test_gen_statement_md_contains_honesty_phrase():
     assert "NO automated CI detector" in md, (
         "CONFORMANCE.md MUST carry the literal phrase 'NO automated CI detector' (honesty contract)"
     )
+
+
+def test_gen_statement_md_lists_repository_case_rules():
+    _run_gen()
+    md = CONFORMANCE_MD.read_text(encoding="ascii")
+    assert "## Repository case rules" in md
+    assert "GitHub Enterprise Cloud hosts ending in `.ghe.com`" in md
+    assert "registry-sourced dependencies (including registry prefixes)" in md
+    assert "Local paths, marketplace identities, and every other host remain case-sensitive" in md

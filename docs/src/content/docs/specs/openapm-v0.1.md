@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **118 normative statements** indexed in
+- OpenAPM v0.1 carries **119 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1399,9 +1399,9 @@ The `dependencies` policy block governs APM dependency declarations.
 
 | Field                  | Semantic                                                                                  |
 |------------------------|-------------------------------------------------------------------------------------------|
-| `allow`                | List of patterns matched against `<owner>/<repo>`. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)). |
-| `deny`                 | Always wins over `allow`.                                                                 |
-| `require`              | Packages every consumer manifest must include.                                            |
+| `allow`                | List of patterns matched against the canonical host-blind dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
+| `deny`                 | Always wins over `allow`; case treatment per [req-pl-018](#req-pl-018).                   |
+| `require`              | Exact packages every consumer manifest must include; case treatment per [req-pl-018](#req-pl-018). |
 | `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
 | `max_depth`            | Maximum transitive dependency depth. Default 50.                                          |
 | `require_pinned_constraint` | When true, flags unbounded direct deps as violations.                                 |
@@ -1422,6 +1422,74 @@ as **pinned** (no violation): (a) a 40-character commit SHA; (b) a
 literal semver tag matching `v?\d+\.\d+\.\d+`; (c) a bounded semver
 range (containing an upper bound); (d) a dependency with
 `source: registry`; (e) a local-path dependency.
+
+<a id="req-pl-018"></a>
+**[req-pl-018]** A conforming **governance** implementation MUST apply
+the following dependency-policy identity rules:
+
+(a) The match subject is the canonical, host-blind dependency package
+path: its repository coordinate plus any virtual in-repository path,
+with any `#` reference suffix excluded. A registry name is never part
+of this match subject and is compared literally by its separate policy
+field. This
+statement governs glob matching for `dependencies.allow` and
+`dependencies.deny`, plus exact identity matching for
+`dependencies.require`. A `require` entry is exact: `*` characters
+are literal, and its package portion is the text before the first
+`#`. This statement changes case treatment only; it does not change
+which subject string is matched. Normalization under this statement
+applies at match time only. Policy-chain intersection, union, and
+deduplication under [Section 6.4](#64-inheritance-and-merge-rules)
+compare authored entries byte-exactly.
+
+(b) A Governance implementation MUST apply to policy operands the
+repository path case rule disclosed under
+[Section 11.2](#112-how-to-claim-conformance) item 5. This is the same
+rule governed by [req-rs-016](#req-rs-016) clause (3) where the
+implementation also claims the Consumer class. A
+registry-sourced dependency, including one resolved through a
+registry prefix, has case-insensitive repository-coordinate segments;
+this source rule applies regardless of the case rule for its host.
+Local-path and marketplace dependencies, plus dependencies on every
+host not documented as case-insensitive under
+[Section 11.2](#112-how-to-claim-conformance), remain case-sensitive.
+The Governance implementation MUST NOT substitute a different case
+rule from the one disclosed for that host or registry source.
+
+(c) The dependency subject determines a repository-coordinate segment
+count N, before any virtual in-repository path. The same N bounds both
+operands: only the first N U+002F-separated segments of the subject and
+pattern are eligible for case-insensitive comparison. Normalization
+maps only U+0041 through U+005A to U+0061 through U+007A. Every other
+code point is compared literally; Unicode
+case folding, locale-sensitive mapping, and normalization forms are
+outside v0.1 per [Section 1.4](#14-terminology-preliminaries).
+For the avoidance of doubt, this statement never applies outside the
+fields named in clause (a): normalization MUST NOT extend into a
+virtual in-repository path, a reference suffix after `#`, a registry
+name, an MCP server name, or an unmanaged-file workspace path.
+
+(d) For a glob pattern, the eligible prefix from clause (c) is further
+truncated to the segments strictly before the first pattern segment
+that contains `**`. The effective case-insensitive prefix is therefore
+the lesser of N and that segment index; every remaining segment on
+both operands is compared byte-exactly. A fused `**` is a `**` token
+sharing a segment with one or more other characters, for example
+`Sec**`.
+
+(e) `dependencies.deny` MUST retain precedence over
+`dependencies.allow` after normalization. Where clause (b) or clause
+(d) requires byte-exact matching, a deny pattern that differs only in
+case does not match. Policy authors who intend to deny multiple
+distinct spellings on such a source or after such a truncation must
+enumerate those spellings. The residual security boundary is described
+in [Section 10.8](#108-policy-bypass-via-crafted-manifest).
+
+(f) A conforming governance implementation MUST evaluate every
+pattern-bearing policy field named in
+[Section 6.5](#65-allow-list--deny-list-tri-state-semantics) under that
+section's pattern grammar. It MUST NOT add character-class, brace, or
+escape expansion.
 
 #### 6.3.2 `mcp`
 
@@ -1449,9 +1517,10 @@ directories that are not recorded in `apm.lock.yaml`. `directories`
 names the managed primitive target trees to scan, `action` selects
 the response (`ignore` | `warn` | `deny`), and `exclude` is a glob
 allow-list of workspace paths to suppress from the report. Its glob
-patterns are matched with the same pattern semantics as the policy
-allow-list and deny-list fields (see
-[Section 6.5](#65-allow-list--deny-list-tri-state-semantics)).
+patterns use the syntax in
+[Section 6.5](#65-allow-list--deny-list-tri-state-semantics), but
+workspace paths remain byte-exact and case-sensitive; dependency
+identity normalization under [req-pl-018](#req-pl-018) does not apply.
 
 <a id="req-pl-015"></a>
 **[req-pl-015]** A conforming **governance** implementation MUST,
@@ -1530,9 +1599,9 @@ merge a policy chain per the following table:
 |---------------------------------------|------------------------------------------------------------------------|
 | `enforcement`                         | Stricter wins (`block` > `warn` > `off`).                              |
 | `fetch_failure`                       | Child overrides if set.                                                |
-| `*.allow` lists                       | Set intersection. `null` is transparent.                               |
-| `*.deny` lists                        | Union, deduplicated, parent order preserved.                           |
-| `*.require` lists                     | Union, deduplicated, parent order preserved.                           |
+| `*.allow` lists                       | Set intersection, byte-exact on each entry's UTF-8 text. `null` is transparent. |
+| `*.deny` lists                        | Union, deduplicated byte-exact, parent order preserved.                |
+| `*.require` lists                     | Union, deduplicated byte-exact, parent order preserved.                |
 | `dependencies.max_depth`              | `min(parent, child)`.                                                  |
 | `dependencies.require_resolution`     | Stricter wins (`block` > `policy-wins` > `project-wins`).              |
 | `mcp.self_defined`                    | Stricter wins (`deny` > `warn` > `allow`).                             |
@@ -1542,6 +1611,12 @@ merge a policy chain per the following table:
 | `unmanaged_files.exclude`             | Union, deduplicated (byte-exact on each pattern's UTF-8 string), parent order preserved (additive: a child adds exclusions and cannot clear a parent's; `null` and `[]` both preserve the parent list). |
 | `security.integrity.require_hashes`   | Logical OR (once `true`, stays `true`).                                |
 | `security.audit.fail_on_drift`        | Logical OR (once `true`, stays `true`).                                |
+
+These merge operations compare authored entries before dependency
+evaluation. Case-variant entries remain distinct during union and
+deduplication, and case-variant `allow` entries can intersect to an
+empty list. [req-pl-018](#req-pl-018) normalization applies only when
+the merged policy is matched against a dependency subject.
 
 ### 6.5 Allow-list / deny-list tri-state semantics
 
@@ -1553,6 +1628,17 @@ transparent during merge; (b) explicit empty list `[]` means
 "explicitly empty" and overrides the parent for that field; (c)
 non-empty list `[...]` carries the listed entries and merges per the
 table in [Section 6.4](#64-inheritance-and-merge-rules).
+
+**Pattern grammar (normative through [req-pl-018](#req-pl-018)
+clause (f)).** Pattern-bearing `dependencies.allow`,
+`dependencies.deny`, MCP allow/deny, and `unmanaged_files.exclude`
+entries are matched against the whole subject and are anchored at
+both ends. `*` matches zero or more characters other than U+002F
+(`/`). `**` matches zero or more characters including U+002F,
+including when fused with other characters in one segment. Every
+other character is literal; there is no character-class, brace,
+or escape expansion. [req-pl-018](#req-pl-018) changes only case
+treatment for dependency identities and does not change this grammar.
 
 ### 6.6 Forward compatibility
 
@@ -1676,7 +1762,7 @@ This section's normative statements are:
   [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
   [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
   [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
-  [req-pl-017](#req-pl-017).
+  [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018).
 
 ---
 
@@ -1774,13 +1860,20 @@ safety boundary, not a wire artifact. It consists of:
 3. the complete repository path after first removing all trailing
    U+002F (`/`) characters and then removing at most one trailing
    literal `.git` suffix. Path comparison MUST be case-sensitive by
-   default. A consumer MAY case-fold paths for a host it documents as
+   default. A dependency with `source: registry`, including one resolved
+   through a registry prefix, has case-insensitive
+   repository-coordinate segments regardless of host documentation;
+   the source rule takes precedence over the host rule. A consumer MUST
+   apply that registry rule at every cache layer. For every other source,
+   a consumer MAY case-fold paths for a host it documents as
    case-insensitive in its conformance statement (see
    [Section 11.2](#112-how-to-claim-conformance)) only when every cache
-   layer applies the same rule. Before comparison, a consumer MUST NOT
-   percent-decode the path, collapse `.` or `..` segments, or coalesce
-   repeated internal slashes; traversal-bearing dependency paths remain
-   subject to parse-time rejection.
+   layer applies the same rule. The same source and host rules govern
+   policy operands under [req-pl-018](#req-pl-018); repository identity
+   and policy matching MUST NOT diverge. Before comparison, a consumer
+   MUST NOT percent-decode the path, collapse `.` or `..` segments, or
+   coalesce repeated internal slashes; traversal-bearing dependency
+   paths remain subject to parse-time rejection.
 
 Credential material in URL userinfo, query strings, and fragments MUST
 NOT contribute to repository identity; credential handling remains
@@ -2599,6 +2692,13 @@ OpenAPM follows the semver discipline at the document level:
   example a new target name registered in the Target Registry
   companion).
 - Adding a new conformance test for behaviour already required.
+- Making an evaluation deterministic when no normative statement
+  previously defined it, the specification already named the field
+  and its purpose, no field is removed, renamed, or retyped, and no
+  existing fail-closed obligation is relaxed. The Appendix D row for
+  the amendment MUST name every verdict class that can change. This
+  does not license changing an evaluation already defined by a
+  normative statement.
 
 **Breaking** (requires a minor bump with migration window):
 
@@ -2881,7 +2981,19 @@ keys a warning, not a silent acceptance, and preserves them as
 `x-*` extensions. [req-pl-010](#req-pl-010) fails closed on fetch
 failure when configured. [req-pl-002](#req-pl-002) blocks before
 disk write. [req-pl-003](#req-pl-003) caps `extends:` depth to
-thwart amplification attacks.
+thwart amplification attacks. [req-pl-018](#req-pl-018) prevents a
+case-variant repository spelling from bypassing an allow-list or
+deny-list when resolution treats both spellings as one package
+identity. On a case-sensitive source, differently cased repository
+paths remain distinct and policy authors must enumerate the spellings
+they intend to deny. The same normalization widens `dependencies.allow`
+matching on a case-insensitive source, so an upgrade can admit a
+case-variant spelling that previously missed. Clause (d) of
+[req-pl-018](#req-pl-018) leaves segments at and after recursive-glob
+ambiguity byte-exact, including on a case-insensitive source. The
+match subject is host-blind, so one policy entry governs the same
+repository path on every reachable host; governance authors relying
+on host separation need an independent host-level control.
 
 ### 10.9 Archive path-traversal (zip-slip / symlink escape)
 
@@ -2922,7 +3034,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
 | 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); self-entry isolation | Consumer-default  |
-| 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010) | Governance-only   |
+| 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010), [req-pl-018](#req-pl-018) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
 | 11| Unauthorised executable primitive deployment | [req-sc-009](#req-sc-009)                                         | Consumer-default  |
@@ -3114,6 +3226,15 @@ conformance statement identifying:
 2. The version of the specification it conforms to (`v0.1`).
 3. The list of OPTIONAL features it implements.
 4. Any limitations or non-conformance points, with rationale.
+5. If it claims the Governance class, or documents a case-insensitive
+   host under [req-rs-016](#req-rs-016), the repository-coordinate
+   case rule for every such host. Registry sources are
+   case-insensitive under [req-rs-016](#req-rs-016) and
+   [req-pl-018](#req-pl-018); the conformance statement records that
+   fixed rule rather than choosing it. The declared host rule MUST
+   agree across repository identity and policy matching. In v0.1 this
+   information is a named prose section; a machine-readable carrier is
+   reserved in [Section 12.6](#126-machine-readable-conformance-manifest-reserved-for-v02).
 
 ### 11.3 Enumerated requirements by class
 
@@ -3203,7 +3324,7 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
 [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
 [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
-[req-pl-017](#req-pl-017).
+[req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -3577,6 +3698,7 @@ renumbering of conformance classes.
 | [req-pl-015](#req-pl-015)                | MUST    | 6.3.5   | governance  |
 | [req-pl-016](#req-pl-016)                | MUST    | 6.8     | governance  |
 | [req-pl-017](#req-pl-017)                | MUST    | 6.8     | governance  |
+| [req-pl-018](#req-pl-018)                | MUST    | 6.3.1   | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -3631,7 +3753,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 118** (113 MUST, 5 SHOULD).
+**Total normative statements: 119** (114 MUST, 5 SHOULD).
 
 ---
 
@@ -3675,6 +3797,7 @@ renumbering of conformance classes.
 | 0.1.32  | 2026-08-23 | Spec-citation fold for authoritative legacy plugin skill declarations (closes #2537). Added [req-pr-006] (Section 8.1, consumer MUST): omitted `skills` alone enables conventional discovery; a string or list replaces discovery; explicit empty, invalid, escaping, symlinked, and duplicate-derived entries contribute no skills; declared containers contribute only immediate child skills; and only resulting names are eligible for enumeration, selection, or deployment. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 115 -> 116 (111 MUST, 5 SHOULD). |
 | 0.1.33  | 2026-08-23 | Spec-citation fold for authorized pre-deployment scan scope (closes #2490 Mode-B silent-extension gate). Added [req-sc-015] (Section 10.16, consumer MUST): a consumer derives one post-authorization source-file set for every install and uninstall re-integration materialization lifecycle; excludes symlink files and does not traverse symlinked directories; scans and materializes only that set; rejects a selected blocking finding before a source-derived target write; and does not scan or materialize source-only package files. Added row 20 to the Section 10.11 summary table. Reconciled with concurrent [req-pl-017] and [req-pr-006] and retained all amendments. Section 1.3, Section 11.3.2, and Appendix C updated. Statement count: 116 -> 117 (112 MUST, 5 SHOULD). |
 | 0.1.34  | 2026-08-25 | Spec-citation fold for root-declared Plugin component staging containment (closes #2556). Added [req-pr-007] (Section 8.1, consumer MUST): a consumer canonicalizes the non-symlink component-source root and prunes the current operation's materialization subtree before traversal. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 117 -> 118 (113 MUST, 5 SHOULD). |
+| 0.1.35  | 2026-08-27 | Spec-citation fold for dependency-policy identity casing in PR #2706. Added [req-pl-018] (Section 6.3.1, governance MUST) and extended [req-rs-016] clause (3): dependency allow, deny, and exact require operands use the documented per-host repository case rule, while registry-sourced repository coordinates are case-insensitive regardless of host; case normalization is ASCII-only, is bounded identically on both operands, stops at recursive-glob ambiguity, and does not cross virtual-path, ref, registry-name, MCP-name, unmanaged-path, or case-sensitive host/source boundaries; deny precedence is unchanged. Defined the policy glob grammar, documented byte-exact Section 6.4 merge behavior, and added the threat mapping. Classified this as a non-breaking correction of previously unspecified evaluation behavior under Section 9.2: existing lowercase workarounds remain matching; on registry sources and hosts documented as case-insensitive, case-variant allow entries can newly match, deny entries can newly enforce, and exact require entries can newly be satisfied, so those policies should be re-audited. Sections 1.3, 6.3.1, 6.3.5, 6.4, 6.5, 6.9, 7.2, 9.2, 10.8, 10.11, 11.2, and 11.3.4, Appendix C, and conformance coverage updated. Statement count: 118 -> 119 (114 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

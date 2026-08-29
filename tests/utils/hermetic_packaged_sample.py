@@ -9,7 +9,7 @@ from pathlib import Path
 
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-from tests.utils.local_git_repository import LocalGitRepositoryFactory
+from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
 
 DEPENDENCY = "microsoft/apm-sample-package"
@@ -23,6 +23,8 @@ class HermeticPackagedSample:
     project: LocalPackage
     environment: dict[str, str]
     runner: ApmLifecycleRunner
+    source_repository: LocalGitRepository
+    repository_factory: LocalGitRepositoryFactory
 
     def run(self, args: Sequence[str], *, scenario_id: str) -> CommandResult:
         """Run one packaged-binary command against the isolated consumer."""
@@ -118,4 +120,6 @@ def create_hermetic_packaged_sample(
         project=project,
         environment=environment,
         runner=ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=240),
+        source_repository=repository,
+        repository_factory=repositories,
     )

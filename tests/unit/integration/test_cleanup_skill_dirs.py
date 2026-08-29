@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.install.deployed_paths import skill_bundle_file_entries
 from apm_cli.integration.cleanup import (
     _is_skill_directory_entry,
     remove_stale_deployed_files,
@@ -132,6 +133,89 @@ class TestSkillDirectoryCleanup:
         )
         assert ".agents/skills/my-skill" in result.deleted
         assert not (project_root / ".agents/skills/my-skill").exists()
+
+    def test_skill_dir_removed_when_only_generated_bytecode_remains(
+        self,
+        project_root,
+        diagnostics,
+    ):
+        skill_dir = project_root / ".agents" / "skills" / "my-skill"
+        skill_md = _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        helper = _make_file(
+            project_root,
+            ".agents/skills/my-skill/scripts/helper.py",
+            "print('ok')\n",
+        )
+        bytecode = skill_dir / "scripts" / "__pycache__" / "helper.cpython-312.pyc"
+        bytecode.parent.mkdir(parents=True)
+        bytecode.write_bytes(b"generated")
+        entries = skill_bundle_file_entries(skill_dir, project_root, targets=[])
+        recorded_hashes = {entry: compute_file_hash(project_root / entry) for entry in entries}
+        stale = [".agents/skills/my-skill", *entries]
+
+        result = remove_stale_deployed_files(
+            stale,
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            recorded_hashes=recorded_hashes,
+        )
+
+        assert entries == [
+            ".agents/skills/my-skill/SKILL.md",
+            ".agents/skills/my-skill/scripts/helper.py",
+        ]
+        assert not skill_md.exists()
+        assert not helper.exists()
+        assert not skill_dir.exists()
+        assert ".agents/skills/my-skill" in result.deleted
+        assert result.skipped_unmanaged == []
+
+    def test_skill_dir_preserves_untracked_loose_pyc(self, project_root, diagnostics):
+        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        loose_pyc = project_root / ".agents" / "skills" / "my-skill" / "notes.pyc"
+        loose_pyc.write_bytes(b"user-content")
+
+        result = remove_stale_deployed_files(
+            [
+                ".agents/skills/my-skill",
+                ".agents/skills/my-skill/SKILL.md",
+            ],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+        assert loose_pyc.exists()
+        assert ".agents/skills/my-skill" in result.skipped_unmanaged
+
+    def test_skill_dir_preserves_non_bytecode_file_inside_pycache(
+        self,
+        project_root,
+        diagnostics,
+    ):
+        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        note = _make_file(
+            project_root,
+            ".agents/skills/my-skill/scripts/__pycache__/notes.txt",
+            "user-content\n",
+        )
+
+        result = remove_stale_deployed_files(
+            [
+                ".agents/skills/my-skill",
+                ".agents/skills/my-skill/SKILL.md",
+            ],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+        assert note.exists()
+        assert ".agents/skills/my-skill" in result.skipped_unmanaged
 
     def test_skill_dir_not_removed_when_user_file_present(self, project_root, diagnostics):
         """Skill dir is NOT removed when it contains user-created files."""

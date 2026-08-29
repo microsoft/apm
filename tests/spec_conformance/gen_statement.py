@@ -187,6 +187,14 @@ def build_md(doc: dict) -> str:
         "which hashes the committed Registry-archive fixture and "
         "asserts equality with the digest the paired lockfile "
         "advertises (sec.11.3.3, req-rg-001).\n\n"
+        "## Repository case rules\n\n"
+        "Repository-coordinate segments are case-insensitive for "
+        "`github.com`, GitHub Enterprise Cloud hosts ending in `.ghe.com`, "
+        "the literal GitHub Enterprise Server host selected by `GITHUB_HOST`, "
+        "and registry-sourced dependencies (including registry prefixes). "
+        "Local paths, marketplace identities, and every other host remain "
+        "case-sensitive. Policy matching and repository identity use the same "
+        "rule (req-rs-016 clause 3; req-pl-018).\n\n"
     )
     summary_section = (
         "## Coverage summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"

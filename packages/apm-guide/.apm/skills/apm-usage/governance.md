@@ -364,6 +364,8 @@ Chain limit: 5 levels max. Cycles are detected and rejected.
 
 Deny is evaluated first. Empty allow list permits all (except denied).
 
+Identity casing compares GitHub and registry owner/repository prefixes case-insensitively and keeps other identity boundaries case-sensitive. See [Identity casing](https://microsoft.github.io/apm/reference/policy-schema/#identity-casing) for recursive-glob behavior, upgrade risk, and workaround removal.
+
 ## Baseline checks (always run with --ci)
 
 These checks run without a policy file:

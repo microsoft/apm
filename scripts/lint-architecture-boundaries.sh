@@ -1805,6 +1805,38 @@ if ! printf '%s\n' "$unique_key_body" | grep -q 'normalize_package_repo_url(' \
     violations=$((violations + 1))
 fi
 
+policy_matcher="src/apm_cli/policy/matcher.py"
+policy_checks="src/apm_cli/policy/policy_checks.py"
+policy_dependency_check_body=$(awk '
+    /^def _find_dependency_policy_match\(/ {flag=1}
+    flag && /^def _check_transitive_depth\(/ {exit}
+    flag {print}
+' "$policy_checks")
+policy_case_parallel_hits=$(
+    {
+        cat "$policy_matcher"
+        printf '%s\n' "$policy_dependency_check_body"
+    } | grep -En '\.lower\(\)|\.casefold\(\)|\.translate\(|maketrans\(|re\.(I|IGNORECASE)|is_github_hostname' \
+        || true
+)
+policy_normalizer_defs=$(grep -rEc \
+    '^def normalize_package_policy_identity\(' \
+    src/apm_cli --include='*.py' \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+if [ "$policy_normalizer_defs" -ne 1 ] \
+    || ! grep -q '^def classify_package_identity_case(' "$identity_owner" \
+    || ! grep -q '^def case_insensitive_identity_prefix_segments(' "$identity_owner" \
+    || ! grep -q 'normalize_package_policy_identity' "$policy_matcher" \
+    || [ "$(grep -c 'dependency\.case_insensitive_identity_prefix_segments' "$policy_matcher")" -lt 2 ] \
+    || [ "$(grep -c 'check_dependency_allowed(dep, policy)' "$policy_checks")" -ne 2 ] \
+    || ! printf '%s\n' "$policy_dependency_check_body" \
+        | grep -q 'dependency_policy_name_matches(dep, policy_name)' \
+    || [ -n "$policy_case_parallel_hits" ]; then
+    echo "[x] Dependency policy casing must route through models/dependency/identity.py"
+    [ -n "$policy_case_parallel_hits" ] && echo "$policy_case_parallel_hits"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC30: MCP non-container launcher argv authority"
 mcp_noncontainer_consumers=(
     src/apm_cli/adapters/client/copilot.py
@@ -1896,6 +1928,25 @@ fi
 echo "[*] AC34: hash-visible generated files use canonical LF writers"
 if ! python3 scripts/check_hash_visible_lf_writes.py; then
     echo "[x] Hash-visible generated files must route through canonical LF writers"
+    violations=$((violations + 1))
+fi
+
+echo "[*] AC35: generated Python artifact membership authority"
+python_artifact_owner="src/apm_cli/security/gate.py"
+python_artifact_definitions=$(grep -rEc --include='*.py' \
+    '^def is_generated_python_artifact\(' src/apm_cli \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+python_cache_path_definitions=$(grep -rEc --include='*.py' \
+    '^def is_python_bytecode_cache_path\(' src/apm_cli \
+    | awk -F: '{sum += $2} END {print sum + 0}')
+if [ "$python_artifact_definitions" -ne 1 ] \
+    || [ "$python_cache_path_definitions" -ne 1 ] \
+    || ! grep -q 'is_generated_python_artifact(Path(c))' "$python_artifact_owner" \
+    || ! grep -q 'is_generated_python_artifact(relative)' \
+        src/apm_cli/install/deployed_paths.py \
+    || ! grep -q 'is_python_bytecode_cache_path(relative_child)' \
+        src/apm_cli/integration/cleanup.py; then
+    echo "[x] Python bytecode copy, inventory, and cleanup must share security/gate.py"
     violations=$((violations + 1))
 fi
 

@@ -11,6 +11,7 @@ comparison identity. It must never be used as a display or filesystem path.
 """
 
 import re
+from enum import Enum
 
 from ...utils.github_host import default_host, is_github_hostname
 
@@ -31,6 +32,19 @@ _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE = r"^(?:[a-zA-Z0-9._~-]|%[0-9A-Fa-f]{2}
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
 _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
+_ASCII_LOWER_TRANSLATION = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "abcdefghijklmnopqrstuvwxyz",
+)
+
+
+class PackageIdentityCase(Enum):
+    """Case-normalization extent for one package identity."""
+
+    SENSITIVE = "sensitive"
+    REPOSITORY = "repository"
+    # ALL covers every repo_url segment; virtual_path remains a package boundary.
+    ALL = "all"
 
 
 def _split_shorthand_host_port(host_segment: str) -> tuple[str, int | None]:
@@ -63,14 +77,35 @@ def normalize_package_repo_url(
     hosts retain their path casing because their repository semantics may be
     case-sensitive.
     """
-    if is_local or source == "local" or is_marketplace:
+    identity_case = classify_package_identity_case(
+        host=host,
+        source=source,
+        registry_prefix=registry_prefix,
+        is_local=is_local,
+        is_marketplace=is_marketplace,
+    )
+    if identity_case is PackageIdentityCase.SENSITIVE:
         return repo_url
+    return repo_url.lower()
+
+
+def classify_package_identity_case(
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> PackageIdentityCase:
+    """Return the canonical case-normalization extent for a package identity."""
+    if is_local or source == "local" or is_marketplace:
+        return PackageIdentityCase.SENSITIVE
     if source == "registry" or registry_prefix:
-        return repo_url.lower()
+        return PackageIdentityCase.ALL
     effective_host = host or default_host()
     if is_github_hostname(effective_host):
-        return repo_url.lower()
-    return repo_url
+        return PackageIdentityCase.REPOSITORY
+    return PackageIdentityCase.SENSITIVE
 
 
 def is_case_insensitive_package_identity(
@@ -82,12 +117,66 @@ def is_case_insensitive_package_identity(
     is_marketplace: bool = False,
 ) -> bool:
     """Return whether repository casing is excluded from package identity."""
-    if is_local or source == "local" or is_marketplace:
-        return False
-    if source == "registry" or registry_prefix:
-        return True
-    effective_host = host or default_host()
-    return is_github_hostname(effective_host)
+    return (
+        classify_package_identity_case(
+            host=host,
+            source=source,
+            registry_prefix=registry_prefix,
+            is_local=is_local,
+            is_marketplace=is_marketplace,
+        )
+        is not PackageIdentityCase.SENSITIVE
+    )
+
+
+def case_insensitive_identity_prefix_segments(
+    repo_url: str,
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> int:
+    """Return how many leading repository path segments exclude casing."""
+    identity_case = classify_package_identity_case(
+        host=host,
+        source=source,
+        registry_prefix=registry_prefix,
+        is_local=is_local,
+        is_marketplace=is_marketplace,
+    )
+    if identity_case is PackageIdentityCase.SENSITIVE:
+        return 0
+    return len(repo_url.split("/"))
+
+
+def normalize_package_policy_identity(
+    value: str,
+    *,
+    case_insensitive_prefix_segments: int,
+) -> str:
+    """Normalize only the repository prefix of a dependency-policy operand.
+
+    The caller must source ``case_insensitive_prefix_segments`` from
+    ``case_insensitive_identity_prefix_segments``. Recursive globs end a
+    positional repository prefix; virtual paths and ``#ref`` suffixes stay
+    case-sensitive.
+    """
+    if case_insensitive_prefix_segments <= 0:
+        return value
+
+    name, separator, reference = value.partition("#")
+    segments = name.split("/")
+    normalized: list[str] = []
+    for index, segment in enumerate(segments):
+        if index >= case_insensitive_prefix_segments or "**" in segment:
+            normalized.extend(segments[index:])
+            break
+        normalized.append(segment.translate(_ASCII_LOWER_TRANSLATION))
+
+    normalized_name = "/".join(normalized)
+    return f"{normalized_name}{separator}{reference}"
 
 
 def build_dependency_unique_key(
