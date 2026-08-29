@@ -8,9 +8,6 @@ from pathlib import Path
 PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 MCP_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 
-QUALIFIED_VERSION = "1.0.81"
-UNQUALIFIED_VERSION = "1.0.81-5"
-
 
 def write_agent_plugin(
     root: Path,

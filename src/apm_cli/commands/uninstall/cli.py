@@ -92,7 +92,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
     logger = CommandLogger("uninstall", verbose=verbose, dry_run=dry_run)
     staged_local_refreshes = {}
-    registration_token = _publish_native_registration(deploy_root, scope)
+    registration_token = _publish_native_registration(deploy_root, scope, manifest_path)
     try:
         # Check if apm.yml exists
         if not manifest_path.exists():
@@ -526,17 +526,31 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         _cleanup_staged_local_refreshes(staged_local_refreshes, modules_dir)
 
 
-def _publish_native_registration(deploy_root, scope):
-    """Publish the Copilot native-plugin capability for this uninstall."""
+def _publish_native_registration(deploy_root, scope, manifest_path):
+    """Publish the Copilot native-plugin capability for this uninstall.
+
+    Reads the SAME canonical target declaration (the manifest's ``target:``/
+    ``targets:`` field, via :func:`package_target_selection`) that ``install``
+    and hook reconciliation already use -- never falls back to directory
+    auto-detection, which would incorrectly treat ``copilot`` as active
+    whenever a ``.github/`` directory happens to exist on disk regardless of
+    what this project actually declares.
+    """
     from ...copilot_plugins.capability import (
         activate_native_registration,
         resolve_native_registration_capability,
     )
     from ...core.scope import InstallScope
     from ...integration.targets import resolve_targets
+    from ...models.apm_package import package_target_selection
 
+    manifest_target = None
+    with contextlib.suppress(Exception):
+        manifest_target = package_target_selection(APMPackage.from_apm_yml(manifest_path))
     try:
-        targets = resolve_targets(deploy_root, user_scope=scope is InstallScope.USER)
+        targets = resolve_targets(
+            deploy_root, user_scope=scope is InstallScope.USER, explicit_target=manifest_target
+        )
     except Exception:
         targets = ()
     return activate_native_registration(resolve_native_registration_capability(targets))

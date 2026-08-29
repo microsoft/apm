@@ -58,11 +58,10 @@ File primitives resolve targets in this order: `--target`, manifest
 `--runtime` / `--target`, then manifest targets, saved config, then
 auto-detection only when `apm.yml` declares no targets.
 
-`APM_COPILOT_CLI_VERSION` overrides the detected Copilot CLI version used by
-the native [Agent Plugin registration](../../../consumer/copilot-agent-plugins/#requirements)
-check. It exists for CI and test determinism, not to bypass the version floor:
-forcing it high on an unqualified client produces exactly the private-state
-copy the floor prevents.
+Native [Agent Plugin registration](../../../consumer/copilot-agent-plugins/#requirements)
+does not discover or execute the Copilot CLI. APM owns deterministic
+materialization and settings projection; you provide a supported runtime when
+you use the generated registration.
 
 ### Policy and trust
 
@@ -221,8 +220,8 @@ apm install ./my-bundle --target opencode
 This imperative route deploys Claude plugin bundles (the default `apm pack`
 output). A portable Agent Plugins v1 package installs declaratively instead:
 declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
-whole and registers it with GitHub Copilot CLI 1.0.81 or newer (floor
-`1.0.81-8`). See
+whole and registers it without locating or executing Copilot. Stable Copilot
+CLI 1.0.81 or newer is required when loading the projection. See
 [Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
 :::
 

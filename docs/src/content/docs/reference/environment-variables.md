@@ -133,4 +133,3 @@ These variables exist in the codebase but are not part of the documented contrac
 | `APM_NO_SCRIPTS` | Disables package lifecycle script execution. | unset | Internal safety/test switch; prefer executable trust policy in production. |
 | `APM_NON_INTERACTIVE` | Forces non-interactive behavior. | unset | Used by automation and tests. |
 | `APM_E2E_TESTS` | Marks the process as an end-to-end test run; relaxes some interactive guards. | unset | Test harness only. Do not set in normal use. |
-| `APM_COPILOT_CLI_VERSION` | Overrides the detected GitHub Copilot CLI version used by the native Agent Plugin registration floor check, skipping the `copilot --version` probe. | unset | CI / test determinism only. **Not** a supported way to bypass the version floor: forcing it at or above `1.0.81-8` on an unqualified client produces the private-state copy the floor exists to prevent. See [Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/#requirements). |

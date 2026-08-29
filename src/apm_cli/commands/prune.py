@@ -58,6 +58,7 @@ def _preflight_prune_survivors(
     from ..agent_plugins.errors import preflight_reintegration_survivors
     from ..models.apm_package import surviving_dependency_refs_for_reintegration
 
+    del logger  # Nothing to warn about: target exclusion is routine and silent.
     survivors = surviving_dependency_refs_for_reintegration(
         apm_package,
         project_root,
@@ -70,7 +71,6 @@ def _preflight_prune_survivors(
             if dependency.get_unique_key() not in excluded_keys
         ),
         apm_modules_dir,
-        on_warning=(logger.warning if logger is not None else None),
     )
 
 
@@ -424,15 +424,29 @@ def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_
 
 
 def _publish_native_registration(project_root: Path):
-    """Publish the Copilot native-plugin capability for this prune."""
+    """Publish the Copilot native-plugin capability for this prune.
+
+    Reads the SAME canonical target declaration (``apm.yml``'s ``target:``/
+    ``targets:`` field, via :func:`package_target_selection`) that ``install``
+    and hook reconciliation already use -- never falls back to directory
+    auto-detection, which would incorrectly treat ``copilot`` as active
+    whenever a ``.github/`` directory happens to exist on disk regardless of
+    what this project actually declares.
+    """
     from ..copilot_plugins.capability import (
         activate_native_registration,
         resolve_native_registration_capability,
     )
     from ..integration.targets import resolve_targets
+    from ..models.apm_package import package_target_selection
 
+    manifest_target = None
+    with contextlib.suppress(Exception):
+        manifest_target = package_target_selection(
+            APMPackage.from_apm_yml(project_root / APM_YML_FILENAME)
+        )
     try:
-        targets = resolve_targets(project_root, user_scope=False)
+        targets = resolve_targets(project_root, user_scope=False, explicit_target=manifest_target)
     except Exception:
         targets = ()
     return activate_native_registration(resolve_native_registration_capability(targets))

@@ -153,9 +153,9 @@ def discover_native_plugins(
     winner whose identity flips relative to the ledger's recorded owner is
     refused unless the new winner is a direct dependency.
 
-    Filesystem routing (probe-free) is split from entry building so callers that
-    must avoid the client version probe can first ask whether any Agent Plugin
-    is physically present.
+    Filesystem routing is split from entry building so callers can first ask
+    whether any Agent Plugin is physically present before reading the
+    (probe-free) admission capability.
     """
     routed = list(_routed_plugin_candidates(candidates, modules_dir=modules_dir, logger=logger))
     return build_native_plugin_entries(
@@ -171,10 +171,11 @@ def _routed_plugin_candidates(
 ) -> Iterable[tuple[ResolvedPluginCandidate, Any]]:
     """Yield ``(candidate, plugin)`` for every candidate that IS an Agent Plugin.
 
-    Pure filesystem work: no client probe, no collision decision. Candidates are
-    yielded in precedence order (direct first, then dependency key) so the entry
-    builder can resolve name collisions deterministically. Every skip emits a
-    named ``_drop`` trace, including the same-path dedupe branch.
+    Pure filesystem work: no capability read, no collision decision.
+    Candidates are yielded in precedence order (direct first, then
+    dependency key) so the entry builder can resolve name collisions
+    deterministically. Every skip emits a named ``_drop`` trace, including
+    the same-path dedupe branch.
     """
     from ..bundle.local_bundle import route_agent_plugin_package
     from .constants import COPILOT_TARGET_NAME
@@ -377,9 +378,10 @@ def resync_native_plugins(
     )
 
     # Reuse the capability already published for this command when available, so
-    # a single lifecycle command never resolves targets -- or probes the client
-    # -- more than once. Only when nothing is published do we resolve fresh from
-    # the caller-supplied targets (or, as a last resort, re-derive them).
+    # a single lifecycle command never resolves targets more than once. Only
+    # when nothing is published do we resolve fresh from the caller-supplied
+    # targets (or, as a last resort, re-derive them). Resolving is a pure,
+    # immediate function of target names -- no runtime is invoked.
     capability = current_native_registration()
     if capability is None:
         resolved_targets = (
@@ -418,10 +420,10 @@ def synchronize_copilot_plugins(
     ledger = read_ledger(ledger_path)
     had_registration = ledger.marketplace_owned or bool(ledger.enabled_plugins)
 
-    # Probe-free discovery FIRST: routing is pure filesystem work, so a command
-    # with no Agent Plugin present and no prior registration returns here without
-    # ever reading the capability -- and therefore without spawning the
-    # `copilot --version` probe. This is the overwhelmingly common case.
+    # Filesystem discovery FIRST: routing is pure filesystem work, so a command
+    # with no Agent Plugin present and no prior registration returns here
+    # without ever reading the capability. This is the overwhelmingly common
+    # case.
     routed = list(_routed_plugin_candidates(candidates, modules_dir=modules_dir, logger=logger))
     if not routed and not had_registration:
         return CopilotPluginSyncResult()

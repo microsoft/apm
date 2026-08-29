@@ -549,7 +549,9 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/agent_plugins/errors.py",
-            "    raise AgentPluginClientUnavailableError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "    raise AgentPluginTargetExcludedError(\n"
+            "        capability.reason if capability is not None else AGENT_PLUGIN_DEPLOYMENT_BLOCKED\n"
+            "    )",
             "    return None  # native package accepted",
             "native deployment boundary must fail closed",
         ),

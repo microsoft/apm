@@ -1,8 +1,8 @@
 """Regression folds for PR #2705 (native Agent Plugin registration).
 
 Each test here pins one security or correctness guard added while folding the
-apm-review-panel advisory. They are hermetic: the Copilot client version is
-pinned through ``VERSION_OVERRIDE_ENV`` and no real ``copilot`` binary runs.
+apm-review-panel advisory. They are hermetic: admission is a pure function of
+the ``--target copilot`` selection and no real ``copilot`` binary ever runs.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.copilot_plugins.capability import VERSION_OVERRIDE_ENV
 from apm_cli.copilot_plugins.constants import ENABLED_PLUGINS_KEY, EXTRA_MARKETPLACES_KEY
 from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
 from apm_cli.install.native_plugin_admission import finalize_native_plugin
@@ -26,7 +25,7 @@ from apm_cli.security.executables import (
 )
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-from ._builders import QUALIFIED_VERSION, read_json, write_agent_plugin, write_legacy_package
+from ._builders import read_json, write_agent_plugin, write_legacy_package
 
 pytestmark = pytest.mark.component
 
@@ -57,8 +56,7 @@ def _write_project(project: Path, dependencies: list) -> None:
     )
 
 
-def _install(monkeypatch, project: Path, *args: str, version: str = QUALIFIED_VERSION):
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, version)
+def _install(monkeypatch, project: Path, *args: str):
     monkeypatch.chdir(project)
     return CliRunner().invoke(
         cli,
@@ -89,7 +87,6 @@ def test_dependency_target_restriction_excludes_native_registration(
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [{"path": str(source), "targets": ["claude"]}])
 
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, QUALIFIED_VERSION)
     monkeypatch.chdir(project)
     result = CliRunner().invoke(
         cli,
@@ -134,7 +131,6 @@ def test_project_target_excluding_copilot_skips_plugin_and_installs_the_rest(
         encoding="ascii",
     )
 
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, QUALIFIED_VERSION)
     monkeypatch.chdir(project)
     result = CliRunner().invoke(cli, ["install", "--no-policy"], catch_exceptions=False)
 
@@ -539,64 +535,99 @@ def test_deps_list_reports_the_natively_registered_plugin_with_its_version(
 
 
 # ---------------------------------------------------------------------------
-# Item 5: the copilot --version probe stays lazy. A no-Agent-Plugin install
-# spawns ZERO probes; a full uninstall/prune spawns at most one.
+# Item 5: admission is a pure function of resolved target names. No lifecycle
+# command may ever shell out or discover a Copilot binary to decide it -- there
+# is no version or binary-presence gate on this path at all.
 # ---------------------------------------------------------------------------
 
 
-class _ProbeCounter:
-    """A stand-in ``probe_copilot_cli_version`` that counts every spawn."""
+def _forbid_copilot_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail loudly if the lifecycle path ever probes for a Copilot binary."""
+    from apm_cli.runtime import utils as runtime_utils
 
-    def __init__(self, version: str = QUALIFIED_VERSION) -> None:
-        self.calls = 0
-        self._version = version
+    def _boom(name: str) -> str | None:
+        raise AssertionError(f"unexpected runtime binary discovery for {name!r}")
 
-    def __call__(self) -> str:
-        self.calls += 1
-        return self._version
+    monkeypatch.setattr(runtime_utils, "find_runtime_binary", _boom)
+    import subprocess as _subprocess
 
+    def _subprocess_boom(*args, **kwargs):
+        raise AssertionError(f"unexpected subprocess invocation: {args!r} {kwargs!r}")
 
-def _patch_probe(monkeypatch: pytest.MonkeyPatch) -> _ProbeCounter:
-    counter = _ProbeCounter()
-    monkeypatch.setattr("apm_cli.copilot_plugins.capability.probe_copilot_cli_version", counter)
-    return counter
+    for attr in ("run", "Popen", "check_output", "check_call"):
+        monkeypatch.setattr(_subprocess, attr, _subprocess_boom)
 
 
-def test_zero_plugin_install_never_probes_the_copilot_client(
+def test_zero_plugin_install_never_discovers_a_copilot_binary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ``--target copilot`` install with no Agent Plugin spawns 0 probes."""
+    """A ``--target copilot`` install with no Agent Plugin never shells out."""
     project = tmp_path / "project"
     ordinary = tmp_path / "source" / "plainpkg"
     write_legacy_package(ordinary, name="plainpkg")
     _write_project(project, [str(ordinary)])
 
-    counter = _patch_probe(monkeypatch)
+    _forbid_copilot_discovery(monkeypatch)
     result = _install(monkeypatch, project)
 
     assert result.exit_code == 0, result.output
-    assert counter.calls == 0
 
 
-def test_uninstall_and_prune_probe_at_most_once(
+def test_full_lifecycle_never_discovers_a_copilot_binary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A full uninstall / prune resolves the capability at most once each."""
+    """install -> uninstall -> prune never probe for a Copilot binary/version.
+
+    Admission is a pure function of resolved target names: there is no binary
+    probe, version check, or ``PATH`` lookup anywhere on this lifecycle path.
+    """
     project = tmp_path / "project"
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
     assert _install(monkeypatch, project).exit_code == 0
 
-    counter = _patch_probe(monkeypatch)
+    _forbid_copilot_discovery(monkeypatch)
+
     uninstall = CliRunner().invoke(cli, ["uninstall", str(source)], catch_exceptions=False)
     assert uninstall.exit_code == 0, uninstall.output
-    assert counter.calls <= 1
 
-    counter.calls = 0
     prune = CliRunner().invoke(cli, ["prune"], catch_exceptions=False)
     assert prune.exit_code == 0, prune.output
-    assert counter.calls <= 1
+
+
+def test_update_and_frozen_restore_never_discover_a_copilot_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Update and restore converge entirely from APM-owned state."""
+    project = tmp_path / "project"
+    source = tmp_path / "source" / "sentinel"
+    write_agent_plugin(source, name="sentinel")
+    _write_project(project, [str(source)])
+    assert _install(monkeypatch, project).exit_code == 0
+
+    _forbid_copilot_discovery(monkeypatch)
+
+    updated = CliRunner().invoke(
+        cli,
+        ["update", "--yes", "--target", "copilot"],
+        catch_exceptions=False,
+    )
+    assert updated.exit_code == 0, updated.output
+
+    catalog = catalog_path_for(project / "apm_modules")
+    settings = project / ".github" / "copilot" / "settings.local.json"
+    catalog.unlink()
+    settings.unlink()
+
+    restored = CliRunner().invoke(
+        cli,
+        ["install", "--frozen", "--no-policy", "--target", "copilot"],
+        catch_exceptions=False,
+    )
+    assert restored.exit_code == 0, restored.output
+    assert catalog.is_file()
+    assert settings.is_file()
 
 
 def test_transitive_dependency_is_not_marked_direct_on_the_install_path() -> None:
@@ -720,27 +751,3 @@ def test_root_layout_components_absent_from_ir_refuse_native_registration(
     assert "lsp" in types
     assert "hooks" in types
     assert plugin_root_exec_types(tmp_path / "empty") == ()
-
-
-def test_lazy_capability_probes_once_across_repeated_reads() -> None:
-    """The memoized holder shells out at most once no matter how many fields
-    a caller reads. The spawn-count guards only assert the CURRENT call
-    graph's read count, so the cache itself needs its own trap.
-    """
-    from apm_cli.copilot_plugins.capability import (
-        resolve_native_registration_capability,
-    )
-
-    counter = _ProbeCounter()
-    capability = resolve_native_registration_capability(
-        [SimpleNamespace(name="copilot")], probe=counter
-    )
-
-    assert counter.calls == 0
-    _ = (
-        capability.supported,
-        capability.reason,
-        capability.detected_version,
-        capability.supported,
-    )
-    assert counter.calls == 1

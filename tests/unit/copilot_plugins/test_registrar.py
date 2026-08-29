@@ -30,11 +30,9 @@ from ._builders import read_json, write_agent_plugin
 
 pytestmark = pytest.mark.component
 
-_QUALIFIED = NativeRegistrationCapability(
-    supported=True, detected_version="1.0.81", target="copilot"
-)
+_QUALIFIED = NativeRegistrationCapability(supported=True, target="copilot")
 _UNQUALIFIED = NativeRegistrationCapability(
-    supported=False, reason="Agent Plugins v1.0.0 packages need GitHub Copilot CLI >=1.0.81-8"
+    supported=False, reason="Agent Plugins v1.0.0 packages install natively only for 'copilot'"
 )
 
 

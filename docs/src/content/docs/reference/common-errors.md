@@ -38,27 +38,17 @@ left untouched.
 
 ---
 
-### Agent Plugin: "needs GitHub Copilot CLI >=1.0.81-8"
+### Agent Plugin does not load in Copilot
 
-**Symptom:** `apm install --target copilot` refuses an Agent Plugins 1.0
-package with `Agent Plugins v1.0.0 packages need GitHub Copilot CLI
->=1.0.81-8 ... detected <version>`, and nothing is written. With no `copilot`
-binary on `PATH`, the message instead reads `GitHub Copilot CLI was not found
-on PATH`.
+**Symptom:** `apm install --target copilot` succeeds and writes the native
+registration, but Copilot does not load the plugin.
 
-**Cause:** Native registration loads the plugin live from `apm_modules`, which
-only the qualified Copilot CLI build supports. Older clients copy the plugin
-into private Copilot state, so APM fails closed instead of degrading silently.
-The same rule applies to non-Copilot targets.
+**Cause:** APM does not discover, execute, or version-check the Copilot runtime
+during install. Stable Copilot CLI `1.0.81` or newer is required to load APM's
+live-directory projection. Older clients may instead copy plugins into private
+state outside APM ownership.
 
-For the package being actively installed this is fatal and the project tree is
-left byte-identical. Two neighbours are treated as recoverable instead: an
-*already-installed* Agent Plugin whose registration merely cannot be refreshed
-(Copilot CLI absent or below the floor) keeps its existing registration
-untouched and the command continues with a warning; and a project whose targets
-exclude `copilot` skips each Agent Plugin dependency with a warning and installs
-the rest of the batch.
-
-**Fix:** Install GitHub Copilot CLI `1.0.81-8` or newer (stable `1.0.81`
-qualifies), then re-run. See
+**Fix:** Upgrade to stable GitHub Copilot CLI `1.0.81` or newer. If an older
+client created a private copy, remove that copy with the client after upgrading;
+APM uninstall and prune can retire only APM-owned registration state. See
 [Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/#requirements).

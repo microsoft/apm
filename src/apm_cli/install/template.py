@@ -132,13 +132,12 @@ def preflight_agent_plugin_materializations(
 ) -> None:
     """Reject the batch once, before any package can mutate a target.
 
-    A package that WAS selected for the copilot target but cannot be
-    registered (client absent or below the floor) aborts the whole batch
-    here -- it is a real, actionable failure. A package that simply is not
-    targeted at copilot (this project selected other targets) is NOT a
-    failure: it is skipped per-package during integration
+    A native Agent Plugin whose effective targets simply do not select
+    ``copilot`` is not a failure: it is skipped per-package during integration
     (:func:`_record_agent_plugin_target_skip`), so it must not abort the
-    batch. ``AgentPluginTargetExcludedError`` carries that distinction.
+    batch -- ``AgentPluginTargetExcludedError`` carries that distinction.
+    Anything else raised here (missing canonical IR, the imperative bundle
+    route) is a real, actionable failure and aborts the whole batch.
     """
     for _, materialization in prepared:
         try:
@@ -151,9 +150,16 @@ def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> N
     """Reject a cached or local native package without mutating its source.
 
     The native-registration capability is published for the duration of the
-    preview so an unqualified or absent Copilot client yields the SAME precise
-    reason a real install would ('upgrade the client' / 'install the client'),
-    instead of the generic 'no native harness' fallback.
+    preview so a project whose effective targets exclude ``copilot`` yields
+    the SAME precise reason a real install would, instead of the generic
+    'no native harness' fallback. Admission never depends on whether a
+    Copilot binary exists or which version it reports.
+
+    Target exclusion (``AgentPluginTargetExcludedError``) is never fatal --
+    a real install skips that package with one warning and installs the
+    rest of the batch, so the dry-run preview must not abort the whole
+    preview for the same reason either. Only a genuine structural failure
+    (missing canonical IR, the imperative bundle route) aborts here.
     """
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.copilot_plugins.capability import native_registration_scope
@@ -194,14 +200,17 @@ def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> N
                     agent_plugin_detection=detection,
                 )
             if validation.is_valid and validation.package is not None:
-                enforce_agent_plugin_deployment_boundary(
-                    PackageInfo(
-                        package=validation.package,
-                        install_path=package_path,
-                        dependency_ref=dependency,
-                        package_type=validation.package_type,
+                try:
+                    enforce_agent_plugin_deployment_boundary(
+                        PackageInfo(
+                            package=validation.package,
+                            install_path=package_path,
+                            dependency_ref=dependency,
+                            package_type=validation.package_type,
+                        )
                     )
-                )
+                except AgentPluginTargetExcludedError:
+                    continue
 
 
 def _record_agent_plugin_boundary_diagnostic(

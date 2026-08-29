@@ -13,13 +13,11 @@ observable guarantees the requirement encodes:
   exactly the entries the consumer created, unrelated host settings
   stay byte-identical, and an entry the consumer does not own is
   refused rather than overwritten;
-* when the machine-verifiable lifecycle is unavailable the consumer
-  falls back to the req-tg-011 fail-closed deployment boundary.
+* target-native registration applies only when the effective targets include
+  ``copilot``; other targets remain behind the req-tg-011 boundary.
 
-The suite is hermetic: ``tests/conftest.py`` pins
-``APM_COPILOT_CLI_VERSION=0.0.0`` (an unqualified floor), so the
-qualified path is reached only where a test sets the override
-explicitly through the real capability resolver.
+The suite is hermetic: capability resolution is a pure target-selection
+decision and never discovers or executes a Copilot runtime.
 """
 
 from __future__ import annotations
@@ -51,12 +49,7 @@ from apm_cli.copilot_plugins.settings import (
 )
 from apm_cli.core.scope import InstallScope
 from tests.spec_conformance._helpers import assert_spec_contains
-from tests.unit.copilot_plugins._builders import (
-    QUALIFIED_VERSION,
-    UNQUALIFIED_VERSION,
-    read_json,
-    write_agent_plugin,
-)
+from tests.unit.copilot_plugins._builders import read_json, write_agent_plugin
 
 _COPILOT_TARGET = SimpleNamespace(name="copilot")
 
@@ -72,9 +65,8 @@ def _settings_path(project: Path) -> Path:
     return project / ".github" / "copilot" / "settings.local.json"
 
 
-def _qualified_capability(monkeypatch: pytest.MonkeyPatch):
-    """Resolve the real capability on the qualified native-lifecycle path."""
-    monkeypatch.setenv("APM_COPILOT_CLI_VERSION", QUALIFIED_VERSION)
+def _copilot_capability():
+    """Resolve the real capability on the Copilot target path."""
     capability = resolve_native_registration_capability([_COPILOT_TARGET])
     assert capability.supported is True
     return capability
@@ -91,7 +83,7 @@ def test_native_registration_is_aggregate_in_place_and_consumer_owned(
     write_agent_plugin(direct, name="direct-plugin")
     write_agent_plugin(transitive, name="transitive-plugin")
 
-    capability = _qualified_capability(monkeypatch)
+    capability = _copilot_capability()
     result = synchronize_copilot_plugins(
         project_root=project,
         modules_dir=modules,
@@ -159,7 +151,7 @@ def test_removal_is_exact_and_unowned_entries_are_refused(
         encoding="ascii",
     )
 
-    capability = _qualified_capability(monkeypatch)
+    capability = _copilot_capability()
     synchronize_copilot_plugins(
         project_root=project,
         modules_dir=modules,
@@ -210,21 +202,18 @@ def test_removal_is_exact_and_unowned_entries_are_refused(
 
 
 @pytest.mark.req("req-tg-013")
-def test_unavailable_lifecycle_falls_back_to_the_boundary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Below the qualified floor, native admission fails to the req-tg-011 boundary."""
+def test_non_copilot_target_falls_back_to_the_boundary(tmp_path: Path) -> None:
+    """A target set without Copilot remains behind the req-tg-011 boundary."""
     project, modules = _project(tmp_path)
     write_agent_plugin(modules / "pkg", name="portable-plugin")
 
-    monkeypatch.setenv("APM_COPILOT_CLI_VERSION", UNQUALIFIED_VERSION)
-    capability = resolve_native_registration_capability([_COPILOT_TARGET])
+    capability = resolve_native_registration_capability([SimpleNamespace(name="claude")])
     assert capability.supported is False
     with pytest.raises(AgentPluginDeploymentBoundaryError):
         capability.require()
 
     # Admission is the gate that lets native registration replace primitive
-    # projection; an unqualified host admits nothing, so the boundary owns it.
+    # projection; a non-Copilot target admits nothing, so the boundary owns it.
     plugin_info = SimpleNamespace(
         package_type=None,
         package=SimpleNamespace(agent_plugin=object()),
@@ -233,10 +222,10 @@ def test_unavailable_lifecycle_falls_back_to_the_boundary(
     from apm_cli.models.validation import PackageType
 
     plugin_info.package_type = PackageType.AGENT_PLUGIN
-    with native_registration_scope([_COPILOT_TARGET]):
+    with native_registration_scope([SimpleNamespace(name="claude")]):
         assert admits_native_plugin(plugin_info) is False
 
-    # A fail-closed capability with no prior registration writes nothing.
+    # A non-applicable capability with no prior registration writes nothing.
     result = synchronize_copilot_plugins(
         project_root=project,
         modules_dir=modules,

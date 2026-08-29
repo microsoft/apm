@@ -23,7 +23,6 @@ from apm_cli.copilot_plugins.capability import (
     reset_native_registration,
     resolve_native_registration_capability,
 )
-from apm_cli.copilot_plugins.constants import COPILOT_LIVE_PLUGIN_MIN_VERSION
 from apm_cli.copilot_plugins.registrar import (
     ResolvedPluginCandidate,
     synchronize_copilot_plugins,
@@ -45,35 +44,28 @@ def activate(ctx: InstallContext) -> None:
 
 
 def _log_capability_decision(ctx: InstallContext, capability) -> None:
-    """Trace the native-registration verdict at verbose level, probe-free.
+    """Trace the native-registration verdict at verbose level.
 
-    Reads only ``copilot_targeted`` (known from the target names, no
-    subprocess). When copilot IS targeted the verdict depends on the client
-    probe, which is deferred until an Agent Plugin is actually integrated -- so a
-    zero-plugin install spawns nothing here. When copilot is NOT targeted the
-    client was never probed, so the line must not claim it was "not detected".
+    Admission is a pure function of the resolved target names -- it never
+    probes a Copilot binary -- so the verdict is known immediately, with
+    nothing deferred and no subprocess spawned.
     """
     logger = getattr(ctx, "logger", None)
     if logger is None:
         return
-    if not getattr(capability, "copilot_targeted", False):
-        logger.verbose_detail(
-            "Copilot native registration: unavailable (copilot target not "
-            f"selected, floor {COPILOT_LIVE_PLUGIN_MIN_VERSION})"
-        )
+    if capability.supported:
+        logger.verbose_detail("Copilot native registration: available (copilot targeted)")
         return
-    logger.verbose_detail(
-        "Copilot native registration: client probe deferred until an Agent "
-        f"Plugin is integrated (floor {COPILOT_LIVE_PLUGIN_MIN_VERSION})"
-    )
+    logger.verbose_detail("Copilot native registration: unavailable (copilot target not selected)")
 
 
 class ActivatePhase:
     """Adapter so the activate step gets ``_run_phase`` timing like its siblings.
 
-    ``activate`` publishes the capability and can block on a ``copilot
-    --version`` subprocess, so it earns the same verbose ``Phase: ...`` timing
-    line the registration ``run`` seam gets.
+    ``activate`` publishes the capability at the phase seam so it earns the
+    same verbose ``Phase: ...`` timing line the registration ``run`` seam
+    gets, even though resolving it is now a pure, immediate computation with
+    no subprocess involved.
     """
 
     @staticmethod

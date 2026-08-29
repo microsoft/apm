@@ -9,7 +9,6 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.copilot_plugins.capability import VERSION_OVERRIDE_ENV
 from apm_cli.copilot_plugins.constants import (
     ENABLED_PLUGINS_KEY,
     EXTRA_MARKETPLACES_KEY,
@@ -17,8 +16,6 @@ from apm_cli.copilot_plugins.constants import (
 from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
 
 from ._builders import (
-    QUALIFIED_VERSION,
-    UNQUALIFIED_VERSION,
     read_json,
     write_agent_plugin,
     write_legacy_package,
@@ -42,8 +39,7 @@ def _write_project(project: Path, dependencies: list[str]) -> None:
     )
 
 
-def _install(monkeypatch: pytest.MonkeyPatch, project: Path, *args: str, version: str):
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, version)
+def _install(monkeypatch: pytest.MonkeyPatch, project: Path, *args: str):
     monkeypatch.chdir(project)
     return CliRunner().invoke(
         cli,
@@ -60,16 +56,16 @@ def _modules(project: Path) -> Path:
     return project / "apm_modules"
 
 
-def test_qualified_client_installs_the_plugin_live_without_decomposing_it(
+def test_offline_install_registers_the_plugin_without_decomposing_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """pack -> install -> plain copilot: the whole unit stays intact."""
+    """Target admission installs the whole unit without inspecting a runtime."""
     project = tmp_path / "project"
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
 
-    result = _install(monkeypatch, project, version=QUALIFIED_VERSION)
+    result = _install(monkeypatch, project)
 
     assert result.exit_code == 0, result.output
     materialized = _modules(project) / "_local" / "sentinel"
@@ -110,7 +106,7 @@ def test_no_private_copilot_state_is_created(
     write_agent_plugin(tmp_path / "source" / "sentinel", name="sentinel")
     _write_project(project, [str(tmp_path / "source" / "sentinel")])
 
-    result = _install(monkeypatch, project, version=QUALIFIED_VERSION)
+    result = _install(monkeypatch, project)
 
     assert result.exit_code == 0, result.output
     assert not (copilot_home / "installed-plugins").exists()
@@ -118,39 +114,20 @@ def test_no_private_copilot_state_is_created(
     assert not (copilot_home / "settings.json").exists()
 
 
-def test_unqualified_client_fails_closed_and_writes_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """1.0.81-5 predates live directory loading and must be refused."""
-    project = tmp_path / "project"
-    write_agent_plugin(tmp_path / "source" / "sentinel", name="sentinel")
-    _write_project(project, [str(tmp_path / "source" / "sentinel")])
-
-    result = _install(monkeypatch, project, version=UNQUALIFIED_VERSION)
-
-    output = " ".join(result.output.split())
-    assert result.exit_code == 1, result.output
-    assert "1.0.81-8" in output
-    assert UNQUALIFIED_VERSION in output
-    assert not catalog_path_for(_modules(project)).exists()
-    assert not _settings_path(project).exists()
-
-
 def test_non_copilot_target_skips_the_plugin_without_aborting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A project that does not target copilot skips the plugin, exit 0.
 
-    A qualified Copilot CLI does not unlock other targets: the plugin is not
-    registered. But a project-level target set that excludes copilot is a
-    non-applicability, not a failure -- it is skipped with one warning and the
-    install still succeeds (Item 4). The fatal path is reserved for a package
-    that WAS selected for copilot but cannot be registered.
+    Admission is a pure function of resolved target names -- a project-level
+    target set that excludes copilot is a non-applicability, not a failure. It
+    is skipped with one warning and the install still succeeds (Item 4). The
+    fatal path is reserved for a package that WAS selected for copilot but
+    cannot be registered.
     """
     project = tmp_path / "project"
     write_agent_plugin(tmp_path / "source" / "sentinel", name="sentinel")
     _write_project(project, [str(tmp_path / "source" / "sentinel")])
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, QUALIFIED_VERSION)
     monkeypatch.chdir(project)
 
     result = CliRunner().invoke(
@@ -178,7 +155,7 @@ def test_mixed_graph_registers_the_plugin_and_deploys_the_legacy_package(
         [str(tmp_path / "source" / "sentinel"), str(tmp_path / "source" / "classic")],
     )
 
-    result = _install(monkeypatch, project, version=QUALIFIED_VERSION)
+    result = _install(monkeypatch, project)
 
     assert result.exit_code == 0, result.output
     catalog = read_json(catalog_path_for(_modules(project)))
@@ -192,11 +169,11 @@ def test_reinstall_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     write_agent_plugin(tmp_path / "source" / "sentinel", name="sentinel")
     _write_project(project, [str(tmp_path / "source" / "sentinel")])
 
-    assert _install(monkeypatch, project, version=QUALIFIED_VERSION).exit_code == 0
+    assert _install(monkeypatch, project).exit_code == 0
     catalog_first = catalog_path_for(_modules(project)).read_bytes()
     settings_first = _settings_path(project).read_bytes()
 
-    assert _install(monkeypatch, project, version=QUALIFIED_VERSION).exit_code == 0
+    assert _install(monkeypatch, project).exit_code == 0
 
     assert catalog_path_for(_modules(project)).read_bytes() == catalog_first
     assert _settings_path(project).read_bytes() == settings_first
@@ -210,10 +187,10 @@ def test_source_edits_propagate_without_recopying_bytes(
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel", skill_body="MARK_V1")
     _write_project(project, [str(source)])
-    assert _install(monkeypatch, project, version=QUALIFIED_VERSION).exit_code == 0
+    assert _install(monkeypatch, project).exit_code == 0
 
     write_agent_plugin(source, name="sentinel", skill_body="MARK_V2")
-    assert _install(monkeypatch, project, "--force", version=QUALIFIED_VERSION).exit_code == 0
+    assert _install(monkeypatch, project, "--force").exit_code == 0
 
     live = _modules(project) / "_local" / "sentinel" / "skills" / "sentinel-skill" / "SKILL.md"
     catalog = read_json(catalog_path_for(_modules(project)))
@@ -229,7 +206,7 @@ def test_uninstall_removes_only_apm_owned_registration(
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
-    assert _install(monkeypatch, project, version=QUALIFIED_VERSION).exit_code == 0
+    assert _install(monkeypatch, project).exit_code == 0
     settings_path = _settings_path(project)
     document = read_json(settings_path)
     document["banner"] = "keep me"
@@ -255,7 +232,7 @@ def test_compile_does_not_rewrite_the_native_plugin(
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
-    assert _install(monkeypatch, project, version=QUALIFIED_VERSION).exit_code == 0
+    assert _install(monkeypatch, project).exit_code == 0
     materialized = _modules(project) / "_local" / "sentinel"
     before = {
         path.relative_to(materialized).as_posix(): path.read_bytes()
@@ -299,7 +276,6 @@ def test_global_scope_registers_in_user_copilot_settings(
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, QUALIFIED_VERSION)
 
     result = CliRunner().invoke(
         cli,
@@ -325,7 +301,7 @@ def test_prune_retires_the_registration_for_an_orphaned_plugin(
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
-    assert _install(monkeypatch, project, version=QUALIFIED_VERSION).exit_code == 0
+    assert _install(monkeypatch, project).exit_code == 0
     _write_project(project, [])
     (project / "apm.lock.yaml").unlink()
 
@@ -346,7 +322,7 @@ def test_project_registration_contains_no_absolute_paths(
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
-    assert _install(monkeypatch, project, version=QUALIFIED_VERSION).exit_code == 0
+    assert _install(monkeypatch, project).exit_code == 0
 
     catalog_text = catalog_path_for(_modules(project)).read_text(encoding="utf-8")
     settings_text = _settings_path(project).read_text(encoding="utf-8")
@@ -367,7 +343,6 @@ def test_install_root_redirect_writes_the_registration_under_that_root(
     source = tmp_path / "source" / "sentinel"
     write_agent_plugin(source, name="sentinel")
     _write_project(workspace, [str(source)])
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, QUALIFIED_VERSION)
     monkeypatch.chdir(workspace)
 
     result = CliRunner().invoke(

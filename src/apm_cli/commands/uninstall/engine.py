@@ -1,6 +1,7 @@
 """APM uninstall engine  -- validation, removal, and cleanup helpers."""
 
 import builtins
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -998,14 +999,14 @@ def _preflight_uninstall_survivors(
 ) -> list[tuple[DependencyReference, object]]:
     """Validate every reintegration survivor before uninstall can mutate state."""
     from ...agent_plugins.errors import (
-        AgentPluginClientUnavailableError,
+        AgentPluginTargetExcludedError,
         enforce_agent_plugin_deployment_boundary,
         preflight_reintegration_survivors,
     )
     from ...models.apm_package import PackageInfo
     from ...models.validation import validate_apm_package
 
-    warn = logger.warning if logger is not None else None
+    del logger  # Nothing to warn about: target exclusion is routine and silent.
     excluded = excluded_keys or set()
     if source_root is not None:
         for entry in surviving_dependencies:
@@ -1017,7 +1018,7 @@ def _preflight_uninstall_survivors(
                 source_path = (source_root / source_path).resolve()
             validation = validate_apm_package(source_path, source_path=source_path)
             if validation.is_valid and validation.package is not None:
-                try:
+                with contextlib.suppress(AgentPluginTargetExcludedError):
                     enforce_agent_plugin_deployment_boundary(
                         PackageInfo(
                             package=validation.package,
@@ -1026,15 +1027,6 @@ def _preflight_uninstall_survivors(
                             package_type=validation.package_type,
                         )
                     )
-                except AgentPluginClientUnavailableError:
-                    if warn is not None:
-                        warn(
-                            "GitHub Copilot plugin registration for "
-                            f"'{dep_ref.get_identity()}' could not be refreshed "
-                            "(Copilot CLI is absent or below the required version); "
-                            "its existing registration is left unchanged. To remove "
-                            f"it, run 'apm uninstall {dep_ref.get_identity()}'."
-                        )
     if lockfile is not None:
         refs = [
             dependency.to_dependency_ref()
@@ -1054,7 +1046,6 @@ def _preflight_uninstall_survivors(
         installed_refs,
         modules_dir,
         require_valid_installed=require_valid_installed,
-        on_warning=warn,
     )
 
 

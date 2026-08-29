@@ -35,7 +35,6 @@ import json
 import os
 import platform
 import pwd
-import re
 import subprocess
 import tarfile
 import urllib.request
@@ -200,23 +199,6 @@ def copilot_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
     pytest.skip("Pinned Copilot artifact layout is not recognized")
 
 
-@pytest.fixture(scope="module")
-def copilot_version(copilot_binary: Path, tmp_path_factory: pytest.TempPathFactory) -> str:
-    """Detect the real client version so the capability floor is honored.
-
-    ``tests/conftest.py`` pins ``APM_COPILOT_CLI_VERSION=0.0.0`` suite-wide;
-    the native-registration tests must deliberately override that to the
-    detected client version, else the ``>= 1.0.81-8`` floor rejects the
-    registration the whole test is meant to exercise.
-    """
-    home = tmp_path_factory.mktemp("version-home")
-    proc = _run_copilot(copilot_binary, home, home, "--version")
-    text = proc.stdout or proc.stderr
-    match = re.search(r"\d+\.\d+\.\d+(?:-\d+)?", text)
-    assert match is not None, f"could not parse Copilot version from: {text!r}"
-    return match.group(0)
-
-
 def _write_author_plugin(project: Path, *, name: str, marker: str) -> Path:
     """Author an Agent Plugins 1.0 source project with a real stdio MCP server.
 
@@ -277,7 +259,7 @@ def _write_author_plugin(project: Path, *, name: str, marker: str) -> Path:
 
 
 @pytest.fixture(scope="module")
-def packed_bundle(copilot_version: str, tmp_path_factory: pytest.TempPathFactory) -> dict:
+def packed_bundle(tmp_path_factory: pytest.TempPathFactory) -> dict:
     """Pack the author project once and share the read-only bundle.
 
     Returns the packed bundle directory plus the plugin name. Building this
@@ -288,7 +270,6 @@ def packed_bundle(copilot_version: str, tmp_path_factory: pytest.TempPathFactory
     author = root / "apm-qualification"
     _write_author_plugin(author, name="apm-qualification", marker="MARK_V1")
     with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("APM_COPILOT_CLI_VERSION", copilot_version)
         mp.chdir(author)
         # The author install only needs to resolve the self-defined MCP server
         # into ``apm.lock.yaml`` so pack can project it. ``--target claude``
@@ -348,7 +329,6 @@ def _read_jsonc(path: Path) -> dict:
 def _install_consumer(
     consumer: Path,
     dependency: Path,
-    version: str,
     monkeypatch: pytest.MonkeyPatch,
     *,
     name: str = "qualification-consumer",
@@ -366,7 +346,6 @@ def _install_consumer(
         ),
         encoding="ascii",
     )
-    monkeypatch.setenv("APM_COPILOT_CLI_VERSION", version)
     monkeypatch.chdir(consumer)
     runner = CliRunner()
     result = runner.invoke(
@@ -449,14 +428,13 @@ def test_packed_bundle_is_canonical_agent_plugin(packed_bundle: dict) -> None:
 
 def test_project_install_loads_live_in_plain_copilot(
     copilot_binary: Path,
-    copilot_version: str,
     packed_bundle: dict,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """pack -> declare -> install -> plain Copilot loads it live (project scope)."""
     consumer = tmp_path / "consumer"
-    _install_consumer(consumer, packed_bundle["dir"], copilot_version, monkeypatch)
+    _install_consumer(consumer, packed_bundle["dir"], monkeypatch)
 
     modules = consumer / "apm_modules"
     settings = json.loads(
@@ -519,14 +497,13 @@ def test_project_install_loads_live_in_plain_copilot(
 
 def test_mcp_handshake_reaches_plugin_stdio_server(
     copilot_binary: Path,
-    copilot_version: str,
     packed_bundle: dict,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A real Copilot session speaks JSON-RPC to the plugin's MCP server."""
     consumer = tmp_path / "consumer"
-    _install_consumer(consumer, packed_bundle["dir"], copilot_version, monkeypatch)
+    _install_consumer(consumer, packed_bundle["dir"], monkeypatch)
     _make_git_root(consumer)
     home = tmp_path / "copilot-home"
     _seed_trust(home, consumer)
@@ -564,7 +541,6 @@ def test_mcp_handshake_reaches_plugin_stdio_server(
 
 def test_global_install_visible_from_unrelated_directory(
     copilot_binary: Path,
-    copilot_version: str,
     packed_bundle: dict,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -592,7 +568,6 @@ def test_global_install_visible_from_unrelated_directory(
     )
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("COPILOT_HOME", str(copilot_home))
-    monkeypatch.setenv("APM_COPILOT_CLI_VERSION", copilot_version)
     workdir = tmp_path / "workdir"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
@@ -624,14 +599,13 @@ def test_global_install_visible_from_unrelated_directory(
 
 def test_apm_lifecycle_and_copilot_uninstall_semantics(
     copilot_binary: Path,
-    copilot_version: str,
     packed_bundle: dict,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """deps list, idempotent re-install, prune, uninstall -> Copilot drops it."""
     consumer = tmp_path / "consumer"
-    runner = _install_consumer(consumer, packed_bundle["dir"], copilot_version, monkeypatch)
+    runner = _install_consumer(consumer, packed_bundle["dir"], monkeypatch)
     catalog = catalog_path_for(consumer / "apm_modules")
 
     listed = runner.invoke(cli, ["deps", "list"], catch_exceptions=False)
@@ -684,7 +658,6 @@ def test_apm_lifecycle_and_copilot_uninstall_semantics(
 
 def test_direct_and_transitive_plugins_load_from_one_catalog(
     copilot_binary: Path,
-    copilot_version: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -695,7 +668,7 @@ def test_direct_and_transitive_plugins_load_from_one_catalog(
     _write_source_plugin(direct, name="plugin-a", marker="AMARK", apm_deps=[str(leaf)])
 
     consumer = tmp_path / "consumer"
-    _install_consumer(consumer, direct, copilot_version, monkeypatch, name="transitive-consumer")
+    _install_consumer(consumer, direct, monkeypatch, name="transitive-consumer")
 
     catalog = json.loads(catalog_path_for(consumer / "apm_modules").read_text(encoding="utf-8"))
     assert catalog["name"] == "apm"

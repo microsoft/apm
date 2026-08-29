@@ -54,8 +54,9 @@ directories) for producers targeting Agent-Plugin-aware hosts beyond APM.
 That format is stricter -- it fails before writing anything if your source
 has agents, commands, instructions, extensions, hooks, or LSP config it
 cannot represent. To install one, declare it as a dependency in `apm.yml`
-and run `apm install --target copilot`, which registers it natively with
-GitHub Copilot CLI 1.0.81 or newer (floor `1.0.81-8`); see
+and run `apm install --target copilot`, which registers it natively without
+locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer is required
+when loading the projection; see
 [Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 Add `--archive` to get a single archive (`.zip` by default; use `--archive-format tar.gz`
@@ -299,9 +300,10 @@ apm pack --archive
 
 **Install Agent Plugin output through the declarative route.** `apm pack --format agent-plugin`
 produces a valid, portable Agent Plugins v1 bundle. Declare it as a dependency
-in `apm.yml` and run `apm install --target copilot`, which registers it
-natively with GitHub Copilot CLI 1.0.81 or newer (floor `1.0.81-8`); the imperative `apm install <bundle>`
-route fails closed for Agent Plugins. See
+in `apm.yml` and run `apm install --target copilot`, which registers it without
+locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer is required
+when loading the projection; the imperative `apm install <bundle>` route fails
+closed for Agent Plugins. See
 [Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 **Do not set `--target`.** The flag is deprecated. Bundles are

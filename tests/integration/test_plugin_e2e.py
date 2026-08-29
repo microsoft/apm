@@ -742,8 +742,17 @@ class TestPluginNetworkE2E:
             skill_dirs = [d for d in skills_dir.iterdir() if d.is_dir()]
             assert len(skill_dirs) > 0, "At least one skill should be scattered"
 
-    def test_native_agent_plugin_fails_closed(self, apm_binary_path, temp_project):
-        """A native Agent Plugin cannot silently deploy through legacy adapters."""
+    def test_native_agent_plugin_installs_when_target_is_copilot_regardless_of_binary(
+        self, apm_binary_path, temp_project
+    ):
+        """A native Agent Plugin materializes for the 'copilot' target.
+
+        Admission is a pure function of the resolved target set -- ``temp_project``
+        has a ``.github/`` directory so ``copilot`` is an active target -- and
+        never depends on whether a Copilot binary exists on this host or which
+        version it reports. So this install must succeed even though the test
+        runner has no Copilot CLI installed.
+        """
         result = subprocess.run(
             [apm_binary_path, "install", self.NATIVE_PLUGIN_REF, "--verbose"],
             capture_output=True,
@@ -751,9 +760,17 @@ class TestPluginNetworkE2E:
             cwd=str(temp_project),
             timeout=300,
         )
-        assert result.returncode != 0
+        assert result.returncode == 0, (
+            f"apm install failed (rc={result.returncode}):\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
         combined = result.stdout + result.stderr
-        assert "no native harness is binary-qualified" in combined
+        assert "no native harness is binary-qualified" not in combined
+        assert "does not include 'copilot'" not in combined
+        settings_path = temp_project / ".github" / "copilot" / "settings.local.json"
+        assert settings_path.exists(), (
+            f"Expected native Copilot marketplace registration at {settings_path}"
+        )
 
     # ---- Test 2: deps list — no false orphans ---------------------------
 

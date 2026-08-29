@@ -126,22 +126,18 @@ def _isolate_discovery_state():
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_copilot_plugin_capability(monkeypatch):
-    """Pin the Copilot CLI capability probe so tests never read the host.
+def _hermetic_copilot_plugin_capability():
+    """Reset native Agent Plugin registration state between tests.
 
-    Native Agent Plugin registration is gated on the installed Copilot CLI
-    version. Without this pin, a developer machine running a qualified
-    client would silently flip the deployment boundary from fail-closed to
-    admitted. Tests that exercise the native path opt in by overriding
-    ``APM_COPILOT_CLI_VERSION`` themselves.
+    Admission is a pure function of resolved target names -- it never reads
+    the host (no binary probe, no version, no environment override), so
+    there is nothing to pin here. This fixture only resets the published
+    capability contextvar so one test's ``activate_native_registration``
+    call can never leak into the next.
     """
     from apm_cli.copilot_plugins.capability import _ACTIVE as _capability_var
-    from apm_cli.copilot_plugins.capability import (
-        VERSION_OVERRIDE_ENV,
-        reset_native_registration,
-    )
+    from apm_cli.copilot_plugins.capability import reset_native_registration
 
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, "0.0.0")
     token = _capability_var.set(None)
     try:
         yield

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,8 +13,9 @@ AGENT_PLUGIN_RECOVERY = (
     "Use 'apm pack --claude-plugin' or ask the publisher for a legacy-compatible package."
 )
 AGENT_PLUGIN_DEPLOYMENT_BLOCKED = (
-    "Agent Plugins v1.0.0 deployment is blocked because no native harness "
-    "is binary-qualified. " + AGENT_PLUGIN_RECOVERY
+    "Agent Plugins v1.0.0 deployment is blocked because this install's "
+    "effective target selection does not include 'copilot'. "
+    "Re-run with --target copilot. " + AGENT_PLUGIN_RECOVERY
 )
 AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED = (
     "Agent Plugins v1.0.0 packages cannot be installed through the imperative "
@@ -57,29 +58,16 @@ class AgentPluginDeploymentBoundaryError(AgentPluginError):
     """Raised when native Agent Plugin content reaches a deployment boundary."""
 
 
-class AgentPluginClientUnavailableError(AgentPluginDeploymentBoundaryError):
-    """Raised when a valid native plugin cannot be refreshed right now.
-
-    The plugin's canonical IR is present and valid, but the GitHub Copilot
-    client is absent from PATH or below the qualified floor, so its native
-    registration cannot be re-applied. For the package being actively
-    integrated this is still fatal, but for an already-installed SURVIVOR it is
-    recoverable: its existing registration bytes are left untouched and the
-    command continues.
-    """
-
-
-class AgentPluginTargetExcludedError(AgentPluginClientUnavailableError):
+class AgentPluginTargetExcludedError(AgentPluginDeploymentBoundaryError):
     """Raised when this install simply does not target the ``copilot`` target.
 
-    Distinct from :class:`AgentPluginClientUnavailableError`: the client may be
-    perfectly qualified, but the effective target set (project-level or
-    per-dependency) never selected ``copilot``, so native registration is not
-    applicable. This is NON-fatal -- the package is skipped with one warning and
-    the rest of the batch installs -- whereas a copilot-targeted install whose
-    client is absent/unqualified stays fatal. Subclasses
-    :class:`AgentPluginClientUnavailableError` so survivor handling, which
-    already leaves such packages untouched, needs no change.
+    The effective target set (project-level or per-dependency) never selected
+    ``copilot``, so native registration is not applicable. This is NON-fatal --
+    the package is skipped with one warning and the rest of the batch installs
+    -- whereas missing canonical IR or the imperative bundle route stays fatal.
+    Admission never depends on whether a Copilot binary exists or which
+    version it reports, so this is the ONLY way native registration is
+    unsupported for a canonical Agent Plugin.
     """
 
 
@@ -88,13 +76,14 @@ def enforce_agent_plugin_deployment_boundary(
     *,
     bundle_info: Any | None = None,
 ) -> None:
-    """Block native Agent Plugin deployment unless a qualified harness exists.
+    """Block native Agent Plugin deployment unless the target admits it.
 
     A native Agent Plugin is admitted only when the canonical capability owner
-    (:mod:`apm_cli.copilot_plugins.capability`) reports that GitHub Copilot can
-    load it live from APM's materialization. Everything else -- an unqualified
-    client, a non-Copilot target, a legacy bundle route, or missing canonical
-    IR -- stays fail-closed with a precise reason.
+    (:mod:`apm_cli.copilot_plugins.capability`) reports that the effective
+    targets include ``copilot`` -- never based on whether a Copilot binary
+    exists or which version it reports. Everything else -- a non-Copilot
+    target, a legacy bundle route, or missing canonical IR -- stays fail-closed
+    with a precise reason.
     """
     from apm_cli.bundle.formats import BundleFormat
     from apm_cli.copilot_plugins.capability import current_native_registration
@@ -115,16 +104,14 @@ def enforce_agent_plugin_deployment_boundary(
     capability = current_native_registration()
     if capability is not None and capability.supported:
         return
-    # Not supported. Distinguish "this install never selected the copilot
-    # target" (skippable, non-fatal) from "copilot WAS selected but its client
-    # is absent or below the floor" (fatal for the package being integrated).
-    # Reading copilot_targeted is probe-free, and reading .supported/.reason for
-    # a non-targeted capability short-circuits before the client probe.
-    if capability is not None and not getattr(capability, "copilot_targeted", True):
-        raise AgentPluginTargetExcludedError(capability.reason or AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
-    if capability is not None and capability.reason:
-        raise AgentPluginClientUnavailableError(capability.reason)
-    raise AgentPluginClientUnavailableError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)
+    # Not supported: the only reason admission is unsupported is that the
+    # effective target set never selected ``copilot`` -- admission never
+    # depends on whether a Copilot binary exists or which version it
+    # reports, so there is nothing else to distinguish here. This is
+    # skippable and non-fatal for the batch.
+    raise AgentPluginTargetExcludedError(
+        capability.reason if capability is not None else AGENT_PLUGIN_DEPLOYMENT_BLOCKED
+    )
 
 
 def preflight_reintegration_survivors(
@@ -132,18 +119,17 @@ def preflight_reintegration_survivors(
     modules_dir: Path,
     *,
     require_valid_installed: bool = False,
-    on_warning: Callable[[str], None] | None = None,
 ) -> list[tuple[DependencyReference, PackageInfo]]:
     """Validate installed survivors before clear-then-rebuild integration.
 
     A survivor is a package NOT being acted on. If such a package is a native
-    Agent Plugin whose registration merely cannot be refreshed right now (the
-    Copilot client is absent or below the floor), aborting the whole command
-    would brick every unrelated ``apm install`` / ``update`` / ``uninstall``.
-    Instead the survivor is dropped from the rebuild plan -- its existing
-    registration bytes are left untouched -- and a warning naming the escape
-    route is surfaced. Structural corruption (missing IR, wrong route) is still
-    fatal.
+    Agent Plugin whose effective targets simply do not select ``copilot``, it
+    is dropped from the rebuild plan -- its existing registration bytes (if
+    any) are left untouched -- rather than aborting every unrelated
+    ``apm install`` / ``update`` / ``uninstall``. This is routine and silent:
+    admission never depends on whether a Copilot binary exists, so there is no
+    "cannot be refreshed right now" state to warn about. Structural
+    corruption (missing IR, wrong route) is still fatal.
     """
     from apm_cli.models.apm_package import build_installed_package_info
 
@@ -170,15 +156,7 @@ def preflight_reintegration_survivors(
             continue
         try:
             enforce_agent_plugin_deployment_boundary(package_info)
-        except AgentPluginClientUnavailableError:
-            identity = dependency.get_identity()
-            if on_warning is not None:
-                on_warning(
-                    f"GitHub Copilot plugin registration for '{identity}' could not "
-                    "be refreshed (Copilot CLI is absent or below the required "
-                    "version); its existing registration is left unchanged. To "
-                    f"remove it, run 'apm uninstall {identity}' or drop it from apm.yml."
-                )
+        except AgentPluginTargetExcludedError:
             continue
         plan.append((dependency, package_info))
     return plan

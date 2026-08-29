@@ -649,7 +649,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # this guard: it publishes the capability so the Agent Plugin
         # deployment boundary can admit a verified plugin (issue #2703). In
         # lockfile_only mode no primitives are deployed, so no native plugin
-        # can be admitted and the client probe would be pure waste.
+        # can be admitted and resolving the capability would be pure waste.
         # --------------------------------------------------------------
         if not lockfile_only:
             from .phases import copilot_plugins as _copilot_plugins_phase

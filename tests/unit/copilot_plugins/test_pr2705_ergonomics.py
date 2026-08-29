@@ -1,9 +1,9 @@
 """CLI output / error-ergonomics folds for PR #2705.
 
 Each test pins one user-facing string guard added while folding the
-cli-logging-expert + devx-ux-expert advisory. They are hermetic: the Copilot
-client version is pinned through ``VERSION_OVERRIDE_ENV`` and no real
-``copilot`` binary ever runs.
+cli-logging-expert + devx-ux-expert advisory. They are hermetic: admission is
+a pure function of the ``--target copilot`` selection and no real ``copilot``
+binary ever runs.
 """
 
 from __future__ import annotations
@@ -15,10 +15,9 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.copilot_plugins.capability import VERSION_OVERRIDE_ENV
 from apm_cli.copilot_plugins.constants import EXTRA_MARKETPLACES_KEY
 
-from ._builders import QUALIFIED_VERSION, write_agent_plugin
+from ._builders import write_agent_plugin
 
 pytestmark = pytest.mark.component
 
@@ -49,8 +48,7 @@ def _write_project(project: Path, dependencies: list) -> None:
     )
 
 
-def _install(monkeypatch, project: Path, *args: str, version: str = QUALIFIED_VERSION):
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, version)
+def _install(monkeypatch, project: Path, *args: str):
     monkeypatch.chdir(project)
     return CliRunner().invoke(
         cli,
@@ -120,7 +118,6 @@ def test_dry_run_announces_the_settings_write(
     assert _install(monkeypatch, project).exit_code == 0
     assert _settings_path(project).exists()
 
-    monkeypatch.setenv(VERSION_OVERRIDE_ENV, QUALIFIED_VERSION)
     monkeypatch.chdir(project)
     result = CliRunner().invoke(cli, ["prune", "--dry-run"], catch_exceptions=False)
 

@@ -15,15 +15,12 @@ from .capability import (
     activate_native_registration,
     admits_native_plugin,
     current_native_registration,
-    is_qualified_client_version,
-    probe_copilot_cli_version,
     reset_native_registration,
     resolve_native_registration_capability,
 )
 from .catalog import NativePluginEntry, render_catalog
 from .constants import (
     APM_MARKETPLACE_NAME,
-    COPILOT_LIVE_PLUGIN_MIN_VERSION,
     MARKETPLACE_MANIFEST_RELATIVE,
     REGISTRATION_LEDGER_RELATIVE,
 )
@@ -38,7 +35,6 @@ from .settings import CopilotSettingsCollisionError
 
 __all__ = [
     "APM_MARKETPLACE_NAME",
-    "COPILOT_LIVE_PLUGIN_MIN_VERSION",
     "MARKETPLACE_MANIFEST_RELATIVE",
     "REGISTRATION_LEDGER_RELATIVE",
     "CopilotPluginSyncResult",
@@ -50,9 +46,7 @@ __all__ = [
     "admits_native_plugin",
     "catalog_path_for",
     "current_native_registration",
-    "is_qualified_client_version",
     "ledger_path_for",
-    "probe_copilot_cli_version",
     "render_catalog",
     "reset_native_registration",
     "resolve_native_registration_capability",

@@ -7,14 +7,9 @@ whole install pipeline, so each mutation-break gate is fast and precise.
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from apm_cli.copilot_plugins.capability import (
-    resolve_native_registration_capability,
-    unqualified_client_reason,
-)
 from apm_cli.copilot_plugins.catalog import NativePluginEntry
 from apm_cli.copilot_plugins.registrar import (
     ResolvedPluginCandidate,
@@ -120,48 +115,6 @@ def test_discover_drop_names_excluded_target_subset(tmp_path: Path) -> None:
 
     verbose = [msg for method, msg, _kw in logger.calls if method == "verbose_detail"]
     assert any("owner/claude-only" in msg and "copilot" in msg for msg in verbose)
-
-
-# ---------------------------------------------------------------------------
-# Item 4: a missing client is a distinct problem from a too-old client.
-# ---------------------------------------------------------------------------
-
-
-def test_undetected_client_reason_names_installation_not_the_floor() -> None:
-    """No copilot on PATH => install guidance, not a version-floor complaint."""
-    capability = resolve_native_registration_capability(
-        [SimpleNamespace(name="copilot")], probe=lambda: None
-    )
-
-    assert capability.supported is False
-    assert capability.detected_version is None
-    assert "was not found on PATH" in capability.reason
-    assert "Install the GitHub Copilot CLI" in capability.reason
-    assert "not detected" not in capability.reason
-    # The floor message is reserved for a parsed-but-too-old version.
-    assert ">=1.0.81-8" not in capability.reason
-
-
-def test_too_old_client_reason_names_the_floor_and_upgrade() -> None:
-    """A parsed, too-old version keeps the floor + a single upgrade action."""
-    capability = resolve_native_registration_capability(
-        [SimpleNamespace(name="copilot")], probe=lambda: "1.0.80"
-    )
-
-    assert capability.supported is False
-    assert capability.detected_version == "1.0.80"
-    assert ">=1.0.81-8" in capability.reason
-    assert "Upgrade the GitHub Copilot CLI to 1.0.81 or newer." in capability.reason
-    # No producer-side repack advice on a consumer-side upgrade problem.
-    assert "apm pack" not in capability.reason
-
-
-def test_unqualified_reason_carries_no_repack_advice() -> None:
-    """The version-floor reason text itself never mentions repacking."""
-    reason = unqualified_client_reason("1.0.80")
-
-    assert "apm pack" not in reason
-    assert "legacy-compatible package" not in reason
 
 
 # ---------------------------------------------------------------------------

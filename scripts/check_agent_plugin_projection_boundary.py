@@ -124,13 +124,14 @@ def _raise_name(node: ast.Raise) -> str:
 
 
 # The boundary fails closed for the actively integrated package by raising the
-# deployment-boundary family. ``AgentPluginClientUnavailableError`` is a
-# subclass of ``AgentPluginDeploymentBoundaryError`` (a valid plugin whose
-# client cannot be refreshed right now); raising it is still a fail-closed
-# outcome for the active package, so both names are accepted here.
+# deployment-boundary family. ``AgentPluginTargetExcludedError`` is the sole
+# subclass of ``AgentPluginDeploymentBoundaryError``: admission is a pure
+# function of resolved targets, so "not targeted" is the only way native
+# registration is unsupported. Raising either name is a fail-closed outcome
+# for the active package.
 _FAIL_CLOSED_BOUNDARY_RAISES = (
     "AgentPluginDeploymentBoundaryError",
-    "AgentPluginClientUnavailableError",
+    "AgentPluginTargetExcludedError",
 )
 
 
@@ -1054,6 +1055,60 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
         violations.append(f"{projection_path}: projection must thaw canonical FrozenJson")
     if "APMPackage" in projection_calls:
         violations.append(f"{projection_path}: projection must not call APMPackage directly")
+
+    # Native admission must be a pure function of resolved target names: no
+    # Copilot binary/version coupling anywhere in the lifecycle that resolves
+    # or activates it, and exactly one function owns the resolution.
+    capability_path = source_root / "copilot_plugins" / "capability.py"
+    activate_phase_path = source_root / "install" / "phases" / "copilot_plugins.py"
+    _FORBIDDEN_DISCOVERY_MODULES = {"subprocess", "shutil"}
+    _FORBIDDEN_DISCOVERY_CALLS = {
+        "subprocess.run",
+        "subprocess.Popen",
+        "subprocess.check_output",
+        "subprocess.check_call",
+        "shutil.which",
+        "os.system",
+    }
+    for path in (capability_path, activate_phase_path):
+        tree = parsed.get(path)
+        if tree is None:
+            violations.append(f"{path}: required owner file is missing")
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] in _FORBIDDEN_DISCOVERY_MODULES:
+                        violations.append(
+                            f"{path}: must not import {alias.name} "
+                            "(no Copilot binary/version discovery)"
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                module_root = (node.module or "").split(".")[0]
+                if module_root in _FORBIDDEN_DISCOVERY_MODULES:
+                    violations.append(
+                        f"{path}: must not import from {node.module} "
+                        "(no Copilot binary/version discovery)"
+                    )
+        forbidden_hits = _function_calls(tree) & _FORBIDDEN_DISCOVERY_CALLS
+        if forbidden_hits:
+            violations.append(
+                f"{path}: must not call {sorted(forbidden_hits)} "
+                "(no Copilot binary/version discovery)"
+            )
+
+    resolver_owners = [
+        (path, node)
+        for path, tree in parsed.items()
+        for node in _functions(tree)
+        if node.name == "resolve_native_registration_capability"
+    ]
+    if len(resolver_owners) != 1 or resolver_owners[0][0] != capability_path:
+        violations.append(
+            f"{capability_path}: resolve_native_registration_capability must have "
+            "exactly one definition, owned by capability.py"
+        )
+
     return violations
 
 

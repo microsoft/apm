@@ -1984,7 +1984,6 @@ class HookIntegrator(BaseIntegrator):
             surviving_deps,
             project_root / APM_MODULES_DIR,
             require_valid_installed=True,
-            on_warning=_log.warning,
         )
         rebuild_plan = []
         for dep_ref, pkg_info in survivor_plan:

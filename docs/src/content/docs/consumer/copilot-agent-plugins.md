@@ -76,37 +76,23 @@ still converges on re-install.
   Copilot target -- that would load them twice.
 - It does not require `--plugin-dir`, a second `copilot plugin install`, or
   any pre-seeded folder trust.
+- It does not locate, execute, or version-check a Copilot binary during
+  install, update, restore, uninstall, or prune.
 - It never edits a marketplace file you authored.
 
 ## Requirements
 
-Native loading is qualified against stable GitHub Copilot CLI **1.0.81 or
-newer**. The exact capability floor remains `1.0.81-8`, the first build where a
-directory-marketplace plugin loads live from its real directory; stable
-`1.0.81` clears that SemVer floor. See the
+APM does not require Copilot to be installed when it materializes or registers
+the plugin. A canonical Agent Plugin is admitted when its effective targets
+include `copilot` and its integrity, security, and executable gates pass.
+
+Loading the generated projection is supported with stable GitHub Copilot CLI
+**1.0.81 or newer**. Older clients may copy plugins into private Copilot state
+outside APM ownership, so APM cannot guarantee that uninstall or prune removes
+those client-created copies. Upgrade the runtime before using the registration.
+See the
 [GitHub Copilot CLI releases](https://github.com/github/copilot-cli/releases).
-On anything older, APM fails the install closed:
-
-```
-[x] Agent Plugins v1.0.0 packages need GitHub Copilot CLI >=1.0.81-8, which
-    loads a directory marketplace live from its real directory; detected
-    1.0.80. Older clients copy the plugin into private Copilot state, so APM
-    refuses to install it there. Upgrade the GitHub Copilot CLI to 1.0.81 or
-    newer.
-```
-
-If no `copilot` binary is on `PATH` at all, the refusal names installation
-rather than an upgrade:
-
-```
-[x] GitHub Copilot CLI was not found on PATH, so APM cannot register Agent
-    Plugins v1.0.0 packages natively. Install the GitHub Copilot CLI (1.0.81
-    or newer), then re-run 'apm install --target copilot'.
-```
-
-Older clients would copy the plugin into global Copilot state and leave APM
-without a clean project lifecycle, so APM refuses instead of silently
-degrading. The same fail-closed rule applies to non-Copilot targets.
+Non-Copilot targets remain outside this native registration path.
 
 ## Lifecycle
 

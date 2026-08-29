@@ -8,9 +8,6 @@ APM_MARKETPLACE_NAME = "apm"
 APM_MARKETPLACE_OWNER = {"name": "APM", "email": "apm@users.noreply.github.com"}
 """Deterministic owner block written into the APM-owned catalog."""
 
-COPILOT_LIVE_PLUGIN_MIN_VERSION = "1.0.81-8"
-"""First Copilot CLI release that loads directory-marketplace plugins live."""
-
 MARKETPLACE_MANIFEST_RELATIVE = ".github/plugin/marketplace.json"
 """Catalog location relative to the APM marketplace root (``apm_modules``)."""
 
