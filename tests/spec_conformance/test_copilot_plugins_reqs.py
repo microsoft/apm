@@ -388,6 +388,7 @@ def test_native_lifecycle_registration_clauses_persist_in_spec() -> None:
         "MUST NOT silently repoint a ledger-recorded owner to a\ndifferent admitted transitive claimant",
         "MUST omit every ambiguous\nor changed-owner entry",
         "Removal MUST retire only entries in that consumer-owned rollback unit",
-        "Only admitted Agent Plugin dependencies participate in plugin-name claimant\n"
-        "selection and registration",
+        "A consumer MUST exclude from plugin-name claimant selection every Agent Plugin\n"
+        "dependency that did not pass the admission conditions above. It MUST NOT\n"
+        "register such a dependency",
     )

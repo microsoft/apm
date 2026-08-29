@@ -2592,8 +2592,9 @@ conditions above, without changing their
 `depth` and `resolved_by` lockfile fields defined in
 [Section 5.2](#52-per-entry-fields).
 
-Only admitted Agent Plugin dependencies participate in plugin-name claimant
-selection and registration. Among admitted dependencies that declare the same
+A consumer MUST exclude from plugin-name claimant selection every Agent Plugin
+dependency that did not pass the admission conditions above. It MUST NOT
+register such a dependency. Among admitted dependencies that declare the same
 plugin name, a directly declared dependency MUST win over a transitive
 dependency. Two admitted claimants at the same precedence MUST cause the
 aggregate registration to fail with an actionable diagnostic naming both
