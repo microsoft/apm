@@ -12,7 +12,11 @@ how to install it:
 | `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
 | `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
-| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot; APM does not require the runtime during install, while loading the projection requires supported Copilot CLI 1.0.81 or newer |
+| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; registered when effective targets include Copilot and admission gates pass. Excluded targets create no native registration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
+
+For Agent Plugins with the same declared name, a direct dependency wins over a
+transitive dependency. APM refuses same-precedence collisions and does not
+silently repoint a ledger-recorded owner to a transitive claimant.
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
 also uses APM dependency resolution. APM installs it as a skill -- it

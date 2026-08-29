@@ -42,7 +42,7 @@ into your Copilot settings, which stays yours:
 | Path | Owner | Purpose |
 | --- | --- | --- |
 | `apm_modules/.github/plugin/marketplace.json` | APM (generated) | One catalog listing every installed Agent Plugin, each pointing at its real directory |
-| `apm_modules/.github/plugin/apm-registration.json` | APM (generated) | Ownership ledger -- the only record of which settings keys APM wrote, so uninstall retires exactly those and nothing else |
+| `apm_modules/.github/plugin/apm-registration.json` | APM (generated) | Primary ownership ledger for the settings keys APM manages |
 | `.github/copilot/settings.local.json` | You (merge-only) | APM adds two namespaced keys: `extraKnownMarketplaces.apm` and `enabledPlugins["<plugin>@apm"]` |
 
 ```json title=".github/copilot/settings.local.json"
@@ -59,14 +59,22 @@ clones, worktrees, and moved checkouts. Global installs (`apm install -g`)
 write the same two keys to `$COPILOT_HOME/settings.json` (unset or blank:
 `~/.copilot/settings.json`) with an absolute path under `~/.apm/apm_modules`.
 
-APM merges only those two keys and preserves everything else byte-for-byte.
+APM preserves unrelated JSON keys and values semantically. Its stable
+serialization may reformat the settings document.
 The install fails closed only when a pre-existing `apm` marketplace entry
 points somewhere other than APM's materialization root and the ledger does not
 record APM as its owner. An entry that already matches what APM would write is
 re-adopted silently, ledger or not. The `<plugin>@apm` enabled keys sit in
 APM's namespace: once APM owns the `apm` marketplace it sets the ones it needs
 and retires any leftover `@apm` key, so a lost ledger (`rm -rf apm_modules`)
-still converges on re-install.
+still converges on re-install. Do not create manual `*@apm` activation keys;
+APM reconciliation may retire them. Keys using another marketplace suffix are
+preserved.
+
+If two dependencies declare the same plugin name, a direct dependency wins over
+a transitive dependency. Two claimants at the same precedence fail with an
+actionable collision instead of registering either one. A transitive dependency
+cannot silently replace the owner recorded in APM's ledger.
 
 ## What APM does not do
 
@@ -93,6 +101,8 @@ those client-created copies. Upgrade the runtime before using the registration.
 See the
 [GitHub Copilot CLI releases](https://github.com/github/copilot-cli/releases).
 Non-Copilot targets remain outside this native registration path.
+APM may still acquire and lock the dependency, but it creates no Copilot
+catalog, ledger, settings entry, or loose primitive projection for it.
 
 ## Lifecycle
 
@@ -121,18 +131,17 @@ is not a collision on its own: as long as the `apm` marketplace still matches,
 the next install re-adopts it and regenerates the ledger, so
 `rm -rf apm_modules && apm install` recovers with no hand-editing.
 
-**The merge fails on a settings file with comments.** APM rewrites the Copilot
-settings document as 2-space JSON, so a file containing comments (JSONC) is not
-valid JSON. The merge fails closed with an explicit message -- and no packages
-are installed -- instead of discarding your comments. Fix the file (convert it
-to plain JSON) or delete it, then re-run `apm install`.
+**The merge fails on invalid JSON or comments.** APM writes stable 2-space JSON,
+so JSONC comments are not supported. Invalid JSON fails closed with an explicit
+message and the original settings file is not overwritten. Fix the file
+(convert it to plain JSON) or delete it, then re-run `apm install`.
 
 ## Why Copilot first
 
-GitHub Copilot is the first harness to expose a machine-verifiable native
-plugin lifecycle, which is why APM can register plugins with it live. APM is
-vendor-neutral: a sibling registrar can be contributed for any harness that
-ships an equivalent lifecycle.
+GitHub Copilot is the first harness for which APM qualifies a native plugin
+lifecycle with a pinned real-binary release test. APM is vendor-neutral: a
+sibling registrar can be contributed for any harness with an equivalent
+qualified projection.
 
 ## See also
 

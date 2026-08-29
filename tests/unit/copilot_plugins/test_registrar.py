@@ -156,6 +156,35 @@ def test_same_precedence_plugin_name_collision_is_refused(tmp_path: Path) -> Non
     assert not _settings(project).is_file()
 
 
+def test_advisory_resync_omits_same_precedence_plugin_name_collisions(
+    tmp_path: Path,
+) -> None:
+    """Non-blocking reconciliation still refuses every ambiguous claimant."""
+    project, modules = _project(tmp_path)
+    for owner in ("a-owner", "b-owner", "c-owner"):
+        write_agent_plugin(modules / owner / "pkg", name="shared-plugin")
+
+    result = _sync(
+        project,
+        modules,
+        [
+            ResolvedPluginCandidate(
+                f"{owner}/pkg",
+                modules / owner / "pkg",
+                direct=False,
+            )
+            for owner in ("a-owner", "b-owner", "c-owner")
+        ],
+        strict=False,
+    )
+
+    assert result.entries == []
+    assert len(result.collisions) == 2
+    assert not catalog_path_for(modules).exists()
+    assert not ledger_path_for(modules).exists()
+    assert not _settings(project).exists()
+
+
 def test_legacy_packages_are_not_registered_natively(tmp_path: Path) -> None:
     """A mixed graph registers only exact Agent Plugins."""
     from ._builders import write_legacy_package
@@ -214,22 +243,17 @@ def test_global_scope_records_an_absolute_marketplace_path(
 
 
 def test_unrelated_user_settings_survive_the_merge(tmp_path: Path) -> None:
-    """APM owns two namespaced keys and touches nothing else."""
+    """APM preserves unrelated values while stable serialization may reformat."""
     project, modules = _project(tmp_path)
     write_agent_plugin(modules / "pkg", name="portable-plugin")
     settings_path = _settings(project)
     settings_path.parent.mkdir(parents=True)
-    settings_path.write_text(
-        json.dumps(
-            {
-                "banner": "keep me",
-                EXTRA_MARKETPLACES_KEY: {"team": {"source": {"source": "directory", "path": "x"}}},
-                ENABLED_PLUGINS_KEY: {"team-plugin@team": True},
-            },
-            indent=2,
-        ),
-        encoding="ascii",
+    original = (
+        '{"banner":"keep me","extraKnownMarketplaces":{"team":{"source":'
+        '{"source":"directory","path":"x"}}},"enabledPlugins":'
+        '{"team-plugin@team":true}}'
     )
+    settings_path.write_text(original, encoding="ascii")
 
     _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
 
@@ -240,6 +264,7 @@ def test_unrelated_user_settings_survive_the_merge(tmp_path: Path) -> None:
     }
     assert settings[ENABLED_PLUGINS_KEY]["team-plugin@team"] is True
     assert settings[ENABLED_PLUGINS_KEY]["portable-plugin@apm"] is True
+    assert settings_path.read_text(encoding="ascii") != original
 
 
 def test_foreign_apm_marketplace_entry_is_a_precise_collision(tmp_path: Path) -> None:
@@ -427,8 +452,8 @@ def test_unqualified_capability_writes_nothing_at_all(tmp_path: Path) -> None:
     assert not _settings(project).exists()
 
 
-def test_capability_regression_retracts_an_existing_registration(tmp_path: Path) -> None:
-    """Downgrading the client retracts APM's rows instead of leaving them live."""
+def test_target_exclusion_retracts_an_existing_registration(tmp_path: Path) -> None:
+    """Excluding Copilot retracts APM's rows without inspecting a runtime."""
     project, modules = _project(tmp_path)
     write_agent_plugin(modules / "pkg", name="portable-plugin")
     _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
@@ -444,40 +469,43 @@ def test_capability_regression_retracts_an_existing_registration(tmp_path: Path)
     assert read_json(_settings(project)) == {}
 
 
-def test_settings_write_failure_rolls_back_catalog_and_ledger(
+def test_direct_owner_promotion_write_failure_rolls_back_registration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A partial registration is never left behind."""
+    """A failed direct-over-transitive promotion leaves the old owner intact."""
     project, modules = _project(tmp_path)
-    write_agent_plugin(modules / "kept", name="kept-plugin")
-    _sync(project, modules, [ResolvedPluginCandidate("kept", modules / "kept")])
+    write_agent_plugin(modules / "transitive", name="shared-plugin")
+    _sync(
+        project,
+        modules,
+        [ResolvedPluginCandidate("transitive", modules / "transitive", direct=False)],
+    )
     catalog_before = catalog_path_for(modules).read_bytes()
     ledger_before = ledger_path_for(modules).read_bytes()
-    write_agent_plugin(modules / "added", name="added-plugin")
+    settings_before = _settings(project).read_bytes()
+    write_agent_plugin(modules / "direct", name="shared-plugin")
 
     import apm_cli.copilot_plugins.registrar as registrar_mod
 
     original_atomic = registrar_mod.atomic_write_text
 
     def _atomic(path, text, **kwargs):
-        if path.name == "settings.local.json":
-            raise OSError("settings write blocked")
+        if path == ledger_path_for(modules):
+            raise OSError("ledger write blocked")
         return original_atomic(path, text, **kwargs)
 
     monkeypatch.setattr(registrar_mod, "atomic_write_text", _atomic)
 
-    with pytest.raises(OSError, match=r"settings write blocked"):
+    with pytest.raises(OSError, match=r"ledger write blocked"):
         _sync(
             project,
             modules,
-            [
-                ResolvedPluginCandidate("kept", modules / "kept"),
-                ResolvedPluginCandidate("added", modules / "added"),
-            ],
+            [ResolvedPluginCandidate("direct", modules / "direct", direct=True)],
         )
 
     assert catalog_path_for(modules).read_bytes() == catalog_before
     assert ledger_path_for(modules).read_bytes() == ledger_before
+    assert _settings(project).read_bytes() == settings_before
 
 
 def test_ledger_records_ownership_and_drives_status(tmp_path: Path) -> None:
@@ -515,6 +543,27 @@ def test_transitive_dependency_cannot_repoint_a_recorded_registration(
             modules,
             [ResolvedPluginCandidate("a-owner/pkg", modules / "a-owner" / "pkg", direct=False)],
         )
+
+
+def test_advisory_resync_drops_a_transitive_owner_repoint(tmp_path: Path) -> None:
+    """Cleanup may continue after a collision but cannot commit the new owner."""
+    project, modules = _project(tmp_path)
+    write_agent_plugin(modules / "owner", name="shared-plugin")
+    _sync(project, modules, [ResolvedPluginCandidate("owner", modules / "owner")])
+    write_agent_plugin(modules / "claimant", name="shared-plugin")
+
+    result = _sync(
+        project,
+        modules,
+        [ResolvedPluginCandidate("claimant", modules / "claimant", direct=False)],
+        strict=False,
+    )
+
+    assert result.entries == []
+    assert len(result.collisions) == 1
+    assert not catalog_path_for(modules).exists()
+    assert not ledger_path_for(modules).exists()
+    assert read_json(_settings(project)) == {}
 
 
 def test_shared_project_settings_are_reused_when_apm_already_owns_them(

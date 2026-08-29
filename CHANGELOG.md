@@ -13,7 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   packages natively: the plugin stays whole under `apm_modules/` and GitHub
   Copilot loads it live -- no copy, no `--plugin-dir`. APM does not require or
   inspect a Copilot runtime during install; stable Copilot CLI `1.0.81` or newer
-  is the supported runtime for loading the projection. (closes #2703)
+  is the supported runtime for loading the projection. Target exclusion keeps
+  dependency materialization opaque without creating Copilot registration, and
+  APM reserves the exact `apm` / `@apm` namespace while preserving unrelated
+  settings values semantically. (closes #2703)
 
 ## [0.29.0] - 2026-08-26
 

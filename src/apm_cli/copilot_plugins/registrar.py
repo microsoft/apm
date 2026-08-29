@@ -238,6 +238,7 @@ def build_native_plugin_entries(
     entries: list[NativePluginEntry] = []
     collisions: list[str] = []
     claimed: dict[str, NativePluginEntry] = {}
+    ambiguous_names: set[str] = set()
     for candidate, plugin in routed:
         try:
             entry = build_entry(
@@ -248,6 +249,12 @@ def build_native_plugin_entries(
             )
         except CatalogSourceError as exc:
             _drop(candidate.dependency_key, f"its catalog entry could not be built ({exc})")
+            continue
+        if entry.plugin_name in ambiguous_names:
+            collisions.append(
+                f"Agent Plugin name '{entry.plugin_name}' has multiple claimants at the "
+                f"same precedence; skipping {entry.dependency_key}."
+            )
             continue
         previous = claimed.get(entry.plugin_name)
         if previous is not None:
@@ -267,12 +274,16 @@ def build_native_plugin_entries(
                 "precedence; refusing to register an ambiguous plugin name. "
                 "Rename one plugin so both can register.",
             )
+            entries.remove(previous)
+            claimed.pop(entry.plugin_name)
+            ambiguous_names.add(entry.plugin_name)
             continue
         claimed[entry.plugin_name] = entry
         entries.append(entry)
 
     ordered_entries = order_entries(entries)
     if ledger is not None:
+        admitted_entries: list[NativePluginEntry] = []
         for entry in ordered_entries:
             recorded = ledger.owner_of(entry.enabled_key)
             if recorded is not None and recorded != entry.dependency_key and not entry.direct:
@@ -285,6 +296,9 @@ def build_native_plugin_entries(
                     "registration. Uninstall the previous owner first if this is "
                     "intended.",
                 )
+                continue
+            admitted_entries.append(entry)
+        ordered_entries = admitted_entries
     return ordered_entries, collisions
 
 

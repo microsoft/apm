@@ -54,13 +54,18 @@ def write_agent_plugin(
     return root
 
 
-def write_legacy_package(root: Path, *, name: str) -> Path:
+def write_legacy_package(
+    root: Path,
+    *,
+    name: str,
+    dependencies: list[str] | None = None,
+) -> Path:
     """Materialize a legacy APM package that must keep decomposing."""
     root.mkdir(parents=True, exist_ok=True)
-    (root / "apm.yml").write_text(
-        json.dumps({"name": name, "version": "1.0.0", "description": name}),
-        encoding="ascii",
-    )
+    manifest = {"name": name, "version": "1.0.0", "description": name}
+    if dependencies:
+        manifest["dependencies"] = {"apm": dependencies}
+    (root / "apm.yml").write_text(json.dumps(manifest), encoding="ascii")
     skills = root / ".apm" / "skills" / f"{name}-skill"
     skills.mkdir(parents=True, exist_ok=True)
     (skills / "SKILL.md").write_text(

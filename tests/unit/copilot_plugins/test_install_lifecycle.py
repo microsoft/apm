@@ -14,6 +14,7 @@ from apm_cli.copilot_plugins.constants import (
     EXTRA_MARKETPLACES_KEY,
 )
 from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
+from apm_cli.deps.lockfile import LockFile
 
 from ._builders import (
     read_json,
@@ -40,10 +41,19 @@ def _write_project(project: Path, dependencies: list[str]) -> None:
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, project: Path, *args: str):
+    return _install_for_target(monkeypatch, project, "copilot", *args)
+
+
+def _install_for_target(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    target: str,
+    *args: str,
+):
     monkeypatch.chdir(project)
     return CliRunner().invoke(
         cli,
-        ["install", "--no-policy", "--target", "copilot", *args],
+        ["install", "--no-policy", "--target", target, *args],
         catch_exceptions=False,
     )
 
@@ -139,8 +149,18 @@ def test_non_copilot_target_skips_the_plugin_without_aborting(
     output = " ".join(result.output.split())
     assert result.exit_code == 0, result.output
     assert "'copilot' target" in output
+    materialized = _modules(project) / "_local" / "sentinel"
+    assert (materialized / "plugin.json").is_file()
+    lock = LockFile.from_yaml((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    locked = lock.get_package_dependencies()
+    assert len(locked) == 1
+    assert locked[0].package_type == "agent_plugin"
     assert not catalog_path_for(_modules(project)).exists()
+    assert not ledger_path_for(_modules(project)).exists()
     assert not _settings_path(project).exists()
+    assert not (project / ".agents" / "skills" / "sentinel-skill").exists()
+    assert not (project / ".github" / "skills" / "sentinel-skill").exists()
+    assert not (project / ".github" / "mcp.json").exists()
 
 
 def test_mixed_graph_registers_the_plugin_and_deploys_the_legacy_package(
@@ -161,6 +181,76 @@ def test_mixed_graph_registers_the_plugin_and_deploys_the_legacy_package(
     catalog = read_json(catalog_path_for(_modules(project)))
     assert [entry["name"] for entry in catalog["plugins"]] == ["sentinel"]
     assert (project / ".agents" / "skills" / "classic-skill" / "SKILL.md").is_file()
+
+
+def _write_legacy_parent_with_transitive_plugin(tmp_path: Path) -> tuple[Path, Path]:
+    source = tmp_path / "source"
+    child = write_agent_plugin(source / "portable-child", name="transitive-plugin")
+    parent = write_legacy_package(
+        source / "legacy-parent",
+        name="legacy-parent",
+        dependencies=["../portable-child"],
+    )
+    return parent, child
+
+
+def test_legacy_parent_integrates_while_transitive_plugin_registers_opaquely(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy parent and its native child keep distinct deployment semantics."""
+    project = tmp_path / "project"
+    parent, _ = _write_legacy_parent_with_transitive_plugin(tmp_path)
+    _write_project(project, [str(parent)])
+
+    result = _install(monkeypatch, project)
+
+    assert result.exit_code == 0, result.output
+    assert (project / ".agents" / "skills" / "legacy-parent-skill" / "SKILL.md").is_file()
+    catalog = read_json(catalog_path_for(_modules(project)))
+    assert [entry["name"] for entry in catalog["plugins"]] == ["transitive-plugin"]
+    source = catalog["plugins"][0]["source"]
+    child_root = _modules(project) / source.removeprefix("./")
+    assert (child_root / "plugin.json").is_file()
+    assert not (project / ".agents" / "skills" / "transitive-plugin-skill").exists()
+    assert not (project / ".github" / "skills" / "transitive-plugin-skill").exists()
+    assert not (project / ".github" / "mcp.json").exists()
+
+    lock = LockFile.from_yaml((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    locked = lock.get_package_dependencies()
+    assert [(dep.package_type, dep.depth) for dep in locked] == [
+        ("apm_package", 1),
+        ("agent_plugin", 2),
+    ]
+    assert locked[1].declaring_parent is not None
+
+
+def test_excluded_target_keeps_legacy_parent_and_transitive_plugin_opaque(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Target exclusion keeps the graph but creates no plugin projection."""
+    project = tmp_path / "project"
+    parent, _ = _write_legacy_parent_with_transitive_plugin(tmp_path)
+    _write_project(project, [str(parent)])
+
+    result = _install_for_target(monkeypatch, project, "claude")
+
+    assert result.exit_code == 0, result.output
+    assert (project / ".claude" / "skills" / "legacy-parent-skill" / "SKILL.md").is_file()
+    lock = LockFile.from_yaml((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    locked = lock.get_package_dependencies()
+    assert [(dep.package_type, dep.depth) for dep in locked] == [
+        ("apm_package", 1),
+        ("agent_plugin", 2),
+    ]
+    child = next(dep for dep in locked if dep.package_type == "agent_plugin")
+    assert child.declaring_parent is not None
+    assert not catalog_path_for(_modules(project)).exists()
+    assert not ledger_path_for(_modules(project)).exists()
+    assert not _settings_path(project).exists()
+    assert not (project / ".claude" / "skills" / "transitive-plugin-skill").exists()
+    assert not (project / ".agents" / "skills" / "transitive-plugin-skill").exists()
 
 
 def test_reinstall_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

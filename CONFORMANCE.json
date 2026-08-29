@@ -1332,8 +1332,8 @@
       "status": "active",
       "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_agent_plugin_deployment_boundary_precedes_all_mutation",
-        "tests/spec_conformance/test_manifest_reqs.py::test_agent_plugin_undeployable_without_native_lifecycle"
+        "tests/spec_conformance/test_manifest_reqs.py::test_agent_plugin_target_exclusion_materializes_without_projection",
+        "tests/spec_conformance/test_manifest_reqs.py::test_agent_plugin_target_exclusion_stays_opaque_after_materialization"
       ]
     },
     {
@@ -1353,11 +1353,14 @@
       "keyword": "MUST",
       "section": "8.5.7",
       "status": "active",
-      "test_count": 4,
+      "test_count": 7,
       "tests": [
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_invalid_settings_fail_closed_without_overwrite",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_ledger_re_adopts_only_the_exact_reserved_namespace",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_lifecycle_registration_clauses_persist_in_spec",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_in_place_and_consumer_owned",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_falls_back_to_the_boundary",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_creates_no_native_registration",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_plugin_name_precedence_and_owner_identity_are_deterministic",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
       ]
     }

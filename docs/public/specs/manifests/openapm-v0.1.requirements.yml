@@ -421,7 +421,7 @@ requirements:
     keyword: MUST
     section: "8.5.5"
     conformance_class: consumer
-    notes: "a schema-bearing Agent Plugins v1 dependency is undeployable until a native lifecycle is machine-verifiable; the consumer fails closed with one diagnostic and an unchanged tree, uniformly across solo, mixed-batch, and dry-run installs"
+    notes: "a schema-bearing Agent Plugins v1 dependency stays opaque to legacy projection at deployment; target exclusion may retain materialization and lock state but creates no native registration or primitive projection, remains nonfatal to ordinary mixed-batch dependencies, and is reported consistently by dry-run"
   - id: req-tg-012
     keyword: MUST
     section: "8.5.6"
@@ -431,7 +431,7 @@ requirements:
     keyword: MUST
     section: "8.5.7"
     conformance_class: consumer
-    notes: "a consumer with a machine-verifiable native lifecycle registers a schema-bearing Agent Plugins v1 dependency in one aggregate per-scope registration that references the package in place without double-projecting primitives, proves ownership from consumer-owned state so removal is exact and unrelated host config stays byte-identical, and falls back to the req-tg-011 fail-closed boundary when the lifecycle is unavailable"
+    notes: "schema, effective-target, integrity, security, and executable admission drives one in-place aggregate registration opaque to legacy projection without lifecycle host-binary probing; direct dependencies win plugin-name collisions over transitive dependencies, equal-precedence collisions fail during admission, advisory cleanup omits ambiguous or changed-owner entries, and ledger-primary ownership permits exact-entry recovery of a reserved namespace while rejecting foreign collisions and invalid JSON, preserving unrelated JSON semantics, and rolling back catalog, ledger, and settings together"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"

@@ -609,7 +609,11 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/commands/install.py",
-            "            preflight_agent_plugin_dry_run(ctx, all_apm_deps)",
+            "            preflight_agent_plugin_dry_run(\n"
+            "                ctx,\n"
+            "                all_apm_deps,\n"
+            "                apm_package=apm_package,\n"
+            "            )",
             "            pass  # native dry-run preflight removed",
             "dry-run native preflight must run before rendering success",
         ),
