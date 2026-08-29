@@ -16,6 +16,7 @@ from apm_cli.agent_plugins import (
     AgentPluginDeploymentBoundaryError,
     AgentPluginLegacyBoundaryError,
 )
+from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
 from apm_cli.cli import cli
 from apm_cli.commands.uninstall.cli import uninstall
 from apm_cli.commands.uninstall.engine import (
@@ -606,6 +607,56 @@ def test_dry_run_target_exclusion_is_non_fatal_like_a_real_install(
     # dry-run preflight is reject-only and does not render diagnostics.
     assert outputs["real"].count("Re-run with --target copilot") == 2
     assert outputs["dry-run"].count("Re-run with --target copilot") == 0
+
+
+def test_dry_run_target_exclusion_uses_the_explicit_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run admission must not replace --target with directory detection."""
+    from apm_cli.agent_plugins import errors as agent_plugin_errors
+
+    project = tmp_path / "project"
+    native = tmp_path / "native"
+    project.mkdir()
+    _write_adversarial_agent_plugin(native, tmp_path / "outside.txt")
+    (native / "skills" / "native" / "nested" / "outside-link").unlink()
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "dependencies": {"apm": [str(native)]},
+                "target": "claude",
+            }
+        ),
+        encoding="ascii",
+    )
+    original = agent_plugin_errors.enforce_agent_plugin_deployment_boundary
+    exclusions: list[str] = []
+
+    def tracked_boundary(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except AgentPluginTargetExcludedError as exc:
+            exclusions.append(str(exc))
+            raise
+
+    monkeypatch.setattr(
+        "apm_cli.install.template.enforce_agent_plugin_deployment_boundary",
+        tracked_boundary,
+    )
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(
+        cli,
+        ["install", "--dry-run", "--no-policy", "--target", "claude"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(exclusions) == 1
+    assert "selected target(s): claude" in exclusions[0]
 
 
 def test_dry_run_native_preflight_skips_apm_when_only_mcp_is_selected(

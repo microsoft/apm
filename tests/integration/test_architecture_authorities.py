@@ -802,6 +802,51 @@ def test_agent_plugin_projection_guard_rejects_bypass(
     assert message in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "src/apm_cli/commands/prune.py",
+        "src/apm_cli/commands/uninstall/cli.py",
+    ),
+)
+def test_agent_plugin_projection_guard_rejects_runtime_discovery_at_lifecycle_callers(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    """Every admission call site must remain free of Copilot runtime discovery."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(root / "src" / "apm_cli", sandbox / "src" / "apm_cli")
+    mutation_path = sandbox / relative_path
+    source = mutation_path.read_text(encoding="utf-8")
+    old = "    manifest_target = None"
+    assert old in source
+    mutation_path.write_text(
+        source.replace(
+            old,
+            '    import shutil\n\n    shutil.which("copilot")\n    manifest_target = None',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        (
+            "python3",
+            "scripts/check_agent_plugin_projection_boundary.py",
+            "--root",
+            str(sandbox),
+        ),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "no Copilot binary/version discovery" in result.stdout + result.stderr
+
+
 def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     """Policy cache refs must be sanitized by the canonical writer."""
     root = Path(__file__).parents[2]

@@ -146,7 +146,12 @@ def preflight_agent_plugin_materializations(
             continue
 
 
-def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> None:
+def preflight_agent_plugin_dry_run(
+    ctx: InstallContext,
+    dependencies: list,
+    *,
+    apm_package,
+) -> None:
     """Reject a cached or local native package without mutating its source.
 
     The native-registration capability is published for the duration of the
@@ -164,15 +169,20 @@ def preflight_agent_plugin_dry_run(ctx: InstallContext, dependencies: list) -> N
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.copilot_plugins.capability import native_registration_scope
     from apm_cli.core.scope import get_modules_dir, is_user_scope
-    from apm_cli.models.apm_package import PackageInfo
+    from apm_cli.models.apm_package import PackageInfo, package_target_selection
     from apm_cli.models.validation import validate_apm_package
 
     source_root = ctx.project_root
     modules_dir = get_modules_dir(ctx.scope)
+    explicit_target = ctx.target or package_target_selection(apm_package)
     try:
         from apm_cli.integration.targets import resolve_targets
 
-        targets = resolve_targets(source_root, user_scope=is_user_scope(ctx.scope))
+        targets = resolve_targets(
+            source_root,
+            user_scope=is_user_scope(ctx.scope),
+            explicit_target=explicit_target,
+        )
     except Exception:
         targets = getattr(ctx, "targets", None)
     with native_registration_scope(targets):

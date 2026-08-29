@@ -1060,7 +1060,16 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
     # Copilot binary/version coupling anywhere in the lifecycle that resolves
     # or activates it, and exactly one function owns the resolution.
     capability_path = source_root / "copilot_plugins" / "capability.py"
-    activate_phase_path = source_root / "install" / "phases" / "copilot_plugins.py"
+    admission_call_names = {
+        "activate_native_registration",
+        "native_registration_scope",
+        "resolve_native_registration_capability",
+    }
+    admission_lifecycle_paths = {capability_path}
+    for path, tree in parsed.items():
+        call_names = {call.rsplit(".", 1)[-1] for call in _function_calls(tree)}
+        if call_names & admission_call_names:
+            admission_lifecycle_paths.add(path)
     _FORBIDDEN_DISCOVERY_MODULES = {"subprocess", "shutil"}
     _FORBIDDEN_DISCOVERY_CALLS = {
         "subprocess.run",
@@ -1070,7 +1079,7 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
         "shutil.which",
         "os.system",
     }
-    for path in (capability_path, activate_phase_path):
+    for path in sorted(admission_lifecycle_paths):
         tree = parsed.get(path)
         if tree is None:
             violations.append(f"{path}: required owner file is missing")

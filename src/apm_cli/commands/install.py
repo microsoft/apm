@@ -1765,7 +1765,11 @@ def _install_apm_packages(ctx, outcome):
         from apm_cli.install.template import preflight_agent_plugin_dry_run
 
         if should_install_apm:
-            preflight_agent_plugin_dry_run(ctx, all_apm_deps)
+            preflight_agent_plugin_dry_run(
+                ctx,
+                all_apm_deps,
+                apm_package=apm_package,
+            )
         # -- W2-dry-run (#827): policy preflight in preview mode --
         # Runs discovery + checks against direct manifest deps, not transitives.
         # Block-severity violations render as "Would be blocked by

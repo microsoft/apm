@@ -1911,7 +1911,11 @@ native_catalog_owner_defs=$(grep -rEc \
 native_binary_coupling_hits=$(
     grep -rnE \
         'COPILOT_LIVE_PLUGIN_MIN_VERSION|probe_copilot_cli_version|APM_COPILOT_CLI_VERSION|find_runtime_binary|is_qualified_client_version|normalize_client_version|minimum_client_version|undetected_client_reason|unqualified_client_reason|AgentPluginClientUnavailableError|SemVer|parse_semver|subprocess\.(run|Popen|check_output|check_call)|shutil\.which' \
-        src/apm_cli/copilot_plugins src/apm_cli/install/phases/copilot_plugins.py \
+        src/apm_cli/copilot_plugins \
+        src/apm_cli/install/phases/copilot_plugins.py \
+        src/apm_cli/install/template.py \
+        src/apm_cli/commands/prune.py \
+        src/apm_cli/commands/uninstall \
         --include='*.py' \
         || true
 )
