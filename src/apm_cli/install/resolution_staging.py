@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
+from hashlib import sha256
 from pathlib import Path
 
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
@@ -42,10 +43,8 @@ class ResolutionStagingSession:
     def prepare_replacement(self, path: Path) -> Path:
         """Return an isolated download path without disturbing *path*."""
         resolved = ensure_path_within(path, self._modules_dir)
-        resolved_base = ensure_path_within(self._modules_dir, self._modules_dir)
-        relative = resolved.relative_to(resolved_base)
-        replacement = self._staging_root / "replacements" / relative
-        ensure_path_within(replacement, self._staging_root)
+        replacement = self._isolated_staging_path("replacements", resolved)
+        replacement = ensure_path_within(replacement, self._staging_root)
         with self._lock:
             if resolved in self._backups:
                 raise RuntimeError(f"Path is already staged for replacement: {resolved}")
@@ -72,9 +71,7 @@ class ResolutionStagingSession:
 
             backup: Path | None = None
             if resolved.exists():
-                resolved_base = ensure_path_within(self._modules_dir, self._modules_dir)
-                relative = resolved.relative_to(resolved_base)
-                backup = self._staging_root / "backups" / relative
+                backup = self._isolated_staging_path("backups", resolved)
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 self._backups[resolved] = backup
                 resolved.replace(backup)
@@ -180,6 +177,13 @@ class ResolutionStagingSession:
         while path != self._modules_dir and path.exists() and not any(path.iterdir()):
             path.rmdir()
             path = path.parent
+
+    def _isolated_staging_path(self, bucket: str, destination: Path) -> Path:
+        """Return an opaque slot so nested destinations never overlap."""
+        modules = ensure_path_within(self._modules_dir, self._modules_dir)
+        relative = destination.relative_to(modules).as_posix().encode("utf-8")
+        slot = sha256(relative).hexdigest()
+        return self._staging_root / bucket / slot
 
     @staticmethod
     def _replace_case_only(source: Path, destination: Path) -> None:

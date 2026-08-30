@@ -904,6 +904,31 @@ class TestTryLoadDependencyPackageForceRecheck:
         assert activated == []
         assert (live / "apm.yml").read_text() == "name: pkg\nversion: 1.0.0\n"
 
+    def test_invalid_fresh_candidate_does_not_claim_existing_install(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Fresh-install validation guidance must not claim prior content exists."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("not: a-package\n")
+        ref = self._semver_dep_ref(live)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=lambda _path: live,
+            update_refs=True,
+        )
+
+        with pytest.raises(DownloadedPackageError) as exc_info:
+            resolver._try_load_dependency_package(ref)
+
+        message = str(exc_info.value)
+        assert "downloaded candidate was not activated" in message
+        assert "existing installation remains active" not in message
+
     def test_valid_candidate_is_activated_after_validation(self, tmp_path: Path) -> None:
         """A valid candidate publishes once and exposes the live package path."""
         mods = tmp_path / "apm_modules"

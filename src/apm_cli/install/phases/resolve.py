@@ -449,23 +449,6 @@ def _resolve_dependencies(
                 package's directory rather than the root consumer (#857).
         """
         install_path = replacement_path = None
-        # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
-        # users see the install advancing past silent transitive lookups.
-        # Under F7's parallel BFS this callback may run on a worker
-        # thread, so serialise the emission via ``callback_lock`` to
-        # keep heartbeat lines from interleaving with each other.
-        # Workstream B (#1116): when the shared InstallTui is painting
-        # the Live region, the static heartbeat line would interleave
-        # with the spinner -- route the heartbeat to the TUI's
-        # task_started instead and skip the static line.
-        if logger:
-            with callback_lock:
-                _display = dep_ref.get_display_name()
-                _tui = getattr(ctx, "tui", None)
-                if _tui is not None:
-                    _tui.task_started(dep_ref.get_unique_key(), f"resolve {_display}")
-                if _tui is None or not _tui.is_animating():
-                    logger.resolving_heartbeat(_display)
         try:
             install_path = _prepare_callback_materialization_path(
                 dep_ref,
@@ -489,6 +472,15 @@ def _resolve_dependencies(
                 ):
                     return install_path
             replacement_path = staging_session.prepare_replacement(install_path)
+            # Emit progress only after the cache fast path decides to fetch.
+            if logger:
+                with callback_lock:
+                    _display = dep_ref.get_display_name()
+                    _tui = getattr(ctx, "tui", None)
+                    if _tui is not None:
+                        _tui.task_started(dep_ref.get_unique_key(), f"resolve {_display}")
+                    if _tui is None or not _tui.is_animating():
+                        logger.resolving_heartbeat(_display)
             # ─── Registry-sourced dep (design §8) ──────────────────────
             # Routed before local/git so the registry resolver owns the
             # download for source=="registry" entries. Lockfile re-installs

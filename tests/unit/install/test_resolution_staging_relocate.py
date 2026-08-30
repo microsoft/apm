@@ -77,6 +77,63 @@ def test_prepare_replacement_reserves_destination(tmp_path: Path) -> None:
     assert staging.prepare_replacement(package) == replacement
 
 
+@pytest.mark.parametrize("publish_parent_first", [False, True])
+def test_nested_replacements_rollback_without_overlapping_staging_paths(
+    tmp_path: Path,
+    publish_parent_first: bool,
+) -> None:
+    """Parent and virtual-subdirectory replacements restore exact prior bytes."""
+    modules = tmp_path / "apm_modules"
+    parent = modules / "owner" / "repo"
+    child = parent / "plugins" / "tool"
+    child.mkdir(parents=True)
+    (parent / "apm.yml").write_text("old manifest", encoding="ascii")
+    (parent / "keep.txt").write_text("keep", encoding="ascii")
+    (child / "hook.py").write_text("old child", encoding="ascii")
+    staging = ResolutionStagingSession(modules)
+    parent_replacement = staging.prepare_replacement(parent)
+    child_replacement = staging.prepare_replacement(child)
+    (parent_replacement / "plugins" / "tool").mkdir(parents=True)
+    (parent_replacement / "apm.yml").write_text("new manifest", encoding="ascii")
+    (parent_replacement / "plugins" / "tool" / "hook.py").write_text(
+        "parent child",
+        encoding="ascii",
+    )
+    child_replacement.mkdir(parents=True)
+    (child_replacement / "hook.py").write_text("new child", encoding="ascii")
+
+    replacements = (
+        (parent_replacement, child_replacement)
+        if publish_parent_first
+        else (child_replacement, parent_replacement)
+    )
+    for replacement in replacements:
+        staging.publish_replacement(replacement)
+    staging.rollback()
+
+    assert (parent / "apm.yml").read_text(encoding="ascii") == "old manifest"
+    assert (parent / "keep.txt").read_text(encoding="ascii") == "keep"
+    assert (child / "hook.py").read_text(encoding="ascii") == "old child"
+
+
+def test_replacement_reservation_uses_canonical_staging_path(tmp_path: Path) -> None:
+    """A symlinked modules root uses the same reservation key at publication."""
+    actual_modules = tmp_path / "actual-modules"
+    actual_modules.mkdir()
+    modules = tmp_path / "apm_modules"
+    modules.symlink_to(actual_modules, target_is_directory=True)
+    package = modules / "owner" / "plugin"
+    staging = ResolutionStagingSession(modules)
+    replacement = staging.prepare_replacement(package)
+    replacement.mkdir(parents=True)
+    (replacement / "apm.yml").write_text("new", encoding="ascii")
+
+    live_path = staging.publish_replacement(replacement)
+
+    assert live_path == package.resolve()
+    assert (package / "apm.yml").read_text(encoding="ascii") == "new"
+
+
 def test_relocate_path_rejects_symlinked_package_directory(tmp_path: Path) -> None:
     """Migration never follows a package-directory symlink."""
     modules = tmp_path / "apm_modules"

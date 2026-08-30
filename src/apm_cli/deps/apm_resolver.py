@@ -788,7 +788,6 @@ class APMDependencyResolver:
                         tree.resolution_errors.append(message)
                     elif isinstance(exc, DownloadedPackageError):
                         tree.resolution_errors.append(str(exc))
-                        _logger.warning("%s", exc)
                     elif isinstance(exc, ValueError):
                         _logger.warning(
                             "Invalid transitive apm.yml for %s: %s",
@@ -1085,6 +1084,7 @@ class APMDependencyResolver:
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
 
         downloaded_candidate: Path | None = None
+        had_existing_install = install_path.exists()
 
         # If package doesn't exist locally, try to download it. Also fall
         # through for a forced semver re-check (see _should_force_recheck).
@@ -1185,16 +1185,22 @@ class APMDependencyResolver:
                     downloaded_candidate,
                     dep_ref,
                     "; ".join(validation.errors),
+                    had_existing_install,
                 )
             if validation.package is None:
                 self._raise_downloaded_package_error(
                     downloaded_candidate,
                     dep_ref,
                     f"Agent Plugin validation produced no package metadata: {install_path}",
+                    had_existing_install,
                 )
             if not validation.package.source:
                 validation.package.source = dep_ref.repo_url
-            return self._activate_validated_package(validation.package, downloaded_candidate)
+            return self._activate_validated_package(
+                validation.package,
+                downloaded_candidate,
+                had_existing_install,
+            )
 
         # Look for apm.yml in the install path
         apm_yml_path = install_path / "apm.yml"
@@ -1211,12 +1217,17 @@ class APMDependencyResolver:
                     package_path=install_path,
                     source_path=self._compute_dep_source_path(dep_ref, parent_pkg, install_path),
                 )
-                return self._activate_validated_package(package, downloaded_candidate)
+                return self._activate_validated_package(
+                    package,
+                    downloaded_candidate,
+                    had_existing_install,
+                )
             # No manifest found
             self._raise_downloaded_package_error(
                 downloaded_candidate,
                 dep_ref,
                 f"Downloaded package has no apm.yml or SKILL.md: {install_path}",
+                had_existing_install,
             )
 
         # Load and return the package, anchoring relative ``local_path`` deps
@@ -1230,12 +1241,14 @@ class APMDependencyResolver:
                 downloaded_candidate,
                 dep_ref,
                 f"Downloaded package manifest disappeared: {apm_yml_path}",
+                had_existing_install,
             )
         except ValueError as exc:
             self._raise_downloaded_package_error(
                 downloaded_candidate,
                 dep_ref,
                 str(exc),
+                had_existing_install,
             )
         # Ensure source is set for tracking. TODO(#940): the cache key
         # already considers source_path; this post-construction mutation
@@ -1243,12 +1256,17 @@ class APMDependencyResolver:
         # shape as the bug we just fixed -- review when refactoring.
         if not package.source:
             package.source = dep_ref.repo_url
-        return self._activate_validated_package(package, downloaded_candidate)
+        return self._activate_validated_package(
+            package,
+            downloaded_candidate,
+            had_existing_install,
+        )
 
     def _activate_validated_package(
         self,
         package: APMPackage,
         downloaded_candidate: Path | None,
+        had_existing_install: bool,
     ) -> APMPackage:
         """Publish one validated candidate and remap its package paths."""
         if downloaded_candidate is None or self._activation_callback is None:
@@ -1258,8 +1276,8 @@ class APMDependencyResolver:
         except Exception as exc:
             raise DownloadedPackageError(
                 f"Failed to activate downloaded dependency "
-                f"'{package.name}': {exc}. The existing installation remains "
-                "active; fix the cause and retry the install."
+                f"'{package.name}': {exc}. "
+                f"{self._replacement_failure_hint(had_existing_install)}"
             ) from exc
         if not live_path.exists():
             raise FileNotFoundError(f"Validated package was not published: {live_path}")
@@ -1280,15 +1298,22 @@ class APMDependencyResolver:
         downloaded_candidate: Path | None,
         dep_ref: DependencyReference,
         detail: str,
+        had_existing_install: bool,
     ) -> NoReturn:
         """Raise a specific fail-closed error for newly downloaded candidates."""
         if downloaded_candidate is None:
             raise ValueError(detail)
         raise DownloadedPackageError(
             f"Downloaded dependency '{dep_ref.get_display_name()}' is invalid: "
-            f"{detail}. The existing installation remains active; fix the cause "
-            "and retry the install."
+            f"{detail}. {APMDependencyResolver._replacement_failure_hint(had_existing_install)}"
         )
+
+    @staticmethod
+    def _replacement_failure_hint(had_existing_install: bool) -> str:
+        """Return recovery guidance accurate for fresh and replacement installs."""
+        if had_existing_install:
+            return "The existing installation remains active; fix the cause and retry the install."
+        return "The downloaded candidate was not activated; fix the cause and retry the install."
 
     @staticmethod
     def _remap_candidate_path(
