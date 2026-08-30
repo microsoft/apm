@@ -141,9 +141,10 @@ class InstallTransaction:
         """Report cleanup paths that require safe manual recovery."""
         if not issues or self._logger is None:
             return
+        item_label = "item" if len(issues) == 1 else "items"
         self._logger.warning(
-            f"Could not safely remove {len(issues)} interrupted-install backup "
-            "item(s). Stop other APM installs, then run again with --verbose "
+            f"Could not safely remove {len(issues)} interrupted-install backup {item_label}. "
+            "Stop other APM installs, then run again with --verbose "
             "to see paths you can delete manually."
         )
         for path, reason in issues:

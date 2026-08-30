@@ -157,7 +157,7 @@ def test_success_commit_preserves_lockless_legacy_staging(tmp_path: Path) -> Non
 
     assert (legacy / "package" / "marker").read_text(encoding="ascii") == "keep"
     transaction._logger.warning.assert_called_once_with(
-        "Could not safely remove 1 interrupted-install backup item(s). "
+        "Could not safely remove 1 interrupted-install backup item. "
         "Stop other APM installs, then run again with --verbose "
         "to see paths you can delete manually."
     )
