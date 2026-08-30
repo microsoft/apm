@@ -40,6 +40,7 @@ from ...marketplace.migration import (
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
+from ...utils.console import STATUS_SYMBOLS
 from ...utils.path_security import (
     PathTraversalError,
     decode_url_path_segments,
@@ -1305,17 +1306,19 @@ class _DoctorCheck:
         self.informational = informational
 
 
+def _doctor_status_icon(check: _DoctorCheck) -> str:
+    """Return the status symbol for a doctor check."""
+    if not check.passed:
+        return STATUS_SYMBOLS["warning"] if check.informational else STATUS_SYMBOLS["error"]
+    return STATUS_SYMBOLS["info"] if check.informational else STATUS_SYMBOLS["check"]
+
+
 def _render_doctor_table(logger, checks):
     """Render the doctor results table."""
     console = _get_console()
     if not console:
         for c in checks:
-            if c.informational:
-                icon = "[i]"
-            elif c.passed:
-                icon = "[+]"
-            else:
-                icon = "[x]"
+            icon = _doctor_status_icon(c)
             logger.tree_item(f"  {icon} {c.name}: {c.detail}")
         return
 
@@ -1333,13 +1336,8 @@ def _render_doctor_table(logger, checks):
     table.add_column("Detail", style="white")
 
     for c in checks:
-        if c.informational:
-            icon = "[i]"
-        elif c.passed:
-            icon = "[+]"
-        else:
-            icon = "[x]"
-        table.add_row(c.name, Text(icon), c.detail)
+        icon = _doctor_status_icon(c)
+        table.add_row(c.name, Text(icon), Text(c.detail))
 
     console.print()
     console.print(table)

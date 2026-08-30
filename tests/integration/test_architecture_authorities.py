@@ -107,6 +107,31 @@ def test_install_request_defaults_have_single_owner() -> None:
     )
 
 
+def test_doctor_status_symbols_use_console_owner() -> None:
+    """Doctor must consume the canonical console status vocabulary."""
+    root = Path(__file__).parents[2]
+    source = (root / "src/apm_cli/commands/marketplace/__init__.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_doctor_status_icon"
+    )
+    raw_symbols = {"[!]", "[x]", "[i]", "[+]"}
+    literal_symbols = {
+        node.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+    assert not literal_symbols & raw_symbols
+    assert any(
+        isinstance(node, ast.Name) and node.id == "STATUS_SYMBOLS" for node in ast.walk(function)
+    )
+    assert "Doctor status symbols must use utils/console.py::STATUS_SYMBOLS" in guard
+
+
 def test_uninstall_reintegration_routes_through_the_deployable_source_plan() -> None:
     """Uninstall rebuild must not recreate a direct, unscanned write path."""
     root = Path(__file__).parents[2]
