@@ -47,6 +47,8 @@ class _LSPTargetSpec:
     user_servers_key: str | None
     project_label: str
     user_label: str
+    project_config_defaults: tuple[tuple[str, str], ...] = ()
+    user_config_defaults: tuple[tuple[str, str], ...] = ()
 
     def path(self, project_root: Path, *, user_scope: bool) -> Path:
         """Return the config path for this target and scope."""
@@ -62,18 +64,29 @@ class _LSPTargetSpec:
         """Return a human-readable config path label."""
         return self.user_label if user_scope else self.project_label
 
+    def config_defaults(self, *, user_scope: bool) -> tuple[tuple[str, str], ...]:
+        """Return required top-level defaults for this target and scope."""
+        return self.user_config_defaults if user_scope else self.project_config_defaults
+
 
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
     "claude": _LSPTargetSpec(
         runtime="claude",
-        project_relative_path=(".lsp.json",),
+        project_relative_path=(
+            ".claude",
+            "skills",
+            "apm-lsp",
+            ".claude-plugin",
+            "plugin.json",
+        ),
         user_relative_path=(".claude.json",),
         language_key=_CLAUDE_LANGUAGE_KEY,
         startup_timeout_key=_CLAUDE_STARTUP_TIMEOUT_KEY,
-        project_servers_key=None,
+        project_servers_key=_LSP_SERVERS_KEY,
         user_servers_key=_LSP_SERVERS_KEY,
-        project_label=".lsp.json",
+        project_label=".claude/skills/apm-lsp/.claude-plugin/plugin.json",
         user_label="~/.claude.json",
+        project_config_defaults=(("name", "apm-lsp"),),
     ),
     "copilot": _LSPTargetSpec(
         runtime="copilot",
@@ -365,6 +378,8 @@ class LSPIntegrator:
         """Merge servers into one target config and return changed server names."""
         config_path = spec.path(project_root, user_scope=user_scope)
         config = LSPIntegrator._read_json_object(config_path)
+        for key, value in spec.config_defaults(user_scope=user_scope):
+            config.setdefault(key, value)
         servers_key = spec.servers_key(user_scope=user_scope)
 
         if servers_key is None:

@@ -758,7 +758,13 @@ dependencies:
 
 #### 4.3.4. What Gets Written
 
-`apm install` writes LSP server configs to detected runtime targets. Claude Code uses `.lsp.json` at project scope or `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at project scope or `~/.copilot/lsp-config.json` at user scope. See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats and lifecycle details.
+`apm install` writes LSP server configs to detected runtime targets. Claude
+Code uses the `lspServers` section in
+`.claude/skills/apm-lsp/.claude-plugin/plugin.json` at project scope or
+`~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at
+project scope or `~/.copilot/lsp-config.json` at user scope. See
+[Install LSP servers](../../consumer/install-lsp-servers/) for output formats
+and lifecycle details.
 
 ---
 

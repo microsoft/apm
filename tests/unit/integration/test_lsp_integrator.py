@@ -16,6 +16,8 @@ import pytest
 from apm_cli.integration.lsp_integrator import LSPIntegrator
 from apm_cli.models.dependency.lsp import LSPDependency
 
+_CLAUDE_PROJECT_PLUGIN = Path(".claude") / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -139,32 +141,51 @@ class TestInstallProjectScope:
         count = LSPIntegrator.install([], project_root=tmp_path)
         assert count == 0
 
-    def test_creates_lsp_json(self, tmp_path):
+    def test_creates_claude_plugin_manifest(self, tmp_path):
         deps = [_make_dep("pyright")]
         count = LSPIntegrator.install(deps, project_root=tmp_path)
         assert count == 1
 
-        lsp_json = tmp_path / ".lsp.json"
-        assert lsp_json.exists()
-        data = json.loads(lsp_json.read_text())
-        assert "pyright" in data
-        assert data["pyright"]["command"] == "pyright-langserver"
-        assert "name" not in data["pyright"]  # name is the key, not in value
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        assert plugin_json.exists()
+        data = json.loads(plugin_json.read_text())
+        assert data["name"] == "apm-lsp"
+        assert data["lspServers"]["pyright"]["command"] == "pyright-langserver"
+        assert "name" not in data["lspServers"]["pyright"]
 
-    def test_merges_with_existing_lsp_json(self, tmp_path):
-        lsp_json = tmp_path / ".lsp.json"
-        lsp_json.write_text(json.dumps({"existing-server": {"command": "x"}}))
+    def test_merges_with_existing_claude_plugin_manifest(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "custom-lsp-plugin",
+                    "description": "Preserve this metadata",
+                    "lspServers": {"existing-server": {"command": "x"}},
+                }
+            )
+        )
 
         deps = [_make_dep("new-server")]
         LSPIntegrator.install(deps, project_root=tmp_path)
 
-        data = json.loads(lsp_json.read_text())
-        assert "existing-server" in data
-        assert "new-server" in data
+        data = json.loads(plugin_json.read_text())
+        assert data["name"] == "custom-lsp-plugin"
+        assert data["description"] == "Preserve this metadata"
+        assert "existing-server" in data["lspServers"]
+        assert "new-server" in data["lspServers"]
 
     def test_update_existing_server_counts_as_change(self, tmp_path):
-        lsp_json = tmp_path / ".lsp.json"
-        lsp_json.write_text(json.dumps({"pyright": {"command": "old-cmd"}}))
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "apm-lsp",
+                    "lspServers": {"pyright": {"command": "old-cmd"}},
+                }
+            )
+        )
 
         deps = [_make_dep("pyright")]
         count = LSPIntegrator.install(deps, project_root=tmp_path)
@@ -182,8 +203,8 @@ class TestInstallProjectScope:
         deps = [{"name": "dict-server", "command": "x", "extensionToLanguage": {".py": "python"}}]
         count = LSPIntegrator.install(deps, project_root=tmp_path)
         assert count == 1
-        data = json.loads((tmp_path / ".lsp.json").read_text())
-        assert "dict-server" in data
+        data = json.loads((tmp_path / _CLAUDE_PROJECT_PLUGIN).read_text())
+        assert "dict-server" in data["lspServers"]
 
     def test_multiple_servers(self, tmp_path):
         deps = [_make_dep("pyright"), _make_dep("ruff-lsp")]
@@ -291,28 +312,35 @@ class TestResolveLspTargets:
 
 class TestRemoveStale:
     def test_empty_stale_set_is_noop(self, tmp_path):
-        lsp_json = tmp_path / ".lsp.json"
-        lsp_json.write_text(json.dumps({"keep": {"command": "x"}}))
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps({"name": "apm-lsp", "lspServers": {"keep": {"command": "x"}}})
+        )
 
         LSPIntegrator.remove_stale(set(), project_root=tmp_path)
-        data = json.loads(lsp_json.read_text())
-        assert "keep" in data
+        data = json.loads(plugin_json.read_text())
+        assert "keep" in data["lspServers"]
 
-    def test_removes_stale_from_project_lsp_json(self, tmp_path):
-        lsp_json = tmp_path / ".lsp.json"
-        lsp_json.write_text(
+    def test_removes_stale_from_project_plugin_manifest(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
             json.dumps(
                 {
-                    "keep": {"command": "x"},
-                    "stale": {"command": "y"},
+                    "name": "apm-lsp",
+                    "lspServers": {
+                        "keep": {"command": "x"},
+                        "stale": {"command": "y"},
+                    },
                 }
             )
         )
 
         LSPIntegrator.remove_stale({"stale"}, project_root=tmp_path)
-        data = json.loads(lsp_json.read_text())
-        assert "keep" in data
-        assert "stale" not in data
+        data = json.loads(plugin_json.read_text())
+        assert "keep" in data["lspServers"]
+        assert "stale" not in data["lspServers"]
 
     def test_removes_stale_from_user_claude_json(self, tmp_path):
         claude_json = tmp_path / ".claude.json"
@@ -334,14 +362,14 @@ class TestRemoveStale:
         assert "keep" in data["lspServers"]
         assert "stale" not in data["lspServers"]
 
-    def test_no_lsp_json_is_noop(self, tmp_path):
-        # Should not raise even if .lsp.json does not exist
+    def test_no_plugin_manifest_is_noop(self, tmp_path):
         LSPIntegrator.remove_stale({"nonexistent"}, project_root=tmp_path)
 
     def test_strict_cleanup_raises_on_unwritable_config_shape(self, tmp_path):
         from apm_cli.install.errors import RequiredIntegrationError
 
-        (tmp_path / ".lsp.json").mkdir()
+        config_path = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        config_path.mkdir(parents=True)
 
         with pytest.raises(RequiredIntegrationError, match="LSP cleanup failed"):
             LSPIntegrator.remove_stale(
@@ -351,20 +379,24 @@ class TestRemoveStale:
             )
 
     def test_multiple_stale_removed(self, tmp_path):
-        lsp_json = tmp_path / ".lsp.json"
-        lsp_json.write_text(
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
             json.dumps(
                 {
-                    "keep": {"command": "x"},
-                    "stale1": {"command": "y"},
-                    "stale2": {"command": "z"},
+                    "name": "apm-lsp",
+                    "lspServers": {
+                        "keep": {"command": "x"},
+                        "stale1": {"command": "y"},
+                        "stale2": {"command": "z"},
+                    },
                 }
             )
         )
 
         LSPIntegrator.remove_stale({"stale1", "stale2"}, project_root=tmp_path)
-        data = json.loads(lsp_json.read_text())
-        assert set(data.keys()) == {"keep"}
+        data = json.loads(plugin_json.read_text())
+        assert set(data["lspServers"]) == {"keep"}
 
 
 # ===========================================================================

@@ -37,10 +37,12 @@ dependencies:
 apm install
 ```
 
-APM writes runtime-specific config for each detected target. Claude Code
-uses `.lsp.json` or `~/.claude.json`; Copilot CLI uses `.github/lsp.json`
-or `~/.copilot/lsp-config.json`. The runtime starts the configured
-language servers automatically.
+APM writes runtime-specific config for each detected target. At project scope,
+Claude Code discovers LSP servers from the APM-managed plugin manifest at
+`.claude/skills/apm-lsp/.claude-plugin/plugin.json`; user-scope installs use
+`~/.claude.json`. Copilot CLI uses `.github/lsp.json` or
+`~/.copilot/lsp-config.json`. The runtime starts the configured language
+servers automatically.
 
 ## The `lsp:` section in apm.yml
 
@@ -74,18 +76,21 @@ The full field reference is in the
 
 | Runtime | Project file | User file (`-g`) | Language map key |
 |---|---|---|---|
-| Claude Code | `.lsp.json` | `~/.claude.json` `lspServers` | `extensionToLanguage` |
+| Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` `lspServers` | `~/.claude.json` `lspServers` | `extensionToLanguage` |
 | GitHub Copilot CLI | `.github/lsp.json` `lspServers` | `~/.copilot/lsp-config.json` `lspServers` | `fileExtensions` |
 
-**Claude Code project-scope `.lsp.json` example:**
+**Claude Code project-scope plugin manifest example:**
 
 ```json
 {
-  "gopls": {
-    "command": "gopls",
-    "args": ["serve"],
-    "extensionToLanguage": {
-      ".go": "go"
+  "name": "apm-lsp",
+  "lspServers": {
+    "gopls": {
+      "command": "gopls",
+      "args": ["serve"],
+      "extensionToLanguage": {
+        ".go": "go"
+      }
     }
   }
 }
@@ -190,7 +195,7 @@ success.
 
 | Runtime | LSP support |
 |---|---|
-| Claude Code | `.lsp.json` / `~/.claude.json` |
+| Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` / `~/.claude.json` |
 | GitHub Copilot CLI | `.github/lsp.json` / `~/.copilot/lsp-config.json` |
 | Others | Not yet supported |
 

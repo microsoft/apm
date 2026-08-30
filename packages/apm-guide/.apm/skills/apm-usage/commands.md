@@ -114,6 +114,12 @@ writing the direct MCP manifest entry or deploying packages. Native service
 config write failures also exit non-zero with an actionable path/permissions
 diagnostic.
 
+For project LSP installs, `apm install --target claude` writes the
+`lspServers` section in
+`.claude/skills/apm-lsp/.claude-plugin/plugin.json`, which Claude Code
+discovers as a skills-directory plugin. Global Claude installs continue to use
+`~/.claude.json`.
+
 For MCP, `--target copilot` writes `.github/mcp.json` at project scope and
 `$COPILOT_HOME/mcp-config.json` with `--global` (or
 `~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset). `--target vscode`
