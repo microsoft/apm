@@ -125,6 +125,45 @@ def test_success_commit_finalizes_resolution(tmp_path: Path) -> None:
     assert not (transaction.apm_modules_dir / ".apm-resolution-staging").exists()
 
 
+def test_success_commit_removes_abandoned_resolution_staging_only(tmp_path: Path) -> None:
+    """A successful install garbage-collects only owned staging directories."""
+    transaction = _transaction(tmp_path)
+    staging_parent = transaction.apm_modules_dir / ".apm-resolution-staging"
+    abandoned = staging_parent / ("a" * 32)
+    unrelated = staging_parent / "keep-me"
+    (abandoned / "package").mkdir(parents=True)
+    unrelated.mkdir()
+    abandoned.with_suffix(".lock").write_text("", encoding="ascii")
+    (abandoned / "package" / "marker").write_text("stale", encoding="ascii")
+    (unrelated / "marker").write_text("keep", encoding="ascii")
+
+    transaction.commit(InstallResult())
+
+    assert not abandoned.exists()
+    assert not abandoned.with_suffix(".lock").exists()
+    assert (unrelated / "marker").read_text(encoding="ascii") == "keep"
+
+
+def test_success_commit_preserves_active_resolution_staging(tmp_path: Path) -> None:
+    """Garbage collection does not remove another active install's backup."""
+    active = _transaction(tmp_path)
+    package = active.apm_modules_dir / "package"
+    package.mkdir()
+    (package / "marker").write_text("original", encoding="ascii")
+    active.resolution.prepare_path(package)
+
+    successful = InstallTransaction(
+        manifest_path=active.manifest_path,
+        apm_modules_dir=active.apm_modules_dir,
+        validation=None,
+        logger=MagicMock(),
+    )
+    successful.commit(InstallResult())
+    active.rollback()
+
+    assert (package / "marker").read_text(encoding="ascii") == "original"
+
+
 def test_manifest_restore_is_byte_exact(tmp_path: Path) -> None:
     """Rollback restores the exact bytes captured before validation."""
     transaction = _transaction(tmp_path)

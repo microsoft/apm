@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import re
 import threading
 import uuid
 from pathlib import Path
 
+from filelock import FileLock, Timeout
+
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
+
+_STAGING_NAME = re.compile(r"[0-9a-f]{32}")
 
 
 class ResolutionStagingSession:
@@ -18,6 +24,8 @@ class ResolutionStagingSession:
         self._modules_dir = apm_modules_dir
         self._modules_existed = apm_modules_dir.exists()
         self._staging_root = apm_modules_dir / ".apm-resolution-staging" / uuid.uuid4().hex
+        self._staging_lock_path = self._staging_root.with_suffix(".lock")
+        self._staging_lock: FileLock | None = None
         self._backups: dict[Path, Path | None] = {}
         self._relocations: list[tuple[Path, Path]] = []
         self._lock = threading.Lock()
@@ -30,6 +38,7 @@ class ResolutionStagingSession:
                 return
             backup: Path | None = None
             if resolved.exists():
+                self._acquire_staging_lock()
                 resolved_base = ensure_path_within(self._modules_dir, self._modules_dir)
                 relative = resolved.relative_to(resolved_base)
                 backup = self._staging_root / relative
@@ -70,6 +79,8 @@ class ResolutionStagingSession:
     def commit(self) -> None:
         """Discard preserved pre-resolution contents after successful validation."""
         self._remove_staging_root()
+        self._release_staging_lock()
+        self._remove_abandoned_staging_roots()
         self._backups.clear()
         self._relocations.clear()
 
@@ -93,6 +104,7 @@ class ResolutionStagingSession:
                         destination.replace(source)
                 self._remove_empty_parents(destination.parent)
             self._remove_staging_root()
+            self._release_staging_lock()
             if (
                 not self._modules_existed
                 and self._modules_dir.exists()
@@ -133,3 +145,72 @@ class ResolutionStagingSession:
         staging_parent = self._staging_root.parent
         if staging_parent.exists() and not any(staging_parent.iterdir()):
             staging_parent.rmdir()
+
+    def _acquire_staging_lock(self) -> None:
+        """Mark this session active before preserving any package contents."""
+        if self._staging_lock is not None:
+            return
+        staging_parent = self._staging_root.parent
+        ensure_path_within(staging_parent, self._modules_dir)
+        staging_parent.mkdir(parents=True, exist_ok=True)
+        ensure_path_within(self._staging_lock_path, staging_parent)
+        if self._staging_lock_path.is_symlink():
+            raise ValueError(f"Refusing symlinked staging lock: {self._staging_lock_path}")
+        lock = FileLock(str(self._staging_lock_path))
+        lock.acquire(timeout=0)
+        self._staging_lock = lock
+
+    def _release_staging_lock(self) -> None:
+        """Release and remove this session's staging activity marker."""
+        if self._staging_lock is None:
+            return
+        self._staging_lock.release()
+        self._staging_lock = None
+        ensure_path_within(self._staging_lock_path, self._staging_root.parent)
+        try:
+            self._staging_lock_path.unlink(missing_ok=True)
+        except OSError:
+            return
+        staging_parent = self._staging_root.parent
+        if staging_parent.exists() and not any(staging_parent.iterdir()):
+            with contextlib.suppress(OSError):
+                staging_parent.rmdir()
+
+    def _remove_abandoned_staging_roots(self) -> None:
+        """Remove inactive, APM-named staging roots left by earlier runs."""
+        staging_parent = self._staging_root.parent
+        if not staging_parent.is_dir() or staging_parent.is_symlink():
+            return
+        ensure_path_within(staging_parent, self._modules_dir)
+        try:
+            candidates = list(staging_parent.iterdir())
+        except OSError:
+            return
+        for candidate in candidates:
+            if (
+                candidate == self._staging_root
+                or _STAGING_NAME.fullmatch(candidate.name) is None
+                or candidate.is_symlink()
+                or not candidate.is_dir()
+            ):
+                continue
+            lock_path = candidate.with_suffix(".lock")
+            if lock_path.is_symlink() or (lock_path.exists() and not lock_path.is_file()):
+                continue
+            try:
+                ensure_path_within(lock_path, staging_parent)
+                candidate_lock = FileLock(str(lock_path))
+                candidate_lock.acquire(timeout=0)
+            except (OSError, Timeout, ValueError):
+                continue
+            try:
+                safe_rmtree(candidate, staging_parent)
+            except (OSError, ValueError):
+                continue
+            finally:
+                candidate_lock.release()
+                with contextlib.suppress(OSError):
+                    lock_path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            if not any(staging_parent.iterdir()):
+                staging_parent.rmdir()
