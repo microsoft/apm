@@ -747,6 +747,7 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
         env = kwargs["env"]
         assert isinstance(env, dict)
         assert kwargs["sparse_paths"] == [dep_ref.virtual_path]
+        assert "GIT_HTTP_EXTRAHEADER" not in env
         if len(cache_calls) == 1:
             assert env["GIT_ASKPASS"] == "echo"
             assert env["GIT_TERMINAL_PROMPT"] == "0"
@@ -781,7 +782,11 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
     validation = MagicMock(is_valid=True, package=MagicMock(), package_type=MagicMock())
 
     with (
-        patch.dict(os.environ, {}, clear=True),
+        patch.dict(
+            os.environ,
+            {"GIT_HTTP_EXTRAHEADER": "Authorization: Bearer ambient-must-not-leak"},
+            clear=True,
+        ),
         patch.object(downloader, "resolve_git_reference", return_value=resolved),
         patch.object(
             downloader,

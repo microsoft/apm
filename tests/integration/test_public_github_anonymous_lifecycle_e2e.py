@@ -304,6 +304,7 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
             shim,
             proxy_url=server.proxy_url,
         )
+        environment["GIT_HTTP_EXTRAHEADER"] = "Authorization: Bearer ambient-must-not-leak"
         result = ApmLifecycleRunner((str(apm_binary_path),)).run(
             (*_INSTALL_ARGS, "--verbose"),
             scenario_id="private-github-scoped-fallback",

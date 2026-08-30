@@ -88,16 +88,16 @@ def git_subprocess_env(overrides: dict[str, object] | None = None) -> dict[str, 
         An external-process-safe copy of ``os.environ`` with problematic
         git variables removed.
     """
-    env = {k: v for k, v in external_process_env().items() if k not in _STRIP_GIT_VARS}
-    if overrides is not None:
-        env.update(
-            {
-                key: value
-                for key, value in overrides.items()
-                if key not in _STRIP_GIT_VARS and isinstance(value, str)
-            }
-        )
-    return env
+    base = (
+        None
+        if overrides is None
+        else {key: value for key, value in overrides.items() if isinstance(value, str)}
+    )
+    return {
+        key: value
+        for key, value in external_process_env(base).items()
+        if key not in _STRIP_GIT_VARS
+    }
 
 
 def reset_git_cache() -> None:

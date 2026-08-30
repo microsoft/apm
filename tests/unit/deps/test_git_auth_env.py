@@ -278,7 +278,11 @@ class TestSubprocessEnvDict:
         # overlays auth env on top.
         with patch.dict(
             os.environ,
-            {"GIT_DIR": "/some/biased/dir", "GIT_CEILING_DIRECTORIES": "/oops"},
+            {
+                "GIT_DIR": "/some/biased/dir",
+                "GIT_CEILING_DIRECTORIES": "/oops",
+                "GIT_HTTP_EXTRAHEADER": "Authorization: Bearer ambient-secret",
+            },
             clear=False,
         ):
             base = {
@@ -293,6 +297,7 @@ class TestSubprocessEnvDict:
         # Sanitized base must not propagate ambient GIT_DIR.
         assert "GIT_DIR" not in env
         assert "GIT_CEILING_DIRECTORIES" not in env
+        assert "GIT_HTTP_EXTRAHEADER" not in env
 
     def test_skips_non_string_values(self):
         # Defensive: dicts with non-string vals don't raise; only strings
