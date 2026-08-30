@@ -40,6 +40,7 @@ from ...marketplace.migration import (
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
+from ...utils.console import STATUS_SYMBOLS
 from ...utils.path_security import (
     PathTraversalError,
     decode_url_path_segments,
@@ -1308,8 +1309,8 @@ class _DoctorCheck:
 def _doctor_status_icon(check: _DoctorCheck) -> str:
     """Return the status symbol for a doctor check."""
     if not check.passed:
-        return "[!]" if check.informational else "[x]"
-    return "[i]" if check.informational else "[+]"
+        return STATUS_SYMBOLS["warning"] if check.informational else STATUS_SYMBOLS["error"]
+    return STATUS_SYMBOLS["info"] if check.informational else STATUS_SYMBOLS["check"]
 
 
 def _render_doctor_table(logger, checks):

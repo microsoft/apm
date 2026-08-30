@@ -934,6 +934,13 @@ class TestRenderDoctorTable:
         call_arg = logger.tree_item.call_args[0][0]
         assert "[!]" in call_arg
 
+    def test_doctor_status_icon_uses_canonical_console_vocabulary(self) -> None:
+        from apm_cli.commands.marketplace import STATUS_SYMBOLS, _doctor_status_icon
+
+        check = self._make_check(passed=False, informational=True)
+        with patch.dict(STATUS_SYMBOLS, {"warning": "[canonical-warning]"}):
+            assert _doctor_status_icon(check) == "[canonical-warning]"
+
     def test_rich_detail_is_rendered_as_literal_text(self) -> None:
         from io import StringIO
 
