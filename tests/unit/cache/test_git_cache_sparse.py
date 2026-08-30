@@ -319,6 +319,7 @@ class TestPartialBareFlavor:
         real_run = subprocess.run
         rejected: list[list[str]] = []
         retried: list[list[str]] = []
+        warnings: list[str] = []
 
         def fake_run(cmd, *args, **kwargs):
             if isinstance(cmd, list) and "--filter=blob:none" in cmd:
@@ -336,6 +337,10 @@ class TestPartialBareFlavor:
             return real_run(cmd, *args, **kwargs)
 
         monkeypatch.setattr(git_cache_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            "apm_cli.utils.console._rich_warning",
+            warnings.append,
+        )
 
         url = bare.as_uri()
         result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
@@ -343,6 +348,9 @@ class TestPartialBareFlavor:
         assert rejected, "partial clone (with --filter) should have been attempted"
         assert retried, "fallback retry (without --filter) should have been issued"
         assert all("--filter=blob:none" not in c for c in retried)
+        assert len(warnings) == 1
+        assert "Partial clone unavailable" in warnings[0]
+        assert "cached a full bare clone instead" in warnings[0]
         assert (result / "alpha" / "file.txt").is_file()
 
     def test_partial_clone_auth_failure_does_not_retry_full_clone(
