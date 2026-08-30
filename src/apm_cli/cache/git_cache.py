@@ -81,11 +81,8 @@ def _safe_git_args() -> list[str]:
 _PARTIAL_BARE_SUFFIX = "__p"
 
 
-def _partial_clone_fallback_warning(
-    url: str,
-    exc: subprocess.CalledProcessError,
-) -> str:
-    """Build a sanitized warning without misclassifying auth as filter failure."""
+def _partial_clone_filter_unsupported(exc: subprocess.CalledProcessError) -> bool:
+    """Return whether Git diagnosed an unsupported partial-clone filter."""
     details: list[str] = []
     for value in (exc.stderr, exc.stdout):
         if isinstance(value, bytes):
@@ -93,7 +90,7 @@ def _partial_clone_fallback_warning(
         if value:
             details.append(str(value).lower())
     diagnostic = " ".join(details)
-    filter_unsupported = any(
+    return any(
         signal in diagnostic
         for signal in (
             "does not support filter",
@@ -102,10 +99,13 @@ def _partial_clone_fallback_warning(
             "filter 'blob:none' not supported",
         )
     )
-    suffix = " Server may not support filter v2." if filter_unsupported else ""
+
+
+def _partial_clone_fallback_warning(url: str) -> str:
+    """Build a sanitized warning for a completed full-clone fallback."""
     return (
-        f"Partial clone (--filter=blob:none) failed for {_sanitize_url(url)}; "
-        f"retrying with full bare clone.{suffix}"
+        f"Partial clone unavailable for {_sanitize_url(url)}; "
+        "cached a full bare clone instead. Server may not support filter v2."
     )
 
 
@@ -412,10 +412,11 @@ class GitCache:
                 # locally and skip lazy fetch (degrades to baseline,
                 # no behavior change for the user).
                 fallback_done = False
-                if partial and isinstance(exc, subprocess.CalledProcessError):
-                    from ..utils.console import _rich_warning
-
-                    _rich_warning(_partial_clone_fallback_warning(url, exc))
+                if (
+                    partial
+                    and isinstance(exc, subprocess.CalledProcessError)
+                    and _partial_clone_filter_unsupported(exc)
+                ):
                     from ..utils.file_ops import robust_rmtree
 
                     robust_rmtree(staged, ignore_errors=True)
@@ -440,6 +441,9 @@ class GitCache:
                             check=True,
                         )
                         fallback_done = True
+                        from ..utils.console import _rich_warning
+
+                        _rich_warning(_partial_clone_fallback_warning(url))
                     except (
                         subprocess.CalledProcessError,
                         subprocess.TimeoutExpired,

@@ -1341,6 +1341,16 @@ persistent_cache_auth_branch=$(
         capture { print }
     ' src/apm_cli/deps/github_downloader.py
 )
+persistent_cache_auth_call_count=$(
+    grep -c 'self\._persistent_cache_checkout(' \
+        src/apm_cli/deps/github_downloader.py \
+        || true
+)
+persistent_cache_auth_bypasses=$(
+    grep -nE '(_persistent_cache|persistent_git_cache)\.get_checkout\(' \
+        src/apm_cli/deps/github_downloader.py \
+        || true
+)
 noninteractive_git_env_bypasses=$(
     grep -rEn --include='*.py' \
         'GitAuthEnvBuilder\.noninteractive_env\(' \
@@ -1352,10 +1362,15 @@ noninteractive_git_env_bypasses=$(
 )
 if ! grep -q '^    def uses_public_github_anonymous_first(' "$public_github_auth_owner" \
     || ! grep -q '^    def build_public_github_anonymous_git_env(' "$public_github_auth_owner" \
+    || ! grep -q '^    def build_public_github_authenticated_git_env(' "$public_github_auth_owner" \
     || ! grep -q '^    def build_noninteractive_git_env(' "$public_github_auth_owner" \
     || ! grep -q 'lazy_public_github' "$public_github_auth_owner" \
     || ! printf '%s\n' "$persistent_cache_auth_branch" \
         | grep -q 'self.auth_resolver.try_with_fallback(' \
+    || ! printf '%s\n' "$persistent_cache_auth_branch" \
+        | grep -q 'self.auth_resolver.build_public_github_authenticated_git_env(' \
+    || [ "$persistent_cache_auth_call_count" -lt 2 ] \
+    || [ -n "$persistent_cache_auth_bypasses" ] \
     || [ -n "$public_github_auth_duplicate_defs" ] \
     || [ -n "$public_github_auth_missing_consumers" ] \
     || [ -n "$noninteractive_git_env_bypasses" ]; then
@@ -1363,6 +1378,7 @@ if ! grep -q '^    def uses_public_github_anonymous_first(' "$public_github_auth
     [ -n "$public_github_auth_duplicate_defs" ] && echo "$public_github_auth_duplicate_defs"
     [ -n "$public_github_auth_missing_consumers" ] \
         && echo "Missing owner routing:${public_github_auth_missing_consumers}"
+    [ -n "$persistent_cache_auth_bypasses" ] && echo "$persistent_cache_auth_bypasses"
     [ -n "$noninteractive_git_env_bypasses" ] && echo "$noninteractive_git_env_bypasses"
     violations=$((violations + 1))
 fi

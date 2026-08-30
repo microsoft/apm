@@ -1221,8 +1221,8 @@ class AuthResolver:
     ) -> dict:
         """Pre-built env dict for subprocess git calls.
 
-        ADO and GitLab tokens use an Authorization header via
-        GIT_CONFIG_COUNT/KEY/VALUE. Other host classes retain GIT_TOKEN.
+        ADO, GitLab, and explicitly requested GitHub subprocess credentials
+        use an Authorization header. Other host classes retain GIT_TOKEN.
         """
         env = dict(base_env) if base_env is not None else os.environ.copy()
         AuthResolver._clear_platform_token_env(env)
@@ -1230,10 +1230,10 @@ class AuthResolver:
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = "echo"
         env.update(_GIT_MESSAGE_LOCALE_ENV)
-        if token and host_kind in {"ado", "gitlab"} and scheme in {"basic", "bearer"}:
-            # ADO credentials use an Authorization header, never argv or
-            # GIT_TOKEN. GitLab uses the same header transport so its tokens
-            # reach Git subprocesses without entering process arguments.
+        header_auth = host_kind in {"ado", "gitlab"} or scheme == "github-basic"
+        if token and header_auth and scheme in {"basic", "bearer", "github-basic"}:
+            # ADO, GitLab, and explicit GitHub subprocess credentials use an
+            # Authorization header, never argv or GIT_TOKEN.
             #
             # #2368: set (append-after-retained) rather than dict-merge, so the
             # non-auth entries _clear_git_auth_env just retained (e.g.
@@ -1243,6 +1243,9 @@ class AuthResolver:
             if scheme == "bearer":
                 credential = token
                 header_scheme = "Bearer"
+            elif scheme == "github-basic":
+                credential = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+                header_scheme = "Basic"
             elif host_kind == "gitlab":
                 credential = base64.b64encode(f"oauth2:{token}".encode()).decode()
                 header_scheme = "Basic"
@@ -1312,6 +1315,21 @@ class AuthResolver:
         cls._append_git_config(env, "credential.helper", "")
         cls._append_git_config(env, "http.extraheader", "")
         return env
+
+    @classmethod
+    def build_public_github_authenticated_git_env(
+        cls,
+        token: str,
+        *,
+        base_env: dict[str, str],
+    ) -> dict[str, str]:
+        """Build a GitHub HTTPS env that keeps the credential out of argv."""
+        return cls._build_git_env(
+            token,
+            scheme="github-basic",
+            host_kind="github",
+            base_env=base_env,
+        )
 
     @staticmethod
     def _append_git_config(env: dict[str, str], key: str, value: str) -> None:

@@ -3806,8 +3806,8 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
     assert "repository = normalize_repo_url(repository_url)" in shared_cache
     assert "repository_url = dep_ref.to_github_url()" in downloader
     assert (
-        "_persistent_cache.get_checkout(\n                    dep_ref.to_github_url(),"
-        in downloader
+        "self._persistent_cache_checkout(\n                    _persistent_cache,\n"
+        "                    dep_ref,\n                    dep_ref.to_github_url()," in downloader
     )
     assert "cache_shard_key(dep_ref.to_github_url())" in tiered_resolver
     assert "cache_shard_key(dep_ref.repo_url)" not in tiered_resolver
@@ -4366,8 +4366,24 @@ def test_public_github_auth_owner_guard_rejects_duplicate_owner(
     )
 
 
+@pytest.mark.parametrize(
+    ("owner_call", "bypass"),
+    (
+        (
+            "return self.auth_resolver.try_with_fallback(\n",
+            "return _checkout(\n",
+        ),
+        (
+            "self._persistent_cache_checkout(\n",
+            "_persistent_cache.get_checkout(\n",
+        ),
+    ),
+    ids=("helper-bypasses-owner", "caller-bypasses-helper"),
+)
 def test_public_github_auth_owner_guard_rejects_persistent_cache_bypass(
     tmp_path: Path,
+    owner_call: str,
+    bypass: str,
 ) -> None:
     """AC20 requires persistent cache network work to route through AuthResolver."""
     root = Path(__file__).parents[2]
@@ -4387,11 +4403,7 @@ def test_public_github_auth_owner_guard_rejects_persistent_cache_bypass(
     )
     consumer = sandbox / "src/apm_cli/deps/github_downloader.py"
     source = consumer.read_text(encoding="utf-8")
-    source = source.replace(
-        "return self.auth_resolver.try_with_fallback(\n",
-        "return _checkout(\n",
-        1,
-    )
+    source = source.replace(owner_call, bypass, 1)
     consumer.write_text(source, encoding="utf-8")
 
     result = subprocess.run(

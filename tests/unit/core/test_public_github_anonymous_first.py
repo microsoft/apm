@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from base64 import b64decode
 from pathlib import Path
 from types import MappingProxyType
 from unittest.mock import MagicMock, call, patch
@@ -759,11 +760,21 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
                 ),
             )
             raise RuntimeError("persistent cache clone failed") from git_failure
+        assert "GIT_TOKEN" not in env
+        assert "GIT_DIR" not in env
+        auth_entries = _git_auth_entries(env)
+        assert len(auth_entries) == 1
+        key, value = auth_entries[0]
+        assert key == "http.extraheader"
+        scheme, encoded = value.removeprefix("Authorization: ").split(" ", 1)
+        assert scheme == "Basic"
+        assert b64decode(encoded).decode() == "x-access-token:private-token"
         return cached_checkout
 
     persistent_cache = MagicMock()
     persistent_cache.get_checkout.side_effect = cache_checkout
     downloader = _public_downloader(resolver)
+    downloader.git_env["GIT_DIR"] = str(tmp_path / "ambient-repository")
     downloader.shared_clone_cache = None
     downloader.persistent_git_cache = persistent_cache
     resolved = MagicMock(resolved_commit="a" * 40)

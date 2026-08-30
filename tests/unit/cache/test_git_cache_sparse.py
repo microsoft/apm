@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache, _partial_clone_fallback_warning, _variant_key
+from apm_cli.cache.git_cache import (
+    GitCache,
+    _partial_clone_fallback_warning,
+    _partial_clone_filter_unsupported,
+    _variant_key,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -44,21 +50,28 @@ class TestVariantKey:
         assert v1 == v2
 
 
-def test_auth_failure_partial_clone_warning_does_not_blame_filter_v2() -> None:
-    """An authentication failure gets a truthful, sanitized retry warning."""
+def test_partial_clone_warning_redacts_url_credentials() -> None:
+    """A completed filter fallback warning never exposes URL credentials."""
+    warning = _partial_clone_fallback_warning(
+        "https://alice:" + "example-token" + "@github.com/acme/private"
+    )
+    rendered_url = next(token.rstrip(";") for token in warning.split() if "://" in token)
+    parsed = urlparse(rendered_url)
+
+    assert parsed.hostname == "github.com"
+    assert parsed.username == "alice"
+    assert parsed.password == "***"
+
+
+def test_auth_failure_is_not_classified_as_filter_rejection() -> None:
+    """An authentication failure must reach the outer AuthResolver immediately."""
     failure = subprocess.CalledProcessError(
         128,
         ("git", "clone"),
         stderr="fatal: Authentication failed",
     )
 
-    warning = _partial_clone_fallback_warning(
-        "https://user:secret@github.com/acme/private",
-        failure,
-    )
-
-    assert "filter v2" not in warning
-    assert "secret" not in warning
+    assert _partial_clone_filter_unsupported(failure) is False
 
 
 def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:
@@ -331,3 +344,38 @@ class TestPartialBareFlavor:
         assert retried, "fallback retry (without --filter) should have been issued"
         assert all("--filter=blob:none" not in c for c in retried)
         assert (result / "alpha" / "file.txt").is_file()
+
+    def test_partial_clone_auth_failure_does_not_retry_full_clone(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """Auth failure exits after one negotiation so AuthResolver can retry."""
+        cache = GitCache(tmp_path / "cache")
+        clone_commands: list[list[str]] = []
+
+        def reject_auth(cmd, *args, **kwargs):
+            argv = list(cmd)
+            if "clone" in argv and "--bare" in argv:
+                clone_commands.append(argv)
+                raise subprocess.CalledProcessError(
+                    128,
+                    argv,
+                    stderr="fatal: Authentication failed",
+                )
+            raise AssertionError(f"unexpected subprocess: {argv}")
+
+        import apm_cli.cache.git_cache as git_cache_mod
+
+        monkeypatch.setattr(git_cache_mod.subprocess, "run", reject_auth)
+
+        with pytest.raises(RuntimeError, match="Failed to clone"):
+            cache.get_checkout(
+                "https://github.com/acme/private",
+                "a" * 40,
+                locked_sha="a" * 40,
+                sparse_paths=["alpha"],
+            )
+
+        assert len(clone_commands) == 1
+        assert "--filter=blob:none" in clone_commands[0]

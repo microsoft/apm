@@ -334,6 +334,8 @@ class GitHubPackageDownloader:
         sparse_paths: list[str] | None = None,
     ) -> Path:
         """Return a persistent checkout using the canonical auth fallback."""
+        from .git_auth_env import GitAuthEnvBuilder
+
         if (
             self.auth_resolver.uses_public_github_anonymous_first(
                 dep_ref.host or default_host(),
@@ -345,15 +347,22 @@ class GitHubPackageDownloader:
         ):
             org = dep_ref.repo_url.split("/", 1)[0] if "/" in dep_ref.repo_url else None
 
-            def _checkout(_token: str | None, env: dict[str, str]) -> Path:
+            def _checkout(token: str | None, env: dict[str, str]) -> Path:
+                attempt_env = GitAuthEnvBuilder.subprocess_env_dict(env)
+                if token:
+                    attempt_env = self.auth_resolver.build_public_github_authenticated_git_env(
+                        token,
+                        base_env=attempt_env,
+                    )
                 return cache.get_checkout(
                     repository_url,
                     ref,
                     locked_sha=locked_sha,
-                    env=env,
+                    env=attempt_env,
                     sparse_paths=sparse_paths,
                 )
 
+            base_env = GitAuthEnvBuilder.subprocess_env_dict(self.git_env)
             return self.auth_resolver.try_with_fallback(
                 dep_ref.host or default_host(),
                 _checkout,
@@ -362,7 +371,7 @@ class GitHubPackageDownloader:
                 path=dep_ref.repo_url,
                 host_type=dep_ref.host_type,
                 unauth_first=True,
-                base_env=self.git_env,
+                base_env=base_env,
             )
 
         return cache.get_checkout(
