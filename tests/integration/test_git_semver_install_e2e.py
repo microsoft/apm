@@ -26,9 +26,11 @@ did not touch the network" without relying on subprocess sentinels.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -42,6 +44,7 @@ from apm_cli.cli import cli
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.models.apm_package import (
     APMPackage,
+    DependencyReference,
     PackageInfo,
     clear_apm_yml_cache,
 )
@@ -158,6 +161,8 @@ class _DownloaderStub:
     def __init__(self, sha_by_tag: dict[str, str]) -> None:
         self.sha_by_tag = sha_by_tag
         self.calls: list[tuple[str, str]] = []  # (owner_repo, reference)
+        self.before_download: Callable[[DependencyReference, Path], None] | None = None
+        self.invalid_tags: set[str] = set()
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         recorder = self
@@ -175,7 +180,24 @@ class _DownloaderStub:
 
             sha = recorder.sha_by_tag.get(ref_value, "f" * 40)
             target_path = Path(target_path)
+            if recorder.before_download is not None:
+                recorder.before_download(dep_ref, target_path)
             target_path.mkdir(parents=True, exist_ok=True)
+
+            if ref_value in recorder.invalid_tags:
+                (target_path / "apm.yml").write_text("not: a-package\n", encoding="utf-8")
+                return type(
+                    "InvalidPackageInfo",
+                    (),
+                    {
+                        "resolved_reference": ResolvedReference(
+                            original_ref=ref_value,
+                            ref_type=GitReferenceType.TAG,
+                            resolved_commit=sha,
+                            ref_name=ref_value,
+                        )
+                    },
+                )()
 
             package_name = dep_ref.repo_url.rsplit("/", 1)[-1]
             (target_path / "apm.yml").write_text(
@@ -266,10 +288,12 @@ def _run_install(
     project: Path,
     monkeypatch: pytest.MonkeyPatch,
     args: list[str] | None = None,
+    *,
+    catch_exceptions: bool = False,
 ):
     monkeypatch.chdir(project)
     with patch(_PATCH_UPDATES, return_value=None):
-        return runner.invoke(cli, ["install", *(args or [])], catch_exceptions=False)
+        return runner.invoke(cli, ["install", *(args or [])], catch_exceptions=catch_exceptions)
 
 
 def _source_cli_environment(child_env: dict[str, str]) -> dict[str, str]:
@@ -908,6 +932,16 @@ class TestUpdateReResolvesGitSemver:
         assert rr.calls.count("acme/widget") == 1, (
             f"first install should ls-remote once, got: {rr.calls}"
         )
+        live_hook = project / "apm_modules" / "acme" / "widget" / "hooks" / "pre_tool.py"
+        live_hook.parent.mkdir(parents=True)
+        live_hook.write_text("old hook", encoding="ascii")
+
+        def assert_live_hook(_dep_ref: DependencyReference, target_path: Path) -> None:
+            if ".apm-resolution-staging" in target_path.parts:
+                assert target_path != live_hook.parents[1]
+                assert live_hook.read_text(encoding="ascii") == "old hook"
+
+        dl.before_download = assert_live_hook
 
         # Upstream publishes v1.5.0. The install path still exists from
         # the first run -- this is the surface that hid the bug.
@@ -939,6 +973,144 @@ class TestUpdateReResolvesGitSemver:
         assert locked_after.get("resolved_commit") == "3" * 40, (
             f"--update must update resolved_commit, got: {locked_after}"
         )
+
+    def test_invalid_update_preserves_live_hook_and_lockfile(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A malformed refresh candidate fails without publishing stale metadata."""
+        project = tmp_path / "invalid-update"
+        _write_apm_yml(project, ["acme/widget#^1.2.0"])
+        rr = _RefResolverCallRecorder(
+            {
+                "acme/widget": [
+                    RemoteRef(name="refs/tags/v1.2.3", sha="2" * 40),
+                ]
+            }
+        )
+        dl = _DownloaderStub({"v1.2.3": "2" * 40, "v1.5.0": "3" * 40})
+        rr.install(monkeypatch)
+        dl.install(monkeypatch)
+        first = _run_install(runner, project, monkeypatch)
+        assert first.exit_code == 0, first.output
+        clear_apm_yml_cache()
+
+        live_hook = project / "apm_modules" / "acme" / "widget" / "hooks" / "pre_tool.py"
+        live_hook.parent.mkdir(parents=True)
+        live_hook.write_text("old hook", encoding="ascii")
+        lock_before = (project / "apm.lock.yaml").read_bytes()
+        rr.refs_by_repo["acme/widget"].append(RemoteRef(name="refs/tags/v1.5.0", sha="3" * 40))
+        dl.invalid_tags.add("v1.5.0")
+
+        second = _run_install(runner, project, monkeypatch, args=["--update"])
+
+        assert second.exit_code != 0
+        output = " ".join(second.output.split())
+        assert "Downloaded dependency 'acme/widget' is invalid" in output
+        assert "existing installation remains active" in output
+        assert live_hook.read_text(encoding="ascii") == "old hook"
+        assert (project / "apm.lock.yaml").read_bytes() == lock_before
+
+    @pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
+    def test_activation_error_preserves_live_hook_and_lockfile(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        error_type: type[BaseException],
+    ) -> None:
+        """Activation errors restore the prior hook and leave lock state unchanged."""
+        project = tmp_path / f"activation-{error_type.__name__}"
+        _write_apm_yml(project, ["acme/widget#^1.2.0"])
+        rr = _RefResolverCallRecorder(
+            {"acme/widget": [RemoteRef(name="refs/tags/v1.2.3", sha="2" * 40)]}
+        )
+        dl = _DownloaderStub({"v1.2.3": "2" * 40, "v1.5.0": "3" * 40})
+        rr.install(monkeypatch)
+        dl.install(monkeypatch)
+        first = _run_install(runner, project, monkeypatch)
+        assert first.exit_code == 0, first.output
+        clear_apm_yml_cache()
+
+        live = project / "apm_modules" / "acme" / "widget"
+        live_hook = live / "hooks" / "pre_tool.py"
+        live_hook.parent.mkdir(parents=True)
+        live_hook.write_text("print('old hook')\n", encoding="ascii")
+        settings_path = project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": f"{sys.executable} {live_hook}",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="ascii",
+        )
+
+        def assert_registered_hook_runs(
+            _dep_ref: DependencyReference,
+            target_path: Path,
+        ) -> None:
+            if ".apm-resolution-staging" not in target_path.parts:
+                return
+            command = json.loads(settings_path.read_text(encoding="ascii"))["hooks"]["PreToolUse"][
+                0
+            ]["hooks"][0]["command"]
+            result = subprocess.run(
+                command.split(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0
+            assert result.stdout.strip() == "old hook"
+
+        dl.before_download = assert_registered_hook_runs
+        lock_before = (project / "apm.lock.yaml").read_bytes()
+        rr.refs_by_repo["acme/widget"].append(RemoteRef(name="refs/tags/v1.5.0", sha="3" * 40))
+        original_replace = Path.replace
+
+        def fail_activation(source: Path, target: Path) -> Path:
+            if (
+                ".apm-resolution-staging" in source.parts
+                and "replacements" in source.parts
+                and target == live
+            ):
+                raise error_type("injected activation failure")
+            return original_replace(source, target)
+
+        monkeypatch.setattr(Path, "replace", fail_activation)
+
+        second = _run_install(
+            runner,
+            project,
+            monkeypatch,
+            args=["--update"],
+            catch_exceptions=True,
+        )
+
+        assert second.exit_code != 0
+        assert live_hook.read_text(encoding="ascii") == "print('old hook')\n"
+        assert_registered_hook_runs(
+            DependencyReference(repo_url="acme/widget"),
+            project / "apm_modules" / ".apm-resolution-staging" / "probe",
+        )
+        assert (project / "apm.lock.yaml").read_bytes() == lock_before
+        assert not (project / "apm_modules" / ".apm-resolution-staging").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,11 @@
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
+`apm update`, `apm install --update`, and `apm install --refresh` stage and
+validate replacement packages before publication. A failed download,
+validation, or activation leaves the previous package and lockfile active;
+fix the reported cause and rerun the command.
+
 For JavaScript hook bundles, `apm install --target copilot` and its
 `--target vscode` alias omit the generated `package.json` sidecar from
 project `.github/hooks/` and user `~/.copilot/hooks/` because Copilot
@@ -242,7 +247,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm marketplace outdated` | Report upgradable plugins, range-aware; respects `tag_pattern` and common monorepo tag layouts | `--offline`, `--include-prerelease`, `-v` |
 | `apm marketplace check` | Validate the `marketplace:` block and verify refs resolve | `--offline`, `-v` |
 | `apm marketplace audit NAME` | Supply-chain audit for plugin deps; local string sources are contained in the registered root | `--strict` (CI exit-1 on bypasses, skipped sources, verification errors, or no verified plugins), `-v` |
-| `apm doctor` | Diagnose git, network, auth, marketplace config readiness, and (when a `marketplace:` block is present) **format coverage** -- which output profiles are configured vs. supported, so producers can spot easy reach wins (e.g. add `codex: {}` to also publish for Codex consumers). GitHub CLI is one auth source, not a separate check. All marketplace-specific rows are informational and never affect exit code. | `-v` |
+| `apm doctor` | Diagnose git, network, auth, marketplace config readiness, and (when a `marketplace:` block is present) **format coverage** -- which output profiles are configured vs. supported, so producers can spot easy reach wins (e.g. add `codex: {}` to also publish for Codex consumers). The executable-trust row names malformed configuration under either `executables` or the deprecated `allowExecutables` key and reports local allows overridden by org policy. GitHub CLI is one auth source, not a separate check. Informational rows never affect exit code. | `-v` |
 | `apm marketplace package add <source>` | Add a plugin entry to `marketplace.plugins` (source accepts `owner/repo` or `./path`) | `--name`, `--version`, `--ref` (mutable refs auto-resolved to SHA), `-d`/`--description`, `-s`/`--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease`, `--no-verify` |
 | `apm marketplace package set <name>` | Update fields on an existing plugin entry | `--version`, `--ref` (mutable refs auto-resolved to SHA), `--description`, `--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease` |
 | `apm marketplace package remove <name>` | Remove a plugin entry from `marketplace.plugins` | `--yes` |

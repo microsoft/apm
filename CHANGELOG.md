@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private `github.com` packages now populate the persistent Git
   cache through repository-scoped credential fallback without storing
   credentials in cache keys or remote URLs. (#2722)
+- Plugin refreshes now keep the existing package and its registered hooks live
+  while replacement content downloads and validates. Failed refreshes retain
+  the prior package instead of accepting stale content. (#2723)
+- Successful installs now remove inactive resolution staging directories left
+  by interrupted earlier runs while preserving active and unrelated entries.
+  (closes #2716)
+- Successful installs now safely clean up temporary backups left by interrupted
+  lock-aware runs without disturbing active installs or unrelated files. Legacy
+  lockless backups are preserved with manual recovery guidance. (#2720)
+- `apm doctor` now reports malformed project `executables` configuration as an
+  actionable informational warning instead of omitting the check. (#2719)
+- `apm doctor` now reports malformed project `executables` or deprecated
+  `allowExecutables` configuration as an actionable informational warning
+  instead of omitting the check. (#2719)
+- `apm doctor` now reports malformed project executable-trust configuration
+  under either `executables` or the deprecated `allowExecutables` key as an
+  actionable informational warning instead of omitting the check. (#2719)
 
 ## [0.29.0] - 2026-08-30
 

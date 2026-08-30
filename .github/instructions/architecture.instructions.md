@@ -49,6 +49,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Deployment provenance / state | deployment_ledger.py | `src/apm_cli/core/deployment_ledger.py` |
 | Target-scoped deployed-file contraction | install/manifest_reconcile.py (reconcile_target_deployed_files) | `src/apm_cli/install/manifest_reconcile.py` |
 | Install success / failure outcome | the canonical install-outcome path | `src/apm_cli/install/outcome.py` |
+| Resolution replacement activation | install/resolution_staging.py (ResolutionStagingSession) | `src/apm_cli/install/resolution_staging.py` |
 | Frozen install mutation eligibility | install/service.py (InstallService) | `src/apm_cli/install/service.py` |
 | Authorized deployable source paths | install/deployable_source_plan.py (DeployableSourcePlan) | `src/apm_cli/install/deployable_source_plan.py` |
 | Symlink-component containment and strict percent-encoded URL-path decoding | utils/path_security.py (has_symlink_component, decode_url_path_segments) | `src/apm_cli/utils/path_security.py` |

@@ -123,9 +123,11 @@ class InstallTransaction:
             if self._rolled_back:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
             if not self.committed:
-                self._resolution.commit()
+                cleanup_issues = self._resolution.commit() or []
                 self.committed = True
                 self._completed = True
+                cleanup_issues.extend(self._resolution.remove_abandoned_roots())
+                self._report_resolution_cleanup_issues(cleanup_issues)
             if (
                 self._validation is not None
                 and self._validation.has_failures
@@ -135,13 +137,35 @@ class InstallTransaction:
             result.committed = True
             return result
 
+    def _report_resolution_cleanup_issues(self, issues: list[tuple[Path, str]]) -> None:
+        """Report cleanup paths that require safe manual recovery."""
+        if not issues or self._logger is None:
+            return
+        item_label = "item" if len(issues) == 1 else "items"
+        if self._logger.verbose is True:
+            recovery_action = (
+                "Stop other APM installs, then delete the paths listed below manually."
+            )
+        else:
+            recovery_action = (
+                "Stop other APM installs, then run again with --verbose "
+                "to see paths you can delete manually."
+            )
+        self._logger.warning(
+            f"Could not safely remove {len(issues)} interrupted-install backup "
+            f"{item_label}. {recovery_action}"
+        )
+        for path, reason in issues:
+            self._logger.verbose_detail(f"Resolution backup kept at {path}: {reason}")
+
     def complete(self, result: InstallResult) -> InstallResult:
         """Finalize one result according to its canonical disposition."""
         if result.disposition is InstallDisposition.DRY_RUN:
             with self._lock:
                 if self._rolled_back:
                     raise RuntimeError("Cannot complete an install transaction after rollback")
-                self._resolution.rollback()
+                cleanup_issues = self._resolution.rollback() or []
+                self._report_resolution_cleanup_issues(cleanup_issues)
                 self._completed = True
             return result
         if result.disposition in {
@@ -158,7 +182,8 @@ class InstallTransaction:
         with self._lock:
             if self.committed or self._rolled_back:
                 return
-            self._resolution.rollback()
+            cleanup_issues = self._resolution.rollback() or []
+            self._report_resolution_cleanup_issues(cleanup_issues)
             self._restore_manifest()
             self._rolled_back = True
             self._completed = True

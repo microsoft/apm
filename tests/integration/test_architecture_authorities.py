@@ -14,6 +14,45 @@ from types import ModuleType
 import pytest
 
 
+def test_resolution_replacement_activation_has_one_owner(tmp_path: Path) -> None:
+    """Resolution downloads must publish through the staging session owner."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    assert (
+        "Resolution replacements must stay staged until their canonical publish boundary" in guard
+    )
+
+    sandbox = tmp_path / "repo"
+    for relative in (
+        "scripts/lint-resolution-replacement-boundary.py",
+        "src/apm_cli/install/resolution_staging.py",
+        "src/apm_cli/install/phases/resolve.py",
+        "src/apm_cli/install/service.py",
+    ):
+        source = root / relative
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    duplicate = sandbox / "src/apm_cli/install/service.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8")
+        + "\n\ndef prepare_replacement(path):\n    return path\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        (sys.executable, "scripts/lint-resolution-replacement-boundary.py"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 1
+    assert "duplicates owner methods: prepare_replacement" in result.stdout
+
+
 def test_generated_bundle_text_writes_are_lf_deterministic() -> None:
     """Generated bundle text must route through the checked LF boundary."""
     root = Path(__file__).parents[2]
@@ -66,6 +105,31 @@ def test_install_request_defaults_have_single_owner() -> None:
     assert "| Install invocation option defaults | install/request.py (InstallRequest) |" in (
         architecture
     )
+
+
+def test_doctor_status_symbols_use_console_owner() -> None:
+    """Doctor must consume the canonical console status vocabulary."""
+    root = Path(__file__).parents[2]
+    source = (root / "src/apm_cli/commands/marketplace/__init__.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_doctor_status_icon"
+    )
+    raw_symbols = {"[!]", "[x]", "[i]", "[+]"}
+    literal_symbols = {
+        node.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+    assert not literal_symbols & raw_symbols
+    assert any(
+        isinstance(node, ast.Name) and node.id == "STATUS_SYMBOLS" for node in ast.walk(function)
+    )
+    assert "Doctor status symbols must use utils/console.py::STATUS_SYMBOLS" in guard
 
 
 def test_uninstall_reintegration_routes_through_the_deployable_source_plan() -> None:

@@ -23,6 +23,8 @@ from unittest.mock import MagicMock, patch
 import yaml
 
 from apm_cli.install.context import InstallContext
+from apm_cli.install.resolution_staging import ResolutionStagingSession
+from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
 # Patch targets for resolve module
@@ -108,6 +110,78 @@ def _run_ctx(ctx, tmp_path, *, graph=None, extra_env=None, mock_resolver=None):
         run(ctx)
 
     return mock_resolver, mock_cache
+
+
+def test_refresh_keeps_registered_hook_live_while_replacement_downloads(
+    tmp_path: Path,
+) -> None:
+    """A refresh stages new package content before replacing the live hook tree."""
+    from apm_cli.install.phases.resolve import (
+        _materialization,
+        _resolve_dependencies,
+    )
+
+    modules = tmp_path / "apm_modules"
+    package = modules / "owner" / "plugin"
+    hook = package / "hooks" / "pre_tool.py"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("old hook", encoding="ascii")
+    dependency = DependencyReference.parse("owner/plugin#main")
+    graph = _make_mock_graph(deps=[dependency])
+    downloader = MagicMock()
+
+    def download_package(_dependency, target_path):
+        assert target_path != package
+        assert hook.read_text(encoding="ascii") == "old hook"
+        replacement_hook = target_path / "hooks" / "pre_tool.py"
+        replacement_hook.parent.mkdir(parents=True)
+        replacement_hook.write_text("new hook", encoding="ascii")
+        return MagicMock(resolved_reference=None)
+
+    downloader.download_package.side_effect = download_package
+    downloader.shared_clone_cache = None
+    downloader._transport_selector = MagicMock()
+    downloader._protocol_pref = None
+
+    class FakeResolver:
+        def __init__(self, *, download_callback, activation_callback, **_kwargs):
+            self._download_callback = download_callback
+            self._activation_callback = activation_callback
+            self.marketplace_provenance = {}
+            self._rejected_remote_local_keys = set()
+
+        def resolve_dependencies(self, _anchor):
+            downloaded = self._download_callback(dependency, modules)
+            assert downloaded != package
+            assert hook.read_text(encoding="ascii") == "old hook"
+            assert self._activation_callback(downloaded) == package
+            return graph
+
+    ctx = _make_ctx(tmp_path)
+    ctx.apm_modules_dir = modules
+    ctx.apm_package = MagicMock(registries={})
+    ctx.all_apm_deps = [dependency]
+    ctx.existing_lockfile = None
+    ctx.downloader = downloader
+    ctx.ref_freshness_policy = MagicMock(requires_remote=True)
+    staging = ResolutionStagingSession(modules)
+
+    with (
+        patch(_RESOLVER_CLS, FakeResolver),
+        patch(_CHECK_INSECURE),
+        patch(_COLLECT_INSECURE, return_value=[]),
+        patch(_WARN_INSECURE),
+        patch(_GUARD_INSECURE),
+    ):
+        _resolve_dependencies(
+            ctx,
+            staging,
+            _materialization.CachedMaterializationPathReader(),
+        )
+
+    assert hook.read_text(encoding="ascii") == "new hook"
+    staging.rollback()
+    assert hook.read_text(encoding="ascii") == "old hook"
 
 
 # ---------------------------------------------------------------------------
