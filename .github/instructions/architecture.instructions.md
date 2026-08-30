@@ -86,6 +86,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | User-root scoped instruction eligibility | integration/targets.py (TargetProfile.include_scoped_in_user_root_context) | `src/apm_cli/integration/targets.py` |
 | Native Agent Plugin registration admission (Copilot target + client capability) | copilot_plugins/capability.py (resolve_native_registration_capability, admits_native_plugin) | `src/apm_cli/copilot_plugins/capability.py` |
 | APM-owned Copilot marketplace catalog, settings entries, and ownership ledger | copilot_plugins/registrar.py (synchronize_copilot_plugins, resync_native_plugins) | `src/apm_cli/copilot_plugins/registrar.py`; `src/apm_cli/copilot_plugins/settings.py`; `src/apm_cli/copilot_plugins/catalog.py` |
+| Frontmatter BOM decoding and bounded YAML parsing | utils/yaml_io.py (load_frontmatter, _BoundedYAMLHandler) | `src/apm_cli/utils/yaml_io.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.
