@@ -313,6 +313,7 @@ class TestIntegratePackagePrimitives:
             "canvases": 0,
             "links_resolved": 0,
             "deployed_files": [],
+            "native_plugin": False,
         }
         integrators["skill_integrator"].integrate_package_skill.assert_not_called()
 
