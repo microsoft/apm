@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -174,6 +175,7 @@ def test_inventory_rejects_path_replacement_before_open(
         AssetInventory(tmp_path).collect_file(asset_path)
 
 
+@pytest.mark.windows_compat
 def test_verified_asset_descriptor_is_stable_after_path_replacement(tmp_path: Path) -> None:
     _write_manifest(tmp_path)
     _write_valid_skill(tmp_path, "stable")
@@ -183,9 +185,20 @@ def test_verified_asset_descriptor_is_stable_after_path_replacement(tmp_path: Pa
     moved = asset_path.with_name("original.md")
 
     with open_verified_asset(tmp_path, asset) as handle:
+        if sys.platform == "win32":
+            with pytest.raises(PermissionError) as exc_info:
+                asset_path.rename(moved)
+            assert exc_info.value.winerror == 32
+            assert hashlib.sha256(handle.read()).hexdigest() == asset.sha256
+        else:
+            asset_path.rename(moved)
+            asset_path.write_text("replacement", encoding="utf-8")
+            assert hashlib.sha256(handle.read()).hexdigest() == asset.sha256
+
+    if sys.platform == "win32":
         asset_path.rename(moved)
         asset_path.write_text("replacement", encoding="utf-8")
-        assert hashlib.sha256(handle.read()).hexdigest() == asset.sha256
+        assert moved.read_text(encoding="utf-8") != asset_path.read_text(encoding="utf-8")
 
 
 def test_collect_file_rejects_directory_instead_of_selecting_child(tmp_path: Path) -> None:

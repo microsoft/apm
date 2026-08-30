@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -371,6 +372,7 @@ class MarketplacePlugin:
     # ``None`` means the field was absent (old marketplace.json); the resolver
     # falls back to its built-in default in that case.
     tag_pattern: str | None = None
+    manifest: dict[str, Any] | None = field(default=None, compare=False, hash=False, repr=False)
 
     def matches_query(self, query: str) -> bool:
         """Return True if the plugin matches a search query (case-insensitive)."""
@@ -542,6 +544,11 @@ def _parse_plugin_entry(
             source_marketplace=source_name,
             registry=registry_name,
             tag_pattern=tag_pattern,
+            manifest={
+                key: deepcopy(entry[key])
+                for key in ("name", "description", "version", "lspServers", "mcpServers")
+                if key in entry
+            },
         ),
         None,
     )

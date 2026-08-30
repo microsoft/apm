@@ -49,6 +49,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Deployment provenance / state | deployment_ledger.py | `src/apm_cli/core/deployment_ledger.py` |
 | Target-scoped deployed-file contraction | install/manifest_reconcile.py (reconcile_target_deployed_files) | `src/apm_cli/install/manifest_reconcile.py` |
 | Install success / failure outcome | the canonical install-outcome path | `src/apm_cli/install/outcome.py` |
+| Resolution replacement activation | install/resolution_staging.py (ResolutionStagingSession) | `src/apm_cli/install/resolution_staging.py` |
 | Frozen install mutation eligibility | install/service.py (InstallService) | `src/apm_cli/install/service.py` |
 | Authorized deployable source paths | install/deployable_source_plan.py (DeployableSourcePlan) | `src/apm_cli/install/deployable_source_plan.py` |
 | Symlink-component containment and strict percent-encoded URL-path decoding | utils/path_security.py (has_symlink_component, decode_url_path_segments) | `src/apm_cli/utils/path_security.py` |
@@ -77,13 +78,17 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Effective marketplace output path | marketplace/output_profiles.py (resolve_effective_output_path) | `src/apm_cli/marketplace/output_profiles.py` |
 | Bootstrap project-name validation and fallback | core/project_name.py (resolve_bootstrap_project_name) | `src/apm_cli/core/project_name.py` |
 | Marketplace raw-structure diagnostics | marketplace/models.py parser; validator.py consumes them | `src/apm_cli/marketplace/models.py`; `src/apm_cli/marketplace/validator.py` |
+| Catalog-only marketplace manifest materialization | deps/_shared.py (materialize_marketplace_manifest) | `src/apm_cli/deps/_shared.py` |
 | Agent Plugins v1 contract interpretation, component discovery, and portable manifest authority | agent_plugins/loader.py (load_agent_plugin, _load_apm_configuration) | `src/apm_cli/agent_plugins/loader.py`; `src/apm_cli/agent_plugins/ir.py` |
 | Agent Plugin producer portable-surface admission | bundle/agent_plugin_exporter.py (_require_portable_agent_plugin) | `src/apm_cli/bundle/agent_plugin_exporter.py` |
 | APMPackage interpreted-manifest construction | models/apm_package.py (APMPackage.from_mapping) | `src/apm_cli/models/apm_package.py` |
 | Agent Plugin compatibility package projection | agent_plugins/projection.py (project_agent_plugin_package) | `src/apm_cli/agent_plugins/projection.py`; `src/apm_cli/models/validation.py` |
 | Network host literal parsing and loopback classification | utils/net.py (parse_host_address, is_loopback_host) | `src/apm_cli/utils/net.py` |
-| Legacy plugin declared-skill membership | deps/plugin_parser.py (_map_plugin_artifacts, normalized_plugin_skill_sources) | `src/apm_cli/deps/plugin_parser.py`; `src/apm_cli/integration/skill_integrator.py` |
+| Legacy plugin declared-skill membership and plugin-root placeholder expansion | deps/plugin_parser.py (_map_plugin_artifacts, normalized_plugin_skill_sources, resolve_plugin_root_placeholders) | `src/apm_cli/deps/plugin_parser.py`; `src/apm_cli/integration/skill_integrator.py` |
 | User-root scoped instruction eligibility | integration/targets.py (TargetProfile.include_scoped_in_user_root_context) | `src/apm_cli/integration/targets.py` |
+| Native Agent Plugin registration admission (Copilot target + client capability) | copilot_plugins/capability.py (resolve_native_registration_capability, admits_native_plugin) | `src/apm_cli/copilot_plugins/capability.py` |
+| APM-owned Copilot marketplace catalog, settings entries, and ownership ledger | copilot_plugins/registrar.py (synchronize_copilot_plugins, resync_native_plugins) | `src/apm_cli/copilot_plugins/registrar.py`; `src/apm_cli/copilot_plugins/settings.py`; `src/apm_cli/copilot_plugins/catalog.py` |
+| Frontmatter BOM decoding and bounded YAML parsing | utils/yaml_io.py (load_frontmatter, _BoundedYAMLHandler) | `src/apm_cli/utils/yaml_io.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

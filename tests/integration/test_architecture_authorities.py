@@ -14,6 +14,45 @@ from types import ModuleType
 import pytest
 
 
+def test_resolution_replacement_activation_has_one_owner(tmp_path: Path) -> None:
+    """Resolution downloads must publish through the staging session owner."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    assert (
+        "Resolution replacements must stay staged until their canonical publish boundary" in guard
+    )
+
+    sandbox = tmp_path / "repo"
+    for relative in (
+        "scripts/lint-resolution-replacement-boundary.py",
+        "src/apm_cli/install/resolution_staging.py",
+        "src/apm_cli/install/phases/resolve.py",
+        "src/apm_cli/install/service.py",
+    ):
+        source = root / relative
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    duplicate = sandbox / "src/apm_cli/install/service.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8")
+        + "\n\ndef prepare_replacement(path):\n    return path\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        (sys.executable, "scripts/lint-resolution-replacement-boundary.py"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 1
+    assert "duplicates owner methods: prepare_replacement" in result.stdout
+
+
 def test_generated_bundle_text_writes_are_lf_deterministic() -> None:
     """Generated bundle text must route through the checked LF boundary."""
     root = Path(__file__).parents[2]
@@ -68,6 +107,31 @@ def test_install_request_defaults_have_single_owner() -> None:
     )
 
 
+def test_doctor_status_symbols_use_console_owner() -> None:
+    """Doctor must consume the canonical console status vocabulary."""
+    root = Path(__file__).parents[2]
+    source = (root / "src/apm_cli/commands/marketplace/__init__.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_doctor_status_icon"
+    )
+    raw_symbols = {"[!]", "[x]", "[i]", "[+]"}
+    literal_symbols = {
+        node.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+    assert not literal_symbols & raw_symbols
+    assert any(
+        isinstance(node, ast.Name) and node.id == "STATUS_SYMBOLS" for node in ast.walk(function)
+    )
+    assert "Doctor status symbols must use utils/console.py::STATUS_SYMBOLS" in guard
+
+
 def test_uninstall_reintegration_routes_through_the_deployable_source_plan() -> None:
     """Uninstall rebuild must not recreate a direct, unscanned write path."""
     root = Path(__file__).parents[2]
@@ -97,6 +161,35 @@ def test_git_semver_preflight_eligibility_has_single_owner() -> None:
     assert 'dep_ref.ref_kind == "semver"' not in ingress
     assert "Git semver preflight eligibility must route through ref_reuse.py" in guard
     assert "| Git semver preflight eligibility and resolution |" in architecture
+
+
+def test_catalog_only_marketplace_materialization_has_single_owner() -> None:
+    """Catalog metadata must reach one transactional materialization boundary."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/deps/_shared.py").read_text(encoding="utf-8")
+    resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text(encoding="utf-8")
+    local_content = (root / "src/apm_cli/install/phases/local_content.py").read_text(
+        encoding="utf-8"
+    )
+    install_sources = (root / "src/apm_cli/install/sources.py").read_text(encoding="utf-8")
+    plugin_parser = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
+    package_model = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert owner.count("def materialize_marketplace_manifest(") == 1
+    assert "materialize_marketplace_manifest(dep_ref, install_path)" in resolver
+    assert "has_marketplace_deployable_manifest(dep_ref)" in local_content
+    assert "materialize_marketplace_manifest(dep_ref, install_path)" in install_sources
+    assert "resolve_plugin_root_placeholders(" in plugin_parser
+    assert "resolve_plugin_root_placeholders(" in package_model
+    assert "Catalog-only marketplace manifests must route through deps/_shared.py" in guard
+    assert "| Catalog-only marketplace manifest materialization |" in architecture
+    assert "| Legacy plugin declared-skill membership and plugin-root placeholder expansion |" in (
+        architecture
+    )
 
 
 @pytest.mark.parametrize(
@@ -531,13 +624,27 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/agent_plugins/errors.py",
-            "        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
-            "        return AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "        raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED)",
+            "        return AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_BUNDLE_ROUTE_BLOCKED)",
             "native deployment boundary must fail closed",
         ),
         (
             "src/apm_cli/agent_plugins/errors.py",
-            "    raise AgentPluginDeploymentBoundaryError(AGENT_PLUGIN_DEPLOYMENT_BLOCKED)",
+            "    if capability is not None and capability.supported:",
+            "    if capability is None or capability.supported:",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "    capability = current_native_registration()",
+            "    capability = None",
+            "native deployment boundary must fail closed",
+        ),
+        (
+            "src/apm_cli/agent_plugins/errors.py",
+            "    raise AgentPluginTargetExcludedError(\n"
+            "        capability.reason if capability is not None else AGENT_PLUGIN_DEPLOYMENT_BLOCKED\n"
+            "    )",
             "    return None  # native package accepted",
             "native deployment boundary must fail closed",
         ),
@@ -595,7 +702,11 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/commands/install.py",
-            "            preflight_agent_plugin_dry_run(ctx, all_apm_deps)",
+            "            preflight_agent_plugin_dry_run(\n"
+            "                ctx,\n"
+            "                all_apm_deps,\n"
+            "                apm_package=apm_package,\n"
+            "            )",
             "            pass  # native dry-run preflight removed",
             "dry-run native preflight must run before rendering success",
         ),
@@ -706,9 +817,8 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/agent_plugins/errors.py",
-            "        enforce_agent_plugin_deployment_boundary(package_info)\n"
-            "        plan.append((dependency, package_info))",
-            "        plan.append((dependency, package_info))",
+            "            enforce_agent_plugin_deployment_boundary(package_info)",
+            "            _ = package_info",
             "survivor reintegration preflight must use the native deployment boundary owner",
         ),
         (
@@ -760,6 +870,8 @@ def test_agent_plugin_projection_guard_rejects_bypass(
         "src/apm_cli/commands/uninstall/cli.py",
         "src/apm_cli/commands/uninstall/engine.py",
         "src/apm_cli/commands/install.py",
+        "src/apm_cli/commands/pack.py",
+        "src/apm_cli/commands/plugin/init.py",
         "src/apm_cli/commands/prune.py",
         "src/apm_cli/integration/hook_integrator.py",
         "src/apm_cli/models/apm_package.py",
@@ -785,6 +897,51 @@ def test_agent_plugin_projection_guard_rejects_bypass(
 
     assert result.returncode == 1
     assert message in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "src/apm_cli/commands/prune.py",
+        "src/apm_cli/commands/uninstall/cli.py",
+    ),
+)
+def test_agent_plugin_projection_guard_rejects_runtime_discovery_at_lifecycle_callers(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    """Every admission call site must remain free of Copilot runtime discovery."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(root / "src" / "apm_cli", sandbox / "src" / "apm_cli")
+    mutation_path = sandbox / relative_path
+    source = mutation_path.read_text(encoding="utf-8")
+    old = "    manifest_target = None"
+    assert old in source
+    mutation_path.write_text(
+        source.replace(
+            old,
+            '    import shutil\n\n    shutil.which("copilot")\n    manifest_target = None',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        (
+            "python3",
+            "scripts/check_agent_plugin_projection_boundary.py",
+            "--root",
+            str(sandbox),
+        ),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "no Copilot binary/version discovery" in result.stdout + result.stderr
 
 
 def test_policy_cache_metadata_redaction_has_single_owner() -> None:
@@ -1117,8 +1274,8 @@ def test_gitlab_policy_adapter_guard_survives_nested_facade_else(tmp_path: Path)
 @pytest.mark.parametrize(
     ("guard", "replacement"),
     [
-        ('(directory_path / ".git").is_file()', "False"),
-        ("child_dirs.clear()", "pass"),
+        ('(entry.path / ".git").is_file()', "False"),
+        ("relative_path.is_relative_to(worktree_root)", "False"),
     ],
 )
 def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
@@ -1142,6 +1299,7 @@ def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
     )
     compiler_path = sandbox / "src/apm_cli/compilation/distributed_compiler.py"
     source = compiler_path.read_text(encoding="utf-8")
+    assert source.count(guard) == 1
     compiler_path.write_text(
         source.replace(guard, replacement, 1),
         encoding="utf-8",
@@ -1157,7 +1315,7 @@ def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
     )
 
     assert result.returncode == 1
-    assert "Nested worktree cleanup must prune .git-file roots" in result.stdout
+    assert "Compile traversal must route through compilation/inventory.py" in result.stdout
 
 
 def test_experimental_target_hints_have_single_owner() -> None:
@@ -3712,8 +3870,8 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
     assert "repository = normalize_repo_url(repository_url)" in shared_cache
     assert "repository_url = dep_ref.to_github_url()" in downloader
     assert (
-        "_persistent_cache.get_checkout(\n                    dep_ref.to_github_url(),"
-        in downloader
+        "self._persistent_cache_checkout(\n                    _persistent_cache,\n"
+        "                    dep_ref,\n                    dep_ref.to_github_url()," in downloader
     )
     assert "cache_shard_key(dep_ref.to_github_url())" in tiered_resolver
     assert "cache_shard_key(dep_ref.repo_url)" not in tiered_resolver
@@ -4256,6 +4414,61 @@ def test_public_github_auth_owner_guard_rejects_duplicate_owner(
         + '    return host.lower() == "github.com"\n',
         encoding="utf-8",
     )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in (
+        result.stdout
+    )
+
+
+@pytest.mark.parametrize(
+    ("owner_call", "bypass"),
+    (
+        (
+            "return self.auth_resolver.try_with_fallback(\n",
+            "return _checkout(\n",
+        ),
+        (
+            "self._persistent_cache_checkout(\n",
+            "_persistent_cache.get_checkout(\n",
+        ),
+    ),
+    ids=("helper-bypasses-owner", "caller-bypasses-helper"),
+)
+def test_public_github_auth_owner_guard_rejects_persistent_cache_bypass(
+    tmp_path: Path,
+    owner_call: str,
+    bypass: str,
+) -> None:
+    """AC20 requires persistent cache network work to route through AuthResolver."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/github_downloader.py"
+    source = consumer.read_text(encoding="utf-8")
+    source = source.replace(owner_call, bypass, 1)
+    consumer.write_text(source, encoding="utf-8")
 
     result = subprocess.run(
         ("bash", "scripts/lint-architecture-boundaries.sh"),

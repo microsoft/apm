@@ -46,6 +46,12 @@ def _calls_public_configuration_thaw(node: ast.AST) -> bool:
 
 
 def _is_validation_package(node: ast.AST) -> bool:
+    if (
+        isinstance(node, ast.Call)
+        and _call_name(node).endswith("._activate_validated_package")
+        and node.args
+    ):
+        node = node.args[0]
     return (
         isinstance(node, ast.Attribute)
         and node.attr == "package"
@@ -121,6 +127,18 @@ def _raise_name(node: ast.Raise) -> str:
     if not isinstance(node.exc, ast.Call):
         return ""
     return _call_name(node.exc)
+
+
+# The boundary fails closed for the actively integrated package by raising the
+# deployment-boundary family. ``AgentPluginTargetExcludedError`` is the sole
+# subclass of ``AgentPluginDeploymentBoundaryError``: admission is a pure
+# function of resolved targets, so "not targeted" is the only way native
+# registration is unsupported. Raising either name is a fail-closed outcome
+# for the active package.
+_FAIL_CLOSED_BOUNDARY_RAISES = (
+    "AgentPluginDeploymentBoundaryError",
+    "AgentPluginTargetExcludedError",
+)
 
 
 def _assigns_subscript_value(
@@ -299,8 +317,26 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
         package_fails_closed = (
             bool(boundary_def.body)
             and isinstance(boundary_def.body[-1], ast.Raise)
-            and _raise_name(boundary_def.body[-1]) == "AgentPluginDeploymentBoundaryError"
+            and _raise_name(boundary_def.body[-1]) in _FAIL_CLOSED_BOUNDARY_RAISES
         )
+        admission_guards = [
+            node
+            for node in ast.walk(boundary_def)
+            if isinstance(node, ast.If)
+            and any(
+                isinstance(item, ast.Attribute) and item.attr == "supported"
+                for item in ast.walk(node.test)
+            )
+        ]
+        # Native admission must be a conjunction of "a capability was published"
+        # AND "it is supported". A disjunction would admit every native package
+        # whenever no capability was resolved -- the exact fail-open shape this
+        # boundary exists to prevent.
+        admission_is_conjunctive = len(admission_guards) == 1 and all(
+            isinstance(guard.test, ast.BoolOp) and isinstance(guard.test.op, ast.And)
+            for guard in admission_guards
+        )
+        consults_capability_owner = "current_native_registration" in _function_calls(boundary_def)
         if (
             len(native_package_guards) != 1
             or not native_package_guards[0].body
@@ -310,6 +346,8 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
             or not has_native_bundle_check
             or not bundle_fails_closed
             or not package_fails_closed
+            or not admission_is_conjunctive
+            or not consults_capability_owner
         ):
             violations.append(
                 f"{errors_path}: native deployment boundary must fail closed on "
@@ -1023,6 +1061,69 @@ def check(root: Path) -> list[str]:  # noqa: C901, PLR0912, PLR0915
         violations.append(f"{projection_path}: projection must thaw canonical FrozenJson")
     if "APMPackage" in projection_calls:
         violations.append(f"{projection_path}: projection must not call APMPackage directly")
+
+    # Native admission must be a pure function of resolved target names: no
+    # Copilot binary/version coupling anywhere in the lifecycle that resolves
+    # or activates it, and exactly one function owns the resolution.
+    capability_path = source_root / "copilot_plugins" / "capability.py"
+    admission_call_names = {
+        "activate_native_registration",
+        "native_registration_scope",
+        "resolve_native_registration_capability",
+    }
+    admission_lifecycle_paths = {capability_path}
+    for path, tree in parsed.items():
+        call_names = {call.rsplit(".", 1)[-1] for call in _function_calls(tree)}
+        if call_names & admission_call_names:
+            admission_lifecycle_paths.add(path)
+    _FORBIDDEN_DISCOVERY_MODULES = {"subprocess", "shutil"}
+    _FORBIDDEN_DISCOVERY_CALLS = {
+        "subprocess.run",
+        "subprocess.Popen",
+        "subprocess.check_output",
+        "subprocess.check_call",
+        "shutil.which",
+        "os.system",
+    }
+    for path in sorted(admission_lifecycle_paths):
+        tree = parsed.get(path)
+        if tree is None:
+            violations.append(f"{path}: required owner file is missing")
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] in _FORBIDDEN_DISCOVERY_MODULES:
+                        violations.append(
+                            f"{path}: must not import {alias.name} "
+                            "(no Copilot binary/version discovery)"
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                module_root = (node.module or "").split(".")[0]
+                if module_root in _FORBIDDEN_DISCOVERY_MODULES:
+                    violations.append(
+                        f"{path}: must not import from {node.module} "
+                        "(no Copilot binary/version discovery)"
+                    )
+        forbidden_hits = _function_calls(tree) & _FORBIDDEN_DISCOVERY_CALLS
+        if forbidden_hits:
+            violations.append(
+                f"{path}: must not call {sorted(forbidden_hits)} "
+                "(no Copilot binary/version discovery)"
+            )
+
+    resolver_owners = [
+        (path, node)
+        for path, tree in parsed.items()
+        for node in _functions(tree)
+        if node.name == "resolve_native_registration_capability"
+    ]
+    if len(resolver_owners) != 1 or resolver_owners[0][0] != capability_path:
+        violations.append(
+            f"{capability_path}: resolve_native_registration_capability must have "
+            "exactly one definition, owned by capability.py"
+        )
+
     return violations
 
 

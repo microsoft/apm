@@ -498,22 +498,28 @@ class AuthResolver:
         """
         from ..deps.github_rate_limit import GitHubThrottleError
 
-        if isinstance(exc, GitHubThrottleError):
-            return False
-        response = getattr(exc, "response", None)
-        status_code = getattr(exc, "status_code", None)
-        if status_code is None and response is not None:
-            status_code = getattr(response, "status_code", None)
-        if isinstance(status_code, int):
-            return status_code in {401, 403, 404}
-
-        parts = [str(exc)]
-        for name in ("stderr", "stdout"):
-            value = getattr(exc, name, None)
-            if isinstance(value, bytes):
-                value = value.decode("utf-8", errors="replace")
-            if value:
-                parts.append(str(value))
+        parts: list[str] = []
+        status_codes: list[int] = []
+        current: BaseException | None = exc
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if isinstance(current, GitHubThrottleError):
+                return False
+            response = getattr(current, "response", None)
+            status_code = getattr(current, "status_code", None)
+            if status_code is None and response is not None:
+                status_code = getattr(response, "status_code", None)
+            if isinstance(status_code, int):
+                status_codes.append(status_code)
+            parts.append(str(current))
+            for name in ("stderr", "stdout"):
+                value = getattr(current, name, None)
+                if isinstance(value, bytes):
+                    value = value.decode("utf-8", errors="replace")
+                if value:
+                    parts.append(str(value))
+            current = current.__cause__ or current.__context__
         text = " ".join(parts).lower()
         if any(
             signal in text
@@ -545,6 +551,8 @@ class AuthResolver:
                 "unable to get password from user",
             )
         ):
+            return True
+        if any(status_code in {401, 403, 404} for status_code in status_codes):
             return True
         return (
             re.search(
@@ -1213,8 +1221,8 @@ class AuthResolver:
     ) -> dict:
         """Pre-built env dict for subprocess git calls.
 
-        ADO and GitLab tokens use an Authorization header via
-        GIT_CONFIG_COUNT/KEY/VALUE. Other host classes retain GIT_TOKEN.
+        ADO, GitLab, and explicitly requested GitHub subprocess credentials
+        use an Authorization header. Other host classes retain GIT_TOKEN.
         """
         env = dict(base_env) if base_env is not None else os.environ.copy()
         AuthResolver._clear_platform_token_env(env)
@@ -1222,10 +1230,10 @@ class AuthResolver:
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = "echo"
         env.update(_GIT_MESSAGE_LOCALE_ENV)
-        if token and host_kind in {"ado", "gitlab"} and scheme in {"basic", "bearer"}:
-            # ADO credentials use an Authorization header, never argv or
-            # GIT_TOKEN. GitLab uses the same header transport so its tokens
-            # reach Git subprocesses without entering process arguments.
+        header_auth = host_kind in {"ado", "gitlab"} or scheme == "github-basic"
+        if token and header_auth and scheme in {"basic", "bearer", "github-basic"}:
+            # ADO, GitLab, and explicit GitHub subprocess credentials use an
+            # Authorization header, never argv or GIT_TOKEN.
             #
             # #2368: set (append-after-retained) rather than dict-merge, so the
             # non-auth entries _clear_git_auth_env just retained (e.g.
@@ -1235,6 +1243,9 @@ class AuthResolver:
             if scheme == "bearer":
                 credential = token
                 header_scheme = "Bearer"
+            elif scheme == "github-basic":
+                credential = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+                header_scheme = "Basic"
             elif host_kind == "gitlab":
                 credential = base64.b64encode(f"oauth2:{token}".encode()).decode()
                 header_scheme = "Basic"
@@ -1304,6 +1315,21 @@ class AuthResolver:
         cls._append_git_config(env, "credential.helper", "")
         cls._append_git_config(env, "http.extraheader", "")
         return env
+
+    @classmethod
+    def build_public_github_authenticated_git_env(
+        cls,
+        token: str,
+        *,
+        base_env: dict[str, str],
+    ) -> dict[str, str]:
+        """Build a GitHub HTTPS env that keeps the credential out of argv."""
+        return cls._build_git_env(
+            token,
+            scheme="github-basic",
+            host_kind="github",
+            base_env=base_env,
+        )
 
     @staticmethod
     def _append_git_config(env: dict[str, str], key: str, value: str) -> None:

@@ -278,15 +278,26 @@ class TestSubprocessEnvDict:
         # overlays auth env on top.
         with patch.dict(
             os.environ,
-            {"GIT_DIR": "/some/biased/dir", "GIT_CEILING_DIRECTORIES": "/oops"},
+            {
+                "GIT_DIR": "/some/biased/dir",
+                "GIT_CEILING_DIRECTORIES": "/oops",
+                "GIT_HTTP_EXTRAHEADER": "Authorization: Bearer ambient-secret",
+            },
             clear=False,
         ):
-            base = {"GITHUB_TOKEN": "ghp_xxx", "GIT_ASKPASS": "echo"}
+            base = {
+                "GITHUB_TOKEN": "ghp_xxx",
+                "GIT_ASKPASS": "echo",
+                "GIT_DIR": "/also/biased",
+                "GIT_CEILING_DIRECTORIES": "/also/oops",
+            }
             env = GitAuthEnvBuilder.subprocess_env_dict(base)
         assert env["GITHUB_TOKEN"] == "ghp_xxx"
         assert env["GIT_ASKPASS"] == "echo"
         # Sanitized base must not propagate ambient GIT_DIR.
         assert "GIT_DIR" not in env
+        assert "GIT_CEILING_DIRECTORIES" not in env
+        assert "GIT_HTTP_EXTRAHEADER" not in env
 
     def test_skips_non_string_values(self):
         # Defensive: dicts with non-string vals don't raise; only strings

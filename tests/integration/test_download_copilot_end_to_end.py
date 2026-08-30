@@ -1333,14 +1333,10 @@ class TestCopilotPureHelpers:
 class TestCopilotConfigPath:
     """Config path resolution and I/O primitives."""
 
-    def test_get_config_path_returns_copilot_dir(self) -> None:
-        """get_config_path returns ~/.copilot/mcp-config.json."""
-        adapter = CopilotClientAdapter()
-        fake_home = Path("/fake/home")
-        with patch("apm_cli.adapters.client.copilot.Path.home", return_value=fake_home):
-            path = adapter.get_config_path()
-        assert path.endswith("mcp-config.json")
-        assert ".copilot" in path
+    def test_get_config_path_returns_project_config(self, tmp_path: Path) -> None:
+        """get_config_path returns the project-scoped .github/mcp.json."""
+        adapter = CopilotClientAdapter(project_root=tmp_path)
+        assert Path(adapter.get_config_path()) == tmp_path / ".github" / "mcp.json"
 
     def test_get_current_config_returns_empty_dict_when_no_file(self) -> None:
         """get_current_config returns {} when file doesn't exist."""

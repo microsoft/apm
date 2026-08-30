@@ -199,6 +199,21 @@ def _warn_target_reconcile_failure(
     )
 
 
+def _log_package_target_restriction(logger: InstallLogger | None, target_selection: Any) -> None:
+    """Name the declared and effective target sets when a package narrows them."""
+    if logger is None or not target_selection.package_restriction_active:
+        return
+    declared = (
+        ", ".join(target_selection.package_declared_targets)
+        if target_selection.package_declared_targets
+        else "unrestricted"
+    )
+    effective = ", ".join(target.name for target in target_selection.targets) or "none"
+    logger.verbose_detail(
+        f"Package target restriction: [{declared}]; effective targets: [{effective}]"
+    )
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -271,6 +286,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         "canvases": 0,
         "links_resolved": 0,
         "deployed_files": [],
+        "native_plugin": False,
     }
 
     deployed = result["deployed_files"]
@@ -295,16 +311,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     targets = list(target_selection.targets)
     allowed_dep_targets = set(target_selection.consumer_allowed_targets)
     dep_targets_active = target_selection.consumer_restriction_active
-    if logger is not None and target_selection.package_restriction_active:
-        declared = (
-            ", ".join(target_selection.package_declared_targets)
-            if target_selection.package_declared_targets
-            else "unrestricted"
-        )
-        effective = ", ".join(target.name for target in target_selection.targets) or "none"
-        logger.verbose_detail(
-            f"Package target restriction: [{declared}]; effective targets: [{effective}]"
-        )
+    _log_package_target_restriction(logger, target_selection)
 
     reconcile_package_targets = getattr(
         integrators.hook,
@@ -321,8 +328,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     if not targets:
         return result
 
-    # Executable approval gate (npm v12-style default-deny). hooks/bin gate
-    # below (~424, ~585); mcp/canvas unused (mcp filtered upstream, canvas re-derived ~433).
+    # Executable approval gate (npm v12-style default-deny); all five verdicts feed the gates.
     (
         _hooks_approved,
         _bin_approved,
@@ -367,6 +373,31 @@ def integrate_package_primitives(  # noqa: PLR0913
         logger=logger,
     ):
         return result
+
+    # A natively registered Agent Plugin stays opaque: Copilot loads the whole
+    # unit live from apm_modules, so decomposing its skills or MCP servers here
+    # would double-load them. The registrar owns this package instead. The
+    # short-circuit fires only AFTER target narrowing (so a dependency that
+    # excludes copilot is not registered) and AFTER the executable trust gate
+    # (so an Agent Plugin's MCP servers / bin cannot bypass a default-deny).
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
+    from apm_cli.install.native_plugin_admission import finalize_native_plugin
+
+    if admits_native_plugin(package_info):
+        return finalize_native_plugin(
+            result,
+            package_info,
+            package_name,
+            targets,
+            hooks_approved=_hooks_approved,
+            mcp_approved=_mcp_approved,
+            bin_approved=_bin_approved,
+            canvas_approved=_canvas_approved,
+            lsp_approved=_lsp_approved,
+            ctx=ctx,
+            diagnostics=diagnostics,
+            logger=logger,
+        )
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 

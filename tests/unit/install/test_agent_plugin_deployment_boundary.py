@@ -16,12 +16,13 @@ from apm_cli.agent_plugins import (
     AgentPluginDeploymentBoundaryError,
     AgentPluginLegacyBoundaryError,
 )
+from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
 from apm_cli.cli import cli
 from apm_cli.commands.uninstall.cli import uninstall
 from apm_cli.commands.uninstall.engine import (
     _preflight_uninstall_survivors,
-    _sync_integrations_after_uninstall,
 )
+from apm_cli.copilot_plugins.registrar import catalog_path_for
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.outcome import finalize_install_result
 from apm_cli.install.services import (
@@ -185,7 +186,7 @@ def test_services_gate_precedes_all_target_and_integrator_mutation(
 
     with pytest.raises(
         AgentPluginDeploymentBoundaryError,
-        match=r"no native harness is binary-qualified",
+        match=r"effective target selection does not include 'copilot'",
     ):
         integrate_package_primitives(
             package_info,
@@ -292,7 +293,7 @@ class _MaterializedSource:
         ("registry", False, "registry", 1, "Failed to integrate primitives from cached package"),
     ],
 )
-def test_every_materialization_shape_fails_without_committing_state(
+def test_every_materialization_shape_skips_without_committing_state_when_target_excludes_copilot(
     tmp_path: Path,
     shape: str,
     is_local: bool,
@@ -300,6 +301,16 @@ def test_every_materialization_shape_fails_without_committing_state(
     initial_installed: int,
     error_prefix: str,
 ) -> None:
+    """A non-Copilot target set is a routine, non-fatal skip for every shape.
+
+    ``ctx.targets`` here is a mock target that never resolves to ``copilot``,
+    so the capability owner reports ``AgentPluginTargetExcludedError`` --
+    never a fatal boundary error, and never dependent on whether a Copilot
+    binary exists on this host. This holds across every materialization
+    shape (local/cached/fresh/registry): the package is skipped with one
+    warning, no integrator ever mutates the project tree, and the batch
+    still exits 0.
+    """
     package_info = _write_adversarial_agent_plugin(
         tmp_path / f"{shape}-source",
         tmp_path / f"{shape}-outside.txt",
@@ -350,13 +361,14 @@ def test_every_materialization_shape_fails_without_committing_state(
     assert deltas is not None
     assert deltas["installed"] == 0
     assert ctx.package_deployed_files == {f"blocked/{shape}": []}
-    assert diagnostics.error_count == 1
-    assert "no native harness is binary-qualified" in diagnostics._diagnostics[0].message
+    assert diagnostics.error_count == 0
+    assert len(diagnostics._diagnostics) == 1
+    assert diagnostics._diagnostics[0].category == "warning"
     result = finalize_install_result(
         InstallResult(installed_count=deltas["installed"], diagnostics=diagnostics),
         force=True,
     )
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     assert _tree_snapshot(project) == before
     for integrator in integrator_map.values():
         assert integrator.mock_calls == []
@@ -428,12 +440,20 @@ def _write_ordinary_package(root: Path) -> None:
         ("--skill", "safe"),
     ),
 )
-def test_mixed_dependency_batch_is_atomic_at_cli_boundary(
+def test_target_exclusion_skips_the_plugin_without_touching_the_rest_of_the_batch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     native_first: bool,
     extra_args: tuple[str, ...],
 ) -> None:
+    """A batch with an otherwise-valid native plugin excluded by target.
+
+    Admission is a pure function of resolved target names, so excluding
+    ``copilot`` is the ONLY way a canonical Agent Plugin is refused -- and it
+    is always non-fatal (Item 4): the plugin is skipped with one warning and
+    the rest of the batch installs, regardless of dependency ordering or
+    which install flags are in play.
+    """
     workspace = tmp_path / "workspace"
     project = workspace / "project"
     ordinary = workspace / "ordinary"
@@ -449,14 +469,11 @@ def test_mixed_dependency_batch_is_atomic_at_cli_boundary(
                 "name": "consumer",
                 "version": "1.0.0",
                 "dependencies": {"apm": dependencies},
-                "target": "copilot",
+                "target": "claude",
             }
         ),
         encoding="ascii",
     )
-    _write_known_good_state(project)
-    LockFile().write(project / "apm.lock.yaml")
-    before = _tree_snapshot(project)
     native_integrator_calls: list[str] = []
     original_integrate = SkillIntegrator.integrate_package_skill
     original_available = SkillIntegrator.available_skill_names
@@ -477,31 +494,55 @@ def test_mixed_dependency_batch_is_atomic_at_cli_boundary(
 
     result = CliRunner().invoke(
         cli,
-        ["install", "--no-policy", "--target", "copilot", *extra_args],
+        ["install", "--no-policy", "--target", "claude", *extra_args],
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    assert _tree_snapshot(project) == before, result.output
+    assert result.exit_code == 0, result.output
+    # The excluded plugin is never handed to any integrator -- native or
+    # legacy -- it is dropped outright, not decomposed.
     assert native_integrator_calls == []
     output = " ".join(result.output.split())
-    assert "Installed 1 APM" not in output
-    assert "no native harness is binary-qualified" in output
-    assert "apm pack --claude-plugin" in output
-    assert "ask the publisher for a legacy-compatible package" in output
+    if "--dry-run" not in extra_args:
+        # The dry-run preflight is reject-only (fatal errors abort the
+        # preview); it does not render the per-package skip diagnostic a
+        # real install does, so only check for it on non-dry-run runs.
+        assert "Agent Plugins v1.0.0" in output
+        assert "Re-run with --target copilot" in output
+        # The refusal must not hand a consumer producer-side repack advice --
+        # that fix contradicts "select the copilot target".
+        assert "apm pack --claude-plugin" not in output
+    assert "ask the publisher for a legacy-compatible package" not in output
 
 
 @pytest.mark.parametrize("include_ordinary", (False, True))
-def test_dry_run_renders_one_native_failure_with_real_install_parity(
+def test_dry_run_target_exclusion_is_non_fatal_like_a_real_install(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     include_ordinary: bool,
 ) -> None:
+    """``--dry-run`` must not fatal-fail on an outcome a real install tolerates.
+
+    Admission is a pure function of resolved target names. A real install
+    skips an excluded native plugin with one non-fatal warning and installs
+    the rest of the batch (Item 4); the dry-run preflight
+    (``preflight_agent_plugin_dry_run``) evaluates the SAME
+    ``enforce_agent_plugin_deployment_boundary`` call and must swallow the
+    same ``AgentPluginTargetExcludedError`` instead of aborting the whole
+    preview -- regression coverage for a real dry-run/real-install exit-code
+    parity bug this refactor uncovered and fixed.
+    """
     workspace = tmp_path / "workspace"
     native_sources = [workspace / "native-a", workspace / "native-b"]
     for index, source in enumerate(native_sources):
         _write_adversarial_agent_plugin(source, workspace / f"outside-{index}.txt")
         (source / "skills" / "native" / "nested" / "outside-link").unlink()
+        # Distinguish the two plugin names -- this test is about exclusion
+        # parity, not the unrelated ambiguous-name collision guard.
+        plugin_json = source / "plugin.json"
+        document = json.loads(plugin_json.read_text(encoding="utf-8"))
+        document["name"] = f"blocked.native.{index}"
+        plugin_json.write_text(json.dumps(document), encoding="utf-8")
     ordinary = workspace / "ordinary"
     if include_ordinary:
         _write_ordinary_package(ordinary)
@@ -540,38 +581,82 @@ def test_dry_run_renders_one_native_failure_with_real_install_parity(
                     "name": f"consumer-{mode}",
                     "version": "1.0.0",
                     "dependencies": {"apm": dependencies},
-                    "target": "copilot",
+                    "target": "claude",
                 }
             ),
             encoding="ascii",
         )
-        _write_known_good_state(project)
-        LockFile().write(project / "apm.lock.yaml")
-        before = _tree_snapshot(project)
         monkeypatch.chdir(project)
 
         result = CliRunner().invoke(
             cli,
-            ["install", "--no-policy", "--target", "copilot", *extra_args],
+            ["install", "--no-policy", "--target", "claude", *extra_args],
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        assert _tree_snapshot(project) == before, result.output
+        # The exit-code parity is the whole point of this regression: before
+        # the fix, dry-run raised AgentPluginTargetExcludedError uncaught
+        # (exit 1) for the exact scenario a real install tolerates (exit 0).
+        assert result.exit_code == 0, result.output
         for source, snapshot in source_snapshots.items():
             assert _tree_snapshot(source) == snapshot
-        output = " ".join(result.output.split())
-        assert "Install complete" not in output
-        assert "Dry run complete" not in output
-        outputs[mode] = output
+        outputs[mode] = " ".join(result.output.split())
 
     assert native_integrator_calls == []
-    for phrase in (
-        "no native harness is binary-qualified",
-        "apm pack --claude-plugin",
-        "ask the publisher for a legacy-compatible package",
-    ):
-        assert outputs["real"].count(phrase) == outputs["dry-run"].count(phrase) == 1
+    # Only the real install renders the per-package skip warning; the
+    # dry-run preflight is reject-only and does not render diagnostics.
+    assert outputs["real"].count("Re-run with --target copilot") == 2
+    assert outputs["dry-run"].count("Re-run with --target copilot") == 0
+
+
+def test_dry_run_target_exclusion_uses_the_explicit_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run admission must not replace --target with directory detection."""
+    from apm_cli.agent_plugins import errors as agent_plugin_errors
+
+    project = tmp_path / "project"
+    native = tmp_path / "native"
+    project.mkdir()
+    _write_adversarial_agent_plugin(native, tmp_path / "outside.txt")
+    (native / "skills" / "native" / "nested" / "outside-link").unlink()
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "dependencies": {"apm": [str(native)]},
+                "target": "claude",
+            }
+        ),
+        encoding="ascii",
+    )
+    original = agent_plugin_errors.enforce_agent_plugin_deployment_boundary
+    exclusions: list[str] = []
+
+    def tracked_boundary(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except AgentPluginTargetExcludedError as exc:
+            exclusions.append(str(exc))
+            raise
+
+    monkeypatch.setattr(
+        "apm_cli.install.template.enforce_agent_plugin_deployment_boundary",
+        tracked_boundary,
+    )
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(
+        cli,
+        ["install", "--dry-run", "--no-policy", "--target", "claude"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(exclusions) == 1
+    assert "selected target(s): claude" in exclusions[0]
 
 
 def test_dry_run_native_preflight_skips_apm_when_only_mcp_is_selected(
@@ -604,7 +689,7 @@ def test_dry_run_native_preflight_skips_apm_when_only_mcp_is_selected(
 
     assert result.exit_code == 0, result.output
     assert _tree_snapshot(project) == before
-    assert "no native harness is binary-qualified" not in result.output
+    assert "Agent Plugins v1.0.0" not in result.output
 
 
 def test_dry_run_native_detection_does_not_normalize_legacy_plugin_source(
@@ -677,7 +762,13 @@ def _write_uninstall_fixture(project: Path, native_source: Path) -> None:
     LockFile(dependencies=dependencies).write(project / "apm.lock.yaml")
 
 
-def test_uninstall_survivor_preflight_rejects_native_directly(tmp_path: Path) -> None:
+def test_uninstall_survivor_preflight_tolerates_target_excluded_native(tmp_path: Path) -> None:
+    # A native survivor whose effective targets exclude ``copilot`` (there is
+    # no published capability outside a CLI command scope, so this direct
+    # unit-level call sees "not supported") must NOT brick an unrelated
+    # uninstall. The survivor is dropped from the rebuild plan and its bytes
+    # are left untouched instead of aborting. Target exclusion is routine
+    # and silent -- no warning is emitted (Item 4).
     project = tmp_path / "project"
     project.mkdir()
     _write_uninstall_fixture(project, tmp_path / "outside.txt")
@@ -685,24 +776,19 @@ def test_uninstall_survivor_preflight_rejects_native_directly(tmp_path: Path) ->
     assert lockfile is not None
     before = _tree_snapshot(project)
 
-    with pytest.raises(AgentPluginDeploymentBoundaryError):
-        _preflight_uninstall_survivors(
-            ["owner/native"],
-            project / "apm_modules",
-            lockfile=lockfile,
-            excluded_keys={"owner/removed"},
-        )
+    warnings: list[str] = []
+    logger = MagicMock()
+    logger.warning = warnings.append
+    plan = _preflight_uninstall_survivors(
+        ["owner/native"],
+        project / "apm_modules",
+        lockfile=lockfile,
+        excluded_keys={"owner/removed"},
+        logger=logger,
+    )
 
-    with pytest.raises(AgentPluginDeploymentBoundaryError):
-        _sync_integrations_after_uninstall(
-            APMPackage.from_apm_yml(project / "apm.yml"),
-            project,
-            set(),
-            MagicMock(),
-            lockfile=lockfile,
-            modules_dir=project / "apm_modules",
-        )
-
+    assert [dep.get_unique_key() for dep, _ in plan] == []
+    assert warnings == []
     assert _tree_snapshot(project) == before
 
 
@@ -737,32 +823,32 @@ def test_uninstall_preflight_uses_declared_local_source_for_shared_slot(
     )
     before = _tree_snapshot(project)
 
-    if surviving_native:
-        with pytest.raises(AgentPluginDeploymentBoundaryError):
-            _preflight_uninstall_survivors(
-                [survivor],
-                modules_dir,
-                source_root=project,
-            )
-    else:
-        plan = _preflight_uninstall_survivors(
-            [survivor],
-            modules_dir,
-            source_root=project,
-        )
-        assert plan == []
+    plan = _preflight_uninstall_survivors(
+        [survivor],
+        modules_dir,
+        source_root=project,
+    )
+    # Local survivors are validated then excluded from the rebuild plan when
+    # called directly (no published capability outside a CLI command scope
+    # means "not supported"), so the plan is empty either way and nothing is
+    # written.
+    assert plan == []
 
     assert _tree_snapshot(project) == before
 
 
-def test_uninstall_cli_blocks_native_survivor_before_scripts_or_writes(
+def test_uninstall_cli_succeeds_with_offline_native_survivor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Uninstalling an unrelated package must SUCCEED regardless of what
+    # happens to an unrelated native survivor's registration -- admission is
+    # a pure function of resolved target names and never a fatal surprise
+    # partway through an uninstall.
     project = tmp_path / "project"
     project.mkdir()
     _write_uninstall_fixture(project, tmp_path / "outside.txt")
-    before = _tree_snapshot(project)
+    survivor_before = _tree_snapshot(project / "apm_modules" / "owner" / "native")
     monkeypatch.chdir(project)
     fire_scripts = MagicMock()
     monkeypatch.setattr(
@@ -772,10 +858,36 @@ def test_uninstall_cli_blocks_native_survivor_before_scripts_or_writes(
 
     result = CliRunner().invoke(uninstall, ["owner/removed"], catch_exceptions=False)
 
-    assert result.exit_code == 1
-    assert _tree_snapshot(project) == before
-    assert fire_scripts.mock_calls == []
-    assert "no native harness is binary-qualified" in " ".join(result.output.split())
+    assert result.exit_code == 0, result.output
+    # The native survivor's bytes are left untouched -- only APM's own view of
+    # the removed package changes.
+    assert _tree_snapshot(project / "apm_modules" / "owner" / "native") == survivor_before
+    assert not (project / "apm_modules" / "owner" / "removed").exists()
+
+
+def test_uninstall_honors_declared_non_copilot_target_despite_github_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A generic .github directory must not activate Copilot registration."""
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_uninstall_fixture(project, tmp_path / "outside.txt")
+    manifest_path = project / "apm.yml"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["target"] = "claude"
+    manifest_path.write_text(json.dumps(manifest), encoding="ascii")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "apm_cli.commands.uninstall.cli._fire_uninstall_scripts",
+        MagicMock(),
+    )
+
+    result = CliRunner().invoke(uninstall, ["owner/removed"], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert not catalog_path_for(project / "apm_modules").exists()
+    assert not (project / ".github" / "copilot" / "settings.local.json").exists()
 
 
 def test_uninstall_allows_native_transitive_orphan_removal(
@@ -845,30 +957,26 @@ def _write_prune_fixture(project: Path, outside: Path) -> None:
     LockFile(dependencies=dependencies).write(project / "apm.lock.yaml")
 
 
-def test_prune_blocks_native_survivor_before_removal_or_reconciliation(
+def test_prune_succeeds_with_target_excluded_native_survivor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Prune of an unrelated orphan must succeed when a native survivor is not
+    # selected for Copilot. The survivor is dropped from reintegration, so no
+    # escape write happens.
     project = tmp_path / "project"
     project.mkdir()
     _write_prune_fixture(project, tmp_path / "outside.txt")
-    before = _tree_snapshot(project)
-    remove = MagicMock()
-    sync = MagicMock()
+    survivor_before = _tree_snapshot(project / "apm_modules" / "owner" / "native")
     integrate = MagicMock()
-    monkeypatch.setattr("apm_cli.commands.prune.safe_rmtree", remove)
-    monkeypatch.setattr(HookIntegrator, "sync_integration", sync)
     monkeypatch.setattr(HookIntegrator, "integrate_hooks_for_target", integrate)
     monkeypatch.chdir(project)
 
     result = CliRunner().invoke(cli, ["prune"], catch_exceptions=False)
 
-    assert result.exit_code == 1, result.output
-    assert _tree_snapshot(project) == before
-    assert remove.mock_calls == []
-    assert sync.mock_calls == []
+    assert result.exit_code == 0, result.output
+    assert _tree_snapshot(project / "apm_modules" / "owner" / "native") == survivor_before
     assert integrate.mock_calls == []
-    assert "no native harness is binary-qualified" in " ".join(result.output.split())
 
 
 def test_prune_dry_run_does_not_reintegrate_native_survivors(
@@ -891,13 +999,16 @@ def test_prune_dry_run_does_not_reintegrate_native_survivors(
     assert _tree_snapshot(project) == before
     assert sync.mock_calls == []
     assert integrate.mock_calls == []
-    assert "no native harness is binary-qualified" not in result.output
+    assert "Agent Plugins v1.0.0" not in result.output
 
 
-def test_direct_hook_reconciliation_cannot_bypass_native_survivor_gate(
+def test_direct_hook_reconciliation_tolerates_target_excluded_native_survivor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A native survivor with an unqualified client must not abort hook
+    # reconciliation for the rest of the tree: it is dropped from the rebuild
+    # plan and its bytes are left untouched.
     project = tmp_path / "project"
     project.mkdir()
     _write_prune_fixture(project, tmp_path / "outside.txt")
@@ -910,15 +1021,15 @@ def test_direct_hook_reconciliation_cannot_bypass_native_survivor_gate(
     monkeypatch.setattr(HookIntegrator, "sync_integration", sync)
     monkeypatch.setattr(HookIntegrator, "integrate_hooks_for_target", integrate)
 
-    with pytest.raises(AgentPluginDeploymentBoundaryError):
-        HookIntegrator().reconcile_after_removal(
-            APMPackage.from_apm_yml(project / "apm.yml"),
-            project,
-            lockfile=lockfile,
-        )
+    HookIntegrator().reconcile_after_removal(
+        APMPackage.from_apm_yml(project / "apm.yml"),
+        project,
+        lockfile=lockfile,
+    )
 
+    # The native survivor is never reintegrated (dropped from the plan), so no
+    # escape write is possible and the tree is unchanged.
     assert _tree_snapshot(project) == before
-    assert sync.mock_calls == []
     assert integrate.mock_calls == []
 
 

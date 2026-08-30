@@ -873,6 +873,7 @@ class TestResolverTryLoadDependencyPackageWithCallback:
 
         def mock_callback(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
             callback_calls.append(dep_ref)
+            return install_path
 
         resolver = APMDependencyResolver(
             apm_modules_dir=apm_modules,

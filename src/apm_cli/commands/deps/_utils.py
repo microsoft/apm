@@ -41,16 +41,38 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     When a package ships nested package or skill manifests, the ``rglob`` scan
     would otherwise treat each sub-directory as an independent package. This
     helper walks up from *candidate* towards *apm_modules_path* and returns
-    ``True`` if any intermediate parent already contains ``apm.yml`` or
-    ``.apm`` -- meaning the candidate is a deployment artifact, not a standalone
-    package.
+    ``True`` if any intermediate parent already contains ``apm.yml``, ``.apm``,
+    or a canonical Agent Plugin manifest -- meaning the candidate is part of
+    that package, not a standalone one.
     """
     parent = candidate.parent
     while parent != apm_modules_path and parent != parent.parent:  # noqa: PLR1714
-        if (parent / APM_YML_FILENAME).exists() or (parent / APM_DIR).exists():
+        if (
+            (parent / APM_YML_FILENAME).exists()
+            or (parent / APM_DIR).exists()
+            or _is_agent_plugin_root(parent)
+        ):
             return True
         parent = parent.parent
     return False
+
+
+def _is_agent_plugin_root(path: Path) -> bool:
+    """Return ``True`` when *path* is a canonical Agent Plugin root.
+
+    An Agent Plugin is installed and loaded as one unit, so its ``skills/``
+    and other inner directories are never independent packages -- scanning
+    them as such would report false orphans and put them in prune's path.
+    """
+    if not (path / "plugin.json").is_file():
+        return False
+    from ...agent_plugins.errors import AgentPluginError
+    from ...bundle.local_bundle import route_agent_plugin_package
+
+    try:
+        return route_agent_plugin_package(path) is not None
+    except (AgentPluginError, OSError):
+        return False
 
 
 def _count_primitives(package_path: Path) -> dict[str, int]:

@@ -15,6 +15,7 @@ from apm_cli.deps.plugin_parser import (
     _holds_skill_dirs,
     _map_plugin_artifacts,
     _mcp_servers_to_apm_deps,
+    _union_dep_list,
     normalize_plugin_directory,
     normalized_plugin_skill_sources,
     parse_plugin_manifest,
@@ -22,6 +23,31 @@ from apm_cli.deps.plugin_parser import (
     validate_plugin_package,
 )
 from apm_cli.utils.helpers import find_plugin_json
+
+
+def test_union_dep_list_indexes_existing_entries_once() -> None:
+    """Large dependency merges must not scan the growing result per append."""
+
+    class NoContainsList(list):
+        def __contains__(self, _item: object) -> bool:
+            raise AssertionError("linear membership scan used")
+
+    existing = NoContainsList(
+        {"name": f"server-{index}", "command": "echo"} for index in range(100)
+    )
+    merged = {"mcp": existing}
+    new_entries = [{"name": f"server-{index}", "command": "echo"} for index in range(100, 1000)]
+    new_entries.extend(
+        [
+            {"name": "server-0", "command": "echo"},
+            {"name": "server-0", "command": "different"},
+        ]
+    )
+
+    _union_dep_list(merged, "mcp", new_entries)
+
+    assert len(existing) == 1001
+    assert existing[-1] == {"name": "server-0", "command": "different"}
 
 
 class TestFindPluginJson:

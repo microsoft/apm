@@ -176,6 +176,7 @@ export default defineConfig({
 						{ label: 'Install LSP servers', slug: 'consumer/install-lsp-servers' },
 						{ label: 'Authentication', slug: 'consumer/authentication' },
 						{ label: 'Private and org packages', slug: 'consumer/private-and-org-packages' },
+						{ label: 'Install Agent Plugins for Copilot', slug: 'consumer/copilot-agent-plugins' },
 						{ label: 'Deploy a local bundle', slug: 'consumer/deploy-a-bundle' },
 						{ label: 'Drift and secure-by-default', slug: 'consumer/drift-and-secure-by-default' },
 						{ label: 'Governance on the consumer ramp', slug: 'consumer/governance-on-the-consumer-ramp' },

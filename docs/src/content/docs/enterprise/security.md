@@ -250,11 +250,28 @@ The experimental `external-scanners` feature can invoke a third-party SARIF scan
 
 ## Policy gates that block install
 
-`apm-policy.yml` is evaluated before any download or write. The install preflight walks the resolved dependency graph -- including transitive MCP servers -- and fails the install if a dep is not in the allow list, falls under a deny rule, uses a forbidden source/scope, or violates a configured trust rule. In CI, `apm audit --ci` runs the same baseline plus policy checks (allow/deny lists, target restrictions, MCP transport restrictions). Tighten-only inheritance (enterprise -> org -> repo) is enforced so a downstream layer can never loosen an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and [Policy Reference](../policy-reference/).
+`apm-policy.yml` is evaluated after dependency resolution and before target
+integration. The policy gate walks the resolved dependency graph -- including
+transitive MCP servers -- and fails the install if a dep is not in the allow
+list, falls under a deny rule, uses a forbidden source/scope, or violates a
+configured trust rule. Target-aware and integrity checks run later in the same
+transaction and roll resolution replacements back on failure. In CI,
+`apm audit --ci` runs the same baseline plus policy checks (allow/deny lists,
+target restrictions, MCP transport restrictions). Tighten-only inheritance
+(enterprise -> org -> repo) is enforced so a downstream layer can never loosen
+an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and
+[Policy Reference](../policy-reference/).
 
 ## Content integrity hashing
 
 APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). Use `apm install --update` to accept new upstream content and refresh the lockfile.
+
+Replacement packages download and pass package-shape validation in an isolated
+staging directory while the current package remains in place. APM publishes the
+staged tree only after those checks succeed, so a failed download does not
+unlink live hook scripts from the current package. Integrity and policy gates
+still run later in the install transaction and roll the replacement back on
+failure.
 
 ```yaml
 # apm.lock.yaml
