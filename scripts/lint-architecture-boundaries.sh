@@ -2094,6 +2094,46 @@ if ! uv run --extra dev python scripts/lint-resolution-replacement-boundary.py; 
     violations=$((violations + 1))
 fi
 
+echo "[*] AC37: read-only lockfile path authority"
+if ! python3 - <<'PY'
+import ast
+from pathlib import Path
+
+owner = Path("src/apm_cli/deps/lockfile.py")
+tree = ast.parse(owner.read_text(encoding="utf-8"))
+definitions = [
+    node
+    for node in tree.body
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    and node.name == "resolve_lockfile_path_for_read"
+]
+if len(definitions) != 1:
+    raise SystemExit("resolve_lockfile_path_for_read must have exactly one definition")
+
+consumers = (
+    Path("src/apm_cli/bundle/packer.py"),
+    Path("src/apm_cli/bundle/plugin_exporter.py"),
+    Path("src/apm_cli/bundle/agent_plugin_exporter.py"),
+)
+for consumer in consumers:
+    source = consumer.read_text(encoding="utf-8")
+    consumer_tree = ast.parse(source)
+    imported = {
+        alias.name
+        for node in ast.walk(consumer_tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    if {"get_lockfile_path", "migrate_lockfile_if_needed"} & imported:
+        raise SystemExit(f"{consumer} imports a mutating lockfile path primitive")
+    if "resolve_lockfile_path_for_read(project_root, read_only=dry_run)" not in source:
+        raise SystemExit(f"{consumer} bypasses read-only lockfile path resolution")
+PY
+then
+    echo "[x] Bundle lockfile reads must route through deps/lockfile.py"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

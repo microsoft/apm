@@ -20,7 +20,7 @@ from ..agent_plugins import (
     load_agent_plugin,
     url_contains_literal_secret,
 )
-from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
 from ..models.apm_package import APMPackage
 from ..utils.archive import (
@@ -300,8 +300,7 @@ def export_agent_plugin_bundle(
     logger=None,
 ) -> PackResult:
     """Export the project as an Agent Plugin bundle."""
-    migrate_lockfile_if_needed(project_root)
-    lockfile_path = get_lockfile_path(project_root)
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
         raise FileNotFoundError(

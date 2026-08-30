@@ -1105,6 +1105,19 @@ def get_lockfile_path(project_root: Path) -> Path:
     return project_root / LOCKFILE_NAME
 
 
+def resolve_lockfile_path_for_read(project_root: Path, *, read_only: bool) -> Path:
+    """Resolve the lockfile path, preserving legacy files for read-only callers."""
+    if read_only:
+        new_path = get_lockfile_path(project_root)
+        legacy_path = project_root / LEGACY_LOCKFILE_NAME
+        if not new_path.exists() and legacy_path.exists():
+            return legacy_path
+        return new_path
+
+    migrate_lockfile_if_needed(project_root)
+    return get_lockfile_path(project_root)
+
+
 def migrate_lockfile_if_needed(project_root: Path) -> bool:
     """Migrate legacy apm.lock to apm.lock.yaml if needed.
 
