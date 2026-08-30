@@ -515,7 +515,7 @@ class TestCopilotClientAdapterConfigPath:
 
         config_path = adapter.get_config_path()
         assert config_path is not None
-        # Copilot is global: ~/.copilot/hosts.json
+        assert Path(config_path) == tmp_apm_root / ".github" / "mcp.json"
 
 
 class TestCopilotClientAdapterUpdateConfig:
@@ -545,7 +545,7 @@ class TestCopilotClientAdapterUpdateConfig:
         config_path_str = adapter.get_config_path()
         # Note: This test may not create the file in test environment
         # Just verify the path is correct format
-        assert config_path_str.endswith("mcp-config.json")
+        assert Path(config_path_str) == tmp_apm_root / ".github" / "mcp.json"
 
 
 # ============================================================================

@@ -31,13 +31,13 @@ jobs:
     name: Spec conformance gate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history so the Mode B detector can deterministically
           # resolve the merge-base against origin/main. Without this the
           # gate's unresolvable-merge-base branch becomes reachable in CI.
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Orphan check (anchors == manifest == Appendix C == markers)
         run: uv run --frozen --extra dev python -m tests.spec_conformance.orphan_check

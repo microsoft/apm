@@ -150,16 +150,17 @@ Researchers have found hidden Unicode characters embedded in popular shared rule
 
 ### Pre-deployment gate
 
-During `apm install`, source files in `apm_modules/` are scanned **before** any integrator copies them to target directories:
+During `apm install`, APM resolves the authorized targets, selected skill subset, and executable approvals, then scans only the source files selected for deployment **before** any integrator copies them to target directories. Source-only files are neither scanned nor deployed by this step:
 
 ```
-download → scan source → block or deploy → report
+download -> authorize deploy set -> scan selected files -> block or deploy -> report
 ```
 
-- **Critical findings block deployment.** The package is downloaded and cached so you can inspect it (`apm_modules/owner/package/`), but nothing reaches agent-readable directories.
+- **Critical findings block deployment.** Nothing reaches agent-readable directories. The package remains cached in `apm_modules/owner/package/` so you can inspect and fix the reported files.
 - **Warnings are non-blocking.** Zero-width characters are flagged in the diagnostics summary. Files are deployed normally.
 - **`--force` overrides the block.** Consistent with existing collision semantics — an explicit "I know what I'm doing."
 - **Multi-package installs continue.** A blocked package doesn't stop other packages from installing. After all packages are processed, `apm install` exits with code 1 if any package was blocked — failing the CI step.
+- **Removal reconciliation uses the same gate.** During `apm uninstall`, each surviving package is scanned before its integrations are rebuilt; a hostile survivor is skipped and the command warns. During `apm prune`, a hostile hook survivor aborts hook reconciliation before cleanup, leaving the prior hook state in place and warning that reconciliation failed. Fix the reported package source, then run `apm install` to rebuild its files.
 
 ### Compile and pack scanning
 
@@ -531,7 +532,11 @@ For an org standardizing on APM:
 
 ### Can a package embed hidden instructions?
 
-Not without detection. APM scans all package source files before deployment. Critical hidden characters (tag characters, bidi overrides) block deployment. `apm audit` provides on-demand scanning for any file, including those obtained outside APM.
+APM scans every authorized deployable source file for the hidden Unicode
+categories listed above before copying it. Critical tag characters and bidi
+overrides block deployment unless `--force` is used; warning-class findings do
+not. Source-only files are not deployed by this step. Use `apm audit` to scan
+other files, including those obtained outside APM.
 
 ### How do I audit what APM installed?
 

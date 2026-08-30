@@ -8,13 +8,16 @@ Covers:
 
 import shutil  # noqa: F401
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
+    decode_url_path_segments,
     ensure_path_within,
+    parse_url_path_segments,
     safe_rmtree,
     validate_path_segments,
 )
@@ -227,6 +230,57 @@ class TestValidatePathSegments:
 
 
 # ---------------------------------------------------------------------------
+# Strict URL-path decoding
+# ---------------------------------------------------------------------------
+
+
+class TestDecodeUrlPathSegments:
+    """Lock strict URL decoding to one canonical safety boundary."""
+
+    @pytest.mark.parametrize(
+        ("raw_path", "expected"),
+        [
+            (
+                "contoso/My%20Projects/_git/agent-skills",
+                ("contoso", "My Projects", "_git", "agent-skills"),
+            ),
+            (
+                "/contoso/My%20Projects/_git/agent-skills",
+                ("contoso", "My Projects", "_git", "agent-skills"),
+            ),
+        ],
+    )
+    def test_decodes_safe_encoded_segments(self, raw_path: str, expected: tuple[str, ...]) -> None:
+        assert decode_url_path_segments(raw_path) == expected
+
+    def test_retains_encoded_segments_for_url_transport(self) -> None:
+        raw, decoded = parse_url_path_segments("team/My%20Group")
+
+        assert raw == ("team", "My%20Group")
+        assert decoded == ("team", "My Group")
+
+    @pytest.mark.parametrize(
+        "raw_path",
+        [
+            "contoso/%/repo",
+            "contoso/%2/repo",
+            "contoso/%GG/repo",
+            "contoso/%FF/repo",
+            "contoso/%2F/repo",
+            r"contoso/%5C/repo",
+            "contoso/%00/repo",
+            "contoso//repo",
+            "contoso/%252E%252E/repo",
+            "contoso/%252F/repo",
+            "contoso/%2E%2E/repo",
+        ],
+    )
+    def test_rejects_unsafe_or_recursive_encoded_segments(self, raw_path: str) -> None:
+        with pytest.raises(PathTraversalError):
+            decode_url_path_segments(raw_path)
+
+
+# ---------------------------------------------------------------------------
 # DependencyReference parse-time traversal rejection
 # ---------------------------------------------------------------------------
 
@@ -284,6 +338,42 @@ class TestDependencyParseTraversalRejection:
     def test_parse_accepts_normal_virtual_package(self):
         dep = DependencyReference.parse("owner/repo/prompts/my-file.prompt.md")
         assert dep.is_virtual is True
+
+    def test_full_https_ado_decodes_identity_after_structural_parse(self) -> None:
+        dep = DependencyReference.parse(
+            "https://dev.azure.com/contoso/My%20Projects/_git/agent-skills"
+        )
+
+        assert dep.repo_url == "contoso/My Projects/agent-skills"
+        assert dep.ado_organization == "contoso"
+        assert dep.ado_project == "My Projects"
+        assert dep.ado_repo == "agent-skills"
+        parsed = urlparse(dep.to_github_url())
+        assert parsed.path == "/contoso/My%20Projects/_git/agent-skills"
+
+    def test_full_https_non_ado_keeps_encoded_transport_path(self) -> None:
+        dep = DependencyReference.parse("https://gitlab.example.com/team/My%20Group")
+
+        assert dep.repo_url == "team/My%20Group"
+        parsed = urlparse(dep.to_github_url())
+        assert parsed.path == "/team/My%20Group"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://dev.azure.com/contoso/%/_git/repo",
+            "https://dev.azure.com/contoso/%FF/_git/repo",
+            "https://dev.azure.com/contoso/%2F/_git/repo",
+            "https://dev.azure.com/contoso/%252E%252E/_git/repo",
+            "https://gitlab.example.com/team/%",
+            "https://gitlab.example.com/team/%FF",
+            "https://gitlab.example.com/team/%2F",
+            "https://gitlab.example.com/team/%252E%252E",
+        ],
+    )
+    def test_full_https_unsafe_encoded_path_fails_during_parse(self, url: str) -> None:
+        with pytest.raises(ValueError):
+            DependencyReference.parse(url)
 
     # --- SSH URL traversal rejection ---
 

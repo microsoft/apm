@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -151,6 +151,43 @@ def _has_symlink_component(candidate: Path, plugin_root: Path) -> bool:
     return False
 
 
+def _iter_command_source_files(
+    source: Path,
+    target_root: Path,
+    staging_root: Path,
+    staging_parent: Path,
+    ignore_non_content: Callable[[str, list[str]], set[str]],
+) -> Iterator[tuple[Path, Path]]:
+    """Yield regular command files while pruning generated staging output."""
+    try:
+        source_root = source.resolve()
+    except OSError:
+        _surface_warning("Skipping command source with an unresolvable staging boundary", _logger)
+        return
+
+    if source_root == target_root:
+        return
+    if source_root == staging_parent:
+        excluded_root = staging_root
+    else:
+        try:
+            target_root.relative_to(source_root)
+        except ValueError:
+            excluded_root = None
+        else:
+            excluded_root = target_root
+
+    for directory, directories, files in os.walk(source_root, topdown=True, followlinks=False):
+        directory_path = Path(directory)
+        if excluded_root is not None and directory_path == excluded_root.parent:
+            directories[:] = [name for name in directories if name != excluded_root.name]
+        ignored = ignore_non_content(directory, files)
+        for name in files:
+            source_file = directory_path / name
+            if name not in ignored and not source_file.is_symlink() and source_file.is_file():
+                yield source_file, source_root
+
+
 def _holds_skill_dirs(candidate: Path) -> bool:
     """Return True iff *candidate* is a container of skills, not a skill itself.
 
@@ -199,7 +236,7 @@ def _map_plugin_skills(
     manifest: dict[str, Any],
     resolve_sources: Callable[[str, str], list[Path]],
     is_same_path: Callable[[Path, Path], bool],
-    ignore_non_content: Callable[..., set[str]],
+    ignore_non_content: Callable[..., list[str]],
 ) -> None:
     """Materialize parser-authorized plugin skills and persist their receipt."""
     skill_sources = resolve_sources("skills", "skills")
@@ -973,13 +1010,29 @@ def _map_plugin_artifacts(
     if manifest is None:
         manifest = {}
 
-    from apm_cli.security.gate import ignore_non_content
+    from apm_cli.security.gate import ignore_non_content as _ignore_non_content
 
     if apm_dir.is_symlink():
         raise PluginIntegrityError(
             f"Refusing to map plugin artifacts through symlinked destination: {apm_dir}"
         )
     plugin_path = plugin_path.resolve()
+    # Command copying checks every discovered file, so resolve the staging
+    # root once rather than repeating filesystem resolution per path.
+    staging_root = apm_dir.resolve()
+    staging_parent = apm_dir.parent.resolve()
+    staging_name = apm_dir.name
+
+    def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
+        """Compose the canonical content filter with staging-root containment."""
+        ignored = set(_ignore_non_content(directory, contents))
+        try:
+            copying_from_plugin_root = Path(directory).resolve() == staging_parent
+        except OSError:
+            copying_from_plugin_root = True
+        if copying_from_plugin_root and staging_name in contents:
+            ignored.add(staging_name)
+        return list(ignored)
 
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
@@ -1051,7 +1104,12 @@ def _map_plugin_artifacts(
         for d in agent_dirs:
             if _is_same_path(d, target_agents):
                 continue
-            shutil.copytree(d, target_agents, dirs_exist_ok=True, ignore=ignore_non_content)
+            shutil.copytree(
+                d,
+                target_agents,
+                dirs_exist_ok=True,
+                ignore=ignore_non_content,
+            )
         if agent_files:
             target_agents.mkdir(parents=True, exist_ok=True)
             for f in agent_files:
@@ -1075,6 +1133,7 @@ def _map_plugin_artifacts(
         target_prompts = apm_dir / "prompts"
         _assert_no_symlink_descendants(target_prompts)
         target_prompts.mkdir(parents=True, exist_ok=True)
+        target_prompts_root = target_prompts.resolve()
 
         def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path = None):  # noqa: RUF013
             """Copy a command file, normalizing .md -> .prompt.md."""
@@ -1094,10 +1153,14 @@ def _map_plugin_artifacts(
             if source.is_file() and not source.is_symlink():
                 _copy_command_file(source, target_prompts)
             elif source.is_dir():
-                for source_file in source.rglob("*"):
-                    if not source_file.is_file() or source_file.is_symlink():
-                        continue
-                    _copy_command_file(source_file, target_prompts, rel_to=source)
+                for source_file, source_root in _iter_command_source_files(
+                    source,
+                    target_prompts_root,
+                    staging_root,
+                    staging_parent,
+                    _ignore_non_content,
+                ):
+                    _copy_command_file(source_file, target_prompts, rel_to=source_root)
 
     # Map hooks/  -- the spec allows a directory path, a config file path,
     # or an inline object.  Handle all three forms.
@@ -1133,7 +1196,12 @@ def _map_plugin_artifacts(
             for d in hook_sources:
                 if _is_same_path(d, target_hooks):
                     continue
-                shutil.copytree(d, target_hooks, dirs_exist_ok=True, ignore=ignore_non_content)
+                shutil.copytree(
+                    d,
+                    target_hooks,
+                    dirs_exist_ok=True,
+                    ignore=ignore_non_content,
+                )
 
     # Pass-through files required for MCP/LSP plugins to function
     for passthrough in (".mcp.json", ".lsp.json", "settings.json"):

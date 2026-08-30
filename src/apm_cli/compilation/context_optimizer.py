@@ -7,7 +7,6 @@ following the Minimal Context Principle.
 
 import builtins
 import fnmatch
-import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -24,7 +23,12 @@ from ..output.models import (
 from ..primitives.models import Instruction
 from ..utils.exclude import matches_glob, should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
-from ..utils.patterns import has_top_level_comma, parse_apply_to
+from ..utils.patterns import (
+    has_top_level_comma,
+    literal_apply_to_top_level_roots,
+    parse_apply_to,
+)
+from .inventory import CompileInventory
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 # When this module is imported during 'apm compile', Click's active context
@@ -133,7 +137,12 @@ class ContextOptimizer:
     LOW_DISTRIBUTION_THRESHOLD = 0.3
     HIGH_DISTRIBUTION_THRESHOLD = 0.7
 
-    def __init__(self, base_dir: str = ".", exclude_patterns: builtins.list[str] | None = None):
+    def __init__(
+        self,
+        base_dir: str = ".",
+        exclude_patterns: builtins.list[str] | None = None,
+        inventory: CompileInventory | None = None,
+    ):
         """Initialize the context optimizer.
 
         Args:
@@ -153,6 +162,7 @@ class ContextOptimizer:
         self._glob_set_cache: builtins.dict[str, builtins.set[Path]] = {}
         self._file_list_cache: builtins.list[Path] | None = None
         self._placement_hidden_tool_trees: frozenset[str] = frozenset()
+        self._scan_top_level_roots: frozenset[str] | None = None
         self._inheritance_cache: builtins.dict[Path, builtins.list[Path]] = {}  # (#171)
         self._timing_enabled = False
         self._phase_timings: builtins.dict[str, float] = {}
@@ -172,6 +182,7 @@ class ContextOptimizer:
 
         # Configurable exclusion patterns (validated at init time)
         self._exclude_patterns = validate_exclude_patterns(exclude_patterns)
+        self._inventory = inventory
 
     def enable_timing(self, verbose: bool = False):
         """Enable performance timing instrumentation."""
@@ -270,6 +281,9 @@ class ContextOptimizer:
         # Shared file discovery runs once per compile batch, so traverse the
         # union of roots explicitly targeted by its instructions.
         self._placement_hidden_tool_trees = self._targeted_hidden_tool_roots(instructions)
+        self._scan_top_level_roots = literal_apply_to_top_level_roots(
+            instruction.apply_to for instruction in instructions
+        )
         self._file_list_cache = None
         self._glob_cache.clear()
         self._glob_set_cache.clear()
@@ -299,7 +313,7 @@ class ContextOptimizer:
                             instruction=instruction,
                             pattern="(global)",
                             matching_directories=1,
-                            total_directories=len(self._directory_cache),
+                            total_directories=self._placement_directory_count(),
                             distribution_score=1.0,
                             strategy=PlacementStrategy.DISTRIBUTED,
                             placement_directories=[self.base_dir],
@@ -485,90 +499,62 @@ class ContextOptimizer:
         )
 
     def _analyze_project_structure(self) -> None:
-        """Analyze the project structure; populate both ``_directory_cache`` and ``_file_list_cache``.
-
-        This is the single canonical ``os.walk`` traversal for the entire
-        optimization pipeline.  Both caches are built in one pass so that
-        :meth:`_get_all_files` (used by :meth:`_cached_glob` / the symlink-safe
-        glob replacement) never needs a separate walk.
-
-        Ordering guarantee: subdirectories are sorted before descent and files
-        are sorted within each directory, so ``_file_list_cache`` is
-        deterministic regardless of OS-level readdir order.
-        """
-        # Rebuild from scratch for both direct calls and optimize orchestration.
+        """Project full accounting and scoped candidate files from one inventory."""
         self._directory_cache.clear()
         self._pattern_cache.clear()
         self._file_list_cache = []
         self._files_by_directory.clear()
         self._children_by_directory.clear()
 
-        visited_dirs: builtins.set[Path] = set()
-
-        for root, dirs, files in os.walk(self.base_dir):
-            current_path = Path(root)
-
-            # Guard against symlink-induced infinite loops.
-            if current_path in visited_dirs:
-                dirs[:] = []
-                continue
-            visited_dirs.add(current_path)
-
-            relative_path = self._relative_path(current_path)
-            depth = len(relative_path.parts) if relative_path is not None else 0
-
-            # Only supported agent-tool roots participate in placement.  Other
-            # hidden paths (including nested caches) stay pruned entirely.
-            if self._contains_unsupported_hidden_directory(current_path, relative_path):
-                dirs[:] = []
+        inventory = self._inventory or CompileInventory.collect(self.base_dir)
+        self._inventory = inventory
+        selected_files = (
+            None
+            if self._scan_top_level_roots is None
+            else set(inventory.files_under(self._scan_top_level_roots))
+        )
+        for entry in inventory.directories:
+            current_path = entry.path
+            if not self._is_placement_path(current_path, entry.relative_path):
                 continue
 
-            # Safety net: skip if a default-excluded component snuck through.
-            if any(part in DEFAULT_EXCLUDED_DIRNAMES for part in relative_path.parts):
-                dirs[:] = []
+            project_files = [
+                current_path / name for name in entry.file_names if not name.startswith(".")
+            ]
+            self._children_by_directory[current_path] = [
+                current_path / name
+                for name in entry.child_names
+                if self._is_placement_path(current_path / name)
+            ]
+            if not project_files:
                 continue
 
-            # Skip paths matching configurable exclusion patterns.
-            if self._should_exclude_path(current_path):
-                dirs[:] = []
-                continue
-
-            # Prune and sort subdirectories.  Sorting ensures that
-            # ``_file_list_cache`` has a stable, deterministic order across
-            # platforms (the OS-level readdir order is not guaranteed).
-            dirs[:] = sorted(d for d in dirs if not self._should_exclude_subdir(current_path / d))
-
-            # Populate the children-by-directory index with admitted child dirs.
-            self._children_by_directory[current_path] = [current_path / d for d in dirs]
-
-            # project_files preserves os.walk entries for project accounting;
-            # matching_files keeps the old is_file() filter, excluding broken
-            # symlinks and other non-regular entries from pattern matching.
-            project_files: builtins.list[Path] = []
-            matching_files: builtins.list[Path] = []
-            for file in sorted(files):
-                if not file.startswith("."):
-                    file_path = current_path / file
-                    self._file_list_cache.append(file_path)
-                    project_files.append(file_path)
-                    if file_path.is_file():
-                        matching_files.append(file_path)
-
-            # Build the directory cache (only for directories that contain
-            # at least one non-hidden file; empty directories are skipped).
-            total_files = len(project_files)
-            if total_files == 0:
-                continue
-
-            self._files_by_directory[current_path] = matching_files
-
-            analysis = DirectoryAnalysis(
-                directory=current_path, depth=depth, total_files=total_files
+            self._directory_cache[current_path] = DirectoryAnalysis(
+                directory=current_path,
+                depth=entry.depth,
+                total_files=len(project_files),
+                file_types={path.suffix for path in project_files},
             )
-            for fp in project_files:
-                analysis.file_types.add(fp.suffix)
+            candidate_files = (
+                project_files
+                if selected_files is None
+                else [path for path in project_files if path in selected_files]
+            )
+            matching_files = [path for path in candidate_files if path.is_file()]
+            self._file_list_cache.extend(candidate_files)
+            if matching_files:
+                self._files_by_directory[current_path] = matching_files
 
-            self._directory_cache[current_path] = analysis
+    def _is_placement_path(self, path: Path, relative_path: Path | None = None) -> bool:
+        """Return whether an inventory path participates in placement accounting."""
+        relative_path = relative_path or self._relative_path(path)
+        if relative_path is None:
+            return False
+        return not (
+            self._contains_unsupported_hidden_directory(path, relative_path)
+            or any(part in DEFAULT_EXCLUDED_DIRNAMES for part in relative_path.parts)
+            or self._should_exclude_path(path)
+        )
 
     def _should_exclude_subdir(self, path: Path) -> bool:
         """Check if a subdirectory should be pruned from os.walk traversal.
@@ -612,12 +598,15 @@ class ContextOptimizer:
         relative_path = relative_path or self._relative_path(path)
         if relative_path is None:
             return True
-        # os.walk reaches a nested directory only after _should_exclude_subdir
-        # admitted its parent, so the top-level component is sufficient here.
         return bool(
             relative_path.parts
-            and relative_path.parts[0].startswith(".")
-            and relative_path.parts[0] not in self._placement_hidden_tool_trees
+            and (
+                (
+                    relative_path.parts[0].startswith(".")
+                    and relative_path.parts[0] not in self._placement_hidden_tool_trees
+                )
+                or any(part.startswith(".") for part in relative_path.parts[1:])
+            )
         )
 
     def _targeted_hidden_tool_roots(
@@ -654,6 +643,10 @@ class ContextOptimizer:
             True if path should be excluded, False otherwise
         """
         return should_exclude(path, self.base_dir, self._exclude_patterns)
+
+    def _placement_directory_count(self) -> int:
+        """Count every directory in historic placement accounting."""
+        return len(self._directory_cache)
 
     def _find_optimal_placements(
         self, instruction: Instruction, verbose: bool = False
@@ -722,7 +715,7 @@ class ContextOptimizer:
                 instruction=instruction,
                 pattern=pattern,
                 matching_directories=0,
-                total_directories=len(self._directory_cache),
+                total_directories=self._placement_directory_count(),
                 distribution_score=0.0,
                 strategy=PlacementStrategy.DISTRIBUTED,
                 placement_directories=[placement],
@@ -771,7 +764,7 @@ class ContextOptimizer:
             instruction=instruction,
             pattern=pattern,
             matching_directories=len(matching_directories),
-            total_directories=len(self._directory_cache),
+            total_directories=self._placement_directory_count(),
             distribution_score=distribution_score,
             strategy=strategy,
             placement_directories=placements,
@@ -982,8 +975,8 @@ class ContextOptimizer:
         Returns:
             float: Distribution score accounting for spread and depth diversity.
         """
-        total_dirs_with_files = len(
-            [d for d in self._directory_cache.values() if d.total_files > 0]
+        total_dirs_with_files = sum(
+            analysis.total_files > 0 for analysis in self._directory_cache.values()
         )
         if total_dirs_with_files == 0:
             return 0.0

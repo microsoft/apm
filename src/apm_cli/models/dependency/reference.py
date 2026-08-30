@@ -22,12 +22,14 @@ from ...utils.github_host import (
 )
 from ...utils.path_security import (
     PathTraversalError,
+    parse_url_path_segments,
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
 from .identity import (
     _DEFAULT_SCHEME_PORTS,
     _NON_ADO_PATH_SEGMENT_RE,
+    _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE,
     InvalidSemverRangeError,
     _is_valid_registry_semver_range,
     _looks_like_invalid_semver_range,
@@ -496,14 +498,21 @@ class DependencyReference(ProviderCoordinateMixin):
         such as ``owner/repo#package@v1.0.1`` remain valid literal refs.
         """
         stripped = dependency_str.strip()
-        if "@" not in stripped:
-            return
         if stripped.lower().startswith(("https://", "http://", "ssh://")):
             return
         if SCP_LIKE_RE.match(stripped):
             return
         shorthand_part, _, ref_part = stripped.partition("#")
-        if "@" not in shorthand_part:
+        has_encoded_alias = False
+        if "%40" in shorthand_part.lower():
+            _, decoded_segments = parse_url_path_segments(
+                shorthand_part,
+                context="repository path",
+            )
+            has_encoded_alias = any("@" in segment for segment in decoded_segments)
+        if "@" not in stripped and not has_encoded_alias:
+            return
+        if "@" not in shorthand_part and not has_encoded_alias:
             _, _, ref_suffix = ref_part.rpartition("@")
             if _REF_VERSION_SUFFIX_RE.fullmatch(ref_suffix):
                 return
@@ -1492,17 +1501,26 @@ class DependencyReference(ProviderCoordinateMixin):
         if not is_supported_git_host(hostname):
             raise ValueError(unsupported_host_error(hostname or parsed_url.netloc))
 
-        path = parsed_url.path.strip("/")
-        if not path:
-            raise ValueError("Repository path cannot be empty")
-
-        if path.endswith(".git"):
-            path = path[:-4]
-
-        path_parts = [urllib.parse.unquote(p) for p in path.split("/")]
+        try:
+            raw_path_parts, decoded_path_parts = parse_url_path_segments(
+                parsed_url.path,
+                context="repository URL path",
+            )
+        except PathTraversalError as exc:
+            raise ValueError(str(exc)) from exc
+        path_parts = list(decoded_path_parts)
+        presentation_path_parts = list(raw_path_parts)
+        if path_parts[-1].endswith(".git"):
+            path_parts[-1] = path_parts[-1][:-4]
+            if presentation_path_parts[-1].endswith(".git"):
+                presentation_path_parts[-1] = presentation_path_parts[-1][:-4]
+        path = "/".join(path_parts)
         if "_git" in path_parts:
             git_idx = path_parts.index("_git")
             path_parts = path_parts[:git_idx] + path_parts[git_idx + 1 :]
+            presentation_path_parts = (
+                presentation_path_parts[:git_idx] + presentation_path_parts[git_idx + 1 :]
+            )
 
         is_ado_host = is_azure_devops_hostname(hostname)
 
@@ -1570,6 +1588,7 @@ class DependencyReference(ProviderCoordinateMixin):
             # :meth:`_extract_artifactory_prefix`.
             if is_artifactory_path(path_parts):
                 path_parts = path_parts[2:]
+                presentation_path_parts = presentation_path_parts[2:]
             for pp in path_parts:
                 if any(pp.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                     raise ValueError(
@@ -1577,17 +1596,22 @@ class DependencyReference(ProviderCoordinateMixin):
                         f"Use the dict format with 'path:' for virtual packages in HTTPS URLs"
                     )
 
-        allowed_pattern = _path_segment_pattern(is_ado_host)
+        validation_parts = path_parts if is_ado_host else presentation_path_parts
+        allowed_pattern = (
+            _path_segment_pattern(is_ado_host)
+            if is_ado_host
+            else _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE
+        )
         validate_path_segments(
-            "/".join(path_parts),
+            "/".join(validation_parts),
             context="repository URL path",
             reject_empty=True,
         )
-        for part in path_parts:
+        for part in validation_parts:
             if not re.match(allowed_pattern, part):
                 raise ValueError(f"Invalid repository path component: {part}")
 
-        return "/".join(path_parts), url_virtual_path
+        return "/".join(path_parts if is_ado_host else presentation_path_parts), url_virtual_path
 
     @classmethod
     def _parse_standard_url(
@@ -1661,7 +1685,7 @@ class DependencyReference(ProviderCoordinateMixin):
         return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
     @classmethod
-    def _validate_final_repo_fields(cls, host, repo_url):
+    def _validate_final_repo_fields(cls, host, repo_url, *, allow_percent_encoded: bool = False):
         """Validate a repository path and return its ADO coordinates when applicable."""
         is_ado_final = host and is_azure_devops_hostname(host)
         if is_ado_final:
@@ -1676,7 +1700,12 @@ class DependencyReference(ProviderCoordinateMixin):
         segments = repo_url.split("/")
         if len(segments) < 2:
             raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
-        if not all(re.match(_NON_ADO_PATH_SEGMENT_RE, s) for s in segments):
+        allowed_pattern = (
+            _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE
+            if allow_percent_encoded
+            else _NON_ADO_PATH_SEGMENT_RE
+        )
+        if not all(re.match(allowed_pattern, s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
         validate_path_segments(repo_url, context="repository path")
         for seg in segments:
@@ -1745,8 +1774,6 @@ class DependencyReference(ProviderCoordinateMixin):
         if not dependency_str.strip():
             raise ValueError("Empty dependency string")
 
-        dependency_str = urllib.parse.unquote(dependency_str)
-
         if any(ord(c) < 32 for c in dependency_str):
             raise ValueError("Dependency string contains invalid control characters")
 
@@ -1814,7 +1841,13 @@ class DependencyReference(ProviderCoordinateMixin):
 
         # Phase 3: full validation (all hosts) + ADO field extraction.
         # canonical_ado_coordinates is for consumers with validated input only.
-        ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(host, repo_url)
+        ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(
+            host,
+            repo_url,
+            allow_percent_encoded=dependency_str.strip()
+            .lower()
+            .startswith(("https://", "http://")),
+        )
 
         if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
             raise ValueError(

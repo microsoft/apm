@@ -248,7 +248,11 @@ class TestI1BlockDeniedDirectDep:
         _write_apm_yml(project_dir / "apm.yml", deps=["test-blocked/forbidden-package"])
 
         policy = _load_fixture_policy("apm-policy-deny.yml")
-        fetch = _make_fetch_result("found", policy=policy)
+        fetch = _make_fetch_result(
+            "found",
+            policy=policy,
+            source="org:gitlab.com/test-org/apm-policy",
+        )
         mock_gate.return_value = fetch
         mock_preflight.return_value = fetch
 

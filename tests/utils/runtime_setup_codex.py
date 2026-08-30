@@ -156,6 +156,7 @@ def run_setup(
     env["FAKE_CURL_LOG"] = str(tmp_path / "curl.log")
     env["FAKE_RELEASE_JSON"] = str(release_json)
     env["FAKE_TARBALL"] = str(tarball)
+    env.pop("GITHUB_API_TOKEN", None)
     env.pop("GITHUB_TOKEN", None)
     env.pop("GITHUB_APM_PAT", None)
     env.pop("GH_TOKEN", None)

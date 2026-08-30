@@ -22,7 +22,7 @@ def test_frontmatter_bom_decoding_has_single_owner() -> None:
 
     assert 'def load_frontmatter(fd: Any, encoding: str = "utf-8-sig")' in owner
     assert 'text.removeprefix("\\ufeff")' in owner
-    assert "AC35: frontmatter BOM decoding authority" in guard
+    assert "AC36: frontmatter BOM decoding authority" in guard
     assert "Frontmatter BOM decoding must route through utils/yaml_io.py" in guard
     assert "| Frontmatter BOM decoding and bounded YAML parsing |" in architecture_doc
 

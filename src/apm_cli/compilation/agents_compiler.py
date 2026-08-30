@@ -23,10 +23,11 @@ from ..core.target_detection import (
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import Instruction, PrimitiveCollection
 from ..utils.path_security import PathTraversalError, ensure_path_within
-from ..utils.paths import portable_relpath
+from ..utils.paths import portable_relpath, resolve_base_and_source_dirs
 from ..version import get_version
 from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
 from .constants import BUILD_ID_PLACEHOLDER
+from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .template_builder import (
     TemplateData,
@@ -336,13 +337,14 @@ class AgentsCompiler:
                 compile --root`` redirects writes but sources remain in
                 ``$PWD``.
         """
-        self.base_dir = Path(base_dir)
-        self.source_dir = Path(source_dir) if source_dir else self.base_dir
+        self.base_dir, self.source_dir = resolve_base_and_source_dirs(base_dir, source_dir)
         self.warnings: list[str] = []
         self.errors: list[str] = []
         self._logger = None
         self._distributed_placement: dict[Path, tuple[Instruction, ...]] | None = None
         self._distributed_context_optimizer: ContextOptimizer | None = None
+        self._source_inventory: CompileInventory | None = None
+        self._deploy_inventory: CompileInventory | None = None
 
     def _log(self, method: str, message: str, **kwargs):
         """Delegate to logger if available, else no-op."""
@@ -403,6 +405,14 @@ class AgentsCompiler:
         # Placement is valid only for this invocation's primitive snapshot.
         self._distributed_placement = None
         self._distributed_context_optimizer = None
+        self._source_inventory = CompileInventory.collect(
+            self.source_dir, exclude_patterns=config.exclude
+        )
+        self._deploy_inventory = (
+            self._source_inventory
+            if self.source_dir == self.base_dir and not config.exclude
+            else CompileInventory.collect(self.base_dir)
+        )
 
         try:
             # Use provided primitives or discover them (with dependency support)
@@ -412,6 +422,7 @@ class AgentsCompiler:
                     primitives = discover_primitives(
                         str(self.source_dir),
                         exclude_patterns=config.exclude,
+                        inventory=self._source_inventory,
                     )
                 else:
                     # Use enhanced discovery with dependencies (Task 4 integration)
@@ -420,6 +431,7 @@ class AgentsCompiler:
                     primitives = discover_primitives_with_dependencies(
                         str(self.source_dir),
                         exclude_patterns=config.exclude,
+                        inventory=self._source_inventory,
                     )
 
             # Route to targets based on config.target.
@@ -555,6 +567,8 @@ class AgentsCompiler:
             str(self.base_dir),
             exclude_patterns=config.exclude,
             source_dir=str(self.source_dir),
+            source_inventory=self._source_inventory,
+            deploy_inventory=self._deploy_inventory,
         )
 
         # Skip instructions in AGENTS.md when they are already deployed to the
@@ -865,6 +879,8 @@ class AgentsCompiler:
                 str(self.base_dir),
                 exclude_patterns=config.exclude,
                 source_dir=str(self.source_dir),
+                source_inventory=self._source_inventory,
+                deploy_inventory=self._deploy_inventory,
             )
             placement_map = self._get_distributed_placement(
                 config,

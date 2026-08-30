@@ -142,8 +142,8 @@ legacy Claude client format.
 
 LSP configuration gets its own guidance in the same error, since neither bundle format carries it: configure LSP servers directly in the target client instead.
 
-:::note[Planned]
-`apm install` does not yet deploy Agent Plugin bundles or packages -- installing one fails closed with an explicit message today, pending native Agent Plugins runtime integration. Use `--format agent-plugin` to produce a portable artifact for external Agent-Plugin-aware hosts; use the default Claude plugin bundle (or `--format apm`) for anything you need `apm install` to deploy right now.
+:::note[Installing what you packed]
+Declare the packed plugin as a dependency in `apm.yml` and run `apm install --target copilot`: APM keeps the whole unit under `apm_modules/` and registers it without locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer loads the projection live; older clients may create private copies outside APM ownership. Non-Copilot targets remain outside this native route -- use the default Claude plugin bundle (or `--format apm`) for those. See [Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
 :::
 
 ### APM bundle (`--format apm`)

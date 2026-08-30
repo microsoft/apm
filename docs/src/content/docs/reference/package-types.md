@@ -16,7 +16,7 @@ Pick the layout that matches the author's intent -- APM preserves it.
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Deploy each hook to the target's `hooks/` directory |
 | `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
-| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Not yet installable -- fails closed (see below) |
+| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
 
 ## APM package (`.apm/` directory)
 
@@ -260,19 +260,28 @@ my-plugin/
 +-- mcp.json
 ```
 
-:::note[Planned]
-`apm install` does not yet deploy Agent Plugin packages. Recognizing the
-schema fails the install closed with an explicit message rather than
-falling back to the Claude plugin artifact mapping above -- APM never
-partially dissects a recognized Agent Plugin through its normal primitive
-integrators. Ask the publisher for a Claude-compatible package
-(`apm pack --claude-plugin`) if you need to install it today.
+**What gets installed:** nothing is dissected. With `--target copilot`, APM
+keeps the plugin whole under `apm_modules/` and registers it with Copilot as a
+live directory marketplace. APM does not require or inspect a Copilot binary
+during install. Stable Copilot CLI 1.0.81 or newer is the supported runtime for
+loading the generated projection.
+Copilot loads the unit from APM's bytes -- it never copies it. See
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
+
+:::caution[Runtime compatibility and other targets]
+Any target set that excludes Copilot refuses this native install rather than
+falling back to the Claude plugin artifact mapping above -- APM never partially
+dissects a recognized Agent Plugin through its normal primitive integrators.
+Older Copilot clients may copy plugins into private state outside APM ownership,
+so APM cannot guarantee cleanup of those client-created copies. Ask the
+publisher for a Claude-compatible package (`apm pack --claude-plugin`) for a
+non-Copilot target.
 :::
 
 **When to choose:** you are producing a portable package with
-`apm pack --format agent-plugin` for other Agent-Plugin-aware hosts that read the
-Agent Plugins v1 schema directly -- not for installing through
-`apm install` yet. See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
+`apm pack --format agent-plugin` for GitHub Copilot and other
+Agent-Plugin-aware hosts that read the Agent Plugins v1 schema directly.
+See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
 
 ## See also
 

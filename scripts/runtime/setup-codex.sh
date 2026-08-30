@@ -91,7 +91,9 @@ fetch_github_api() {
     local token=""
 
     if [[ "$use_auth" == "true" ]]; then
-        if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        if [[ -n "${GITHUB_API_TOKEN:-}" ]]; then
+            token="$GITHUB_API_TOKEN"
+        elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
             token="$GITHUB_TOKEN"
         elif [[ -n "${GITHUB_APM_PAT:-}" ]]; then
             token="$GITHUB_APM_PAT"
@@ -122,7 +124,8 @@ fetch_release_metadata() {
     local url="$1"
     local response=""
 
-    if [[ -n "${GITHUB_TOKEN:-}" || -n "${GITHUB_APM_PAT:-}" || -n "${GH_TOKEN:-}" ]]; then
+    if [[ -n "${GITHUB_API_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" \
+        || -n "${GITHUB_APM_PAT:-}" || -n "${GH_TOKEN:-}" ]]; then
         if response="$(fetch_github_api "$url" true 2>/dev/null)" \
             && [[ -n "$(printf '%s\n' "$response" | extract_release_tag)" ]]; then
             printf '%s' "$response"

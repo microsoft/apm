@@ -50,8 +50,10 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Target-scoped deployed-file contraction | install/manifest_reconcile.py (reconcile_target_deployed_files) | `src/apm_cli/install/manifest_reconcile.py` |
 | Install success / failure outcome | the canonical install-outcome path | `src/apm_cli/install/outcome.py` |
 | Frozen install mutation eligibility | install/service.py (InstallService) | `src/apm_cli/install/service.py` |
+| Authorized deployable source paths | install/deployable_source_plan.py (DeployableSourcePlan) | `src/apm_cli/install/deployable_source_plan.py` |
+| Symlink-component containment and strict percent-encoded URL-path decoding | utils/path_security.py (has_symlink_component, decode_url_path_segments) | `src/apm_cli/utils/path_security.py` |
 | Install invocation option defaults | install/request.py (InstallRequest) | `src/apm_cli/install/request.py`; `src/apm_cli/commands/install.py` |
-| Neutral hook source grammar and shape -> per-target native | hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir) + per-target renderers | `src/apm_cli/hook_contract.py`; `src/apm_cli/integration/hook_ir.py`; `src/apm_cli/integration/hook_native_formats.py`; `src/apm_cli/integration/hook_integrator.py`; `src/apm_cli/integration/hook_ownership.py` |
+| Neutral hook source grammar, per-target native shape, and shared-config APM-owned drift projection | hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries) | `src/apm_cli/hook_contract.py`; `src/apm_cli/integration/hook_ir.py`; `src/apm_cli/integration/hook_native_formats.py`; `src/apm_cli/integration/hook_integrator.py`; `src/apm_cli/integration/hook_ownership.py` |
 | Plugin-root hook command vocabulary + parsing | integration/hook_command_paths.py | `src/apm_cli/integration/hook_command_paths.py` |
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) | `src/apm_cli/integration/base_integrator.py` |
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) | `install.ps1` |
@@ -81,6 +83,9 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Agent Plugin compatibility package projection | agent_plugins/projection.py (project_agent_plugin_package) | `src/apm_cli/agent_plugins/projection.py`; `src/apm_cli/models/validation.py` |
 | Network host literal parsing and loopback classification | utils/net.py (parse_host_address, is_loopback_host) | `src/apm_cli/utils/net.py` |
 | Legacy plugin declared-skill membership | deps/plugin_parser.py (_map_plugin_artifacts, normalized_plugin_skill_sources) | `src/apm_cli/deps/plugin_parser.py`; `src/apm_cli/integration/skill_integrator.py` |
+| User-root scoped instruction eligibility | integration/targets.py (TargetProfile.include_scoped_in_user_root_context) | `src/apm_cli/integration/targets.py` |
+| Native Agent Plugin registration admission (Copilot target + client capability) | copilot_plugins/capability.py (resolve_native_registration_capability, admits_native_plugin) | `src/apm_cli/copilot_plugins/capability.py` |
+| APM-owned Copilot marketplace catalog, settings entries, and ownership ledger | copilot_plugins/registrar.py (synchronize_copilot_plugins, resync_native_plugins) | `src/apm_cli/copilot_plugins/registrar.py`; `src/apm_cli/copilot_plugins/settings.py`; `src/apm_cli/copilot_plugins/catalog.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

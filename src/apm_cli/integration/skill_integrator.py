@@ -6,13 +6,22 @@ import os
 import re
 import shutil
 import stat
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.skill_package_routing import (
+    get_effective_type,
+)
+from apm_cli.integration.skill_package_routing import (
+    should_compile_instructions as _should_compile_instructions,
+)
+from apm_cli.integration.skill_package_routing import (
+    should_install_skill as _should_install_skill,
+)
 from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
     build_copy_ignore,
@@ -23,10 +32,63 @@ from apm_cli.integration.targets import TargetProfile
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.atomic_io import write_text_lf
 
+__all__ = [
+    "SkillIntegrationResult",
+    "SkillIntegrator",
+    "copy_skill_to_target",
+    "get_effective_type",
+    "normalize_skill_name",
+    "should_compile_instructions",
+    "should_install_skill",
+    "to_hyphen_case",
+    "validate_skill_name",
+]
+
 if TYPE_CHECKING:
-    # Runtime imports of PackageType stay inside the functions that need it:
-    # importing the models package here would close an import cycle.
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.models.validation import PackageType
+
+
+def should_install_skill(package_info) -> bool:
+    """Return whether a package should be installed as a native skill."""
+    return _should_install_skill(
+        package_info,
+        resolve_effective_type=get_effective_type,
+    )
+
+
+def should_compile_instructions(package_info) -> bool:
+    """Return whether package instructions belong in compiled output."""
+    return _should_compile_instructions(
+        package_info,
+        resolve_effective_type=get_effective_type,
+    )
+
+
+def _build_deployable_copy_ignore(
+    *,
+    skip_bin: bool = False,
+    source_plan: "DeployableSourcePlan | None" = None,
+    exclude_apm: bool = False,
+    exclude_apm_yml: bool = False,
+) -> Callable[[str, list[str]], list[str]]:
+    """Build a copy filter constrained to the authorized source plan."""
+    base_ignore = build_copy_ignore(skip_bin=skip_bin)
+    internal_names = (
+        *((".apm",) if exclude_apm else ()),
+        *(("apm.yml",) if exclude_apm_yml else ()),
+    )
+    internal_filter = shutil.ignore_patterns(*internal_names) if internal_names else None
+
+    def _combined(directory: str, contents: list[str]) -> list[str]:
+        ignored = set(base_ignore(directory, contents))
+        if internal_filter is not None:
+            ignored.update(internal_filter(directory, contents))
+        if source_plan is not None:
+            ignored.update(source_plan.copy_ignore(directory, contents))
+        return list(ignored)
+
+    return _combined
 
 
 def to_hyphen_case(name: str) -> str:
@@ -146,118 +208,13 @@ def normalize_skill_name(name: str) -> str:
     return to_hyphen_case(name)
 
 
-# =============================================================================
-# Package Type Routing Functions (T4)
-# =============================================================================
-# These functions determine behavior based on:
-# 1. Explicit `type` field in apm.yml (highest priority)
-# 2. Presence of SKILL.md at package root (makes it a skill)
-# 3. Default to INSTRUCTIONS for instruction-only packages
-#
-# Per skill-strategy.md Decision 2: "Skills are explicit, not implicit"
-# - Packages with SKILL.md OR explicit type: skill/hybrid -> become skills
-# - Packages with only instructions -> compile to AGENTS.md, NOT skills
-
-
-def get_effective_type(package_info) -> "PackageContentType":
-    """Get effective package content type based on package structure.
-
-    Determines type by:
-    1. Package has SKILL.md (PackageType.CLAUDE_SKILL or HYBRID) -> SKILL
-    2. Package is a SKILL_BUNDLE or legacy marketplace plugin with skills/ -> SKILL
-    3. Otherwise -> INSTRUCTIONS (compile to AGENTS.md only)
-
-    Args:
-        package_info: PackageInfo object containing package metadata
-
-    Returns:
-        PackageContentType: The effective type
-    """
-    from apm_cli.models.apm_package import PackageContentType, PackageType
-
-    # Check if package has SKILL.md (via package_type field)
-    # PackageType.CLAUDE_SKILL = has root SKILL.md only
-    # PackageType.HYBRID = has both apm.yml AND root SKILL.md
-    # PackageType.SKILL_BUNDLE = has skills/<name>/SKILL.md (nested bundle)
-    # PackageType.MARKETPLACE_PLUGIN = explicit legacy Claude plugin input.
-    if package_info.package_type in (
-        PackageType.CLAUDE_SKILL,
-        PackageType.HYBRID,
-        PackageType.SKILL_BUNDLE,
-        PackageType.MARKETPLACE_PLUGIN,
-    ):
-        return PackageContentType.SKILL
-
-    # Default to INSTRUCTIONS for packages without SKILL.md
-    return PackageContentType.INSTRUCTIONS
-
-
-def should_install_skill(package_info) -> bool:
-    """Determine if package should be installed as a native skill.
-
-    This controls whether a package gets installed to .github/skills/ (or .claude/skills/).
-
-    Per skill-strategy.md Decision 2 - "Skills are explicit, not implicit":
-
-    Returns True for:
-        - SKILL: Package has SKILL.md or declares type: skill
-        - HYBRID: Package declares type: hybrid in apm.yml
-
-    Returns False for:
-        - INSTRUCTIONS: Compile to AGENTS.md only, no skill created
-        - PROMPTS: Commands/prompts only, no skill created
-        - Packages without SKILL.md and no explicit type field
-
-    Args:
-        package_info: PackageInfo object containing package metadata
-
-    Returns:
-        bool: True if package should be installed as a native skill
-    """
-    from apm_cli.models.apm_package import PackageContentType
-
-    effective_type = get_effective_type(package_info)
-
-    # SKILL and HYBRID should install as skills
-    # INSTRUCTIONS and PROMPTS should NOT install as skills
-    return effective_type in (PackageContentType.SKILL, PackageContentType.HYBRID)
-
-
-def should_compile_instructions(package_info) -> bool:
-    """Determine if package should compile to AGENTS.md/CLAUDE.md.
-
-    This controls whether a package's instructions are included in compiled output.
-
-    Per skill-strategy.md Decision 2:
-
-    Returns True for:
-        - INSTRUCTIONS: Compile to AGENTS.md only (default for packages without SKILL.md)
-        - HYBRID: Package declares type: hybrid in apm.yml
-
-    Returns False for:
-        - SKILL: Install as native skill only, no AGENTS.md compilation
-        - PROMPTS: Commands/prompts only, no instructions compiled
-
-    Args:
-        package_info: PackageInfo object containing package metadata
-
-    Returns:
-        bool: True if package's instructions should be compiled to AGENTS.md/CLAUDE.md
-    """
-    from apm_cli.models.apm_package import PackageContentType
-
-    effective_type = get_effective_type(package_info)
-
-    # INSTRUCTIONS and HYBRID should compile to AGENTS.md
-    # SKILL and PROMPTS should NOT compile to AGENTS.md
-    return effective_type in (PackageContentType.INSTRUCTIONS, PackageContentType.HYBRID)
-
-
 def copy_skill_to_target(
     package_info,
     source_path: Path,
     target_base: Path,
     targets=None,
+    *,
+    source_plan: "DeployableSourcePlan | None" = None,
 ) -> list[Path]:
     """Copy skill directory to all active target skills/ directories.
 
@@ -285,10 +242,43 @@ def copy_skill_to_target(
         source_path: Path to skill in apm_modules/
         target_base: Usually project root
         targets: Optional explicit list of TargetProfile objects.
+        source_plan: Authorized source files from the canonical install
+            materialization path. Direct callers without a plan receive a
+            conservative skills-only plan for their resolved targets.
 
     Returns:
         List of all deployed skill directory paths (empty if skipped).
     """
+    if targets is None:
+        from apm_cli.integration.targets import active_targets
+
+        targets = active_targets(target_base)
+    if source_plan is None:
+        from types import SimpleNamespace
+
+        from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+
+        plan_package = package_info
+        if not isinstance(getattr(package_info, "install_path", None), Path):
+            plan_package = SimpleNamespace(install_path=source_path)
+        source_plan = DeployableSourcePlan.create(
+            plan_package,
+            targets,
+            skill_subset=None,
+            hooks_approved=False,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+    source_path = source_path.resolve()
+    if source_path != source_plan.source_root:
+        raise ValueError("copy_skill_to_target source_path must match source_plan.source_root")
+
+    from apm_cli.security.gate import BLOCK_POLICY
+
+    verdict = source_plan.scan_security(policy=BLOCK_POLICY)
+    if verdict.should_block:
+        return []
+
     # Check if package type allows skill installation (T4 routing)
     if not should_install_skill(package_info):
         return []
@@ -315,10 +305,6 @@ def copy_skill_to_target(
     # When no targets are provided, fall back to project-scope detection.
     # Callers responsible for user-scope should pass resolved targets
     # from resolve_targets().
-    if targets is None:
-        from apm_cli.integration.targets import active_targets
-
-        targets = active_targets(target_base)
     for target in targets:
         if not target.supports("skills"):
             continue
@@ -376,9 +362,11 @@ def copy_skill_to_target(
         skill_dir.parent.mkdir(parents=True, exist_ok=True)
         if skill_dir.exists():
             shutil.rmtree(skill_dir)
-        from apm_cli.security.gate import ignore_non_content
-
-        shutil.copytree(source_path, skill_dir, ignore=ignore_non_content)
+        shutil.copytree(
+            source_path,
+            skill_dir,
+            ignore=_build_deployable_copy_ignore(source_plan=source_plan),
+        )
         rewriter = SkillIntegrator()
         rewriter.init_link_resolver(package_info, target_base)
         rewriter._resolve_markdown_links_in_skill_bundle(source_path, skill_dir)
@@ -736,6 +724,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         name_filter: set[str] | None = None,
         link_rewriter: "SkillIntegrator | None" = None,
+        source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
     ) -> tuple[int, list[Path]]:
         """Promote named skill directories to top-level skill entries.
@@ -853,7 +842,10 @@ class SkillIntegrator(BaseIntegrator):
                 sub_skill_path,
                 target,
                 dirs_exist_ok=True,
-                ignore=build_copy_ignore(skip_bin=skip_bin),
+                ignore=_build_deployable_copy_ignore(
+                    skip_bin=skip_bin,
+                    source_plan=source_plan,
+                ),
             )
             if link_rewriter is not None:
                 link_rewriter._resolve_markdown_links_in_skill_bundle(sub_skill_path, target)
@@ -929,6 +921,7 @@ class SkillIntegrator(BaseIntegrator):
         targets=None,
         skill_subset=None,
         skip_bin: bool = False,
+        source_plan: "DeployableSourcePlan | None" = None,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from a package that is NOT itself a skill.
 
@@ -963,7 +956,11 @@ class SkillIntegrator(BaseIntegrator):
         _dep_ref = getattr(package_info, "dependency_ref", None)
         parent_name = _dep_ref.get_unique_key() if _dep_ref is not None else package_path.name
         owned_by = self._build_skill_ownership_map(project_root)
-        name_filter = skill_subset_filter_tokens(skill_subset)
+        name_filter = (
+            source_plan.selected_skill_names
+            if source_plan is not None
+            else skill_subset_filter_tokens(skill_subset)
+        )
         count = 0
         all_deployed: list[Path] = []
         seen_skill_dirs: set[Path] = set()
@@ -1005,6 +1002,7 @@ class SkillIntegrator(BaseIntegrator):
                 name_filter=name_filter,
                 link_rewriter=self,
                 skip_bin=skip_bin,
+                source_plan=source_plan,
             )
             if is_primary:
                 count = n
@@ -1032,6 +1030,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skip_bin: bool = False,
+        source_plan: "DeployableSourcePlan | None" = None,
     ) -> SkillIntegrationResult:
         """Copy a native Skill (with existing SKILL.md) to all active targets.
 
@@ -1198,19 +1197,20 @@ class SkillIntegrator(BaseIntegrator):
 
                             _rich_warning(detail)
                 shutil.rmtree(target_skill_dir)
-
             target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-            _base_ignore = build_copy_ignore(skip_bin=skip_bin)
+            target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
+            from apm_cli.models.apm_package import PackageType as _PackageType
 
-            _apm_filter = shutil.ignore_patterns(".apm")
-
-            def _ignore_non_content_and_apm(directory, contents):
-                return list(
-                    set(_base_ignore(directory, contents))  # noqa: B023
-                    | set(_apm_filter(directory, contents))  # noqa: B023
-                )
-
-            shutil.copytree(package_path, target_skill_dir, ignore=_ignore_non_content_and_apm)
+            shutil.copytree(
+                package_path,
+                target_skill_dir,
+                ignore=_build_deployable_copy_ignore(
+                    skip_bin=skip_bin,
+                    source_plan=source_plan,
+                    exclude_apm=True,
+                    exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
+                ),
+            )
             self._resolve_markdown_links_in_skill_bundle(package_path, target_skill_dir)
             all_target_paths.append(target_skill_dir)
 
@@ -1234,6 +1234,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger if is_primary else None,
                 link_rewriter=self,
                 skip_bin=skip_bin,
+                source_plan=source_plan,
             )
             all_target_paths.extend(sub_deployed)
 
@@ -1271,6 +1272,7 @@ class SkillIntegrator(BaseIntegrator):
         targets=None,
         skill_subset=None,
         skip_bin: bool = False,
+        source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
     ) -> SkillIntegrationResult:
         """Promote every skill in a SKILL_BUNDLE's top-level skills/ directory.
@@ -1323,7 +1325,11 @@ class SkillIntegrator(BaseIntegrator):
         )
 
         # Convert skill_subset tuple to promotion filter tokens for O(1) lookup.
-        _name_filter = skill_subset_filter_tokens(skill_subset)
+        _name_filter = (
+            source_plan.selected_skill_names
+            if source_plan is not None
+            else skill_subset_filter_tokens(skill_subset)
+        )
 
         for target in targets:
             if not target.supports("skills"):
@@ -1362,6 +1368,7 @@ class SkillIntegrator(BaseIntegrator):
                 name_filter=_name_filter,
                 link_rewriter=self,
                 skip_bin=skip_bin,
+                source_plan=source_plan,
                 source_paths=source_paths,
             )
             if is_primary:
@@ -1405,6 +1412,7 @@ class SkillIntegrator(BaseIntegrator):
         skip_bin: bool = False,
         bin_skip_reason_override: str | None = None,
         trust_bin: bool | None = None,
+        source_plan=None,
     ) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
 
@@ -1458,6 +1466,7 @@ class SkillIntegrator(BaseIntegrator):
                 targets=targets,
                 skill_subset=skill_subset,
                 skip_bin=skip_bin,
+                source_plan=source_plan,
             )
             return SkillIntegrationResult(
                 skill_created=False,
@@ -1508,6 +1517,8 @@ class SkillIntegrator(BaseIntegrator):
                     force=force,
                     logger=logger,
                     trust_bin=trust_bin,
+                    skip_bin=skip_bin,
+                    source_plan=source_plan,
                 )
 
         # Check if this is a native Skill (already has SKILL.md at root)
@@ -1531,6 +1542,7 @@ class SkillIntegrator(BaseIntegrator):
                     logger=logger,
                     targets=targets,
                     skip_bin=skip_bin,
+                    source_plan=source_plan,
                 ),
                 bin_paths,
                 bin_skip_reason,
@@ -1586,6 +1598,7 @@ class SkillIntegrator(BaseIntegrator):
                     targets=targets,
                     skill_subset=skill_subset,
                     skip_bin=skip_bin,
+                    source_plan=source_plan,
                 ),
                 bin_paths,
                 bin_skip_reason,
@@ -1603,6 +1616,7 @@ class SkillIntegrator(BaseIntegrator):
             targets=targets,
             skill_subset=skill_subset,
             skip_bin=skip_bin,
+            source_plan=source_plan,
         )
         return self._merge_bin_paths(
             SkillIntegrationResult(
@@ -1657,6 +1671,8 @@ class SkillIntegrator(BaseIntegrator):
         force: bool = False,
         logger=None,
         trust_bin: bool | None = None,
+        skip_bin: bool = True,
+        source_plan=None,
     ) -> tuple[list[Path], str | None]:
         """Deploy bin/ executables and plugin manifest for a MARKETPLACE_PLUGIN.
 
@@ -1699,21 +1715,39 @@ class SkillIntegrator(BaseIntegrator):
 
         # The package ships executables -- from here a non-deploy is a
         # reportable skip, not a silent no-op.
-        if scope is not InstallScope.USER:
-            if logger and scope is InstallScope.PROJECT:
-                logger.progress(
-                    "bin/ deploy is user-scope only; skipping for project-scope install",
-                    symbol="info",
-                )
-            return [], "project_scope"
-
-        if self._bin_deploy_denied(package_info, policy, logger):
-            return [], None
-
         if targets is None:
             from apm_cli.integration.targets import active_targets
 
             targets = active_targets(project_root)
+        deployable = getattr(source_plan, "plugin_bin_deployable", None)
+        if deployable is None:
+            from apm_cli.install.exec_gate import plugin_bin_deployable
+
+            deployable = plugin_bin_deployable(
+                package_info,
+                targets,
+                project_root=project_root,
+                scope=scope,
+                policy=policy,
+                skip_bin=skip_bin,
+            )
+        if not deployable:
+            if scope is InstallScope.PROJECT:
+                if logger:
+                    logger.progress(
+                        "bin/ deploy is user-scope only; skipping for project-scope install",
+                        symbol="info",
+                    )
+                return [], "project_scope"
+            if not any(t.name == "claude" and t.supports("skills") for t in targets):
+                if logger:
+                    logger.progress(
+                        "bin/ present but no active Claude skills target; skipping bin deploy for "
+                        f"{package_info.get_canonical_dependency_string()}",
+                        symbol="warning",
+                    )
+                return [], "no_claude_target"
+            return [], None
 
         # Claude-specific contract: only Claude targets that support skills.
         claude_targets = [t for t in targets if t.name == "claude" and t.supports("skills")]
@@ -1756,35 +1790,6 @@ class SkillIntegrator(BaseIntegrator):
             )
 
         return deployed, None
-
-    @staticmethod
-    def _bin_deploy_denied(package_info, policy, logger) -> bool:
-        """Return True when policy opts the package out of bin/ deployment."""
-        if policy is None:
-            return False
-        bd_policy = policy.bin_deploy
-        if bd_policy is None:
-            return False
-        from apm_cli.security.executables import normalize_bin_deploy_deny_key
-
-        canonical = package_info.get_canonical_dependency_string()
-        normalized_canonical = normalize_bin_deploy_deny_key(canonical)
-        if bd_policy.deny_all:
-            if logger:
-                logger.progress(
-                    f"bin_deploy.deny_all: skipping bin deploy for {canonical}",
-                    symbol="info",
-                )
-            return True
-        deny_entries = {normalize_bin_deploy_deny_key(entry) for entry in bd_policy.deny}
-        if normalized_canonical in deny_entries:
-            if logger:
-                logger.progress(
-                    f"bin_deploy.deny: skipping bin deploy for {canonical}",
-                    symbol="info",
-                )
-            return True
-        return False
 
     def _deploy_bin_files(
         self,

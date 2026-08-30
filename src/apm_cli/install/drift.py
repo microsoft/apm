@@ -877,12 +877,15 @@ def diff_scratch_against_project(
         _collect_hashed_files(lockfile),
         project_files,
     )
-    # Hook merge targets (.claude/settings.json, .cursor/hooks.json, and their
-    # apm-hooks.json sidecars) are shared with the user and never claimed in
-    # deployed_files, so they can never be "unrecorded".
-    from apm_cli.install.manifest_reconcile import merge_hook_config_paths
+    # Hook merge targets are shared with the user and never claimed in
+    # deployed_files, so they can never be "unrecorded". Their APM-owned slice
+    # is compared through hook_ownership; sidecars remain byte-for-byte owned.
+    from apm_cli.install.manifest_reconcile import merge_hook_config_projection_specs
 
-    merge_config_paths = merge_hook_config_paths(targets)
+    merge_config_specs = merge_hook_config_projection_specs(targets)
+    merge_config_paths = set(merge_config_specs) | {
+        sidecar_path for sidecar_path, _ in merge_config_specs.values()
+    }
 
     # Imperative local bundles have no authored source tree for replay. Their
     # deployed bytes are already bound by local_deployed_file_hashes and the
@@ -937,7 +940,21 @@ def diff_scratch_against_project(
         try:
             s_bytes = _normalize(scratch_path.read_bytes())
             p_bytes = _normalize(project_path.read_bytes())
-        except OSError as exc:
+            if projection_spec := merge_config_specs.get(rel):
+                from apm_cli.integration.hook_ownership import project_apm_owned_hook_entries
+
+                sidecar_rel, event_container_key = projection_spec
+                s_bytes = project_apm_owned_hook_entries(
+                    s_bytes,
+                    _normalize((scratch_root / sidecar_rel).read_bytes()),
+                    event_container_key,
+                )
+                p_bytes = project_apm_owned_hook_entries(
+                    p_bytes,
+                    _normalize((project_root / sidecar_rel).read_bytes()),
+                    event_container_key,
+                )
+        except (OSError, ValueError) as exc:
             findings.append(
                 DriftFinding(
                     path=rel,

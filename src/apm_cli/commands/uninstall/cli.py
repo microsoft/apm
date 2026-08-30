@@ -1,6 +1,7 @@
 """APM uninstall command CLI."""
 
 import builtins
+import contextlib
 import sys
 import traceback
 
@@ -91,6 +92,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
     logger = CommandLogger("uninstall", verbose=verbose, dry_run=dry_run)
     staged_local_refreshes = {}
+    registration_token = _publish_native_registration(deploy_root, scope, manifest_path)
     try:
         # Check if apm.yml exists
         if not manifest_path.exists():
@@ -486,6 +488,16 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                     "Failed to update lockfile -- it may be out of sync with uninstalled packages."
                 )
 
+        # Rebuild the APM-owned Copilot plugin registration from the surviving
+        # locked state: only APM's own rows disappear, user bytes never do.
+        _resync_native_registration_after_uninstall(
+            deploy_root=deploy_root,
+            modules_dir=modules_dir,
+            scope=scope,
+            lockfile=lockfile,
+            logger=logger,
+        )
+
         # Final summary
         summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]
         if removed_from_modules > 0:
@@ -510,7 +522,76 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         logger.error(f"Error uninstalling packages: {e}")
         sys.exit(1)
     finally:
+        _retire_native_registration(registration_token)
         _cleanup_staged_local_refreshes(staged_local_refreshes, modules_dir)
+
+
+def _publish_native_registration(deploy_root, scope, manifest_path):
+    """Publish the Copilot native-plugin capability for this uninstall.
+
+    Reads the SAME canonical target declaration (the manifest's ``target:``/
+    ``targets:`` field, via :func:`package_target_selection`) that ``install``
+    and hook reconciliation already use -- never falls back to directory
+    auto-detection, which would incorrectly treat ``copilot`` as active
+    whenever a ``.github/`` directory happens to exist on disk regardless of
+    what this project actually declares.
+    """
+    from ...copilot_plugins.capability import (
+        activate_native_registration,
+        resolve_native_registration_capability,
+    )
+    from ...core.scope import InstallScope
+    from ...integration.targets import resolve_targets
+    from ...models.apm_package import package_target_selection
+
+    manifest_target = None
+    with contextlib.suppress(Exception):
+        manifest_target = package_target_selection(APMPackage.from_apm_yml(manifest_path))
+    try:
+        targets = resolve_targets(
+            deploy_root, user_scope=scope is InstallScope.USER, explicit_target=manifest_target
+        )
+    except Exception:
+        targets = ()
+    return activate_native_registration(resolve_native_registration_capability(targets))
+
+
+def _resync_native_registration_after_uninstall(
+    *, deploy_root, modules_dir, scope, lockfile, logger
+) -> None:
+    """Rebuild APM-owned Copilot plugin rows from surviving locked state.
+
+    Downgrades registration failures to a warning so an unrelated uninstall
+    is never bricked by a Copilot settings collision or a missing client.
+    """
+    try:
+        from ...agent_plugins.errors import AgentPluginError
+        from ...copilot_plugins.registrar import resync_native_plugins
+        from ...copilot_plugins.settings import CopilotSettingsCollisionError
+
+        resync_native_plugins(
+            project_root=deploy_root,
+            modules_dir=modules_dir,
+            scope=scope,
+            lockfile=lockfile,
+            logger=logger,
+        )
+    except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
+        logger.warning(
+            f"GitHub Copilot plugin registration could not be updated: {registration_error} "
+            "Re-run 'apm install' to re-register once resolved."
+        )
+
+
+def _retire_native_registration(token) -> None:
+    """Retire the published capability once the command finishes."""
+    from ...copilot_plugins.capability import reset_native_registration
+
+    if token is None:
+        return
+    # A token created in another context is not ours to reset.
+    with contextlib.suppress(ValueError):
+        reset_native_registration(token)
 
 
 def _fire_uninstall_scripts(

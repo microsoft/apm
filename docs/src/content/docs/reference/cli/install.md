@@ -58,6 +58,11 @@ File primitives resolve targets in this order: `--target`, manifest
 `--runtime` / `--target`, then manifest targets, saved config, then
 auto-detection only when `apm.yml` declares no targets.
 
+Native [Agent Plugin registration](../../../consumer/copilot-agent-plugins/#requirements)
+does not discover or execute the Copilot CLI. APM owns deterministic
+materialization and settings projection; you provide a supported runtime when
+you use the generated registration.
+
 ### Policy and trust
 
 | Flag | Default | Description |
@@ -123,10 +128,17 @@ in `apm.yml`, then run `apm install` again.
 - **Frozen mode.** With `--frozen`, install resolves only what is in `apm.lock.yaml`. A missing lockfile, a direct dependency missing from it, or MCP config state that differs from `apm.yml` exits `1` before lockfile, target config, deployment, or cache mutation. Cold-cache installs (empty `apm_modules/`) with git `apm_package` deps are tolerated: MCP checks are skipped for absent package directories (the packages will be hydrated by the pipeline), and their MCP server configs are restored from the lockfile so no false drift is reported. Run normal `apm install` to create or repair MCP-only lock state, then retry frozen mode. Add-style invocations (`apm install PACKAGE` and `apm install --mcp NAME`) are rejected because they mutate `apm.yml`. Orphan package lock entries are tolerated; local-path deps are skipped. This is a structural check, not a content check -- run `apm audit --ci` for hash verification.
 - **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped at `--global` and with `--only mcp`.
 - **User-scope root context hint.** Compilation stays explicit. After `apm install -g`, targets with native user-scope instruction files pick up global instructions during install. Targets whose user-scope instruction surface is a root context file require [`apm compile --global`](../compile/#global-compilation); install prints a one-line `[i]` hint and writes no root context file.
+- **OpenCode user scope.** `apm install -g --target opencode` deploys skills to
+  `~/.config/opencode/skills/`. Run `apm compile -g` to refresh
+  `~/.config/opencode/AGENTS.md`, including scoped instruction sections.
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed from the workspace, gated by per-file content hashes recorded in the lockfile (user-edited files are kept with a warning).
 - **Enterprise marketplace gate.** When installing from a `*.ghe.com` marketplace, bare cross-repo `repo:` fields (e.g. `repo: owner/repo`) are refused before any network request runs, preventing dependency-confusion attacks. Host-qualify the field to proceed: `repo: corp.ghe.com/owner/repo` for an enterprise dep, or `repo: github.com/owner/repo` for a declared cross-host dep.
-- **Security scan.** Source files are scanned for hidden Unicode and other tag-character / bidi-override patterns before deployment. Critical findings block the package; the install exits `1`. Use `--force` to deploy anyway, or run `apm audit --strip` first to remediate.
+- **Security scan.** After target, subset, and executable authorization, APM scans
+  exactly the source files it can deploy for hidden Unicode, tag-character, and
+  bidi-override patterns. Critical findings block the package and make install
+  exit `1`; fix the reported files in the package source and reinstall. Use
+  `--force` only after reviewing the findings.
 - **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths.
 - **Unresolved hook roots.** A hook command that leaves a supported `${PLUGIN_ROOT}` alias unresolved emits a warning naming the package and a concrete repair. Balance quotes around the complete package-relative path, keep it inside the package, then run `apm install` again. See [Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks) for accepted quoting forms.
 - **Declared plugin components.** Every path explicitly listed under a recognized plugin manifest's `agents`, `skills`, `commands`, or `hooks` field must resolve inside that plugin root. A missing or escaping path fails before deployment and lockfile commit; remove the declaration or add the component, then reinstall. Omitted fields and empty lists remain valid.
@@ -204,12 +216,13 @@ apm install ./my-bundle.zip --as custom-name
 apm install ./my-bundle --target opencode
 ```
 
-:::note[Planned]
-This deploys Claude plugin bundles (the default `apm pack` output). A bundle
-produced with `apm pack --format agent-plugin` (portable Agent Plugins v1) is not
-deployable yet -- `apm install` fails closed and points you to a
-Claude-compatible package instead. See
-[Package Types](../../package-types/#agent-plugin-pluginjson-with-an-agent-plugins-schema).
+:::note[Claude bundles only]
+This imperative route deploys Claude plugin bundles (the default `apm pack`
+output). A portable Agent Plugins v1 package installs declaratively instead:
+declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
+whole and registers it without locating or executing Copilot. Stable Copilot
+CLI 1.0.81 or newer is required when loading the projection. See
+[Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
 :::
 
 ### Install only a subset of skills from a bundle
@@ -230,7 +243,7 @@ apm install owner/skill-bundle --skill '*'         # reset to all skills
 
 ## Notes
 
-- **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. It does **not** suppress general install errors -- any error reported in the diagnostic summary still exits `1` (matches `npm` / `pip` / `cargo`). It does **not** refresh remote refs -- for routine ref updates, run [`apm update`](../update/). To remediate findings, prefer `apm audit --strip`. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
+- **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. It does **not** suppress general install errors -- any error reported in the diagnostic summary still exits `1` (matches `npm` / `pip` / `cargo`). It does **not** refresh remote refs -- for routine ref updates, run [`apm update`](../update/). To remediate a blocked package, fix the reported source files and reinstall; `apm audit --strip` only remediates files that are already deployed. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
 - **Target contraction is reconciled.** A narrowed `targets:` in `apm.yml` is reconciled on the next non-dry-run install: deployed files, lockfile ownership, and merge-hook config/sidecar entries for the dropped target are cleaned up, even when no dependency itself changed. A package's own `target:` / `targets:` declaration applies an additional restriction within that effective set. See [Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks) for the full intersection and merge-hook config/sidecar details. `apm lock` may refresh the lockfile rows, but it never deletes deployed files from disk.
 - **Claude target prompt rewrite.** When deploying to `.claude/commands/`, prompt files with an `input:` front-matter key are rewritten to Claude's `arguments:` shape and `${input:name}` placeholders become `$name`. Argument names must match `^[A-Za-z][\w-]{0,63}$`; rejected names are dropped with a warning.
 - **MCP env-var passthrough.** Copilot CLI and Kiro translate `${env:VAR}` and `<VAR>` to `${VAR}` in their MCP configs. Kiro writes `.kiro/settings/mcp.json` and `~/.kiro/settings/mcp.json` with `0o600` permissions. JetBrains Copilot preserves env references as `${env:VAR}` in `github-copilot/intellij/mcp.json`. Plaintext secrets are never written to disk for these runtime-resolved targets; legacy targets resolve placeholders at install time.

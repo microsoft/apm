@@ -128,6 +128,10 @@ def build_json() -> dict:
             "tests": [row["test_nodeid"] for row in rows],
             "test_count": len(rows),
         }
+        if r.fixture is not None:
+            entry["fixture"] = r.fixture
+        if r.oracle is not None:
+            entry["oracle"] = r.oracle
         if r.id in waivers:
             entry["waivers"] = sorted(waivers[r.id])
         entries.append(entry)
@@ -189,14 +193,14 @@ def build_md(doc: dict) -> str:
     )
     rows = [
         "## Per-requirement coverage\n",
-        "| Req ID | Keyword | Sec | Class | Status | Tests |",
-        "|--------|---------|----:|-------|--------|------:|",
+        "| Req ID | Keyword | Sec | Class | Status | Tests | Oracle |",
+        "|--------|---------|----:|-------|--------|------:|--------|",
     ]
     for e in doc["requirements"]:
         rows.append(
             f"| [{e['id']}](docs/src/content/docs/specs/openapm-v0.1.md#{e['id']}) "
             f"| {e['keyword']} | {e['section']} | {e['conformance_class']} "
-            f"| {e['status']} | {e['test_count']} |"
+            f"| {e['status']} | {e['test_count']} | {e.get('oracle', '-')} |"
         )
     table = "\n".join(rows) + "\n\n"
     waivers_section = ["## Waivers\n"]
