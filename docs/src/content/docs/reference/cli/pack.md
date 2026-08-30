@@ -43,7 +43,7 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, marketplace: {outputs: [...]}}`. |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
-| `--check-clean` | off | Release gate: regenerate every configured marketplace output to a temp representation and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. Exits `4` for drift. Combine with `--dry-run` to compare without normal pack output generation. |
+| `--check-clean` | off | Read-only release gate: regenerate every configured marketplace output to a temporary representation and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. It never writes pack outputs and exits `4` for drift. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
 :::caution[Migrating automation from `.tar.gz`?]

@@ -232,6 +232,29 @@ class TestCheckCleanFlag:
         # No marketplace.json on disk -> "missing" -> exit 4.
         assert result.exit_code == 4
 
+    def test_detects_drift_without_mutating_existing_output(
+        self, tmp_path: _Path, monkeypatch
+    ) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        initial_pack = CliRunner().invoke(pack_cmd, ["--offline"])
+        assert initial_pack.exit_code == 0, initial_pack.output
+        output = tmp_path / ".claude-plugin" / "marketplace.json"
+        initial_bytes = output.read_bytes()
+
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "      version: 1.0.0", "      version: 1.0.1"
+            ),
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--offline"])
+
+        assert result.exit_code == 4, result.output
+        assert output.read_bytes() == initial_bytes
+
     def test_json_envelope_carries_drift(self, tmp_path: _Path, monkeypatch) -> None:
         _write_project(tmp_path, _APM_ALIGNED)
         monkeypatch.chdir(tmp_path)
