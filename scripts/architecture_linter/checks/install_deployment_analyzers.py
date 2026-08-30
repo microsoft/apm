@@ -42,9 +42,11 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
 )
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_request_and_source import (
+    _GUARD_INSTALL_SCOPE,
     _GUARD_OUTCOME,
     _GUARD_REQUEST_DEFAULTS,
     _GUARD_SOURCE_PLAN,
+    check_install_scope_selection,
     check_outcome,
     check_request_defaults,
     check_source_plan,
@@ -107,6 +109,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_REQUEST_DEFAULTS,
         "Install invocation option defaults stay owned by install/request.py.",
         check_request_defaults,
+    ),
+    _rule(
+        _GUARD_INSTALL_SCOPE,
+        "Direct MCP installs consume the install command's single scope decision.",
+        check_install_scope_selection,
     ),
     _rule(
         _GUARD_BASE_INTEGRATOR,

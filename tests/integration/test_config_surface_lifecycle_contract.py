@@ -1193,6 +1193,70 @@ def test_saved_target_drives_direct_mcp_without_target_flag(
     assert "saved-direct-mcp" in repaired["mcpServers"]
 
 
+def test_global_direct_mcp_uses_user_manifest_and_runtime_config(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Global direct MCP install must avoid project-scoped state."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "global-direct-mcp",
+        base_env=dict(os.environ),
+    )
+    user_manifest = isolated.home / ".apm" / "apm.yml"
+    dump_yaml(
+        {
+            "name": "global-direct",
+            "version": "0.1.0",
+            "targets": ["claude"],
+            "dependencies": {"mcp": []},
+        },
+        user_manifest,
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    project_manifest = project / "apm.yml"
+    dump_yaml(
+        {
+            "name": "project-direct",
+            "version": "0.1.0",
+            "targets": ["cursor"],
+            "dependencies": {"mcp": []},
+        },
+        project_manifest,
+    )
+
+    result = _runner(apm_binary_path).run_sequence(
+        (
+            (
+                "install",
+                "-g",
+                "--mcp",
+                "global-direct-server",
+                "--no-policy",
+                "--",
+                "echo",
+                "ready",
+            ),
+        ),
+        expected_returncodes=(0,),
+        scenario_id="global-direct-mcp",
+        cwd=project,
+        env=isolated.subprocess_env(),
+    )[0]
+
+    user_config = load_yaml(user_manifest)
+    assert user_config["dependencies"]["mcp"][0]["name"] == "global-direct-server"
+    project_config = load_yaml(project_manifest)
+    assert project_config["dependencies"]["mcp"] == []
+    claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
+    assert claude_config["mcpServers"]["global-direct-server"] == {
+        "args": ["ready"],
+        "command": "echo",
+        "type": "stdio",
+    }
+    assert "Install interrupted" not in result.stdout + result.stderr
+
+
 def test_saved_target_drives_declared_mcp_and_lsp_without_package(
     tmp_path: Path,
     apm_binary_path: Path,

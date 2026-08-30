@@ -68,11 +68,15 @@
       "id": "install-invocation-option-defaults",
       "decision": "Install invocation option defaults",
       "owner": "install/request.py (InstallRequest)",
-      "selectors": [
-        "src/apm_cli/install/request.py",
-        "src/apm_cli/commands/install.py"
-      ],
+      "selectors": ["src/apm_cli/install/request.py"],
       "guards": ["install-deployment-request-defaults"]
+    },
+    {
+      "id": "install-command-scope-selection",
+      "decision": "Install command scope selection",
+      "owner": "commands/install.py (install computes scope once)",
+      "selectors": ["src/apm_cli/commands/install.py"],
+      "guards": ["install-deployment-install-scope-selection"]
     },
     {
       "id": "file-level-deploy-sync-cleanup",

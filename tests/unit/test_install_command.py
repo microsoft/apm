@@ -13,6 +13,7 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.core.scope import InstallScope
 from apm_cli.models.results import InstallResult
 
 
@@ -2168,11 +2169,75 @@ class TestInstallMcpFlag:
             assert result.exit_code == 2
             assert "cannot mix --mcp with positional packages" in result.output
 
-    def test_e2_mcp_with_global(self):
-        with self._chdir_with_apm_yml():
-            result = self.runner.invoke(cli, ["install", "--mcp", "foo", "--global"])
-            assert result.exit_code == 2
-            assert "project-scoped" in result.output
+    def test_global_mcp_uses_user_manifest_scope(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        user_apm_dir = fake_home / ".apm"
+        user_apm_dir.mkdir(parents=True)
+        user_manifest = user_apm_dir / "apm.yml"
+        user_manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "user-scope",
+                    "version": "0.1.0",
+                    "targets": ["claude"],
+                    "dependencies": {"mcp": []},
+                }
+            ),
+            encoding="utf-8",
+        )
+        project = tmp_path / "project"
+        project.mkdir()
+        project_manifest = project / "apm.yml"
+        project_manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "project-scope",
+                    "version": "0.1.0",
+                    "targets": ["cursor"],
+                    "dependencies": {"mcp": []},
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "-g",
+            "--mcp",
+            "probe",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.install.mcp.command.MCPIntegrator") as integrator,
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 0, result.output
+        assert yaml.safe_load(user_manifest.read_text(encoding="utf-8"))["dependencies"]["mcp"] == [
+            {
+                "args": ["ready"],
+                "command": "echo",
+                "name": "probe",
+                "registry": False,
+                "transport": "stdio",
+            }
+        ]
+        assert (
+            yaml.safe_load(project_manifest.read_text(encoding="utf-8"))["dependencies"]["mcp"]
+            == []
+        )
+        install_call = integrator.install.call_args
+        assert install_call.kwargs["scope"] is InstallScope.USER
+        assert install_call.kwargs["user_scope"] is True
+        assert install_call.kwargs["project_root"] == user_apm_dir
+        assert install_call.kwargs["target_decision"].value == ["claude"]
 
     def test_e3_mcp_with_only_apm(self):
         with self._chdir_with_apm_yml():

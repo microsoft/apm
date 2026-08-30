@@ -765,6 +765,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     logger,
     no_policy,
     validated_registry_url,
+    scope,
 ):
     """Execute the ``--mcp`` install path (MCP server add).
 
@@ -774,7 +775,6 @@ def _handle_mcp_install(  # noqa: PLR0913
     returns immediately after this function completes.
     """
     from ..core.scope import (
-        InstallScope,
         get_apm_dir,
         get_manifest_path,
     )
@@ -784,9 +784,8 @@ def _handle_mcp_install(  # noqa: PLR0913
         validated_registry_url,
         logger=logger,
     )
-    mcp_scope = InstallScope.PROJECT
-    mcp_manifest_path = get_manifest_path(mcp_scope)
-    mcp_apm_dir = get_apm_dir(mcp_scope)
+    mcp_manifest_path = get_manifest_path(scope)
+    mcp_apm_dir = get_apm_dir(scope)
     from ..core.target_detection import resolve_manifest_target_decision
 
     target_decision = resolve_manifest_target_decision(
@@ -866,7 +865,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         exclude=exclude,
         logger=logger,
         apm_dir=mcp_apm_dir,
-        scope=mcp_scope,
+        scope=scope,
         registry_url=validated_registry_url,
     )
 
@@ -1365,6 +1364,9 @@ def install(  # noqa: C901, PLR0913
 
         # Validate --registry (raises UsageError on a bad URL).
         validated_registry_url = _validate_registry_url(registry_url)
+        from ..core.scope import InstallScope
+
+        scope = InstallScope.USER if global_ else InstallScope.PROJECT
 
         _validate_mcp_conflicts(
             mcp_name=mcp_name,
@@ -1376,7 +1378,6 @@ def install(  # noqa: C901, PLR0913
             headers=header_pairs,
             mcp_version=mcp_version,
             command_argv=command_argv,
-            global_=global_,
             only=only,
             update=update,
             any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
@@ -1405,6 +1406,7 @@ def install(  # noqa: C901, PLR0913
                 logger=logger,
                 no_policy=no_policy,
                 validated_registry_url=validated_registry_url,
+                scope=scope,
             )
             summary_rendered = True
             return
@@ -1435,15 +1437,12 @@ def install(  # noqa: C901, PLR0913
 
         # Resolve scope
         from ..core.scope import (
-            InstallScope,
             ensure_user_dirs,
             get_apm_dir,
             get_manifest_path,
             get_modules_dir,
             warn_unsupported_user_scope,
         )
-
-        scope = InstallScope.USER if global_ else InstallScope.PROJECT
 
         if scope is InstallScope.USER:
             ensure_user_dirs()

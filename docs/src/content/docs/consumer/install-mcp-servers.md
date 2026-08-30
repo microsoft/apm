@@ -225,7 +225,8 @@ package declares a `targets:` field (or the CLI passes `--target`),
 only the matching runtimes receive the config write. When neither
 restricts targets, all detected user-scope-capable runtimes are
 configured. Workspace-only runtimes (VS Code, Cursor, OpenCode) are
-skipped at user scope.
+skipped at user scope. The direct command reads and updates
+`~/.apm/apm.yml`; it does not fall back to the current project's manifest.
 
 ## stdio vs HTTP servers
 
