@@ -254,6 +254,7 @@ class TestCheckCleanFlag:
 
         assert result.exit_code == 4, result.output
         assert output.read_bytes() == initial_bytes
+        assert "[dry-run] Would write" not in result.output
 
     def test_json_envelope_carries_drift(self, tmp_path: _Path, monkeypatch) -> None:
         _write_project(tmp_path, _APM_ALIGNED)

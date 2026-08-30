@@ -557,6 +557,8 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         return
 
     for sub in result.producer_results:
+        if check_clean and not dry_run:
+            continue
         if sub.kind is OutputKind.BUNDLE:
             _render_bundle_result(
                 logger,
