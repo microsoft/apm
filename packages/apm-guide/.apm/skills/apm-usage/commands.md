@@ -25,6 +25,11 @@
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
+`apm update`, `apm install --update`, and `apm install --refresh` stage and
+validate replacement packages before publication. A failed download,
+validation, or activation leaves the previous package and lockfile active;
+fix the reported cause and rerun the command.
+
 For JavaScript hook bundles, `apm install --target copilot` and its
 `--target vscode` alias omit the generated `package.json` sidecar from
 project `.github/hooks/` and user `~/.copilot/hooks/` because Copilot

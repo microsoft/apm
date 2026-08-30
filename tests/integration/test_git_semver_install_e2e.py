@@ -26,6 +26,7 @@ did not touch the network" without relying on subprocess sentinels.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -1036,7 +1037,49 @@ class TestUpdateReResolvesGitSemver:
         live = project / "apm_modules" / "acme" / "widget"
         live_hook = live / "hooks" / "pre_tool.py"
         live_hook.parent.mkdir(parents=True)
-        live_hook.write_text("old hook", encoding="ascii")
+        live_hook.write_text("print('old hook')\n", encoding="ascii")
+        settings_path = project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": f"{sys.executable} {live_hook}",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="ascii",
+        )
+
+        def assert_registered_hook_runs(
+            _dep_ref: DependencyReference,
+            target_path: Path,
+        ) -> None:
+            if ".apm-resolution-staging" not in target_path.parts:
+                return
+            command = json.loads(settings_path.read_text(encoding="ascii"))["hooks"]["PreToolUse"][
+                0
+            ]["hooks"][0]["command"]
+            result = subprocess.run(
+                command.split(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0
+            assert result.stdout.strip() == "old hook"
+
+        dl.before_download = assert_registered_hook_runs
         lock_before = (project / "apm.lock.yaml").read_bytes()
         rr.refs_by_repo["acme/widget"].append(RemoteRef(name="refs/tags/v1.5.0", sha="3" * 40))
         original_replace = Path.replace
@@ -1061,7 +1104,11 @@ class TestUpdateReResolvesGitSemver:
         )
 
         assert second.exit_code != 0
-        assert live_hook.read_text(encoding="ascii") == "old hook"
+        assert live_hook.read_text(encoding="ascii") == "print('old hook')\n"
+        assert_registered_hook_runs(
+            DependencyReference(repo_url="acme/widget"),
+            project / "apm_modules" / ".apm-resolution-staging" / "probe",
+        )
         assert (project / "apm.lock.yaml").read_bytes() == lock_before
         assert not (project / "apm_modules" / ".apm-resolution-staging").exists()
 
