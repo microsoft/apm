@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Successful installs now safely clean up temporary backups left by interrupted
   lock-aware runs without disturbing active installs or unrelated files. Legacy
   lockless backups are preserved with manual recovery guidance. (#2720)
+- `apm doctor` now reports malformed project `executables` configuration as an
+  actionable informational warning instead of omitting the check. (#2719)
+- `apm doctor` now reports malformed project `executables` or deprecated
+  `allowExecutables` configuration as an actionable informational warning
+  instead of omitting the check. (#2719)
+- `apm doctor` now reports malformed project executable-trust configuration
+  under either `executables` or the deprecated `allowExecutables` key as an
+  actionable informational warning instead of omitting the check. (#2719)
 
 ## [0.29.0] - 2026-08-30
 

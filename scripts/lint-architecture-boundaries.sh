@@ -1120,6 +1120,38 @@ if [ "$diagnostic_ascii_status" -ne 0 ]; then
     echo "$diagnostic_ascii_output"
     violations=$((violations + 1))
 fi
+doctor_status_output=$(python3 - <<'PY'
+import ast
+from pathlib import Path
+
+source = Path("src/apm_cli/commands/marketplace/__init__.py").read_text(encoding="utf-8")
+tree = ast.parse(source)
+function = next(
+    node
+    for node in tree.body
+    if isinstance(node, ast.FunctionDef) and node.name == "_doctor_status_icon"
+)
+raw_symbols = {"[!]", "[x]", "[i]", "[+]"}
+literal_symbols = {
+    node.value
+    for node in ast.walk(function)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str)
+}
+uses_owner = any(
+    isinstance(node, ast.Name) and node.id == "STATUS_SYMBOLS"
+    for node in ast.walk(function)
+)
+if literal_symbols & raw_symbols or not uses_owner:
+    print("doctor status symbols must use utils/console.py::STATUS_SYMBOLS")
+    raise SystemExit(1)
+PY
+)
+doctor_status_status=$?
+if [ "$doctor_status_status" -ne 0 ]; then
+    echo "[x] Doctor status symbols must use utils/console.py::STATUS_SYMBOLS"
+    echo "$doctor_status_output"
+    violations=$((violations + 1))
+fi
 
 echo "[*] AC13: Git ref transport selection authority"
 semver_transport_router="src/apm_cli/install/helpers/ref_reuse.py"
