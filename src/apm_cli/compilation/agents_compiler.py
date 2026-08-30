@@ -27,7 +27,7 @@ from ..utils.paths import portable_relpath, resolve_base_and_source_dirs
 from ..version import get_version
 from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
 from .constants import BUILD_ID_PLACEHOLDER
-from .footer import build_generation_footer
+from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
 from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .template_builder import (
@@ -179,11 +179,10 @@ class CompilationConfig:
         # Initialize exclude list if None
         if self.exclude is None:
             self.exclude = []
-        _valid_modes = ("full", "managed_section")
-        if self.agents_md_mode not in _valid_modes:
+        if self.agents_md_mode not in VALID_AGENTS_MD_MODES:
             raise ValueError(
                 f"Unknown agents_md.mode {self.agents_md_mode!r}. "
-                f"Supported values: {', '.join(repr(m) for m in _valid_modes)}."
+                f"Supported values: {', '.join(repr(mode) for mode in VALID_AGENTS_MD_MODES)}."
             )
 
     @classmethod
@@ -1633,10 +1632,10 @@ class AgentsCompiler:
                 )
             except ManagedSectionError as exc:
                 raise ManagedSectionError(f"[{target}] {exc}") from exc
-        elif config.agents_md_mode != "full":
+        elif config.agents_md_mode not in VALID_AGENTS_MD_MODES:
             raise ValueError(
                 f"Unknown agents_md.mode {config.agents_md_mode!r}. "
-                "Supported values: 'full', 'managed_section'."
+                f"Supported values: {', '.join(repr(mode) for mode in VALID_AGENTS_MD_MODES)}."
             )
 
         return content

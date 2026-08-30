@@ -737,7 +737,7 @@ class DistributedAgentsCompiler:
 
         # Footer is opt-in (cosmetic).
         if source_attribution:
-            is_root = placement.agents_path.parent.resolve() == self.base_dir.resolve()
+            is_root = placement.agents_path.parent == self.base_dir
             footer_mode = agents_md_mode if is_root else "full"
             sections.extend(build_generation_footer(footer_mode))
 

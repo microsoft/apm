@@ -218,7 +218,6 @@ fi
 agents_footer_output=$(python3 scripts/check_agents_footer_authority.py "$ROOT" 2>&1)
 agents_footer_status=$?
 if [ "$agents_footer_status" -ne 0 ]; then
-    echo "[x] Generated footer wording must route through compilation/footer.py"
     echo "$agents_footer_output"
     violations=$((violations + 1))
 fi

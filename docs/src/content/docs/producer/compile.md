@@ -245,8 +245,8 @@ you can omit `start_marker` and `end_marker` if you use those verbatim.
 - `start_marker` and `end_marker` must be distinct non-empty strings.
 - Content outside the markers is preserved verbatim across every compile
   run for the root `AGENTS.md`; only the block between the markers is
-  replaced. The generated footer identifies this block as a generated
-  section rather than describing the whole file as generated.
+  replaced. When source attribution emits a footer, it identifies this block
+  as a generated section rather than describing the whole file as generated.
 - In distributed compile mode, subdirectory `AGENTS.md` files remain fully
   APM-owned and are overwritten on each run.
 

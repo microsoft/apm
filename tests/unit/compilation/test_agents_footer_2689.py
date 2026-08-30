@@ -6,7 +6,12 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.compilation.distributed_compiler import (
+    DistributedAgentsCompiler,
+    PlacementResult,
+)
 from apm_cli.compilation.footer import build_generation_footer
+from apm_cli.primitives.models import PrimitiveCollection
 
 pytestmark = pytest.mark.component
 
@@ -82,3 +87,19 @@ def test_generated_footer_describes_managed_section(
     managed_content = written[start:end]
     assert _SECTION_FOOTER in managed_content
     assert _FILE_FOOTER not in managed_content
+
+
+def test_managed_mode_keeps_subdirectory_footer_file_scoped(tmp_path: Path) -> None:
+    """A fully generated nested AGENTS.md must retain file ownership wording."""
+    compiler = DistributedAgentsCompiler(base_dir=str(tmp_path))
+    placement = PlacementResult(
+        agents_path=tmp_path / "services" / "api" / "AGENTS.md",
+        instructions=[],
+    )
+
+    nested_content = compiler._generate_agents_content(
+        placement, PrimitiveCollection(), agents_md_mode="managed_section"
+    )
+
+    assert _FILE_FOOTER in nested_content
+    assert _SECTION_FOOTER not in nested_content

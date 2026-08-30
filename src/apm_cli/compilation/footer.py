@@ -1,14 +1,14 @@
 """Canonical generated-content footer rendering."""
 
-_VALID_AGENTS_MD_MODES = ("full", "managed_section")
+VALID_AGENTS_MD_MODES = ("full", "managed_section")
 
 
 def build_generation_footer(agents_md_mode: str = "full") -> list[str]:
     """Build a footer whose ownership wording matches the output mode."""
-    if agents_md_mode not in _VALID_AGENTS_MD_MODES:
+    if agents_md_mode not in VALID_AGENTS_MD_MODES:
         raise ValueError(
             f"Unknown agents_md.mode {agents_md_mode!r}. "
-            f"Supported values: {', '.join(repr(mode) for mode in _VALID_AGENTS_MD_MODES)}."
+            f"Supported values: {', '.join(repr(mode) for mode in VALID_AGENTS_MD_MODES)}."
         )
 
     subject = "section" if agents_md_mode == "managed_section" else "file"
