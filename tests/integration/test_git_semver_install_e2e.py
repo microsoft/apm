@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -42,6 +43,7 @@ from apm_cli.cli import cli
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.models.apm_package import (
     APMPackage,
+    DependencyReference,
     PackageInfo,
     clear_apm_yml_cache,
 )
@@ -158,6 +160,8 @@ class _DownloaderStub:
     def __init__(self, sha_by_tag: dict[str, str]) -> None:
         self.sha_by_tag = sha_by_tag
         self.calls: list[tuple[str, str]] = []  # (owner_repo, reference)
+        self.before_download: Callable[[DependencyReference, Path], None] | None = None
+        self.invalid_tags: set[str] = set()
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         recorder = self
@@ -175,7 +179,24 @@ class _DownloaderStub:
 
             sha = recorder.sha_by_tag.get(ref_value, "f" * 40)
             target_path = Path(target_path)
+            if recorder.before_download is not None:
+                recorder.before_download(dep_ref, target_path)
             target_path.mkdir(parents=True, exist_ok=True)
+
+            if ref_value in recorder.invalid_tags:
+                (target_path / "apm.yml").write_text("not: a-package\n", encoding="utf-8")
+                return type(
+                    "InvalidPackageInfo",
+                    (),
+                    {
+                        "resolved_reference": ResolvedReference(
+                            original_ref=ref_value,
+                            ref_type=GitReferenceType.TAG,
+                            resolved_commit=sha,
+                            ref_name=ref_value,
+                        )
+                    },
+                )()
 
             package_name = dep_ref.repo_url.rsplit("/", 1)[-1]
             (target_path / "apm.yml").write_text(
@@ -908,6 +929,16 @@ class TestUpdateReResolvesGitSemver:
         assert rr.calls.count("acme/widget") == 1, (
             f"first install should ls-remote once, got: {rr.calls}"
         )
+        live_hook = project / "apm_modules" / "acme" / "widget" / "hooks" / "pre_tool.py"
+        live_hook.parent.mkdir(parents=True)
+        live_hook.write_text("old hook", encoding="ascii")
+
+        def assert_live_hook(_dep_ref: DependencyReference, target_path: Path) -> None:
+            if ".apm-resolution-staging" in target_path.parts:
+                assert target_path != live_hook.parents[1]
+                assert live_hook.read_text(encoding="ascii") == "old hook"
+
+        dl.before_download = assert_live_hook
 
         # Upstream publishes v1.5.0. The install path still exists from
         # the first run -- this is the surface that hid the bug.
@@ -939,6 +970,45 @@ class TestUpdateReResolvesGitSemver:
         assert locked_after.get("resolved_commit") == "3" * 40, (
             f"--update must update resolved_commit, got: {locked_after}"
         )
+
+    def test_invalid_update_preserves_live_hook_and_lockfile(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A malformed refresh candidate fails without publishing stale metadata."""
+        project = tmp_path / "invalid-update"
+        _write_apm_yml(project, ["acme/widget#^1.2.0"])
+        rr = _RefResolverCallRecorder(
+            {
+                "acme/widget": [
+                    RemoteRef(name="refs/tags/v1.2.3", sha="2" * 40),
+                ]
+            }
+        )
+        dl = _DownloaderStub({"v1.2.3": "2" * 40, "v1.5.0": "3" * 40})
+        rr.install(monkeypatch)
+        dl.install(monkeypatch)
+        first = _run_install(runner, project, monkeypatch)
+        assert first.exit_code == 0, first.output
+        clear_apm_yml_cache()
+
+        live_hook = project / "apm_modules" / "acme" / "widget" / "hooks" / "pre_tool.py"
+        live_hook.parent.mkdir(parents=True)
+        live_hook.write_text("old hook", encoding="ascii")
+        lock_before = (project / "apm.lock.yaml").read_bytes()
+        rr.refs_by_repo["acme/widget"].append(RemoteRef(name="refs/tags/v1.5.0", sha="3" * 40))
+        dl.invalid_tags.add("v1.5.0")
+
+        second = _run_install(runner, project, monkeypatch, args=["--update"])
+
+        assert second.exit_code != 0
+        output = " ".join(second.output.split())
+        assert "Downloaded dependency 'acme/widget' is invalid" in output
+        assert "existing installation remains active" in output
+        assert live_hook.read_text(encoding="ascii") == "old hook"
+        assert (project / "apm.lock.yaml").read_bytes() == lock_before
 
 
 # ---------------------------------------------------------------------------

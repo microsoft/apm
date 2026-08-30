@@ -111,7 +111,8 @@ catalog, ledger, settings entry, or loose primitive projection for it.
 | Command | Effect |
 | --- | --- |
 | `apm install` | Materializes the plugin under `apm_modules/`, then rebuilds the catalog and settings entries |
-| `apm install --force` / `apm update` | Downloads and validates replacement package content while the current plugin remains available, then publishes it; a failed refresh keeps the prior content |
+| `apm install --force` | Reapplies the current dependency selection while overriding supported collision and trust prompts; it does not select newer remote refs |
+| `apm update` | Downloads and validates replacement package content while the current plugin remains available, then publishes it; a failed refresh keeps the prior content |
 | `apm deps list` | Reports which Agent Plugins APM registers natively |
 | `apm uninstall` / `apm prune` | Removes only APM-owned catalog rows and settings keys, then deletes the generated catalog once it is empty |
 

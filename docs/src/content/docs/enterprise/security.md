@@ -250,7 +250,17 @@ The experimental `external-scanners` feature can invoke a third-party SARIF scan
 
 ## Policy gates that block install
 
-`apm-policy.yml` is evaluated before any download or write. The install preflight walks the resolved dependency graph -- including transitive MCP servers -- and fails the install if a dep is not in the allow list, falls under a deny rule, uses a forbidden source/scope, or violates a configured trust rule. In CI, `apm audit --ci` runs the same baseline plus policy checks (allow/deny lists, target restrictions, MCP transport restrictions). Tighten-only inheritance (enterprise -> org -> repo) is enforced so a downstream layer can never loosen an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and [Policy Reference](../policy-reference/).
+`apm-policy.yml` is evaluated after dependency resolution and before target
+integration. The policy gate walks the resolved dependency graph -- including
+transitive MCP servers -- and fails the install if a dep is not in the allow
+list, falls under a deny rule, uses a forbidden source/scope, or violates a
+configured trust rule. Target-aware and integrity checks run later in the same
+transaction and roll resolution replacements back on failure. In CI,
+`apm audit --ci` runs the same baseline plus policy checks (allow/deny lists,
+target restrictions, MCP transport restrictions). Tighten-only inheritance
+(enterprise -> org -> repo) is enforced so a downstream layer can never loosen
+an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and
+[Policy Reference](../policy-reference/).
 
 ## Content integrity hashing
 

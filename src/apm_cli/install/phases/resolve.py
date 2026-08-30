@@ -15,6 +15,7 @@ from __future__ import annotations
 import builtins
 import logging
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -141,6 +142,28 @@ def _prepare_callback_materialization_path(
             reader=materialization_reader,
             on_migrate=_materialization_migration_logger(logger, modules_dir),
         )
+
+
+def _activate_validated_candidate(
+    candidate_path: Path,
+    *,
+    staging_session: ResolutionStagingSession,
+    pending_downloads: dict[Path, tuple[str, str | None]],
+    callback_downloaded: dict[str, str | None],
+    callback_lock: Any,
+    tui: Any,
+) -> Path:
+    """Publish one accepted candidate, then expose its download metadata."""
+    live_path = staging_session.publish_replacement(candidate_path)
+    with callback_lock:
+        pending = pending_downloads.pop(candidate_path, None)
+        if pending is None:
+            raise RuntimeError(f"Validated candidate has no download record: {candidate_path}")
+        dep_key, resolved_sha = pending
+        callback_downloaded[dep_key] = resolved_sha
+    if tui is not None:
+        tui.task_completed(dep_key)
+    return live_path
 
 
 def _load_lockfile(ctx: InstallContext) -> None:
@@ -347,9 +370,7 @@ def _resolve_dependencies(
     )
     from apm_cli.install.phases.local_content import _copy_local_package
 
-    # ------------------------------------------------------------------
     # 3b. Dedicated registry resolver (design §3.1, §8)
-    # ------------------------------------------------------------------
     # Built when:
     #   - the manifest's apm.yml has a top-level ``registries:`` block, OR
     #   - the on-disk lockfile has at least one ``source: registry`` entry
@@ -373,13 +394,10 @@ def _resolve_dependencies(
         _apply_lockfile_registry_name = dependency_ref_with_registry_name_from_lockfile
     ctx.registry_resolver = registry_resolver
 
-    # ------------------------------------------------------------------
     # 4. Tracking variables (phase-local except where noted)
-    # ------------------------------------------------------------------
-    # direct_dep_keys is phase-local (only read inside download_callback)
     direct_dep_keys = builtins.set(dep.get_unique_key() for dep in ctx.all_apm_deps)
-    # These three escape to later phases via ctx
     callback_downloaded: builtins.dict = {}
+    pending_callback_downloads: builtins.dict[Path, tuple[str, str | None]] = {}
     transitive_failures: builtins.list = []
     callback_failures: builtins.set = builtins.set()
     # F7 (#1116): the resolver may dispatch ``download_callback`` calls
@@ -390,11 +408,7 @@ def _resolve_dependencies(
     # cheap; the heavy I/O work runs OUTSIDE the lock.
     callback_lock = _threading.Lock()
 
-    # ------------------------------------------------------------------
     # 5. Download callback for transitive resolution
-    # ------------------------------------------------------------------
-    # Capture frequently-used ctx fields as locals for the closure.
-    # This matches the original code's closure over function-level locals.
     scope = ctx.scope
     project_root = ctx.project_root
     # Local-path package references in apm.yml are relative to the
@@ -525,13 +539,21 @@ def _resolve_dependencies(
                             resolved_hash=_locked_reg.resolved_hash,
                             version=_locked_reg.version,
                         )
-                        callback_downloaded[dep_ref.get_unique_key()] = None
+                        with callback_lock:
+                            pending_callback_downloads[replacement_path] = (
+                                dep_ref.get_unique_key(),
+                                None,
+                            )
                         return replacement_path
                 registry_resolver.download_package(dep_ref, replacement_path)
                 _annotate_registry_dep_ref(dep_ref, registry_resolver)
                 # Mark as already-downloaded so the parallel pre-download
                 # phase skips this dep. No SHA for registry deps.
-                callback_downloaded[dep_ref.get_unique_key()] = None
+                with callback_lock:
+                    pending_callback_downloads[replacement_path] = (
+                        dep_ref.get_unique_key(),
+                        None,
+                    )
                 return replacement_path
 
             # Handle local packages: copy instead of git clone
@@ -574,10 +596,10 @@ def _resolve_dependencies(
                 )
                 if result_path:
                     with callback_lock:
-                        callback_downloaded[dep_ref.get_unique_key()] = None
-                    _tui = getattr(ctx, "tui", None)
-                    if _tui is not None:
-                        _tui.task_completed(dep_ref.get_unique_key())
+                        pending_callback_downloads[replacement_path] = (
+                            dep_ref.get_unique_key(),
+                            None,
+                        )
                     return replacement_path
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
@@ -655,10 +677,10 @@ def _resolve_dependencies(
                 resolved_sha = result.resolved_reference.resolved_commit
             callback_downloaded_value = resolved_sha
             with callback_lock:
-                callback_downloaded[dep_ref.get_unique_key()] = callback_downloaded_value
-            _tui = getattr(ctx, "tui", None)
-            if _tui is not None:
-                _tui.task_completed(dep_ref.get_unique_key())
+                pending_callback_downloads[replacement_path] = (
+                    dep_ref.get_unique_key(),
+                    callback_downloaded_value,
+                )
             return replacement_path
         except Exception as e:
             if replacement_path is not None:
@@ -724,7 +746,14 @@ def _resolve_dependencies(
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
         download_callback=download_callback,
-        activation_callback=staging_session.publish_replacement,
+        activation_callback=partial(
+            _activate_validated_candidate,
+            staging_session=staging_session,
+            pending_downloads=pending_callback_downloads,
+            callback_downloaded=callback_downloaded,
+            callback_lock=callback_lock,
+            tui=getattr(ctx, "tui", None),
+        ),
         auth_resolver=ctx.auth_resolver,
         update_refs=update_refs,
         existing_lockfile=existing_lockfile,

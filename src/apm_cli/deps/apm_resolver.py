@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, Optional, Protocol
+from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
@@ -80,6 +80,10 @@ class ActivationCallback(Protocol):
     """Publish a validated download candidate and return its live path."""
 
     def __call__(self, candidate_path: Path) -> Path: ...
+
+
+class DownloadedPackageError(RuntimeError):
+    """A downloaded candidate could not be validated or activated."""
 
 
 class APMDependencyResolver:
@@ -782,6 +786,9 @@ class APMDependencyResolver:
                         message = f"Marketplace package materialization failed: {exc}"
                         _logger.warning(message)
                         tree.resolution_errors.append(message)
+                    elif isinstance(exc, DownloadedPackageError):
+                        tree.resolution_errors.append(str(exc))
+                        _logger.warning("%s", exc)
                     elif isinstance(exc, ValueError):
                         _logger.warning(
                             "Invalid transitive apm.yml for %s: %s",
@@ -1115,8 +1122,10 @@ class APMDependencyResolver:
                                 dep_ref, self._apm_modules_dir, parent_chain
                             )
                         if downloaded_path and downloaded_path.exists():
+                            original_install_path = install_path
                             install_path = downloaded_path
-                            downloaded_candidate = downloaded_path
+                            if downloaded_path != original_install_path:
+                                downloaded_candidate = downloaded_path
                         else:
                             # Fetch produced no usable path -- release the
                             # reservation so a subsequent retry (or a
@@ -1172,10 +1181,16 @@ class APMDependencyResolver:
                 agent_plugin_detection=native_detection,
             )
             if not validation.is_valid:
-                raise ValueError("; ".join(validation.errors))
+                self._raise_downloaded_package_error(
+                    downloaded_candidate,
+                    dep_ref,
+                    "; ".join(validation.errors),
+                )
             if validation.package is None:
-                raise ValueError(
-                    f"Agent Plugin validation produced no package metadata: {install_path}"
+                self._raise_downloaded_package_error(
+                    downloaded_candidate,
+                    dep_ref,
+                    f"Agent Plugin validation produced no package metadata: {install_path}",
                 )
             if not validation.package.source:
                 validation.package.source = dep_ref.repo_url
@@ -1198,7 +1213,11 @@ class APMDependencyResolver:
                 )
                 return self._activate_validated_package(package, downloaded_candidate)
             # No manifest found
-            return None
+            self._raise_downloaded_package_error(
+                downloaded_candidate,
+                dep_ref,
+                f"Downloaded package has no apm.yml or SKILL.md: {install_path}",
+            )
 
         # Load and return the package, anchoring relative ``local_path`` deps
         # on the declaring package's source dir (#857). For local deps this
@@ -1207,9 +1226,17 @@ class APMDependencyResolver:
         try:
             package = APMPackage.from_apm_yml(apm_yml_path, source_path=dep_source_path)
         except FileNotFoundError:
-            return None
-        except ValueError:
-            raise
+            self._raise_downloaded_package_error(
+                downloaded_candidate,
+                dep_ref,
+                f"Downloaded package manifest disappeared: {apm_yml_path}",
+            )
+        except ValueError as exc:
+            self._raise_downloaded_package_error(
+                downloaded_candidate,
+                dep_ref,
+                str(exc),
+            )
         # Ensure source is set for tracking. TODO(#940): the cache key
         # already considers source_path; this post-construction mutation
         # of ``source`` (a separate field) is safe today but has the same
@@ -1226,7 +1253,14 @@ class APMDependencyResolver:
         """Publish one validated candidate and remap its package paths."""
         if downloaded_candidate is None or self._activation_callback is None:
             return package
-        live_path = self._activation_callback(downloaded_candidate)
+        try:
+            live_path = self._activation_callback(downloaded_candidate)
+        except Exception as exc:
+            raise DownloadedPackageError(
+                f"Failed to activate downloaded dependency "
+                f"'{package.name}': {exc}. The existing installation remains "
+                "active; fix the cause and retry the install."
+            ) from exc
         if not live_path.exists():
             raise FileNotFoundError(f"Validated package was not published: {live_path}")
         package.package_path = self._remap_candidate_path(
@@ -1240,6 +1274,21 @@ class APMDependencyResolver:
             live_path,
         )
         return package
+
+    @staticmethod
+    def _raise_downloaded_package_error(
+        downloaded_candidate: Path | None,
+        dep_ref: DependencyReference,
+        detail: str,
+    ) -> NoReturn:
+        """Raise a specific fail-closed error for newly downloaded candidates."""
+        if downloaded_candidate is None:
+            raise ValueError(detail)
+        raise DownloadedPackageError(
+            f"Downloaded dependency '{dep_ref.get_display_name()}' is invalid: "
+            f"{detail}. The existing installation remains active; fix the cause "
+            "and retry the install."
+        )
 
     @staticmethod
     def _remap_candidate_path(

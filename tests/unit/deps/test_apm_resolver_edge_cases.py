@@ -28,7 +28,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.apm_resolver import APMDependencyResolver, DownloadedPackageError
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
 
@@ -898,7 +898,7 @@ class TestTryLoadDependencyPackageForceRecheck:
             update_refs=True,
         )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(DownloadedPackageError, match="existing installation remains active"):
             resolver._try_load_dependency_package(ref)
 
         assert activated == []
@@ -933,6 +933,32 @@ class TestTryLoadDependencyPackageForceRecheck:
         assert package is not None
         assert package.version == "2.0.0"
         assert package.package_path == live
+
+    def test_cached_local_package_is_not_activated_as_candidate(self, tmp_path: Path) -> None:
+        """A live local cache hit remains readable for transitive resolution."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "_local" / "parent"
+        live.mkdir(parents=True)
+        (live / "apm.yml").write_text(
+            "name: parent\nversion: 1.0.0\ndependencies:\n  apm:\n    - path: ../child\n",
+        )
+        ref = DependencyReference(
+            repo_url="_local/parent",
+            is_local=True,
+            local_path="../parent",
+        )
+        activated: list[Path] = []
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: live,
+            activation_callback=lambda path: activated.append(path) or live,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert package is not None
+        assert len(package.get_apm_dependencies()) == 1
+        assert activated == []
 
     def test_existing_path_without_lock_calls_callback_on_plain_install(
         self,

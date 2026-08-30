@@ -73,13 +73,28 @@ def find_violations(root: Path) -> list[str]:
         for keyword in node.keywords
         if keyword.arg == "activation_callback"
     ]
-    if not any(
+    routes_owner_directly = any(
         isinstance(value, ast.Attribute)
         and isinstance(value.value, ast.Name)
         and value.value.id == "staging_session"
         and value.attr == "publish_replacement"
         for value in activation_routes
-    ):
+    )
+    routes_owner_through_acceptance = any(
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "partial"
+        and bool(value.args)
+        and isinstance(value.args[0], ast.Name)
+        and value.args[0].id == "_activate_validated_candidate"
+        for value in activation_routes
+    ) and any(
+        node.attr == "publish_replacement"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "staging_session"
+        for node in consumer_calls
+    )
+    if not (routes_owner_directly or routes_owner_through_acceptance):
         violations.append("validated candidates do not publish through the staging owner")
     return violations
 
