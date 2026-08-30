@@ -8,12 +8,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
+from filelock import FileLock
 
 from apm_cli.cli import cli
 from apm_cli.core.command_logger import _ValidationOutcome
 from apm_cli.install.transaction import InstallTransaction
 from apm_cli.models.results import InstallDisposition, InstallResult
-from apm_cli.utils.path_security import PathTraversalError
+from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
 
 
 def _transaction(
@@ -142,6 +143,85 @@ def test_success_commit_removes_abandoned_resolution_staging_only(tmp_path: Path
     assert not abandoned.exists()
     assert not abandoned.with_suffix(".lock").exists()
     assert (unrelated / "marker").read_text(encoding="ascii") == "keep"
+
+
+def test_success_commit_preserves_lockless_legacy_staging(tmp_path: Path) -> None:
+    """Lockless backups remain until the user confirms no legacy install is active."""
+    transaction = _transaction(tmp_path)
+    staging_parent = transaction.apm_modules_dir / ".apm-resolution-staging"
+    legacy = staging_parent / ("b" * 32)
+    (legacy / "package").mkdir(parents=True)
+    (legacy / "package" / "marker").write_text("keep", encoding="ascii")
+
+    transaction.commit(InstallResult())
+
+    assert (legacy / "package" / "marker").read_text(encoding="ascii") == "keep"
+    transaction._logger.warning.assert_called_once_with(
+        "Could not safely remove 1 interrupted-install backup item(s). "
+        "Stop other APM installs, then run again with --verbose "
+        "to see paths you can delete manually."
+    )
+    assert (
+        "legacy backup has no activity lock" in transaction._logger.verbose_detail.call_args[0][0]
+    )
+
+
+def test_cleanup_failure_cannot_roll_back_committed_package(tmp_path: Path) -> None:
+    """Best-effort garbage collection cannot reopen a committed transaction."""
+    transaction = _transaction(tmp_path)
+    package = transaction.apm_modules_dir / "package"
+    package.mkdir()
+    (package / "marker").write_text("original", encoding="ascii")
+    transaction.resolution.prepare_path(package)
+    package.mkdir()
+    (package / "marker").write_text("replacement", encoding="ascii")
+    staging_parent = transaction.apm_modules_dir / ".apm-resolution-staging"
+    abandoned = staging_parent / ("c" * 32)
+    (abandoned / "stale").mkdir(parents=True)
+    abandoned.with_suffix(".lock").write_text("", encoding="ascii")
+    original_safe_rmtree = safe_rmtree
+
+    def fail_abandoned_cleanup(path: Path, root: Path) -> None:
+        if path == abandoned:
+            raise OSError("permission denied")
+        original_safe_rmtree(path, root)
+
+    with patch(
+        "apm_cli.install.resolution_staging.safe_rmtree",
+        side_effect=fail_abandoned_cleanup,
+    ):
+        result = transaction.commit(InstallResult())
+        transaction.rollback()
+
+    assert result.committed is True
+    assert (package / "marker").read_text(encoding="ascii") == "replacement"
+    transaction._logger.warning.assert_called_once()
+    assert "permission denied" in transaction._logger.verbose_detail.call_args[0][0]
+
+
+def test_rollback_releases_staging_lock_when_root_cleanup_fails(tmp_path: Path) -> None:
+    """Rollback never leaves an activity lock held after restoration."""
+    transaction = _transaction(tmp_path)
+    package = transaction.apm_modules_dir / "package"
+    package.mkdir()
+    (package / "marker").write_text("original", encoding="ascii")
+    transaction.resolution.prepare_path(package)
+    package.mkdir()
+    lock_path = transaction.resolution._staging_lock_path
+
+    with (
+        patch.object(
+            transaction.resolution,
+            "_remove_staging_root",
+            side_effect=OSError("permission denied"),
+        ),
+        pytest.raises(OSError, match="permission denied"),
+    ):
+        transaction.rollback()
+
+    probe = FileLock(str(lock_path))
+    with probe.acquire(timeout=0):
+        assert probe.is_locked
 
 
 def test_success_commit_preserves_active_resolution_staging(tmp_path: Path) -> None:

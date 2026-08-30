@@ -126,6 +126,8 @@ class InstallTransaction:
                 self._resolution.commit()
                 self.committed = True
                 self._completed = True
+                cleanup_issues = self._resolution.remove_abandoned_roots()
+                self._report_resolution_cleanup_issues(cleanup_issues)
             if (
                 self._validation is not None
                 and self._validation.has_failures
@@ -134,6 +136,18 @@ class InstallTransaction:
                 result.disposition = InstallDisposition.PARTIAL_SUCCESS
             result.committed = True
             return result
+
+    def _report_resolution_cleanup_issues(self, issues: list[tuple[Path, str]]) -> None:
+        """Report cleanup paths that require safe manual recovery."""
+        if not issues or self._logger is None:
+            return
+        self._logger.warning(
+            f"Could not safely remove {len(issues)} interrupted-install backup "
+            "item(s). Stop other APM installs, then run again with --verbose "
+            "to see paths you can delete manually."
+        )
+        for path, reason in issues:
+            self._logger.verbose_detail(f"Resolution backup kept at {path}: {reason}")
 
     def complete(self, result: InstallResult) -> InstallResult:
         """Finalize one result according to its canonical disposition."""

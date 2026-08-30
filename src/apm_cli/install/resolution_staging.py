@@ -79,10 +79,21 @@ class ResolutionStagingSession:
     def commit(self) -> None:
         """Discard preserved pre-resolution contents after successful validation."""
         self._remove_staging_root()
-        self._release_staging_lock()
-        self._remove_abandoned_staging_roots()
         self._backups.clear()
         self._relocations.clear()
+        self._release_staging_lock()
+
+    def remove_abandoned_roots(self) -> list[tuple[Path, str]]:
+        """Remove inactive backups created by lock-aware APM versions."""
+        try:
+            return self._remove_abandoned_staging_roots()
+        except Exception as exc:
+            return [
+                (
+                    self._staging_root.parent,
+                    f"unexpected cleanup error: {exc}",
+                )
+            ]
 
     def rollback(self) -> None:
         """Remove session-created paths and restore every replaced path."""
@@ -103,8 +114,10 @@ class ResolutionStagingSession:
                     else:
                         destination.replace(source)
                 self._remove_empty_parents(destination.parent)
-            self._remove_staging_root()
-            self._release_staging_lock()
+            try:
+                self._remove_staging_root()
+            finally:
+                self._release_staging_lock()
             if (
                 not self._modules_existed
                 and self._modules_dir.exists()
@@ -144,7 +157,8 @@ class ResolutionStagingSession:
             safe_rmtree(self._staging_root, self._modules_dir)
         staging_parent = self._staging_root.parent
         if staging_parent.exists() and not any(staging_parent.iterdir()):
-            staging_parent.rmdir()
+            with contextlib.suppress(OSError):
+                staging_parent.rmdir()
 
     def _acquire_staging_lock(self) -> None:
         """Mark this session active before preserving any package contents."""
@@ -160,32 +174,38 @@ class ResolutionStagingSession:
         lock.acquire(timeout=0)
         self._staging_lock = lock
 
-    def _release_staging_lock(self) -> None:
+    def _release_staging_lock(self) -> list[tuple[Path, str]]:
         """Release and remove this session's staging activity marker."""
         if self._staging_lock is None:
-            return
-        self._staging_lock.release()
-        self._staging_lock = None
-        ensure_path_within(self._staging_lock_path, self._staging_root.parent)
+            return []
         try:
+            self._staging_lock.release()
+        except Exception as exc:
+            self._staging_lock = None
+            return [(self._staging_lock_path, f"could not release activity lock: {exc}")]
+        self._staging_lock = None
+        try:
+            ensure_path_within(self._staging_lock_path, self._staging_root.parent)
             self._staging_lock_path.unlink(missing_ok=True)
-        except OSError:
-            return
+        except (OSError, ValueError) as exc:
+            return [(self._staging_lock_path, f"could not remove activity lock: {exc}")]
         staging_parent = self._staging_root.parent
         if staging_parent.exists() and not any(staging_parent.iterdir()):
             with contextlib.suppress(OSError):
                 staging_parent.rmdir()
+        return []
 
-    def _remove_abandoned_staging_roots(self) -> None:
+    def _remove_abandoned_staging_roots(self) -> list[tuple[Path, str]]:
         """Remove inactive, APM-named staging roots left by earlier runs."""
+        issues: list[tuple[Path, str]] = []
         staging_parent = self._staging_root.parent
         if not staging_parent.is_dir() or staging_parent.is_symlink():
-            return
-        ensure_path_within(staging_parent, self._modules_dir)
+            return issues
         try:
+            ensure_path_within(staging_parent, self._modules_dir)
             candidates = list(staging_parent.iterdir())
-        except OSError:
-            return
+        except (OSError, ValueError) as exc:
+            return [(staging_parent, f"could not inspect staging directory: {exc}")]
         for candidate in candidates:
             if (
                 candidate == self._staging_root
@@ -195,7 +215,16 @@ class ResolutionStagingSession:
             ):
                 continue
             lock_path = candidate.with_suffix(".lock")
-            if lock_path.is_symlink() or (lock_path.exists() and not lock_path.is_file()):
+            if not lock_path.exists():
+                issues.append(
+                    (
+                        candidate,
+                        "legacy backup has no activity lock and may belong to a running install",
+                    )
+                )
+                continue
+            if lock_path.is_symlink() or not lock_path.is_file():
+                issues.append((candidate, "activity lock is not a regular file"))
                 continue
             try:
                 ensure_path_within(lock_path, staging_parent)
@@ -205,12 +234,20 @@ class ResolutionStagingSession:
                 continue
             try:
                 safe_rmtree(candidate, staging_parent)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                issues.append((candidate, f"could not remove backup: {exc}"))
                 continue
             finally:
-                candidate_lock.release()
-                with contextlib.suppress(OSError):
-                    lock_path.unlink(missing_ok=True)
+                try:
+                    candidate_lock.release()
+                except Exception as exc:
+                    issues.append((lock_path, f"could not release cleanup lock: {exc}"))
+                else:
+                    try:
+                        lock_path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        issues.append((lock_path, f"could not remove cleanup lock: {exc}"))
         with contextlib.suppress(OSError):
             if not any(staging_parent.iterdir()):
                 staging_parent.rmdir()
+        return issues

@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Successful installs now remove inactive resolution staging directories left
   by interrupted earlier runs while preserving active and unrelated entries.
   (closes #2716)
+- Successful installs now safely clean up temporary backups left by interrupted
+  lock-aware runs without disturbing active installs or unrelated files. Legacy
+  lockless backups are preserved with manual recovery guidance. (#2720)
 
 ## [0.29.0] - 2026-08-30
 
