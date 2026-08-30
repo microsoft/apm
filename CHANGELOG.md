@@ -7,21 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- `apm install --target copilot` now installs portable Agent Plugins 1.0
-  packages natively: the plugin stays whole under `apm_modules/` and GitHub
-  Copilot loads it live -- no copy, no `--plugin-dir`. APM does not require or
-  inspect a Copilot runtime during install; stable Copilot CLI `1.0.81` or newer
-  is the supported runtime for loading the projection. Target exclusion keeps
-  dependency materialization opaque without creating Copilot registration, and
-  APM reserves the exact `apm` / `@apm` namespace while preserving unrelated
-  settings values semantically. (closes #2703)
-
-## [0.29.0] - 2026-08-26
+## [0.29.0] - 2026-08-30
 
 ### Added
 
+- `apm install --target copilot` now registers portable Agent Plugins 1.0
+  packages natively while keeping each plugin intact under `apm_modules/`.
+  Copilot CLI `1.0.81` or newer can load the installed plugin without copies or
+  `--plugin-dir`. (closes #2703, #2705)
 - `apm install` now accepts `--trust-bin` and `--no-trust-bin` for
   per-invocation consent over marketplace-plugin executables. Non-interactive
   installs default to no deployment unless consent or policy permits it.
@@ -124,6 +117,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- The contributor dashboard now refreshes GitHub every 15 minutes by default,
+  backs off for at least one hour after rate limits, and caches unchanged PR
+  enrichment, reducing scheduled GraphQL list traffic from 240 to 8 queries per
+  hour. (by @sergio-sisternes-epam, #2679)
 - `apm compile` now scopes literal `applyTo` walks to their roots, reducing
   matching work in large repositories without changing placement.
   (by @aryansk, #2595)
