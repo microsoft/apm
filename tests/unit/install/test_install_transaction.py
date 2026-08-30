@@ -227,6 +227,20 @@ def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -
     assert str(lock_path) in detail
     assert "could not remove activity lock: permission denied" in detail
 
+    rerun_logger = MagicMock()
+    rerun = InstallTransaction(
+        manifest_path=transaction.manifest_path,
+        apm_modules_dir=transaction.apm_modules_dir,
+        validation=None,
+        logger=rerun_logger,
+    )
+    rerun.commit(InstallResult())
+
+    rerun_logger.warning.assert_called_once()
+    rerun_detail = rerun_logger.verbose_detail.call_args[0][0]
+    assert str(lock_path) in rerun_detail
+    assert "orphaned activity lock remains" in rerun_detail
+
 
 def test_rollback_releases_staging_lock_when_root_cleanup_fails(tmp_path: Path) -> None:
     """Rollback never leaves an activity lock held after restoration."""

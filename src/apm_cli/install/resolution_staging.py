@@ -210,6 +210,21 @@ class ResolutionStagingSession:
             return [(staging_parent, f"could not inspect staging directory: {exc}")]
         for candidate in candidates:
             if (
+                candidate != self._staging_lock_path
+                and candidate.suffix == ".lock"
+                and _STAGING_NAME.fullmatch(candidate.stem) is not None
+                and candidate.is_file()
+                and not candidate.is_symlink()
+                and not candidate.with_suffix("").exists()
+            ):
+                issues.append(
+                    (
+                        candidate,
+                        "orphaned activity lock remains without a staging directory",
+                    )
+                )
+                continue
+            if (
                 candidate == self._staging_root
                 or _STAGING_NAME.fullmatch(candidate.name) is None
                 or candidate.is_symlink()
