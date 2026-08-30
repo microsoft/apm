@@ -1305,17 +1305,19 @@ class _DoctorCheck:
         self.informational = informational
 
 
+def _doctor_status_icon(check: _DoctorCheck) -> str:
+    """Return the status symbol for a doctor check."""
+    if not check.passed:
+        return "[!]" if check.informational else "[x]"
+    return "[i]" if check.informational else "[+]"
+
+
 def _render_doctor_table(logger, checks):
     """Render the doctor results table."""
     console = _get_console()
     if not console:
         for c in checks:
-            if c.informational:
-                icon = "[i]"
-            elif c.passed:
-                icon = "[+]"
-            else:
-                icon = "[x]"
+            icon = _doctor_status_icon(c)
             logger.tree_item(f"  {icon} {c.name}: {c.detail}")
         return
 
@@ -1333,13 +1335,8 @@ def _render_doctor_table(logger, checks):
     table.add_column("Detail", style="white")
 
     for c in checks:
-        if c.informational:
-            icon = "[i]"
-        elif c.passed:
-            icon = "[+]"
-        else:
-            icon = "[x]"
-        table.add_row(c.name, Text(icon), c.detail)
+        icon = _doctor_status_icon(c)
+        table.add_row(c.name, Text(icon), Text(c.detail))
 
     console.print()
     console.print(table)

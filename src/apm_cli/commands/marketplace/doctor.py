@@ -14,6 +14,7 @@ from ...marketplace.yml_schema import (
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
 )
+from ...utils.diagnostics import printable_ascii_text
 from . import (
     _DoctorCheck,
     _find_duplicate_names,
@@ -43,6 +44,7 @@ def _executable_trust_drift_check(
             LAYER_PROJECT_ALLOW,
             LAYER_USER_ALLOW,
             build_exec_trust_context,
+            parse_project_executables,
             resolve_exec_decision,
         )
         from ...utils.yaml_io import load_yaml
@@ -55,16 +57,20 @@ def _executable_trust_drift_check(
         return None
 
     try:
-        ctx = build_exec_trust_context(
-            policy=policy,
-            project_data=project_data,
-        )
+        parse_project_executables(project_data)
     except ValueError as exc:
+        error_detail = printable_ascii_text(str(exc))
         return _DoctorCheck(
             name="executable trust",
             passed=False,
-            detail=f"Invalid executables block: {exc}. Fix 'executables' in apm.yml.",
+            detail=f"Invalid executables block: {error_detail}. Fix 'executables' in apm.yml.",
             informational=True,
+        )
+
+    try:
+        ctx = build_exec_trust_context(
+            policy=policy,
+            project_data=project_data,
         )
     except Exception:
         return None

@@ -840,6 +840,42 @@ class TestExecutableTrustDriftCheck:
             "and/or 'deny' keys. Fix 'executables' in apm.yml."
         )
 
+    def test_malformed_project_detail_is_printable_ascii(self, tmp_path) -> None:
+        from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
+
+        (tmp_path / "apm.yml").write_text(
+            "name: t\nversion: 0.0.1\nexecutables:\n  allow:\n    cafe\u0301: bogus\n",
+            encoding="utf-8",
+        )
+
+        check = _executable_trust_drift_check(tmp_path)
+
+        assert check is not None
+        assert check.passed is False
+        assert check.detail.isascii()
+        assert check.detail.isprintable()
+        assert "executables.allow['cafe?']" in check.detail
+
+    def test_malformed_user_config_is_not_attributed_to_project(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
+
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            '{"executables": {"allow": "bogus"}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(config_path))
+        (tmp_path / "apm.yml").write_text(
+            "name: t\nversion: 0.0.1\nexecutables: {}\n",
+            encoding="utf-8",
+        )
+
+        check = _executable_trust_drift_check(tmp_path)
+
+        assert check is None
+
     def test_no_conflict_passes(self, tmp_path) -> None:
         from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
         from apm_cli.policy.schema import ApmPolicy
