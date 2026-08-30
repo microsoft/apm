@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (by @lkshrk, #2709).
 - `apm doctor` now reports malformed project `executables` configuration as an
   actionable informational warning instead of omitting the check. (#2719)
+- `apm doctor` now reports malformed project `executables` or deprecated
+  `allowExecutables` configuration as an actionable informational warning
+  instead of omitting the check. (#2719)
 
 ## [0.29.0] - 2026-08-30
 
