@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under either `executables` or the deprecated `allowExecutables` key as an
   actionable informational warning instead of omitting the check. (#2719)
 
+- Git subdirectory dependencies with symlinks to files elsewhere in the same
+  repository now install successfully where Git materializes symlinks; APM
+  widens the checkout only when needed. On Windows, Git defaults to
+  `core.symlinks=false` and checks these entries out as plain files, which is
+  outside #2707's scope. (by @MohammedAlkindi, closes #2707, #2710)
+
 ## [0.29.0] - 2026-08-30
 
 ### Added

@@ -741,6 +741,20 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
     package_dir = cached_checkout / dep_ref.virtual_path
     package_dir.mkdir(parents=True)
     (package_dir / "apm.yml").write_text("name: my-pkg\nversion: 1.0.0\n")
+    subprocess.run(["git", "init", "-q", "-b", "main", str(cached_checkout)], check=True)
+    subprocess.run(
+        ["git", "-C", str(cached_checkout), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(cached_checkout), "config", "user.name", "APM Test"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(cached_checkout), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(cached_checkout), "commit", "-q", "-m", "fixture"],
+        check=True,
+    )
     cache_calls: list[tuple[str, dict[str, object]]] = []
 
     def cache_checkout(url: str, _ref: str, **kwargs: object) -> Path:

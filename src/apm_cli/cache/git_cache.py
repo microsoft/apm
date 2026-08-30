@@ -33,7 +33,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from ..utils.git_sparse import apply_sparse_cone
+from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
 from .locking import atomic_land, cleanup_incomplete, shard_lock, stage_path
@@ -192,7 +192,12 @@ class GitCache:
         if not self._refresh and checkout_dir.is_dir():
             if verify_checkout_sha(checkout_dir, sha):
                 _log.debug("Cache HIT: %s @ %s [%s]", url, sha[:12], variant)
-                return checkout_dir
+                with shard_lock(checkout_dir):
+                    return self._finalize_sparse_checkout(
+                        checkout_dir,
+                        sparse_paths,
+                        env=env,
+                    )
             else:
                 # Integrity failure -- evict
                 _log.warning(
@@ -217,6 +222,36 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _finalize_sparse_checkout(
+        self,
+        checkout_dir: Path,
+        sparse_paths: list[str] | None,
+        *,
+        env: dict[str, str] | None,
+    ) -> Path:
+        """Repair and validate a sparse checkout before any cache return."""
+        if not sparse_paths:
+            return checkout_dir
+        from ..utils.git_env import get_git_executable, git_subprocess_env
+
+        git_exe = get_git_executable()
+        subprocess_env = env if env is not None else git_subprocess_env()
+        dangling = repair_dangling_cone_symlinks(
+            git_exe,
+            checkout_dir,
+            list(sparse_paths),
+            env=subprocess_env,
+            extra_git_args=_safe_git_args(),
+        )
+        if dangling is not None:
+            _log.info(
+                "Sparse-cone checkout of %s left a dangling symlink at %s; "
+                "widened to a full checkout so it resolves (#2707).",
+                checkout_dir,
+                dangling,
+            )
+        return checkout_dir
 
     def _resolve_sha(
         self,
@@ -552,7 +587,11 @@ class GitCache:
                     sha[:12],
                     variant,
                 )
-                return final_dir
+                return self._finalize_sparse_checkout(
+                    final_dir,
+                    sparse_paths,
+                    env=env,
+                )
 
             staged = stage_path(final_dir)
             ensure_path_within(staged, self._checkouts_root)
@@ -645,6 +684,22 @@ class GitCache:
                     env=subprocess_env,
                     check=True,
                 )
+                if sparse_paths:
+                    # Correctness repair, not a failure fallback (#2707):
+                    # if the cone left a dangling symlink (target outside
+                    # the requested paths), widen to a full checkout so
+                    # it resolves. Only fires when the narrow cone would
+                    # otherwise ship a broken checkout.
+                    self._finalize_sparse_checkout(
+                        staged,
+                        sparse_paths,
+                        env=env,
+                    )
+            except (RuntimeError, ValueError):
+                from ..utils.file_ops import robust_rmtree
+
+                robust_rmtree(staged, ignore_errors=True)
+                raise
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
                 from ..utils.file_ops import robust_rmtree
 

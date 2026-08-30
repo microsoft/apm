@@ -60,6 +60,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) | `src/apm_cli/integration/base_integrator.py` |
 | Windows stable executable path | install.ps1 ($currentDir / $currentExe) | `install.ps1` |
 | Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) | `src/apm_cli/cache/url_normalize.py` |
+| Sparse-cone setup, dangling-symlink repair, and materialized symlink validation | utils/git_sparse.py | `src/apm_cli/utils/git_sparse.py` |
 | Self-update release -> installer ref + VERSION | commands/self_update.py (_ResolvedSelfUpdateRelease) | `src/apm_cli/commands/self_update.py` |
 | Dependency comparison identity vs display-cased materialization path | models/dependency/identity.py + materialization.py + DependencyReference | `src/apm_cli/models/dependency/identity.py`; `src/apm_cli/models/dependency/materialization.py`; `src/apm_cli/models/dependency/reference.py` |
 | Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) | `src/apm_cli/policy/discovery.py` |

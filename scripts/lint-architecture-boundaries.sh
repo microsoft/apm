@@ -1118,6 +1118,34 @@ check_pattern \
     'to_repository_cache_url' \
     src/apm_cli
 
+echo "[*] AC11a: sparse-cone materialization authority"
+sparse_cone_owner="src/apm_cli/utils/git_sparse.py"
+sparse_cone_raw_set_hits=$(
+    grep -rEn --include='*.py' \
+        '"sparse-checkout",[[:space:]]*"set"' src/apm_cli \
+        | grep -v "^${sparse_cone_owner}:" \
+        | grep -v '^src/apm_cli/deps/git_file_transport.py:' \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if [ "$(grep -Ec '^def apply_sparse_cone\(' "$sparse_cone_owner")" -ne 1 ] \
+    || [ "$(grep -Ec '^def repair_dangling_cone_symlinks\(' "$sparse_cone_owner")" -ne 1 ] \
+    || [ "$(grep -Ec '^def _literal_pathspec\(' "$sparse_cone_owner")" -ne 1 ] \
+    || [ "$(grep -Fc '"ls-tree",' "$sparse_cone_owner")" -ne 2 ] \
+    || [ "$(grep -Fc '_literal_pathspec(path)' "$sparse_cone_owner")" -ne 2 ] \
+    || [ "$(grep -Ec '^    def _finalize_sparse_checkout\(' src/apm_cli/cache/git_cache.py)" -ne 1 ] \
+    || [ "$(grep -Fc 'self._finalize_sparse_checkout(' src/apm_cli/cache/git_cache.py)" -ne 3 ] \
+    || [ "$(grep -Fc 'repair_dangling_cone_symlinks(' src/apm_cli/cache/git_cache.py)" -ne 1 ] \
+    || [ "$(grep -Fc 'repair_dangling_cone_symlinks(' src/apm_cli/deps/bare_cache.py)" -ne 1 ] \
+    || [ "$(grep -Fc 'repair_dangling_cone_symlinks(' src/apm_cli/deps/github_downloader.py)" -ne 1 ] \
+    || ! grep -Fq 'return _repair(setup_env)' src/apm_cli/deps/github_downloader.py \
+    || ! grep -Fq 'return _repair(env)' src/apm_cli/deps/github_downloader.py \
+    || [ -n "$sparse_cone_raw_set_hits" ]; then
+    echo "[x] Sparse-cone materialization must route through utils/git_sparse.py"
+    [ -n "$sparse_cone_raw_set_hits" ] && echo "$sparse_cone_raw_set_hits"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC12: diagnostic printable-ASCII authority"
 diagnostic_ascii_output=$(python3 scripts/check_diagnostic_ascii_owner.py --root "$ROOT" 2>&1)
 diagnostic_ascii_status=$?

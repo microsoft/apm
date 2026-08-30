@@ -53,6 +53,78 @@ def test_resolution_replacement_activation_has_one_owner(tmp_path: Path) -> None
     assert "duplicates owner methods: prepare_replacement" in result.stdout
 
 
+def test_sparse_cone_materialization_has_single_owner() -> None:
+    """Every cone checkout must route through the shared repair policy."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/utils/git_sparse.py").read_text(encoding="utf-8")
+    git_cache = (root / "src/apm_cli/cache/git_cache.py").read_text(encoding="utf-8")
+    bare_cache = (root / "src/apm_cli/deps/bare_cache.py").read_text(encoding="utf-8")
+    downloader = (root / "src/apm_cli/deps/github_downloader.py").read_text(encoding="utf-8")
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    owner_table = (root / ".apm/instructions/architecture.instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert owner.count("def apply_sparse_cone(") == 1
+    assert owner.count("def repair_dangling_cone_symlinks(") == 1
+    assert owner.count("def _literal_pathspec(") == 1
+    assert owner.count('"ls-tree",') == 2
+    assert owner.count("_literal_pathspec(path)") == 2
+    assert git_cache.count("repair_dangling_cone_symlinks(") == 1
+    assert git_cache.count("def _finalize_sparse_checkout(") == 1
+    assert git_cache.count("self._finalize_sparse_checkout(") == 3
+    assert bare_cache.count("repair_dangling_cone_symlinks(") == 1
+    assert downloader.count("repair_dangling_cone_symlinks(") == 1
+    assert "return _repair(setup_env)" in downloader
+    assert "return _repair(env)" in downloader
+    assert '"sparse-checkout", "set"' not in downloader
+    assert "Sparse-cone materialization must route through utils/git_sparse.py" in guard
+    assert (
+        "| Sparse-cone setup, dangling-symlink repair, and materialized symlink validation "
+        "| utils/git_sparse.py | `src/apm_cli/utils/git_sparse.py` |"
+    ) in owner_table
+
+
+def test_sparse_cone_materialization_guard_rejects_bypass(tmp_path: Path) -> None:
+    """The boundary lint rejects a consumer that skips the repair owner."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/github_downloader.py"
+    consumer.write_text(
+        consumer.read_text(encoding="utf-8").replace(
+            "            return _repair(env)\n",
+            "            return True\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Sparse-cone materialization must route through utils/git_sparse.py" in result.stdout
+
+
 def test_generated_bundle_text_writes_are_lf_deterministic() -> None:
     """Generated bundle text must route through the checked LF boundary."""
     root = Path(__file__).parents[2]
