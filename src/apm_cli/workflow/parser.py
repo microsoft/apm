@@ -49,7 +49,7 @@ def parse_workflow_file(file_path):
         WorkflowDefinition: Parsed workflow definition.
     """
     try:
-        with open(file_path, encoding="utf-8-sig") as f:
+        with open(file_path, encoding="utf-8") as f:
             post = load_frontmatter(f)
 
         # Extract name based on file structure

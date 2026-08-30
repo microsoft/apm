@@ -81,6 +81,7 @@ semicolon-delimited, and specific to the file(s) that own the fact.
 | Agent Plugin compatibility package projection | agent_plugins/projection.py (project_agent_plugin_package) | `src/apm_cli/agent_plugins/projection.py`; `src/apm_cli/models/validation.py` |
 | Network host literal parsing and loopback classification | utils/net.py (parse_host_address, is_loopback_host) | `src/apm_cli/utils/net.py` |
 | Legacy plugin declared-skill membership | deps/plugin_parser.py (_map_plugin_artifacts, normalized_plugin_skill_sources) | `src/apm_cli/deps/plugin_parser.py`; `src/apm_cli/integration/skill_integrator.py` |
+| Frontmatter BOM decoding and bounded YAML parsing | utils/yaml_io.py (load_frontmatter, _BoundedYAMLHandler) | `src/apm_cli/utils/yaml_io.py` |
 <!-- /canonical-owner-table -->
 
 Host + credential resolution includes public github.com anonymous-first ordering.

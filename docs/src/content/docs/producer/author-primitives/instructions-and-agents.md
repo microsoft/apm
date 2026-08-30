@@ -53,6 +53,9 @@ applyTo: "**/*.py"
 | `description` | yes | One-line summary; used in compiled context indexes |
 | `applyTo` | yes for instructions | Glob (or comma-separated globs) the rule binds to |
 
+Encode primitive Markdown as UTF-8. APM accepts files with or without a
+leading UTF-8 BOM and strips the BOM before parsing frontmatter.
+
 `applyTo` is the load-bearing field. Without it the rule is treated as
 unconditional and gets folded into compiled context files
 (`AGENTS.md`, `GEMINI.md`) instead of a per-file rule directory. With

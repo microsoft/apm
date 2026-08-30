@@ -309,6 +309,9 @@ tags: [security, validation]
 ---
 ```
 
+Encode primitive Markdown as UTF-8. APM accepts files with or without a
+leading UTF-8 BOM and strips the BOM before parsing frontmatter.
+
 `applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
 (`"**/src/**,**/api/**"`). The comma-separated string form is the recommended
 way to specify multiple patterns, as it is portably expanded into target-specific

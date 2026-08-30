@@ -27,7 +27,7 @@ def parse_skill_file(file_path: str | Path, source: str = None) -> Skill:  # noq
     file_path = Path(file_path)
 
     try:
-        with open(file_path, encoding="utf-8-sig") as f:
+        with open(file_path, encoding="utf-8") as f:
             post = load_frontmatter(f)
 
         metadata = post.metadata
@@ -67,7 +67,7 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
     file_path = Path(file_path)
 
     try:
-        with open(file_path, encoding="utf-8-sig") as f:
+        with open(file_path, encoding="utf-8") as f:
             post = load_frontmatter(f)
 
         # Extract name based on file structure

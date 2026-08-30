@@ -129,7 +129,7 @@ def pack_bundle(
             try:
                 from apm_cli.utils.yaml_io import load_frontmatter
 
-                with open(skill_md_path, encoding="utf-8-sig") as _f:
+                with open(skill_md_path, encoding="utf-8") as _f:
                     _skill_post = load_frontmatter(_f)
                 _skill_desc = _skill_post.metadata.get("description")
             except Exception:

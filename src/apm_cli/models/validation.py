@@ -545,7 +545,7 @@ def _validate_claude_skill(
     from .apm_package import APMPackage
 
     try:
-        with open(skill_md_path, encoding="utf-8-sig") as f:
+        with open(skill_md_path, encoding="utf-8") as f:
             post = load_frontmatter(f)
 
         skill_name = post.metadata.get("name", package_path.name)
@@ -632,7 +632,7 @@ def _validate_skill_bundle(
 
         # Validate frontmatter
         try:
-            with open(skill_md_path, encoding="utf-8-sig") as f:
+            with open(skill_md_path, encoding="utf-8") as f:
                 post = load_frontmatter(f)
         except Exception as e:
             result.add_error(f"skills/{name}/SKILL.md: failed to parse frontmatter: {e}")
@@ -745,7 +745,7 @@ def _validate_hybrid_package(
     try:
         from apm_cli.utils.yaml_io import load_frontmatter
 
-        with open(skill_md_path, encoding="utf-8-sig") as f:
+        with open(skill_md_path, encoding="utf-8") as f:
             load_frontmatter(f)  # Parse only to surface malformed frontmatter.
 
         # Metadata model for HYBRID packages: apm.yml.description and

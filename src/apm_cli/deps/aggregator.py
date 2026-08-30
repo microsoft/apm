@@ -28,7 +28,7 @@ def scan_workflows_for_dependencies():
 
     for workflow_file in workflows:
         try:
-            with open(workflow_file, encoding="utf-8-sig") as f:
+            with open(workflow_file, encoding="utf-8") as f:
                 content = load_frontmatter(f)
                 if "mcp" in content.metadata and isinstance(content.metadata["mcp"], list):
                     all_servers.update(content.metadata["mcp"])

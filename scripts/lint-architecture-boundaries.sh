@@ -1713,6 +1713,23 @@ if ! python3 scripts/check_hash_visible_lf_writes.py; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC35: frontmatter BOM decoding authority"
+frontmatter_owner="src/apm_cli/utils/yaml_io.py"
+frontmatter_bom_duplicate_hits=$(
+    grep -rEn --include='*.py' 'utf-8-sig' src/apm_cli \
+        | grep -v "^${frontmatter_owner}:" \
+        | grep -v 'architecture-authority-exempt:' \
+        || true
+)
+if ! grep -q 'def load_frontmatter(fd: Any, encoding: str = "utf-8-sig")' \
+        "$frontmatter_owner" \
+    || ! grep -Fq 'text.removeprefix("\ufeff")' "$frontmatter_owner" \
+    || [ -n "$frontmatter_bom_duplicate_hits" ]; then
+    echo "[x] Frontmatter BOM decoding must route through utils/yaml_io.py"
+    [ -n "$frontmatter_bom_duplicate_hits" ] && echo "$frontmatter_bom_duplicate_hits"
+    violations=$((violations + 1))
+fi
+
 echo "[*] AC18: bootstrap project-name authority"
 if ! uv run --extra dev python scripts/lint-bootstrap-project-name.py; then
     echo "[x] Manifest bootstrap names must route through core/project_name.py"
