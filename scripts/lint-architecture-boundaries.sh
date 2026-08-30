@@ -215,6 +215,13 @@ if [ "$agents_source_attribution_status" -ne 0 ]; then
     echo "$agents_source_attribution_output"
     violations=$((violations + 1))
 fi
+agents_footer_output=$(python3 scripts/check_agents_footer_authority.py "$ROOT" 2>&1)
+agents_footer_status=$?
+if [ "$agents_footer_status" -ne 0 ]; then
+    echo "[x] Generated footer wording must route through compilation/footer.py"
+    echo "$agents_footer_output"
+    violations=$((violations + 1))
+fi
 hook_file="src/apm_cli/integration/hook_integrator.py"
 validation_line=$(grep -n 'if not validation\.valid:' "$hook_file" | tail -1 | cut -d: -f1)
 continue_line=$(awk -v start="$validation_line" 'NR > start && /continue/ {print NR; exit}' "$hook_file")
