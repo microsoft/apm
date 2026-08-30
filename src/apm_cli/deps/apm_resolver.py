@@ -1108,10 +1108,11 @@ class APMDependencyResolver:
                             # Fetch produced no usable path -- release the
                             # reservation so a subsequent retry (or a
                             # different anchor with the same key) can try
-                            # again rather than silently treating the dep
-                            # as already-downloaded.
+                            # again rather than silently treating either the
+                            # old materialization or the dep as downloaded.
                             with self._download_lock:
                                 self._downloaded_packages.discard(unique_key)
+                            return None
                     except MarketplaceManifestMaterializationError:
                         with self._download_lock:
                             self._downloaded_packages.discard(unique_key)

@@ -32,9 +32,50 @@ class ResolutionStagingSession:
             if resolved.exists():
                 resolved_base = ensure_path_within(self._modules_dir, self._modules_dir)
                 relative = resolved.relative_to(resolved_base)
-                backup = self._staging_root / relative
+                backup = self._staging_root / "backups" / relative
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 resolved.replace(backup)
+            self._backups[resolved] = backup
+
+    def prepare_replacement(self, path: Path) -> Path:
+        """Return an isolated download path without disturbing *path*."""
+        resolved = ensure_path_within(path, self._modules_dir)
+        resolved_base = ensure_path_within(self._modules_dir, self._modules_dir)
+        relative = resolved.relative_to(resolved_base)
+        replacement = self._staging_root / "replacements" / relative
+        ensure_path_within(replacement, self._staging_root)
+        with self._lock:
+            if resolved in self._backups:
+                raise RuntimeError(f"Path is already staged for replacement: {resolved}")
+            if replacement.exists():
+                safe_rmtree(replacement, self._staging_root)
+            replacement.parent.mkdir(parents=True, exist_ok=True)
+        return replacement
+
+    def publish_replacement(self, path: Path, replacement: Path) -> None:
+        """Activate a complete replacement and journal the prior contents."""
+        resolved = ensure_path_within(path, self._modules_dir)
+        staged = ensure_path_within(replacement, self._staging_root)
+        with self._lock:
+            if resolved in self._backups:
+                raise RuntimeError(f"Path is already staged for replacement: {resolved}")
+            if not staged.exists():
+                raise FileNotFoundError(f"Replacement path was not materialized: {staged}")
+
+            backup: Path | None = None
+            if resolved.exists():
+                resolved_base = ensure_path_within(self._modules_dir, self._modules_dir)
+                relative = resolved.relative_to(resolved_base)
+                backup = self._staging_root / "backups" / relative
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                resolved.replace(backup)
+            try:
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                staged.replace(resolved)
+            except BaseException:
+                if backup is not None and backup.exists() and not resolved.exists():
+                    backup.replace(resolved)
+                raise
             self._backups[resolved] = backup
 
     def relocate_path(self, source: Path, destination: Path) -> None:

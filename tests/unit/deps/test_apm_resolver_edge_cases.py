@@ -844,6 +844,22 @@ class TestTryLoadDependencyPackageForceRecheck:
         assert len(call_log) == 1
         assert result is not None
 
+    def test_failed_replacement_does_not_reuse_existing_path(self, tmp_path: Path) -> None:
+        """A failed refresh must not silently validate the old materialization."""
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        ref = self._semver_dep_ref(pkg_dir)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: None,
+            update_refs=True,
+        )
+
+        assert resolver._try_load_dependency_package(ref) is None
+        assert (pkg_dir / "apm.yml").exists()
+
     def test_existing_path_without_lock_calls_callback_on_plain_install(
         self,
         tmp_path: Path,

@@ -7,6 +7,29 @@ import pytest
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 
 
+def test_replacement_keeps_installed_hook_live_until_publish(tmp_path: Path) -> None:
+    """A replacement download must not unlink the currently registered hook."""
+    modules = tmp_path / "apm_modules"
+    package = modules / "owner" / "plugin"
+    hook = package / "hooks" / "pre_tool.py"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("old hook", encoding="ascii")
+    staging = ResolutionStagingSession(modules)
+
+    replacement = staging.prepare_replacement(package)
+
+    assert hook.read_text(encoding="ascii") == "old hook"
+    replacement_hook = replacement / "hooks" / "pre_tool.py"
+    replacement_hook.parent.mkdir(parents=True)
+    replacement_hook.write_text("new hook", encoding="ascii")
+
+    staging.publish_replacement(package, replacement)
+
+    assert hook.read_text(encoding="ascii") == "new hook"
+    staging.rollback()
+    assert hook.read_text(encoding="ascii") == "old hook"
+
+
 def test_relocate_path_rejects_symlinked_package_directory(tmp_path: Path) -> None:
     """Migration never follows a package-directory symlink."""
     modules = tmp_path / "apm_modules"

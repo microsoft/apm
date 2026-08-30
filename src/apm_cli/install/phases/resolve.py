@@ -173,6 +173,17 @@ def _prepare_callback_materialization_path(
         )
 
 
+def _publish_materialized_replacement(
+    staging_session: ResolutionStagingSession,
+    install_path: Path,
+    replacement_path: Path,
+    result: Any,
+) -> Any:
+    """Publish a completed resolution download and preserve its result."""
+    staging_session.publish_replacement(install_path, replacement_path)
+    return result
+
+
 def _load_lockfile(ctx: InstallContext) -> None:
     """Load ``apm.lock.yaml`` and populate ``ctx.existing_lockfile`` / ``ctx.lockfile_path``."""
     # ------------------------------------------------------------------
@@ -481,7 +492,7 @@ def _resolve_dependencies(
             )
             if not should_force_ref_recheck(dep_ref, _locked_for_recheck, update_refs=update_refs):
                 return install_path
-        staging_session.prepare_path(install_path)
+        replacement_path = staging_session.prepare_replacement(install_path)
         # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
         # users see the install advancing past silent transitive lookups.
         # Under F7's parallel BFS this callback may run on a worker
@@ -543,16 +554,26 @@ def _resolve_dependencies(
                     from apm_cli.drift import detect_ref_change as _detect_ref_change
 
                     if not _detect_ref_change(dep_ref, _locked_reg, update_refs=False):
-                        registry_resolver.download_from_lockfile(
-                            dep_ref,
+                        _publish_materialized_replacement(
+                            staging_session,
                             install_path,
-                            resolved_url=_locked_reg.resolved_url,
-                            resolved_hash=_locked_reg.resolved_hash,
-                            version=_locked_reg.version,
+                            replacement_path,
+                            registry_resolver.download_from_lockfile(
+                                dep_ref,
+                                replacement_path,
+                                resolved_url=_locked_reg.resolved_url,
+                                resolved_hash=_locked_reg.resolved_hash,
+                                version=_locked_reg.version,
+                            ),
                         )
                         callback_downloaded[dep_ref.get_unique_key()] = None
                         return install_path
-                registry_resolver.download_package(dep_ref, install_path)
+                _publish_materialized_replacement(
+                    staging_session,
+                    install_path,
+                    replacement_path,
+                    registry_resolver.download_package(dep_ref, replacement_path),
+                )
                 _annotate_registry_dep_ref(dep_ref, registry_resolver)
                 # Mark as already-downloaded so the parallel pre-download
                 # phase skips this dep. No SHA for registry deps.
@@ -592,18 +613,19 @@ def _resolve_dependencies(
                 )
                 result_path = _copy_local_package(
                     dep_ref,
-                    install_path,
+                    replacement_path,
                     base_dir,
                     project_root=project_root,
                     logger=logger,
                 )
                 if result_path:
+                    staging_session.publish_replacement(install_path, replacement_path)
                     with callback_lock:
                         callback_downloaded[dep_ref.get_unique_key()] = None
                     _tui = getattr(ctx, "tui", None)
                     if _tui is not None:
                         _tui.task_completed(dep_ref.get_unique_key())
-                    return result_path
+                    return install_path
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
                     _tui.task_failed(dep_ref.get_unique_key())
@@ -671,7 +693,12 @@ def _resolve_dependencies(
             )
 
             # Silent download - no progress display for transitive deps
-            result = downloader.download_package(download_dep, install_path)
+            result = _publish_materialized_replacement(
+                staging_session,
+                install_path,
+                replacement_path,
+                downloader.download_package(download_dep, replacement_path),
+            )
             # Capture resolved commit SHA for lockfile
             resolved_sha = None
             if result and hasattr(result, "resolved_reference") and result.resolved_reference:

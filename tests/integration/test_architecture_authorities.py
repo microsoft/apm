@@ -14,6 +14,51 @@ from types import ModuleType
 import pytest
 
 
+def test_resolution_replacement_activation_has_one_owner(tmp_path: Path) -> None:
+    """Resolution downloads must publish through the staging session owner."""
+    root = Path(__file__).parents[2]
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    assert (
+        "Resolution replacements must stay staged until their canonical publish boundary" in guard
+    )
+
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    duplicate = sandbox / "src/apm_cli/install/service.py"
+    duplicate.write_text(
+        duplicate.read_text(encoding="utf-8")
+        + "\n\ndef prepare_replacement(path):\n    return path\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Resolution replacements must stay staged until their canonical publish boundary"
+        in result.stdout
+    )
+
+
 def test_generated_bundle_text_writes_are_lf_deterministic() -> None:
     """Generated bundle text must route through the checked LF boundary."""
     root = Path(__file__).parents[2]
