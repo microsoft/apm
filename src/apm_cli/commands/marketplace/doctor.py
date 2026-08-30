@@ -60,10 +60,13 @@ def _executable_trust_drift_check(
         parse_project_executables(project_data)
     except ValueError as exc:
         error_detail = printable_ascii_text(str(exc))
+        config_key = (
+            "allowExecutables" if error_detail.startswith("allowExecutables") else "executables"
+        )
         return _DoctorCheck(
             name="executable trust",
             passed=False,
-            detail=f"Invalid executables block: {error_detail}. Fix 'executables' in apm.yml.",
+            detail=f"Invalid executables block: {error_detail}. Fix '{config_key}' in apm.yml.",
             informational=True,
         )
 

@@ -856,6 +856,20 @@ class TestExecutableTrustDriftCheck:
         assert check.detail.isprintable()
         assert "executables.allow['cafe?']" in check.detail
 
+    def test_malformed_deprecated_alias_names_alias_in_remediation(self, tmp_path) -> None:
+        from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
+
+        (tmp_path / "apm.yml").write_text(
+            "name: t\nversion: 0.0.1\nallowExecutables:\n  - bogus\n",
+            encoding="utf-8",
+        )
+
+        check = _executable_trust_drift_check(tmp_path)
+
+        assert check is not None
+        assert check.passed is False
+        assert "Fix 'allowExecutables' in apm.yml" in check.detail
+
     def test_malformed_user_config_is_not_attributed_to_project(
         self, tmp_path, monkeypatch
     ) -> None:
