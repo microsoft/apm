@@ -323,6 +323,56 @@ class GitHubPackageDownloader:
             )
         return git_env
 
+    def _persistent_cache_checkout(
+        self,
+        cache: Any,
+        dep_ref: DependencyReference,
+        repository_url: str,
+        ref: str | None,
+        *,
+        locked_sha: str | None,
+        sparse_paths: list[str] | None = None,
+    ) -> Path:
+        """Return a persistent checkout using the canonical auth fallback."""
+        if (
+            self.auth_resolver.uses_public_github_anonymous_first(
+                dep_ref.host or default_host(),
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            is True
+            and not dep_ref.is_insecure
+        ):
+            org = dep_ref.repo_url.split("/", 1)[0] if "/" in dep_ref.repo_url else None
+
+            def _checkout(_token: str | None, env: dict[str, str]) -> Path:
+                return cache.get_checkout(
+                    repository_url,
+                    ref,
+                    locked_sha=locked_sha,
+                    env=env,
+                    sparse_paths=sparse_paths,
+                )
+
+            return self.auth_resolver.try_with_fallback(
+                dep_ref.host or default_host(),
+                _checkout,
+                org=org,
+                port=dep_ref.port,
+                path=dep_ref.repo_url,
+                host_type=dep_ref.host_type,
+                unauth_first=True,
+                base_env=self.git_env,
+            )
+
+        return cache.get_checkout(
+            repository_url,
+            ref,
+            locked_sha=locked_sha,
+            env=self._cache_git_env(dep_ref),
+            sparse_paths=sparse_paths,
+        )
+
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
 
@@ -1335,11 +1385,12 @@ class GitHubPackageDownloader:
                 # (~78 MB for dotnet/skills). Different subdirs of the
                 # same SHA land in separate variant shards; bare cache
                 # is unchanged so they still share object data.
-                _persistent_checkout = _persistent_cache.get_checkout(
+                _persistent_checkout = self._persistent_cache_checkout(
+                    _persistent_cache,
+                    dep_ref,
                     repository_url,
                     _resolved_sha_for_cache or ref,
                     locked_sha=_resolved_sha_for_cache,
-                    env=self._cache_git_env(dep_ref),
                     sparse_paths=[subdir_path],
                 )
             except Exception:
@@ -1797,11 +1848,12 @@ class GitHubPackageDownloader:
             from ..bundle.local_bundle import route_agent_plugin_package
 
             try:
-                _cached = _persistent_cache.get_checkout(
+                _cached = self._persistent_cache_checkout(
+                    _persistent_cache,
+                    dep_ref,
                     dep_ref.to_github_url(),
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
-                    env=self._cache_git_env(dep_ref),
                 )
                 from ..utils.file_ops import robust_copy2, robust_copytree
 

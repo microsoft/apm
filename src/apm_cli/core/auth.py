@@ -498,22 +498,28 @@ class AuthResolver:
         """
         from ..deps.github_rate_limit import GitHubThrottleError
 
-        if isinstance(exc, GitHubThrottleError):
-            return False
-        response = getattr(exc, "response", None)
-        status_code = getattr(exc, "status_code", None)
-        if status_code is None and response is not None:
-            status_code = getattr(response, "status_code", None)
-        if isinstance(status_code, int):
-            return status_code in {401, 403, 404}
-
-        parts = [str(exc)]
-        for name in ("stderr", "stdout"):
-            value = getattr(exc, name, None)
-            if isinstance(value, bytes):
-                value = value.decode("utf-8", errors="replace")
-            if value:
-                parts.append(str(value))
+        parts: list[str] = []
+        status_codes: list[int] = []
+        current: BaseException | None = exc
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if isinstance(current, GitHubThrottleError):
+                return False
+            response = getattr(current, "response", None)
+            status_code = getattr(current, "status_code", None)
+            if status_code is None and response is not None:
+                status_code = getattr(response, "status_code", None)
+            if isinstance(status_code, int):
+                status_codes.append(status_code)
+            parts.append(str(current))
+            for name in ("stderr", "stdout"):
+                value = getattr(current, name, None)
+                if isinstance(value, bytes):
+                    value = value.decode("utf-8", errors="replace")
+                if value:
+                    parts.append(str(value))
+            current = current.__cause__ or current.__context__
         text = " ".join(parts).lower()
         if any(
             signal in text
@@ -545,6 +551,8 @@ class AuthResolver:
                 "unable to get password from user",
             )
         ):
+            return True
+        if any(status_code in {401, 403, 404} for status_code in status_codes):
             return True
         return (
             re.search(

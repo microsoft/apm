@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache, _variant_key
+from apm_cli.cache.git_cache import GitCache, _partial_clone_fallback_warning, _variant_key
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +42,23 @@ class TestVariantKey:
         v1 = _variant_key(["plugins/x", "tools/y"])
         v2 = _variant_key(["tools/y", "plugins/x"])
         assert v1 == v2
+
+
+def test_auth_failure_partial_clone_warning_does_not_blame_filter_v2() -> None:
+    """An authentication failure gets a truthful, sanitized retry warning."""
+    failure = subprocess.CalledProcessError(
+        128,
+        ("git", "clone"),
+        stderr="fatal: Authentication failed",
+    )
+
+    warning = _partial_clone_fallback_warning(
+        "https://user:secret@github.com/acme/private",
+        failure,
+    )
+
+    assert "filter v2" not in warning
+    assert "secret" not in warning
 
 
 def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:

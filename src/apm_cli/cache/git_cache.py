@@ -81,6 +81,34 @@ def _safe_git_args() -> list[str]:
 _PARTIAL_BARE_SUFFIX = "__p"
 
 
+def _partial_clone_fallback_warning(
+    url: str,
+    exc: subprocess.CalledProcessError,
+) -> str:
+    """Build a sanitized warning without misclassifying auth as filter failure."""
+    details: list[str] = []
+    for value in (exc.stderr, exc.stdout):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="replace")
+        if value:
+            details.append(str(value).lower())
+    diagnostic = " ".join(details)
+    filter_unsupported = any(
+        signal in diagnostic
+        for signal in (
+            "does not support filter",
+            "filtering not recognized by server",
+            "filter capability",
+            "filter 'blob:none' not supported",
+        )
+    )
+    suffix = " Server may not support filter v2." if filter_unsupported else ""
+    return (
+        f"Partial clone (--filter=blob:none) failed for {_sanitize_url(url)}; "
+        f"retrying with full bare clone.{suffix}"
+    )
+
+
 def _variant_key(sparse_paths: list[str] | None) -> str:
     """Return the on-disk variant segment for a checkout shard.
 
@@ -387,11 +415,7 @@ class GitCache:
                 if partial and isinstance(exc, subprocess.CalledProcessError):
                     from ..utils.console import _rich_warning
 
-                    _rich_warning(
-                        f"Partial clone (--filter=blob:none) failed for "
-                        f"{_sanitize_url(url)}; retrying with full bare clone. "
-                        f"Server may not support filter v2."
-                    )
+                    _rich_warning(_partial_clone_fallback_warning(url, exc))
                     from ..utils.file_ops import robust_rmtree
 
                     robust_rmtree(staged, ignore_errors=True)

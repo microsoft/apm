@@ -1334,6 +1334,13 @@ for consumer in $public_github_auth_consumers; do
 ${consumer}"
     fi
 done
+persistent_cache_auth_branch=$(
+    awk '
+        /^    def _persistent_cache_checkout\(/ { capture = 1 }
+        /^    def _setup_git_environment\(/ { capture = 0 }
+        capture { print }
+    ' src/apm_cli/deps/github_downloader.py
+)
 noninteractive_git_env_bypasses=$(
     grep -rEn --include='*.py' \
         'GitAuthEnvBuilder\.noninteractive_env\(' \
@@ -1347,6 +1354,8 @@ if ! grep -q '^    def uses_public_github_anonymous_first(' "$public_github_auth
     || ! grep -q '^    def build_public_github_anonymous_git_env(' "$public_github_auth_owner" \
     || ! grep -q '^    def build_noninteractive_git_env(' "$public_github_auth_owner" \
     || ! grep -q 'lazy_public_github' "$public_github_auth_owner" \
+    || ! printf '%s\n' "$persistent_cache_auth_branch" \
+        | grep -q 'self.auth_resolver.try_with_fallback(' \
     || [ -n "$public_github_auth_duplicate_defs" ] \
     || [ -n "$public_github_auth_missing_consumers" ] \
     || [ -n "$noninteractive_git_env_bypasses" ]; then

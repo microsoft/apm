@@ -4366,6 +4366,49 @@ def test_public_github_auth_owner_guard_rejects_duplicate_owner(
     )
 
 
+def test_public_github_auth_owner_guard_rejects_persistent_cache_bypass(
+    tmp_path: Path,
+) -> None:
+    """AC20 requires persistent cache network work to route through AuthResolver."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        ),
+    )
+    consumer = sandbox / "src/apm_cli/deps/github_downloader.py"
+    source = consumer.read_text(encoding="utf-8")
+    source = source.replace(
+        "return self.auth_resolver.try_with_fallback(\n",
+        "return _checkout(\n",
+        1,
+    )
+    consumer.write_text(source, encoding="utf-8")
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in (
+        result.stdout
+    )
+
+
 def test_mcp_container_launcher_has_one_canonical_owner() -> None:
     """OCI selection and image placement must stay shared across adapters."""
     root = Path(__file__).parents[2]

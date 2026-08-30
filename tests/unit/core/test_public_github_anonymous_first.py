@@ -482,6 +482,19 @@ def test_public_github_auth_failure_classifier_signal_vocabulary(
     assert AuthResolver.is_public_github_auth_failure(failure) is expected
 
 
+def test_public_github_auth_failure_classifier_reads_wrapped_git_stderr() -> None:
+    """Cache wrappers do not hide the Git auth signal that unlocks fallback."""
+    git_failure = subprocess.CalledProcessError(
+        128,
+        ("git", "clone"),
+        stderr="fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    )
+    try:
+        raise RuntimeError("persistent cache clone failed") from git_failure
+    except RuntimeError as wrapped:
+        assert AuthResolver.is_public_github_auth_failure(wrapped) is True
+
+
 @pytest.mark.parametrize(
     "locale_environment",
     (
@@ -693,6 +706,87 @@ def test_private_github_clone_resolves_one_path_scoped_fallback() -> None:
     assert anonymous_url.username is None
     assert authenticated_url.username is not None
     _assert_anonymous_attempt_env(calls[0][1])
+    manager.resolve_credential_from_git.assert_called_once_with(
+        "github.com",
+        port=None,
+        path="acme/private",
+    )
+
+
+def test_private_github_subdirectory_cache_retries_with_scoped_credential(
+    tmp_path: Path,
+) -> None:
+    """Persistent sparse cache uses the same anonymous-first auth owner as clone."""
+    manager = MagicMock(spec=GitHubTokenManager)
+    manager.setup_environment.side_effect = lambda: dict(os.environ)
+    manager.get_token_for_purpose.return_value = None
+    manager.resolve_credential_from_gh_cli.return_value = None
+    manager.resolve_credential_from_git.return_value = "private-token"
+    resolver = AuthResolver(token_manager=manager)
+    dep_ref = MagicMock()
+    dep_ref.host = "github.com"
+    dep_ref.port = None
+    dep_ref.host_type = None
+    dep_ref.repo_url = "acme/private"
+    dep_ref.is_insecure = False
+    dep_ref.is_virtual = True
+    dep_ref.virtual_path = "packages/my-pkg"
+    dep_ref.reference = "main"
+    dep_ref.is_virtual_subdirectory.return_value = True
+    dep_ref.to_github_url.return_value = "https://github.com/acme/private"
+
+    cached_checkout = tmp_path / "cached"
+    package_dir = cached_checkout / dep_ref.virtual_path
+    package_dir.mkdir(parents=True)
+    (package_dir / "apm.yml").write_text("name: my-pkg\nversion: 1.0.0\n")
+    cache_calls: list[tuple[str, dict[str, object]]] = []
+
+    def cache_checkout(url: str, _ref: str, **kwargs: object) -> Path:
+        cache_calls.append((url, kwargs))
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        assert kwargs["sparse_paths"] == [dep_ref.virtual_path]
+        if len(cache_calls) == 1:
+            assert env["GIT_ASKPASS"] == "echo"
+            assert env["GIT_TERMINAL_PROMPT"] == "0"
+            assert dict(_indexed_git_config(env))["credential.helper"] == ""
+            git_failure = subprocess.CalledProcessError(
+                128,
+                ("git", "clone", "--filter=blob:none"),
+                stderr=(
+                    "fatal: could not read Username for 'https://github.com': "
+                    "terminal prompts disabled"
+                ),
+            )
+            raise RuntimeError("persistent cache clone failed") from git_failure
+        return cached_checkout
+
+    persistent_cache = MagicMock()
+    persistent_cache.get_checkout.side_effect = cache_checkout
+    downloader = _public_downloader(resolver)
+    downloader.shared_clone_cache = None
+    downloader.persistent_git_cache = persistent_cache
+    resolved = MagicMock(resolved_commit="a" * 40)
+    validation = MagicMock(is_valid=True, package=MagicMock(), package_type=MagicMock())
+
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch.object(downloader, "resolve_git_reference", return_value=resolved),
+        patch.object(
+            downloader,
+            "_try_sparse_checkout",
+            side_effect=AssertionError("credential-aware cache retry was bypassed"),
+        ),
+        patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
+        patch("apm_cli.utils.file_ops.robust_copy2"),
+        patch("apm_cli.utils.file_ops.robust_copytree"),
+        patch("apm_cli.deps.package_validator.stamp_plugin_version"),
+        patch("apm_cli.deps.github_downloader._rmtree"),
+    ):
+        downloader.download_subdirectory_package(dep_ref, tmp_path / "target")
+
+    assert len(cache_calls) == 2
+    assert cache_calls[0][0] == cache_calls[1][0] == "https://github.com/acme/private"
     manager.resolve_credential_from_git.assert_called_once_with(
         "github.com",
         port=None,
