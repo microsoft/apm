@@ -316,6 +316,8 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
             f"shim_events={shim.events()!r}\n"
             f"http_observations={server.observations!r}"
         )
+        assert "Partial clone unavailable" not in result.stdout
+        assert "Partial clone unavailable" not in result.stderr
         assert (project.root / ".agents/skills/private-package/SKILL.md").is_file()
         assert (project.root / ".agents/skills/private-subpackage/SKILL.md").is_file()
 
