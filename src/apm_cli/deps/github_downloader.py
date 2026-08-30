@@ -362,7 +362,6 @@ class GitHubPackageDownloader:
                     sparse_paths=sparse_paths,
                 )
 
-            base_env = GitAuthEnvBuilder.subprocess_env_dict(self.git_env)
             return self.auth_resolver.try_with_fallback(
                 dep_ref.host or default_host(),
                 _checkout,
@@ -371,7 +370,7 @@ class GitHubPackageDownloader:
                 path=dep_ref.repo_url,
                 host_type=dep_ref.host_type,
                 unauth_first=True,
-                base_env=base_env,
+                base_env=self.git_env,
             )
 
         return cache.get_checkout(

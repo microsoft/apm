@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from base64 import b64decode
 from pathlib import Path
 from types import MappingProxyType
@@ -748,6 +749,8 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
         assert isinstance(env, dict)
         assert kwargs["sparse_paths"] == [dep_ref.virtual_path]
         assert "GIT_HTTP_EXTRAHEADER" not in env
+        assert env["LD_LIBRARY_PATH"] == "/user/lib"
+        assert "LD_LIBRARY_PATH_ORIG" not in env
         if len(cache_calls) == 1:
             assert env["GIT_ASKPASS"] == "echo"
             assert env["GIT_TERMINAL_PROMPT"] == "0"
@@ -776,6 +779,8 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
     persistent_cache.get_checkout.side_effect = cache_checkout
     downloader = _public_downloader(resolver)
     downloader.git_env["GIT_DIR"] = str(tmp_path / "ambient-repository")
+    downloader.git_env["LD_LIBRARY_PATH"] = "/bundle/internal"
+    downloader.git_env["LD_LIBRARY_PATH_ORIG"] = "/user/lib"
     downloader.shared_clone_cache = None
     downloader.persistent_git_cache = persistent_cache
     resolved = MagicMock(resolved_commit="a" * 40)
@@ -787,6 +792,7 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
             {"GIT_HTTP_EXTRAHEADER": "Authorization: Bearer ambient-must-not-leak"},
             clear=True,
         ),
+        patch.object(sys, "frozen", True, create=True),
         patch.object(downloader, "resolve_git_reference", return_value=resolved),
         patch.object(
             downloader,
