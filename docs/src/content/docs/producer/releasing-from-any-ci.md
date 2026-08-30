@@ -19,7 +19,8 @@ shell-script translation of these lines.
 set -euo pipefail
 VERSION="${VERSION:?VERSION must be set, e.g. v1.2.3}"
 
-apm pack --check-versions --check-clean --json > pack-report.json
+apm pack --check-versions --check-clean --json > gate-report.json
+apm pack --json > pack-report.json
 
 for f in build/*.zip .claude-plugin/marketplace.json; do
   [ -f "$f" ] || continue
@@ -37,12 +38,14 @@ gh release create "$VERSION" \
 
 What each command does:
 
-- `apm pack --check-versions --check-clean --json` runs the pack with
-  the release gates enabled. `--check-versions` fails if per-package
+- `apm pack --check-versions --check-clean --json` runs the read-only
+  release gates. `--check-versions` fails if per-package
   versions disagree with `marketplace.versioning.strategy`.
   `--check-clean` fails if the on-disk `marketplace.json` does not
   match what a fresh pack would produce. `--json` writes a
   machine-readable summary to stdout; human logs go to stderr.
+- `apm pack --json` then writes the release artifacts after both gates
+  pass.
 - `sha256sum` produces one sidecar per artifact. Consumers verify
   with `sha256sum -c <file>.sha256`.
 - `gh release create` uploads the bundle, the marketplace artifact,
@@ -76,9 +79,9 @@ jobs:
 
 [`microsoft/apm-action@v1`](https://github.com/microsoft/apm-action)
 with `mode: release` is a convenience wrapper for the canonical
-sequence above. It installs the CLI, runs `apm pack
---check-versions --check-clean --json`, generates the sidecars, and
-calls `gh release create` against the pushed tag. Use it when you
+sequence above. It installs the CLI, runs the read-only gates, packs
+the release artifacts separately, generates the sidecars, and calls
+`gh release create` against the pushed tag. Use it when you
 want one less script to maintain; use the raw `run:` form below when
 you need to customise any step.
 
@@ -102,7 +105,8 @@ artifact format.
         with: { python-version: "3.12" }
       - run: pip install apm-cli
       - run: |
-          apm pack --check-versions --check-clean --json > pack-report.json
+          apm pack --check-versions --check-clean --json > gate-report.json
+          apm pack --json > pack-report.json
           for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
@@ -125,7 +129,8 @@ release:
     - if: '$CI_COMMIT_TAG =~ /^v/'
   script:
     - pip install apm-cli
-    - apm pack --check-versions --check-clean --json > pack-report.json
+    - apm pack --check-versions --check-clean --json > gate-report.json
+    - apm pack --json > pack-report.json
     - |
       for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
@@ -149,7 +154,8 @@ pipeline {
       steps {
         sh '''
           pip install apm-cli
-          apm pack --check-versions --check-clean --json > pack-report.json
+          apm pack --check-versions --check-clean --json > gate-report.json
+          apm pack --json > pack-report.json
           for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
@@ -176,7 +182,8 @@ steps:
   - task: UsePythonVersion@0
     inputs: { versionSpec: "3.12" }
   - script: pip install apm-cli
-  - script: apm pack --check-versions --check-clean --json > pack-report.json
+  - script: apm pack --check-versions --check-clean --json > gate-report.json
+  - script: apm pack --json > pack-report.json
   - script: |
       for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
