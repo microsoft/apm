@@ -234,7 +234,8 @@ content-hash binding in this release: an org `executables.enforce` rung is
 accepted but fail-safe degrades to `recommend` (allowed, still overridable by a
 deny). Inspect the deciding layer for one package with `apm policy explain
 <pkg>`, and surface fleet-wide layer conflicts (packages allowed locally but
-denied by org policy) with `apm doctor`.
+denied by org policy) with `apm doctor`. The same doctor row reports a malformed
+project `executables` block and points to the configuration to fix.
 
 ## Plugin bin/ deployment governance (deprecated alias)
 

@@ -817,6 +817,29 @@ class TestExecutableTrustDriftCheck:
         assert check.informational is True
         assert "disabled" in check.detail.lower()
 
+    @pytest.mark.parametrize(
+        "malformed_block",
+        ["executables: bogus\n", "executables:\n  - bogus\n"],
+    )
+    def test_malformed_executables_block_is_reported(self, tmp_path, malformed_block: str) -> None:
+        from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
+
+        (tmp_path / "apm.yml").write_text(
+            f"name: t\nversion: 0.0.1\n{malformed_block}",
+            encoding="utf-8",
+        )
+
+        check = _executable_trust_drift_check(tmp_path)
+
+        assert check is not None
+        assert check.name == "executable trust"
+        assert check.passed is False
+        assert check.informational is True
+        assert check.detail == (
+            "Invalid executables block: executables must be a mapping with 'allow' "
+            "and/or 'deny' keys. Fix 'executables' in apm.yml."
+        )
+
     def test_no_conflict_passes(self, tmp_path) -> None:
         from apm_cli.commands.marketplace.doctor import _executable_trust_drift_check
         from apm_cli.policy.schema import ApmPolicy
