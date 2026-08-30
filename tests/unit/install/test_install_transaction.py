@@ -228,6 +228,7 @@ def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -
     assert "could not remove activity lock: permission denied" in detail
 
     rerun_logger = MagicMock()
+    rerun_logger.verbose = True
     rerun = InstallTransaction(
         manifest_path=transaction.manifest_path,
         apm_modules_dir=transaction.apm_modules_dir,
@@ -236,7 +237,10 @@ def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -
     )
     rerun.commit(InstallResult())
 
-    rerun_logger.warning.assert_called_once()
+    rerun_logger.warning.assert_called_once_with(
+        "Could not safely remove 1 interrupted-install backup item. "
+        "Stop other APM installs, then delete the paths listed below manually."
+    )
     rerun_detail = rerun_logger.verbose_detail.call_args[0][0]
     assert str(lock_path) in rerun_detail
     assert "orphaned activity lock remains" in rerun_detail

@@ -217,12 +217,21 @@ class ResolutionStagingSession:
                 and not candidate.is_symlink()
                 and not candidate.with_suffix("").exists()
             ):
-                issues.append(
-                    (
-                        candidate,
-                        "orphaned activity lock remains without a staging directory",
+                orphan_lock = FileLock(str(candidate))
+                try:
+                    orphan_lock.acquire(timeout=0)
+                except (OSError, Timeout):
+                    continue
+                try:
+                    issues.append(
+                        (
+                            candidate,
+                            "orphaned activity lock remains without a staging directory",
+                        )
                     )
-                )
+                finally:
+                    with contextlib.suppress(Exception):
+                        orphan_lock.release()
                 continue
             if (
                 candidate == self._staging_root

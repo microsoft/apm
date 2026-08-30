@@ -65,6 +65,41 @@ def test_successful_install_preserves_staging_locked_by_another_process(
         process.wait(timeout=10)
 
 
+def test_successful_install_does_not_report_live_lock_without_staging_root(
+    tmp_path: Path,
+) -> None:
+    """A lock holder is active even before it creates its staging directory."""
+    modules = tmp_path / "apm_modules"
+    staging_parent = modules / ".apm-resolution-staging"
+    staging_parent.mkdir(parents=True)
+    lock_path = staging_parent / f"{'c' * 32}.lock"
+    ready = tmp_path / "lock-only-ready"
+    process = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER, str(lock_path), str(ready)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), "lock-holder process did not acquire the staging lock"
+        logger = MagicMock()
+        transaction = InstallTransaction(
+            manifest_path=tmp_path / "apm.yml",
+            apm_modules_dir=modules,
+            validation=None,
+            logger=logger,
+        )
+
+        transaction.commit(InstallResult())
+
+        logger.warning.assert_not_called()
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
 def test_successful_install_preserves_symlinked_staging_entry(tmp_path: Path) -> None:
     """Cleanup never follows a staging candidate symlink."""
     modules = tmp_path / "apm_modules"
