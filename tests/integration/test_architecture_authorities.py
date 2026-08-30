@@ -23,19 +23,16 @@ def test_resolution_replacement_activation_has_one_owner(tmp_path: Path) -> None
     )
 
     sandbox = tmp_path / "repo"
-    shutil.copytree(
-        root,
-        sandbox,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            ".pytest_cache",
-            "__pycache__",
-            "build",
-            "dist",
-            "node_modules",
-        ),
-    )
+    for relative in (
+        "scripts/lint-resolution-replacement-boundary.py",
+        "src/apm_cli/install/resolution_staging.py",
+        "src/apm_cli/install/phases/resolve.py",
+        "src/apm_cli/install/service.py",
+    ):
+        source = root / relative
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
     duplicate = sandbox / "src/apm_cli/install/service.py"
     duplicate.write_text(
         duplicate.read_text(encoding="utf-8")
@@ -44,19 +41,16 @@ def test_resolution_replacement_activation_has_one_owner(tmp_path: Path) -> None
     )
 
     result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        (sys.executable, "scripts/lint-resolution-replacement-boundary.py"),
         cwd=sandbox,
         capture_output=True,
         text=True,
         check=False,
-        timeout=300,
+        timeout=10,
     )
 
     assert result.returncode == 1
-    assert (
-        "Resolution replacements must stay staged until their canonical publish boundary"
-        in result.stdout
-    )
+    assert "duplicates owner methods: prepare_replacement" in result.stdout
 
 
 def test_generated_bundle_text_writes_are_lf_deterministic() -> None:

@@ -256,10 +256,12 @@ The experimental `external-scanners` feature can invoke a third-party SARIF scan
 
 APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). Use `apm install --update` to accept new upstream content and refresh the lockfile.
 
-Replacements download and validate in an isolated staging directory while the
-current package remains in place. APM publishes the staged tree only after the
-download succeeds, so an interrupted or failed download does not unlink live
-hook scripts from the current package.
+Replacement packages download and pass package-shape validation in an isolated
+staging directory while the current package remains in place. APM publishes the
+staged tree only after those checks succeed, so a failed download does not
+unlink live hook scripts from the current package. Integrity and policy gates
+still run later in the install transaction and roll the replacement back on
+failure.
 
 ```yaml
 # apm.lock.yaml

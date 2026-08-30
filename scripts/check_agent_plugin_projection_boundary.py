@@ -46,6 +46,12 @@ def _calls_public_configuration_thaw(node: ast.AST) -> bool:
 
 
 def _is_validation_package(node: ast.AST) -> bool:
+    if (
+        isinstance(node, ast.Call)
+        and _call_name(node).endswith("._activate_validated_package")
+        and node.args
+    ):
+        node = node.args[0]
     return (
         isinstance(node, ast.Attribute)
         and node.attr == "package"

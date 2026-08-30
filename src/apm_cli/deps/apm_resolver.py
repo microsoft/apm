@@ -76,6 +76,12 @@ class DownloadCallback(Protocol):
     ) -> Path | None: ...
 
 
+class ActivationCallback(Protocol):
+    """Publish a validated download candidate and return its live path."""
+
+    def __call__(self, candidate_path: Path) -> Path: ...
+
+
 class APMDependencyResolver:
     """Handles recursive APM dependency resolution similar to NPM."""
 
@@ -88,6 +94,7 @@ class APMDependencyResolver:
         auth_resolver: object | None = None,
         update_refs: bool = False,
         existing_lockfile: "LockFile | None" = None,
+        activation_callback: ActivationCallback | None = None,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -114,11 +121,14 @@ class APMDependencyResolver:
             existing_lockfile: Existing resolved dependency state used by the
                 canonical ref-drift owner to decide whether a plain install
                 must re-enter the download callback.
+            activation_callback: Optional callback that publishes a downloaded
+                candidate only after this resolver validates it.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
         self._download_callback = download_callback
+        self._activation_callback = activation_callback
         self._update_refs = update_refs
         self._existing_lockfile = existing_lockfile
         # Whether ``download_callback`` accepts ``parent_pkg`` (added in #857).
@@ -1067,6 +1077,8 @@ class APMDependencyResolver:
         # Get the canonical install path for this dependency
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
 
+        downloaded_candidate: Path | None = None
+
         # If package doesn't exist locally, try to download it. Also fall
         # through for a forced semver re-check (see _should_force_recheck).
         if dep_ref.is_local or not install_path.exists() or self._should_force_recheck(dep_ref):
@@ -1104,6 +1116,7 @@ class APMDependencyResolver:
                             )
                         if downloaded_path and downloaded_path.exists():
                             install_path = downloaded_path
+                            downloaded_candidate = downloaded_path
                         else:
                             # Fetch produced no usable path -- release the
                             # reservation so a subsequent retry (or a
@@ -1139,6 +1152,7 @@ class APMDependencyResolver:
                             dep_ref.get_display_name(),
                             exc_info=True,
                         )
+                        return None
 
             # Still doesn't exist after download attempt
             if not install_path.exists():
@@ -1165,7 +1179,7 @@ class APMDependencyResolver:
                 )
             if not validation.package.source:
                 validation.package.source = dep_ref.repo_url
-            return validation.package
+            return self._activate_validated_package(validation.package, downloaded_candidate)
 
         # Look for apm.yml in the install path
         apm_yml_path = install_path / "apm.yml"
@@ -1175,13 +1189,14 @@ class APMDependencyResolver:
             skill_md_path = install_path / "SKILL.md"
             if skill_md_path.exists():
                 # Claude Skill without apm.yml - no transitive deps
-                return APMPackage(
+                package = APMPackage(
                     name=dep_ref.get_display_name(),
                     version="1.0.0",
                     source=dep_ref.repo_url,
                     package_path=install_path,
                     source_path=self._compute_dep_source_path(dep_ref, parent_pkg, install_path),
                 )
+                return self._activate_validated_package(package, downloaded_candidate)
             # No manifest found
             return None
 
@@ -1191,17 +1206,55 @@ class APMDependencyResolver:
         # apm_modules.
         try:
             package = APMPackage.from_apm_yml(apm_yml_path, source_path=dep_source_path)
-            # Ensure source is set for tracking. TODO(#940): the cache key
-            # already considers source_path; this post-construction mutation
-            # of ``source`` (a separate field) is safe today but has the same
-            # shape as the bug we just fixed -- review when refactoring.
-            if not package.source:
-                package.source = dep_ref.repo_url
-            return package
         except FileNotFoundError:
             return None
         except ValueError:
             raise
+        # Ensure source is set for tracking. TODO(#940): the cache key
+        # already considers source_path; this post-construction mutation
+        # of ``source`` (a separate field) is safe today but has the same
+        # shape as the bug we just fixed -- review when refactoring.
+        if not package.source:
+            package.source = dep_ref.repo_url
+        return self._activate_validated_package(package, downloaded_candidate)
+
+    def _activate_validated_package(
+        self,
+        package: APMPackage,
+        downloaded_candidate: Path | None,
+    ) -> APMPackage:
+        """Publish one validated candidate and remap its package paths."""
+        if downloaded_candidate is None or self._activation_callback is None:
+            return package
+        live_path = self._activation_callback(downloaded_candidate)
+        if not live_path.exists():
+            raise FileNotFoundError(f"Validated package was not published: {live_path}")
+        package.package_path = self._remap_candidate_path(
+            package.package_path,
+            downloaded_candidate,
+            live_path,
+        )
+        package.source_path = self._remap_candidate_path(
+            package.source_path,
+            downloaded_candidate,
+            live_path,
+        )
+        return package
+
+    @staticmethod
+    def _remap_candidate_path(
+        path: Path | None,
+        candidate: Path,
+        live_path: Path,
+    ) -> Path | None:
+        """Map a path inside a staged candidate to the published tree."""
+        if path is None:
+            return None
+        try:
+            relative = path.relative_to(candidate)
+        except ValueError:
+            return path
+        return live_path / relative
 
     @staticmethod
     def _is_remote_parent(parent_pkg: APMPackage | None) -> bool:

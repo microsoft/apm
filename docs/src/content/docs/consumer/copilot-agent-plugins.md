@@ -111,7 +111,7 @@ catalog, ledger, settings entry, or loose primitive projection for it.
 | Command | Effect |
 | --- | --- |
 | `apm install` | Materializes the plugin under `apm_modules/`, then rebuilds the catalog and settings entries |
-| `apm install --force` / `apm update` | Refreshes the live bytes; Copilot picks them up on `/restart` or in a new session, with no `copilot plugin update` |
+| `apm install --force` / `apm update` | Downloads and validates replacement package content while the current plugin remains available, then publishes it; a failed refresh keeps the prior content |
 | `apm deps list` | Reports which Agent Plugins APM registers natively |
 | `apm uninstall` / `apm prune` | Removes only APM-owned catalog rows and settings keys, then deletes the generated catalog once it is empty |
 

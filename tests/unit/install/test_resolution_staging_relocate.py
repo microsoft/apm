@@ -23,11 +23,58 @@ def test_replacement_keeps_installed_hook_live_until_publish(tmp_path: Path) -> 
     replacement_hook.parent.mkdir(parents=True)
     replacement_hook.write_text("new hook", encoding="ascii")
 
-    staging.publish_replacement(package, replacement)
+    staging.publish_replacement(replacement)
 
     assert hook.read_text(encoding="ascii") == "new hook"
     staging.rollback()
     assert hook.read_text(encoding="ascii") == "old hook"
+
+
+@pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
+def test_publish_replacement_restores_old_package_when_activation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[BaseException],
+) -> None:
+    """A failed activation must leave the previous hook runnable."""
+    modules = tmp_path / "apm_modules"
+    package = modules / "owner" / "plugin"
+    hook = package / "hooks" / "pre_tool.py"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("old hook", encoding="ascii")
+    staging = ResolutionStagingSession(modules)
+    replacement = staging.prepare_replacement(package)
+    replacement.mkdir(parents=True)
+    real_replace = Path.replace
+
+    def fail_replacement(source: Path, target: Path) -> Path:
+        if source == replacement:
+            raise error_type("injected activation failure")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_replacement)
+
+    with pytest.raises(error_type, match="injected activation failure"):
+        staging.publish_replacement(replacement)
+
+    assert hook.read_text(encoding="ascii") == "old hook"
+    staging.rollback()
+    assert not (modules / ".apm-resolution-staging").exists()
+
+
+def test_prepare_replacement_reserves_destination(tmp_path: Path) -> None:
+    """Parallel callbacks cannot materialize into one physical package path."""
+    modules = tmp_path / "apm_modules"
+    package = modules / "owner" / "plugin"
+    staging = ResolutionStagingSession(modules)
+
+    replacement = staging.prepare_replacement(package)
+
+    with pytest.raises(RuntimeError, match="replacement in progress"):
+        staging.prepare_replacement(package)
+
+    staging.discard_replacement(replacement)
+    assert staging.prepare_replacement(package) == replacement
 
 
 def test_relocate_path_rejects_symlinked_package_directory(tmp_path: Path) -> None:

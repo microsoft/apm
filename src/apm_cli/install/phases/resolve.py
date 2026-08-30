@@ -62,45 +62,6 @@ def _require_package_registry_feature_if_needed(registries_map, existing_lockfil
     return needs_registry
 
 
-def _purge_cached_semver_paths_for_update(
-    *,
-    all_apm_deps,
-    apm_modules_dir,
-    logger,
-    staging_session: ResolutionStagingSession,
-) -> None:
-    """Clear direct semver install paths for update/refresh re-resolution.
-
-    Transitives use resolver recheck; local and proxy dependencies are excluded.
-    """
-    from contextlib import suppress
-
-    from apm_cli.utils.file_ops import robust_rmtree as _rrm
-
-    for _dep in all_apm_deps:
-        if getattr(_dep, "ref_kind", None) != "semver":
-            continue
-        if _dep.is_local:
-            continue
-        if getattr(_dep, "artifactory_prefix", None):
-            continue
-        try:
-            _ip = _dep.get_install_path(apm_modules_dir)
-        except Exception:  # noqa: S112
-            # Path computation failure (e.g. malformed dep) is non-fatal
-            # here -- the resolver will surface a real error downstream.
-            continue
-        if _ip.exists():
-            staging_session.prepare_path(_ip)
-            with suppress(Exception):
-                _rrm(_ip, ignore_errors=True)
-            if logger:
-                logger.verbose_detail(
-                    f"[*] --update: cleared cached install path for "
-                    f"{_dep.get_unique_key()} to force semver re-resolution"
-                )
-
-
 def _prepare_existing_materialization_paths(
     ctx: InstallContext,
     staging_session: ResolutionStagingSession,
@@ -154,6 +115,15 @@ def _materialization_migration_logger(
     return report
 
 
+def _with_preserved_install_hint(message: str, install_path: Path | None) -> str:
+    """Explain that a failed replacement left the current install active."""
+    if install_path is None or not install_path.exists():
+        return message
+    return (
+        f"{message}. The existing installation remains active; fix the cause and retry the install."
+    )
+
+
 def _prepare_callback_materialization_path(
     dependency: Any,
     modules_dir: Path,
@@ -171,17 +141,6 @@ def _prepare_callback_materialization_path(
             reader=materialization_reader,
             on_migrate=_materialization_migration_logger(logger, modules_dir),
         )
-
-
-def _publish_materialized_replacement(
-    staging_session: ResolutionStagingSession,
-    install_path: Path,
-    replacement_path: Path,
-    result: Any,
-) -> Any:
-    """Publish a completed resolution download and preserve its result."""
-    staging_session.publish_replacement(install_path, replacement_path)
-    return result
 
 
 def _load_lockfile(ctx: InstallContext) -> None:
@@ -475,24 +434,7 @@ def _resolve_dependencies(
                 transitive ``../sibling`` resolves against the declaring
                 package's directory rather than the root consumer (#857).
         """
-        install_path = _prepare_callback_materialization_path(
-            dep_ref,
-            modules_dir,
-            staging_session,
-            materialization_reader,
-            callback_lock,
-            logger,
-        )
-        # Cache reuse stays behind the canonical ref-drift owner.
-        if install_path.exists():
-            _locked_for_recheck = (
-                existing_lockfile.get_dependency(dep_ref.get_unique_key())
-                if existing_lockfile
-                else None
-            )
-            if not should_force_ref_recheck(dep_ref, _locked_for_recheck, update_refs=update_refs):
-                return install_path
-        replacement_path = staging_session.prepare_replacement(install_path)
+        install_path = replacement_path = None
         # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
         # users see the install advancing past silent transitive lookups.
         # Under F7's parallel BFS this callback may run on a worker
@@ -511,6 +453,28 @@ def _resolve_dependencies(
                 if _tui is None or not _tui.is_animating():
                     logger.resolving_heartbeat(_display)
         try:
+            install_path = _prepare_callback_materialization_path(
+                dep_ref,
+                modules_dir,
+                staging_session,
+                materialization_reader,
+                callback_lock,
+                logger,
+            )
+            # Cache reuse stays behind the canonical ref-drift owner.
+            if install_path.exists():
+                _locked_for_recheck = (
+                    existing_lockfile.get_dependency(dep_ref.get_unique_key())
+                    if existing_lockfile
+                    else None
+                )
+                if not should_force_ref_recheck(
+                    dep_ref,
+                    _locked_for_recheck,
+                    update_refs=update_refs,
+                ):
+                    return install_path
+            replacement_path = staging_session.prepare_replacement(install_path)
             # ─── Registry-sourced dep (design §8) ──────────────────────
             # Routed before local/git so the registry resolver owns the
             # download for source=="registry" entries. Lockfile re-installs
@@ -554,31 +518,21 @@ def _resolve_dependencies(
                     from apm_cli.drift import detect_ref_change as _detect_ref_change
 
                     if not _detect_ref_change(dep_ref, _locked_reg, update_refs=False):
-                        _publish_materialized_replacement(
-                            staging_session,
-                            install_path,
+                        registry_resolver.download_from_lockfile(
+                            dep_ref,
                             replacement_path,
-                            registry_resolver.download_from_lockfile(
-                                dep_ref,
-                                replacement_path,
-                                resolved_url=_locked_reg.resolved_url,
-                                resolved_hash=_locked_reg.resolved_hash,
-                                version=_locked_reg.version,
-                            ),
+                            resolved_url=_locked_reg.resolved_url,
+                            resolved_hash=_locked_reg.resolved_hash,
+                            version=_locked_reg.version,
                         )
                         callback_downloaded[dep_ref.get_unique_key()] = None
-                        return install_path
-                _publish_materialized_replacement(
-                    staging_session,
-                    install_path,
-                    replacement_path,
-                    registry_resolver.download_package(dep_ref, replacement_path),
-                )
+                        return replacement_path
+                registry_resolver.download_package(dep_ref, replacement_path)
                 _annotate_registry_dep_ref(dep_ref, registry_resolver)
                 # Mark as already-downloaded so the parallel pre-download
                 # phase skips this dep. No SHA for registry deps.
                 callback_downloaded[dep_ref.get_unique_key()] = None
-                return install_path
+                return replacement_path
 
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
@@ -619,13 +573,12 @@ def _resolve_dependencies(
                     logger=logger,
                 )
                 if result_path:
-                    staging_session.publish_replacement(install_path, replacement_path)
                     with callback_lock:
                         callback_downloaded[dep_ref.get_unique_key()] = None
                     _tui = getattr(ctx, "tui", None)
                     if _tui is not None:
                         _tui.task_completed(dep_ref.get_unique_key())
-                    return install_path
+                    return replacement_path
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
                     _tui.task_failed(dep_ref.get_unique_key())
@@ -693,12 +646,7 @@ def _resolve_dependencies(
             )
 
             # Silent download - no progress display for transitive deps
-            result = _publish_materialized_replacement(
-                staging_session,
-                install_path,
-                replacement_path,
-                downloader.download_package(download_dep, replacement_path),
-            )
+            result = downloader.download_package(download_dep, replacement_path)
             # Capture resolved commit SHA for lockfile
             resolved_sha = None
             if result and hasattr(result, "resolved_reference") and result.resolved_reference:
@@ -711,8 +659,10 @@ def _resolve_dependencies(
             _tui = getattr(ctx, "tui", None)
             if _tui is not None:
                 _tui.task_completed(dep_ref.get_unique_key())
-            return install_path
+            return replacement_path
         except Exception as e:
+            if replacement_path is not None:
+                staging_session.discard_replacement(replacement_path)
             dep_display = dep_ref.get_display_name()
             dep_key = dep_ref.get_unique_key()
             is_direct = dep_key in direct_dep_keys
@@ -750,6 +700,7 @@ def _resolve_dependencies(
             else:
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
+            fail_msg = _with_preserved_install_hint(fail_msg, install_path)
 
             # Verbose: inline detail via logger (single output path).
             # Deferred diagnostics below cover the non-logger case.
@@ -770,17 +721,10 @@ def _resolve_dependencies(
     # ------------------------------------------------------------------
     # 6. Resolver creation + dependency resolution
     # ------------------------------------------------------------------
-    if update_refs:
-        _purge_cached_semver_paths_for_update(
-            all_apm_deps=ctx.all_apm_deps,
-            apm_modules_dir=ctx.apm_modules_dir,
-            logger=ctx.logger,
-            staging_session=staging_session,
-        )
-
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
         download_callback=download_callback,
+        activation_callback=staging_session.publish_replacement,
         auth_resolver=ctx.auth_resolver,
         update_refs=update_refs,
         existing_lockfile=existing_lockfile,

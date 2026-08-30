@@ -860,6 +860,80 @@ class TestTryLoadDependencyPackageForceRecheck:
         assert resolver._try_load_dependency_package(ref) is None
         assert (pkg_dir / "apm.yml").exists()
 
+    def test_callback_exception_does_not_reuse_existing_path(self, tmp_path: Path) -> None:
+        """A callback exception must fail closed instead of validating stale bytes."""
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        ref = self._semver_dep_ref(pkg_dir)
+
+        def fail_callback(*_args, **_kwargs):
+            raise RuntimeError("injected replacement failure")
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=fail_callback,
+            update_refs=True,
+        )
+
+        assert resolver._try_load_dependency_package(ref) is None
+        assert (pkg_dir / "apm.yml").exists()
+
+    def test_invalid_candidate_is_not_activated(self, tmp_path: Path) -> None:
+        """A downloaded candidate must pass validation before publication."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        live.mkdir(parents=True)
+        (live / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("not: a-package\n")
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=lambda path: activated.append(path) or live,
+            update_refs=True,
+        )
+
+        with pytest.raises(ValueError):
+            resolver._try_load_dependency_package(ref)
+
+        assert activated == []
+        assert (live / "apm.yml").read_text() == "name: pkg\nversion: 1.0.0\n"
+
+    def test_valid_candidate_is_activated_after_validation(self, tmp_path: Path) -> None:
+        """A valid candidate publishes once and exposes the live package path."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("name: pkg\nversion: 2.0.0\n")
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live)
+
+        def activate(path: Path) -> Path:
+            activated.append(path)
+            live.parent.mkdir(parents=True)
+            path.replace(live)
+            return live
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=activate,
+            update_refs=True,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert activated == [candidate]
+        assert package is not None
+        assert package.version == "2.0.0"
+        assert package.package_path == live
+
     def test_existing_path_without_lock_calls_callback_on_plain_install(
         self,
         tmp_path: Path,

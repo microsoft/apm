@@ -144,14 +144,17 @@ def test_refresh_keeps_registered_hook_live_while_replacement_downloads(
     downloader._protocol_pref = None
 
     class FakeResolver:
-        def __init__(self, *, download_callback, **_kwargs):
+        def __init__(self, *, download_callback, activation_callback, **_kwargs):
             self._download_callback = download_callback
+            self._activation_callback = activation_callback
             self.marketplace_provenance = {}
             self._rejected_remote_local_keys = set()
 
         def resolve_dependencies(self, _anchor):
             downloaded = self._download_callback(dependency, modules)
-            assert downloaded == package
+            assert downloaded != package
+            assert hook.read_text(encoding="ascii") == "old hook"
+            assert self._activation_callback(downloaded) == package
             return graph
 
     ctx = _make_ctx(tmp_path)

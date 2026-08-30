@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Marketplace installs now materialize catalog-only LSP and MCP metadata
   without requiring a package manifest in the downloaded source
   (by @lkshrk, #2709).
+- Plugin refreshes now keep the existing package and its registered hooks live
+  while replacement content downloads and validates. Failed refreshes retain
+  the prior package instead of accepting stale content. (#2723)
 
 ## [0.29.0] - 2026-08-30
 

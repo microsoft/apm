@@ -2004,30 +2004,8 @@ if ! uv run --extra dev python scripts/lint-bootstrap-project-name.py; then
 fi
 
 echo "[*] AC36: resolution replacement activation authority"
-resolution_replacement_owner="src/apm_cli/install/resolution_staging.py"
-resolution_replacement_consumer="src/apm_cli/install/phases/resolve.py"
-resolution_replacement_duplicate_defs=$(
-    grep -rEn --include='*.py' \
-        '^[[:space:]]*def (prepare_replacement|publish_replacement)\(' \
-        src/apm_cli \
-        | grep -v "^${resolution_replacement_owner}:" \
-        | grep -v 'architecture-authority-exempt:' \
-        || true
-)
-if [ "$(grep -Ec '^    def (prepare_replacement|publish_replacement)\(' \
-        "$resolution_replacement_owner")" -ne 2 ] \
-    || ! grep -q 'replacement_path = staging_session.prepare_replacement(install_path)' \
-        "$resolution_replacement_consumer" \
-    || ! grep -q 'staging_session.publish_replacement(install_path, replacement_path)' \
-        "$resolution_replacement_consumer" \
-    || [ "$(grep -Fc '_publish_materialized_replacement(' \
-        "$resolution_replacement_consumer")" -lt 4 ] \
-    || grep -q 'staging_session.prepare_path(install_path)' \
-        "$resolution_replacement_consumer" \
-    || [ -n "$resolution_replacement_duplicate_defs" ]; then
+if ! uv run --extra dev python scripts/lint-resolution-replacement-boundary.py; then
     echo "[x] Resolution replacements must stay staged until their canonical publish boundary"
-    [ -n "$resolution_replacement_duplicate_defs" ] \
-        && echo "$resolution_replacement_duplicate_defs"
     violations=$((violations + 1))
 fi
 
