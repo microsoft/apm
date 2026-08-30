@@ -62,3 +62,41 @@ def test_generated_footer_guard_rejects_parallel_wording(tmp_path: Path) -> None
 
     assert result.returncode == 1
     assert "Generated footer wording must route through compilation/footer.py" in result.stdout
+
+
+def test_generated_footer_guard_requires_executable_consumer_call(tmp_path: Path) -> None:
+    """A comment mentioning the owner must not satisfy the boundary guard."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    paths = (
+        "scripts/check_agents_footer_authority.py",
+        "src/apm_cli/compilation/agents_compiler.py",
+        "src/apm_cli/compilation/claude_formatter.py",
+        "src/apm_cli/compilation/distributed_compiler.py",
+        "src/apm_cli/compilation/footer.py",
+        "src/apm_cli/compilation/template_builder.py",
+    )
+    for relative_path in paths:
+        source = root / relative_path
+        destination = sandbox / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+    consumer = sandbox / "src/apm_cli/compilation/template_builder.py"
+    source = consumer.read_text(encoding="utf-8")
+    source = source.replace(
+        "sections.extend(build_generation_footer(agents_md_mode))",
+        "sections.extend([])  # build_generation_footer( is not executable",
+    )
+    consumer.write_text(source, encoding="utf-8")
+
+    result = subprocess.run(
+        (sys.executable, "scripts/check_agents_footer_authority.py", str(sandbox)),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "template_builder.py: generated footer must use" in result.stdout

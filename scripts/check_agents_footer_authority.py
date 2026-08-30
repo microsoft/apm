@@ -27,6 +27,17 @@ def _string_constants(path: Path) -> list[str]:
     ]
 
 
+def _calls_function(path: Path, function_name: str) -> bool:
+    """Return whether executable code calls the named function."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == function_name
+        for node in ast.walk(tree)
+    )
+
+
 def find_violations(root: Path) -> list[str]:
     """Find duplicate footer wording or consumers bypassing the owner."""
     owner = root / _OWNER
@@ -42,8 +53,7 @@ def find_violations(root: Path) -> list[str]:
 
     for relative_path in _CONSUMERS:
         consumer = root / relative_path
-        source = consumer.read_text(encoding="utf-8")
-        if "build_generation_footer(" not in source:
+        if not _calls_function(consumer, "build_generation_footer"):
             violations.append(f"{relative_path}: generated footer must use build_generation_footer")
 
     compilation_root = root / "src/apm_cli/compilation"
