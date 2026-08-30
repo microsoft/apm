@@ -123,10 +123,10 @@ class InstallTransaction:
             if self._rolled_back:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
             if not self.committed:
-                self._resolution.commit()
+                cleanup_issues = self._resolution.commit() or []
                 self.committed = True
                 self._completed = True
-                cleanup_issues = self._resolution.remove_abandoned_roots()
+                cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                 self._report_resolution_cleanup_issues(cleanup_issues)
             if (
                 self._validation is not None
@@ -156,7 +156,8 @@ class InstallTransaction:
             with self._lock:
                 if self._rolled_back:
                     raise RuntimeError("Cannot complete an install transaction after rollback")
-                self._resolution.rollback()
+                cleanup_issues = self._resolution.rollback() or []
+                self._report_resolution_cleanup_issues(cleanup_issues)
                 self._completed = True
             return result
         if result.disposition in {
@@ -173,7 +174,8 @@ class InstallTransaction:
         with self._lock:
             if self.committed or self._rolled_back:
                 return
-            self._resolution.rollback()
+            cleanup_issues = self._resolution.rollback() or []
+            self._report_resolution_cleanup_issues(cleanup_issues)
             self._restore_manifest()
             self._rolled_back = True
             self._completed = True

@@ -199,6 +199,35 @@ def test_cleanup_failure_cannot_roll_back_committed_package(tmp_path: Path) -> N
     assert "permission denied" in transaction._logger.verbose_detail.call_args[0][0]
 
 
+def test_current_lock_cleanup_failure_is_reported_after_commit(tmp_path: Path) -> None:
+    """A retained current-session lock gets the same actionable diagnostic."""
+    transaction = _transaction(tmp_path)
+    package = transaction.apm_modules_dir / "package"
+    package.mkdir()
+    transaction.resolution.prepare_path(package)
+    package.mkdir()
+    lock_path = transaction.resolution._staging_lock_path
+    original_unlink = Path.unlink
+
+    def fail_lock_unlink(path: Path, missing_ok: bool = False) -> None:
+        if path == lock_path:
+            raise OSError("permission denied")
+        original_unlink(path, missing_ok=missing_ok)
+
+    with patch.object(Path, "unlink", autospec=True, side_effect=fail_lock_unlink):
+        result = transaction.commit(InstallResult())
+
+    assert result.committed is True
+    transaction._logger.warning.assert_called_once_with(
+        "Could not safely remove 1 interrupted-install backup item. "
+        "Stop other APM installs, then run again with --verbose "
+        "to see paths you can delete manually."
+    )
+    detail = transaction._logger.verbose_detail.call_args[0][0]
+    assert str(lock_path) in detail
+    assert "could not remove activity lock: permission denied" in detail
+
+
 def test_rollback_releases_staging_lock_when_root_cleanup_fails(tmp_path: Path) -> None:
     """Rollback never leaves an activity lock held after restoration."""
     transaction = _transaction(tmp_path)

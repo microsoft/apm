@@ -76,12 +76,12 @@ class ResolutionStagingSession:
             source.replace(destination)
             self._relocations.append((source, destination))
 
-    def commit(self) -> None:
+    def commit(self) -> list[tuple[Path, str]]:
         """Discard preserved pre-resolution contents after successful validation."""
         self._remove_staging_root()
         self._backups.clear()
         self._relocations.clear()
-        self._release_staging_lock()
+        return self._release_staging_lock()
 
     def remove_abandoned_roots(self) -> list[tuple[Path, str]]:
         """Remove inactive backups created by lock-aware APM versions."""
@@ -95,8 +95,9 @@ class ResolutionStagingSession:
                 )
             ]
 
-    def rollback(self) -> None:
+    def rollback(self) -> list[tuple[Path, str]]:
         """Remove session-created paths and restore every replaced path."""
+        cleanup_issues: list[tuple[Path, str]] = []
         with self._lock:
             for path, backup in reversed(self._backups.items()):
                 if path.exists():
@@ -117,7 +118,7 @@ class ResolutionStagingSession:
             try:
                 self._remove_staging_root()
             finally:
-                self._release_staging_lock()
+                cleanup_issues.extend(self._release_staging_lock())
             if (
                 not self._modules_existed
                 and self._modules_dir.exists()
@@ -126,6 +127,7 @@ class ResolutionStagingSession:
                 self._modules_dir.rmdir()
             self._backups.clear()
             self._relocations.clear()
+        return cleanup_issues
 
     def _remove_empty_parents(self, path: Path) -> None:
         """Remove empty migration-created parents below ``apm_modules``."""
