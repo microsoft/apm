@@ -72,10 +72,10 @@ def test_repository_registry_is_complete_without_a_markdown_mirror() -> None:
         "marketplace-plugins.json",
         "contracts-tooling.json",
     )
-    assert len(registry.owners) == 54
-    assert len({owner.id for owner in registry.owners}) == 54
-    assert len({owner.decision for owner in registry.owners}) == 54
-    assert len({selector for owner in registry.owners for selector in owner.selectors}) == 71
+    assert len(registry.owners) == 55
+    assert len({owner.id for owner in registry.owners}) == 55
+    assert len({owner.decision for owner in registry.owners}) == 55
+    assert len({selector for owner in registry.owners for selector in owner.selectors}) == 72
     assert all(owner.guards for owner in registry.owners)
 
 

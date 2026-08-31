@@ -6,7 +6,7 @@ runner already proves the registry and the rule catalog agree *by name* and that
 every guard executes exactly once per run.  Names prove nothing about teeth: a
 rule whose body was gutted still registers its guard ID and still runs.
 
-This file supplies the missing half of that contract.  For each of the 54
+This file supplies the missing half of that contract.  For each of the 55
 registered owner guards it pins one minimal, meaningful source mutation -- a
 surgical edit that kills a load-bearing sub-condition of the owning decision --
 and asserts the one rule that owns that guard reports a real `Violation`.
@@ -75,6 +75,14 @@ class MutationCase:
 
 
 MUTATIONS: tuple[MutationCase, ...] = (
+    MutationCase(
+        guard_id="contracts-tooling-generation-footer",
+        rule_id="contracts-tooling-generation-footer",
+        path="src/apm_cli/compilation/footer.py",
+        old="def build_generation_footer(",
+        new="def build_generation_footer_v2(",
+        intent="Generated footer owner loses the one canonical builder definition.",
+    ),
     MutationCase(
         guard_id="contracts-tests-taxonomy-classification",
         rule_id="contracts-tests-taxonomy-classification",

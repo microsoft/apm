@@ -16,6 +16,9 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+from scripts.architecture_linter.checks.contracts_generation_footer import (
+    check_generation_footer_authority,
+)
 from scripts.architecture_linter.checks.contracts_legacy import LEGACY_CHECKS
 from scripts.architecture_linter.checks.contracts_structural_authorities import (
     find_binary_selection_violations,
@@ -48,6 +51,9 @@ _GUARD_APPLY_TO = "contracts-tooling-apply-to-placement"
 
 
 _GUARD_FRONTMATTER = "contracts-tooling-frontmatter-yaml"
+
+
+_GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
 
 _SRC_PREFIX = "src/apm_cli/"
@@ -632,6 +638,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_FRONTMATTER,
         "Frontmatter BOM decoding and bounded YAML parsing stay owned by utils/yaml_io.py.",
         check_frontmatter_yaml,
+    ),
+    _owner_rule(
+        _GUARD_GENERATION_FOOTER,
+        "Generated-content footer wording stays owned by compilation/footer.py.",
+        lambda provider: check_generation_footer_authority(provider, _GUARD_GENERATION_FOOTER),
     ),
     _structural_rule(
         _CONTRACT_RULE_ID,

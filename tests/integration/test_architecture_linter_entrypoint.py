@@ -279,7 +279,7 @@ def test_metrics_write_error_fails_closed(
     """A metrics destination that cannot be written flips the exit code to 1.
 
     Uses a tiny synthetic repo and monkeypatched fake rule groups (not the
-    real 102-rule catalog) so this stays fast: only the metrics-write step
+    real 103-rule catalog) so this stays fast: only the metrics-write step
     is under test here.
     """
     _write_synthetic_repo(tmp_path, ["only-guard"])
@@ -372,7 +372,7 @@ def test_mutated_run_still_executes_every_registered_owner_guard_exactly_once(
     registry = load_registry(mutated_report.copy_root / ".apm/architecture/owners", inventory.files)
     registered_guard_ids = {guard for owner in registry.owners for guard in owner.guards}
 
-    assert len(registered_guard_ids) == 54
+    assert len(registered_guard_ids) == 55
     assert not any(failure.stage == "guard" for failure in report.failures)
     for guard_id in registered_guard_ids:
         assert guard_hits.get(guard_id) == 1
@@ -457,7 +457,7 @@ def test_python_selected_rule_api_selects_one_real_rule_with_no_cli_equivalent()
 # ---------------------------------------------------------------------------
 # Shared synthetic-repo helpers for the metrics-write-error test above.
 # `run()`'s six group-module imports are monkeypatched with fake, trivial
-# modules so this test never touches the real 102-rule catalog.
+# modules so this test never touches the real 103-rule catalog.
 # ---------------------------------------------------------------------------
 
 

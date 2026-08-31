@@ -379,6 +379,116 @@ def test_manifestless_virtual_package_is_skipped(tmp_path: Path) -> None:
     assert view.problems == ()
 
 
+def test_manifestless_virtual_hook_package_is_skipped(tmp_path: Path) -> None:
+    """A matching virtual hook-package shape legitimately omits apm.yml."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        virtual_path="packages/git-hooks",
+        is_virtual=True,
+        package_type="hook_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text('{"hooks": {}}\n', encoding="ascii")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not (package_dir / "apm.yml").exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_missing_virtual_hook_package_records_problem(tmp_path: Path) -> None:
+    """Lock metadata alone cannot waive an entirely absent hook package."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        virtual_path="packages/git-hooks",
+        is_virtual=True,
+        package_type="hook_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not package_dir.exists()
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_hook_package_requires_virtual_subdirectory(tmp_path: Path) -> None:
+    """A hook shape alone cannot waive the manifest for a non-virtual package."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        package_type="hook_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text('{"hooks": {}}\n', encoding="ascii")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_virtual_hook_package_requires_matching_lock_type(
+    tmp_path: Path,
+) -> None:
+    """A detected virtual hook package cannot waive mismatched lock metadata."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        virtual_path="packages/git-hooks",
+        is_virtual=True,
+        package_type="claude_skill",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text('{"hooks": {}}\n', encoding="ascii")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_locked_virtual_hook_package_requires_matching_detected_type(
+    tmp_path: Path,
+) -> None:
+    """Hook lock metadata cannot waive a different manifestless package shape."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        virtual_path="packages/git-hooks",
+        is_virtual=True,
+        package_type="hook_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    package_dir.mkdir(parents=True)
+    (package_dir / "SKILL.md").write_text("# Not a hook package\n", encoding="ascii")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
 def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
     tmp_path: Path,
 ) -> None:

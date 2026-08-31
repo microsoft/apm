@@ -9,12 +9,12 @@ Covers, in order:
   collectors, and the AST-visit counter, all from one walk.
 * :data:`runner.GROUP_MODULE_NAMES` and :func:`runner.registered_rules` --
   the fixed six-group catalog and its bidirectional guard equivalence with
-  the real 54-guard owner registry.
+  the real 55-guard owner registry.
 * :func:`runner.run` aggregation and fail-closed mechanics -- missing
   groups, duplicate rule/guard IDs, unknown rule selection, and every
   malformed-result category -- exercised through fully synthetic,
   monkeypatched rule groups so these engine-mechanics tests stay fast and
-  independent of the real 102-rule catalog.
+  independent of the real 103-rule catalog.
 * :mod:`scripts.architecture_linter.diagnostics` -- deterministic ordering
   and strict ASCII ``path:line:column: rule-id message`` rendering.
 * The Python-only ``selected_rule_ids`` test API, exercised against the
@@ -376,7 +376,7 @@ def test_facts_provider_skips_ast_parsing_for_non_python_files(tmp_path: Path) -
 
 # ---------------------------------------------------------------------------
 # Section C: the fixed six-group catalog and its guard equivalence with the
-# real 54-guard owner registry.
+# real 55-guard owner registry.
 # ---------------------------------------------------------------------------
 
 
@@ -556,6 +556,7 @@ contracts-tooling-apply-to-placement
 contracts-tooling-cached-policy-shape
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
+contracts-tooling-generation-footer
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
@@ -671,8 +672,8 @@ def test_registered_rule_ids_are_unique_and_stable_across_calls() -> None:
     assert {rule.group for rule in first} == set(runner.GROUP_MODULE_NAMES)
 
 
-def test_registered_rule_guard_ids_equal_the_54_registry_guards() -> None:
-    """Rule-declared guards and registry-referenced guards are the same 54 IDs."""
+def test_registered_rule_guard_ids_equal_the_55_registry_guards() -> None:
+    """Rule-declared guards and registry-referenced guards are the same 55 IDs."""
     rules = runner.registered_rules()
     inventory = build_inventory(REAL_ROOT)
     registry = load_registry(REAL_ROOT / ".apm/architecture/owners", inventory.files)
@@ -680,7 +681,7 @@ def test_registered_rule_guard_ids_equal_the_54_registry_guards() -> None:
     rule_guard_ids = {guard for rule in rules for guard in rule.guard_ids}
     registry_guard_ids = {guard for owner in registry.owners for guard in owner.guards}
 
-    assert len(registry_guard_ids) == 54
+    assert len(registry_guard_ids) == 55
     assert rule_guard_ids == registry_guard_ids
     assert all(len(set(rule.guard_ids)) == len(rule.guard_ids) for rule in rules)
 
@@ -689,7 +690,7 @@ def test_registered_rule_guard_ids_equal_the_54_registry_guards() -> None:
 # Section D: `run()` aggregation and fail-closed mechanics.
 #
 # These use fully synthetic, monkeypatched rule groups instead of the real
-# 102-rule catalog: `runner._GROUP_IMPORTS` is the module-level tuple both
+# 103-rule catalog: `runner._GROUP_IMPORTS` is the module-level tuple both
 # `run()` and `registered_rules()` read at call time, so replacing it (and
 # restoring it via `monkeypatch`) lets these tests drive the real engine
 # through engineered failure modes in milliseconds, fully isolated from
@@ -1694,7 +1695,7 @@ def test_format_violation_adds_display_only_stable_legacy_ac_aliases() -> None:
 
 # ---------------------------------------------------------------------------
 # Section F: the Python-only `selected_rule_ids` test API against the real
-# registered rules. Selecting one real rule out of 102 keeps this fast (well
+# registered rules. Selecting one real rule out of 103 keeps this fast (well
 # under a second) -- it is not a full-catalog run.
 # ---------------------------------------------------------------------------
 

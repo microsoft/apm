@@ -35,6 +35,13 @@
       "owner": "utils/yaml_io.py (load_frontmatter, _BoundedYAMLHandler)",
       "selectors": ["src/apm_cli/utils/yaml_io.py"],
       "guards": ["contracts-tooling-frontmatter-yaml"]
+    },
+    {
+      "id": "generated-content-footer-wording",
+      "decision": "Generated-content footer ownership wording",
+      "owner": "compilation/footer.py (build_generation_footer)",
+      "selectors": ["src/apm_cli/compilation/footer.py"],
+      "guards": ["contracts-tooling-generation-footer"]
     }
   ]
 }

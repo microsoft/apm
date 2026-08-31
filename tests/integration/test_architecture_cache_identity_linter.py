@@ -607,7 +607,7 @@ def test_owned_modules_stay_within_the_module_line_budget(relative: str) -> None
 def test_cache_identity_rule_guard_surface_is_unchanged() -> None:
     """Adding the structural half did not change the rule's guard mapping.
 
-    The whole-catalog "these are exactly the 54 registry guards" contract is
+    The whole-catalog "these are exactly the 55 registry guards" contract is
     owned by `tests/unit/scripts/test_architecture_runner.py`; this asserts
     only the local invariant this change could have broken.
     """
