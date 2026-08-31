@@ -38,7 +38,7 @@ import platform
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -346,16 +346,15 @@ def parse_project_script_file(path: Path) -> list[ScriptEntry]:
 def _get_policy_scripts_dir() -> Path:
     """Return the platform-specific policy scripts directory.
 
-    ``ProgramData`` is not a fixed ``C:`` path on Windows -- it's stored in
-    the registry as an unexpanded ``%SystemDrive%\\ProgramData`` and only
-    equals ``C:\\ProgramData`` when the system drive is ``C:``. Resolving it
-    from the environment (which Windows always populates) instead of a
-    literal keeps the admin policy tier readable on a machine whose system
-    drive differs (apm#2684).
+    Windows normally supplies an absolute ``ProgramData`` environment value.
+    Fall back to its historical default when that value is missing or unsafe.
     """
     system = platform.system()
     if system == "Windows":
-        return Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "APM" / "policy.d"
+        program_data = os.environ.get("PROGRAMDATA")
+        if not program_data or not PureWindowsPath(program_data).is_absolute():
+            program_data = r"C:\ProgramData"
+        return Path(program_data) / "APM" / "policy.d"
     return Path("/etc/apm/policy.d")
 
 
