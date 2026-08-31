@@ -27,7 +27,7 @@ class LLMRuntime(RuntimeAdapter):
                 text=True,
                 encoding="utf-8",
                 check=True,
-                env=build_child_tls_env(os.environ),
+                env=build_child_tls_env(os.environ, runtime_name="llm"),
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise RuntimeError("llm CLI not found. Please install: pip install llm")  # noqa: B904
@@ -54,7 +54,9 @@ class LLMRuntime(RuntimeAdapter):
             cmd.append(prompt_content)
 
             # Execute the command with real-time streaming
-            output_lines, return_code = _stream_subprocess_output(cmd)
+            output_lines, return_code = _stream_subprocess_output(
+                cmd, env=build_child_tls_env(os.environ, runtime_name="llm")
+            )
 
             if return_code != 0:
                 full_output = "".join(output_lines)
@@ -81,7 +83,7 @@ class LLMRuntime(RuntimeAdapter):
                 text=True,
                 encoding="utf-8",
                 check=True,
-                env=build_child_tls_env(os.environ),
+                env=build_child_tls_env(os.environ, runtime_name="llm"),
             )
             models = {}
             for line in result.stdout.strip().split("\n"):
@@ -134,7 +136,7 @@ class LLMRuntime(RuntimeAdapter):
                 text=True,
                 encoding="utf-8",
                 check=True,
-                env=build_child_tls_env(os.environ),
+                env=build_child_tls_env(os.environ, runtime_name="llm"),
             )
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):

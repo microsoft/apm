@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `APM_EXTRA_CA_BUNDLE` now adds an enterprise CA bundle without replacing
+  existing trust. APM applies it to parent Requests and truststore-backed Python
+  HTTPS, snapshots `certifi` plus the extra CA for Python/Requests children,
+  refreshes the managed `llm` bootstrap, and propagates the validated extra
+  snapshot to Node without overwriting an explicit `NODE_EXTRA_CA_CERTS`.
+  (closes #2034)
+
 ### Fixed
 
 - Windows admin lifecycle policies now resolve from `%ProgramData%` instead of

@@ -409,6 +409,28 @@ class TestExecuteRuntimeCommandRuntimes:
     def setup_method(self) -> None:
         self.runner = ScriptRunner()
 
+    @patch("apm_cli.core.tls_trust.build_child_tls_env")
+    @patch("subprocess.run")
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    def test_runtime_spawn_uses_tls_child_environment(
+        self,
+        _mock_bin: MagicMock,
+        mock_run: MagicMock,
+        mock_child_env: MagicMock,
+    ) -> None:
+        child_env = {"BASE": "parent", "INLINE": "command", "TLS_CHILD": "derived"}
+        mock_child_env.return_value = child_env
+        mock_run.return_value.returncode = 0
+
+        self.runner._execute_runtime_command(
+            "INLINE=command codex exec", "content", {"BASE": "parent"}
+        )
+
+        mock_child_env.assert_called_once_with(
+            {"BASE": "parent", "INLINE": "command"}, runtime_name="codex"
+        )
+        assert mock_run.call_args.kwargs["env"] is child_env
+
     @patch("subprocess.run")
     @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
     def test_copilot_uses_p_flag(self, _mock_bin: MagicMock, mock_run: MagicMock) -> None:
@@ -892,11 +914,18 @@ class TestExecuteScriptCommand:
     """Tests for ScriptRunner._execute_script_command."""
 
     @patch("subprocess.run")
+    @patch("apm_cli.core.tls_trust.build_child_tls_env")
     @patch("apm_cli.core.script_runner.setup_runtime_environment")
     def test_shell_execution_when_no_runtime_content(
-        self, mock_env: MagicMock, mock_run: MagicMock
+        self,
+        mock_env: MagicMock,
+        mock_child_env: MagicMock,
+        mock_run: MagicMock,
     ) -> None:
-        mock_env.return_value = {}
+        parent_env = {"PARENT": "value"}
+        child_env = {"PARENT": "value", "TLS_CHILD": "derived"}
+        mock_env.return_value = parent_env
+        mock_child_env.return_value = child_env
         mock_run.return_value.returncode = 0
         runner = ScriptRunner()
         with patch.object(
@@ -906,9 +935,49 @@ class TestExecuteScriptCommand:
         ):
             result = runner._execute_script_command("echo hello", {})
         mock_run.assert_called_once()
+        mock_child_env.assert_called_once_with(parent_env, runtime_name="unknown")
         # shell=True should be used for non-runtime commands
         assert mock_run.call_args[1]["shell"] is True
+        assert mock_run.call_args[1]["env"] is child_env
         assert result is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "APM_DISABLE_TRUSTSTORE=1 python child.py",
+            "CURL_CA_BUNDLE=/replacement.pem python child.py",
+            'APM_EXTRA_CA_BUNDLE="C:\\CA Path\\corp.pem" node child.js',
+            "FOO=$BAR python child.py",
+            'FOO="$(helper)" python child.py',
+            r"FOO=a\ b python child.py",
+            "APM_EXTRA_CA_BUNDLE=$CORP_CA node child.js",
+            "APM_EXTRA_CA_BUNDLE=ca1.pem APM_EXTRA_CA_BUNDLE=$CA2 node child.js",
+            "REQUESTS_CA_BUNDLE=/replacement.pem cmd1 | python child.py",
+        ],
+    )
+    @patch("subprocess.run")
+    @patch("apm_cli.core.script_runner.setup_runtime_environment")
+    def test_shell_assignments_with_shell_semantics_remain_untouched(
+        self,
+        mock_env: MagicMock,
+        mock_run: MagicMock,
+        command: str,
+    ) -> None:
+        """APM must leave inline assignment scope and expansion to the shell."""
+        mock_env.return_value = {"BAR": "expanded-by-shell"}
+        mock_run.return_value.returncode = 0
+        runner = ScriptRunner()
+
+        with patch.object(
+            runner,
+            "_auto_compile_prompts",
+            return_value=(command, [], None),
+        ):
+            assert runner._execute_script_command("ignored", {}) is True
+
+        assert mock_run.call_args.args[0] == command
+        child_env = mock_run.call_args.kwargs["env"]
+        assert child_env == {"BAR": "expanded-by-shell"}
 
     @patch("subprocess.run")
     @patch("apm_cli.core.script_runner.setup_runtime_environment")

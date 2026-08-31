@@ -29,6 +29,7 @@ network. The interpreter under test is still a foreign venv without ``apm_cli``.
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import os
 import shutil
@@ -38,8 +39,19 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.core.tls_trust import _child_bootstrap_dir, _venv_site_packages
+from apm_cli.core.tls_trust import (
+    _DERIVED_REQUESTS_CA_MARKER,
+    _DISABLE_ENV_VAR,
+    _EXTRA_CA_ENV_VAR,
+    _NODE_EXTRA_CA_ENV_VAR,
+    _child_bootstrap_dir,
+    _venv_site_packages,
+    build_child_tls_env,
+)
 from apm_cli.runtime.manager import RuntimeManager
+
+from ._tls_ca_server import private_ca_https_server
+from .test_tls_custom_ca import _OPENSSL_EXECUTABLE
 
 pytestmark = pytest.mark.integration
 
@@ -47,6 +59,11 @@ _truststore_missing = importlib.util.find_spec("truststore") is None
 _requires_truststore = pytest.mark.skipif(
     _truststore_missing, reason="truststore not importable in this environment"
 )
+_requires_openssl = pytest.mark.skipif(
+    _OPENSSL_EXECUTABLE is None, reason="openssl CLI not available"
+)
+_NODE_EXECUTABLE = shutil.which("node")
+_requires_node = pytest.mark.skipif(_NODE_EXECUTABLE is None, reason="node is not available")
 
 # Child that reports which module owns ssl.SSLContext -- truststore-backed after
 # the bootstrap runs, plain "ssl" otherwise.
@@ -58,6 +75,10 @@ _TRUST_ENV_VARS = (
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "APM_DISABLE_TRUSTSTORE",
+    "APM_EXTRA_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "APM_NODE_EXTRA_CA_CERTS_IS_DERIVED_ADDITIVE",
+    "APM_REQUESTS_CA_BUNDLE_IS_DERIVED_ADDITIVE",
     "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
     "PYTHONPATH",
 )
@@ -169,6 +190,261 @@ def test_bootstrap_is_additive_to_user_sitecustomize(tmp_path):
     assert result.stdout.strip().startswith("truststore"), (
         f"truststore must still inject with a user sitecustomize present, got {result.stdout!r}"
     )
+
+
+@_requires_truststore
+@_requires_openssl
+def test_foreign_child_bootstrap_adds_private_ca_on_real_loopback(tmp_path):
+    """A foreign child keeps OS truststore and adds the selected private root."""
+    venv_python, site_packages = _make_foreign_venv(tmp_path)
+    _drop_bootstrap(site_packages)
+    server_dir = tmp_path / "private-ca-server"
+    server_dir.mkdir()
+
+    child_probe = (
+        "import ssl, sys, urllib.request\n"
+        "print(ssl.SSLContext.__module__)\n"
+        "print(urllib.request.urlopen(sys.argv[1], timeout=5).read().decode('ascii'))\n"
+    )
+    with private_ca_https_server(server_dir) as server:
+        # Control: OS trust alone must reject this fresh private root.
+        rejected = subprocess.run(
+            [str(venv_python), "-c", child_probe, server.url],
+            env=_clean_env(),
+            capture_output=True,
+            text=True,
+        )
+        assert rejected.returncode != 0
+
+        env = _clean_env()
+        env["APM_EXTRA_CA_BUNDLE"] = server.ca_path
+        accepted = subprocess.run(
+            [str(venv_python), "-c", child_probe, server.url],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    assert accepted.returncode == 0, accepted.stderr
+    output = accepted.stdout.splitlines()
+    assert output[0].startswith("truststore")
+    assert output[-1] == "ok"
+
+
+@_requires_truststore
+@_requires_openssl
+def test_bootstrap_preserves_derived_marker_for_python_descendants(tmp_path):
+    """A managed child and its same-venv descendant both keep OS-plus-extra trust."""
+    venv_python, site_packages = _make_foreign_venv(tmp_path)
+    _drop_bootstrap(site_packages)
+    server_dir = tmp_path / "two-generation-private-ca"
+    server_dir.mkdir()
+
+    inner_probe = (
+        "import json, os, ssl, sys, urllib.request; "
+        "body = urllib.request.urlopen(sys.argv[1], timeout=5).read().decode('ascii'); "
+        "print(json.dumps({'module': ssl.SSLContext.__module__, 'body': body, "
+        "'marker_matches': os.environ.get('APM_REQUESTS_CA_BUNDLE_IS_DERIVED_ADDITIVE') "
+        "== os.environ.get('REQUESTS_CA_BUNDLE')}))"
+    )
+    outer_probe = (
+        "import json, os, ssl, subprocess, sys, urllib.request\n"
+        f"inner_probe = {inner_probe!r}\n"
+        "body = urllib.request.urlopen(sys.argv[1], timeout=5).read().decode('ascii')\n"
+        "inner = subprocess.run([sys.executable, '-c', inner_probe, sys.argv[1]], "
+        "env=os.environ.copy(), capture_output=True, text=True)\n"
+        "print(json.dumps({'module': ssl.SSLContext.__module__, 'body': body, "
+        "'marker_matches': os.environ.get('APM_REQUESTS_CA_BUNDLE_IS_DERIVED_ADDITIVE') "
+        "== os.environ.get('REQUESTS_CA_BUNDLE'), 'inner_returncode': inner.returncode, "
+        "'inner_stdout': inner.stdout, 'inner_stderr': inner.stderr}))\n"
+    )
+
+    with private_ca_https_server(server_dir) as server:
+        env = build_child_tls_env({**_clean_env(), _EXTRA_CA_ENV_VAR: server.ca_path})
+        result = subprocess.run(
+            [str(venv_python), "-c", outer_probe, server.url],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    assert result.returncode == 0, result.stderr
+    outer = json.loads(result.stdout.splitlines()[-1])
+    assert outer["module"].startswith("truststore")
+    assert outer["body"] == "ok"
+    assert outer["marker_matches"] is True
+    assert outer["inner_returncode"] == 0, outer["inner_stderr"]
+    inner = json.loads(outer["inner_stdout"].splitlines()[-1])
+    assert inner["module"].startswith("truststore")
+    assert inner["body"] == "ok"
+    assert inner["marker_matches"] is True
+
+
+@_requires_openssl
+def test_bootstrap_rolls_back_after_post_injection_failure(tmp_path):
+    """A late child-bootstrap failure restores stdlib TLS and keeps fallback env."""
+    import certifi
+
+    venv_python, site_packages = _make_foreign_venv(tmp_path)
+    (site_packages / "truststore" / "__init__.py").write_text(
+        """\
+import ssl
+
+_ORIGINAL_CONTEXT = ssl.SSLContext
+
+class SSLContext(_ORIGINAL_CONTEXT):
+    def __init__(self, protocol=None):
+        super().__init__(protocol)
+        self.check_hostname = False
+
+def inject_into_ssl():
+    ssl.SSLContext = SSLContext
+""",
+        encoding="ascii",
+    )
+    _drop_bootstrap(site_packages)
+    fallback_path = certifi.where()
+    env = _clean_env()
+    env.update(
+        {
+            _EXTRA_CA_ENV_VAR: fallback_path,
+            "REQUESTS_CA_BUNDLE": fallback_path,
+            _DERIVED_REQUESTS_CA_MARKER: fallback_path,
+        }
+    )
+    probe = (
+        "import json, os, ssl; "
+        "print(json.dumps({'module': ssl.SSLContext.__module__, "
+        "'marker_matches': os.environ.get('APM_REQUESTS_CA_BUNDLE_IS_DERIVED_ADDITIVE') "
+        "== os.environ.get('REQUESTS_CA_BUNDLE')}))"
+    )
+
+    result = subprocess.run(
+        [str(venv_python), "-c", probe],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(result.stdout.splitlines()[-1])
+    assert evidence == {"module": "ssl", "marker_matches": True}
+
+
+@_requires_node
+@_requires_openssl
+def test_node_child_consumes_derived_extra_ca_on_real_loopback(tmp_path):
+    """Node rejects the private root by default and accepts APM's stable snapshot."""
+    assert _NODE_EXECUTABLE is not None
+    server_dir = tmp_path / "node ca path with spaces"
+    server_dir.mkdir()
+    node_probe = """
+const https = require('https');
+https.get(process.env.APM_TEST_URL, response => {
+  let body = '';
+  response.on('data', chunk => { body += chunk; });
+  response.on('end', () => { console.log(body); });
+}).on('error', error => {
+  console.error(error.message);
+  process.exitCode = 2;
+});
+"""
+
+    with private_ca_https_server(server_dir) as server:
+        control_env = {**_clean_env(), "APM_TEST_URL": server.url}
+        rejected = subprocess.run(
+            [_NODE_EXECUTABLE, "-e", node_probe],
+            env=control_env,
+            capture_output=True,
+            text=True,
+        )
+        assert rejected.returncode != 0
+
+        derived_env = build_child_tls_env({**control_env, _EXTRA_CA_ENV_VAR: server.ca_path})
+        accepted = subprocess.run(
+            [_NODE_EXECUTABLE, "-e", node_probe],
+            env=derived_env,
+            capture_output=True,
+            text=True,
+        )
+        disabled_env = build_child_tls_env({**derived_env, _DISABLE_ENV_VAR: "1"})
+        disabled = subprocess.run(
+            [_NODE_EXECUTABLE, "-e", node_probe],
+            env=disabled_env,
+            capture_output=True,
+            text=True,
+        )
+
+        explicit_env = build_child_tls_env(
+            {
+                **control_env,
+                _EXTRA_CA_ENV_VAR: server.ca_path,
+                _NODE_EXTRA_CA_ENV_VAR: server.ca_path,
+            }
+        )
+        explicit = subprocess.run(
+            [_NODE_EXECUTABLE, "-e", node_probe],
+            env=explicit_env,
+            capture_output=True,
+            text=True,
+        )
+
+    assert Path(derived_env[_NODE_EXTRA_CA_ENV_VAR]).is_file()
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.stdout.strip() == "ok"
+    assert _NODE_EXTRA_CA_ENV_VAR not in disabled_env
+    assert disabled.returncode != 0
+    assert explicit_env[_NODE_EXTRA_CA_ENV_VAR] == server.ca_path
+    assert explicit.returncode == 0, explicit.stderr
+    assert explicit.stdout.strip() == "ok"
+
+
+@_requires_openssl
+def test_generic_python_child_uses_stable_snapshot_after_source_mutation(tmp_path):
+    """Ordinary Requests children use merged stable bytes, without a .pth bootstrap."""
+    server_dir = tmp_path / "generic-child-server"
+    server_dir.mkdir()
+    probe = (
+        "import sys, requests\n"
+        "response = requests.get(sys.argv[1], timeout=5)\n"
+        "print(response.text)\n"
+    )
+
+    with private_ca_https_server(server_dir) as server:
+        rejected = subprocess.run(
+            [sys.executable, "-c", probe, server.url],
+            env=_clean_env(),
+            capture_output=True,
+            text=True,
+        )
+        assert rejected.returncode != 0
+
+        source = Path(server.ca_path)
+        original_bytes = source.read_bytes()
+        base_env = {**_clean_env(), _EXTRA_CA_ENV_VAR: str(source)}
+        child_env = build_child_tls_env(base_env)
+        extra_snapshot = Path(child_env[_EXTRA_CA_ENV_VAR])
+        requests_snapshot = Path(child_env["REQUESTS_CA_BUNDLE"])
+
+        assert base_env[_EXTRA_CA_ENV_VAR] == str(source)
+        assert extra_snapshot.is_absolute() and extra_snapshot != source
+        assert requests_snapshot.is_absolute() and requests_snapshot != source
+        assert child_env[_NODE_EXTRA_CA_ENV_VAR] == str(extra_snapshot)
+        assert child_env[_DERIVED_REQUESTS_CA_MARKER] == str(requests_snapshot)
+        assert extra_snapshot.read_bytes() == original_bytes
+        assert original_bytes in requests_snapshot.read_bytes()
+
+        source.write_text("replaced after child env construction\n", encoding="ascii")
+        accepted = subprocess.run(
+            [sys.executable, "-c", probe, server.url],
+            env=child_env,
+            capture_output=True,
+            text=True,
+        )
+
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.stdout.strip() == "ok"
+    assert extra_snapshot.read_bytes() == original_bytes
 
 
 def test_runtime_manager_setup_llm_installs_tls_bootstrap(tmp_path, monkeypatch):

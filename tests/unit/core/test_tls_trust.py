@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import logging
 import os
+import ssl
 import subprocess
 import sys
 import types
@@ -23,8 +24,14 @@ import pytest
 
 from apm_cli.core.tls_trust import (
     _BUNDLED_CERT_MARKER,
+    _DERIVED_NODE_EXTRA_CA_MARKER,
+    _DERIVED_REQUESTS_CA_MARKER,
     _DISABLE_ENV_VAR,
     _EXPLICIT_CA_ENV_VARS,
+    _EXTRA_CA_ENV_VAR,
+    _MAX_EXTRA_CA_BUNDLE_BYTES,
+    _NODE_EXTRA_CA_ENV_VAR,
+    TLSConfigurationError,
     build_child_tls_env,
     configure_tls_trust,
     ensure_child_tls_bootstrap,
@@ -33,7 +40,15 @@ from apm_cli.core.tls_trust import (
 )
 
 _NON_REQUESTS_CA_ENV_VARS = ("SSL_CERT_FILE", "SSL_CERT_DIR")
-_ALL_TRUST_ENV = (_DISABLE_ENV_VAR, *_NON_REQUESTS_CA_ENV_VARS, *_EXPLICIT_CA_ENV_VARS)
+_ALL_TRUST_ENV = (
+    _DISABLE_ENV_VAR,
+    *_NON_REQUESTS_CA_ENV_VARS,
+    *_EXPLICIT_CA_ENV_VARS,
+    _EXTRA_CA_ENV_VAR,
+    _NODE_EXTRA_CA_ENV_VAR,
+    _DERIVED_NODE_EXTRA_CA_MARKER,
+    _DERIVED_REQUESTS_CA_MARKER,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +58,7 @@ def _clean_env(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
-def _install_fake_truststore(monkeypatch, inject=None):
+def _install_fake_truststore(monkeypatch, inject=None, ssl_context=None):
     """Put a fake ``truststore`` module in sys.modules and return its inject mock."""
     calls = {"n": 0}
 
@@ -52,6 +67,7 @@ def _install_fake_truststore(monkeypatch, inject=None):
 
     module = types.ModuleType("truststore")
     module.inject_into_ssl = inject or _default_inject  # type: ignore[attr-defined]
+    module.SSLContext = ssl_context or object  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "truststore", module)
     return calls
 
@@ -101,11 +117,215 @@ def test_injection_failure_falls_back(monkeypatch):
     assert configure_tls_trust() is False
 
 
+def test_post_injection_additive_failure_rolls_back_all_globals(monkeypatch):
+    """A late additive failure cannot leave a partially injected process."""
+    import certifi
+    import requests.adapters
+    import urllib3.util.ssl_ as urllib3_ssl
+
+    import apm_cli.core.tls_trust as tls
+
+    original_ssl = ssl.SSLContext
+    original_urllib3 = urllib3_ssl.SSLContext
+    preloaded_was_present = hasattr(requests.adapters, "_preloaded_ssl_context")
+    original_preloaded = getattr(requests.adapters, "_preloaded_ssl_context", None)
+
+    class PartiallyPublishedContext:
+        pass
+
+    module = types.ModuleType("truststore")
+    module.SSLContext = PartiallyPublishedContext  # type: ignore[attr-defined]
+
+    def _partial_inject():
+        ssl.SSLContext = PartiallyPublishedContext  # type: ignore[misc]
+        urllib3_ssl.SSLContext = PartiallyPublishedContext  # type: ignore[assignment]
+        requests.adapters._preloaded_ssl_context = object()
+
+    module.inject_into_ssl = _partial_inject  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "truststore", module)
+
+    def _late_failure(_base_context, _bundle_pem):
+        raise TLSConfigurationError("forced post-injection failure")
+
+    monkeypatch.setattr(tls, "_install_additive_ca_context", _late_failure)
+    env = {_EXTRA_CA_ENV_VAR: certifi.where()}
+
+    assert configure_tls_trust(env=env) is False
+    assert ssl.SSLContext is original_ssl
+    assert urllib3_ssl.SSLContext is original_urllib3
+    assert hasattr(requests.adapters, "_preloaded_ssl_context") is preloaded_was_present
+    assert getattr(requests.adapters, "_preloaded_ssl_context", None) is original_preloaded
+    assert Path(env["REQUESTS_CA_BUNDLE"]).is_file()
+    assert env[_DERIVED_REQUESTS_CA_MARKER] == env["REQUESTS_CA_BUNDLE"]
+
+
+def test_failed_injection_rebuilds_new_requests_232_preloaded_context(monkeypatch):
+    """A Requests module first imported mid-injection retains its certifi roots."""
+    fake_adapters = types.ModuleType("requests.adapters")
+
+    class RestoredContext:
+        def __init__(self):
+            self.loaded_paths: list[str] = []
+
+        def load_verify_locations(self, path):
+            self.loaded_paths.append(path)
+
+    fake_adapters._preloaded_ssl_context = object()  # type: ignore[attr-defined]
+    fake_adapters.DEFAULT_CA_BUNDLE_PATH = "/bundled/certifi.pem"  # type: ignore[attr-defined]
+    fake_adapters.extract_zipped_paths = lambda path: path  # type: ignore[attr-defined]
+    fake_adapters.create_urllib3_context = RestoredContext  # type: ignore[attr-defined]
+
+    monkeypatch.delitem(sys.modules, "requests.adapters", raising=False)
+
+    module = types.ModuleType("truststore")
+    module.SSLContext = object  # type: ignore[attr-defined]
+
+    def _partial_inject_then_fail():
+        sys.modules["requests.adapters"] = fake_adapters
+        raise RuntimeError("forced partial injection")
+
+    module.inject_into_ssl = _partial_inject_then_fail  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "truststore", module)
+
+    assert configure_tls_trust() is False
+    restored = fake_adapters._preloaded_ssl_context  # type: ignore[attr-defined]
+    assert isinstance(restored, RestoredContext)
+    assert restored.loaded_paths == ["/bundled/certifi.pem"]
+
+
 def test_happy_path_injects_once(monkeypatch):
     calls = _install_fake_truststore(monkeypatch)
 
     assert configure_tls_trust() is True
     assert calls["n"] == 1
+
+
+def test_valid_additive_bundle_extends_injected_parent_context(monkeypatch):
+    """A valid extra bundle is applied on top of the injected OS context."""
+    import certifi
+
+    import apm_cli.core.tls_trust as tls
+
+    class FakeOSContext:
+        pass
+
+    calls = _install_fake_truststore(monkeypatch, ssl_context=FakeOSContext)
+    installed: dict[str, object] = {}
+
+    def _capture_install(base_context, bundle_pem):
+        installed["base_context"] = base_context
+        installed["bundle_pem"] = bundle_pem
+
+    monkeypatch.setattr(tls, "_install_additive_ca_context", _capture_install)
+
+    assert configure_tls_trust(env={_EXTRA_CA_ENV_VAR: certifi.where()}) is True
+    assert calls["n"] == 1
+    assert installed["base_context"] is FakeOSContext
+    assert "-----BEGIN CERTIFICATE-----" in str(installed["bundle_pem"])
+
+
+@pytest.mark.parametrize(
+    "precedence",
+    [
+        {_DISABLE_ENV_VAR: "1"},
+        {"REQUESTS_CA_BUNDLE": "/replacement/requests.pem"},
+        {"CURL_CA_BUNDLE": "/replacement/curl.pem"},
+    ],
+    ids=["disabled", "requests", "curl"],
+)
+def test_higher_precedence_controls_skip_invalid_additive_bundle(tmp_path, monkeypatch, precedence):
+    """Disable/replacement settings win before extra-path validation or mapping."""
+    missing = tmp_path / "must-not-be-read.pem"
+    env = {_EXTRA_CA_ENV_VAR: str(missing), **precedence}
+    calls = _install_fake_truststore(monkeypatch)
+
+    assert configure_tls_trust(env=env) is False
+    assert calls["n"] == 0
+
+    child = build_child_tls_env(env)
+    assert child[_EXTRA_CA_ENV_VAR] == str(missing)
+    assert _NODE_EXTRA_CA_ENV_VAR not in child
+
+
+def test_explicit_requests_bundle_remains_authoritative_with_disable(tmp_path, caplog):
+    """The opt-out suppresses injection; it never unsets a replacement bundle."""
+    replacement = str(tmp_path / "replacement.pem")
+    env = {
+        _DISABLE_ENV_VAR: "1",
+        "REQUESTS_CA_BUNDLE": replacement,
+        _EXTRA_CA_ENV_VAR: str(tmp_path / "must-not-be-read.pem"),
+    }
+
+    with caplog.at_level(logging.DEBUG, logger="apm_cli.core.tls_trust"):
+        assert configure_tls_trust(env=env) is False
+
+    assert any("explicit CA bundle in use" in message for message in _trust_source_messages(caplog))
+    child = build_child_tls_env(env)
+    assert child["REQUESTS_CA_BUNDLE"] == replacement
+    assert _NODE_EXTRA_CA_ENV_VAR not in child
+
+
+def _invalid_extra_ca_path(tmp_path: Path, case: str) -> Path:
+    candidate = tmp_path / f"{case}.pem"
+    if case == "missing":
+        return candidate
+    if case == "empty":
+        candidate.touch()
+    elif case == "directory":
+        candidate.mkdir()
+    elif case == "malformed":
+        candidate.write_text("this is not a PEM certificate\n", encoding="ascii")
+    elif case == "non-ascii":
+        candidate.write_bytes(b"\xff\xfe\xfd")
+    elif case == "oversized":
+        # Seek makes this sparse where supported; only the bounded-size check
+        # matters, so the test need not allocate an 8 MiB in-memory payload.
+        with candidate.open("wb") as handle:
+            handle.seek(_MAX_EXTRA_CA_BUNDLE_BYTES)
+            handle.write(b"x")
+    elif case == "private-key":
+        import certifi
+
+        private_key_label = b"PRIVATE " + b"KEY"
+        candidate.write_bytes(
+            Path(certifi.where()).read_bytes()
+            + b"\n-----BEGIN "
+            + private_key_label
+            + b"-----\nAA==\n-----END "
+            + private_key_label
+            + b"-----\n"
+        )
+    else:  # pragma: no cover - parametrization is the closed set
+        raise AssertionError(case)
+    return candidate
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["missing", "empty", "directory", "malformed", "non-ascii", "oversized", "private-key"],
+)
+def test_invalid_additive_bundle_fails_parent_and_child_launch(tmp_path, case):
+    selected = _invalid_extra_ca_path(tmp_path, case)
+    env = {_EXTRA_CA_ENV_VAR: str(selected)}
+
+    with pytest.raises(TLSConfigurationError):
+        configure_tls_trust(env=env)
+    with pytest.raises(TLSConfigurationError):
+        build_child_tls_env(env)
+
+
+def test_private_key_bundle_is_rejected_before_snapshot_creation(tmp_path, monkeypatch):
+    import apm_cli.core.tls_trust as tls
+
+    selected = _invalid_extra_ca_path(tmp_path, "private-key")
+    monkeypatch.setattr(
+        tls,
+        "_ensure_child_ca_snapshots",
+        lambda _pem: pytest.fail("private material reached snapshot creation"),
+    )
+
+    with pytest.raises(TLSConfigurationError, match="private keys are not allowed"):
+        build_child_tls_env({_EXTRA_CA_ENV_VAR: str(selected)})
 
 
 def _repo_root() -> Path:
@@ -137,13 +357,7 @@ def test_cli_bootstrap_injects_before_requests_import(tmp_path):
     )
 
     env = os.environ.copy()
-    for name in (
-        _DISABLE_ENV_VAR,
-        "REQUESTS_CA_BUNDLE",
-        "CURL_CA_BUNDLE",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-    ):
+    for name in _ALL_TRUST_ENV:
         env.pop(name, None)
     env["PYTHONPATH"] = f"{tmp_path}{os.pathsep}{_repo_root() / 'src'}"
     env["TRUSTSTORE_SENTINEL"] = str(sentinel)
@@ -180,13 +394,7 @@ def test_cli_bootstrap_is_idempotent_across_import_and_main(tmp_path):
     )
 
     env = os.environ.copy()
-    for name in (
-        _DISABLE_ENV_VAR,
-        "REQUESTS_CA_BUNDLE",
-        "CURL_CA_BUNDLE",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-    ):
+    for name in _ALL_TRUST_ENV:
         env.pop(name, None)
     env["PYTHONPATH"] = f"{tmp_path}{os.pathsep}{_repo_root() / 'src'}"
     env["TRUSTSTORE_SENTINEL"] = str(sentinel)
@@ -250,13 +458,14 @@ def test_diag_disabled_names_opt_out(caplog):
         message.encode("ascii")
 
 
-def test_diag_explicit_bundle_names_the_path(caplog):
-    ca_path = "/etc/ssl/certs/corp-root.pem"
+def test_diag_explicit_bundle_names_the_path(tmp_path, caplog):
+    ca_path = str(tmp_path / "corp-root.pem")
     with caplog.at_level(logging.DEBUG, logger="apm_cli.core.tls_trust"):
         assert configure_tls_trust(env={"REQUESTS_CA_BUNDLE": ca_path}) is False
 
     messages = _trust_source_messages(caplog)
-    assert f"TLS: explicit CA bundle in use: {ca_path}" in messages
+    display = ascii(str(Path(ca_path)))[1:-1]
+    assert f"TLS: explicit CA bundle in use: {display}" in messages
     for message in messages:
         message.encode("ascii")
 
@@ -344,8 +553,8 @@ def test_marker_cleared_on_inject_success(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# build_child_tls_env is now an env-hygiene pass: it strips the bundled-default
-# marker and does NOT mutate PYTHONPATH (no more sitecustomize shim hijack).
+# build_child_tls_env strips APM's internal marker without mutating PYTHONPATH;
+# additive CA inputs are handled below through private stable snapshots.
 # ---------------------------------------------------------------------------
 
 
@@ -369,6 +578,149 @@ def test_build_child_tls_env_returns_independent_copy():
     child = build_child_tls_env(base)
     child["PATH"] = "/mutated"
     assert base["PATH"] == "/usr/bin"
+
+
+def _expected_merged_bundle(extra_bytes: bytes) -> bytes:
+    import certifi
+
+    certifi_bytes = Path(certifi.where()).read_bytes()
+    merged = certifi_bytes + (b"" if certifi_bytes.endswith(b"\n") else b"\n") + extra_bytes
+    return merged if merged.endswith(b"\n") else merged + b"\n"
+
+
+def _assert_stable_child_snapshots(child: dict[str, str], extra_bytes: bytes) -> None:
+    extra_snapshot = Path(child[_EXTRA_CA_ENV_VAR])
+    requests_snapshot = Path(child["REQUESTS_CA_BUNDLE"])
+
+    assert extra_snapshot.is_absolute()
+    assert requests_snapshot.is_absolute()
+    assert extra_snapshot.is_file()
+    assert requests_snapshot.is_file()
+    assert extra_snapshot.read_bytes() == extra_bytes
+    assert requests_snapshot.read_bytes() == _expected_merged_bundle(extra_bytes)
+    assert child[_NODE_EXTRA_CA_ENV_VAR] == str(extra_snapshot)
+    assert child[_DERIVED_NODE_EXTRA_CA_MARKER] == str(extra_snapshot)
+    assert child[_DERIVED_REQUESTS_CA_MARKER] == str(requests_snapshot)
+
+
+def test_child_snapshots_live_under_the_user_apm_directory():
+    """Snapshot integrity does not depend on a potentially shared TEMP root."""
+    import certifi
+
+    child = build_child_tls_env({_EXTRA_CA_ENV_VAR: certifi.where()})
+    profile_tls_root = (Path.home().resolve() / ".apm" / "tls").resolve()
+
+    for variable in (_EXTRA_CA_ENV_VAR, "REQUESTS_CA_BUNDLE"):
+        snapshot = Path(child[variable]).resolve()
+        assert snapshot.is_relative_to(profile_tls_root)
+        if os.name != "nt":
+            assert snapshot.stat().st_mode & 0o777 == 0o600
+            assert snapshot.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_build_child_tls_env_derives_node_extra_and_does_not_mutate_input():
+    import certifi
+
+    base = {_EXTRA_CA_ENV_VAR: certifi.where(), "PATH": "/usr/bin"}
+    original = dict(base)
+    extra_bytes = Path(certifi.where()).read_bytes()
+
+    child = build_child_tls_env(base)
+
+    _assert_stable_child_snapshots(child, extra_bytes)
+    assert base == original
+    assert child is not base
+
+
+@pytest.mark.parametrize("native_value", ["/native/node-root.pem", "  /native/spaced.pem  "])
+def test_build_child_tls_env_preserves_nonempty_native_node_setting(native_value):
+    import certifi
+
+    child = build_child_tls_env(
+        {
+            _EXTRA_CA_ENV_VAR: certifi.where(),
+            _NODE_EXTRA_CA_ENV_VAR: native_value,
+        }
+    )
+
+    assert child[_NODE_EXTRA_CA_ENV_VAR] == native_value
+
+
+def test_build_child_tls_env_replaces_blank_native_node_setting():
+    import certifi
+
+    child = build_child_tls_env({_EXTRA_CA_ENV_VAR: certifi.where(), _NODE_EXTRA_CA_ENV_VAR: "  "})
+
+    assert child[_NODE_EXTRA_CA_ENV_VAR] == child[_EXTRA_CA_ENV_VAR]
+
+
+def test_build_child_tls_env_clears_inherited_derived_node_on_disable():
+    """A nested opt-out removes only the Node CA an outer APM derived."""
+    import certifi
+
+    outer = build_child_tls_env({_EXTRA_CA_ENV_VAR: certifi.where()})
+    nested = build_child_tls_env({**outer, _DISABLE_ENV_VAR: "1"})
+
+    assert "REQUESTS_CA_BUNDLE" not in nested
+    assert _DERIVED_REQUESTS_CA_MARKER not in nested
+    assert _NODE_EXTRA_CA_ENV_VAR not in nested
+    assert _DERIVED_NODE_EXTRA_CA_MARKER not in nested
+
+
+def test_build_child_tls_env_clears_inherited_derived_node_for_replacement():
+    """A nested Requests replacement suppresses an inherited Node mapping."""
+    import certifi
+
+    replacement = "/replacement/requests.pem"
+    outer = build_child_tls_env({_EXTRA_CA_ENV_VAR: certifi.where()})
+    nested = build_child_tls_env({**outer, "REQUESTS_CA_BUNDLE": replacement})
+
+    assert nested["REQUESTS_CA_BUNDLE"] == replacement
+    assert _DERIVED_REQUESTS_CA_MARKER not in nested
+    assert _NODE_EXTRA_CA_ENV_VAR not in nested
+    assert _DERIVED_NODE_EXTRA_CA_MARKER not in nested
+
+
+def test_build_child_tls_env_preserves_node_value_replacing_derived_value():
+    """Changing the marked Node path turns it into an explicit native value."""
+    import certifi
+
+    native_node = "/native/node-root.pem"
+    outer = build_child_tls_env({_EXTRA_CA_ENV_VAR: certifi.where()})
+    outer[_NODE_EXTRA_CA_ENV_VAR] = native_node
+    nested = build_child_tls_env(outer)
+
+    assert nested[_NODE_EXTRA_CA_ENV_VAR] == native_node
+    assert _DERIVED_NODE_EXTRA_CA_MARKER not in nested
+
+
+@pytest.mark.windows_compat
+def test_build_child_tls_env_snapshots_additive_path_with_spaces(tmp_path):
+    """The Windows gate verifies stable paths and bytes across a spawn boundary."""
+    import certifi
+
+    selected = tmp_path / "Corporate CAs" / "APM extra root.pem"
+    selected.parent.mkdir()
+    selected.write_bytes(Path(certifi.where()).read_bytes())
+    selected_bytes = selected.read_bytes()
+
+    child = build_child_tls_env({_EXTRA_CA_ENV_VAR: str(selected)})
+
+    _assert_stable_child_snapshots(child, selected_bytes)
+    assert Path(child[_EXTRA_CA_ENV_VAR]) != selected.resolve()
+
+
+def test_child_ca_snapshots_survive_source_mutation(tmp_path):
+    import certifi
+
+    selected = tmp_path / "operator-controlled.pem"
+    original_bytes = Path(certifi.where()).read_bytes()
+    selected.write_bytes(original_bytes)
+    child = build_child_tls_env({_EXTRA_CA_ENV_VAR: str(selected)})
+
+    selected.write_text("replaced after validation\n", encoding="ascii")
+
+    _assert_stable_child_snapshots(child, original_bytes)
 
 
 # ---------------------------------------------------------------------------
@@ -399,10 +751,55 @@ def test_ensure_child_tls_bootstrap_installs_both_files(tmp_path):
     assert "import apm_cli" not in module.read_text(encoding="utf-8")
 
 
+def test_shipped_child_tls_bootstrap_is_silent_by_construction():
+    """Startup trust code cannot inherit logging handlers or write output."""
+    import apm_cli.core.tls_trust as tls
+
+    source = (Path(tls._child_bootstrap_dir()) / "_apm_tls_bootstrap.py").read_text(
+        encoding="ascii"
+    )
+
+    assert "import logging" not in source
+    assert "_logger." not in source
+    assert "print(" not in source
+
+
 def test_ensure_child_tls_bootstrap_is_idempotent(tmp_path):
     venv = _fake_venv(tmp_path)
     assert ensure_child_tls_bootstrap(venv) is True
     assert ensure_child_tls_bootstrap(venv) is True
+
+
+def test_build_child_tls_env_refreshes_existing_managed_llm_bootstrap(tmp_path, monkeypatch):
+    import apm_cli.core.tls_trust as tls
+
+    venv = tmp_path / ".apm" / "runtimes" / "llm-venv"
+    site = venv / "lib" / "python3.12" / "site-packages"
+    site.mkdir(parents=True)
+    module = site / "_apm_tls_bootstrap.py"
+    pth = site / "_apm_tls.pth"
+    module.write_text("# stale bootstrap\n", encoding="ascii")
+    pth.write_text("# stale activation\n", encoding="ascii")
+    monkeypatch.setattr(tls.Path, "home", classmethod(lambda _cls: tmp_path))
+
+    writes: list[Path] = []
+    original_atomic_write = tls._atomic_write
+
+    def _recording_write(target, data):
+        writes.append(target)
+        original_atomic_write(target, data)
+
+    monkeypatch.setattr(tls, "_atomic_write", _recording_write)
+
+    assert build_child_tls_env({}, runtime_name="llm") == {}
+    source = Path(tls._child_bootstrap_dir())
+    assert module.read_bytes() == (source / "_apm_tls_bootstrap.py").read_bytes()
+    assert pth.read_text(encoding="ascii") == "import _apm_tls_bootstrap\n"
+    assert writes == [module, pth]
+
+    writes.clear()
+    assert build_child_tls_env({}, runtime_name="llm") == {}
+    assert writes == [], "an already-current managed bootstrap must not be rewritten"
 
 
 def test_ensure_child_tls_bootstrap_returns_false_for_missing_site_packages(tmp_path):
@@ -469,6 +866,7 @@ def test_child_bootstrap_tls_policy_matches_parent_constants():
     expected = {
         tls._DISABLE_ENV_VAR,
         *tls._EXPLICIT_CA_ENV_VARS,
+        tls._EXTRA_CA_ENV_VAR,
         tls._BUNDLED_CERT_MARKER,
         tls._SSL_CERT_FILE_VAR,
     }

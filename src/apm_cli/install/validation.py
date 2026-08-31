@@ -130,7 +130,9 @@ def _log_tls_failure(host_display: str, exc: BaseException, verbose_log, logger)
         "TLS verification failed -- APM uses the system trust store by default. "
         "If you're behind a corporate proxy or firewall, make sure your "
         "organisation's CA is installed in the OS trust store, or set "
-        "REQUESTS_CA_BUNDLE to a readable PEM bundle and retry. "
+        "APM_EXTRA_CA_BUNDLE to a readable PEM bundle to add it while retaining "
+        "public trust. Use REQUESTS_CA_BUNDLE only to replace the complete "
+        "Python trust set. "
         "See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
     )
     if verbose_log:
