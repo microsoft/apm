@@ -85,7 +85,7 @@ class TreeIndex:
     _definition_anchors: array[int]
     _functions: tuple[ast.AST, ...]
     _functions_by_qualname: dict[str, ast.AST]
-    _qualnames_by_function_id: dict[int, str]
+    _qualnames_by_position: dict[int, str]
 
     # -- adjacency -------------------------------------------------------
     def children(self, node: ast.AST) -> tuple[ast.AST, ...]:
@@ -182,10 +182,15 @@ class TreeIndex:
 
     def function_qualname(self, function: ast.AST) -> str:
         """Return the class-qualified name recorded for `function`."""
-        return self._qualnames_by_function_id.get(
-            id(function),
-            getattr(function, "name", "<unknown>"),
-        )
+        position = self._position(function)
+        if position is None:
+            raise RuntimeError("function is not part of this tree index")
+        try:
+            return self._qualnames_by_position[position]
+        except KeyError:
+            raise RuntimeError(
+                f"tree index has no qualified name at function position {position}"
+            ) from None
 
 
 def _subtree_ends(parent_positions: Sequence[int]) -> array[int]:
@@ -301,9 +306,7 @@ def build_tree_index(records: Sequence[NodeRecord]) -> TreeIndex | None:
         _definition_anchors=definition_anchors,
         _functions=tuple(functions),
         _functions_by_qualname=by_qualname,
-        _qualnames_by_function_id={
-            id(function): qualname for qualname, function in by_qualname.items()
-        },
+        _qualnames_by_position=qualnames,
     )
 
 

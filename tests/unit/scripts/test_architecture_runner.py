@@ -339,6 +339,40 @@ def test_spill_load_failure_never_rebuilds_or_hides_the_failure(
     assert provider.max_tree_index_builds_per_file == 1
 
 
+def test_spill_reload_preserves_nested_function_qualnames(tmp_path: Path) -> None:
+    """Stable pre-order keys survive pickle replacing every AST node identity."""
+    path = "tests/test_nested.py"
+    target = tmp_path / path
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        """
+class Container:
+    def method(self):
+        def inner():
+            return 1
+        return inner()
+""".lstrip(),
+        encoding="utf-8",
+    )
+    provider = FactsProvider(tmp_path, (path,), registry=None)
+
+    original = provider.file_facts(path).tree_index
+    assert original is not None
+    original_inner = original.function("Container.method.inner")
+    assert original_inner is not None
+    provider._transient_facts.clear()
+
+    reloaded = provider.file_facts(path).tree_index
+    assert reloaded is not None
+    reloaded_inner = reloaded.function("Container.method.inner")
+    assert reloaded_inner is not None
+    assert reloaded_inner is not original_inner
+    assert reloaded.function_qualname(reloaded_inner) == "Container.method.inner"
+    assert provider.source_cache.read_attempts == 1
+    assert provider.parse_cache.parse_attempts == 1
+    assert provider.tree_index_builds == 1
+
+
 def test_tree_index_build_has_one_production_owner() -> None:
     """Only FactsProvider may fold FileFacts into a compact TreeIndex."""
     linter_root = REAL_ROOT / "scripts/architecture_linter"
