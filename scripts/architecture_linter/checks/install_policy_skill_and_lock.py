@@ -301,9 +301,6 @@ _DEPENDENCY_PARSER = "src/apm_cli/models/dependency/reference.py"
 _LOCAL_PACKAGE_FIXTURE = "tests/utils/local_package.py"
 
 
-_AUTHORITIES_TEST = "tests/integration/test_architecture_authorities.py"
-
-
 _DEPENDENCY_PARSER_NEEDLES = (
     "reject_unknown_git_fields(entry, parent=True)",
     "reject_unknown_git_fields(entry, parent=False)",
@@ -337,7 +334,7 @@ def check_git_object_field_authority(provider: FactsProvider) -> tuple[Violation
 
     scanned = (
         *_tree_python_paths(provider, _SRC_TREE, excluded=(_OBJECT_FIELDS_OWNER,)),
-        *_tree_python_paths(provider, _TESTS_TREE, excluded=(_AUTHORITIES_TEST,)),
+        *_tree_python_paths(provider, _TESTS_TREE),
     )
     findings.extend(
         _banned(

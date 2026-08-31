@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance only.
+    from scripts.architecture_linter.checks.tree_index import TreeIndex
     from scripts.architecture_linter.facts import FactsProvider
 
 
@@ -96,19 +97,16 @@ class DefinitionFact:
 class FileFacts:
     """Everything the shared traversal captured for a single file, once.
 
-    ``node_records`` is the *intrinsic* raw shape of the file: one immutable
-    :data:`NodeRecord` per visited node, in the traversal's depth-first
-    pre-order. It is built unconditionally by the one shared walk -- no
-    registration, no scoping, no opt-in -- because AST shape is what most
-    analyzers need and every scoped copy of it was the same data recorded
-    again. :func:`~scripts.architecture_linter.checks.tree_index.build_tree_index`
-    is the only thing allowed to interpret it.
+    ``tree_index`` is the compact intrinsic AST shape built by the same shared
+    traversal. Raw ``(node, parent)`` records exist only while this object is
+    being constructed; retaining both those records and the query index doubled
+    the high-cardinality shape state for the full run.
 
     ``extra`` remains the escape hatch for *specialized* facts a
     :class:`~scripts.architecture_linter.facts.Collector` computes during the
     same traversal, keyed by collector name. Shape is no longer one of them:
-    a collector that only re-records ``(node, parent)`` duplicates
-    ``node_records`` and must not exist.
+    a collector that only re-records ``(node, parent)`` duplicates the compact
+    tree index and must not exist.
     """
 
     path: str
@@ -122,7 +120,7 @@ class FileFacts:
     calls: tuple[CallFact, ...]
     assignments: tuple[AssignmentFact, ...]
     literals: tuple[LiteralFact, ...]
-    node_records: tuple[NodeRecord, ...]
+    tree_index: TreeIndex | None
     extra: Mapping[str, tuple[object, ...]]
     visits: int
 

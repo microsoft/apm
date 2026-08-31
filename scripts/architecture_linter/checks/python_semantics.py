@@ -8,7 +8,7 @@ node views; they never parse source or start a second AST walk.
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 
 from scripts.architecture_linter.checks.tree_index import (
@@ -73,6 +73,33 @@ def scope_nodes(index: TreeIndex, scope: ast.AST | None) -> Sequence[ast.AST]:
     if scope is not None:
         return index.own_scope(scope)
     return tuple(node for node in index.nodes if index.definition_anchor(node) is None)
+
+
+def propagated_assignment_values(
+    index: TreeIndex,
+    resolver: Callable[[TreeIndex, ast.AST, dict[str, set[str]]], set[str]],
+) -> dict[str, set[str]]:
+    """Propagate resolver-derived values through simple name assignments."""
+    assignments: list[tuple[list[str], ast.AST]] = []
+    for node in index.walk(index.root):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names = [target.id for target in targets if isinstance(target, ast.Name)]
+        if names:
+            assignments.append((names, node.value))
+    known: dict[str, set[str]] = {}
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for names, value in assignments:
+            resolved = resolver(index, value, known)
+            for name in names:
+                if not resolved.issubset(known.get(name, set())):
+                    known.setdefault(name, set()).update(resolved)
+                    changed = True
+        if not changed:
+            break
+    return known
 
 
 def _target_binds_name(target: ast.AST, name: str) -> bool:
@@ -246,5 +273,6 @@ __all__ = [
     "has_exclusive_import",
     "import_bound_name",
     "is_statically_dead",
+    "propagated_assignment_values",
     "scope_nodes",
 ]

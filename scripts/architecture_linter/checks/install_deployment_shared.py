@@ -9,14 +9,22 @@ from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Sequence
 
+from scripts.architecture_linter.checks.lexical_shared import (
+    body_has,
+    captured_facts_body,
+    duplicate_definition_lines,
+)
 from scripts.architecture_linter.checks.tree_index import TreeIndex
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import EXEMPT_MARKER, checked_facts, violation
 from scripts.architecture_linter.models import Rule, Violation
 
 GROUP = "install_deployment"
+
+_awk_body = captured_facts_body
+_body_has = body_has
+_duplicate_definition_lines = duplicate_definition_lines
 
 
 _SRC_PREFIX = "src/apm_cli/"
@@ -50,77 +58,11 @@ def _first_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
     return None
 
 
-def _awk_body(
-    facts: object,
-    start: re.Pattern[str],
-    boundary: re.Pattern[str],
-    keep: re.Pattern[str] | None = None,
-) -> tuple[str, ...]:
-    """Extract a function/class body like the shell's block-capture awk.
-
-    Capture begins on the first line matching `start` (inclusive) and ends
-    just before the next line matching `boundary` that does not also match
-    `keep` -- exactly the ``/start/{flag=1} flag&&/boundary/&&!/keep/{exit}``
-    idiom used throughout the legacy script. `keep` defaults to `start`, which
-    covers every block whose negation repeats the opening signature.
-    """
-    keep_pattern = keep if keep is not None else start
-    body: list[str] = []
-    capturing = False
-    for line in _lines(facts):
-        if not capturing:
-            if start.search(line) is not None:
-                capturing = True
-                body.append(line)
-            continue
-        if boundary.search(line) is not None and keep_pattern.search(line) is None:
-            break
-        body.append(line)
-    return tuple(body)
-
-
-def _body_has(body: Sequence[str], needle: str) -> bool:
-    """Return whether any captured body line contains `needle`."""
-    return any(needle in line for line in body)
-
-
 def _python_paths(provider: FactsProvider, prefix: str) -> tuple[str, ...]:
     """Return every inventory Python path under `prefix`, in inventory order."""
     return tuple(
         path for path in provider.inventory if path.startswith(prefix) and path.endswith(".py")
     )
-
-
-def _duplicate_definition_lines(
-    provider: FactsProvider,
-    *,
-    rule_id: str,
-    prefix: str,
-    pattern: re.Pattern[str],
-    owner: str,
-    message: str,
-    respect_exempt: bool,
-) -> list[Violation]:
-    """Flag every definition matching `pattern` outside the canonical `owner`.
-
-    Mirrors ``grep -rEn PATTERN prefix | grep -v owner: | grep -v exempt``.
-    """
-    findings: list[Violation] = []
-    for path in _python_paths(provider, prefix):
-        if path == owner:
-            continue
-        facts = provider.file_facts(path)
-        if getattr(facts, "read_error", None) is not None:
-            continue
-        for number, line in enumerate(_lines(facts), start=1):
-            if respect_exempt and EXEMPT_MARKER in line:
-                continue
-            match = pattern.search(line)
-            if match is not None:
-                findings.append(
-                    violation(rule_id, path, message, line=number, column=match.start() + 1)
-                )
-    return findings
 
 
 def _all_names(index: TreeIndex, node: ast.AST) -> set[str]:

@@ -30,10 +30,18 @@ jobs:
     - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
     - name: Ruff lint
-      run: uv run --frozen --extra dev ruff check src/ tests/
+      run: >-
+        uv run --frozen --extra dev ruff check
+        src/ tests/
+        scripts/lint_architecture_boundaries.py
+        scripts/architecture_linter/
 
     - name: Ruff format check
-      run: uv run --frozen --extra dev ruff format --check src/ tests/
+      run: >-
+        uv run --frozen --extra dev ruff format --check
+        src/ tests/
+        scripts/lint_architecture_boundaries.py
+        scripts/architecture_linter/
 
     - name: Check YAML encoding safety
       run: |
@@ -55,8 +63,13 @@ jobs:
         # Ruff has no max-module-lines rule. This check prevents new files from
         # exceeding the current worst case. Tighten the threshold over time.
         MAX_LINES=2100   # Stage 1 (was 2450); target 1400 deferred to Stage 2
-        VIOLATIONS=$(find src/ -name '*.py' -print0 | xargs -0 -I{} awk -v max="$MAX_LINES" \
-          'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {})
+        VIOLATIONS=$(
+          {
+            find src/ scripts/architecture_linter/ -name '*.py' -print0
+            printf '%s\0' scripts/lint_architecture_boundaries.py
+          } | xargs -0 -I{} awk -v max="$MAX_LINES" \
+            'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {}
+        )
         if [ -n "$VIOLATIONS" ]; then
           echo "::error::Source files exceed $MAX_LINES-line limit:"
           echo "$VIOLATIONS"
@@ -77,7 +90,9 @@ jobs:
           --disable=all --enable=R0801 \
           --min-similarity-lines=10 \
           --fail-on=R0801 \
-          src/apm_cli/
+          src/apm_cli/ \
+          scripts/lint_architecture_boundaries.py \
+          scripts/architecture_linter/
 
     - name: Lint - auth-protocol boundary (#1212 anti-regression)
       run: bash scripts/lint-auth-signals.sh
@@ -182,6 +197,14 @@ jobs:
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
           tests/quality/test_ci_topology.py
+
+    - name: Run bounded architecture scaling gate
+      env:
+        PYTEST_PERF: '1'
+      run: >-
+        uv run --frozen --extra dev pytest -p no:cacheprovider -q
+        -m benchmark
+        tests/perf/test_architecture_linter_scaling.py::test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction
 
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #

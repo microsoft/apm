@@ -1,16 +1,13 @@
 """Mutation coverage for the in-process repository cache-identity authority.
 
-``scripts/check_repository_cache_identity_owner.py`` is the standalone CLI that
-first encoded these semantics. When the shell architecture gate was replaced by
-the in-process linter, the ``transport-platform-git-cache-identity`` rule kept
-only the helper's *lexical* half, so the exact evasions the helper exists to
-stop -- truncation hidden behind a renamed helper, or applied after canonical
-normalization -- passed the rule that owns the decision.
+The ``transport-platform-git-cache-identity`` registered rule owns these
+semantics. Its mutation matrix covers the exact evasions that a lexical check
+misses: truncation hidden behind a renamed helper and truncation applied after
+canonical normalization.
 
 Every test here drives the registered rule through the real engine
 (:func:`run_selected_rules`) against a full filesystem copy of this repository,
-mutated one defect at a time. Standalone-helper compatibility remains isolated
-to ``tests/unit/scripts/test_check_repository_cache_identity_owner.py``.
+mutated one defect at a time.
 """
 
 from __future__ import annotations

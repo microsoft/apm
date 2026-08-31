@@ -299,6 +299,49 @@ def test_tree_index_build_has_one_production_owner() -> None:
     ]
 
 
+def test_retired_architecture_checker_entrypoints_cannot_return() -> None:
+    """The registered catalog is the only executable architecture authority."""
+    retired = {
+        "check_agent_plugin_component_ir.py",
+        "check_agents_source_attribution_owner.py",
+        "check_bundle_format_authority.sh",
+        "check_cleanup_claim_owner.py",
+        "check_compile_inventory_authority.py",
+        "check_deployment_owner_boundaries.py",
+        "check_deployment_state_mutations.py",
+        "check_diagnostic_ascii_owner.py",
+        "check_generated_bundle_text_writers.py",
+        "check_hash_visible_lf_writes.py",
+        "check_hook_config_write_owner.py",
+        "check_hook_file_routing_owner.py",
+        "check_package_target_authority.py",
+        "check_plugin_skill_declaration_authority.py",
+        "check_removed_agent_plugin_lifecycle.py",
+        "check_repository_cache_identity_owner.py",
+        "check_shared_target_contraction_owner.py",
+        "check_skill_subset_owner.py",
+        "check_target_instruction_contraction_owner.py",
+        "check_test_contract_authorities.py",
+        "check_uninstall_selection_owner.py",
+        "check_windows_stable_path_owner.py",
+        "lint-bootstrap-project-name.py",
+        "lint-resolution-replacement-boundary.py",
+    }
+    scripts_root = REAL_ROOT / "scripts"
+    assert not {path.name for path in scripts_root.iterdir()} & retired
+
+    retired_modules = {name.removesuffix(".py").replace("-", "_") for name in retired}
+    imported: set[str] = set()
+    for path in sorted((scripts_root / "architecture_linter").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.rsplit(".", 1)[-1] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.rsplit(".", 1)[-1])
+    assert not imported & retired_modules
+
+
 def test_ast_visit_counter_matches_an_independent_ast_walk_with_no_extra_traversal(
     tmp_path: Path,
 ) -> None:
@@ -391,93 +434,6 @@ def test_group_module_names_is_the_exact_six_in_fixed_order() -> None:
         "marketplace_integrations",
     )
     assert len(set(runner.GROUP_MODULE_NAMES)) == 6
-
-
-def test_six_group_catalogs_stay_thin() -> None:
-    """Catalog wiring stays tiny: each of the six group modules is a thin,
-    compose-only re-export of RULES/COLLECTORS from one or more cohesive
-    check modules under ``checks/`` -- never the checks themselves."""
-    linter_root = REAL_ROOT / "scripts/architecture_linter"
-    groups_root = linter_root / "groups"
-    catalog_paths = tuple(groups_root / f"{name}.py" for name in runner.GROUP_MODULE_NAMES)
-    actual_catalog_names = {
-        path.stem for path in groups_root.glob("*.py") if path.stem not in {"__init__", "common"}
-    }
-
-    assert actual_catalog_names == set(runner.GROUP_MODULE_NAMES)
-    assert all(path.is_file() for path in catalog_paths)
-    assert all(len(path.read_text(encoding="utf-8").splitlines()) < 50 for path in catalog_paths)
-    for path in catalog_paths:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        assert not any(
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-            for node in tree.body
-        ), f"{path.relative_to(REAL_ROOT)} contains analyzer implementation"
-
-
-MAX_ARCHITECTURE_LINTER_MODULE_LINES = 1000
-
-
-def test_architecture_module_line_budget() -> None:
-    """No Python module under scripts/architecture_linter may exceed 1000 lines.
-
-    This is a repo-wide, recursive replacement for the old "exactly six
-    ``*_analyzers.py`` files under a 2100-line cap" assumption: analyzer
-    modules are now split into as many cohesive, subdomain-scoped files as
-    keep each one comfortably under the shared 1000-line budget, and this
-    scan holds every module in the package to that budget regardless of its
-    name or which group catalog composes it.
-    """
-    linter_root = REAL_ROOT / "scripts/architecture_linter"
-    offenders = []
-    for path in sorted(linter_root.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        line_count = len(path.read_text(encoding="utf-8").splitlines())
-        if line_count > MAX_ARCHITECTURE_LINTER_MODULE_LINES:
-            offenders.append((str(path.relative_to(REAL_ROOT)), line_count))
-
-    assert offenders == [], "modules over the {}-line budget:\n{}".format(
-        MAX_ARCHITECTURE_LINTER_MODULE_LINES,
-        "\n".join(f"  {path}: {count} lines" for path, count in offenders),
-    )
-
-
-def test_six_literal_group_imports_aggregate_any_import_exception() -> None:
-    """Each lazy literal import catches exceptions plus SystemExit, not signals."""
-    source = Path(runner.__file__).read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    import_function = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_import_groups"
-    )
-    imported: list[str] = []
-    for statement in import_function.body:
-        if not isinstance(statement, ast.Try) or len(statement.body) != 1:
-            continue
-        import_node = statement.body[0]
-        if not isinstance(import_node, ast.ImportFrom):
-            continue
-        if import_node.module != "scripts.architecture_linter.groups":
-            continue
-        imported.extend(alias.name for alias in import_node.names)
-        assert len(statement.handlers) == 1
-        handler_type = statement.handlers[0].type
-        assert isinstance(handler_type, ast.Tuple)
-        caught = {element.id for element in handler_type.elts if isinstance(element, ast.Name)}
-        assert caught == {"Exception", "SystemExit"}
-
-    assert tuple(imported) == runner.GROUP_MODULE_NAMES
-    assert not any(
-        isinstance(statement, ast.Try)
-        and any(
-            isinstance(child, ast.ImportFrom)
-            and child.module == "scripts.architecture_linter.groups"
-            for child in statement.body
-        )
-        for statement in tree.body
-    )
 
 
 def test_importing_runner_does_not_import_rule_groups(

@@ -103,9 +103,6 @@ _RESOLVE_PHASE = "src/apm_cli/install/phases/resolve.py"
 _REF_RECHECK_CONSUMERS = (_APM_RESOLVER, _RESOLVE_PHASE)
 
 
-_ARCHITECTURE_AUTHORITIES_TEST = "test_architecture_authorities.py"
-
-
 _REF_RECHECK_OWNER_DEF = re.compile(r"^def should_force_ref_recheck\(")
 
 
@@ -164,11 +161,7 @@ def check_ref_recheck_ownership(provider: FactsProvider) -> tuple[Violation, ...
             for line, column in _matches(lines, _REF_RECHECK_PARALLEL, respect_exempt=False)
         )
 
-    test_paths = tuple(
-        path
-        for path in _tree_python_paths(provider, _TESTS_TREE)
-        if not path.endswith(f"/{_ARCHITECTURE_AUTHORITIES_TEST}")
-    )
+    test_paths = _tree_python_paths(provider, _TESTS_TREE)
     findings.extend(
         _banned(
             provider,

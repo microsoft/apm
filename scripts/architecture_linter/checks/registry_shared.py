@@ -8,66 +8,23 @@ module focused on its own checks while avoiding duplicated helper logic.
 
 from __future__ import annotations
 
-import re
-from collections.abc import Sequence
-
-from scripts.architecture_linter.facts import FactsProvider
-from scripts.architecture_linter.groups.common import checked_facts
-from scripts.architecture_linter.models import FileFacts, Violation
+from scripts.architecture_linter.checks.lexical_shared import (
+    count_regex,
+    has_regex,
+    python_paths,
+    read_required_python,
+)
+from scripts.architecture_linter.models import FileFacts
 
 GROUP = "registry_delegation"
 
+_count_regex_lines = count_regex
+_has_regex = has_regex
+_python_paths = python_paths
+_read_required = read_required_python
+
 
 _SRC = "src/apm_cli/"
-
-
-def _read_required(
-    provider: FactsProvider, rule_id: str, paths: Sequence[str]
-) -> tuple[dict[str, FileFacts], tuple[Violation, ...]]:
-    """Read every required file through the shared cache, failing closed.
-
-    Returns the cached facts keyed by path and a tuple of fail-closed
-    violations for any file that could not be read or parsed. A non-empty
-    failure tuple means the caller must not proceed: a missing or
-    unparseable owner is treated as a guard failure, never a silent pass.
-    """
-    facts_by_path: dict[str, FileFacts] = {}
-    failures: list[Violation] = []
-    for path in paths:
-        facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
-        facts_by_path[path] = facts
-        failures.extend(read_failures)
-    return facts_by_path, tuple(failures)
-
-
-def _python_paths(
-    provider: FactsProvider, *, under: str, exclude: tuple[str, ...] = ()
-) -> tuple[str, ...]:
-    """Return inventory ``*.py`` paths under a prefix (AND semantics).
-
-    ``common.inventory_paths`` selects with OR semantics across its prefix
-    and suffix criteria, so it cannot express "under this directory *and*
-    ending in ``.py``". This helper filters the one canonical inventory
-    directly, dropping any path under an `exclude` prefix.
-    """
-    return tuple(
-        path
-        for path in provider.inventory
-        if path.startswith(under)
-        and path.endswith(".py")
-        and not (exclude and path.startswith(exclude))
-    )
-
-
-def _count_regex_lines(facts: FileFacts, pattern: str | re.Pattern[str]) -> int:
-    """Count lexical lines matching `pattern` (mirrors ``grep -Ec``)."""
-    compiled = re.compile(pattern) if isinstance(pattern, str) else pattern
-    return sum(1 for line in facts.lines if compiled.search(line) is not None)
-
-
-def _has_regex(facts: FileFacts, pattern: str | re.Pattern[str]) -> bool:
-    """Return whether any lexical line matches `pattern` (``grep -Eq``)."""
-    return _count_regex_lines(facts, pattern) > 0
 
 
 def _definition_span(

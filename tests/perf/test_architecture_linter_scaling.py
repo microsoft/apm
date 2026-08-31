@@ -32,10 +32,12 @@ several fresh runs and compares raw and baseline-adjusted 10N/N ratios
 against a loose ceiling -- loose enough that ordinary host noise never
 fails it, tight enough that a real quadratic regression still would.
 
-Section C copies the real repository, adds N and 10N benign modules under
-catalog-scanned install/integration prefixes, and runs the actual six-group
-catalog without monkeypatching. It pins the compact-index cache to one build
-per file and keeps the measured 10N/N ratio below 15.
+Section C copies the real repository, adds 0, N, and 10N benign integration
+modules, and runs the actual six-group catalog without monkeypatching. A
+bounded CI case counts every production ``TreeIndex.walk`` result and applies
+fixed-cost subtraction to deterministic work units. The richer benchmark uses
+three fresh samples per size and applies the same subtraction to median wall
+time.
 
 Run explicitly with ``PYTEST_PERF=1 pytest tests/perf -v -s`` (see
 `tests/perf/conftest.py`); also gated by the repo-wide `benchmark` marker,
@@ -45,6 +47,7 @@ live'`) the same way every other perf/benchmark test in this repo is.
 
 from __future__ import annotations
 
+import ast
 import json
 import shutil
 import statistics
@@ -56,6 +59,7 @@ from pathlib import Path
 import pytest
 
 from scripts.architecture_linter import runner
+from scripts.architecture_linter.checks.tree_index import TreeIndex
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.inventory import EXCLUDED_ROOTS
 from scripts.architecture_linter.models import Rule, Violation
@@ -392,12 +396,22 @@ def test_runner_real_path_scales_subquadratically_at_zero_n_and_ten_n(
 
 
 # ---------------------------------------------------------------------------
-# Section C: actual six-group catalog over representative N/10N repository
-# copies. No fake Rule, group module, or selected-rule shortcut is involved.
+# Section C: actual six-group catalog over 0/N/10N repository copies. No fake
+# Rule, group module, or selected-rule shortcut is involved.
 # ---------------------------------------------------------------------------
-_REAL_SMALL_N = 30
+_CI_REAL_SMALL_N = 6
+_CI_REAL_LARGE_N = _CI_REAL_SMALL_N * 10
+_REAL_SMALL_N = 80
 _REAL_LARGE_N = _REAL_SMALL_N * 10
 _MAX_REAL_CATALOG_RATIO = 15
+_REAL_RUNS_PER_SIZE = 3
+_REAL_MEASURABLE_SECONDS = 0.05
+
+
+@dataclass(frozen=True)
+class _CatalogSample:
+    report: runner.RunReport
+    walk_work_units: int
 
 
 def _build_real_catalog_repo(root: Path, count: int) -> Path:
@@ -406,44 +420,108 @@ def _build_real_catalog_repo(root: Path, count: int) -> Path:
         root,
         ignore=shutil.ignore_patterns(*EXCLUDED_ROOTS),
     )
-    for prefix in (
-        "src/apm_cli/install/perf_catalog",
-        "src/apm_cli/integration/perf_catalog",
-    ):
-        directory = root / prefix
-        directory.mkdir(parents=True, exist_ok=True)
-        for index in range(count):
-            (directory / f"module_{index}.py").write_text(
-                f"def helper_{index}(value):\n"
-                "    if value:\n"
-                "        return value\n"
-                "    return None\n",
-                encoding="ascii",
-            )
+    directory = root / "tests/integration/perf_catalog"
+    directory.mkdir(parents=True, exist_ok=True)
+    for index in range(count):
+        (directory / f"test_module_{index}.py").write_text(
+            "import pytest\n\n"
+            "pytestmark = pytest.mark.integration\n\n\n"
+            f"def helper_{index}(value):\n"
+            "    if value:\n"
+            "        return value\n"
+            "    return None\n",
+            encoding="ascii",
+        )
     return root
 
 
-def test_real_six_group_catalog_stays_below_fifteen_x_at_ten_x_scale(
+def _install_walk_counter(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Count structural work without adding another AST traversal."""
+    work_units = [0]
+    original = TreeIndex.walk
+
+    def counted_walk(index: TreeIndex, node: ast.AST) -> Sequence[ast.AST]:
+        result = original(index, node)
+        work_units[0] += len(result)
+        return result
+
+    monkeypatch.setattr(TreeIndex, "walk", counted_walk)
+    return work_units
+
+
+def _catalog_sample(root: Path, work_units: list[int]) -> _CatalogSample:
+    before = work_units[0]
+    report = runner.run(root)
+    return _CatalogSample(report=report, walk_work_units=work_units[0] - before)
+
+
+def _assert_catalog_sample(sample: _CatalogSample) -> None:
+    report = sample.report
+    assert report.exit_code == 0
+    assert report.metrics.tree_index_builds > 0
+    assert report.metrics.max_tree_index_builds_per_file <= 1
+    assert report.metrics.max_reads_per_file <= 1
+    assert report.metrics.max_parses_per_file <= 1
+    assert report.metrics.child_process_count == 0
+    assert sample.walk_work_units > 0
+
+
+def test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The shipped catalog, including tree queries, scales subquadratically."""
-    small_root = _build_real_catalog_repo(tmp_path / "real_n", _REAL_SMALL_N)
-    large_root = _build_real_catalog_repo(tmp_path / "real_ten_n", _REAL_LARGE_N)
+    """Bounded CI gate exercises the production catalog with deterministic work."""
+    work_units = _install_walk_counter(monkeypatch)
+    roots = {
+        "zero": _build_real_catalog_repo(tmp_path / "ci_real_zero", 0),
+        "n": _build_real_catalog_repo(tmp_path / "ci_real_n", _CI_REAL_SMALL_N),
+        "ten_n": _build_real_catalog_repo(tmp_path / "ci_real_ten_n", _CI_REAL_LARGE_N),
+    }
+    samples = {label: _catalog_sample(root, work_units) for label, root in roots.items()}
+    for sample in samples.values():
+        _assert_catalog_sample(sample)
 
-    small = runner.run(small_root)
-    large = runner.run(large_root)
+    fixed = samples["zero"].walk_work_units
+    incremental_n = samples["n"].walk_work_units - fixed
+    incremental_ten_n = samples["ten_n"].walk_work_units - fixed
+    assert incremental_n > 0
+    assert incremental_ten_n / incremental_n < _MAX_REAL_CATALOG_RATIO
 
-    assert small.exit_code == 0
-    assert large.exit_code == 0
-    assert small.metrics.tree_index_builds > 0
-    assert large.metrics.tree_index_builds > small.metrics.tree_index_builds
-    assert small.metrics.max_tree_index_builds_per_file <= 1
-    assert large.metrics.max_tree_index_builds_per_file <= 1
-    assert small.metrics.child_process_count == 0
-    assert large.metrics.child_process_count == 0
 
-    ratio = large.metrics.total_seconds / max(
-        small.metrics.total_seconds,
-        _MEASURABLE_SECONDS_FLOOR,
-    )
-    assert ratio < _MAX_REAL_CATALOG_RATIO
+def test_real_six_group_catalog_wall_time_scales_below_fifteen_x(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three-sample production-catalog medians scale subquadratically."""
+    work_units = _install_walk_counter(monkeypatch)
+    sizes = {"zero": 0, "n": _REAL_SMALL_N, "ten_n": _REAL_LARGE_N}
+    roots = {
+        label: _build_real_catalog_repo(tmp_path / f"real_{label}", count)
+        for label, count in sizes.items()
+    }
+    samples = {
+        label: tuple(_catalog_sample(root, work_units) for _ in range(_REAL_RUNS_PER_SIZE))
+        for label, root in roots.items()
+    }
+    for scale_samples in samples.values():
+        for sample in scale_samples:
+            _assert_catalog_sample(sample)
+
+    median_seconds = {
+        label: statistics.median(sample.report.metrics.total_seconds for sample in values)
+        for label, values in samples.items()
+    }
+    baseline = median_seconds["zero"]
+    incremental_n = median_seconds["n"] - baseline
+    incremental_ten_n = median_seconds["ten_n"] - baseline
+    assert incremental_n > _REAL_MEASURABLE_SECONDS
+    assert incremental_ten_n / incremental_n < _MAX_REAL_CATALOG_RATIO
+
+    median_work = {
+        label: statistics.median(sample.walk_work_units for sample in values)
+        for label, values in samples.items()
+    }
+    incremental_n_work = median_work["n"] - median_work["zero"]
+    incremental_ten_n_work = median_work["ten_n"] - median_work["zero"]
+    assert incremental_n_work > 0
+    assert incremental_ten_n_work / incremental_n_work < _MAX_REAL_CATALOG_RATIO

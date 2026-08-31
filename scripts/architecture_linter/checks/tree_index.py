@@ -34,6 +34,7 @@ calls ``ast.parse``/``ast.walk``/``ast.iter_child_nodes``, uses an
 from __future__ import annotations
 
 import ast
+from array import array
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
@@ -78,12 +79,10 @@ class TreeIndex:
 
     root: ast.AST | None
     nodes: tuple[ast.AST, ...]
-    _children: dict[int, tuple[ast.AST, ...]]
-    _parents: dict[int, ast.AST]
-    _positions: dict[int, int]
-    _ends: tuple[int, ...]
-    _own_scope_anchors: tuple[int, ...]
-    _definition_anchors: tuple[int, ...]
+    _parent_positions: array[int]
+    _ends: array[int]
+    _own_scope_anchors: array[int]
+    _definition_anchors: array[int]
     _functions: tuple[ast.AST, ...]
     _functions_by_qualname: dict[str, ast.AST]
     _qualnames_by_function_id: dict[int, str]
@@ -91,7 +90,7 @@ class TreeIndex:
     # -- adjacency -------------------------------------------------------
     def children(self, node: ast.AST) -> tuple[ast.AST, ...]:
         """Return the direct children of `node` in source order."""
-        return self._children.get(id(node), ())
+        return tuple(ast.iter_child_nodes(node))
 
     def module_children(self) -> tuple[ast.AST, ...]:
         """Return the module body (what a helper reads as ``tree.body``)."""
@@ -99,7 +98,11 @@ class TreeIndex:
 
     def parent(self, node: ast.AST) -> ast.AST | None:
         """Return the recorded parent of `node`, or ``None`` at the root."""
-        return self._parents.get(id(node))
+        position = self._position(node)
+        if position is None:
+            return None
+        parent_position = self._parent_positions[position]
+        return None if parent_position < 0 else self.nodes[parent_position]
 
     def walk(self, node: ast.AST) -> Sequence[ast.AST]:
         """Return a compact pre-order view of `node` and its descendants.
@@ -108,7 +111,7 @@ class TreeIndex:
         yield. Known subtrees are represented by an O(1) range view over the
         file's one pre-order node tuple; unknown nodes degrade to ``(node,)``.
         """
-        position = self._positions.get(id(node))
+        position = self._position(node)
         if position is None:
             return (node,)
         return _NodeRange(self.nodes, position, self._ends[position])
@@ -125,7 +128,7 @@ class TreeIndex:
 
     def definition_anchor(self, node: ast.AST) -> ast.AST | None:
         """Return the nearest enclosing ``def``/``async def``/``class``."""
-        position = self._positions.get(id(node))
+        position = self._position(node)
         if position is None:
             return None
         anchor = self._definition_anchors[position]
@@ -139,7 +142,7 @@ class TreeIndex:
         helper's scope-node set for one statement; a `node` that is itself a
         definition contributes nothing.
         """
-        position = self._positions.get(id(node))
+        position = self._position(node)
         if position is None:
             return ()
         anchor = self._definition_anchors[position]
@@ -150,9 +153,9 @@ class TreeIndex:
             and not isinstance(self.nodes[offset], DEFINITION_NODES)
         )
 
-    def _scoped(self, node: ast.AST, anchors: tuple[int, ...]) -> tuple[ast.AST, ...]:
+    def _scoped(self, node: ast.AST, anchors: array[int]) -> tuple[ast.AST, ...]:
         """Return the descendants of `node` anchored directly to `node`."""
-        position = self._positions.get(id(node))
+        position = self._position(node)
         if position is None:
             return ()
         return tuple(
@@ -160,6 +163,13 @@ class TreeIndex:
             for offset in range(position + 1, self._ends[position])
             if anchors[offset] == position
         )
+
+    def _position(self, node: ast.AST) -> int | None:
+        """Return the traversal position attached during the one shared walk."""
+        position = getattr(node, "_apm_arch_position", None)
+        if not isinstance(position, int) or position < 0 or position >= len(self.nodes):
+            return None
+        return position if self.nodes[position] is node else None
 
     # -- definitions -----------------------------------------------------
     def functions(self) -> tuple[ast.AST, ...]:
@@ -178,14 +188,14 @@ class TreeIndex:
         )
 
 
-def _subtree_ends(parent_positions: Sequence[int]) -> list[int]:
+def _subtree_ends(parent_positions: Sequence[int]) -> array[int]:
     """Return each pre-order position's exclusive subtree end.
 
     Depth-first pre-order makes every subtree a contiguous run, so a node's
     descendant set is ``nodes[position:end]``. Walking positions downward
     finalizes each node before it propagates its end up to its parent.
     """
-    ends = [position + 1 for position in range(len(parent_positions))]
+    ends = array("I", (position + 1 for position in range(len(parent_positions))))
     for position in range(len(parent_positions) - 1, 0, -1):
         parent_position = parent_positions[position]
         if parent_position < 0:
@@ -221,28 +231,24 @@ class _NodeRange(Sequence[ast.AST]):
         return self.nodes[self.start + position]
 
 
-def build_tree_index(facts: object) -> TreeIndex | None:
+def build_tree_index(records: Sequence[NodeRecord]) -> TreeIndex | None:
     """Fold one file's intrinsic node records into a :class:`TreeIndex`.
 
-    Reads :attr:`~scripts.architecture_linter.models.FileFacts.node_records`
-    directly -- there is no fact name to pass and no collector to register,
-    because shape is intrinsic to the one shared traversal.
+    The raw records are a construction-only stream from the shared traversal.
+    The returned index keeps one node tuple plus compact integer arrays; it does
+    not retain record tuples or per-node dictionaries.
 
     Returns ``None`` when that traversal recorded nothing for the file (not
     Python, unreadable, or unparseable), which every caller treats as "no
     structural claim can be made about this file".
     """
-    records: Sequence[NodeRecord] = getattr(facts, "node_records", ())
     if not records:
         return None
 
     nodes: list[ast.AST] = []
-    positions: dict[int, int] = {}
-    parent_positions: list[int] = []
-    own_anchors: list[int] = []
-    definition_anchors: list[int] = []
-    child_lists: dict[int, list[ast.AST]] = {}
-    parents: dict[int, ast.AST] = {}
+    parent_positions = array("i")
+    own_anchors = array("i")
+    definition_anchors = array("i")
     qualnames: dict[int, str] = {}
     functions: list[ast.AST] = []
     by_qualname: dict[str, ast.AST] = {}
@@ -255,7 +261,7 @@ def build_tree_index(facts: object) -> TreeIndex | None:
     # so intermediate expression nodes need to record nothing.
     for node, parent in records:
         position = len(nodes)
-        positions[id(node)] = position
+        node._apm_arch_position = position
         nodes.append(node)
         if parent is None:
             root = node
@@ -264,11 +270,8 @@ def build_tree_index(facts: object) -> TreeIndex | None:
             definition_anchors.append(-1)
             anchor = -1
         else:
-            parent_id = id(parent)
-            parent_position = positions[parent_id]
+            parent_position = parent._apm_arch_position
             parent_positions.append(parent_position)
-            parents[id(node)] = parent
-            child_lists.setdefault(parent_id, []).append(node)
             own_anchors.append(
                 parent_position
                 if isinstance(parent, OWN_SCOPE_BARRIERS)
@@ -292,12 +295,10 @@ def build_tree_index(facts: object) -> TreeIndex | None:
     return TreeIndex(
         root=root,
         nodes=ordered,
-        _children={node_id: tuple(items) for node_id, items in child_lists.items()},
-        _parents=parents,
-        _positions=positions,
-        _ends=tuple(ends),
-        _own_scope_anchors=tuple(own_anchors),
-        _definition_anchors=tuple(definition_anchors),
+        _parent_positions=parent_positions,
+        _ends=ends,
+        _own_scope_anchors=own_anchors,
+        _definition_anchors=definition_anchors,
         _functions=tuple(functions),
         _functions_by_qualname=by_qualname,
         _qualnames_by_function_id={

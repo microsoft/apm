@@ -19,6 +19,10 @@ def _write_plugin_consumer(tmp_path: Path, plugin_manifest: dict) -> tuple[Path,
         json.dumps(plugin_manifest),
         encoding="utf-8",
     )
+    (plugin / "apm.yml").write_text(
+        f"name: {plugin_manifest['name']}\nversion: {plugin_manifest.get('version', '1.0.0')}\n",
+        encoding="utf-8",
+    )
     consumer = tmp_path / "consumer"
     consumer.mkdir()
     (consumer / ".claude").mkdir()

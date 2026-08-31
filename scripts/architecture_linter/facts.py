@@ -5,13 +5,15 @@ Three collaborators do the work:
 * :class:`SourceCache` reads each file's bytes at most once, memoizing both
   successful reads and read errors.
 * :class:`ParseCache` parses each Python source at most once, memoizing both
-  the resulting module and parse errors.
+  the resulting module and parse errors until :class:`FactsProvider` has
+  materialized an immutable fact set.
 * :class:`FactsProvider` is what rules actually receive. It lazily builds a
   frozen :class:`~scripts.architecture_linter.models.FileFacts` per file on
-  first request (via the two caches above and one shared composite
-  ``ast.NodeVisitor``), then serves every subsequent request for the same
-  path from memory. No file is ever read twice, parsed twice, or walked with
-  a second ``ast.walk``, no matter how many rules ask for it.
+  first request (via the two caches above and one shared composite traversal).
+  Hot product-source facts remain in memory. Test-corpus facts, which are used
+  by only the contract family, spill to a private bounded cache so hundreds of
+  large test ASTs do not remain resident beside the hot source corpus. No file
+  is ever read twice, parsed twice, or walked twice.
 
 The walk also records the file's raw AST *shape* -- one immutable
 ``(node, parent)`` record per visited node -- as an intrinsic part of
@@ -33,12 +35,16 @@ every registered collector once per AST node, and their output lands in
 from __future__ import annotations
 
 import ast
+import pickle
+import tempfile
+from collections import OrderedDict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
+from scripts.architecture_linter.checks.tree_index import TreeIndex, build_tree_index
 from scripts.architecture_linter.inventory import is_safe_repository_relative_path
 from scripts.architecture_linter.models import (
     AssignmentFact,
@@ -193,6 +199,17 @@ class ParseCache:
         self.parse_successes += 1
         self._cache[relative_path] = result
         return result
+
+    def release_tree(self, relative_path: str) -> None:
+        """Release a successfully materialized tree without resetting counters.
+
+        FactsProvider calls this only after the corresponding immutable facts
+        have been persisted. Parse failures stay cached so diagnostics remain
+        available and a bad path cannot be retried.
+        """
+        cached = self._cache.get(relative_path)
+        if cached is not None and cached[0] is not None:
+            del self._cache[relative_path]
 
     @property
     def max_parses_per_file(self) -> int:
@@ -415,7 +432,7 @@ def _build_file_facts(
     calls: tuple[CallFact, ...] = ()
     assignments: tuple[AssignmentFact, ...] = ()
     literals: tuple[LiteralFact, ...] = ()
-    node_records: tuple[NodeRecord, ...] = ()
+    tree_index: TreeIndex | None = None
     extra: MappingProxyType[str, tuple[object, ...]] = MappingProxyType({})
     visits = 0
 
@@ -429,7 +446,7 @@ def _build_file_facts(
             calls = tuple(visitor.calls)
             assignments = tuple(visitor.assignments)
             literals = tuple(visitor.literals)
-            node_records = tuple(visitor.node_records)
+            tree_index = build_tree_index(visitor.node_records)
             extra = MappingProxyType({name: tuple(items) for name, items in visitor.extra.items()})
             visits = visitor.visits
 
@@ -445,7 +462,7 @@ def _build_file_facts(
         calls=calls,
         assignments=assignments,
         literals=literals,
-        node_records=node_records,
+        tree_index=tree_index,
         extra=extra,
         visits=visits,
     )
@@ -474,7 +491,12 @@ class FactsProvider:
         self.parse_cache = ParseCache()
         self._collectors = tuple(collectors)
         self._file_facts: dict[str, FileFacts] = {}
-        self._tree_indexes: dict[str, TreeIndex | None] = {}
+        self._spill_directory = tempfile.TemporaryDirectory(prefix="apm-architecture-facts-")
+        self._spill_paths: dict[str, Path] = {}
+        self._transient_facts: OrderedDict[str, FileFacts] = OrderedDict()
+        self._next_spill_id = 0
+        self._ast_visits = 0
+        self._tree_index_requests: set[str] = set()
         self._tree_index_builds_per_file: dict[str, int] = {}
         self._tree_index_node_count = 0
         self.tree_index_builds = 0
@@ -486,34 +508,100 @@ class FactsProvider:
         cached = self._file_facts.get(relative_path)
         if cached is not None:
             return cached
+        transient = self._transient_facts.pop(relative_path, None)
+        if transient is not None:
+            self._transient_facts[relative_path] = transient
+            return transient
+        spill_path = self._spill_paths.get(relative_path)
+        if spill_path is not None:
+            facts = self._load_spilled_facts(spill_path)
+            self._remember_transient(relative_path, facts)
+            return facts
         facts = _build_file_facts(
             relative_path, self.source_cache, self.parse_cache, self._collectors
         )
-        self._file_facts[relative_path] = facts
-        return facts
-
-    def tree_index(self, relative_path: str) -> TreeIndex | None:
-        """Return the one cached compact tree index for `relative_path`."""
-        if relative_path in self._tree_indexes:
-            self.tree_index_cache_hits += 1
-            return self._tree_indexes[relative_path]
-
-        # Lazy to keep the fact layer import-safe and avoid a models/facts cycle.
-        from scripts.architecture_linter.checks.tree_index import build_tree_index
-
-        index = build_tree_index(self.file_facts(relative_path))
-        self._tree_indexes[relative_path] = index
-        self.tree_index_builds += 1
-        self._tree_index_builds_per_file[relative_path] = (
-            self._tree_index_builds_per_file.get(relative_path, 0) + 1
-        )
-        if index is not None:
-            self._tree_index_node_count += len(index.nodes)
+        self._ast_visits += facts.visits
+        if facts.tree_index is not None:
+            self.tree_index_builds += 1
+            self._tree_index_builds_per_file[relative_path] = 1
+            self._tree_index_node_count += len(facts.tree_index.nodes)
             self.peak_tree_index_nodes = max(
                 self.peak_tree_index_nodes,
                 self._tree_index_node_count,
             )
-        return index
+        if self._should_spill(relative_path, facts):
+            self._spill_facts(relative_path, facts)
+            self.parse_cache.release_tree(relative_path)
+            self._remember_transient(relative_path, facts)
+        else:
+            self._file_facts[relative_path] = facts
+        return facts
+
+    @staticmethod
+    def _should_spill(relative_path: str, facts: FileFacts) -> bool:
+        """Return whether facts belong to the cold, high-volume test corpus."""
+        return relative_path.startswith("tests/") and facts.tree_index is not None
+
+    def _spill_facts(self, relative_path: str, facts: FileFacts) -> None:
+        """Persist one trusted fact set without constructing a second byte copy."""
+        spill_path = Path(self._spill_directory.name) / f"{self._next_spill_id}.pickle"
+        self._next_spill_id += 1
+        payload = (
+            facts.path,
+            facts.exists,
+            facts.is_python,
+            facts.read_error,
+            facts.parse_error,
+            facts.lines,
+            facts.definitions,
+            facts.imports,
+            facts.calls,
+            facts.assignments,
+            facts.literals,
+            facts.tree_index,
+            dict(facts.extra),
+            facts.visits,
+        )
+        with spill_path.open("wb") as handle:
+            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        self._spill_paths[relative_path] = spill_path
+
+    @staticmethod
+    def _load_spilled_facts(spill_path: Path) -> FileFacts:
+        """Load facts written by this process to its private temporary folder."""
+        with spill_path.open("rb") as handle:
+            payload = pickle.load(handle)  # noqa: S301 - private same-process cache
+        if not isinstance(payload, tuple) or len(payload) != 14:
+            raise RuntimeError(f"malformed architecture fact spill: {spill_path.name}")
+        return FileFacts(
+            path=payload[0],
+            exists=payload[1],
+            is_python=payload[2],
+            read_error=payload[3],
+            parse_error=payload[4],
+            lines=payload[5],
+            definitions=payload[6],
+            imports=payload[7],
+            calls=payload[8],
+            assignments=payload[9],
+            literals=payload[10],
+            tree_index=payload[11],
+            extra=MappingProxyType(payload[12]),
+            visits=payload[13],
+        )
+
+    def _remember_transient(self, relative_path: str, facts: FileFacts) -> None:
+        """Keep only enough cold facts for adjacent facts/tree-index requests."""
+        self._transient_facts[relative_path] = facts
+        while len(self._transient_facts) > 2:
+            self._transient_facts.popitem(last=False)
+
+    def tree_index(self, relative_path: str) -> TreeIndex | None:
+        """Return the one cached compact tree index for `relative_path`."""
+        if relative_path in self._tree_index_requests:
+            self.tree_index_cache_hits += 1
+        self._tree_index_requests.add(relative_path)
+        return self.file_facts(relative_path).tree_index
 
     @property
     def max_tree_index_builds_per_file(self) -> int:
@@ -523,4 +611,4 @@ class FactsProvider:
     @property
     def ast_visits(self) -> int:
         """Total AST nodes visited across every file built so far."""
-        return sum(facts.visits for facts in self._file_facts.values())
+        return self._ast_visits

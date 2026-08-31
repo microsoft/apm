@@ -14,6 +14,7 @@ import ast
 from collections.abc import Sequence
 
 from scripts.architecture_linter.checks.contracts_test_shared import _APM_EXECUTABLE_NAMES
+from scripts.architecture_linter.checks.python_semantics import propagated_assignment_values
 from scripts.architecture_linter.checks.tree_index import FUNCTION_NODES, TreeIndex
 
 _LOCAL_BINARY_FACADES = frozenset({"_resolve_apm_executable", "apm_binary", "apm_command"})
@@ -202,9 +203,15 @@ def _scope_binding_maps(
     return bindings_by_scope, scope_by_node
 
 
-def _direct_binary_env_read_lines(index: TreeIndex) -> list[int]:
+ScopeBindingMaps = tuple[dict[int, dict[str, str]], dict[int, ast.AST]]
+
+
+def _direct_binary_env_read_lines(
+    index: TreeIndex,
+    binding_maps: ScopeBindingMaps | None = None,
+) -> list[int]:
     """Find direct APM_BINARY_PATH environment reads."""
-    bindings_by_scope, scope_by_node = _scope_binding_maps(index)
+    bindings_by_scope, scope_by_node = binding_maps or _scope_binding_maps(index)
     root = index.root
     lines: set[int] = set()
     for node in index.walk(root):
@@ -221,9 +228,12 @@ def _direct_binary_env_read_lines(index: TreeIndex) -> list[int]:
     return sorted(lines)
 
 
-def _direct_binary_path_lookup_lines(index: TreeIndex) -> list[int]:
+def _direct_binary_path_lookup_lines(
+    index: TreeIndex,
+    binding_maps: ScopeBindingMaps | None = None,
+) -> list[int]:
     """Find direct ``shutil.which("apm")`` PATH lookups."""
-    bindings_by_scope, scope_by_node = _scope_binding_maps(index)
+    bindings_by_scope, scope_by_node = binding_maps or _scope_binding_maps(index)
     root = index.root
     lines: set[int] = set()
     for node in index.walk(root):
@@ -254,27 +264,7 @@ def _expression_string_tokens(
 
 def _assignment_string_tokens(index: TreeIndex) -> dict[str, set[str]]:
     """Propagate string path tokens across simple assignments (fixed point)."""
-    root = index.root
-    assignments: list[tuple[list[str], ast.AST]] = []
-    for node in index.walk(root):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        names = [target.id for target in targets if isinstance(target, ast.Name)]
-        if names:
-            assignments.append((names, node.value))
-    known: dict[str, set[str]] = {}
-    for _ in range(len(assignments) + 1):
-        changed = False
-        for names, value in assignments:
-            tokens = _expression_string_tokens(index, value, known)
-            for name in names:
-                if not tokens.issubset(known.get(name, set())):
-                    known.setdefault(name, set()).update(tokens)
-                    changed = True
-        if not changed:
-            break
-    return known
+    return propagated_assignment_values(index, _expression_string_tokens)
 
 
 def _is_path_construction(node: ast.AST) -> bool:

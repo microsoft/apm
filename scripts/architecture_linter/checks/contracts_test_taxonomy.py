@@ -31,6 +31,18 @@ from scripts.architecture_linter.checks.contracts_test_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.lexical_shared import (
+    body_has as _body_has,
+)
+from scripts.architecture_linter.checks.lexical_shared import (
+    body_has_regex as _body_has_re,
+)
+from scripts.architecture_linter.checks.lexical_shared import (
+    captured_facts_body as _awk_body,
+)
+from scripts.architecture_linter.checks.lexical_shared import (
+    duplicate_definition_lines as _duplicate_definition_lines,
+)
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import EXEMPT_MARKER, checked_facts, violation
 from scripts.architecture_linter.models import Rule, Violation
@@ -105,67 +117,6 @@ def _count_defs_across(provider: FactsProvider, prefix: str, pattern: re.Pattern
             continue
         total += _count_re(facts, pattern)
     return total
-
-
-def _duplicate_definition_lines(
-    provider: FactsProvider,
-    *,
-    rule_id: str,
-    prefix: str,
-    pattern: re.Pattern[str],
-    owner: str,
-    message: str,
-    respect_exempt: bool,
-) -> list[Violation]:
-    """Flag every definition matching `pattern` outside the canonical `owner`."""
-    findings: list[Violation] = []
-    for path in _python_paths(provider, prefix):
-        if path == owner:
-            continue
-        facts = provider.file_facts(path)
-        if getattr(facts, "read_error", None) is not None:
-            continue
-        for number, line in enumerate(_lines(facts), start=1):
-            if respect_exempt and EXEMPT_MARKER in line:
-                continue
-            match = pattern.search(line)
-            if match is not None:
-                findings.append(
-                    violation(rule_id, path, message, line=number, column=match.start() + 1)
-                )
-    return findings
-
-
-def _awk_body(
-    facts: object,
-    start: re.Pattern[str],
-    boundary: re.Pattern[str],
-    keep: re.Pattern[str] | None = None,
-) -> tuple[str, ...]:
-    """Extract a function/class body like the shell's block-capture awk."""
-    keep_pattern = keep if keep is not None else start
-    body: list[str] = []
-    capturing = False
-    for line in _lines(facts):
-        if not capturing:
-            if start.search(line) is not None:
-                capturing = True
-                body.append(line)
-            continue
-        if boundary.search(line) is not None and keep_pattern.search(line) is None:
-            break
-        body.append(line)
-    return tuple(body)
-
-
-def _body_has(body: Sequence[str], needle: str) -> bool:
-    """Return whether any captured body line contains `needle`."""
-    return any(needle in line for line in body)
-
-
-def _body_has_re(body: Sequence[str], pattern: re.Pattern[str]) -> bool:
-    """Return whether any captured body line matches `pattern`."""
-    return any(pattern.search(line) is not None for line in body)
 
 
 _TAXONOMY_PLUGIN = "tests/quality/taxonomy_inventory_plugin.py"

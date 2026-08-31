@@ -14,6 +14,7 @@ import ast
 import shlex
 
 from scripts.architecture_linter.checks.contracts_scope_binding import (
+    ScopeBindingMaps,
     _assignment_command_values,
     _attribute_name,
     _direct_binary_env_read_lines,
@@ -35,6 +36,7 @@ from scripts.architecture_linter.checks.contracts_test_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.python_semantics import propagated_assignment_values
 from scripts.architecture_linter.checks.tree_index import TreeIndex
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import violation
@@ -86,9 +88,12 @@ _RATCHET_LOCAL_INVENTORY_SHAPES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _direct_apm_subprocess_lines(index: TreeIndex) -> list[int]:
+def _direct_apm_subprocess_lines(
+    index: TreeIndex,
+    binding_maps: ScopeBindingMaps | None = None,
+) -> list[int]:
     """Find direct apm subprocess selection outside the canonical owner."""
-    bindings_by_scope, scope_by_node = _scope_binding_maps(index)
+    bindings_by_scope, scope_by_node = binding_maps or _scope_binding_maps(index)
     scope_parents = _scope_parent_map(index)
     lists_by_scope, strings_by_scope = _assignment_command_values(index, scope_by_node)
     root = index.root
@@ -326,26 +331,7 @@ def _path_segments(index: TreeIndex, node: ast.AST, known: dict[str, set[str]]) 
 
 def _rendered_cli_path_names(index: TreeIndex) -> set[str]:
     """Return names bound to a rendered CLI reference path (fixed point)."""
-    root = index.root
-    assignments: list[tuple[list[str], ast.AST]] = []
-    for node in index.walk(root):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        names = [target.id for target in targets if isinstance(target, ast.Name)]
-        if names:
-            assignments.append((names, node.value))
-    known: dict[str, set[str]] = {}
-    for _ in range(len(assignments) + 1):
-        changed = False
-        for names, value in assignments:
-            segments = _path_segments(index, value, known)
-            for name in names:
-                if not segments.issubset(known.get(name, set())):
-                    known.setdefault(name, set()).update(segments)
-                    changed = True
-        if not changed:
-            break
+    known = propagated_assignment_values(index, _path_segments)
     return {name for name, segments in known.items() if {"reference", "cli"}.issubset(segments)}
 
 
@@ -392,36 +378,39 @@ def _cannot_inspect(facts: object, path: str, rule_id: str) -> Violation | None:
     return None
 
 
-_BINARY_SUBCHECKS = (
-    (
-        _direct_binary_env_read_lines,
-        "direct APM_BINARY_PATH read outside {owner}; consume the apm_binary_path fixture",
-    ),
-    (
-        _direct_binary_path_lookup_lines,
-        "direct PATH lookup for apm outside {owner}; consume the apm_binary_path fixture",
-    ),
-    (
-        _venv_binary_fallback_lines,
-        "direct .venv apm fallback outside {owner}; consume the apm_binary_path fixture",
-    ),
-    (
-        _python_sibling_binary_lines,
-        "interpreter-relative apm selection outside {owner}; consume the apm_binary_path fixture",
-    ),
-    (
-        _local_binary_facade_lines,
-        "local apm binary fixture or facade outside {owner}; inject apm_binary_path directly",
-    ),
-    (
-        _direct_apm_subprocess_lines,
-        "direct apm subprocess selection outside {owner}; inject apm_binary_path directly",
-    ),
-    (
-        _implicit_lifecycle_runner_lines,
-        "implicit lifecycle runner APM selection outside {owner}; pass apm_binary_path as the runner command",
-    ),
-)
+def _binary_subcheck_results(index: TreeIndex) -> tuple[tuple[list[int], str], ...]:
+    """Run binary-selection detectors with one shared scope-binding derivation."""
+    binding_maps = _scope_binding_maps(index)
+    return (
+        (
+            _direct_binary_env_read_lines(index, binding_maps),
+            "direct APM_BINARY_PATH read outside {owner}; consume the apm_binary_path fixture",
+        ),
+        (
+            _direct_binary_path_lookup_lines(index, binding_maps),
+            "direct PATH lookup for apm outside {owner}; consume the apm_binary_path fixture",
+        ),
+        (
+            _venv_binary_fallback_lines(index),
+            "direct .venv apm fallback outside {owner}; consume the apm_binary_path fixture",
+        ),
+        (
+            _python_sibling_binary_lines(index),
+            "interpreter-relative apm selection outside {owner}; consume the apm_binary_path fixture",
+        ),
+        (
+            _local_binary_facade_lines(index),
+            "local apm binary fixture or facade outside {owner}; inject apm_binary_path directly",
+        ),
+        (
+            _direct_apm_subprocess_lines(index, binding_maps),
+            "direct apm subprocess selection outside {owner}; inject apm_binary_path directly",
+        ),
+        (
+            _implicit_lifecycle_runner_lines(index),
+            "implicit lifecycle runner APM selection outside {owner}; pass apm_binary_path as the runner command",
+        ),
+    )
 
 
 def find_binary_selection_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
@@ -449,9 +438,9 @@ def find_binary_selection_violations(provider: FactsProvider, rule_id: str) -> l
         index = provider.tree_index(path)
         if index is None or index.root is None:
             continue
-        for detector, template in _BINARY_SUBCHECKS:
+        for lines, template in _binary_subcheck_results(index):
             message = template.format(owner=_BINARY_OWNER)
-            for line in detector(index):
+            for line in lines:
                 findings.append(violation(rule_id, path, message, line=line))
         if path.count("/") == 2 and "_resolve_apm_binary" in _defined_functions(index):
             findings.append(

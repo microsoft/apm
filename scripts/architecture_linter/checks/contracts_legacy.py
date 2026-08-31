@@ -208,14 +208,8 @@ def check_ado_lock_coordinates(provider: FactsProvider) -> tuple[Violation, ...]
 
 # --------------------------------------------------------------------------
 # Ref-recheck owner guard, tests/ half (legacy shell L575-576).
-#
-#   grep -rEq --include='*.py' --exclude='test_architecture_authorities.py' \
-#       'def _force_semver_resolve|def should_force_ref_recheck' tests
-#
-# `--exclude` matched the base name, and the grep did not filter exemptions.
 # --------------------------------------------------------------------------
 _REF_RECHECK_OWNER = "src/apm_cli/drift.py"
-_ARCHITECTURE_ASSERTIONS = "test_architecture_authorities.py"
 
 _REF_RECHECK_TEST_SCAN = TreeScan(
     rule_id=RULE_REF_RECHECK_TEST_TREE,
@@ -227,7 +221,6 @@ _REF_RECHECK_TEST_SCAN = TreeScan(
         "::should_force_ref_recheck; the test tree must not define a parallel "
         "ref-recheck decision"
     ),
-    excluded_names=frozenset({_ARCHITECTURE_ASSERTIONS}),
     respect_exempt=False,
 )
 
@@ -242,8 +235,7 @@ def check_ref_recheck_test_tree(provider: FactsProvider) -> tuple[Violation, ...
 #
 #   dependency_field_duplicate_hits: grep -rEn --include='*.py'
 #       'def reject_unknown_git_fields|_(REMOTE|PARENT)_GIT_DEPENDENCY_FIELDS'
-#       src tests, minus the owner file, minus the architecture assertion
-#       module, minus exemption-marked lines.
+#       src tests, minus the owner file and exemption-marked lines.
 #   fixture_dependency_field_hits: grep -En
 #       'reject_unknown_fields|_(REMOTE|PARENT)?_?GIT_DEPENDENCY_FIELDS'
 #       tests/utils/local_package.py, minus exemption-marked lines.
@@ -261,7 +253,7 @@ _GIT_FIELD_DUPLICATE_SCAN = TreeScan(
     prefilter=("reject_unknown_git_fields", "_GIT_DEPENDENCY_FIELDS"),
     message=f"{_GIT_FIELD_MESSAGE}; owner is {_GIT_FIELD_OWNER}",
     respect_exempt=True,
-    excluded_paths=frozenset({_GIT_FIELD_OWNER, f"tests/integration/{_ARCHITECTURE_ASSERTIONS}"}),
+    excluded_paths=frozenset({_GIT_FIELD_OWNER}),
 )
 
 _GIT_FIELD_FIXTURE_BAN = re.compile(
