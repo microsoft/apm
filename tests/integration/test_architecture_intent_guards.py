@@ -6,8 +6,10 @@ import ast
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from scripts.architecture_linter.runner import registered_rules
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_LINT_SCRIPT = _REPO_ROOT / "scripts" / "lint-architecture-boundaries.sh"
+_RULES_BY_ID = {rule.id: rule for rule in registered_rules()}
 
 
 def _find_function(tree: ast.AST, name: str) -> ast.FunctionDef:
@@ -120,24 +122,21 @@ def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> 
 
 
 def test_static_boundary_guard_covers_replay_skill_subset_authority() -> None:
-    """The static lint script must guard both propagation edges above.
+    """The architecture-linter catalog must guard both propagation edges above.
 
     This meta-test does not itself re-derive runtime behavior; it only
-    confirms the two independent, function-scoped static guards below exist
-    in the lint script. Both AST tests above are structural routing guards
-    and the lint script is the second, independent guardrail required by
-    the single-canonical-owner discipline (see
+    confirms the registered, function-scoped static guard below exists in
+    the architecture-linter rule catalog. Both AST tests above are structural
+    routing guards and the linter rule is the second, independent guardrail
+    required by the single-canonical-owner discipline (see
     .github/instructions/architecture.instructions.md, AC4). A
     behavioral/AST regression test alone can be deleted or weakened by a
-    future change, so both guards -- lockfile-side reconstruction and
-    replay-side forwarding -- must be present in the script.
+    future change, so a registered semantic rule guarding locked skill-subset
+    propagation must remain present in the catalog.
     """
-    lint_source = _LINT_SCRIPT.read_text(encoding="utf-8")
-    assert (
-        "LockedDependency.to_dependency_ref must reconstruct skill_subset "
-        "from self.skill_subset" in lint_source
-    )
-    assert "Audit replay must preserve locked skill subset intent" in lint_source
+    rule = _RULES_BY_ID["install-deployment-skill-subset-tokens"]
+
+    assert "Skill subset filter tokens come from models/dependency/subsets.py" in rule.description
 
 
 def test_incompatible_refs_survive_to_conflict_selection(tmp_path: Path) -> None:

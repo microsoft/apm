@@ -5,121 +5,38 @@ description: "Single canonical owner discipline: one authority per durable decis
 
 # Architecture discipline: one canonical owner per decision
 
-APM is a pipeline of durable facts (targets, lock state, install
-outcomes, compiled output, hook shapes, credentials, deployment
-provenance). Most reliability bugs in this codebase have one shape:
-the SAME decision was computed or enforced in more than one place, so
-a fix on one path silently missed a sibling path. The cure is
-structural, not case-by-case.
-
 ## The rule
 
 Every durable decision, vocabulary, outcome, write, or contract has
 exactly ONE canonical owner. Every call site routes THROUGH that owner
 instead of re-deriving the answer locally.
 
-- A "decision" is anything a reader must be able to trust is computed
-  identically everywhere: the accepted target set, whether an install
-  succeeded, the on-disk shape of a hook, the integrity hash of a
-  deployed file, the resolved credential for a host.
-- Adding a second place that computes or enforces the same decision is
-  a "split authority" and is a defect even if it currently agrees --
-  it WILL drift the next time one side is patched.
+Adding a second place that computes or enforces the same decision is a split
+authority, even when both implementations currently agree.
 
-## Existing canonical owners -- route through these, do not re-derive
+## Route through the owner
 
-The `Owner path selectors` column is executable contract data. The
-shepherd-driver owner-touch gate parses it directly; do not copy these
-selectors into another table or script. Keep selectors repository-relative,
-semicolon-delimited, and specific to the file(s) that own the fact.
+The executable owner inventory lives in
+`.apm/architecture/owners/index.json` and its explicitly listed domain shards.
+Read that registry before changing a durable decision.
 
-<!-- canonical-owner-table:v1 -->
-| Decision / fact | Canonical owner | Owner path selectors |
-|---|---|---|
-| Accepted target vocabulary | core/target_catalog.py | `src/apm_cli/core/target_catalog.py` |
-| Effective install target selection | core/target_detection.py (EffectiveTargetDecision) | `src/apm_cli/core/target_detection.py` |
-| Effective package target authorization | install/target_filter.py (resolve_effective_package_targets) | `src/apm_cli/install/target_filter.py` |
-| MCP target-selection precedence | integration/mcp_integrator_install.py (_resolve_target_runtimes) | `src/apm_cli/integration/mcp_integrator_install.py` |
-| Legacy MCP runtime ownership-key migration | install/mcp/ownership.py (migrate_legacy_project_target_servers) | `src/apm_cli/install/mcp/ownership.py` |
-| Behavioral test taxonomy classification | module-level pytestmark (taxonomy inventory verifies) | `tests/quality/taxonomy_inventory_plugin.py`; `tests/quality/test_test_taxonomy.py` |
-| Host + credential resolution | core/auth.py (AuthResolver), core/host_providers.py | `src/apm_cli/core/auth.py`; `src/apm_cli/core/host_providers.py` |
-| Runtime descriptors | runtime/registry.py | `src/apm_cli/runtime/registry.py` |
-| User-facing output / diagnostics | CommandLogger / console owner | `src/apm_cli/core/command_logger.py`; `src/apm_cli/utils/console.py` |
-| Compiled-output writes (atomic) | CompiledOutputWriter | `src/apm_cli/compilation/output_writer.py` |
-| Deployment provenance / state | deployment_ledger.py | `src/apm_cli/core/deployment_ledger.py` |
-| Target-scoped deployed-file contraction | install/manifest_reconcile.py (reconcile_target_deployed_files) | `src/apm_cli/install/manifest_reconcile.py` |
-| Install success / failure outcome | the canonical install-outcome path | `src/apm_cli/install/outcome.py` |
-| Resolution replacement activation | install/resolution_staging.py (ResolutionStagingSession) | `src/apm_cli/install/resolution_staging.py` |
-| Frozen install mutation eligibility | install/service.py (InstallService) | `src/apm_cli/install/service.py` |
-| Authorized deployable source paths | install/deployable_source_plan.py (DeployableSourcePlan) | `src/apm_cli/install/deployable_source_plan.py` |
-| Symlink-component containment and strict percent-encoded URL-path decoding | utils/path_security.py (has_symlink_component, decode_url_path_segments) | `src/apm_cli/utils/path_security.py` |
-| Install invocation option defaults | install/request.py (InstallRequest) | `src/apm_cli/install/request.py`; `src/apm_cli/commands/install.py` |
-| Neutral hook source grammar, per-target native shape, and shared-config APM-owned drift projection | hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries) | `src/apm_cli/hook_contract.py`; `src/apm_cli/integration/hook_ir.py`; `src/apm_cli/integration/hook_native_formats.py`; `src/apm_cli/integration/hook_integrator.py`; `src/apm_cli/integration/hook_ownership.py` |
-| Plugin-root hook command vocabulary + parsing | integration/hook_command_paths.py | `src/apm_cli/integration/hook_command_paths.py` |
-| File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) | `src/apm_cli/integration/base_integrator.py` |
-| Windows stable executable path | install.ps1 ($currentDir / $currentExe) | `install.ps1` |
-| Git repository cache-key normalization | cache/url_normalize.py (normalize_repo_url / cache_shard_key) | `src/apm_cli/cache/url_normalize.py` |
-| Sparse-cone setup, dangling-symlink repair, and materialized symlink validation | utils/git_sparse.py | `src/apm_cli/utils/git_sparse.py` |
-| Self-update release -> installer ref + VERSION | commands/self_update.py (_ResolvedSelfUpdateRelease) | `src/apm_cli/commands/self_update.py` |
-| Dependency comparison identity vs display-cased materialization path | models/dependency/identity.py + materialization.py + DependencyReference | `src/apm_cli/models/dependency/identity.py`; `src/apm_cli/models/dependency/materialization.py`; `src/apm_cli/models/dependency/reference.py` |
-| Cached policy shape | policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) | `src/apm_cli/policy/discovery.py` |
-| Post-uninstall dependency reachability | deps/reachability.py (compute_forward_reachable_keys) | `src/apm_cli/deps/reachability.py` |
-| CI audit scratch materialization | install/audit_replay.py (prepare_ci_audit_replay) | `src/apm_cli/install/audit_replay.py` |
-| GitHub API throttle classification | deps/github_rate_limit.py | `src/apm_cli/deps/github_rate_limit.py` |
-| Git ref freshness and cache eligibility | deps/tiered_ref_resolver.py (RefFreshnessPolicy) | `src/apm_cli/deps/tiered_ref_resolver.py` |
-| Git semver preflight eligibility and resolution | install/helpers/ref_reuse.py (is_git_semver_resolution_eligible / maybe_resolve_git_semver) | `src/apm_cli/install/helpers/ref_reuse.py` |
-| Root vs dependency MCP declaration scope | integration/mcp_config_view.py (CurrentMcpConfigView) | `src/apm_cli/integration/mcp_config_view.py` |
-| MCP package launcher selection and argv shape (container and non-container) | adapters/client/base.py (MCPClientAdapter) | `src/apm_cli/adapters/client/base.py` |
-| Dependency CLI identifier parsing + uninstall selection | models/dependency/selection.py (via DependencyReference) | `src/apm_cli/models/dependency/selection.py` |
-| JetBrains Copilot MCP config path | adapters/client/intellij.py | `src/apm_cli/adapters/client/intellij.py` |
-| Copilot CLI MCP config paths | adapters/client/copilot.py | `src/apm_cli/adapters/client/copilot.py` |
-| Marketplace tag-pattern validation and expansion | marketplace/tag_pattern.py | `src/apm_cli/marketplace/tag_pattern.py` |
-| Local marketplace package-version manifest precedence | marketplace/version_check.py (_read_local_version) | `src/apm_cli/marketplace/version_check.py` |
-| applyTo normalization and hidden-tool placement | utils/patterns.py (normalize_apply_to); compilation/context_optimizer.py (ContextOptimizer) | `src/apm_cli/utils/patterns.py`; `src/apm_cli/compilation/context_optimizer.py` |
-| Effective marketplace output path | marketplace/output_profiles.py (resolve_effective_output_path) | `src/apm_cli/marketplace/output_profiles.py` |
-| Bootstrap project-name validation and fallback | core/project_name.py (resolve_bootstrap_project_name) | `src/apm_cli/core/project_name.py` |
-| Marketplace raw-structure diagnostics | marketplace/models.py parser; validator.py consumes them | `src/apm_cli/marketplace/models.py`; `src/apm_cli/marketplace/validator.py` |
-| Catalog-only marketplace manifest materialization | deps/_shared.py (materialize_marketplace_manifest) | `src/apm_cli/deps/_shared.py` |
-| Agent Plugins v1 contract interpretation, component discovery, and portable manifest authority | agent_plugins/loader.py (load_agent_plugin, _load_apm_configuration) | `src/apm_cli/agent_plugins/loader.py`; `src/apm_cli/agent_plugins/ir.py` |
-| Agent Plugin producer portable-surface admission | bundle/agent_plugin_exporter.py (_require_portable_agent_plugin) | `src/apm_cli/bundle/agent_plugin_exporter.py` |
-| APMPackage interpreted-manifest construction | models/apm_package.py (APMPackage.from_mapping) | `src/apm_cli/models/apm_package.py` |
-| Agent Plugin compatibility package projection | agent_plugins/projection.py (project_agent_plugin_package) | `src/apm_cli/agent_plugins/projection.py`; `src/apm_cli/models/validation.py` |
-| Network host literal parsing and loopback classification | utils/net.py (parse_host_address, is_loopback_host) | `src/apm_cli/utils/net.py` |
-| Legacy plugin declared-skill membership and plugin-root placeholder expansion | deps/plugin_parser.py (_map_plugin_artifacts, normalized_plugin_skill_sources, resolve_plugin_root_placeholders) | `src/apm_cli/deps/plugin_parser.py`; `src/apm_cli/integration/skill_integrator.py` |
-| User-root scoped instruction eligibility | integration/targets.py (TargetProfile.include_scoped_in_user_root_context) | `src/apm_cli/integration/targets.py` |
-| Native Agent Plugin registration admission (Copilot target + client capability) | copilot_plugins/capability.py (resolve_native_registration_capability, admits_native_plugin) | `src/apm_cli/copilot_plugins/capability.py` |
-| APM-owned Copilot marketplace catalog, settings entries, and ownership ledger | copilot_plugins/registrar.py (synchronize_copilot_plugins, resync_native_plugins) | `src/apm_cli/copilot_plugins/registrar.py`; `src/apm_cli/copilot_plugins/settings.py`; `src/apm_cli/copilot_plugins/catalog.py` |
-| Frontmatter BOM decoding and bounded YAML parsing | utils/yaml_io.py (load_frontmatter, _BoundedYAMLHandler) | `src/apm_cli/utils/yaml_io.py` |
-<!-- /canonical-owner-table -->
+If the owner already exists, route every consumer through it. If it lacks a
+case, extend the owner instead of creating a sibling authority. Add a new
+registry record only for a genuinely new durable decision.
 
-Host + credential resolution includes public github.com anonymous-first ordering.
-Consumers must ask `AuthResolver` rather than reclassifying that host locally.
+## Dual guardrail
 
-If you are about to compute one of these locally, stop and call the
-owner. If the owner is missing a case you need, EXTEND the owner --
-never fork it.
+A centralization or split-authority fix is complete only when it has both:
 
-## When you centralize or fix a split-authority bug: dual guardrail
+1. A hermetic behavioral regression test under `tests/`.
+2. A registered static guard in the architecture linter, referenced by the
+   owner's registry record.
 
-A fix is not done until the split cannot silently return. Add BOTH:
+Run the stable CI entrypoint:
 
-1. A behavioral **regression test** (hermetic, under tests/) that
-   encodes the exact symptom and fails before / passes after.
-2. A **static boundary guard** so a future contributor cannot re-add a
-   second owner: extend scripts/lint-architecture-boundaries.sh and the
-   matching tests/integration/test_architecture_*.py suite.
+```bash
+bash scripts/lint-architecture-boundaries.sh
+```
 
-The scripts/lint-architecture-boundaries.sh check is wired into CI (the
-Lint job) alongside the auth-signal guard. Treat a new authority the
-same way: give it a guard line.
-
-Static boundary checks use bounded AST inspection and do not trace alias
-dataflow such as `view = lock.field; view.clear()`. Behavioral regression
-tests and code review remain the guard for those indirect mutations.
-
-## Review lens
-
-When reviewing or authoring a change, ask: "Does this compute or
-enforce a decision the codebase already owns elsewhere?" If yes, the
-change must route through the owner, and a new parallel path is a
-blocking finding, not a nit.
+When reviewing a change, ask whether it computes or enforces a decision already
+owned elsewhere. A new parallel path is a blocking defect, not a nit.

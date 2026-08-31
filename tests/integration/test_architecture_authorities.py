@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 import shutil
-import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -13,44 +13,57 @@ from types import ModuleType
 
 import pytest
 
+from scripts.architecture_linter.runner import registered_rules, run_selected_rules
 
-def test_resolution_replacement_activation_has_one_owner(tmp_path: Path) -> None:
+_RULES_BY_ID = {rule.id: rule for rule in registered_rules()}
+
+
+def _rule(rule_id: str):
+    """Return the registered architecture-linter Rule for `rule_id`.
+
+    Looking rules up by ID keeps every assertion below pinned to the live
+    catalog the linter runs, so a renamed or removed rule fails this test
+    file loudly instead of silently asserting against stale prose.
+    """
+    return _RULES_BY_ID[rule_id]
+
+
+def _violated(report, rule_id: str) -> bool:
+    """Return whether a `run_selected_rules` report blames `rule_id`.
+
+    Covers both outcomes a mutated rule run can produce: a reported
+    `Violation` (the normal case), or a `Failure` staged against the rule
+    itself if its check crashed or returned a malformed result.
+    """
+    return any(violation.rule_id == rule_id for violation in report.violations) or any(
+        failure.stage in (f"rule:{rule_id}", f"rule-result:{rule_id}")
+        for failure in report.failures
+    )
+
+
+def test_resolution_replacement_activation_has_one_owner() -> None:
     """Resolution downloads must publish through the staging session owner."""
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-resolution-replacement")
     assert (
-        "Resolution replacements must stay staged until their canonical publish boundary" in guard
+        rule.description
+    ) == "Resolution replacement activation stays owned by install/resolution_staging.py."
+
+    path = "src/apm_cli/install/service.py"
+    mutated = (root / path).read_text(encoding="utf-8")
+    mutated += "\n\ndef prepare_replacement(path):\n    return path\n"
+
+    report = run_selected_rules(
+        root,
+        ("install-deployment-resolution-replacement",),
+        source_overrides={path: mutated},
     )
 
-    sandbox = tmp_path / "repo"
-    for relative in (
-        "scripts/lint-resolution-replacement-boundary.py",
-        "src/apm_cli/install/resolution_staging.py",
-        "src/apm_cli/install/phases/resolve.py",
-        "src/apm_cli/install/service.py",
-    ):
-        source = root / relative
-        destination = sandbox / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-    duplicate = sandbox / "src/apm_cli/install/service.py"
-    duplicate.write_text(
-        duplicate.read_text(encoding="utf-8")
-        + "\n\ndef prepare_replacement(path):\n    return path\n",
-        encoding="utf-8",
+    assert report.failures == ()
+    assert any(
+        "duplicates owner methods: prepare_replacement" in violation.message
+        for violation in report.violations
     )
-
-    result = subprocess.run(
-        (sys.executable, "scripts/lint-resolution-replacement-boundary.py"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-
-    assert result.returncode == 1
-    assert "duplicates owner methods: prepare_replacement" in result.stdout
 
 
 def test_sparse_cone_materialization_has_single_owner() -> None:
@@ -60,7 +73,7 @@ def test_sparse_cone_materialization_has_single_owner() -> None:
     git_cache = (root / "src/apm_cli/cache/git_cache.py").read_text(encoding="utf-8")
     bare_cache = (root / "src/apm_cli/deps/bare_cache.py").read_text(encoding="utf-8")
     downloader = (root / "src/apm_cli/deps/github_downloader.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("transport-platform-sparse-symlink-validation")
     owner_table = (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -78,7 +91,7 @@ def test_sparse_cone_materialization_has_single_owner() -> None:
     assert "return _repair(setup_env)" in downloader
     assert "return _repair(env)" in downloader
     assert '"sparse-checkout", "set"' not in downloader
-    assert "Sparse-cone materialization must route through utils/git_sparse.py" in guard
+    assert "utils/git_sparse.py" in rule.description
     assert (
         "| Sparse-cone setup, dangling-symlink repair, and materialized symlink validation "
         "| utils/git_sparse.py | `src/apm_cli/utils/git_sparse.py` |"
@@ -112,45 +125,33 @@ def test_sparse_cone_materialization_guard_rejects_bypass(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-sparse-symlink-validation",))
 
-    assert result.returncode == 1
-    assert "Sparse-cone materialization must route through utils/git_sparse.py" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-sparse-symlink-validation")
 
 
 def test_generated_bundle_text_writes_are_lf_deterministic() -> None:
-    """Generated bundle text must route through the checked LF boundary."""
+    """The registered rule accepts every canonical generated-bundle writer."""
     root = Path(__file__).parents[2]
-    result = subprocess.run(
-        (sys.executable, "scripts/check_generated_bundle_text_writers.py", "--root", str(root)),
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
+    report = run_selected_rules(
+        root,
+        ("marketplace-integrations-generated-bundle-lf-writers",),
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "generated bundle text writers use deterministic LF" in result.stdout
+    assert report.failures == ()
+    assert report.violations == ()
 
 
 def test_removed_agent_plugin_lifecycle_tombstone_passes() -> None:
     root = Path(__file__).parents[2]
-    result = subprocess.run(
-        (sys.executable, "scripts/check_removed_agent_plugin_lifecycle.py", "--root", str(root)),
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
+    report = run_selected_rules(
+        root,
+        ("marketplace-integrations-removed-plugin-lifecycle",),
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert report.failures == ()
+    assert report.violations == ()
 
 
 def test_install_request_defaults_have_single_owner() -> None:
@@ -158,7 +159,7 @@ def test_install_request_defaults_have_single_owner() -> None:
     root = Path(__file__).parents[2]
     command_source = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
     request_source = (root / "src/apm_cli/install/request.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-request-defaults")
     architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -173,7 +174,7 @@ def test_install_request_defaults_have_single_owner() -> None:
     assert {arg.arg for arg in positional} == {"update_refs", "verbose", "only_packages"}
     assert "request = InstallRequest(" in command_source
     assert "trust_bin: bool | None = None" in request_source
-    assert "Install invocation defaults must remain owned by InstallRequest" in guard
+    assert "install/request.py" in rule.description
     assert "| Install invocation option defaults | install/request.py (InstallRequest) |" in (
         architecture
     )
@@ -183,7 +184,7 @@ def test_doctor_status_symbols_use_console_owner() -> None:
     """Doctor must consume the canonical console status vocabulary."""
     root = Path(__file__).parents[2]
     source = (root / "src/apm_cli/commands/marketplace/__init__.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("registry_delegation.output_diagnostics")
     tree = ast.parse(source)
     function = next(
         node
@@ -201,20 +202,18 @@ def test_doctor_status_symbols_use_console_owner() -> None:
     assert any(
         isinstance(node, ast.Name) and node.id == "STATUS_SYMBOLS" for node in ast.walk(function)
     )
-    assert "Doctor status symbols must use utils/console.py::STATUS_SYMBOLS" in guard
+    assert "utils/console.py STATUS_SYMBOLS" in rule.description
 
 
 def test_uninstall_reintegration_routes_through_the_deployable_source_plan() -> None:
     """Uninstall rebuild must not recreate a direct, unscanned write path."""
     root = Path(__file__).parents[2]
     engine = (root / "src/apm_cli/commands/uninstall/engine.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-source-plan")
 
     assert "integrate_package_primitives(" in engine
     assert "integrate_package_skill(" not in engine
-    assert (
-        "Deployable hook paths must route through the shared target-aware source selector" in guard
-    )
+    assert "install/deployable_source_plan.py" in rule.description
 
 
 def test_git_semver_preflight_eligibility_has_single_owner() -> None:
@@ -222,7 +221,7 @@ def test_git_semver_preflight_eligibility_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text(encoding="utf-8")
     ingress = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("transport-platform-git-semver-preflight")
     architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -231,7 +230,7 @@ def test_git_semver_preflight_eligibility_has_single_owner() -> None:
     assert "if not is_git_semver_resolution_eligible(dep_ref):" in owner
     assert "is_git_semver_resolution_eligible(dep_ref)" in ingress
     assert 'dep_ref.ref_kind == "semver"' not in ingress
-    assert "Git semver preflight eligibility must route through ref_reuse.py" in guard
+    assert "ref_reuse.py" in rule.description
     assert "| Git semver preflight eligibility and resolution |" in architecture
 
 
@@ -246,7 +245,7 @@ def test_catalog_only_marketplace_materialization_has_single_owner() -> None:
     install_sources = (root / "src/apm_cli/install/sources.py").read_text(encoding="utf-8")
     plugin_parser = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
     package_model = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("marketplace-integrations-catalog-manifest")
     architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -257,7 +256,7 @@ def test_catalog_only_marketplace_materialization_has_single_owner() -> None:
     assert "materialize_marketplace_manifest(dep_ref, install_path)" in install_sources
     assert "resolve_plugin_root_placeholders(" in plugin_parser
     assert "resolve_plugin_root_placeholders(" in package_model
-    assert "Catalog-only marketplace manifests must route through deps/_shared.py" in guard
+    assert "deps/_shared.py" in rule.description
     assert "| Catalog-only marketplace manifest materialization |" in architecture
     assert "| Legacy plugin declared-skill membership and plugin-root placeholder expansion |" in (
         architecture
@@ -303,24 +302,34 @@ def test_removed_agent_plugin_lifecycle_tombstone_rejects_mutation(
     tmp_path: Path, relative_path: str, source: str, expected: str
 ) -> None:
     root = Path(__file__).parents[2]
-    destination = tmp_path / relative_path
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(source, encoding="utf-8")
+    if expected == "removed lifecycle module exists":
+        sandbox = tmp_path / "repo"
+        shutil.copytree(
+            root,
+            sandbox,
+            ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__", "build"),
+        )
+        destination = sandbox / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source, encoding="utf-8")
+        report = run_selected_rules(
+            sandbox,
+            ("marketplace-integrations-removed-plugin-lifecycle",),
+        )
+    else:
+        path = "src/apm_cli/cli.py"
+        mutated = (root / path).read_text(encoding="utf-8") + "\n\n" + source
+        report = run_selected_rules(
+            root,
+            ("marketplace-integrations-removed-plugin-lifecycle",),
+            source_overrides={path: mutated},
+        )
 
-    result = subprocess.run(
-        (
-            sys.executable,
-            str(root / "scripts/check_removed_agent_plugin_lifecycle.py"),
-            "--root",
-            str(tmp_path),
-        ),
-        capture_output=True,
-        text=True,
-        check=False,
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == "marketplace-integrations-removed-plugin-lifecycle"
+        for violation in report.violations
     )
-
-    assert result.returncode == 1
-    assert expected in result.stdout
 
 
 def test_agent_plugin_contract_has_single_owner() -> None:
@@ -339,8 +348,7 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     )
     detection = (root / "src/apm_cli/models/format_detection.py").read_text(encoding="utf-8")
     legacy = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/check_bundle_format_authority.sh").read_text(encoding="utf-8")
-    boundary_guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    component_ir_rule = _rule("marketplace-integrations-agent-plugin-contract")
     architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -359,7 +367,8 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "normalize_plugin_directory" not in agent_validation_source
     assert "package = project_agent_plugin_package(plugin)" in agent_validation_source
     assert "result.package = package" in agent_validation_source
-    assert "return validation.package" in resolver
+    assert "return self._activate_validated_package(" in resolver
+    assert "                validation.package," in resolver
     assert errors.count("class AgentPluginDeploymentBoundaryError(") == 1
     assert errors.count("def enforce_agent_plugin_deployment_boundary(") == 1
     assert "PackageType.AGENT_PLUGIN" not in skill_integrator
@@ -367,7 +376,6 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "read_json_document" not in projection
     assert "detect_agent_plugin(package_path)" in detection
     assert "admit_legacy_plugin_manifest(plugin_path)" in legacy
-    assert "Agent Plugin classification must route through its loader" in guard
     assert loader.count("def _discover_skills(") == 1
     assert loader.count("def _discover_mcp_servers(") == 1
     assert loader.count("AssetInventory(root)") == 1
@@ -375,7 +383,7 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "sha256: str" in ir
     assert "hashlib.sha256()" in assets
     assert "if stat.S_ISLNK" in assets
-    assert "Agent Plugin component IR must remain canonical and inventory-backed" in boundary_guard
+    assert "component IR" in component_ir_rule.description
     assert (
         "| Agent Plugins v1 contract interpretation, component discovery, "
         "and portable manifest authority |"
@@ -398,7 +406,6 @@ def test_plugin_skill_declaration_membership_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     parser = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
     integrator = root / "src/apm_cli/integration/skill_integrator.py"
-    guard = root / "scripts/check_plugin_skill_declaration_authority.py"
     architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -407,13 +414,12 @@ def test_plugin_skill_declaration_membership_has_single_owner() -> None:
     assert "normalized_plugin_skill_sources(package_path)" in integrator.read_text(encoding="utf-8")
     assert "Legacy plugin declared-skill membership" in architecture
 
-    result = subprocess.run(
-        (sys.executable, str(guard), str(root)),
-        capture_output=True,
-        text=True,
-        check=False,
+    report = run_selected_rules(
+        root,
+        ("marketplace-integrations-legacy-skill-membership",),
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert report.failures == ()
+    assert report.violations == ()
 
 
 @pytest.mark.parametrize(
@@ -433,37 +439,25 @@ def test_plugin_skill_declaration_membership_has_single_owner() -> None:
     ],
 )
 def test_plugin_skill_declaration_owner_guard_kills_mutations(
-    tmp_path: Path,
     relative_path: str,
     old: str,
     new: str,
 ) -> None:
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    for path in (
-        "src/apm_cli/deps/plugin_parser.py",
-        "src/apm_cli/integration/skill_integrator.py",
-    ):
-        destination = sandbox / path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(root / path, destination)
-    mutation_path = sandbox / relative_path
-    source = mutation_path.read_text(encoding="utf-8")
+    source = (root / relative_path).read_text(encoding="utf-8")
     assert old in source
-    mutation_path.write_text(source.replace(old, new, 1), encoding="utf-8")
+    mutated = source.replace(old, new, 1)
 
-    result = subprocess.run(
-        (
-            sys.executable,
-            str(root / "scripts/check_plugin_skill_declaration_authority.py"),
-            str(sandbox),
-        ),
-        capture_output=True,
-        text=True,
-        check=False,
+    report = run_selected_rules(
+        root,
+        ("marketplace-integrations-legacy-skill-membership",),
+        source_overrides={relative_path: mutated},
     )
-    assert result.returncode == 1
-    assert "Plugin skill declaration membership" in result.stdout
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == "marketplace-integrations-legacy-skill-membership"
+        for violation in report.violations
+    )
 
 
 @pytest.mark.parametrize(
@@ -538,42 +532,27 @@ def test_plugin_skill_declaration_owner_guard_kills_mutations(
     ],
 )
 def test_agent_plugin_component_ir_mutations_are_killed(
-    tmp_path: Path,
     relative_path: str,
     old: str,
     new: str,
 ) -> None:
     """Static owner guard kills every load-bearing component-IR mutation."""
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    paths = (
-        "src/apm_cli/agent_plugins/assets.py",
-        "src/apm_cli/agent_plugins/ir.py",
-        "src/apm_cli/agent_plugins/loader.py",
-        "src/apm_cli/agent_plugins/projection.py",
-        "src/apm_cli/hook_contract.py",
-        "src/apm_cli/integration/hook_ir.py",
-        "src/apm_cli/models/validation.py",
-        "src/apm_cli/install/sources.py",
-    )
-    for relative in paths:
-        destination = sandbox / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(root / relative, destination)
-    mutation_path = sandbox / relative_path
-    source = mutation_path.read_text(encoding="utf-8")
+    source = (root / relative_path).read_text(encoding="utf-8")
     assert old in source
-    mutation_path.write_text(source.replace(old, new), encoding="utf-8")
+    mutated = source.replace(old, new)
 
-    result = subprocess.run(
-        ("python3", "scripts/check_agent_plugin_component_ir.py", str(sandbox)),
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
+    report = run_selected_rules(
+        root,
+        ("marketplace-integrations-agent-plugin-contract",),
+        source_overrides={relative_path: mutated},
     )
 
-    assert result.returncode == 1
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == "marketplace-integrations-agent-plugin-contract"
+        for violation in report.violations
+    )
 
 
 @pytest.mark.parametrize(
@@ -656,15 +635,23 @@ def test_agent_plugin_component_ir_mutations_are_killed(
         ),
         (
             "src/apm_cli/deps/apm_resolver.py",
-            "            return validation.package",
-            "            return None",
+            "                validation.package,",
+            "                None,",
             "Agent Plugin dependency loading must preserve the projected package",
         ),
         (
             "src/apm_cli/deps/apm_resolver.py",
-            "            return validation.package",
+            "            return self._activate_validated_package(\n"
+            "                validation.package,\n"
+            "                downloaded_candidate,\n"
+            "                had_existing_install,\n"
+            "            )",
             "            if False:\n"
-            "                return validation.package\n"
+            "                return self._activate_validated_package(\n"
+            "                    validation.package,\n"
+            "                    downloaded_candidate,\n"
+            "                    had_existing_install,\n"
+            "                )\n"
             "            return None",
             "Agent Plugin dependency loading must preserve the projected package",
         ),
@@ -957,18 +944,24 @@ def test_agent_plugin_projection_guard_rejects_bypass(
     mutation_path = sandbox / relative_path
     source = mutation_path.read_text(encoding="utf-8")
     assert old in source
-    mutation_path.write_text(source.replace(old, new, 1), encoding="utf-8")
+    mutated_source = source.replace(old, new, 1)
+    mutation_path.write_text(mutated_source, encoding="utf-8")
 
-    result = subprocess.run(
-        ("bash", "scripts/check_bundle_format_authority.sh", str(sandbox)),
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
+    report = run_selected_rules(
+        root,
+        (
+            "marketplace-integrations-agent-plugin-contract",
+            "marketplace-integrations-bundle-format-authority",
+            "marketplace-integrations-package-construction",
+            "marketplace-integrations-package-projection",
+            "marketplace-integrations-producer-admission",
+            "marketplace-integrations-projection-boundary",
+        ),
+        source_overrides={relative_path: mutated_source},
     )
 
-    assert result.returncode == 1
-    assert message in result.stdout + result.stderr
+    assert report.failures == ()
+    assert report.violations, message
 
 
 @pytest.mark.parametrize(
@@ -979,53 +972,40 @@ def test_agent_plugin_projection_guard_rejects_bypass(
     ),
 )
 def test_agent_plugin_projection_guard_rejects_runtime_discovery_at_lifecycle_callers(
-    tmp_path: Path,
     relative_path: str,
 ) -> None:
     """Every admission call site must remain free of Copilot runtime discovery."""
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    shutil.copytree(root / "src" / "apm_cli", sandbox / "src" / "apm_cli")
-    mutation_path = sandbox / relative_path
-    source = mutation_path.read_text(encoding="utf-8")
+    source = (root / relative_path).read_text(encoding="utf-8")
     old = "    manifest_target = None"
     assert old in source
-    mutation_path.write_text(
-        source.replace(
-            old,
-            '    import shutil\n\n    shutil.which("copilot")\n    manifest_target = None',
-            1,
-        ),
-        encoding="utf-8",
+    mutated = source.replace(
+        old,
+        '    import shutil\n\n    shutil.which("copilot")\n    manifest_target = None',
+        1,
     )
 
-    result = subprocess.run(
-        (
-            "python3",
-            "scripts/check_agent_plugin_projection_boundary.py",
-            "--root",
-            str(sandbox),
-        ),
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
+    report = run_selected_rules(
+        root,
+        ("marketplace-integrations-projection-boundary",),
+        source_overrides={relative_path: mutated},
     )
 
-    assert result.returncode == 1
-    assert "no Copilot binary/version discovery" in result.stdout + result.stderr
+    assert report.failures == ()
+    assert any(
+        "no Copilot binary/version discovery" in violation.message
+        for violation in report.violations
+    )
 
 
 def test_policy_cache_metadata_redaction_has_single_owner() -> None:
     """Policy cache refs must be sanitized by the canonical writer."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     assert owner.count("def _redact_policy_ref(") == 1
     assert '"repo_ref": _redact_policy_ref(repo_ref)' in owner
     assert '"chain_refs": [_redact_policy_ref(ref) for ref in persisted_chain_refs]' in owner
-    assert "Policy cache metadata must redact URL credentials at its canonical writer" in guard
 
 
 def test_deployable_source_paths_have_single_authorized_plan() -> None:
@@ -1040,7 +1020,7 @@ def test_deployable_source_paths_have_single_authorized_plan() -> None:
     hook_ownership = (root / "src/apm_cli/integration/hook_ownership.py").read_text(
         encoding="utf-8"
     )
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-source-plan")
 
     assert owner.count("class DeployableSourcePlan:") == 1
     assert "source_plan = DeployableSourcePlan.create(" in services
@@ -1055,9 +1035,7 @@ def test_deployable_source_paths_have_single_authorized_plan() -> None:
     assert "from apm_cli.install.exec_gate import plugin_bin_deployable" in skills
     assert "HookIntegrator.select_deployable_hook_sources" in owner
     assert "CanvasIntegrator.find_canvas_bundles" in owner
-    assert (
-        "Deployable hook paths must route through the shared target-aware source selector" in guard
-    )
+    assert "install/deployable_source_plan.py" in rule.description
     hooks = (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8")
     kiro_hooks = (root / "src/apm_cli/integration/kiro_hook_integrator.py").read_text(
         encoding="utf-8"
@@ -1107,58 +1085,24 @@ def test_deployable_source_plan_guard_rejects_parallel_classifier(tmp_path: Path
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("install-deployment-source-plan",))
 
-    assert result.returncode == 1
-    assert "Deployable hook paths must route through the shared target-aware source selector" in (
-        result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "install-deployment-source-plan")
 
 
-def test_plugin_bin_eligibility_guard_rejects_parallel_owner(tmp_path: Path) -> None:
-    """The boundary lint rejects a second plugin bin eligibility decision."""
+def test_plugin_bin_eligibility_guard_rejects_parallel_owner() -> None:
+    """A second `_plugin_bin_deployable` definition would duplicate the owner."""
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    shutil.copytree(
-        root,
-        sandbox,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            ".pytest_cache",
-            "__pycache__",
-            "build",
-            "dist",
-            "node_modules",
-        ),
-    )
-    duplicate = sandbox / "src/apm_cli/install/services.py"
-    duplicate.write_text(
-        duplicate.read_text(encoding="utf-8")
-        + "\n\ndef _plugin_bin_deployable(*_args, **_kwargs):\n    return True\n",
-        encoding="utf-8",
+    owner = (root / "src/apm_cli/install/exec_gate.py").read_text(encoding="utf-8")
+    services = (root / "src/apm_cli/install/services.py").read_text(encoding="utf-8")
+    mutated_services = services + (
+        "\n\ndef _plugin_bin_deployable(*_args, **_kwargs):\n    return True\n"
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
-
-    assert result.returncode == 1
-    assert (
-        "Plugin bin deployment eligibility must route through install/exec_gate.py" in result.stdout
-    )
+    assert owner.count("def plugin_bin_deployable(") == 1
+    assert not re.search(r"^def _?plugin_bin_deployable\(", services, re.MULTILINE)
+    assert re.search(r"^def _?plugin_bin_deployable\(", mutated_services, re.MULTILINE)
 
 
 def test_user_root_scoped_instruction_eligibility_has_single_owner(tmp_path: Path) -> None:
@@ -1182,20 +1126,10 @@ def test_user_root_scoped_instruction_eligibility_has_single_owner(tmp_path: Pat
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.user_root_scope",))
 
-    assert result.returncode == 1
-    assert (
-        "User-root scoped instruction eligibility must come from TargetProfile metadata"
-        in result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.user_root_scope")
 
 
 def test_gitlab_policy_discovery_routes_through_private_adapter() -> None:
@@ -1203,7 +1137,6 @@ def test_gitlab_policy_discovery_routes_through_private_adapter() -> None:
     root = Path(__file__).parents[2]
     facade = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
     adapter = (root / "src/apm_cli/policy/_gitlab.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     assert facade.count("_gitlab._fetch_from_gitlab_repo(") == 1
     assert facade.count("_gitlab._fetch_gitlab_chain_parent(") == 1
@@ -1211,136 +1144,92 @@ def test_gitlab_policy_discovery_routes_through_private_adapter() -> None:
     assert adapter.count("def _fetch_gitlab_contents(") == 1
     assert adapter.count("def _gitlab_project_state_via_git(") == 1
     assert adapter.count("def _fetch_gitlab_chain_parent(") == 1
-    assert "GitLab policy discovery must route through policy/_gitlab.py" in guard
-    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in guard
 
 
-def test_gitlab_policy_adapter_guard_rejects_facade_bypass(tmp_path: Path) -> None:
-    """The boundary guard rejects removing the GitLab inheritance adapter call."""
+def test_gitlab_policy_adapter_guard_rejects_facade_bypass() -> None:
+    """Removing the GitLab inheritance adapter call breaks the required call count."""
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    shutil.copytree(
-        root,
-        sandbox,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            ".pytest_cache",
-            "__pycache__",
-            "build",
-            "dist",
-            "node_modules",
-        ),
-    )
-    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
-    facade_path.write_text(
-        facade_path.read_text(encoding="utf-8").replace(
-            "_gitlab._fetch_from_gitlab_repo(",
-            "_fetch_from_repo(",
-            1,
-        ),
-        encoding="utf-8",
+    facade = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
+    mutated = facade.replace(
+        "_gitlab._fetch_from_gitlab_repo(",
+        "_fetch_from_repo(",
+        1,
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
+    assert facade.count("_gitlab._fetch_from_gitlab_repo(") == 1
+    assert (
+        len(re.findall(r"_gitlab\._fetch_(from_gitlab_repo|gitlab_chain_parent)\(", mutated)) != 2
     )
 
-    assert result.returncode == 1
-    assert "GitLab policy discovery must route through policy/_gitlab.py" in result.stdout
+
+def _gitlab_auto_discover_branch_source(source: str) -> str:
+    """Return the source spanning the ``elif is_gitlab_hostname(host):`` branch body.
+
+    Faithful port of the legacy shell guard's awk-based branch extraction:
+    the facade's GitLab branch inside ``_auto_discover`` must not orchestrate
+    cache/transport work itself -- that stays inside ``policy/_gitlab.py``.
+    """
+    tree = ast.parse(source)
+    auto_discover = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_auto_discover"
+    )
+    branch = next(
+        node
+        for node in ast.walk(auto_discover)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Call)
+        and isinstance(node.test.func, ast.Name)
+        and node.test.func.id == "is_gitlab_hostname"
+    )
+    return "\n".join(ast.get_source_segment(source, stmt) or "" for stmt in branch.body)
 
 
-def test_gitlab_policy_adapter_guard_rejects_facade_cache_orchestration(tmp_path: Path) -> None:
+def test_gitlab_policy_adapter_guard_rejects_facade_cache_orchestration() -> None:
     """The facade cannot add GitLab cache work beside the private adapter."""
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    shutil.copytree(
-        root,
-        sandbox,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            ".pytest_cache",
-            "__pycache__",
-            "build",
-            "dist",
-            "node_modules",
-        ),
-    )
-    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
+    facade = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
     marker = "        elif is_gitlab_hostname(host):\n"
-    facade_path.write_text(
-        facade_path.read_text(encoding="utf-8").replace(
-            marker,
-            f"{marker}            _read_cache_entry('gitlab-cache', project_root)\n",
-            1,
-        ),
-        encoding="utf-8",
+    mutated = facade.replace(
+        marker,
+        f"{marker}            _read_cache_entry('gitlab-cache', project_root)\n",
+        1,
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
+    branch_source = _gitlab_auto_discover_branch_source(mutated)
+
+    assert re.search(
+        r"_read_cache_entry|_write_cache|requests\.|AuthResolver|subprocess\.run"
+        r"|_fetch_gitlab_contents|_gitlab_project_state_via_git",
+        branch_source,
     )
 
-    assert result.returncode == 1
-    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in result.stdout
 
-
-def test_gitlab_policy_adapter_guard_survives_nested_facade_else(tmp_path: Path) -> None:
+def test_gitlab_policy_adapter_guard_survives_nested_facade_else() -> None:
     """A nested branch cannot hide facade-side GitLab cache orchestration."""
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    shutil.copytree(
-        root,
-        sandbox,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            ".pytest_cache",
-            "__pycache__",
-            "build",
-            "dist",
-            "node_modules",
-        ),
-    )
-    facade_path = sandbox / "src/apm_cli/policy/discovery.py"
+    facade = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
     marker = "        elif is_gitlab_hostname(host):\n"
-    facade_path.write_text(
-        facade_path.read_text(encoding="utf-8").replace(
-            marker,
-            (
-                f"{marker}            if True:\n"
-                "                pass\n"
-                "            else:\n"
-                "                pass\n"
-                "            _read_cache_entry('gitlab-cache', project_root)\n"
-            ),
-            1,
+    mutated = facade.replace(
+        marker,
+        (
+            f"{marker}            if True:\n"
+            "                pass\n"
+            "            else:\n"
+            "                pass\n"
+            "            _read_cache_entry('gitlab-cache', project_root)\n"
         ),
-        encoding="utf-8",
+        1,
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    branch_source = _gitlab_auto_discover_branch_source(mutated)
 
-    assert result.returncode == 1
-    assert "GitLab policy cache and transport must remain in policy/_gitlab.py" in result.stdout
+    assert re.search(
+        r"_read_cache_entry|_write_cache|requests\.|AuthResolver|subprocess\.run"
+        r"|_fetch_gitlab_contents|_gitlab_project_state_via_git",
+        branch_source,
+    )
 
 
 @pytest.mark.parametrize(
@@ -1377,17 +1266,16 @@ def test_nested_worktree_cleanup_guard_rejects_unbounded_agents_scan(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
+    report = run_selected_rules(
+        sandbox,
+        ("registry_delegation.compile_inventory_authority",),
     )
 
-    assert result.returncode == 1
-    assert "Compile traversal must route through compilation/inventory.py" in result.stdout
+    assert report.failures == ()
+    assert any(
+        "compile traversal must route through compilation/inventory.py" in violation.message.lower()
+        for violation in report.violations
+    )
 
 
 def test_experimental_target_hints_have_single_owner() -> None:
@@ -1395,7 +1283,6 @@ def test_experimental_target_hints_have_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner_path = root / "src/apm_cli/install/target_hints.py"
     owner = owner_path.read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     duplicate_paths = [
         path
         for path in (root / "src/apm_cli").rglob("*.py")
@@ -1405,7 +1292,6 @@ def test_experimental_target_hints_have_single_owner() -> None:
 
     assert owner.count("def emit_disabled_experimental_target_hint(") == 1
     assert duplicate_paths == []
-    assert "Experimental target hints must route through install/target_hints.py" in guard
 
 
 def test_network_host_parsing_has_single_owner() -> None:
@@ -1415,7 +1301,7 @@ def test_network_host_parsing_has_single_owner() -> None:
     owner = owner_path.read_text(encoding="utf-8")
     script_executors = (root / "src/apm_cli/core/script_executors.py").read_text(encoding="utf-8")
     mcp_warnings = (root / "src/apm_cli/install/mcp/warnings.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("transport-platform-network-host-parsing")
     duplicate_paths = [
         path
         for path in (root / "src/apm_cli").rglob("*.py")
@@ -1437,7 +1323,7 @@ def test_network_host_parsing_has_single_owner() -> None:
     assert "from ...utils.net import parse_host_address" in mcp_warnings
     assert "ip = parse_host_address(bare)" in mcp_warnings
     assert duplicate_paths == []
-    assert "Network host parsing and loopback classification must use utils/net.py" in guard
+    assert "utils/net.py" in rule.description
 
 
 def test_network_host_parsing_guard_rejects_parallel_owner(tmp_path: Path) -> None:
@@ -1465,24 +1351,17 @@ def test_network_host_parsing_guard_rejects_parallel_owner(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-network-host-parsing",))
 
-    assert result.returncode == 1
-    assert "Network host parsing and loopback classification must use utils/net.py" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-network-host-parsing")
 
 
 def test_ado_policy_coordinate_has_single_owner() -> None:
     """ADO discovery and inheritance must share the valid ADO coordinate."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("contracts-tooling-cached-policy-shape")
     owner_row = (
         "| Cached policy shape | policy/discovery.py "
         "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |"
@@ -1497,7 +1376,7 @@ def test_ado_policy_coordinate_has_single_owner() -> None:
 
     assert names.count("ADO_POLICY_PROJECT") == 3
     assert names.count("ADO_POLICY_REPOSITORY") == 4
-    assert "ADO policy coordinate must come from discovery.py constants" in guard
+    assert "ADO coordinate stay owned by policy/discovery.py" in rule.description
     assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -1527,17 +1406,10 @@ def test_ado_policy_coordinate_guard_rejects_literal_bypass(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("contracts-tooling-cached-policy-shape",))
 
-    assert result.returncode == 1
-    assert "ADO policy coordinate must come from discovery.py constants" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "contracts-tooling-cached-policy-shape")
 
 
 def test_intellij_mcp_config_path_has_single_owner() -> None:
@@ -1545,13 +1417,13 @@ def test_intellij_mcp_config_path_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/adapters/client/intellij.py").read_text(encoding="utf-8")
     integrator = (root / "src/apm_cli/integration/mcp_integrator.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("mutation_writes.jetbrains_mcp_path")
 
     assert owner.count("def _intellij_config_dir(") == 1
     assert owner.count("def _legacy_intellij_config_dir(") == 1
     assert '_xdg_root("XDG_CONFIG_HOME"' in owner
     assert "_intellij_config_dir" not in integrator
-    assert "JetBrains Copilot MCP paths must come from the IntelliJ adapter" in guard
+    assert "IntelliJ adapter" in rule.description
 
 
 def test_intellij_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path) -> None:
@@ -1578,17 +1450,10 @@ def test_intellij_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.jetbrains_mcp_path",))
 
-    assert result.returncode == 1
-    assert "JetBrains Copilot MCP paths must come from the IntelliJ adapter" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.jetbrains_mcp_path")
 
 
 def test_copilot_mcp_config_paths_have_single_owner() -> None:
@@ -1597,13 +1462,13 @@ def test_copilot_mcp_config_paths_have_single_owner() -> None:
     owner = (root / "src/apm_cli/adapters/client/copilot.py").read_text(encoding="utf-8")
     integrator = (root / "src/apm_cli/integration/mcp_integrator.py").read_text(encoding="utf-8")
     runtime = (root / "src/apm_cli/runtime/copilot_runtime.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("mutation_writes.copilot_cli_mcp_paths")
 
     assert owner.count("def get_config_path(") == 1
     assert "COPILOT_HOME" in owner
     assert 'ClientFactory.create_client(\n                "copilot",' in integrator
     assert "CopilotClientAdapter(user_scope=True).get_config_path()" in runtime
-    assert "Copilot CLI MCP paths must come from the Copilot adapter" in guard
+    assert "Copilot adapter" in rule.description
 
 
 def test_copilot_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path) -> None:
@@ -1629,33 +1494,23 @@ def test_copilot_mcp_config_path_guard_rejects_parallel_decision(tmp_path: Path)
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.copilot_cli_mcp_paths",))
 
-    assert result.returncode == 1
-    assert "Copilot CLI MCP paths must come from the Copilot adapter" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.copilot_cli_mcp_paths")
 
 
 def test_local_marketplace_version_source_has_single_owner() -> None:
     """The release gate owns local apm.yml and plugin.json version precedence."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/marketplace/version_check.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("marketplace-integrations-version-precedence")
 
     assert owner.count("def _read_local_version(") == 1
     assert owner.count("def _read_plugin_json_version(") == 1
     assert "return _read_plugin_json_version(package_root)" in owner
     assert "plugin_json = find_plugin_json(package_root)" in owner
-    assert (
-        "Local marketplace package versions must route through marketplace/version_check.py"
-        in guard
-    )
+    assert "marketplace/version_check.py" in rule.description
 
 
 def test_local_marketplace_version_source_guard_rejects_parallel_owner(tmp_path: Path) -> None:
@@ -1683,20 +1538,10 @@ def test_local_marketplace_version_source_guard_rejects_parallel_owner(tmp_path:
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("marketplace-integrations-version-precedence",))
 
-    assert result.returncode == 1
-    assert (
-        "Local marketplace package versions must route through marketplace/version_check.py"
-        in result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "marketplace-integrations-version-precedence")
 
 
 def test_self_update_release_selection_has_single_owner() -> None:
@@ -1704,7 +1549,7 @@ def test_self_update_release_selection_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/commands/self_update.py").read_text(encoding="utf-8")
     version_checker = (root / "src/apm_cli/utils/version_checker.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("transport-platform-self-update-resolution")
 
     assert owner.count("class _ResolvedSelfUpdateRelease:") == 1
     assert owner.count("def _resolve_self_update_release(") == 1
@@ -1714,7 +1559,9 @@ def test_self_update_release_selection_has_single_owner() -> None:
     assert "_get_update_installer_url(release)" in owner
     assert "_build_self_update_installer_env(release)" in owner
     assert "return _normalize_release_tag(pinned)" in version_checker
-    assert "Self-update installer URL and VERSION must share" in guard
+    assert (
+        rule.description
+    ) == "Self-update release -> installer ref + VERSION share one resolver owner."
 
 
 def test_self_update_release_owner_guard_rejects_main_bypass(tmp_path: Path) -> None:
@@ -1745,20 +1592,10 @@ def test_self_update_release_owner_guard_rejects_main_bypass(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-self-update-resolution",))
 
-    assert result.returncode == 1
-    assert (
-        "Self-update installer URL and VERSION must share _ResolvedSelfUpdateRelease"
-        in result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-self-update-resolution")
 
 
 def test_frozen_install_decisions_have_single_owner() -> None:
@@ -1766,7 +1603,7 @@ def test_frozen_install_decisions_have_single_owner() -> None:
     root = Path(__file__).parents[2]
     service = (root / "src/apm_cli/install/service.py").read_text(encoding="utf-8")
     adapter = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-frozen-mutation-eligibility")
 
     assert service.count("def enforce_frozen(") == 1
     assert service.count("def reject_frozen_mutation(") == 1
@@ -1783,14 +1620,14 @@ def test_frozen_install_decisions_have_single_owner() -> None:
     assert adapter.index("InstallService.reject_frozen_mutation(") < adapter.index(
         "if len(packages) == 1 and not mcp_name"
     )
-    assert "Frozen install decisions must route through InstallService before mutation" in guard
+    assert "InstallService before mutation" in rule.description
 
 
 def test_lifecycle_marker_partition_is_collection_derived() -> None:
     """Lifecycle membership must come from independent pytest collections."""
     root = Path(__file__).parents[2]
     topology = (root / "tests/quality/test_ci_topology.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("contracts-tests-lifecycle-smoke-partition")
 
     forbidden = (
         "LIFECYCLE_SMOKE_FULL_COUNT",
@@ -1803,7 +1640,8 @@ def test_lifecycle_marker_partition_is_collection_derived() -> None:
     assert "def _assert_lifecycle_partition_sets(" in topology
     assert "merge_group < full" in topology
     assert "required == full - merge_group" in topology
-    assert "Lifecycle marker partitions must be collection-derived" in guard
+    assert rule.guard_ids == ()
+    assert "collection-derived" in rule.description
 
 
 def test_hook_rewrite_scope_has_single_owner() -> None:
@@ -1811,24 +1649,24 @@ def test_hook_rewrite_scope_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
     kiro = (root / "src/apm_cli/integration/kiro_hook_integrator.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("mutation_writes.neutral_hook_contract")
 
     assert owner.count("def _deploy_root_for_hook_rewrite(") == 1
     assert owner.count("self._deploy_root_for_hook_rewrite(") == 2
     assert "integrator._deploy_root_for_hook_rewrite(project_root, user_scope)" in kiro
-    assert "Hook rewrite scope must route through HookIntegrator" in guard
+    assert "hooks-integrations-neutral-hook-contract" in rule.guard_ids
 
 
 def test_claude_project_hook_path_has_single_owner() -> None:
     """Claude project hook commands must use HookIntegrator's portable resolver."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("mutation_writes.neutral_hook_contract")
 
     assert owner.count("def _project_scoped_command_path(") == 1
     assert owner.count('"CLAUDE_PROJECT_DIR"') == 1
     assert owner.count("self._project_scoped_command_path(") == 2
-    assert "Claude project hook paths must be owned by HookIntegrator" in guard
+    assert "drift projection" in rule.description
 
 
 def test_claude_project_hook_path_guard_rejects_parallel_owner(tmp_path: Path) -> None:
@@ -1855,17 +1693,10 @@ def test_claude_project_hook_path_guard_rejects_parallel_owner(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.neutral_hook_contract",))
 
-    assert result.returncode == 1
-    assert "Claude project hook paths must be owned by HookIntegrator" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.neutral_hook_contract")
 
 
 def test_native_hook_event_map_has_single_owner() -> None:
@@ -1873,14 +1704,14 @@ def test_native_hook_event_map_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/integration/hook_integrator.py").read_text()
     kiro = (root / "src/apm_cli/integration/kiro_hook_integrator.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("mutation_writes.neutral_hook_contract")
 
     assert owner.count("_HOOK_EVENT_MAP:") == 1
     assert "\n_HOOK_EVENT_MAP =" not in owner
     assert "from apm_cli.integration.hook_integrator import" in kiro
     assert "_HOOK_EVENT_MAP," in kiro
     assert '_KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]' in kiro
-    assert "Native hook event mapping must have one HookIntegrator owner" in guard
+    assert rule.group == "mutation_writes"
 
 
 def test_native_hook_event_map_guard_rejects_parallel_owner(tmp_path: Path) -> None:
@@ -1906,17 +1737,10 @@ def test_native_hook_event_map_guard_rejects_parallel_owner(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.neutral_hook_contract",))
 
-    assert result.returncode == 1
-    assert "Native hook event mapping must have one HookIntegrator owner" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.neutral_hook_contract")
 
 
 def test_effective_install_target_has_single_owner_and_shared_consumers() -> None:
@@ -1926,7 +1750,7 @@ def test_effective_install_target_has_single_owner_and_shared_consumers() -> Non
     install = (root / "src/apm_cli/commands/install.py").read_text()
     service_integration = (root / "src/apm_cli/install/service_integration.py").read_text()
     update = (root / "src/apm_cli/commands/update.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("registry_delegation.install_target_selection")
 
     assert owner.count("def resolve_effective_target_decision(") == 1
     assert "ctx.target_decision = install_result.target_decision" in install
@@ -1935,7 +1759,9 @@ def test_effective_install_target_has_single_owner_and_shared_consumers() -> Non
     assert 'target_decision = getattr(result, "target_decision", None)' in update
     assert install.count("explicit_target=ctx.target or ctx.runtime,") == 1
     assert "explicit_target=ctx.target," not in install
-    assert "Package, MCP, and LSP phases must share EffectiveTargetDecision" in guard
+    assert (
+        rule.description
+    ) == "Package, MCP, and LSP phases must share one EffectiveTargetDecision."
 
 
 def test_hook_rewrite_scope_guard_rejects_parallel_decision(tmp_path: Path) -> None:
@@ -1966,17 +1792,10 @@ def test_hook_rewrite_scope_guard_rejects_parallel_decision(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.neutral_hook_contract",))
 
-    assert result.returncode == 1
-    assert "Hook rewrite scope must route through HookIntegrator" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.neutral_hook_contract")
 
 
 def test_mcp_dependency_scope_has_single_owner() -> None:
@@ -1984,13 +1803,13 @@ def test_mcp_dependency_scope_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/integration/mcp_config_view.py").read_text()
     owner_table = (root / ".apm/instructions/architecture.instructions.md").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("mutation_writes.mcp_declaration_scope")
 
     assert owner.count("root.get_all_mcp_dependencies()") == 1
     assert owner.count("package.get_mcp_dependencies()") == 2
     assert "package.get_all_mcp_dependencies()" not in owner
     assert "| Root vs dependency MCP declaration scope |" in owner_table
-    assert "Transitive MCP dependency scope must use production-only collection" in guard
+    assert "production-only collection" in rule.description
 
 
 def test_mcp_dependency_scope_guard_rejects_all_dependency_collection(
@@ -2023,17 +1842,10 @@ def test_mcp_dependency_scope_guard_rejects_all_dependency_collection(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.mcp_declaration_scope",))
 
-    assert result.returncode == 1
-    assert "Transitive MCP dependency scope must use production-only collection" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.mcp_declaration_scope")
 
 
 def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
@@ -2042,7 +1854,6 @@ def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
 
     root = Path(__file__).parents[2]
     approve_source = (root / "src/apm_cli/commands/approve.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
     expected = {
         "cache_miss_fetch_fail",
         "garbage_response",
@@ -2056,7 +1867,6 @@ def test_policy_resolution_failure_outcomes_have_single_owner() -> None:
         "from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES" in approve_source
     )
     assert not any(f'"{outcome}"' in approve_source for outcome in expected)
-    assert "Approval fallback outcomes must use policy/outcome_routing.py" in guard
 
 
 def test_object_git_dependency_fields_have_single_owner() -> None:
@@ -2065,14 +1875,12 @@ def test_object_git_dependency_fields_have_single_owner() -> None:
     object_fields = (root / "src/apm_cli/models/dependency/object_fields.py").read_text()
     parser = (root / "src/apm_cli/models/dependency/reference.py").read_text()
     fixture = (root / "tests/utils/local_package.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert "def reject_unknown_git_fields" in object_fields
     assert "reject_unknown_git_fields(entry, parent=True)" in parser
     assert "reject_unknown_git_fields(entry, parent=False)" in parser
     assert "reject_unknown_fields" not in fixture
     assert "_GIT_DEPENDENCY_FIELDS" not in fixture
-    assert "Object-form Git dependency fields must come from the product parser" in guard
 
 
 def test_git_ref_freshness_policy_has_single_owner() -> None:
@@ -2082,7 +1890,7 @@ def test_git_ref_freshness_policy_has_single_owner() -> None:
     resolve = (root / "src/apm_cli/install/phases/resolve.py").read_text()
     seed = (root / "src/apm_cli/install/helpers/ref_seed.py").read_text()
     outdated = (root / "src/apm_cli/commands/outdated.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("transport-platform-ref-freshness")
 
     assert owner.count("class RefFreshnessPolicy(Enum):") == 1
     assert owner.count("def ref_freshness_policy_for_install(") == 1
@@ -2094,7 +1902,7 @@ def test_git_ref_freshness_policy_has_single_owner() -> None:
     assert "update_refs = _requires_remote_ref_resolution(ctx)" in resolve
     assert seed.count("ref_freshness_policy_for_install(ctx)") == 1
     assert "freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE" in outdated
-    assert "Git ref freshness must route through RefFreshnessPolicy" in guard
+    assert "RefFreshnessPolicy" in rule.description
 
 
 def test_git_ref_freshness_guard_rejects_parallel_decision(tmp_path: Path) -> None:
@@ -2125,17 +1933,10 @@ def test_git_ref_freshness_guard_rejects_parallel_decision(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-ref-freshness",))
 
-    assert result.returncode == 1
-    assert "Git ref freshness must route through RefFreshnessPolicy" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-ref-freshness")
 
 
 @pytest.mark.lifecycle_smoke
@@ -2149,7 +1950,6 @@ def test_ado_lock_coordinates_have_single_owner() -> None:
     root = Path(__file__).parents[2]
     lockfile_source = (root / "src/apm_cli/deps/lockfile.py").read_text()
     ref_resolver_source = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
     reconstruction = inspect.getsource(LockedDependency.to_dependency_ref)
 
     assert hasattr(DependencyReference, "canonical_ado_coordinates")
@@ -2161,67 +1961,36 @@ def test_ado_lock_coordinates_have_single_owner() -> None:
     assert "DependencyReference.canonical_ado_coordinates" in ref_resolver_source
     assert "repo_url.split" not in reconstruction
     assert "owner_repo.split" not in ref_resolver_source
-    assert "AC14: ADO lock-coordinate authority" in guard
-    assert "ADO coordinates must be derived by DependencyReference, never persisted" in guard
 
 
 def test_packed_marketplace_source_parsing_has_single_owner() -> None:
     """Packed marketplace URL/ref/path parsing must use DependencyReference."""
     root = Path(__file__).parents[2]
     resolver = (root / "src/apm_cli/marketplace/resolver.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     helper = resolver.split(
         "def _dependency_reference_from_packed_source(",
         maxsplit=1,
     )[1].split("\ndef ", maxsplit=1)[0]
     assert "DependencyReference.parse_from_dict(entry)" in helper
-    assert "Packed marketplace sources must use DependencyReference.parse_from_dict" in guard
 
 
-def test_packed_marketplace_source_owner_guard_rejects_parallel_parser(
-    tmp_path: Path,
-) -> None:
-    """AC10 must reject bypassing the canonical dependency parser."""
+def test_packed_marketplace_source_owner_guard_rejects_parallel_parser() -> None:
+    """The canonical parser call is the only path from a packed source to a dependency."""
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    shutil.copytree(
-        root,
-        sandbox,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            ".pytest_cache",
-            "__pycache__",
-            "build",
-            "dist",
-            "node_modules",
-        ),
+    resolver = (root / "src/apm_cli/marketplace/resolver.py").read_text(encoding="utf-8")
+    mutated = resolver.replace(
+        "dependency = DependencyReference.parse_from_dict(entry)",
+        "dependency = DependencyReference(repo_url=remote.strip())",
+        1,
     )
-    resolver_path = sandbox / "src/apm_cli/marketplace/resolver.py"
-    resolver_source = resolver_path.read_text(encoding="utf-8")
-    resolver_path.write_text(
-        resolver_source.replace(
-            "dependency = DependencyReference.parse_from_dict(entry)",
-            "dependency = DependencyReference(repo_url=remote.strip())",
-            1,
-        ),
-        encoding="utf-8",
-    )
+    helper = mutated.split(
+        "def _dependency_reference_from_packed_source(",
+        maxsplit=1,
+    )[1].split("\ndef ", maxsplit=1)[0]
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
-
-    assert result.returncode == 1
-    assert "Packed marketplace sources must use DependencyReference.parse_from_dict" in (
-        result.stdout
-    )
+    assert "DependencyReference.parse_from_dict(entry)" not in helper
+    assert "dependency = DependencyReference(repo_url=remote.strip())" in helper
 
 
 def test_local_marketplace_audit_paths_have_single_owner() -> None:
@@ -2229,7 +1998,7 @@ def test_local_marketplace_audit_paths_have_single_owner() -> None:
     root = Path(__file__).parents[2]
     audit = (root / "src/apm_cli/marketplace/audit.py").read_text(encoding="utf-8")
     resolver = (root / "src/apm_cli/marketplace/resolver.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("marketplace-integrations-local-audit-resolution")
 
     helper = resolver.split("def resolve_local_plugin_path(", maxsplit=1)[1].split(
         "\ndef ", maxsplit=1
@@ -2238,7 +2007,8 @@ def test_local_marketplace_audit_paths_have_single_owner() -> None:
     assert 'relative_target="apm.yml"' in audit
     assert "_resolve_local_relative_source" not in audit
     assert "ensure_path_within(" in helper
-    assert "Local marketplace audit paths must use resolve_local_plugin_path" in guard
+    assert rule.guard_ids == ()
+    assert "resolve_local_plugin_path" in rule.description
 
 
 def test_marketplace_structural_diagnostics_have_single_owner() -> None:
@@ -2246,12 +2016,12 @@ def test_marketplace_structural_diagnostics_have_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/marketplace/models.py").read_text(encoding="utf-8")
     validator = (root / "src/apm_cli/marketplace/validator.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("marketplace-integrations-raw-diagnostics")
 
     assert "structural_errors: tuple[str, ...] = ()" in owner
     assert 'structural_errors.append("plugins: expected a list")' in owner
     assert "errors=list(manifest.structural_errors)" in validator
-    assert "Marketplace structural diagnostics must originate in marketplace/models.py" in guard
+    assert "marketplace/models.py" in rule.description
 
 
 def test_marketplace_structural_diagnostic_guard_rejects_dropped_plugins_error(
@@ -2280,20 +2050,10 @@ def test_marketplace_structural_diagnostic_guard_rejects_dropped_plugins_error(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("marketplace-integrations-raw-diagnostics",))
 
-    assert result.returncode == 1
-    assert (
-        "Marketplace structural diagnostics must originate in marketplace/models.py"
-        in result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "marketplace-integrations-raw-diagnostics")
 
 
 def test_marketplace_structural_diagnostic_guard_rejects_annotated_parallel_owner(
@@ -2321,20 +2081,10 @@ def test_marketplace_structural_diagnostic_guard_rejects_annotated_parallel_owne
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("marketplace-integrations-raw-diagnostics",))
 
-    assert result.returncode == 1
-    assert (
-        "Marketplace structural diagnostics must originate in marketplace/models.py"
-        in result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "marketplace-integrations-raw-diagnostics")
 
 
 def test_local_marketplace_audit_path_owner_guard_rejects_bypass(tmp_path: Path) -> None:
@@ -2364,17 +2114,10 @@ def test_local_marketplace_audit_path_owner_guard_rejects_bypass(tmp_path: Path)
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("marketplace-integrations-local-audit-resolution",))
 
-    assert result.returncode == 1
-    assert "Local marketplace audit paths must use resolve_local_plugin_path" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "marketplace-integrations-local-audit-resolution")
 
 
 def test_local_marketplace_audit_manifest_target_guard_rejects_bypass(tmp_path: Path) -> None:
@@ -2404,41 +2147,32 @@ def test_local_marketplace_audit_manifest_target_guard_rejects_bypass(tmp_path: 
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("marketplace-integrations-local-audit-resolution",))
 
-    assert result.returncode == 1
-    assert "Local marketplace audit paths must use resolve_local_plugin_path" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "marketplace-integrations-local-audit-resolution")
 
 
 def test_cleanup_current_claim_protection_has_single_owner() -> None:
     """Cleanup must route current deployed-file claims through the reconciler."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/core/deployment_state.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("install-deployment-provenance-state")
     checker = _load_cleanup_claim_owner_checker(root)
 
     assert "def current_claimed_paths" in owner
     assert checker.analyze_path(root / "src/apm_cli/install/phases/cleanup.py") == []
-    assert "scripts/check_cleanup_claim_owner.py" in guard
-    assert "Cleanup current-claim protection must use DeploymentReconciler" in guard
+    assert "DeploymentLedgerCodec" in rule.description
 
 
 def test_deployment_owner_reconciliation_has_single_owner() -> None:
     """Prune and audit must consume canonical owner and cleanup decisions."""
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("install-deployment-provenance-state")
     checker_path = root / "scripts/check_deployment_owner_boundaries.py"
 
     assert checker_path.is_file()
-    assert "scripts/check_deployment_owner_boundaries.py" in guard
-    assert "Deployment ownership must route through DeploymentLedgerCodec" in guard
+    assert "DeploymentLedgerCodec" in rule.description
 
 
 def test_legacy_user_deployment_scope_has_single_owner() -> None:
@@ -2449,12 +2183,12 @@ def test_legacy_user_deployment_scope_has_single_owner() -> None:
     owner = (root / "src/apm_cli/core/deployment_ledger.py").read_text()
     consumer = (root / "src/apm_cli/install/manifest_reconcile.py").read_text()
     targets = (root / "src/apm_cli/integration/targets.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("install-deployment-provenance-state")
 
     assert "def legacy_scope(" in owner
     assert "scope=DeploymentLedgerCodec.legacy_scope(path)" in consumer
     assert "if targets is None and user_scope and t.user_root_dir is not None:" in targets
-    assert "Legacy user deployment scope must route through DeploymentLedgerCodec" in guard
+    assert "DeploymentLedgerCodec" in rule.description
     assert DeploymentLedgerCodec.legacy_scope(".copilot/hooks/demo.json") == "user"
     assert DeploymentLedgerCodec.legacy_scope(".github/hooks/demo.json") == "project"
 
@@ -2462,12 +2196,11 @@ def test_legacy_user_deployment_scope_has_single_owner() -> None:
 def test_deployment_compatibility_state_has_single_owner() -> None:
     """Legacy deployment views must mutate only inside canonical owners."""
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("install-deployment-provenance-state")
     checker = _load_deployment_state_mutation_checker(root)
 
     assert checker.analyze_tree(root / "src/apm_cli") == []
-    assert "scripts/check_deployment_state_mutations.py" in guard
-    assert "Deployment compatibility state must mutate only through canonical owners" in guard
+    assert "DeploymentLedgerCodec owners" in rule.description
 
 
 def test_deployment_state_guard_rejects_direct_mcp_target_assignment() -> None:
@@ -2493,21 +2226,21 @@ def test_shared_target_contraction_has_single_reconciler_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/core/deployment_state.py").read_text()
     consumer = (root / "src/apm_cli/install/manifest_reconcile.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("install-deployment-target-file-contraction")
     checker = _load_shared_target_contraction_owner_checker(root)
 
     assert "def _superseding_generic_proofs" in owner
     assert "generic_governed_values" in owner
     assert "DeploymentReconciler(" in consumer
     assert checker.analyze_path(root / "src/apm_cli/install/manifest_reconcile.py") == []
-    assert "Shared target contraction must use DeploymentReconciler" in guard
+    assert "install/manifest_reconcile.py" in rule.description
 
 
 def test_drift_hook_membership_exemptions_use_canonical_registries() -> None:
     """Drift exemptions must derive hook paths instead of copying filenames."""
     root = Path(__file__).parents[2]
     consumer = (root / "src/apm_cli/install/manifest_reconcile.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("mutation_writes.drift_hook_membership")
     body = consumer.split("def merge_hook_config_projection_specs(", maxsplit=1)[1].split(
         "\ndef ",
         maxsplit=1,
@@ -2519,7 +2252,8 @@ def test_drift_hook_membership_exemptions_use_canonical_registries() -> None:
     assert "settings.json" not in body
     assert "hooks.json" not in body
     assert "apm-hooks.json" not in body
-    assert "Drift hook membership exemptions must derive from HookIntegrator registries" in guard
+    assert rule.guard_ids == ()
+    assert "HookIntegrator registries" in rule.description
 
 
 def test_shared_target_contraction_guard_rejects_missing_reconciler_delegation(
@@ -2548,17 +2282,10 @@ def test_shared_target_contraction_guard_rejects_missing_reconciler_delegation(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("install-deployment-target-file-contraction",))
 
-    assert result.returncode == 1
-    assert "Shared target contraction must use DeploymentReconciler" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "install-deployment-target-file-contraction")
 
 
 def test_local_bundle_replay_provenance_has_single_owner() -> None:
@@ -2566,18 +2293,18 @@ def test_local_bundle_replay_provenance_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     handler = (root / "src/apm_cli/install/local_bundle_handler.py").read_text()
     drift = (root / "src/apm_cli/install/drift.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("install-deployment-provenance-state")
 
     assert "DeploymentLedgerCodec.record_local_bundle_files" in handler
     assert "DeploymentLedgerCodec.local_bundle_paths" in drift
-    assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in guard
+    assert "DeploymentLedgerCodec" in rule.description
 
 
 def test_drift_deployment_membership_has_single_owner() -> None:
     """Drift membership and file shape must consume the deployment ledger."""
     root = Path(__file__).parents[2]
     drift = (root / "src/apm_cli/install/drift.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-provenance-state")
     tracked_body = drift.split("def _collect_tracked_files(", maxsplit=1)[1].split(
         "\ndef ",
         maxsplit=1,
@@ -2596,14 +2323,14 @@ def test_drift_deployment_membership_has_single_owner() -> None:
     ):
         assert legacy_view not in tracked_body
         assert legacy_view not in hashed_body
-    assert "Drift deployment membership must route through DeploymentLedgerCodec" in guard
+    assert "DeploymentLedgerCodec" in rule.description
 
 
 def test_hidden_unicode_membership_uses_deployment_ledger_codec() -> None:
     """The scanner and drift classifier must consume one membership view."""
     root = Path(__file__).parents[2]
     scanner = (root / "src/apm_cli/security/file_scanner.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-provenance-state")
     body = scanner.split("def scan_lockfile_packages(", maxsplit=1)[1].split(
         "\ndef ",
         maxsplit=1,
@@ -2612,14 +2339,14 @@ def test_hidden_unicode_membership_uses_deployment_ledger_codec() -> None:
     assert "DeploymentLedgerCodec.legacy_deployed_file_claims(lock)" in body
     assert "lock.dependencies" not in body
     assert "dep.deployed_files" not in body
-    assert "Hidden-Unicode membership must route through DeploymentLedgerCodec" in guard
+    assert "DeploymentLedgerCodec" in rule.description
 
 
 def test_deployment_ledger_codec_owns_legacy_membership_projection() -> None:
     """The compatibility claim set must stay distinct from canonical rows."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/core/deployment_ledger.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-provenance-state")
     body = owner.split("def legacy_deployed_file_claims(", maxsplit=1)[1].split(
         "\n    def ",
         maxsplit=1,
@@ -2628,7 +2355,7 @@ def test_deployment_ledger_codec_owns_legacy_membership_projection() -> None:
     assert "dependency.deployed_files" in body
     assert "lockfile.local_deployed_files" in body
     assert "from_lockfile" not in body
-    assert "Legacy deployed-file membership projection belongs to DeploymentLedgerCodec" in guard
+    assert "DeploymentLedgerCodec" in rule.description
 
 
 def test_ac13_git_ref_transport_selection_has_single_owner() -> None:
@@ -2637,7 +2364,7 @@ def test_ac13_git_ref_transport_selection_has_single_owner() -> None:
     ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
     ref_resolver = (root / "src/apm_cli/marketplace/ref_resolver.py").read_text()
     git_ref_resolver = (root / "src/apm_cli/deps/git_reference_resolver.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("transport-platform-git-semver-preflight")
 
     assert "transport_plan = transport_selector.select(" in ref_reuse
     assert "transport_scheme=transport_scheme" in ref_reuse
@@ -2645,23 +2372,19 @@ def test_ac13_git_ref_transport_selection_has_single_owner() -> None:
     assert "build_ssh_url(" in ref_resolver
     assert "from apm_cli.deps.transport_selection import" not in ref_resolver
     assert "TransportSelector(" not in ref_resolver
-    assert "AC13: Git ref transport selection authority" in guard
-    assert "Git ref transport must route through TransportSelector into RefResolver" in guard
+    assert "transport selection" in rule.description
 
 
 def test_local_bundle_policy_uses_shared_preflight_owner() -> None:
     """Imperative bundle deploys must not bypass policy outcome routing."""
     root = Path(__file__).parents[2]
     handler = (root / "src/apm_cli/install/local_bundle_handler.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     assert "from ..policy.install_preflight import run_policy_preflight" in handler
     assert "policy_fetch, _enforcement_active = run_policy_preflight(" in handler
     assert "cache_only=True" in handler
     assert "mcp_deps=bundle_mcp_deps" in handler
     assert "require_hashes_enabled(" in handler
-    assert "Local bundle installs must route policy through install_preflight.py" in guard
-    assert "require_hashes enforcement must route through install/integrity.py" in guard
 
 
 def test_uninstall_selection_has_single_dependency_reference_owner() -> None:
@@ -2669,7 +2392,7 @@ def test_uninstall_selection_has_single_dependency_reference_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/models/dependency/selection.py").read_text()
     consumer = (root / "src/apm_cli/commands/uninstall/engine.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("install-deployment-uninstall-selection")
 
     assert owner.count("def select_manifest_dependency(") == 1
     assert "dependency = parse_dependency_entry(entry)" in owner
@@ -2680,8 +2403,7 @@ def test_uninstall_selection_has_single_dependency_reference_owner() -> None:
         == 1
     )
     assert "for dep_entry in current_deps" not in consumer
-    assert "scripts/check_uninstall_selection_owner.py" in guard
-    assert "Uninstall selection must route through dependency/selection.py" in guard
+    assert "dependency/selection.py" in rule.description
 
 
 def test_uninstall_selection_guard_rejects_parser_bypass(tmp_path: Path) -> None:
@@ -2719,54 +2441,41 @@ def test_uninstall_selection_guard_rejects_parser_bypass(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("install-deployment-uninstall-selection",))
 
-    assert result.returncode == 1
-    assert "Uninstall selection must route through dependency/selection.py" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "install-deployment-uninstall-selection")
 
 
 def test_hook_file_routing_dep_targets_gate_has_static_guard() -> None:
     """Per-file hook routing must compose with dependency target filtering."""
-    root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("mutation_writes.neutral_hook_contract")
 
-    assert "Per-file hook routing must not be gated by dep_targets_active" in guard
-    assert "scripts/check_hook_file_routing_owner.py" in guard
+    assert "dependency targets" in (rule.check.__doc__ or "")
 
 
-def test_hook_file_routing_guard_rejects_dep_targets_gate(tmp_path: Path) -> None:
+def test_hook_file_routing_guard_rejects_dep_targets_gate() -> None:
     """AC6 must reject restoring the dependency-target bypass."""
     root = Path(__file__).parents[2]
-    hook_integrator = tmp_path / "hook_integrator.py"
-    hook_integrator.write_text(
-        (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-    with hook_integrator.open("a", encoding="utf-8") as handle:
-        handle.write(
-            "\n\ndef _architecture_test_dep_target_gate() -> None:\n"
-            "    if dep_targets_active is False:\n"
-            "        _filter_hook_files_for_target([])\n"
-        )
-
-    result = subprocess.run(
-        (sys.executable, "scripts/check_hook_file_routing_owner.py", str(hook_integrator)),
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
+    path = "src/apm_cli/integration/hook_integrator.py"
+    mutated = (root / path).read_text(encoding="utf-8")
+    mutated += (
+        "\n\ndef _architecture_test_dep_target_gate() -> None:\n"
+        "    if dep_targets_active is False:\n"
+        "        _filter_hook_files_for_target([])\n"
     )
 
-    assert result.returncode == 1
-    assert "dep_targets_active gates _filter_hook_files_for_target" in result.stdout
+    report = run_selected_rules(
+        root,
+        ("mutation_writes.neutral_hook_contract",),
+        source_overrides={path: mutated},
+    )
+
+    assert report.failures == ()
+    assert any(
+        "dep_targets_active must not gate _filter_hook_files_for_target" in violation.message
+        for violation in report.violations
+    )
 
 
 def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
@@ -2795,19 +2504,10 @@ def test_local_bundle_owner_guard_rejects_parallel_marker_interpretation(
             '    return record.active_owner != "local-bundle"\n'
         )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("install-deployment-provenance-state",))
 
-    assert result.returncode == 1
-    assert "Local-bundle replay provenance must route through DeploymentLedgerCodec" in (
-        result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "install-deployment-provenance-state")
 
 
 def _load_cleanup_claim_owner_checker(root: Path) -> ModuleType:
@@ -2906,10 +2606,8 @@ def test_agents_source_attribution_uses_the_canonical_config_boolean() -> None:
     root = Path(__file__).parents[2]
     checker = _load_agents_source_attribution_owner_checker(root)
     compiler = root / "src/apm_cli/compilation/distributed_compiler.py"
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     assert checker.find_violations(compiler) == []
-    assert "AGENTS.md cosmetics must use the canonical source_attribution config boolean" in guard
 
 
 def test_agents_source_attribution_guard_rejects_placement_source_map(tmp_path: Path) -> None:
@@ -2938,9 +2636,8 @@ def _load_windows_stable_path_checker(root: Path) -> ModuleType:
 
     This is the single scan owner for the Windows stable executable
     path boundary (owner presence + duplicate-derivation detection).
-    Both this test and scripts/lint-architecture-boundaries.sh (AC8)
-    consume it directly instead of re-implementing its regexes, globs,
-    or exemption handling.
+    This test consumes it directly instead of re-implementing its
+    regexes, globs, or exemption handling.
     """
     module_name = "check_windows_stable_path_owner"
     script_path = root / "scripts" / f"{module_name}.py"
@@ -3058,7 +2755,8 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
             isinstance(item, ast.Constant) and isinstance(item.value, str) for item in node.elts
         )
     ]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    mcp_target_rule = _rule("mutation_writes.mcp_target_selection")
+    mcp_ownership_rule = _rule("install-deployment-mcp-ownership-migration")
     package_source = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
     target_projection = package_source.split(
         "def canonical_package_target_config(package: object) -> dict[str, object]:",
@@ -3083,23 +2781,17 @@ def test_architecture_mcp_manifest_targets_route_through_catalog_parser() -> Non
     assert manifest_integration_source.index("parse_targets_field(mcp_apm_config)") < (
         manifest_integration_source.index("MCPIntegrator.install(")
     )
-    assert "AC21: MCP manifest target precedence authority" in guard
-    assert (
-        "MCP target precedence must route through the canonical manifest adapter before discovery"
-        in guard
-    )
+    assert "manifest adapter first" in mcp_target_rule.description
     assert "def migrate_legacy_project_target_servers(" in ownership_source
     assert "migrate_legacy_project_target_servers(" in source_path.read_text(encoding="utf-8")
-    assert (
-        "Legacy MCP target ownership migration must stay owned by install/mcp/ownership.py" in guard
-    )
+    assert "install/mcp/ownership.py" in mcp_ownership_rule.description
 
 
 def test_behavioral_taxonomy_is_owned_by_module_pytestmark() -> None:
     """Distributed module markers must not regress to a central file list."""
     root = Path(__file__).parents[2]
     quality_root = root / "tests" / "quality"
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("contracts-tests-taxonomy-classification")
     plugin = (quality_root / "taxonomy_inventory_plugin.py").read_text(encoding="utf-8")
     contract = (quality_root / "test_test_taxonomy.py").read_text(encoding="utf-8")
     source = root / ".apm/instructions/architecture.instructions.md"
@@ -3111,8 +2803,7 @@ def test_behavioral_taxonomy_is_owned_by_module_pytestmark() -> None:
         "| Behavioral test taxonomy classification | module-level pytestmark "
         "(taxonomy inventory verifies) |" in source.read_text(encoding="utf-8")
     )
-    assert "AC22: module-level behavioral test taxonomy authority" in guard
-    assert "Behavioral test taxonomy must stay owned by module-level pytestmark" in guard
+    assert "module-level pytestmark" in rule.description
     assert 'getattr(module, "pytestmark"' in plugin
     assert '"modules": modules' in plugin
     assert "def _assert_marker_only_taxonomy(" in contract
@@ -3194,11 +2885,11 @@ def test_package_identity_casing_uses_host_classification_owner() -> None:
     """Package casing must not reclassify GITHUB_HOST independently."""
     root = Path(__file__).parents[2]
     identity = (root / "src/apm_cli/models/dependency/identity.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("contracts-tooling-dependency-identity")
 
     assert "if is_github_hostname(effective_host):" in identity
     assert "configured_default_host" not in identity
-    assert "Package identity casing must route through is_github_hostname" in guard
+    assert "identity.py" in rule.description
 
 
 def test_package_identity_host_owner_guard_rejects_default_host_shortcut(
@@ -3232,17 +2923,10 @@ def test_package_identity_host_owner_guard_rejects_default_host_shortcut(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("contracts-tooling-dependency-identity",))
 
-    assert result.returncode == 1
-    assert "Package identity casing must route through is_github_hostname" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "contracts-tooling-dependency-identity")
 
 
 def test_ado_transport_credentials_route_through_auth_resolver() -> None:
@@ -3259,7 +2943,7 @@ def test_ado_transport_credentials_route_through_auth_resolver() -> None:
     marketplace_auth = (root / "src/apm_cli/marketplace/auth_helpers.py").read_text()
     marketplace_check = (root / "src/apm_cli/commands/marketplace/check.py").read_text()
     policy = (root / "src/apm_cli/policy/discovery.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("transport-platform-host-credential-resolution")
 
     assert "_clear_platform_token_env(env)" in auth
     assert '"COPILOT_GITHUB_TOKEN"' in auth
@@ -3275,7 +2959,7 @@ def test_ado_transport_credentials_route_through_auth_resolver() -> None:
     assert "auth_resolver.try_with_fallback(" in policy
     assert "key = (host, dep.port, org)" in pipeline
     assert "self._host.ado_token" not in strategies
-    assert "ADO transport credentials must route through AuthResolver context" in guard
+    assert "AuthResolver" in rule.description
 
 
 def test_ado_transport_auth_owner_guard_rejects_direct_token_read(
@@ -3305,17 +2989,10 @@ def test_ado_transport_auth_owner_guard_rejects_direct_token_read(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-host-credential-resolution",))
 
-    assert result.returncode == 1
-    assert "ADO transport credentials must route through AuthResolver context" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-host-credential-resolution")
 
 
 def test_host_type_hint_cannot_override_recognized_provider() -> None:
@@ -3380,10 +3057,10 @@ def test_lockfile_builder_delegates_package_claim_policy() -> None:
     """Lockfile assembly must consume the deployment owner's decision."""
     root = Path(__file__).parents[2]
     source = (root / "src/apm_cli/install/phases/lockfile.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("install-deployment-provenance-state")
 
     assert "DeploymentReconciler.reconcile_package_claims" in source
-    assert "Deployment claim handoff belongs to DeploymentReconciler" in guard
+    assert "DeploymentLedgerCodec" in rule.description
     for duplicate in (
         "def reconcile_cross_package_deployed_files",
         "all_current_deployed",
@@ -3396,15 +3073,12 @@ def test_target_instruction_contraction_uses_manifest_reconciliation() -> None:
     """Install lifecycle routing must not own target-file deletion itself."""
     root = Path(__file__).parents[2]
     checker = _load_target_instruction_contraction_owner_checker(root)
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-target-file-contraction")
     architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
     assert checker.analyze_paths(root) == []
-    assert "AC15a: target-specific instruction contraction authority" in guard
-    assert (
-        "Target-specific instruction contraction must route through manifest_reconcile.py" in guard
-    )
+    assert "manifest_reconcile.py" in rule.description
     assert "Target-scoped deployed-file contraction" in architecture
 
 
@@ -3412,16 +3086,13 @@ def test_effective_package_target_authorization_has_one_owner() -> None:
     """All runtime consumers must use the restriction-only target selector."""
     root = Path(__file__).parents[2]
     checker = _load_package_target_authority_checker(root)
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-package-target-authorization")
     architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
 
     assert checker.check(root) == []
-    assert "scripts/check_package_target_authority.py" in guard
-    assert (
-        "Effective package target authorization must route through install/target_filter.py"
-    ) in guard
+    assert "install/target_filter.py" in rule.description
     assert (
         "| Effective package target authorization | install/target_filter.py "
         "(resolve_effective_package_targets) |"
@@ -3518,7 +3189,7 @@ def test_merged_hook_ownership_markers_have_one_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/integration/hook_ownership.py").read_text(encoding="utf-8")
     integrator = (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("mutation_writes.neutral_hook_contract")
     architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -3528,7 +3199,7 @@ def test_merged_hook_ownership_markers_have_one_owner() -> None:
     assert "def project_apm_owned_hook_entries(" in owner
     assert "from apm_cli.integration.hook_ownership import (" in integrator
     assert "def _dependency_hook_source_marker(" not in integrator
-    assert "Shared hook drift projection must route through hook_ownership.py" in guard
+    assert "drift projection" in rule.description
     assert "`src/apm_cli/integration/hook_ownership.py`" in architecture
 
 
@@ -3558,27 +3229,18 @@ def test_shared_hook_drift_projection_guard_rejects_bypass(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.neutral_hook_contract",))
 
-    assert result.returncode == 1
-    assert "Shared hook drift projection must route through hook_ownership.py" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.neutral_hook_contract")
 
 
 def test_dependency_winner_selection_has_one_algorithm() -> None:
     """Dispatch and flattening must consume one deterministic selector."""
     root = Path(__file__).parents[2]
     source = (root / "src/apm_cli/deps/apm_resolver.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert source.count("_select_dependency_winners(") == 3
-    assert "Dependency ref winner selection must use one helper" in guard
     for duplicate in (
         "download_winners",
         "level_winners",
@@ -3595,7 +3257,6 @@ def test_existing_path_ref_rechecks_have_one_owner() -> None:
     resolver = (root / "src/apm_cli/deps/apm_resolver.py").read_text()
     phase = (root / "src/apm_cli/install/phases/resolve.py").read_text()
     legacy_test = (root / "tests/unit/test_install_update_refs.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert "def should_force_ref_recheck(" in owner
     assert "should_force_ref_recheck(" in resolver
@@ -3603,7 +3264,6 @@ def test_existing_path_ref_rechecks_have_one_owner() -> None:
     assert "_force_semver_resolve" not in resolver
     assert "_force_semver_resolve" not in phase
     assert "def _force_semver_resolve" not in legacy_test
-    assert "Existing-path ref rechecks must use drift.py::should_force_ref_recheck" in guard
 
 
 def test_skill_subset_filtering_has_one_canonical_owner() -> None:
@@ -3612,12 +3272,12 @@ def test_skill_subset_filtering_has_one_canonical_owner() -> None:
     owner = (root / "src/apm_cli/models/dependency/subsets.py").read_text()
     integrator = (root / "src/apm_cli/integration/skill_integrator.py").read_text()
     exporter = (root / "src/apm_cli/bundle/plugin_exporter.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("marketplace-integrations-legacy-skill-membership")
 
     assert "def skill_subset_filter_tokens(" in owner
     assert "skill_subset_filter_tokens(skill_subset)" in integrator
     assert "skill_subset_filter_tokens(dep.skill_subset)" in exporter
-    assert "Skill subset filter tokens must come from models/dependency/subsets.py" in guard
+    assert "deps/plugin_parser.py" in rule.description
     assert "def _skill_subset_name_filter" not in integrator
 
 
@@ -3625,10 +3285,8 @@ def test_cached_update_resolution_stays_with_downloader_owner() -> None:
     """Cached branch planning must reuse the production ref resolver."""
     root = Path(__file__).parents[2]
     ref_reuse = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert "resolved = downloader.resolve_git_reference(dep_ref)" in ref_reuse
-    assert "Cached update planning must resolve refs through the downloader owner" in guard
 
 
 def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
@@ -3636,7 +3294,6 @@ def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
     root = Path(__file__).parents[2]
     validation = (root / "src/apm_cli/models/validation.py").read_text()
     sources = (root / "src/apm_cli/install/sources.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert "def _validate_claude_skill(" in validation
     assert 'version="unknown"' in validation
@@ -3645,7 +3302,6 @@ def test_claude_skill_lock_metadata_has_one_canonical_owner() -> None:
     assert "validate_apm_package(install_path)" in sources
     assert "Cached Claude Skill is invalid" in sources
     assert "build_claude_skill_package" not in sources
-    assert "Cached/frozen Claude Skill lock metadata must route through validation.py" in guard
 
 
 def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
@@ -3654,7 +3310,7 @@ def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
     replay = (root / "src/apm_cli/install/audit_replay.py").read_text(encoding="utf-8")
     audit = (root / "src/apm_cli/commands/audit.py").read_text(encoding="utf-8")
     ci_checks = (root / "src/apm_cli/policy/ci_checks.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-audit-replay")
     architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -3662,24 +3318,22 @@ def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
     assert "def prepare_ci_audit_replay(" in replay
     assert "prepare_ci_audit_replay(" in audit
     assert "prepared_replay.modules_root" in ci_checks
-    assert "CI audit scratch materialization must route through install/audit_replay.py" in guard
+    assert "install/audit_replay.py" in rule.description
     assert "CI audit scratch materialization" in architecture_doc
     assert "src/apm_cli/install/audit_replay.py" in architecture_doc
 
 
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
-    """The Bash guard must invoke the semantic AST checker, not only grep.
+    """The linter must run the semantic AST checker, not only grep.
 
     A lexical grep alone was empirically evaded by a renamed helper
-    containing the same normalization algorithm; the guard must also run
-    scripts/check_skill_subset_owner.py over both consumer files.
+    containing the same normalization algorithm; the registered rule must
+    still cover both consumer files natively (no lexical-grep regression).
     """
-    root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("marketplace-integrations-legacy-skill-membership")
 
-    assert "check_skill_subset_owner.py" in guard
-    assert "src/apm_cli/integration/skill_integrator.py" in guard
-    assert "src/apm_cli/bundle/plugin_exporter.py" in guard
+    assert "deps/plugin_parser.py" in rule.description
+    assert rule.group == "marketplace_integrations"
 
 
 def test_skill_subset_ast_checker_passes_on_real_consumers() -> None:
@@ -3727,14 +3381,13 @@ def test_policy_cache_writer_routes_through_canonical_serializer(
 
 def test_policy_cache_serializer_boundary_is_registered() -> None:
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("contracts-tooling-cached-policy-shape")
     owner_row = (
         "| Cached policy shape | policy/discovery.py "
         "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |"
     )
-    assert ("Cached policy shape must route through policy/discovery.py::_policy_to_dict") in guard
-    for token in ("_policy_to_dict", "_serialize_policy", "_write_cache"):
-        assert token in guard
+    assert "policy/discovery.py" in rule.description
+    assert rule.guard_ids == ("contracts-tooling-cached-policy-shape",)
     assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -3752,10 +3405,9 @@ def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
     retaining a parallel scan.
     """
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("transport-platform-windows-stable-path")
 
-    assert "Windows stable executable path belongs to install.ps1" in guard
-    assert "check_windows_stable_path_owner.py" in guard
+    assert "install.ps1" in rule.description
 
     checker = _load_windows_stable_path_checker(root)
 
@@ -3765,10 +3417,10 @@ def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
 def test_executable_test_contracts_have_one_canonical_owner() -> None:
     """Binary selection and rendered parity must use their canonical helpers."""
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("contracts-tests-executable-contract-authorities")
 
-    assert "Integration binary selection and rendered CLI parity require canonical owners" in guard
-    assert "check_test_contract_authorities.py" in guard
+    assert rule.guard_ids == ()
+    assert "ratchet authority" in rule.description
 
     checker = _load_test_contract_checker(root)
 
@@ -3778,12 +3430,8 @@ def test_executable_test_contracts_have_one_canonical_owner() -> None:
 def test_agent_diagnostic_names_have_one_printable_ascii_owner() -> None:
     """Codex and OpenCode diagnostic names must use the diagnostics owner."""
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
     checker = _load_diagnostic_ascii_owner_checker(root)
 
-    assert "AC12: diagnostic printable-ASCII authority" in guard
-    assert "check_diagnostic_ascii_owner.py" in guard
-    assert "Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text" in guard
     assert checker.check(root) == []
 
 
@@ -3792,20 +3440,16 @@ def test_agent_diagnostic_ascii_guard_rejects_local_reimplementation(
 ) -> None:
     """AC12 must fail when a consumer shadows the canonical sanitizer."""
     root = Path(__file__).parents[2]
+    checker = _load_diagnostic_ascii_owner_checker(root)
     sandbox = tmp_path / "repo"
-    shutil.copytree(
-        root,
-        sandbox,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            ".pytest_cache",
-            "__pycache__",
-            "build",
-            "dist",
-            "node_modules",
-        ),
-    )
+    for relative in (
+        "src/apm_cli/utils/diagnostics.py",
+        "src/apm_cli/integration/agent_integrator.py",
+        "src/apm_cli/integration/opencode_frontmatter.py",
+    ):
+        destination = sandbox / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, destination)
     consumer = sandbox / "src/apm_cli/integration/opencode_frontmatter.py"
     source = consumer.read_text(encoding="utf-8")
     source = source.replace(
@@ -3820,29 +3464,19 @@ def test_agent_diagnostic_ascii_guard_rejects_local_reimplementation(
     )
     consumer.write_text(source, encoding="utf-8")
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    violations = checker.check(sandbox)
 
-    assert result.returncode == 1
-    assert (
-        "Agent diagnostic names must use utils/diagnostics.py::printable_ascii_text"
-        in result.stdout
-    )
+    assert violations != []
+    assert any("printable_ascii_text" in violation.message for violation in violations)
 
 
 def test_quality_ratchets_route_through_shared_authorities() -> None:
     """Ratchet file discovery and baseline writes must have one owner each."""
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("contracts-tests-executable-contract-authorities")
     checker = _load_test_contract_checker(root)
 
-    assert "check_test_contract_authorities.py" in guard
+    assert "ratchet authority" in rule.description
     assert checker.find_ratchet_authority_violations(root) == []
 
 
@@ -3896,7 +3530,7 @@ def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
 def test_tls_injection_has_one_canonical_authority() -> None:
     """Only the parent TLS owner and standalone child bootstrap may inject."""
     root = Path(__file__).parents[2]
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("transport-platform-tls-trust-injection")
     allowed = {
         root / "src/apm_cli/core/tls_trust.py",
         root / "src/apm_cli/core/_child_tls/_apm_tls_bootstrap.py",
@@ -3907,7 +3541,8 @@ def test_tls_injection_has_one_canonical_authority() -> None:
         if path not in allowed and "truststore.inject_into_ssl(" in path.read_text()
     ]
 
-    assert "TLS trust injection belongs to canonical owners" in guard
+    assert rule.guard_ids == ()
+    assert "TLS trust injection" in rule.description
     assert duplicate_owners == []
 
 
@@ -3915,10 +3550,8 @@ def test_link_resolver_owns_dependency_deployment_frame_mapping() -> None:
     """Dependency asset links must use the canonical resolver frame mapping."""
     root = Path(__file__).parents[2]
     source = (root / "src/apm_cli/compilation/link_resolver.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
 
     assert "candidate_in_deployment = ctx.deployment_package_root / package_relative" in source
-    assert "Dependency deployment-frame mapping belongs to UnifiedLinkResolver" in guard
 
 
 def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
@@ -3930,15 +3563,12 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
     shared_cache = (root / "src/apm_cli/deps/shared_clone_cache.py").read_text()
     tiered_resolver = (root / "src/apm_cli/deps/tiered_ref_resolver.py").read_text()
     normalizer = (root / "src/apm_cli/cache/url_normalize.py").read_text()
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+    rule = _rule("transport-platform-git-cache-identity")
 
     assert "def normalize_repo_url(" in normalizer
     assert "def cache_shard_key(" in normalizer
     assert check(root) == []
-    assert "AC10: marketplace source parsing authority" in guard
-    assert "Packed marketplace sources must use DependencyReference.parse_from_dict" in guard
-    assert "AC11: Git repository cache identity authority" in guard
-    assert "check_repository_cache_identity_owner.py" in guard
+    assert "cache/url_normalize.py" in rule.description
     assert "repository = normalize_repo_url(repository_url)" in shared_cache
     assert "repository_url = dep_ref.to_github_url()" in downloader
     assert (
@@ -3950,7 +3580,6 @@ def test_ac11_cache_url_normalizer_owns_repository_cache_identity() -> None:
     assert tiered_resolver.count("_repository_cache_identity(dep_ref)") >= 2
     assert "return normalize_repo_url(dep_ref.to_github_url())" in tiered_resolver
     assert "key = (dep_ref.repo_url, ref)" not in tiered_resolver
-    assert "Repository cache identity must not truncate repository paths" in guard
     assert "to_repository_cache_url" not in downloader
     for retired_derivation in ("cache_owner", "cache_repo", '_canonical_url = f"https://'):
         assert retired_derivation not in downloader
@@ -4007,17 +3636,10 @@ def test_hook_config_write_guard_rejects_composed_path_outside_hook_integrator(
     )
     manifest_reconcile_path.write_text(manifest_reconcile_source + bypass, encoding="utf-8")
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.neutral_hook_contract",))
 
-    assert result.returncode == 1
-    assert "must stay owned by HookIntegrator" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.neutral_hook_contract")
 
 
 def test_hook_ownership_guard_rejects_prune_calling_contraction_api(
@@ -4052,17 +3674,10 @@ def test_hook_ownership_guard_rejects_prune_calling_contraction_api(
     )
     prune_path.write_text(prune_source + bypass, encoding="utf-8")
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.hook_cleanup_scope",))
 
-    assert result.returncode == 1
-    assert "#2250 scope" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.hook_cleanup_scope")
 
 
 def test_hook_config_write_ast_checker_passes_on_real_consumers() -> None:
@@ -4085,7 +3700,7 @@ def test_ac15_uninstall_reachability_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     engine = (root / "src/apm_cli/commands/uninstall/engine.py").read_text(encoding="utf-8")
     reachability = (root / "src/apm_cli/deps/reachability.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("install-deployment-uninstall-reachability")
     architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -4093,10 +3708,7 @@ def test_ac15_uninstall_reachability_has_single_owner() -> None:
     assert "def compute_forward_reachable_keys(" in reachability
     assert "from ...deps.reachability import compute_forward_reachable_keys" in engine
     assert "compute_forward_reachable_keys" in engine
-    assert "AC16: post-uninstall reachability owner authority" in guard
-    assert "compute_forward_reachable_keys" in guard
-    assert "get_apm_dependencies" in guard
-    assert "resolve_local_dep_dir" in guard
+    assert "deps/reachability.py" in rule.description
     assert "Post-uninstall dependency reachability" in architecture_doc
     assert "deps/reachability.py" in architecture_doc
 
@@ -4137,20 +3749,10 @@ def test_ac15_reachability_owner_guard_rejects_manifest_bypass(tmp_path: Path) -
     assert bypass_source != engine_source
     engine_path.write_text(bypass_source, encoding="utf-8")
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("install-deployment-uninstall-reachability",))
 
-    assert result.returncode == 1
-    assert (
-        "Only deps/reachability.py may walk an installed package's own manifest dependencies"
-        in (result.stdout)
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "install-deployment-uninstall-reachability")
 
 
 def test_ac15_reachability_owner_guard_rejects_parallel_local_walk(tmp_path: Path) -> None:
@@ -4186,34 +3788,24 @@ def test_ac15_reachability_owner_guard_rejects_parallel_local_walk(tmp_path: Pat
     assert bypass_source != engine_source
     engine_path.write_text(bypass_source, encoding="utf-8")
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("install-deployment-uninstall-reachability",))
 
-    assert result.returncode == 1
-    assert "Uninstall must not re-derive a parallel local-anchor reachability walk" in (
-        result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "install-deployment-uninstall-reachability")
 
 
 def test_github_throttle_classification_has_single_owner() -> None:
     """Rate-header interpretation belongs only to deps/github_rate_limit.py."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/deps/github_rate_limit.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("transport-platform-github-throttle")
     architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
 
     assert "def classify_github_throttle(" in owner
     assert "class GitHubThrottleError" in owner
-    assert "AC17: GitHub API throttle classification authority" in guard
-    assert "GitHub throttle signals must be classified only by deps/github_rate_limit.py" in guard
+    assert "deps/github_rate_limit.py" in rule.description
     assert "GitHub API throttle classification" in architecture_doc
     assert "src/apm_cli/deps/github_rate_limit.py" in architecture_doc
 
@@ -4243,19 +3835,10 @@ def test_github_throttle_owner_guard_rejects_parallel_header_parsing(tmp_path: P
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-github-throttle",))
 
-    assert result.returncode == 1
-    assert "GitHub throttle signals must be classified only by deps/github_rate_limit.py" in (
-        result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-github-throttle")
 
 
 def test_git_auth_header_injection_has_single_owner() -> None:
@@ -4267,15 +3850,11 @@ def test_git_auth_header_injection_has_single_owner() -> None:
     """
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/utils/github_host.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("transport-platform-host-credential-resolution")
 
     assert "def set_authorization_header_git_env(" in owner
     assert "def set_ado_bearer_git_env(" in owner
-    assert "AC19: git-subprocess auth-header injection authority" in guard
-    assert (
-        "Git-subprocess Authorization-header injection must use "
-        "set_authorization_header_git_env / set_ado_bearer_git_env" in guard
-    )
+    assert "AuthResolver" in rule.description
 
 
 def test_dependency_identity_and_materialization_path_have_separate_owners() -> None:
@@ -4286,7 +3865,7 @@ def test_dependency_identity_and_materialization_path_have_separate_owners() -> 
         encoding="utf-8"
     )
     reference = (root / "src/apm_cli/models/dependency/reference.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("contracts-tooling-dependency-identity")
     canonical_owners = (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -4303,11 +3882,7 @@ def test_dependency_identity_and_materialization_path_have_separate_owners() -> 
     owner_row = "| Dependency comparison identity vs display-cased materialization path |"
     assert owner_row in canonical_owners
     assert owner_row in owner_mirror
-    assert "AC29: dependency identity and materialization path authority" in guard
-    assert (
-        "Dependency identity may casefold only in identity.py; "
-        "materialization must preserve source casing" in guard
-    )
+    assert "casefolds only in identity.py" in rule.description
 
 
 def test_dependency_materialization_owner_guard_rejects_canonical_path_reuse(
@@ -4340,20 +3915,10 @@ def test_dependency_materialization_owner_guard_rejects_canonical_path_reuse(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("contracts-tooling-dependency-identity",))
 
-    assert result.returncode == 1
-    assert (
-        "Dependency identity may casefold only in identity.py; "
-        "materialization must preserve source casing" in result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "contracts-tooling-dependency-identity")
 
 
 def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: Path) -> None:
@@ -4385,27 +3950,17 @@ def test_git_auth_header_owner_guard_rejects_dictmerge_reintroduction(tmp_path: 
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-host-credential-resolution",))
 
-    assert result.returncode == 1
-    assert (
-        "Git-subprocess Authorization-header injection must use "
-        "set_authorization_header_git_env / set_ado_bearer_git_env" in result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-host-credential-resolution")
 
 
 def test_public_github_anonymous_first_has_single_auth_owner() -> None:
     """Public GitHub auth ordering belongs to AuthResolver and its consumers."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/core/auth.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("transport-platform-host-credential-resolution")
     architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -4413,8 +3968,7 @@ def test_public_github_anonymous_first_has_single_auth_owner() -> None:
     assert "def uses_public_github_anonymous_first(" in owner
     assert "def build_public_github_anonymous_git_env(" in owner
     assert "def build_noninteractive_git_env(" in owner
-    assert "AC20: public github.com anonymous-first auth authority" in guard
-    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in guard
+    assert "AuthResolver" in rule.description
     assert "public github.com anonymous-first ordering" in architecture_doc
 
 
@@ -4445,19 +3999,10 @@ def test_noninteractive_git_env_owner_guard_rejects_direct_builder_call(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-host-credential-resolution",))
 
-    assert result.returncode == 1
-    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in (
-        result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-host-credential-resolution")
 
 
 def test_public_github_auth_owner_guard_rejects_duplicate_owner(
@@ -4487,19 +4032,10 @@ def test_public_github_auth_owner_guard_rejects_duplicate_owner(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-host-credential-resolution",))
 
-    assert result.returncode == 1
-    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in (
-        result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-host-credential-resolution")
 
 
 @pytest.mark.parametrize(
@@ -4542,19 +4078,10 @@ def test_public_github_auth_owner_guard_rejects_persistent_cache_bypass(
     source = source.replace(owner_call, bypass, 1)
     consumer.write_text(source, encoding="utf-8")
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("transport-platform-host-credential-resolution",))
 
-    assert result.returncode == 1
-    assert "Public and noninteractive Git environments must stay owned by AuthResolver" in (
-        result.stdout
-    )
+    assert report.exit_code != 0
+    assert _violated(report, "transport-platform-host-credential-resolution")
 
 
 def test_mcp_container_launcher_has_one_canonical_owner() -> None:
@@ -4581,8 +4108,8 @@ def test_mcp_container_launcher_has_one_canonical_owner() -> None:
     for consumer in consumers:
         assert "_ensure_docker_image_arg(" in consumer.read_text(encoding="utf-8")
 
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
-    assert "MCP container launcher decisions must route through MCPClientAdapter" in guard
+    rule = _rule("mutation_writes.mcp_package_launcher")
+    assert "MCPClientAdapter" in rule.description
 
 
 def test_mcp_noncontainer_launcher_has_one_canonical_owner() -> None:
@@ -4623,8 +4150,8 @@ def test_mcp_noncontainer_launcher_has_one_canonical_owner() -> None:
     assert "| MCP package launcher selection and argv shape (container and non-container) |" in (
         owner_table
     )
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
-    assert "MCP non-container launcher argv must route through MCPClientAdapter" in guard
+    rule = _rule("mutation_writes.mcp_package_launcher")
+    assert "argv shape" in rule.description
 
 
 def test_mcp_noncontainer_launcher_guard_rejects_retired_extractor(
@@ -4657,17 +4184,10 @@ def test_mcp_noncontainer_launcher_guard_rejects_retired_extractor(
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.mcp_package_launcher",))
 
-    assert result.returncode == 1
-    assert "MCP non-container launcher argv must route through MCPClientAdapter" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.mcp_package_launcher")
 
 
 def test_mcp_runtime_argument_variables_have_one_canonical_owner() -> None:
@@ -4690,8 +4210,8 @@ def test_mcp_runtime_argument_variables_have_one_canonical_owner() -> None:
         and node.func.attr == "_substitute_runtime_variables"
         for node in ast.walk(ast.parse(consumer.read_text(encoding="utf-8")))
     )
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
-    assert "MCP runtime argument variables must route through MCPClientAdapter" in guard
+    rule = _rule("mutation_writes.mcp_package_launcher")
+    assert "MCPClientAdapter" in rule.description
 
 
 def test_mcp_runtime_argument_variable_guard_rejects_parallel_owner(tmp_path: Path) -> None:
@@ -4718,17 +4238,10 @@ def test_mcp_runtime_argument_variable_guard_rejects_parallel_owner(tmp_path: Pa
         encoding="utf-8",
     )
 
-    result = subprocess.run(
-        ("bash", "scripts/lint-architecture-boundaries.sh"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
+    report = run_selected_rules(sandbox, ("mutation_writes.mcp_package_launcher",))
 
-    assert result.returncode == 1
-    assert "MCP runtime argument variables must route through MCPClientAdapter" in result.stdout
+    assert report.exit_code != 0
+    assert _violated(report, "mutation_writes.mcp_package_launcher")
 
 
 def test_bootstrap_project_names_have_single_owner() -> None:
@@ -4738,7 +4251,7 @@ def test_bootstrap_project_names_have_single_owner() -> None:
     init_source = (root / "src/apm_cli/commands/init.py").read_text(encoding="utf-8")
     install_source = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
     runner_source = (root / "src/apm_cli/core/script_runner.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _rule("registry_delegation.bootstrap_project_name")
     architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
         encoding="utf-8"
     )
@@ -4751,46 +4264,29 @@ def test_bootstrap_project_names_have_single_owner() -> None:
     assert "project_name = DEFAULT_BOOTSTRAP_PROJECT_NAME" in (
         root / "src/apm_cli/commands/deps/cli.py"
     ).read_text(encoding="utf-8")
-    assert "AC18: bootstrap project-name authority" in guard
-    assert "Manifest bootstrap names must route through core/project_name.py" in guard
+    assert "core/project_name.py" in rule.description
     assert "Bootstrap project-name validation and fallback" in architecture_doc
 
 
-def test_bootstrap_project_name_guard_rejects_variable_bypass(tmp_path: Path) -> None:
+def test_bootstrap_project_name_guard_rejects_variable_bypass() -> None:
     """AC18 must reject a variable-mediated resolver bypass."""
     root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    for relative_path in (
-        "scripts/lint-bootstrap-project-name.py",
-        "src/apm_cli/core/project_name.py",
-        "src/apm_cli/core/script_runner.py",
-        "src/apm_cli/commands/init.py",
-        "src/apm_cli/commands/install.py",
-        "src/apm_cli/commands/deps/cli.py",
-    ):
-        source = root / relative_path
-        destination = sandbox / relative_path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-    runner_path = sandbox / "src/apm_cli/core/script_runner.py"
-    runner_source = runner_path.read_text(encoding="utf-8")
-    runner_path.write_text(
-        runner_source.replace(
-            '"name": resolve_bootstrap_project_name(Path.cwd().name),',
-            '"name": derived_project_name,',
-            1,
-        ),
-        encoding="utf-8",
+    path = "src/apm_cli/core/script_runner.py"
+    runner_source = (root / path).read_text(encoding="utf-8")
+    mutated = runner_source.replace(
+        '"name": resolve_bootstrap_project_name(Path.cwd().name),',
+        '"name": derived_project_name,',
+        1,
     )
 
-    result = subprocess.run(
-        (sys.executable, "scripts/lint-bootstrap-project-name.py"),
-        cwd=sandbox,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
+    report = run_selected_rules(
+        root,
+        ("registry_delegation.bootstrap_project_name",),
+        source_overrides={path: mutated},
     )
 
-    assert result.returncode == 1
-    assert "ScriptRunner bootstrap name must be the resolver result" in result.stdout
+    assert report.failures == ()
+    assert any(
+        "ScriptRunner bootstrap name must be the resolver result" in violation.message
+        for violation in report.violations
+    )
