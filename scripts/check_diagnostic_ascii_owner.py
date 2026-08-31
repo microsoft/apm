@@ -6,7 +6,7 @@ applied to untrusted package and agent names before they reach diagnostic
 output. The two consumers covered by this boundary must delegate directly:
 
 * ``AgentIntegrator`` Codex diagnostic rendering; and
-* OpenCode agent frontmatter validation.
+* OpenCode agent frontmatter transformer and validator.
 
 This checker is intentionally narrow. It does not inspect hook event-name or
 SkillSpector output sanitizers because those normalize different values under
@@ -28,10 +28,10 @@ AGENT_CONSUMER = Path("src/apm_cli/integration/agent_integrator.py")
 AGENT_DIAGNOSTIC_FUNCTIONS = {
     "AgentIntegrator._warn_codex_unverified_scope": True,
     "AgentIntegrator._warn_codex_tools_dropped": True,
-    "AgentIntegrator._warn_opencode_frontmatter": False,
+    "AgentIntegrator._write_opencode_agent": False,
 }
 ALLOWED_IDENTITY_DELEGATES = {
-    "AgentIntegrator._warn_opencode_frontmatter": {"validate_opencode_frontmatter"},
+    "AgentIntegrator._write_opencode_agent": {"validate_opencode_frontmatter"},
 }
 OPENCODE_CONSUMER = Path("src/apm_cli/integration/opencode_frontmatter.py")
 OPENCODE_FUNCTION = "validate_opencode_frontmatter"

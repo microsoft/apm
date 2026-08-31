@@ -169,8 +169,7 @@ def test_opencode_wrapper_package_field_must_use_owner(
     violations = checker.check(repo_copy)
 
     assert any(
-        "AgentIntegrator._warn_opencode_frontmatter must derive" in item.message
-        for item in violations
+        "AgentIntegrator._write_opencode_agent must derive" in item.message for item in violations
     )
     assert any(
         "must not render raw source.name or package_name" in item.message for item in violations

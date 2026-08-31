@@ -1093,6 +1093,162 @@ class TestOpenCodeAgentIntegration:
         assert result["errors"] == 0
 
 
+class TestOpenCodeAgentConversion:
+    """Tests for _write_opencode_agent tools-format conversion (Phase 2 of #581)."""
+
+    def setup_method(self):
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.integrator = AgentIntegrator()
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _write_source(self, name: str, content: str) -> Path:
+        p = self.temp_dir / name
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def _target(self, name: str) -> Path:
+        return self.temp_dir / "out" / name
+
+    def test_tools_list_converted_to_object(self):
+        """List-style tools is converted to {name: true} mapping."""
+        source = self._write_source(
+            "agent.agent.md",
+            "---\ntools:\n  - Read\n  - Grep\n---\nBody\n",
+        )
+        target = self._target("agent.md")
+        self.integrator._write_opencode_agent(source, target)
+        import yaml
+
+        fm_text = target.read_text().split("---\n")[1]
+        fm = yaml.safe_load(fm_text)
+        assert fm["tools"] == {"Read": True, "Grep": True}
+
+    def test_tools_string_converted_to_object(self):
+        """Comma-separated string tools is converted to {name: true} mapping."""
+        source = self._write_source(
+            "agent.agent.md",
+            "---\ntools: Read, Grep\n---\nBody\n",
+        )
+        target = self._target("agent.md")
+        self.integrator._write_opencode_agent(source, target)
+        import yaml
+
+        fm_text = target.read_text().split("---\n")[1]
+        fm = yaml.safe_load(fm_text)
+        assert fm["tools"] == {"Read": True, "Grep": True}
+
+    def test_tools_dict_preserved(self):
+        """Already-correct dict-style tools is not changed."""
+        source = self._write_source(
+            "agent.agent.md",
+            "---\ntools:\n  Read: true\n  Grep: true\n---\nBody\n",
+        )
+        target = self._target("agent.md")
+        self.integrator._write_opencode_agent(source, target)
+        import yaml
+
+        fm_text = target.read_text().split("---\n")[1]
+        fm = yaml.safe_load(fm_text)
+        assert fm["tools"] == {"Read": True, "Grep": True}
+
+    def test_no_tools_field_preserved(self):
+        """Agent without tools field is written unchanged."""
+        source = self._write_source(
+            "agent.agent.md",
+            "---\nname: test\ndescription: desc\n---\nBody\n",
+        )
+        target = self._target("agent.md")
+        self.integrator._write_opencode_agent(source, target)
+        assert "tools" not in target.read_text()
+
+    def test_no_frontmatter_written_verbatim(self):
+        """Agent without frontmatter is written verbatim."""
+        body = "# Just markdown\n\nNo frontmatter here.\n"
+        source = self._write_source("agent.agent.md", body)
+        target = self._target("agent.md")
+        self.integrator._write_opencode_agent(source, target)
+        assert target.read_text().strip() == body.strip()
+
+    def test_invalid_color_warning_emitted(self):
+        """Residual Zod-fatal issues (bad color) are warned via diagnostics."""
+        source = self._write_source(
+            "agent.agent.md",
+            "---\ntools:\n  - Read\ncolor: cyan\n---\nBody\n",
+        )
+        target = self._target("agent.md")
+        diagnostics = DiagnosticCollector()
+        self.integrator._write_opencode_agent(
+            source, target, diagnostics=diagnostics, package_name="pkg"
+        )
+        warnings = [d for d in diagnostics.by_category().get(CATEGORY_WARNING, []) if True]
+        assert any("color" in w.message for w in warnings)
+
+    def test_valid_color_no_warning(self):
+        """Hex-color and valid theme names do not produce a warning."""
+        source = self._write_source(
+            "agent.agent.md",
+            "---\ntools:\n  Read: true\ncolor: '#aabbcc'\n---\nBody\n",
+        )
+        target = self._target("agent.md")
+        diagnostics = DiagnosticCollector()
+        self.integrator._write_opencode_agent(
+            source, target, diagnostics=diagnostics, package_name="pkg"
+        )
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert not warnings
+
+    def test_converted_tools_no_tools_warning(self):
+        """After list->dict conversion, no tools-related warning is emitted."""
+        source = self._write_source(
+            "agent.agent.md",
+            "---\ntools:\n  - Read\n  - Grep\n---\nBody\n",
+        )
+        target = self._target("agent.md")
+        diagnostics = DiagnosticCollector()
+        self.integrator._write_opencode_agent(
+            source, target, diagnostics=diagnostics, package_name="pkg"
+        )
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert not any("tools" in w.message for w in warnings)
+
+    def test_dispatch_uses_write_opencode_agent(self):
+        """integrate_package_agents_opencode dispatches through _write_opencode_agent."""
+        project_root = self.temp_dir / "project"
+        project_root.mkdir()
+        (project_root / ".opencode").mkdir()
+        pkg_dir = project_root / "apm_modules" / "pkg"
+        agents_dir = pkg_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "helper.agent.md").write_text(
+            "---\ntools:\n  - Read\n---\nBody\n", encoding="utf-8"
+        )
+        package = APMPackage(name="pkg", version="1.0.0", package_path=pkg_dir)
+        resolved_ref = ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        )
+        pkg_info = PackageInfo(
+            package=package,
+            install_path=pkg_dir,
+            resolved_reference=resolved_ref,
+            installed_at=datetime.now().isoformat(),
+        )
+        result = self.integrator.integrate_package_agents_opencode(pkg_info, project_root)
+        assert result.files_integrated == 1
+        out = project_root / ".opencode" / "agents" / "helper.md"
+        assert out.exists()
+        import yaml
+
+        fm = yaml.safe_load(out.read_text().split("---\n")[1])
+        assert fm["tools"] == {"Read": True}
+
+
 class TestCodexAgentIntegration:
     """Tests for Codex TOML agent transformation."""
 
