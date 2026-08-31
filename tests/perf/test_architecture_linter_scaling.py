@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import shutil
 import statistics
 import types
@@ -523,5 +524,40 @@ def test_real_six_group_catalog_wall_time_scales_below_fifteen_x(
     }
     incremental_n_work = median_work["n"] - median_work["zero"]
     incremental_ten_n_work = median_work["ten_n"] - median_work["zero"]
+    report_path = os.environ.get("APM_ARCH_SCALING_REPORT")
+    if report_path:
+        payload = {
+            "fixed_cost_subtraction": "0-file production-catalog median",
+            "max_ratio": _MAX_REAL_CATALOG_RATIO,
+            "run_count_per_size": _REAL_RUNS_PER_SIZE,
+            "sizes": sizes,
+            "scales": {
+                label: {
+                    "ast_visits": [sample.report.metrics.ast_visits for sample in values],
+                    "inventory_files": [
+                        sample.report.metrics.inventory_file_count for sample in values
+                    ],
+                    "max_parses_per_file": [
+                        sample.report.metrics.max_parses_per_file for sample in values
+                    ],
+                    "max_reads_per_file": [
+                        sample.report.metrics.max_reads_per_file for sample in values
+                    ],
+                    "wall_seconds": [sample.report.metrics.total_seconds for sample in values],
+                    "walk_work_units": [sample.walk_work_units for sample in values],
+                }
+                for label, values in samples.items()
+            },
+            "statistics": {
+                "incremental_ten_n_over_n_wall": incremental_ten_n / incremental_n,
+                "incremental_ten_n_over_n_work": (incremental_ten_n_work / incremental_n_work),
+                "median_wall_seconds": median_seconds,
+                "median_walk_work_units": median_work,
+            },
+        }
+        Path(report_path).write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="ascii",
+        )
     assert incremental_n_work > 0
     assert incremental_ten_n_work / incremental_n_work < _MAX_REAL_CATALOG_RATIO
