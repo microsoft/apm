@@ -13,9 +13,20 @@ import warnings
 
 import click
 
-from apm_cli.core.tls_trust import configure_process_tls_trust, log_tls_trust_status
+from apm_cli.core.tls_trust import (
+    TLSConfigurationError,
+    configure_process_tls_trust,
+    log_tls_trust_status,
+)
 
-configure_process_tls_trust()
+_TLS_BOOTSTRAP_ERROR: TLSConfigurationError | None = None
+try:
+    configure_process_tls_trust()
+except TLSConfigurationError as exc:
+    # Command modules may create Sessions at import time but do not perform
+    # network I/O. Preserve early TLS ordering, then surface a concise Click
+    # error before any command callback can make a request.
+    _TLS_BOOTSTRAP_ERROR = exc
 
 from apm_cli.commands._helpers import (
     ERROR,
@@ -148,6 +159,8 @@ def _configure_logging(verbose: bool = False) -> None:
 @click.pass_context
 def cli(ctx, verbose: bool) -> None:
     """Main entry point for the APM CLI."""
+    if _TLS_BOOTSTRAP_ERROR is not None:
+        raise click.ClickException(str(_TLS_BOOTSTRAP_ERROR))
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
     from apm_cli.core.output_mode import configure_output_mode, detect_output_mode
@@ -359,7 +372,6 @@ def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
-    configure_process_tls_trust()
     try:
         cli(obj={})
     except Exception as e:

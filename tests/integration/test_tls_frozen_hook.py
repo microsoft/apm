@@ -34,7 +34,12 @@ _TRUST_ENV_VARS = (
     "REQUESTS_CA_BUNDLE",
     "CURL_CA_BUNDLE",
     "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
     "APM_DISABLE_TRUSTSTORE",
+    "APM_EXTRA_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "APM_NODE_EXTRA_CA_CERTS_IS_DERIVED_ADDITIVE",
+    "APM_REQUESTS_CA_BUNDLE_IS_DERIVED_ADDITIVE",
     "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
 )
 _HOOK_PATH = Path(__file__).resolve().parents[2] / "build" / "hooks" / "runtime_hook_ssl_certs.py"

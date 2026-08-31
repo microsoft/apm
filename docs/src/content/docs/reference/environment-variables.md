@@ -44,13 +44,21 @@ Controls how APM clones packages and enumerates refs on Git hosts. These setting
 
 ## TLS trust
 
-APM verifies HTTPS against the operating-system trust store by default. For the full troubleshooting flow, see [SSL / TLS issues](../../troubleshooting/ssl-issues/).
+APM verifies HTTPS against the operating-system trust store by default, with bundled `certifi` as the Requests fallback. Use `APM_EXTRA_CA_BUNDLE` to add an enterprise CA to whichever default is active instead of replacing it. For the full troubleshooting flow, see [SSL / TLS issues](../../troubleshooting/ssl-issues/).
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `REQUESTS_CA_BUNDLE` | PEM bundle for APM's Python HTTP requests. | unset | Explicit override; wins over OS trust-store injection. Use for a per-shell corporate CA bundle. |
-| `CURL_CA_BUNDLE` | PEM bundle fallback honoured by `requests`. | unset | Explicit override; wins over OS trust-store injection when `REQUESTS_CA_BUNDLE` is unset. |
-| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS trust-store injection. | unset | Escape hatch that restores the legacy bundled-`certifi` verification path. |
+| `APM_DISABLE_TRUSTSTORE` | Set to `1` (or `true`/`yes`/`on`) to disable OS trust-store injection. | unset | Disables APM's OS and additive trust propagation. It does not unset an independently configured `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE`; those explicit replacements remain authoritative. |
+| `REQUESTS_CA_BUNDLE` | PEM bundle for APM's Python HTTP requests. | unset | Explicit replacement override; wins over `CURL_CA_BUNDLE`, additive trust, and the OS trust store. |
+| `CURL_CA_BUNDLE` | PEM bundle fallback honoured by `requests`. | unset | Explicit replacement override when `REQUESTS_CA_BUNDLE` is unset; wins over additive trust and the OS trust store. |
+| `APM_EXTRA_CA_BUNDLE` | Certificate-only PEM bundle to add to APM's normal TLS trust. | unset | Additive: truststore-backed parent contexts retain OS roots, the parent Requests fallback and Python/Requests children receive `certifi` plus the extra CA, and APM derives `NODE_EXTRA_CA_CERTS` for Node children unless that native variable is already set. A selected bundle that is missing, unreadable, empty, non-regular, over 8 MiB, non-ASCII, malformed, or contains a private-key block fails closed. |
+| `NODE_EXTRA_CA_CERTS` | PEM bundle added by Node.js to its normal roots. | unset | Native Node override. APM preserves an explicitly set value instead of replacing it with `APM_EXTRA_CA_BUNDLE`. |
+
+Trust resolution is ordered: `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, the OS trust store, then bundled `certifi` as the final Requests fallback. The `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` settings replace normal Requests trust; `APM_DISABLE_TRUSTSTORE` suppresses OS/additive propagation without deleting those replacements; `APM_EXTRA_CA_BUNDLE` augments the selected defaults. APM derives child settings only when the additive bundle wins this precedence.
+
+If the APM parent cannot inject OS trust, its Requests-based HTTPS retains the selected additive certificates over the `certifi` fallback. Other stdlib HTTPS callers do not consult `REQUESTS_CA_BUNDLE`. Python/Requests children use an APM-owned merged snapshot containing `certifi` and the validated extra certificates. The managed Python child additionally uses `truststore` for OS-plus-extra behavior when that package is available.
+
+`APM_EXTRA_CA_BUNDLE` covers APM's truststore-backed Python contexts and parent Requests HTTPS, Python/Requests children launched by `apm run`, the managed Python child, and Node child startup. Child snapshots live in a per-process directory beneath `~/.apm/tls/` and are removed when the parent process exits normally. Git keeps its own trust settings, and Rust-based Codex retains its runtime-owned trust configuration.
 
 ## Registry (MCP and proxy)
 

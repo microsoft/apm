@@ -75,7 +75,11 @@ class TestTLSHelpers:
         logger = MagicMock()
         _log_tls_failure("github.com", RuntimeError("ssl err"), None, logger)
         logger.warning.assert_called_once()
-        assert "TLS" in logger.warning.call_args[0][0]
+        guidance = logger.warning.call_args[0][0]
+        assert "TLS" in guidance
+        assert "APM_EXTRA_CA_BUNDLE" in guidance
+        assert "retaining public trust" in guidance
+        assert "REQUESTS_CA_BUNDLE only to replace" in guidance
 
     def test_log_tls_failure_verbose(self) -> None:
         from apm_cli.install.validation import _log_tls_failure
