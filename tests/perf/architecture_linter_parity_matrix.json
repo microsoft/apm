@@ -2,10 +2,11 @@
   "baseline_sha": "cbe3bec00fe399381b84fa73562f12cc2159cac5",
   "candidate_detected_count": 103,
   "candidate_failure_count": 0,
-  "candidate_sha": "8079f0c73ee18149b88c8b990a956d107866aab6",
+  "candidate_base_sha": "8079f0c73ee18149b88c8b990a956d107866aab6",
+  "candidate_revision": "the git commit containing this artifact",
   "case_count": 103,
   "legacy_detected_count": 100,
-  "method": "Each of 103 mutations ran independently against clean current main through the retired shell entrypoint in eight isolated worker copies and virtual environments; each candidate semantic rule then ran independently against the identical mutation.",
+  "method": "Each of 103 mutations ran independently against clean current main through the retired shell entrypoint in eight isolated worker copies and virtual environments; each candidate semantic rule then ran independently against the identical mutation. The candidate worktree changes were committed together with this generated artifact.",
   "rows": [
     {
       "candidate_detected": true,
