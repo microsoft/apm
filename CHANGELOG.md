@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Architecture ownership guards now use a sharded JSON registry and a
   single-process Python linter while preserving exact-revision compatibility
-  and reducing warm median lint time by 82%. (#2739)
+  and reducing warm median lint time by 75%. (#2739)
 
 ### Fixed
 
