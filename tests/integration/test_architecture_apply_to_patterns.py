@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.architecture_linter.inventory import build_inventory
+from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import RunReport, registered_rules, run_selected_rules
 
 pytestmark = pytest.mark.component
@@ -28,8 +30,10 @@ def test_apply_to_normalization_and_hidden_placement_have_canonical_owners() -> 
     patterns = (root / "src/apm_cli/utils/patterns.py").read_text(encoding="utf-8")
     parser = (root / "src/apm_cli/primitives/parser.py").read_text(encoding="utf-8")
     optimizer = (root / "src/apm_cli/compilation/context_optimizer.py").read_text(encoding="utf-8")
-    owner_table = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
+    inventory_files = build_inventory(root).files
+    registry = load_registry(root / ".apm/architecture/owners", inventory_files)
+    registry_owner = next(
+        owner for owner in registry.owners if owner.id == "apply-to-hidden-tool-placement"
     )
     apply_to_rule = _RULES_BY_ID["contracts-tooling-apply-to-placement"]
     compile_inventory_rule = _RULES_BY_ID["registry_delegation.compile_inventory_authority"]
@@ -55,7 +59,10 @@ def test_apply_to_normalization_and_hidden_placement_have_canonical_owners() -> 
     assert "Compile traversal must route through compilation/inventory.py" in (
         compile_inventory_rule.description
     )
-    assert "| applyTo normalization and hidden-tool placement |" in owner_table
+    assert registry_owner.selectors == (
+        "src/apm_cli/utils/patterns.py",
+        "src/apm_cli/compilation/context_optimizer.py",
+    )
 
 
 def test_apply_to_owner_guard_rejects_a_parser_normalizer(tmp_path: Path) -> None:

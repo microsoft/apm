@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.architecture_linter.inventory import build_inventory
+from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import RunReport, registered_rules, run_selected_rules
 
 pytestmark = pytest.mark.component
@@ -26,8 +28,12 @@ def test_frontmatter_bom_decoding_has_single_owner() -> None:
     """The shared frontmatter loader must own path and stream BOM handling."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/utils/yaml_io.py").read_text(encoding="utf-8")
-    architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
+    registry = load_registry(
+        root / ".apm/architecture/owners",
+        build_inventory(root).files,
+    )
+    registry_owner = next(
+        owner for owner in registry.owners if owner.id == "frontmatter-bom-bounded-yaml"
     )
     rule = _RULES_BY_ID["contracts-tooling-frontmatter-yaml"]
 
@@ -37,7 +43,7 @@ def test_frontmatter_bom_decoding_has_single_owner() -> None:
         "Frontmatter BOM decoding and bounded YAML parsing stay owned by utils/yaml_io.py"
         in rule.description
     )
-    assert "| Frontmatter BOM decoding and bounded YAML parsing |" in architecture_doc
+    assert registry_owner.selectors == ("src/apm_cli/utils/yaml_io.py",)
 
     duplicate_owners = []
     for source in (root / "src/apm_cli").rglob("*.py"):

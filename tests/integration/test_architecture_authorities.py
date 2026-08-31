@@ -13,9 +13,17 @@ from types import ModuleType
 
 import pytest
 
+from scripts.architecture_linter.inventory import build_inventory
+from scripts.architecture_linter.registry import load_registry
 from scripts.architecture_linter.runner import registered_rules, run_selected_rules
 
 _RULES_BY_ID = {rule.id: rule for rule in registered_rules()}
+_ROOT = Path(__file__).parents[2]
+_INVENTORY = build_inventory(_ROOT)
+_OWNER_BY_ID = {
+    owner.id: owner
+    for owner in load_registry(_ROOT / ".apm/architecture/owners", _INVENTORY.files).owners
+}
 
 
 def _rule(rule_id: str):
@@ -26,6 +34,11 @@ def _rule(rule_id: str):
     file loudly instead of silently asserting against stale prose.
     """
     return _RULES_BY_ID[rule_id]
+
+
+def _owner(owner_id: str):
+    """Return one owner from the executable architecture registry."""
+    return _OWNER_BY_ID[owner_id]
 
 
 def _violated(report, rule_id: str) -> bool:
@@ -74,9 +87,7 @@ def test_sparse_cone_materialization_has_single_owner() -> None:
     bare_cache = (root / "src/apm_cli/deps/bare_cache.py").read_text(encoding="utf-8")
     downloader = (root / "src/apm_cli/deps/github_downloader.py").read_text(encoding="utf-8")
     rule = _rule("transport-platform-sparse-symlink-validation")
-    owner_table = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("sparse-cone-symlink-validation")
 
     assert owner.count("def apply_sparse_cone(") == 1
     assert owner.count("def repair_dangling_cone_symlinks(") == 1
@@ -92,10 +103,10 @@ def test_sparse_cone_materialization_has_single_owner() -> None:
     assert "return _repair(env)" in downloader
     assert '"sparse-checkout", "set"' not in downloader
     assert "utils/git_sparse.py" in rule.description
-    assert (
-        "| Sparse-cone setup, dangling-symlink repair, and materialized symlink validation "
-        "| utils/git_sparse.py | `src/apm_cli/utils/git_sparse.py` |"
-    ) in owner_table
+    assert registry_owner.decision == (
+        "Sparse-cone setup, dangling-symlink repair, and materialized symlink validation"
+    )
+    assert registry_owner.selectors == ("src/apm_cli/utils/git_sparse.py",)
 
 
 def test_sparse_cone_materialization_guard_rejects_bypass(tmp_path: Path) -> None:
@@ -160,9 +171,7 @@ def test_install_request_defaults_have_single_owner() -> None:
     command_source = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
     request_source = (root / "src/apm_cli/install/request.py").read_text(encoding="utf-8")
     rule = _rule("install-deployment-request-defaults")
-    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("install-invocation-option-defaults")
     tree = ast.parse(command_source)
     wrapper = next(
         node
@@ -175,9 +184,7 @@ def test_install_request_defaults_have_single_owner() -> None:
     assert "request = InstallRequest(" in command_source
     assert "trust_bin: bool | None = None" in request_source
     assert "install/request.py" in rule.description
-    assert "| Install invocation option defaults | install/request.py (InstallRequest) |" in (
-        architecture
-    )
+    assert registry_owner.owner == "install/request.py (InstallRequest)"
 
 
 def test_doctor_status_symbols_use_console_owner() -> None:
@@ -222,16 +229,14 @@ def test_git_semver_preflight_eligibility_has_single_owner() -> None:
     owner = (root / "src/apm_cli/install/helpers/ref_reuse.py").read_text(encoding="utf-8")
     ingress = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
     rule = _rule("transport-platform-git-semver-preflight")
-    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("git-semver-preflight-resolution")
 
     assert owner.count("def is_git_semver_resolution_eligible(") == 1
     assert "if not is_git_semver_resolution_eligible(dep_ref):" in owner
     assert "is_git_semver_resolution_eligible(dep_ref)" in ingress
     assert 'dep_ref.ref_kind == "semver"' not in ingress
     assert "ref_reuse.py" in rule.description
-    assert "| Git semver preflight eligibility and resolution |" in architecture
+    assert registry_owner.decision == "Git semver preflight eligibility and resolution"
 
 
 def test_catalog_only_marketplace_materialization_has_single_owner() -> None:
@@ -246,9 +251,8 @@ def test_catalog_only_marketplace_materialization_has_single_owner() -> None:
     plugin_parser = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
     package_model = (root / "src/apm_cli/models/apm_package.py").read_text(encoding="utf-8")
     rule = _rule("marketplace-integrations-catalog-manifest")
-    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    catalog_owner = _owner("catalog-only-marketplace-manifest")
+    legacy_owner = _owner("legacy-plugin-skill-membership")
 
     assert owner.count("def materialize_marketplace_manifest(") == 1
     assert "materialize_marketplace_manifest(dep_ref, install_path)" in resolver
@@ -257,9 +261,9 @@ def test_catalog_only_marketplace_materialization_has_single_owner() -> None:
     assert "resolve_plugin_root_placeholders(" in plugin_parser
     assert "resolve_plugin_root_placeholders(" in package_model
     assert "deps/_shared.py" in rule.description
-    assert "| Catalog-only marketplace manifest materialization |" in architecture
-    assert "| Legacy plugin declared-skill membership and plugin-root placeholder expansion |" in (
-        architecture
+    assert catalog_owner.decision == "Catalog-only marketplace manifest materialization"
+    assert legacy_owner.decision == (
+        "Legacy plugin declared-skill membership and plugin-root placeholder expansion"
     )
 
 
@@ -349,9 +353,13 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     detection = (root / "src/apm_cli/models/format_detection.py").read_text(encoding="utf-8")
     legacy = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
     component_ir_rule = _rule("marketplace-integrations-agent-plugin-contract")
-    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner_ids = {
+        "agent-plugin-v1-contract",
+        "agent-plugin-producer-admission",
+        "apm-package-manifest-construction",
+        "agent-plugin-package-projection",
+        "neutral-hook-contract",
+    }
     validation_tree = ast.parse(validation)
     agent_validation = next(
         node
@@ -384,21 +392,8 @@ def test_agent_plugin_contract_has_single_owner() -> None:
     assert "hashlib.sha256()" in assets
     assert "if stat.S_ISLNK" in assets
     assert "component IR" in component_ir_rule.description
-    assert (
-        "| Agent Plugins v1 contract interpretation, component discovery, "
-        "and portable manifest authority |"
-    ) in architecture
-    assert "| Agent Plugin producer portable-surface admission |" in architecture
-    assert "| APMPackage interpreted-manifest construction |" in architecture
-    assert "| Agent Plugin compatibility package projection |" in architecture
-    assert (
-        "| Neutral hook source grammar, per-target native shape, and "
-        "shared-config APM-owned drift projection |"
-    ) in architecture
-    assert "src/apm_cli/hook_contract.py" in architecture
-    assert architecture == (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    assert registry_owner_ids <= _OWNER_BY_ID.keys()
+    assert "src/apm_cli/hook_contract.py" in _owner("neutral-hook-contract").selectors
 
 
 def test_plugin_skill_declaration_membership_has_single_owner() -> None:
@@ -406,13 +401,11 @@ def test_plugin_skill_declaration_membership_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     parser = (root / "src/apm_cli/deps/plugin_parser.py").read_text(encoding="utf-8")
     integrator = root / "src/apm_cli/integration/skill_integrator.py"
-    architecture = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("legacy-plugin-skill-membership")
 
     assert parser.count("def normalized_plugin_skill_sources(") == 1
     assert "normalized_plugin_skill_sources(package_path)" in integrator.read_text(encoding="utf-8")
-    assert "Legacy plugin declared-skill membership" in architecture
+    assert registry_owner.owner.startswith("deps/plugin_parser.py")
 
     report = run_selected_rules(
         root,
@@ -1362,10 +1355,7 @@ def test_ado_policy_coordinate_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/policy/discovery.py").read_text(encoding="utf-8")
     rule = _rule("contracts-tooling-cached-policy-shape")
-    owner_row = (
-        "| Cached policy shape | policy/discovery.py "
-        "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |"
-    )
+    registry_owner = _owner("cached-policy-shape")
 
     tree = ast.parse(owner)
     names = [
@@ -1377,8 +1367,9 @@ def test_ado_policy_coordinate_has_single_owner() -> None:
     assert names.count("ADO_POLICY_PROJECT") == 3
     assert names.count("ADO_POLICY_REPOSITORY") == 4
     assert "ADO coordinate stay owned by policy/discovery.py" in rule.description
-    assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
+    assert registry_owner.owner == (
+        "policy/discovery.py (_policy_to_dict via _serialize_policy; "
+        "ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY)"
     )
 
 
@@ -1802,13 +1793,13 @@ def test_mcp_dependency_scope_has_single_owner() -> None:
     """Root and dependency MCP declarations must route through one view."""
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/integration/mcp_config_view.py").read_text()
-    owner_table = (root / ".apm/instructions/architecture.instructions.md").read_text()
+    registry_owner = _owner("mcp-declaration-scope")
     rule = _rule("mutation_writes.mcp_declaration_scope")
 
     assert owner.count("root.get_all_mcp_dependencies()") == 1
     assert owner.count("package.get_mcp_dependencies()") == 2
     assert "package.get_all_mcp_dependencies()" not in owner
-    assert "| Root vs dependency MCP declaration scope |" in owner_table
+    assert registry_owner.selectors == ("src/apm_cli/integration/mcp_config_view.py",)
     assert "production-only collection" in rule.description
 
 
@@ -2794,15 +2785,10 @@ def test_behavioral_taxonomy_is_owned_by_module_pytestmark() -> None:
     rule = _rule("contracts-tests-taxonomy-classification")
     plugin = (quality_root / "taxonomy_inventory_plugin.py").read_text(encoding="utf-8")
     contract = (quality_root / "test_test_taxonomy.py").read_text(encoding="utf-8")
-    source = root / ".apm/instructions/architecture.instructions.md"
-    deployed = root / ".github/instructions/architecture.instructions.md"
+    registry_owner = _owner("behavioral-test-taxonomy-classification")
 
     assert list(quality_root.glob("*suite*.toml")) == []
-    assert source.read_bytes() == deployed.read_bytes()
-    assert (
-        "| Behavioral test taxonomy classification | module-level pytestmark "
-        "(taxonomy inventory verifies) |" in source.read_text(encoding="utf-8")
-    )
+    assert registry_owner.owner == "module-level pytestmark (taxonomy inventory verifies)"
     assert "module-level pytestmark" in rule.description
     assert 'getattr(module, "pytestmark"' in plugin
     assert '"modules": modules' in plugin
@@ -3074,12 +3060,10 @@ def test_target_instruction_contraction_uses_manifest_reconciliation() -> None:
     root = Path(__file__).parents[2]
     checker = _load_target_instruction_contraction_owner_checker(root)
     rule = _rule("install-deployment-target-file-contraction")
-    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("target-scoped-deployed-file-contraction")
     assert checker.analyze_paths(root) == []
     assert "manifest_reconcile.py" in rule.description
-    assert "Target-scoped deployed-file contraction" in architecture
+    assert registry_owner.selectors == ("src/apm_cli/install/manifest_reconcile.py",)
 
 
 def test_effective_package_target_authorization_has_one_owner() -> None:
@@ -3087,16 +3071,11 @@ def test_effective_package_target_authorization_has_one_owner() -> None:
     root = Path(__file__).parents[2]
     checker = _load_package_target_authority_checker(root)
     rule = _rule("install-deployment-package-target-authorization")
-    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("effective-package-target-authorization")
 
     assert checker.check(root) == []
     assert "install/target_filter.py" in rule.description
-    assert (
-        "| Effective package target authorization | install/target_filter.py "
-        "(resolve_effective_package_targets) |"
-    ) in architecture
+    assert registry_owner.owner == ("install/target_filter.py (resolve_effective_package_targets)")
 
 
 def test_package_target_authority_guard_rejects_parallel_decision(tmp_path: Path) -> None:
@@ -3190,9 +3169,7 @@ def test_merged_hook_ownership_markers_have_one_owner() -> None:
     owner = (root / "src/apm_cli/integration/hook_ownership.py").read_text(encoding="utf-8")
     integrator = (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8")
     rule = _rule("mutation_writes.neutral_hook_contract")
-    architecture = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("neutral-hook-contract")
 
     assert "def dependency_hook_source_marker(" in owner
     assert "def dependency_hook_sources(" in owner
@@ -3200,7 +3177,7 @@ def test_merged_hook_ownership_markers_have_one_owner() -> None:
     assert "from apm_cli.integration.hook_ownership import (" in integrator
     assert "def _dependency_hook_source_marker(" not in integrator
     assert "drift projection" in rule.description
-    assert "`src/apm_cli/integration/hook_ownership.py`" in architecture
+    assert "src/apm_cli/integration/hook_ownership.py" in registry_owner.selectors
 
 
 def test_shared_hook_drift_projection_guard_rejects_bypass(tmp_path: Path) -> None:
@@ -3311,16 +3288,13 @@ def test_ci_audit_scratch_materialization_has_one_canonical_owner() -> None:
     audit = (root / "src/apm_cli/commands/audit.py").read_text(encoding="utf-8")
     ci_checks = (root / "src/apm_cli/policy/ci_checks.py").read_text(encoding="utf-8")
     rule = _rule("install-deployment-audit-replay")
-    architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("ci-audit-scratch-materialization")
 
     assert "def prepare_ci_audit_replay(" in replay
     assert "prepare_ci_audit_replay(" in audit
     assert "prepared_replay.modules_root" in ci_checks
     assert "install/audit_replay.py" in rule.description
-    assert "CI audit scratch materialization" in architecture_doc
-    assert "src/apm_cli/install/audit_replay.py" in architecture_doc
+    assert registry_owner.selectors == ("src/apm_cli/install/audit_replay.py",)
 
 
 def test_skill_subset_ast_checker_is_wired_into_the_boundary_guard() -> None:
@@ -3380,17 +3354,11 @@ def test_policy_cache_writer_routes_through_canonical_serializer(
 
 
 def test_policy_cache_serializer_boundary_is_registered() -> None:
-    root = Path(__file__).parents[2]
     rule = _rule("contracts-tooling-cached-policy-shape")
-    owner_row = (
-        "| Cached policy shape | policy/discovery.py "
-        "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |"
-    )
+    registry_owner = _owner("cached-policy-shape")
     assert "policy/discovery.py" in rule.description
     assert rule.guard_ids == ("contracts-tooling-cached-policy-shape",)
-    assert owner_row in (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    assert registry_owner.guards == rule.guard_ids
 
 
 def test_windows_stable_executable_path_has_one_canonical_owner() -> None:
@@ -3480,32 +3448,24 @@ def test_quality_ratchets_route_through_shared_authorities() -> None:
     assert checker.find_ratchet_authority_violations(root) == []
 
 
-def test_windows_owner_row_stays_synced_source_deployed_and_lockfile() -> None:
-    """The new owner-table row must not silently drop on the next deploy.
+def test_windows_owner_registry_and_instruction_projection_stay_synced() -> None:
+    """Registry metadata and generated instruction projection stay intact.
 
     ``.github/instructions/architecture.instructions.md`` is a compiled
     artifact: ``.apm/instructions/architecture.instructions.md`` is its
     canonical compile source (see docs/src/content/docs/producer/compile.md),
     and apm.lock.yaml records a content hash of the deployed copy. If the
-    deployed file gains a row that the source lacks, the next
-    ``apm compile`` / ``apm install`` would regenerate the deployed file
-    from the (stale) source and silently remove the row; a stale lockfile
-    hash would additionally make ``apm audit`` report drift. This guards
-    all three legs of that contract using the project's own lockfile codec
-    and content-hash function rather than a bespoke comparison.
+    A stale lockfile hash would make ``apm audit`` report drift. This guards
+    the registry entry plus the generated projection and lock state.
     """
     root = Path(__file__).parents[2]
     source = root / ".apm/instructions/architecture.instructions.md"
     deployed = root / ".github/instructions/architecture.instructions.md"
 
-    owner_rows = (
-        "| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |",
-        "| Cached policy shape | policy/discovery.py "
-        "(_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY) |",
-    )
-    source_text = source.read_text(encoding="utf-8")
-    for owner_row in owner_rows:
-        assert owner_row in source_text
+    windows_owner = _owner("windows-stable-executable-path")
+    policy_owner = _owner("cached-policy-shape")
+    assert windows_owner.selectors == ("install.ps1",)
+    assert policy_owner.selectors == ("src/apm_cli/policy/discovery.py",)
 
     # Source and deployed must be byte-identical: the deployed file is a
     # compiled copy of the source, not an independently edited artifact.
@@ -3701,16 +3661,13 @@ def test_ac15_uninstall_reachability_has_single_owner() -> None:
     engine = (root / "src/apm_cli/commands/uninstall/engine.py").read_text(encoding="utf-8")
     reachability = (root / "src/apm_cli/deps/reachability.py").read_text(encoding="utf-8")
     rule = _rule("install-deployment-uninstall-reachability")
-    architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("post-uninstall-dependency-reachability")
 
     assert "def compute_forward_reachable_keys(" in reachability
     assert "from ...deps.reachability import compute_forward_reachable_keys" in engine
     assert "compute_forward_reachable_keys" in engine
     assert "deps/reachability.py" in rule.description
-    assert "Post-uninstall dependency reachability" in architecture_doc
-    assert "deps/reachability.py" in architecture_doc
+    assert registry_owner.selectors == ("src/apm_cli/deps/reachability.py",)
 
 
 def test_ac15_reachability_owner_guard_rejects_manifest_bypass(tmp_path: Path) -> None:
@@ -3799,15 +3756,12 @@ def test_github_throttle_classification_has_single_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/deps/github_rate_limit.py").read_text(encoding="utf-8")
     rule = _rule("transport-platform-github-throttle")
-    architecture_doc = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("github-api-throttle-classification")
 
     assert "def classify_github_throttle(" in owner
     assert "class GitHubThrottleError" in owner
     assert "deps/github_rate_limit.py" in rule.description
-    assert "GitHub API throttle classification" in architecture_doc
-    assert "src/apm_cli/deps/github_rate_limit.py" in architecture_doc
+    assert registry_owner.selectors == ("src/apm_cli/deps/github_rate_limit.py",)
 
 
 def test_github_throttle_owner_guard_rejects_parallel_header_parsing(tmp_path: Path) -> None:
@@ -3866,12 +3820,7 @@ def test_dependency_identity_and_materialization_path_have_separate_owners() -> 
     )
     reference = (root / "src/apm_cli/models/dependency/reference.py").read_text(encoding="utf-8")
     rule = _rule("contracts-tooling-dependency-identity")
-    canonical_owners = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
-    owner_mirror = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("dependency-identity-materialization")
 
     assert "def build_dependency_unique_key(" in identity
     assert "key = normalize_package_repo_url(" in identity
@@ -3879,9 +3828,9 @@ def test_dependency_identity_and_materialization_path_have_separate_owners() -> 
     assert 'repo_parts = dependency.repo_url.split("/")' in materialization
     assert "def prepare_materialization_path(" in materialization
     assert "return build_materialization_path(self, apm_modules_dir)" in reference
-    owner_row = "| Dependency comparison identity vs display-cased materialization path |"
-    assert owner_row in canonical_owners
-    assert owner_row in owner_mirror
+    assert registry_owner.decision == (
+        "Dependency comparison identity vs display-cased materialization path"
+    )
     assert "casefolds only in identity.py" in rule.description
 
 
@@ -3961,15 +3910,13 @@ def test_public_github_anonymous_first_has_single_auth_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/core/auth.py").read_text(encoding="utf-8")
     rule = _rule("transport-platform-host-credential-resolution")
-    architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("host-credential-resolution")
 
     assert "def uses_public_github_anonymous_first(" in owner
     assert "def build_public_github_anonymous_git_env(" in owner
     assert "def build_noninteractive_git_env(" in owner
     assert "AuthResolver" in rule.description
-    assert "public github.com anonymous-first ordering" in architecture_doc
+    assert "src/apm_cli/core/auth.py" in registry_owner.selectors
 
 
 def test_noninteractive_git_env_owner_guard_rejects_direct_builder_call(
@@ -4144,12 +4091,8 @@ def test_mcp_noncontainer_launcher_has_one_canonical_owner() -> None:
             for node in ast.walk(sources[consumer])
         )
 
-    owner_table = (root / ".github/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
-    assert "| MCP package launcher selection and argv shape (container and non-container) |" in (
-        owner_table
-    )
+    registry_owner = _owner("mcp-package-launcher")
+    assert registry_owner.selectors == ("src/apm_cli/adapters/client/base.py",)
     rule = _rule("mutation_writes.mcp_package_launcher")
     assert "argv shape" in rule.description
 
@@ -4252,9 +4195,7 @@ def test_bootstrap_project_names_have_single_owner() -> None:
     install_source = (root / "src/apm_cli/commands/install.py").read_text(encoding="utf-8")
     runner_source = (root / "src/apm_cli/core/script_runner.py").read_text(encoding="utf-8")
     rule = _rule("registry_delegation.bootstrap_project_name")
-    architecture_doc = (root / ".apm/instructions/architecture.instructions.md").read_text(
-        encoding="utf-8"
-    )
+    registry_owner = _owner("bootstrap-project-name")
 
     assert 'DEFAULT_BOOTSTRAP_PROJECT_NAME = "my-project"' in owner
     assert "def resolve_bootstrap_project_name(" in owner
@@ -4265,7 +4206,7 @@ def test_bootstrap_project_names_have_single_owner() -> None:
         root / "src/apm_cli/commands/deps/cli.py"
     ).read_text(encoding="utf-8")
     assert "core/project_name.py" in rule.description
-    assert "Bootstrap project-name validation and fallback" in architecture_doc
+    assert registry_owner.selectors == ("src/apm_cli/core/project_name.py",)
 
 
 def test_bootstrap_project_name_guard_rejects_variable_bypass() -> None:
