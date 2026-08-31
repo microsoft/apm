@@ -25,7 +25,12 @@ def read_json_document(path: Path, *, reject_duplicate_schema: bool = False) -> 
         raise ValueError(
             f"JSON file {path} exceeds {MAX_JSON_BYTES}-byte cap ({initial.st_size} bytes)"
         )
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:

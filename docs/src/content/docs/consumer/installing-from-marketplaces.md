@@ -104,6 +104,11 @@ for a self-hosted GitLab monorepo. APM preserves the package host, path, and
 ref in `apm.yml` and `apm.lock.yaml`. Invalid URLs and unsafe subdirectory
 paths fail before manifest, lockfile, or deployment writes.
 
+Marketplace entries can also provide inline LSP or MCP servers when their
+downloaded source has no package manifest. APM validates these
+[catalog-only marketplace packages](../../reference/package-types/#catalog-only-marketplace-package)
+before deployment.
+
 Marketplace publishers can route an entry through a configured APM package
 registry with the entry's `registry` and semver `version` fields. Enable the
 feature first with `apm experimental enable registries`; see

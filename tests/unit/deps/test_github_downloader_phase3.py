@@ -904,6 +904,7 @@ class TestDownloadSubdirectoryPackageErrors:
             patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.path_security.ensure_path_within"),
+            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
             patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
             patch("apm_cli.deps.package_validator.stamp_plugin_version"),
             patch("apm_cli.utils.file_ops.robust_copytree"),
@@ -973,6 +974,38 @@ class TestTrySparseCheckout:
         with patch("apm_cli.deps.github_downloader.subprocess.run", return_value=ok_result):
             result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
         assert result is True
+
+    def test_repair_logs_via_verbose_channel(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        """Successful widening must use logging configured by --verbose."""
+        dep = _make_dep()
+        downloader._strategies.build_repo_url = MagicMock(return_value="https://github.com/o/r")
+        downloader.git_env = {}
+        ctx = MagicMock()
+        ctx.auth_scheme = "basic"
+        ctx.git_env = {}
+        downloader.auth_resolver.resolve_for_dep.return_value = ctx
+        downloader.auth_resolver.git_env_for_context.side_effect = lambda auth_ctx, *, base_env: {
+            **base_env,
+            **auth_ctx.git_env,
+        }
+        clone_path = tmp_path / "sparse"
+        dangling = clone_path / "skills" / "foo" / "reference.md"
+        ok_result = MagicMock(returncode=0)
+
+        with (
+            patch("apm_cli.deps.github_downloader.subprocess.run", return_value=ok_result),
+            patch(
+                "apm_cli.deps.github_downloader.repair_dangling_cone_symlinks",
+                return_value=dangling,
+            ),
+            patch("apm_cli.deps.github_downloader._log.info") as log_info,
+        ):
+            result = downloader._try_sparse_checkout(dep, clone_path, "skills/foo", "main")
+
+        assert result is True
+        log_info.assert_called_once()
 
     def test_bearer_auth_scheme_uses_dep_auth_ctx_git_env(
         self, downloader: GitHubPackageDownloader, tmp_path: Path

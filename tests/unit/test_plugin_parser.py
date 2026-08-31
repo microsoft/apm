@@ -15,6 +15,7 @@ from apm_cli.deps.plugin_parser import (
     _holds_skill_dirs,
     _map_plugin_artifacts,
     _mcp_servers_to_apm_deps,
+    _union_dep_list,
     normalize_plugin_directory,
     normalized_plugin_skill_sources,
     parse_plugin_manifest,
@@ -22,6 +23,31 @@ from apm_cli.deps.plugin_parser import (
     validate_plugin_package,
 )
 from apm_cli.utils.helpers import find_plugin_json
+
+
+def test_union_dep_list_indexes_existing_entries_once() -> None:
+    """Large dependency merges must not scan the growing result per append."""
+
+    class NoContainsList(list):
+        def __contains__(self, _item: object) -> bool:
+            raise AssertionError("linear membership scan used")
+
+    existing = NoContainsList(
+        {"name": f"server-{index}", "command": "echo"} for index in range(100)
+    )
+    merged = {"mcp": existing}
+    new_entries = [{"name": f"server-{index}", "command": "echo"} for index in range(100, 1000)]
+    new_entries.extend(
+        [
+            {"name": "server-0", "command": "echo"},
+            {"name": "server-0", "command": "different"},
+        ]
+    )
+
+    _union_dep_list(merged, "mcp", new_entries)
+
+    assert len(existing) == 1001
+    assert existing[-1] == {"name": "server-0", "command": "different"}
 
 
 class TestFindPluginJson:
@@ -362,6 +388,40 @@ class TestMapPluginArtifacts:
         assert (prompts / "run.prompt.md").read_text() == "# Run"
         # Already .prompt.md stays unchanged
         assert (prompts / "already.prompt.md").exists()
+
+    def test_prepositioned_apm_command_source_is_preserved(self, tmp_path):
+        """A declared command source under .apm is input, not generated output."""
+        plugin_dir = tmp_path / "plugin"
+        plugin_dir.mkdir()
+        apm_dir = plugin_dir / ".apm"
+        source = apm_dir / "custom-commands"
+        source.mkdir(parents=True)
+        (source / "run.md").write_text("# Run")
+
+        _map_plugin_artifacts(
+            plugin_dir,
+            apm_dir,
+            manifest={"commands": [".apm/custom-commands"]},
+        )
+
+        assert (apm_dir / "prompts" / "run.prompt.md").read_text() == "# Run"
+
+    def test_command_source_skips_fifo(self, tmp_path):
+        """Command mapping must not block while opening a named pipe."""
+        plugin_dir = tmp_path / "plugin"
+        command_dir = plugin_dir / "commands"
+        command_dir.mkdir(parents=True)
+        fifo = command_dir / "wait"
+        try:
+            os.mkfifo(fifo)
+        except (AttributeError, OSError):
+            pytest.skip("Named pipes are not supported on this platform")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"commands": "commands"})
+
+        assert not (apm_dir / "prompts" / "wait").exists()
 
     def test_map_hooks_directory(self, tmp_path):
         plugin_dir = tmp_path / "plugin"
@@ -1747,6 +1807,92 @@ class TestSynthesizePreservesExistingManifest:
         # Fallback still produces a usable apm.yml from plugin metadata.
         result = self._read_apm_yml(tmp_path)
         assert result["name"] == "bad-pkg"
+
+
+class TestRootDeclaredComponents:
+    """Root declarations must copy only source content into the component tree."""
+
+    @staticmethod
+    def _plugin(tmp_path, component: str) -> tuple[Path, bool]:
+        plugin_dir = tmp_path / "plug"
+        plugin_dir.mkdir()
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / "SKILL.md").write_text("# hello\n", encoding="utf-8")
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "plug", component: ["./"]}),
+            encoding="utf-8",
+        )
+        (plugin_dir / ".apm-pin").write_text("internal cache marker\n", encoding="utf-8")
+        linked = plugin_dir / "linked.md"
+        try:
+            linked.symlink_to(plugin_dir / "SKILL.md")
+        except OSError:
+            return plugin_dir, False
+        return plugin_dir, True
+
+    @pytest.mark.parametrize(
+        ("component", "expected_files"),
+        [
+            ("agents", {"SKILL.md", ".claude-plugin/plugin.json"}),
+            ("skills", {"SKILL.md", ".claude-plugin/plugin.json"}),
+            ("commands", {"SKILL.prompt.md", ".claude-plugin/plugin.json"}),
+            ("hooks", {"SKILL.md", ".claude-plugin/plugin.json"}),
+        ],
+    )
+    def test_root_component_excludes_internal_and_symlinked_content(
+        self,
+        tmp_path,
+        component: str,
+        expected_files: set[str],
+    ) -> None:
+        """A root declaration has a stable, finite deployment tree."""
+        plugin_dir, has_symlink = self._plugin(tmp_path, component)
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+
+        _map_plugin_artifacts(plugin_dir, apm_dir, {"name": "plug", component: ["./"]})
+
+        component_root = (
+            apm_dir
+            / {
+                "agents": "agents",
+                "skills": "skills/plug",
+                "commands": "prompts",
+                "hooks": "hooks",
+            }[component]
+        )
+        deployed_files = {
+            path.relative_to(component_root).as_posix()
+            for path in component_root.rglob("*")
+            if path.is_file()
+        }
+        assert deployed_files == expected_files
+        assert not list(component_root.rglob(".apm"))
+        assert not list(component_root.rglob(".apm-pin"))
+        if has_symlink:
+            assert "linked.md" not in deployed_files
+
+    def test_root_declared_skills_are_idempotent(self, tmp_path) -> None:
+        """Re-materializing a root declaration preserves an identical tree."""
+        plugin_dir, _ = self._plugin(tmp_path, "skills")
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        manifest = {"name": "plug", "skills": ["./"]}
+
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest)
+        first_tree = {
+            path.relative_to(apm_dir).as_posix(): path.read_bytes()
+            for path in apm_dir.rglob("*")
+            if path.is_file()
+        }
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest)
+        second_tree = {
+            path.relative_to(apm_dir).as_posix(): path.read_bytes()
+            for path in apm_dir.rglob("*")
+            if path.is_file()
+        }
+
+        assert second_tree == first_tree
 
 
 @pytest.mark.windows_compat

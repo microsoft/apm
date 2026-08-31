@@ -28,7 +28,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.apm_resolver import APMDependencyResolver, DownloadedPackageError
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
 
@@ -843,6 +843,147 @@ class TestTryLoadDependencyPackageForceRecheck:
 
         assert len(call_log) == 1
         assert result is not None
+
+    def test_failed_replacement_does_not_reuse_existing_path(self, tmp_path: Path) -> None:
+        """A failed refresh must not silently validate the old materialization."""
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        ref = self._semver_dep_ref(pkg_dir)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: None,
+            update_refs=True,
+        )
+
+        assert resolver._try_load_dependency_package(ref) is None
+        assert (pkg_dir / "apm.yml").exists()
+
+    def test_callback_exception_does_not_reuse_existing_path(self, tmp_path: Path) -> None:
+        """A callback exception must fail closed instead of validating stale bytes."""
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        ref = self._semver_dep_ref(pkg_dir)
+
+        def fail_callback(*_args, **_kwargs):
+            raise RuntimeError("injected replacement failure")
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=fail_callback,
+            update_refs=True,
+        )
+
+        assert resolver._try_load_dependency_package(ref) is None
+        assert (pkg_dir / "apm.yml").exists()
+
+    def test_invalid_candidate_is_not_activated(self, tmp_path: Path) -> None:
+        """A downloaded candidate must pass validation before publication."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        live.mkdir(parents=True)
+        (live / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("not: a-package\n")
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=lambda path: activated.append(path) or live,
+            update_refs=True,
+        )
+
+        with pytest.raises(DownloadedPackageError, match="existing installation remains active"):
+            resolver._try_load_dependency_package(ref)
+
+        assert activated == []
+        assert (live / "apm.yml").read_text() == "name: pkg\nversion: 1.0.0\n"
+
+    def test_invalid_fresh_candidate_does_not_claim_existing_install(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Fresh-install validation guidance must not claim prior content exists."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("not: a-package\n")
+        ref = self._semver_dep_ref(live)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=lambda _path: live,
+            update_refs=True,
+        )
+
+        with pytest.raises(DownloadedPackageError) as exc_info:
+            resolver._try_load_dependency_package(ref)
+
+        message = str(exc_info.value)
+        assert "downloaded candidate was not activated" in message
+        assert "existing installation remains active" not in message
+
+    def test_valid_candidate_is_activated_after_validation(self, tmp_path: Path) -> None:
+        """A valid candidate publishes once and exposes the live package path."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("name: pkg\nversion: 2.0.0\n")
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live)
+
+        def activate(path: Path) -> Path:
+            activated.append(path)
+            live.parent.mkdir(parents=True)
+            path.replace(live)
+            return live
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=activate,
+            update_refs=True,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert activated == [candidate]
+        assert package is not None
+        assert package.version == "2.0.0"
+        assert package.package_path == live
+
+    def test_cached_local_package_is_not_activated_as_candidate(self, tmp_path: Path) -> None:
+        """A live local cache hit remains readable for transitive resolution."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "_local" / "parent"
+        live.mkdir(parents=True)
+        (live / "apm.yml").write_text(
+            "name: parent\nversion: 1.0.0\ndependencies:\n  apm:\n    - path: ../child\n",
+        )
+        ref = DependencyReference(
+            repo_url="_local/parent",
+            is_local=True,
+            local_path="../parent",
+        )
+        activated: list[Path] = []
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: live,
+            activation_callback=lambda path: activated.append(path) or live,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert package is not None
+        assert len(package.get_apm_dependencies()) == 1
+        assert activated == []
 
     def test_existing_path_without_lock_calls_callback_on_plain_install(
         self,

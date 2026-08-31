@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 from typing import get_args
 
 import pytest
@@ -114,6 +117,65 @@ def test_asset_digest_verification_rejects_post_load_mutation(tmp_path: Path) ->
             pass
 
 
+@pytest.mark.windows_compat
+def test_inventory_accepts_portable_descriptor_mode_difference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Path and descriptor mode emulation must not reject an unchanged asset."""
+    _write_manifest(tmp_path)
+    _write_valid_skill(tmp_path, "portable")
+    real_fstat = os.fstat
+
+    def fstat_with_different_permission_bits(descriptor: int) -> SimpleNamespace:
+        result = real_fstat(descriptor)
+        return SimpleNamespace(
+            st_mode=result.st_mode ^ stat.S_IWUSR,
+            st_ino=result.st_ino,
+            st_dev=result.st_dev,
+            st_size=result.st_size,
+        )
+
+    monkeypatch.setattr(
+        "apm_cli.agent_plugins.assets.os.fstat",
+        fstat_with_different_permission_bits,
+    )
+
+    plugin = load_agent_plugin(tmp_path)
+
+    assert tuple(skill.directory_name for skill in plugin.components.skills) == ("portable",)
+    assert not any(diagnostic.code == "skill.assets.invalid" for diagnostic in plugin.diagnostics)
+    asset = plugin.components.skills[0].assets[0]
+    assert asset.sha256 == hashlib.sha256((tmp_path / asset.path).read_bytes()).hexdigest()
+    with open_verified_asset(tmp_path, asset) as handle:
+        assert handle.read() == (tmp_path / asset.path).read_bytes()
+
+
+@pytest.mark.windows_compat
+def test_inventory_rejects_path_replacement_before_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A changed pathname must not be mistaken for the descriptor inventory."""
+    from apm_cli.agent_plugins.assets import AssetInventory
+
+    asset_path = tmp_path / "asset.txt"
+    asset_path.write_text("original", encoding="utf-8")
+    moved = tmp_path / "original.txt"
+    real_open = os.open
+
+    def replace_then_open(path: Path, flags: int) -> int:
+        asset_path.rename(moved)
+        asset_path.write_text("replacement", encoding="utf-8")
+        return real_open(path, flags)
+
+    monkeypatch.setattr("apm_cli.agent_plugins.assets.os.open", replace_then_open)
+
+    with pytest.raises(AssetInventoryError, match="changed during inventory"):
+        AssetInventory(tmp_path).collect_file(asset_path)
+
+
+@pytest.mark.windows_compat
 def test_verified_asset_descriptor_is_stable_after_path_replacement(tmp_path: Path) -> None:
     _write_manifest(tmp_path)
     _write_valid_skill(tmp_path, "stable")
@@ -123,9 +185,20 @@ def test_verified_asset_descriptor_is_stable_after_path_replacement(tmp_path: Pa
     moved = asset_path.with_name("original.md")
 
     with open_verified_asset(tmp_path, asset) as handle:
+        if sys.platform == "win32":
+            with pytest.raises(PermissionError) as exc_info:
+                asset_path.rename(moved)
+            assert exc_info.value.winerror == 32
+            assert hashlib.sha256(handle.read()).hexdigest() == asset.sha256
+        else:
+            asset_path.rename(moved)
+            asset_path.write_text("replacement", encoding="utf-8")
+            assert hashlib.sha256(handle.read()).hexdigest() == asset.sha256
+
+    if sys.platform == "win32":
         asset_path.rename(moved)
         asset_path.write_text("replacement", encoding="utf-8")
-        assert hashlib.sha256(handle.read()).hexdigest() == asset.sha256
+        assert moved.read_text(encoding="utf-8") != asset_path.read_text(encoding="utf-8")
 
 
 def test_collect_file_rejects_directory_instead_of_selecting_child(tmp_path: Path) -> None:

@@ -150,16 +150,17 @@ Researchers have found hidden Unicode characters embedded in popular shared rule
 
 ### Pre-deployment gate
 
-During `apm install`, source files in `apm_modules/` are scanned **before** any integrator copies them to target directories:
+During `apm install`, APM resolves the authorized targets, selected skill subset, and executable approvals, then scans only the source files selected for deployment **before** any integrator copies them to target directories. Source-only files are neither scanned nor deployed by this step:
 
 ```
-download → scan source → block or deploy → report
+download -> authorize deploy set -> scan selected files -> block or deploy -> report
 ```
 
-- **Critical findings block deployment.** The package is downloaded and cached so you can inspect it (`apm_modules/owner/package/`), but nothing reaches agent-readable directories.
+- **Critical findings block deployment.** Nothing reaches agent-readable directories. The package remains cached in `apm_modules/owner/package/` so you can inspect and fix the reported files.
 - **Warnings are non-blocking.** Zero-width characters are flagged in the diagnostics summary. Files are deployed normally.
 - **`--force` overrides the block.** Consistent with existing collision semantics — an explicit "I know what I'm doing."
 - **Multi-package installs continue.** A blocked package doesn't stop other packages from installing. After all packages are processed, `apm install` exits with code 1 if any package was blocked — failing the CI step.
+- **Removal reconciliation uses the same gate.** During `apm uninstall`, each surviving package is scanned before its integrations are rebuilt; a hostile survivor is skipped and the command warns. During `apm prune`, a hostile hook survivor aborts hook reconciliation before cleanup, leaving the prior hook state in place and warning that reconciliation failed. Fix the reported package source, then run `apm install` to rebuild its files.
 
 ### Compile and pack scanning
 
@@ -249,11 +250,28 @@ The experimental `external-scanners` feature can invoke a third-party SARIF scan
 
 ## Policy gates that block install
 
-`apm-policy.yml` is evaluated before any download or write. The install preflight walks the resolved dependency graph -- including transitive MCP servers -- and fails the install if a dep is not in the allow list, falls under a deny rule, uses a forbidden source/scope, or violates a configured trust rule. In CI, `apm audit --ci` runs the same baseline plus policy checks (allow/deny lists, target restrictions, MCP transport restrictions). Tighten-only inheritance (enterprise -> org -> repo) is enforced so a downstream layer can never loosen an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and [Policy Reference](../policy-reference/).
+`apm-policy.yml` is evaluated after dependency resolution and before target
+integration. The policy gate walks the resolved dependency graph -- including
+transitive MCP servers -- and fails the install if a dep is not in the allow
+list, falls under a deny rule, uses a forbidden source/scope, or violates a
+configured trust rule. Target-aware and integrity checks run later in the same
+transaction and roll resolution replacements back on failure. In CI,
+`apm audit --ci` runs the same baseline plus policy checks (allow/deny lists,
+target restrictions, MCP transport restrictions). Tighten-only inheritance
+(enterprise -> org -> repo) is enforced so a downstream layer can never loosen
+an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and
+[Policy Reference](../policy-reference/).
 
 ## Content integrity hashing
 
 APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). Use `apm install --update` to accept new upstream content and refresh the lockfile.
+
+Replacement packages download and pass package-shape validation in an isolated
+staging directory while the current package remains in place. APM publishes the
+staged tree only after those checks succeed, so a failed download does not
+unlink live hook scripts from the current package. Integrity and policy gates
+still run later in the install transaction and roll the replacement back on
+failure.
 
 ```yaml
 # apm.lock.yaml
@@ -311,9 +329,8 @@ Trust boundaries:
 
 ### Symlink handling
 
-Symlinks are rejected in most APM operations; the only context where in-package
-symlinks are followed is local-path install, under a per-symlink containment
-check (see below):
+Symlinks are rejected in most APM operations. They are followed only
+during contained package materialization:
 
 - **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
@@ -323,6 +340,12 @@ check (see below):
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
+
+Remote Git subdirectory installs can dereference a symlink whose target is a
+tracked file in the same checked-out commit. If sparse checkout excluded that
+target, APM widens the checkout before copying the package. Generated Git
+metadata, targets outside the repository, and links that remain broken after
+widening hard-fail the install.
 
 #### Local-install symlink dereference and containment guarantee
 
@@ -531,7 +554,11 @@ For an org standardizing on APM:
 
 ### Can a package embed hidden instructions?
 
-Not without detection. APM scans all package source files before deployment. Critical hidden characters (tag characters, bidi overrides) block deployment. `apm audit` provides on-demand scanning for any file, including those obtained outside APM.
+APM scans every authorized deployable source file for the hidden Unicode
+categories listed above before copying it. Critical tag characters and bidi
+overrides block deployment unless `--force` is used; warning-class findings do
+not. Source-only files are not deployed by this step. Use `apm audit` to scan
+other files, including those obtained outside APM.
 
 ### How do I audit what APM installed?
 

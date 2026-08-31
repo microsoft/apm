@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..core.auth import AuthContext, HostInfo
 
-from ..utils.github_host import default_host
+from ..utils.github_host import default_host, is_azure_devops_hostname
 from ..utils.path_security import ensure_path_within
 from ..utils.yaml_io import load_yaml_str
 from ._io import atomic_write
@@ -585,11 +585,31 @@ class MarketplaceBuilder:
     ) -> tuple[str | None, str, str | None, str | None]:
         """Return ``(host, repo_path, source_url, org_hint)`` for a remote entry."""
         if entry.host:
+            if entry.source_url is not None:
+                from ..models.dependency.reference import DependencyReference
+
+                dependency = DependencyReference.parse(entry.source_url)
+                return (
+                    dependency.host,
+                    dependency.repo_url,
+                    entry.source_url,
+                    dependency.ado_organization,
+                )
             return entry.host, entry.source, None, None
         source_base_parts = self._get_source_base_parts()
         if source_base_parts is not None:
             repo_path = f"{source_base_parts.path_prefix}/{entry.source}"
             source_url = f"{source_base_parts.source_base}/{entry.source}"
+            if is_azure_devops_hostname(source_base_parts.host):
+                from ..models.dependency.reference import DependencyReference
+
+                dependency = DependencyReference.parse(source_url)
+                return (
+                    dependency.host,
+                    dependency.repo_url,
+                    source_url,
+                    dependency.ado_organization,
+                )
             logger.debug(
                 "Composed marketplace source %r onto sourceBase %r as %r",
                 entry.source,

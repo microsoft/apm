@@ -15,13 +15,13 @@ import json
 import logging
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from ..utils.atomic_io import write_text_lf
+from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
 
@@ -151,6 +151,43 @@ def _has_symlink_component(candidate: Path, plugin_root: Path) -> bool:
     return False
 
 
+def _iter_command_source_files(
+    source: Path,
+    target_root: Path,
+    staging_root: Path,
+    staging_parent: Path,
+    ignore_non_content: Callable[[str, list[str]], set[str]],
+) -> Iterator[tuple[Path, Path]]:
+    """Yield regular command files while pruning generated staging output."""
+    try:
+        source_root = source.resolve()
+    except OSError:
+        _surface_warning("Skipping command source with an unresolvable staging boundary", _logger)
+        return
+
+    if source_root == target_root:
+        return
+    if source_root == staging_parent:
+        excluded_root = staging_root
+    else:
+        try:
+            target_root.relative_to(source_root)
+        except ValueError:
+            excluded_root = None
+        else:
+            excluded_root = target_root
+
+    for directory, directories, files in os.walk(source_root, topdown=True, followlinks=False):
+        directory_path = Path(directory)
+        if excluded_root is not None and directory_path == excluded_root.parent:
+            directories[:] = [name for name in directories if name != excluded_root.name]
+        ignored = ignore_non_content(directory, files)
+        for name in files:
+            source_file = directory_path / name
+            if name not in ignored and not source_file.is_symlink() and source_file.is_file():
+                yield source_file, source_root
+
+
 def _holds_skill_dirs(candidate: Path) -> bool:
     """Return True iff *candidate* is a container of skills, not a skill itself.
 
@@ -199,7 +236,7 @@ def _map_plugin_skills(
     manifest: dict[str, Any],
     resolve_sources: Callable[[str, str], list[Path]],
     is_same_path: Callable[[Path, Path], bool],
-    ignore_non_content: Callable[..., set[str]],
+    ignore_non_content: Callable[..., list[str]],
 ) -> None:
     """Materialize parser-authorized plugin skills and persist their receipt."""
     skill_sources = resolve_sources("skills", "skills")
@@ -500,7 +537,16 @@ def _validate_declared_component_paths(plugin_path: Path, manifest: dict[str, An
             )
 
 
-def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) -> Path:
+def synthesize_apm_yml_from_plugin(
+    plugin_path: Path,
+    manifest: dict[str, Any],
+    *,
+    output_path: Path | None = None,
+    map_artifacts: bool = True,
+    merge_existing: bool = True,
+    substitute_plugin_root: bool = True,
+    warn_on_invalid_servers: bool = True,
+) -> Path:
     """Synthesize apm.yml from plugin metadata.
 
     Maps the plugin's agents/, skills/, commands/, hooks/ directories and
@@ -517,6 +563,11 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
         plugin_path: Path to the plugin directory.
         manifest: Plugin metadata dict (only `name` is required; all other
                   fields are optional and default gracefully).
+        output_path: Optional staged manifest destination.
+        map_artifacts: Whether to copy plugin artifacts into ``.apm``.
+        merge_existing: Whether to preserve an existing package manifest.
+        substitute_plugin_root: Whether to resolve plugin-root placeholders.
+        warn_on_invalid_servers: Whether skipped server entries emit warnings.
 
     Returns:
         Path: Path to the generated apm.yml.
@@ -526,36 +577,51 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
 
     _validate_declared_component_paths(plugin_path, manifest)
 
-    # Create .apm directory structure
-    apm_dir = plugin_path / ".apm"
-    apm_dir.mkdir(exist_ok=True)
-
-    # Map plugin structure into .apm/ subdirectories
-    _map_plugin_artifacts(plugin_path, apm_dir, manifest)
+    if map_artifacts:
+        apm_dir = plugin_path / ".apm"
+        apm_dir.mkdir(exist_ok=True)
+        _map_plugin_artifacts(plugin_path, apm_dir, manifest)
 
     # Extract MCP servers from plugin and convert to dependency format
-    mcp_servers = _extract_mcp_servers(plugin_path, manifest)
+    mcp_servers = _extract_mcp_servers(
+        plugin_path,
+        manifest,
+        substitute_plugin_root=substitute_plugin_root,
+    )
     if mcp_servers:
-        mcp_deps = _mcp_servers_to_apm_deps(mcp_servers, plugin_path)
+        mcp_deps = _mcp_servers_to_apm_deps(
+            mcp_servers,
+            plugin_path,
+            warn_on_invalid=warn_on_invalid_servers,
+        )
         if mcp_deps:
             manifest["_mcp_deps"] = mcp_deps
 
     # Extract LSP servers from plugin and convert to dependency format
-    lsp_servers = _extract_lsp_servers(plugin_path, manifest)
+    lsp_servers = _extract_lsp_servers(
+        plugin_path,
+        manifest,
+        substitute_plugin_root=substitute_plugin_root,
+    )
     if lsp_servers:
-        lsp_deps = _lsp_servers_to_apm_deps(lsp_servers, plugin_path)
+        lsp_deps = _lsp_servers_to_apm_deps(
+            lsp_servers,
+            plugin_path,
+            warn_on_invalid=warn_on_invalid_servers,
+        )
         if lsp_deps:
             manifest["_lsp_deps"] = lsp_deps
 
     # Load existing apm.yml as base so resolution-critical blocks are not
     # discarded when the synthesized manifest overwrites the file (#1666).
-    apm_yml_path = plugin_path / "apm.yml"
+    source_apm_yml_path = plugin_path / "apm.yml"
+    apm_yml_path = output_path or source_apm_yml_path
     existing_manifest: dict[str, Any] | None = None
-    if apm_yml_path.exists():
+    if merge_existing and source_apm_yml_path.exists():
         try:
             from ..utils.yaml_io import load_yaml
 
-            data = load_yaml(apm_yml_path)
+            data = load_yaml(source_apm_yml_path)
             if isinstance(data, dict):
                 existing_manifest = data
         except (OSError, yaml.YAMLError) as exc:
@@ -576,12 +642,20 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     # platform-native text-mode write (CRLF on Windows) would make the
     # lockfile content_hash diverge across OSes. Mirrors the #2223 fix for
     # download_virtual_file_package().
-    write_text_lf(apm_yml_path, apm_yml_content)
+    if output_path is None:
+        write_text_lf(apm_yml_path, apm_yml_content)
+    else:
+        atomic_write_text(apm_yml_path, apm_yml_content, new_file_mode=0o644)
 
     return apm_yml_path
 
 
-def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+def _extract_mcp_servers(
+    plugin_path: Path,
+    manifest: dict[str, Any],
+    *,
+    substitute_plugin_root: bool = True,
+) -> dict[str, Any]:
     """Extract MCP server definitions from a plugin manifest.
 
     Resolves ``mcpServers`` by type (per Claude Code spec):
@@ -637,7 +711,7 @@ def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
                     break
 
     # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
-    if servers:
+    if servers and substitute_plugin_root:
         abs_root = str(plugin_path.resolve())
         servers = _substitute_plugin_root(servers, abs_root, logger)
 
@@ -680,27 +754,31 @@ def _substitute_plugin_root(
     servers: dict[str, Any], abs_root: str, logger: logging.Logger
 ) -> dict[str, Any]:
     """Replace ``${CLAUDE_PLUGIN_ROOT}`` in server config string values."""
-    placeholder = "${CLAUDE_PLUGIN_ROOT}"
-    substituted = False
-
-    def _walk(obj: Any) -> Any:
-        nonlocal substituted
-        if isinstance(obj, str) and placeholder in obj:
-            substituted = True
-            return obj.replace(placeholder, abs_root)
-        if isinstance(obj, dict):
-            return {k: _walk(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_walk(item) for item in obj]
-        return obj
-
-    result = {name: _walk(cfg) for name, cfg in servers.items()}
-    if substituted:
+    result = resolve_plugin_root_placeholders(servers, Path(abs_root))
+    if result != servers:
         logger.info("Substituted ${CLAUDE_PLUGIN_ROOT} with %s", abs_root)
     return result
 
 
-def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list[dict[str, Any]]:
+def resolve_plugin_root_placeholders(value: Any, plugin_path: Path) -> Any:
+    """Resolve plugin-root placeholders in an in-memory manifest value."""
+    if isinstance(value, str):
+        return value.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_path.resolve()))
+    if isinstance(value, dict):
+        return {
+            key: resolve_plugin_root_placeholders(item, plugin_path) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [resolve_plugin_root_placeholders(item, plugin_path) for item in value]
+    return value
+
+
+def _mcp_servers_to_apm_deps(
+    servers: dict[str, Any],
+    plugin_path: Path,
+    *,
+    warn_on_invalid: bool = True,
+) -> list[dict[str, Any]]:
     """Convert raw MCP server configs to ``dependencies.mcp`` dicts.
 
     Transport inference:
@@ -732,7 +810,8 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
 
     for name, cfg in servers.items():
         if not isinstance(cfg, dict):
-            logger.warning("Skipping non-dict MCP server config '%s'", name)
+            if warn_on_invalid:
+                logger.warning("Skipping non-dict MCP server config '%s'", name)
             continue
 
         dep: dict[str, Any] = {"name": name, "registry": False}
@@ -750,11 +829,12 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
             if "headers" in cfg:
                 dep["headers"] = cfg["headers"]
         else:
-            _surface_warning(
-                f"Skipping MCP server '{name}' from plugin "
-                f"'{plugin_path.name}': no 'command' or 'url'",
-                logger,
-            )
+            if warn_on_invalid:
+                _surface_warning(
+                    f"Skipping MCP server '{name}' from plugin "
+                    f"'{plugin_path.name}': no 'command' or 'url'",
+                    logger,
+                )
             continue
 
         if "env" in cfg:
@@ -770,10 +850,11 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
         try:
             MCPDependency.from_dict(dep)
         except (ValueError, Exception) as exc:
-            _surface_warning(
-                f"Skipping invalid MCP server '{name}' from plugin '{plugin_path.name}': {exc}",
-                logger,
-            )
+            if warn_on_invalid:
+                _surface_warning(
+                    f"Skipping invalid MCP server '{name}' from plugin '{plugin_path.name}': {exc}",
+                    logger,
+                )
             continue
 
         deps.append(dep)
@@ -781,7 +862,12 @@ def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
     return deps
 
 
-def _extract_lsp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+def _extract_lsp_servers(
+    plugin_path: Path,
+    manifest: dict[str, Any],
+    *,
+    substitute_plugin_root: bool = True,
+) -> dict[str, Any]:
     """Extract LSP server definitions from a plugin manifest.
 
     Resolves ``lspServers`` by type (per Claude Code spec):
@@ -825,7 +911,7 @@ def _extract_lsp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[st
                     break
 
     # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
-    if servers:
+    if servers and substitute_plugin_root:
         abs_root = str(plugin_path.resolve())
         servers = _substitute_plugin_root(servers, abs_root, logger)
 
@@ -884,7 +970,12 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     return dict(data)
 
 
-def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list[dict[str, Any]]:
+def _lsp_servers_to_apm_deps(
+    servers: dict[str, Any],
+    plugin_path: Path,
+    *,
+    warn_on_invalid: bool = True,
+) -> list[dict[str, Any]]:
     """Convert raw LSP server configs to ``dependencies.lsp`` dicts.
 
     Required fields per Claude Code spec:
@@ -908,7 +999,8 @@ def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
 
     for name, cfg in servers.items():
         if not isinstance(cfg, dict):
-            logger.warning("Skipping non-dict LSP server config '%s'", name)
+            if warn_on_invalid:
+                logger.warning("Skipping non-dict LSP server config '%s'", name)
             continue
 
         dep: dict[str, Any] = {"name": name}
@@ -935,10 +1027,11 @@ def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
         try:
             LSPDependency.from_dict(dep)
         except Exception as exc:
-            _surface_warning(
-                f"Skipping invalid LSP server '{name}' from plugin '{plugin_path.name}': {exc}",
-                logger,
-            )
+            if warn_on_invalid:
+                _surface_warning(
+                    f"Skipping invalid LSP server '{name}' from plugin '{plugin_path.name}': {exc}",
+                    logger,
+                )
             continue
 
         deps.append(dep)
@@ -973,13 +1066,29 @@ def _map_plugin_artifacts(
     if manifest is None:
         manifest = {}
 
-    from apm_cli.security.gate import ignore_non_content
+    from apm_cli.security.gate import ignore_non_content as _ignore_non_content
 
     if apm_dir.is_symlink():
         raise PluginIntegrityError(
             f"Refusing to map plugin artifacts through symlinked destination: {apm_dir}"
         )
     plugin_path = plugin_path.resolve()
+    # Command copying checks every discovered file, so resolve the staging
+    # root once rather than repeating filesystem resolution per path.
+    staging_root = apm_dir.resolve()
+    staging_parent = apm_dir.parent.resolve()
+    staging_name = apm_dir.name
+
+    def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
+        """Compose the canonical content filter with staging-root containment."""
+        ignored = set(_ignore_non_content(directory, contents))
+        try:
+            copying_from_plugin_root = Path(directory).resolve() == staging_parent
+        except OSError:
+            copying_from_plugin_root = True
+        if copying_from_plugin_root and staging_name in contents:
+            ignored.add(staging_name)
+        return list(ignored)
 
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
@@ -1051,7 +1160,12 @@ def _map_plugin_artifacts(
         for d in agent_dirs:
             if _is_same_path(d, target_agents):
                 continue
-            shutil.copytree(d, target_agents, dirs_exist_ok=True, ignore=ignore_non_content)
+            shutil.copytree(
+                d,
+                target_agents,
+                dirs_exist_ok=True,
+                ignore=ignore_non_content,
+            )
         if agent_files:
             target_agents.mkdir(parents=True, exist_ok=True)
             for f in agent_files:
@@ -1075,6 +1189,7 @@ def _map_plugin_artifacts(
         target_prompts = apm_dir / "prompts"
         _assert_no_symlink_descendants(target_prompts)
         target_prompts.mkdir(parents=True, exist_ok=True)
+        target_prompts_root = target_prompts.resolve()
 
         def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path = None):  # noqa: RUF013
             """Copy a command file, normalizing .md -> .prompt.md."""
@@ -1094,10 +1209,14 @@ def _map_plugin_artifacts(
             if source.is_file() and not source.is_symlink():
                 _copy_command_file(source, target_prompts)
             elif source.is_dir():
-                for source_file in source.rglob("*"):
-                    if not source_file.is_file() or source_file.is_symlink():
-                        continue
-                    _copy_command_file(source_file, target_prompts, rel_to=source)
+                for source_file, source_root in _iter_command_source_files(
+                    source,
+                    target_prompts_root,
+                    staging_root,
+                    staging_parent,
+                    _ignore_non_content,
+                ):
+                    _copy_command_file(source_file, target_prompts, rel_to=source_root)
 
     # Map hooks/  -- the spec allows a directory path, a config file path,
     # or an inline object.  Handle all three forms.
@@ -1133,7 +1252,12 @@ def _map_plugin_artifacts(
             for d in hook_sources:
                 if _is_same_path(d, target_hooks):
                     continue
-                shutil.copytree(d, target_hooks, dirs_exist_ok=True, ignore=ignore_non_content)
+                shutil.copytree(
+                    d,
+                    target_hooks,
+                    dirs_exist_ok=True,
+                    ignore=ignore_non_content,
+                )
 
     # Pass-through files required for MCP/LSP plugins to function
     for passthrough in (".mcp.json", ".lsp.json", "settings.json"):
@@ -1251,14 +1375,35 @@ def _union_dep_list(
 ) -> None:
     """Append *new_entries* into ``merged[key]`` without duplicates.
 
-    Both string entries and dict entries (e.g. ``{git: parent, path: ...}``)
-    are handled.  Equality is checked with ``==`` which works correctly for
-    both types.
+    Both string entries and nested mapping entries are handled. A hashable
+    structural key keeps merging linear while preserving equality semantics.
     """
     existing = merged.setdefault(key, [])
+    seen = {_dependency_entry_key(entry) for entry in existing}
     for entry in new_entries:
-        if entry not in existing:
-            existing.append(entry)
+        entry_key = _dependency_entry_key(entry)
+        if entry_key in seen:
+            continue
+        existing.append(entry)
+        seen.add(entry_key)
+
+
+def _dependency_entry_key(value: Any) -> Any:
+    """Return a hashable structural key for a manifest dependency entry."""
+    if isinstance(value, dict):
+        return (
+            "dict",
+            frozenset((key, _dependency_entry_key(item)) for key, item in value.items()),
+        )
+    if isinstance(value, list):
+        return ("list", tuple(_dependency_entry_key(item) for item in value))
+    if isinstance(value, tuple):
+        return ("tuple", tuple(_dependency_entry_key(item) for item in value))
+    try:
+        hash(value)
+    except TypeError:
+        return ("repr", repr(value))
+    return ("scalar", type(value).__qualname__, value)
 
 
 def synthesize_plugin_json_from_apm_yml(apm_yml_path: Path) -> dict:

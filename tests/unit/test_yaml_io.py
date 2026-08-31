@@ -299,6 +299,36 @@ class TestLoadFrontmatter:
         with pytest.raises(yaml.YAMLError):
             load_frontmatter(io.StringIO(bomb))
 
+    @pytest.mark.windows_compat
+    def test_leading_bom_does_not_break_the_fence(self, tmp_path):
+        """A UTF-8 BOM (PowerShell/Notepad on Windows) doesn't hide the front matter (apm#2683)."""
+        text = '---\ndescription: Scoped rule\napplyTo: "**/*.py"\n---\n# Style\n'
+        path = tmp_path / "withbom.md"
+        path.write_bytes(text.encode("utf-8-sig"))
+        post = load_frontmatter(str(path))
+        assert post.metadata["applyTo"] == "**/*.py"
+        assert post.metadata["description"] == "Scoped rule"
+
+    @pytest.mark.windows_compat
+    def test_bom_and_no_bom_files_parse_identically(self, tmp_path):
+        """A BOM'd and a plain file with the same content yield the same metadata."""
+        text = '---\napplyTo: "**/*.py"\n---\nbody\n'
+        no_bom = tmp_path / "nobom.md"
+        with_bom = tmp_path / "withbom.md"
+        no_bom.write_bytes(text.encode("utf-8"))
+        with_bom.write_bytes(text.encode("utf-8-sig"))
+        assert load_frontmatter(str(no_bom)).metadata == load_frontmatter(str(with_bom)).metadata
+
+    @pytest.mark.windows_compat
+    def test_leading_bom_is_stripped_from_already_open_utf8_stream(self, tmp_path):
+        """The shared parser owns BOM removal even for already-open streams."""
+        text = '---\napplyTo: "**/*.py"\n---\nbody\n'
+        path = tmp_path / "withbom.md"
+        path.write_bytes(text.encode("utf-8-sig"))
+
+        with path.open(encoding="utf-8") as f:
+            assert load_frontmatter(f).metadata["applyTo"] == "**/*.py"
+
 
 class TestBoundedMergeHappyPath:
     """Legitimate YAML merge keys resolve through the bounded flatten_mapping."""

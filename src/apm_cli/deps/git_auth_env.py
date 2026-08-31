@@ -175,8 +175,4 @@ class GitAuthEnvBuilder:
         """
         from ..utils.git_env import git_subprocess_env
 
-        env: dict[str, str] = git_subprocess_env()
-        for key, value in base_git_env.items():
-            if isinstance(value, str):
-                env[key] = value
-        return env
+        return git_subprocess_env(base_git_env)

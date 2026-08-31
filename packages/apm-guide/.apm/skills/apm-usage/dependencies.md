@@ -253,6 +253,13 @@ path. Both survive into the concrete `git:`, `path:`, and `ref:` manifest
 entry and the lockfile. Invalid URLs or unsafe paths fail before durable
 project writes.
 
+Catalog-only entries with inline `lspServers` or `mcpServers` remain valid
+marketplace dependencies when downloaded source has no package manifest. Keep
+the consumer declaration in the object form above; catalog server fields do not
+belong in `dependencies.apm`. APM ignores unrelated catalog dependency fields
+and rejects the package if any declared server is invalid. See
+[Catalog-only marketplace packages](../../../../../docs/src/content/docs/reference/package-types.md#catalog-only-marketplace-package).
+
 If the marketplace plugin entry declares `registry`, APM creates a
 registry-sourced dependency instead of Git coordinates. Enable registry support
 with `apm experimental enable registries` and configure the named registry.

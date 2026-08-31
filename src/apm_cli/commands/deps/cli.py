@@ -25,6 +25,7 @@ from .._helpers import (
 from ._utils import (
     _count_primitives,
     _get_package_display_info,
+    _is_agent_plugin_root,
     _is_nested_under_package,
 )
 from .why import why as _why_cmd
@@ -315,7 +316,10 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             continue
         has_apm_yml = (candidate / APM_YML_FILENAME).exists()
         has_skill_md = (candidate / SKILL_MD_FILENAME).exists()
-        if not has_apm_yml and not has_skill_md:
+        # A canonical Agent Plugin root is a package even though it carries
+        # neither apm.yml nor a root SKILL.md -- it is installed as one unit.
+        has_plugin_manifest = _is_agent_plugin_root(candidate)
+        if not has_apm_yml and not has_skill_md and not has_plugin_manifest:
             continue
         rel_parts = candidate.relative_to(apm_modules_path).parts
         if len(rel_parts) < 2:
@@ -370,6 +374,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             if has_apm_yml:
                 package = APMPackage.from_apm_yml(candidate / APM_YML_FILENAME)
                 version = package.version or "unknown"
+            else:
+                version = _agent_plugin_version(candidate) or version
             primitives = _count_primitives(candidate)
 
             if is_orphaned:
@@ -417,6 +423,45 @@ def deps():
 deps.add_command(_why_cmd)
 
 
+def _agent_plugin_version(candidate) -> str | None:
+    """Return the declared version of a canonical Agent Plugin root."""
+    from ...agent_plugins.errors import AgentPluginError
+    from ...bundle.local_bundle import route_agent_plugin_package
+
+    try:
+        detection = route_agent_plugin_package(candidate)
+    except (AgentPluginError, OSError):
+        return None
+    if detection is None or detection.plugin is None:
+        return None
+    return detection.plugin.identity.version
+
+
+def _report_native_plugins(apm_dir, logger) -> None:
+    """Report Agent Plugins APM registers natively with GitHub Copilot."""
+    from pathlib import Path
+
+    from ...agent_plugins.errors import AgentPluginError
+    from ...copilot_plugins.registrar import registration_status
+
+    try:
+        names = registration_status(Path(apm_dir) / "apm_modules")
+    except (AgentPluginError, OSError):
+        return
+    if not names:
+        return
+    noun = "Agent Plugin" if len(names) == 1 else "Agent Plugins"
+    shown = ", ".join(names[:3])
+    if len(names) > 3:
+        shown += f", and {len(names) - 3} more"
+    logger.info(
+        f"{len(names)} {noun} registered natively with GitHub Copilot: {shown}",
+        symbol="info",
+    )
+    if len(names) > 3:
+        logger.verbose_detail(f"    plugins: {', '.join(names)}")
+
+
 def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
     """Display dependencies for a single scope (Project or Global)."""
     installed_packages, orphaned_packages = _resolve_scope_deps(apm_dir, logger, insecure_only)
@@ -433,6 +478,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             logger.progress(
                 f"apm_modules/ directory exists but contains no valid packages ({scope_label} scope)"
             )
+        _report_native_plugins(apm_dir, logger)
         return
 
     # Display packages in table format
@@ -534,6 +580,8 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
             logger.info("Run 'apm prune' to remove orphaned packages")
+
+    _report_native_plugins(apm_dir, logger)
 
 
 @deps.command(name="list", help="List installed APM dependencies and their primitives")

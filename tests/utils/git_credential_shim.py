@@ -173,6 +173,13 @@ def main():
             "language": os.environ.get("LANGUAGE"),
         }
     )
+    if not remotes:
+        return subprocess.run(
+            [os.environ["APM_TEST_REAL_GIT"], *rewritten_args],
+            env=os.environ,
+            check=False,
+        ).returncode
+
     completed = subprocess.run(
         [os.environ["APM_TEST_REAL_GIT"], *rewritten_args],
         env=os.environ,

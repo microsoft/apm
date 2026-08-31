@@ -245,7 +245,8 @@ you can omit `start_marker` and `end_marker` if you use those verbatim.
 - `start_marker` and `end_marker` must be distinct non-empty strings.
 - Content outside the markers is preserved verbatim across every compile
   run for the root `AGENTS.md`; only the block between the markers is
-  replaced.
+  replaced. When source attribution emits a footer, it identifies this block
+  as a generated section rather than describing the whole file as generated.
 - In distributed compile mode, subdirectory `AGENTS.md` files remain fully
   APM-owned and are overwritten on each run.
 
@@ -270,6 +271,9 @@ root-context targets:
 - `~/.copilot/AGENTS.md`
 - `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
+
+OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
+retains explicit sections for `applyTo` instructions as well.
 
 ### Overwrite protection
 

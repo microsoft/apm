@@ -634,6 +634,7 @@ def test_source_ref_transition_applies_once_and_invalid_twin_preserves_state(
     assert invalid.returncode == 1
     invalid_output = " ".join((invalid.stdout + invalid.stderr).split())
     assert "Failed to download dependency" in invalid_output
+    assert "existing installation remains active" in invalid_output
     assert "No install transaction changes were committed." in invalid_output
     assert (scenario.project_root / "apm.lock.yaml").read_bytes() == lock_bytes
     assert (scenario.project_root / _SKILL_PATH).read_bytes() == deployed_bytes

@@ -86,8 +86,13 @@ def _finalize_build_id(content: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _generate_content(instructions: list[Instruction]) -> str:
-    """Generate the root context file content from a list of global instructions.
+def _generate_content(
+    instructions: list[Instruction],
+    *,
+    preserve_scoped_sections: bool = False,
+    base_dir: Path | None = None,
+) -> str:
+    """Generate root context content, retaining scoped sections when supported.
 
     Embeds the APM-generated marker and a deterministic Build ID so that
     subsequent runs can detect APM-owned files and apply overwrite protection.
@@ -104,9 +109,23 @@ def _generate_content(instructions: list[Instruction]) -> str:
         "",
     ]
 
-    for instruction in instructions:
-        sections.append(instruction.content.strip())
-        sections.append("")
+    if preserve_scoped_sections:
+        from .template_builder import render_instructions_block
+
+        def emit(instruction: Instruction) -> list[str]:
+            return [instruction.content.strip(), ""]
+
+        sections.extend(
+            render_instructions_block(
+                instructions,
+                base_dir=base_dir or Path.cwd(),
+                emit_instruction=emit,
+            )
+        )
+    else:
+        for instruction in instructions:
+            sections.append(instruction.content.strip())
+            sections.append("")
 
     return _finalize_build_id("\n".join(sections))
 
@@ -115,11 +134,12 @@ def discover_global_instructions(
     source_root: Path,
     *,
     logger: _logging_module.Logger | None = None,
+    include_scoped: bool = False,
 ) -> list[Instruction]:
-    """Return global (apply_to-less) instructions under ``source_root/apm_modules``.
+    """Return global instructions and optionally scoped ones from ``apm_modules``.
 
     Returns an empty list when the ``apm_modules`` tree is absent or carries no
-    global instructions.  Results are sorted by file path for determinism so
+    matching instructions. Results are sorted by file path for determinism so
     callers (the compile engine and the install-time hint) agree on ordering.
     """
     from ..primitives.discovery import discover_primitives
@@ -136,7 +156,7 @@ def discover_global_instructions(
 
     primitives = discover_primitives(str(apm_modules))
     return sorted(
-        [instr for instr in primitives.instructions if not instr.apply_to],
+        [instr for instr in primitives.instructions if include_scoped or not instr.apply_to],
         key=lambda instr: str(instr.file_path),
     )
 
@@ -194,7 +214,8 @@ def compile_user_root_contexts(
         )
         return results
 
-    global_instructions = discover_global_instructions(source_root, logger=log)
+    all_instructions = discover_global_instructions(source_root, logger=log, include_scoped=True)
+    global_instructions = [instr for instr in all_instructions if not instr.apply_to]
 
     for target in targets:
         # Resolve to user scope; None == target does not support user scope
@@ -212,9 +233,11 @@ def compile_user_root_contexts(
             )
             continue
 
-        if not global_instructions:
+        preserve_scoped_sections = scoped.include_scoped_in_user_root_context
+        target_instructions = all_instructions if preserve_scoped_sections else global_instructions
+        if not target_instructions:
             log.debug(
-                "user_root_context: no global instructions found in %s -- skipping %s",
+                "user_root_context: no applicable instructions found in %s -- skipping %s",
                 apm_modules,
                 scoped.name,
             )
@@ -232,7 +255,11 @@ def compile_user_root_contexts(
             )
             continue
 
-        content = _generate_content(global_instructions)
+        content = _generate_content(
+            target_instructions,
+            preserve_scoped_sections=preserve_scoped_sections,
+            base_dir=source_root,
+        )
 
         # -- overwrite protection --
         if output_path.exists():

@@ -138,6 +138,9 @@ one-line hint pointing at `apm compile -g`. Run it manually after adding or
 removing global packages. Hand-authored files (files that do not carry the
 APM-generated marker) are never overwritten.
 
+For OpenCode, `apm compile -g` writes
+`~/.config/opencode/AGENTS.md` and retains scoped `applyTo` sections.
+
 ```bash
 apm compile -g
 ```

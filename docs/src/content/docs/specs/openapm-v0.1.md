@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **116 normative statements** indexed in
+- OpenAPM v0.1 carries **119 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2231,6 +2231,14 @@ derived leaf name maps to more than one canonical source contributes no
 skill. Only the resulting names are eligible for enumeration, selection,
 or deployment.
 
+<a id="req-pr-007"></a>
+**[req-pr-007]** A conforming **consumer** implementation MUST, when
+copying a declared Plugin collection component source, canonicalize the
+non-symlink source root selected for that component. A consumer-generated
+staging subtree is the materialization root created by the current operation
+and every descendant of that root. The consumer MUST prune every such staging
+subtree before traversing the source.
+
 A package **exposes selectable skills** when layout resolution identifies a
 container for individually addressable named skill entries, whether that
 container currently yields zero or more entries. This includes an APM package
@@ -2449,7 +2457,8 @@ implementation MUST integrate target-scoped primitives only into the
 intersection of (a) the project's currently active targets, (b) the
 target subset authorized by the consumer for that dependency, and (c)
 the dependency package's declared `target:` or `targets:` set when that
-set is restrictive. The mechanism for (b) is implementation-defined;
+set is restrictive. This computed set is the dependency's **effective target
+intersection**. The mechanism for (b) is implementation-defined;
 when the consumer has no explicit per-dependency authorization
 mechanism or subset, (b) adds no restriction.
 
@@ -2508,25 +2517,33 @@ cause the target shell to reinterpret a path component.
 
 <a id="req-tg-011"></a>
 **[req-tg-011]** A conforming **consumer** implementation MUST treat a
-schema-bearing Agent Plugins v1 dependency as undeployable until that
-consumer exposes a machine-verifiable native lifecycle for it. Before
-any target handler or primitive integrator runs for such a dependency,
-the consumer MUST refuse deployment with one actionable diagnostic and
-MUST leave the project tree byte-identical to its pre-install state --
-no partial target file, lockfile, or managed-file mutation. This rule
-applies uniformly to a schema-bearing dependency materialized alone, to
-one mixed into the same install alongside ordinary (schema-less)
-dependencies, and to a `--dry-run` invocation, so a dry run and a real
-install reach the identical single-diagnostic outcome for the same
-dependency set. A schema-bearing dependency MUST NOT fall back to
-legacy primitive projection to satisfy this rule; the boundary fails
-closed rather than partially projecting the package.
+schema-bearing Agent Plugins v1 dependency as opaque at the deployment
+boundary unless an applicable target-native lifecycle admits it. Dependency
+acquisition, materialization beneath the resolved dependency root, and lock
+identity recording MAY occur before that boundary. When the effective target
+intersection computed under [req-tg-008](#req-tg-008) does not select an
+applicable native lifecycle, the consumer MUST skip deployment of that
+dependency and emit one actionable diagnostic, MUST NOT run a legacy primitive
+integrator for it, and MUST NOT create target-native registration, settings,
+catalog, or ownership state for it. The materialized package and lock state MAY
+remain. This skip is
+dependency-scoped: ordinary dependencies in the same install MUST remain
+eligible for their normal deployment, and a `--dry-run` invocation MUST report
+the same per-dependency deployment decision without mutating state.
+If an earlier operation registered the dependency but the current effective
+target intersection no longer selects that native lifecycle, the consumer MUST
+retire the dependency's consumer-owned catalog, activation, and ownership
+entries through the rollback unit in [req-tg-013](#req-tg-013).
 
 > **Editorial note.** This requirement governs the deployment boundary
-> only. It does not define a native Agent Plugin lifecycle; a native
-> lifecycle (and any preferred-default change) is reserved for a
-> future revision once a consumer implementation demonstrates a
-> qualified, machine-verifiable binary lifecycle.
+> only. A machine-verifiable consumer lifecycle now exists:
+> [req-tg-013](#req-tg-013) defines native registration for a consumer
+> that exposes one. "Applicable" is determined from successful Agent Plugins
+> schema parsing, the effective target intersection in
+> [req-tg-008](#req-tg-008), and the admission gates referenced by
+> [req-tg-013](#req-tg-013), not from whether a host binary happens to be
+> installed. This requirement still does not itself define that lifecycle, and
+> it does not mandate any preferred-default change.
 
 #### 8.5.6 Plugin-root hook command resolution
 
@@ -2549,6 +2566,83 @@ NOT silently deploy the unresolved command.
 > `"${PLUGIN_ROOT}"/hooks/probe.py` normalizes to
 > `"${PLUGIN_ROOT}/hooks/probe.py"`.
 
+#### 8.5.7 Agent Plugins v1 native-lifecycle registration
+
+<a id="req-tg-013"></a>
+**[req-tg-013]** A conforming **consumer** implementation that exposes a
+machine-verifiable native lifecycle for a schema-bearing Agent Plugins v1
+dependency MAY register that dependency with a target-native plugin host when
+the acquired and materialized dependency has passed Agent Plugins schema
+parsing, the effective target intersection computed under
+[req-tg-008](#req-tg-008) selects that host, and the applicable lock-integrity
+obligations ([req-lk-013](#req-lk-013), [req-lk-015](#req-lk-015)),
+authorized source-plan scan ([req-sc-015](#req-sc-015)), and executable
+authorization ([req-sc-009](#req-sc-009), [req-sc-010](#req-sc-010),
+[req-sc-011](#req-sc-011), and [req-sc-014](#req-sc-014)) admit the
+package. Admission during install,
+update, restore, uninstall, and prune MUST NOT locate, invoke, or version-check
+the target-native host binary. When the dependency is registered, the consumer
+MUST NOT additionally project that package's primitives, so a single dependency
+is deployed exactly once. The consumer MUST NOT copy the package into the
+target's private plugin state; the registration MUST reference the materialized
+package in place beneath the resolved dependency root. A single aggregate
+registration per install scope MUST cover both directly declared and
+transitively resolved Agent Plugin dependencies that passed the admission
+conditions above, without changing their
+`depth` and `resolved_by` lockfile fields defined in
+[Section 5.2](#52-per-entry-fields).
+
+A consumer MUST exclude from plugin-name claimant selection every Agent Plugin
+dependency that did not pass the admission conditions above. It MUST NOT
+register such a dependency. Among admitted dependencies that declare the same
+plugin name, a directly declared dependency MUST win over a transitive
+dependency. Two admitted claimants at the same precedence MUST cause the
+aggregate registration to fail with an actionable diagnostic naming both
+claimants. A consumer MUST NOT silently repoint a ledger-recorded owner to a
+different admitted transitive claimant. An admitted directly declared claimant
+MAY replace a recorded transitive owner under the direct-precedence rule, but
+the ownership record and registration MUST update in the same rollback unit.
+A post-lifecycle reconciliation after uninstall, prune, or restore MAY
+downgrade a residual same-precedence or transitive-repoint collision to an
+actionable diagnostic so cleanup can continue, but it MUST omit every ambiguous
+or changed-owner entry and MUST NOT commit a new owner for that plugin name.
+
+The consumer MUST record registration ownership in consumer-owned state. A
+consumer that reserves a marketplace identifier and activation-key suffix for
+its generated registration MAY treat that namespace as consumer-owned only
+while its exact expected directory-marketplace entry is present or being
+created. It MUST refuse an existing conflicting entry that uses the reserved
+marketplace identifier before treating the activation-key suffix as owned. Its
+ownership record is the primary evidence for later reconciliation and removal.
+If that record is missing, the consumer MAY re-adopt an existing entry only
+when it is exactly the directory-marketplace entry the consumer would generate.
+It MAY then reconcile the reserved activation-key suffix from the aggregate
+registration. Its conformance statement MUST identify any reserved marketplace
+identifier and activation-key suffix. Registration and removal MUST preserve
+unrelated host JSON keys and values semantically; stable JSON serialization MAY
+reformat the document. Invalid JSON, including JSONC comments, MUST fail closed
+before overwrite. Catalog, ownership-record, and settings writes MUST commit as
+one rollback unit so a failed write leaves no partial new registration.
+Removal MUST retire only entries in that consumer-owned rollback unit and MUST
+preserve settings outside the reserved marketplace identifier and activation
+suffix.
+
+> **Editorial note.** "Machine-verifiable" qualifies the consumer lifecycle,
+> not the runtime present on an operator's machine. A consumer can qualify
+> compatibility at release or build time with a pinned real-host lifecycle
+> suite; this implementation uses
+> `tests/integration/test_copilot_native_plugin_binary_lifecycle.py`. Operators
+> remain responsible for supplying a compatible runtime. In this implementation
+> the host is GitHub Copilot CLI, the reserved marketplace identifier is `apm`,
+> activation keys use the `@apm` suffix, and the ownership ledger lives under
+> `apm_modules`. Manual `*@apm` activation keys are unsupported while the exact
+> APM directory-marketplace entry is present because reconciliation owns that
+> reserved namespace. This requirement does not prescribe that host, namespace,
+> or compatibility version for other consumers.
+> A directory-marketplace entry points the host at a generated catalog rooted in
+> the materialized dependency directory; it does not copy package content into
+> the host's private plugin state.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2565,7 +2659,8 @@ without a spec revision. The current matrix is in the companion
   [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
   [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
   [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
-  [req-tg-012](#req-tg-012), [req-pr-006](#req-pr-006).
+  [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
+  [req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007).
 
 ---
 
@@ -2925,6 +3020,8 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 17| Cross-target primitive deployment                    | [req-tg-008](#req-tg-008), [req-lk-021](#req-lk-021)               | Consumer-default  |
 | 18| Case-collision materialization confusion             | [req-lk-022](#req-lk-022), [req-rs-016](#req-rs-016)               | Consumer-default  |
 | 19| Executable deployment in non-interactive contexts    | [req-sc-014](#req-sc-014)                                          | Consumer-default  |
+| 20| Source-only or symlinked package content materialization | [req-sc-015](#req-sc-015)                                      | Consumer-default  |
+| 21| Native plugin namespace collision or ownership-ledger loss | [req-tg-013](#req-tg-013)                                      | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -3036,6 +3133,43 @@ policy gate [req-sc-009](#req-sc-009) is evaluated before per-invocation
 consent and always takes precedence: a policy-level denial cannot be
 overridden by a per-invocation opt-in.
 
+### 10.16 Authorized source-plan materialization
+
+**Threat.** A package can hide hostile content in a source-only file or a
+symlink entry, then reach a primitive target through a lifecycle path that
+does not reuse the authorization and scan decision made for ordinary install.
+
+**Mitigation.**
+
+<a id="req-sc-015"></a>
+**[req-sc-015]** A conforming **consumer** implementation MUST derive exactly
+one authorized source-file set after target, package-subset, and executable
+authorization for every primitive-materialization lifecycle, including
+install and re-integration after uninstall. The set MUST exclude symlink
+files and MUST NOT traverse symlinked directories. The consumer MUST apply
+any pre-deployment content security scan to the full set before any
+source-derived target write and MUST materialize primitive files only from that
+same set; each primitive-integrator materialization path MUST consume the
+canonical set rather than derive a second classifier. If a selected file
+violates a blocking scan policy, the consumer MUST reject that materialization
+before writing a source-derived target file unless the operator explicitly
+forces the install. The consumer MUST NOT scan or materialize a
+source-only file merely because it is present in the package tree. The
+executable authorization used to derive the set remains governed by
+[req-sc-009](#req-sc-009).
+
+### 10.17 Native plugin namespace and ownership recovery
+
+**Threat.** A foreign marketplace entry captures a consumer's reserved
+identifier, or loss of the consumer-owned ledger causes registration cleanup
+to overwrite unrelated host settings or retain stale activation keys.
+
+**Mitigation.** [req-tg-013](#req-tg-013) permits namespace recovery only from
+the exact directory-marketplace entry the consumer would generate, refuses a
+foreign collision, reconciles only the declared reserved activation-key
+suffix, preserves unrelated JSON values semantically, and commits catalog,
+ledger, and settings writes as one rollback unit.
+
 ---
 
 ## 11. Conformance
@@ -3079,6 +3213,10 @@ conformance statement identifying:
 2. The version of the specification it conforms to (`v0.1`).
 3. The list of OPTIONAL features it implements.
 4. Any limitations or non-conformance points, with rationale.
+5. Any additional conformance-statement content required by a specific
+   requirement, including reserved namespace disclosure under
+   [req-tg-013](#req-tg-013) and fixture citations under
+   [req-cf-002](#req-cf-002).
 
 ### 11.3 Enumerated requirements by class
 
@@ -3123,20 +3261,21 @@ conformance statement identifying:
 [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
-[req-pr-006](#req-pr-006),
+[req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
 [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
 [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
-[req-tg-012](#req-tg-012), [req-sc-001](#req-sc-001),
+[req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
+[req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
 [req-sc-008](#req-sc-008) (SHOULD), [req-sc-009](#req-sc-009),
 [req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011),
 [req-sc-012](#req-sc-012), [req-sc-013](#req-sc-013),
-[req-sc-014](#req-sc-014),
+[req-sc-014](#req-sc-014), [req-sc-015](#req-sc-015),
 [req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
 
@@ -3338,6 +3477,8 @@ tests/fixtures/spec-conformance/
     invalid-extends-cycle.yml
   resolution/
     semver-dialect.json
+  source-plan/
+    req-sc-015.json
 ```
 
 Conformance-suite expansion (additional fixtures for archive
@@ -3350,6 +3491,13 @@ The lockfile fixture `materialization-sort-exclusion.yml` exercises
 `v1-git-only.yml` exercises transactional spelling migration and
 collision refusal through the [req-lk-022](#req-lk-022) conformance
 oracles.
+
+The `source-plan/req-sc-015.json` oracle describes selected materialized
+content, source-only content, and excluded symlink files and directories
+for [req-sc-015](#req-sc-015). A consumer uses the oracle to demonstrate
+that scanning and materialization share the same authorized source set
+through both install and re-integration; each lifecycle result matches
+the oracle's authorized paths.
 
 ### 12.5 Round-trip conformance (normative)
 
@@ -3555,6 +3703,7 @@ renumbering of conformance classes.
 | [req-pr-004](#req-pr-004)                | MUST    | 7.8     | producer    |
 | [req-pr-005](#req-pr-005)                | SHOULD  | 7.8     | producer    |
 | [req-pr-006](#req-pr-006)                | MUST    | 8.1     | consumer    |
+| [req-pr-007](#req-pr-007)                | MUST    | 8.1     | consumer    |
 | [req-tg-001](#req-tg-001)                | MUST    | 8.4     | consumer    |
 | [req-tg-002](#req-tg-002)                | MUST    | 8.5     | consumer    |
 | [req-tg-003](#req-tg-003)                | MUST    | 8.5     | consumer    |
@@ -3567,6 +3716,7 @@ renumbering of conformance classes.
 | [req-tg-010](#req-tg-010)                | MUST    | 8.5.4   | consumer    |
 | [req-tg-011](#req-tg-011)                | MUST    | 8.5.5   | consumer    |
 | [req-tg-012](#req-tg-012)                | MUST    | 8.5.6   | consumer    |
+| [req-tg-013](#req-tg-013)                | MUST    | 8.5.7   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3581,11 +3731,12 @@ renumbering of conformance classes.
 | [req-sc-012](#req-sc-012)                | MUST    | 10.14   | consumer    |
 | [req-sc-013](#req-sc-013)                | MUST    | 10.3    | consumer    |
 | [req-sc-014](#req-sc-014)                | MUST    | 10.15   | consumer    |
+| [req-sc-015](#req-sc-015)                | MUST    | 10.16   | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 116** (111 MUST, 5 SHOULD).
+**Total normative statements: 119** (114 MUST, 5 SHOULD).
 
 ---
 
@@ -3612,7 +3763,6 @@ renumbering of conformance classes.
 | 0.1.15  | 2026-07-15 | Spec-citation fold for lossy agent target conversion (closes the #2181 Mode-B silent-extension gate). Added [req-tg-006] (Section 8.5, consumer MUST): target-native agent conversion either preserves source-declared capability restrictions exactly or emits a default-visible, actionable diagnostic naming the source agent, each discarded field, and the broader-access risk before the overall operation returns; malformed or non-mapping frontmatter receives an unverifiable-restriction diagnostic. The requirement does not define a target-native restriction encoding or mandate a nonzero exit status. Statement count: 99 -> 100 (95 MUST, 5 SHOULD). |
 | 0.1.16  | 2026-07-17 | Spec-citation fold for dropped-target merge-hook reconciliation (closes the #2253 Mode-B silent-extension gate). Added [req-lk-021] (Section 5.2, consumer MUST): extends [req-lk-020]'s target-reconciliation preserve/remove decision to merge-based hook configuration and its ownership record, since that state is deliberately outside `deployed_files`/`local_deployed_files` tracking and so was never reachable by req-lk-020's literal text -- narrowing a project's declared target set now also reconciles the dropped target's consumer-owned merge-hook entries, while preserving entries not carrying consumer ownership and preserving state for targets still attributable per req-lk-020's own (a)-(c) test. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 100 -> 101 (96 MUST, 5 SHOULD). |
 | 0.1.17  | 2026-07-17 | Spec-citation fold for deployment-ledger owner integrity (closes the PR #2292 Mode-B silent-extension gate on the policy engine and audit exit contract). Added [req-pl-016] (Section 6.8, governance MUST): a canonical deployment-ledger owner that does not resolve to a dependency entry in `apm.lock.yaml` is a hard integrity failure, independent of `security.audit.fail_on_drift`; an audit MUST exit non-zero in BOTH default and CI modes when such a stale ownership record is present, MUST NOT mutate deployed bytes (for example under strip) while ownership is invalid, and MUST name each affected locator with its invalid owner(s) plus one reconcile-ownership remediation. Explicitly distinguished from ordinary deployed-file drift, which stays advisory in default mode per [req-pl-014]; a durable ownership record is not a file edit, so its staleness surfaces unconditionally. Reconciled the Section 6.9 and Section 11.3.4 governance enumerations (the latter also gained the previously-missing [req-pl-015] row). Section 1.3 and Appendix C count sites updated. Statement count: 101 -> 102 (97 MUST, 5 SHOULD). |
-| 0.1.31  | 2026-08-23 | Spec-citation fold for Azure DevOps organization-policy discovery. Added [req-pl-017] (Section 6.8, governance MUST): discovery uses `apm/apm-policy` first and can use legacy `_apm/_apm` only after an HTTP 404; all non-404 failures stop without fallback, and a successful legacy fallback emits one actionable migration warning. Section 6.9, Section 11.3.4, and Appendix C updated. Statement count: 114 -> 115 (110 MUST, 5 SHOULD). |
 | 0.1.18  | 2026-07-17 | Spec-citation fold for project-scope post-install compilation guidance (closes #2057). Added [req-tg-007] (Section 8.5, consumer MUST): after a non-dry-run project install adds a package, a consumer that finds dependency instruction primitives for an active root-context compilation target emits a default-visible diagnostic naming the follow-up compile operation and root context output class. The diagnostic is suppressed for dry runs, no-op installs, trees without dependency instructions, and target sets that deploy instructions as native per-file rules. Section 8.7 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 102 -> 103 (98 MUST, 5 SHOULD). |
 | 0.1.19  | 2026-07-18 | Spec-citation fold for stale persisted skill subsets (closes #2116). Added [req-mf-022] (Section 4.3.2, consumer MUST): when a non-empty manifest `skills:` subset matches no available skill in a dependency that exposes selectable skills, the consumer emits a default-visible diagnostic naming the dependency plus the requested and available skill names before install returns; the diagnostic does not by itself require a nonzero install status. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 103 -> 104 (99 MUST, 5 SHOULD). |
 | 0.1.20  | 2026-07-30 | Defensive amendment of [req-lk-006] (no new normative statement; count remains 104 (99 MUST, 5 SHOULD)): frozen validation now covers direct MCP server names and configurations as well as package pins, runs before lockfile, target-config, deployment, or cache mutation, and rejects manifest dependency mutation. |
@@ -3624,9 +3774,14 @@ renumbering of conformance classes.
 | 0.1.26  | 2026-08-03 | Spec-citation fold for VS Code OCI/Docker MCP runtime argument resolution (closes #2438). Added [req-mf-023] (Section 4.5, consumer MUST): a non-secret runtime variable resolves every `{name}` occurrence across package runtime and package arguments, an unresolved template is never written literally, and package-scoped secret metadata uses VS Code secret-input references instead of generated config bytes. Section 4.9, Section 11.3.2, and Appendix C updated. Statement count: 109 -> 110 (105 MUST, 5 SHOULD). |
 | 0.1.27  | 2026-08-03 | Spec-citation fold for object-form registry identity preservation on CLI-driven manifest updates (closes the PR #2166 Mode-B silent-extension gate). Added [req-mf-024] (Section 4.3.2, consumer MUST): a consumer MUST NOT silently rewrite an existing `id:`-form (registry-sourced) manifest entry into a `git:`-form entry when persisting a subsequent CLI-driven update (e.g. an additive `--skill` pin) for the same dependency identity; when a CLI-parsed reference is ambiguous about its source but an existing manifest entry for the same identity already resolves to the `registry` source, the existing entry's source MUST be honored, and an update that would otherwise replace a registry-sourced entry with a non-registry-shaped entry MUST be rejected with a diagnostic naming the identity. Section 4.9 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 110 -> 111 (106 MUST, 5 SHOULD). |
 | 0.1.28  | 2026-08-06 | Spec-citation fold for per-invocation executable consent in non-interactive contexts (closes #1620 Mode-B silent-extension gate). Added [req-sc-014] (Section 10.15, consumer MUST): a consumer that supports a per-invocation consent flag for bin/ executable deployment MUST deny deployment by default when stdout is not a TTY, unless the operator has explicitly opted in for that invocation; an explicit opt-in overrides the non-interactive default and permits deployment; an explicit opt-out overrides the default and denies deployment even in a terminal; the allowExecutables policy gate [req-sc-009] is evaluated first and always takes precedence. Added row 19 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 111 -> 112 (107 MUST, 5 SHOULD). |
-| 0.1.29  | 2026-08-22 | Spec-citation fold for the Agent Plugins v1 native-lifecycle deployment boundary (closes #2522 Mode-B silent-extension gate). Added [req-tg-011] (Section 8.5.5, consumer MUST): a consumer MUST treat a schema-bearing Agent Plugins v1 dependency as undeployable until it exposes a machine-verifiable native lifecycle for that dependency; before any target handler or primitive integrator runs, the consumer MUST refuse deployment with one actionable diagnostic, MUST leave the project tree unchanged, MUST NOT fall back to legacy primitive projection, and MUST reach the identical single-diagnostic outcome whether the dependency is materialized alone, mixed with ordinary dependencies in the same install, or under `--dry-run`. Section 8.7 and Appendix C updated. Statement count: 112 -> 113 (108 MUST, 5 SHOULD). |
-| 0.1.30  | 2026-08-23 | Spec-citation fold for plugin-root hook command resolution (closes #2639 Mode-B silent-extension gate). Added [req-tg-012] (Section 8.5.6, consumer MUST): a consumer that resolves plugin-root placeholders treats a matching quoted placeholder followed by an outside path separator equivalently to the fully quoted path, preserves balanced expandable quoting, and emits a default-visible diagnostic instead of silently deploying any supported placeholder that remains unresolved. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 114 -> 115 (110 MUST, 5 SHOULD). |
-| 0.1.31  | 2026-08-23 | Spec-citation fold for authoritative legacy plugin skill declarations (closes #2537). Added [req-pr-006] (Section 8.1, consumer MUST): omitted `skills` alone enables conventional discovery; a string or list replaces discovery; explicit empty, invalid, escaping, symlinked, and duplicate-derived entries contribute no skills; declared containers contribute only immediate child skills; and only resulting names are eligible for enumeration, selection, or deployment. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 115 -> 116 (111 MUST, 5 SHOULD). |
+| 0.1.29  | 2026-08-22 | Spec-citation fold for the Agent Plugins v1 native-lifecycle deployment boundary (closes #2522 Mode-B silent-extension gate). Added [req-tg-011] (Section 8.5.5, consumer MUST): a consumer treats a schema-bearing Agent Plugins v1 dependency as opaque to legacy primitive projection and requires an applicable target-native lifecycle for deployment. The original boundary wording was refined by 0.1.35 to permit acquisition, materialization, and lock recording before a dependency-scoped deployment skip, while ordinary dependencies in the same install remain eligible for deployment and `--dry-run` reports the same decision without mutation. Section 8.7 and Appendix C updated. Statement count: 112 -> 113 (108 MUST, 5 SHOULD). |
+| 0.1.30  | 2026-08-23 | Spec-citation fold for plugin-root hook command resolution (closes #2639 Mode-B silent-extension gate). Added [req-tg-012] (Section 8.5.6, consumer MUST): a consumer that resolves plugin-root placeholders treats a matching quoted placeholder followed by an outside path separator equivalently to the fully quoted path, preserves balanced expandable quoting, and emits a default-visible diagnostic instead of silently deploying any supported placeholder that remains unresolved. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 113 -> 114 (109 MUST, 5 SHOULD). |
+| 0.1.31  | 2026-08-23 | Spec-citation fold for Azure DevOps organization-policy discovery. Added [req-pl-017] (Section 6.8, governance MUST): discovery uses `apm/apm-policy` first and can use legacy `_apm/_apm` only after an HTTP 404; all non-404 failures stop without fallback, and a successful legacy fallback emits one actionable migration warning. Section 6.9, Section 11.3.4, and Appendix C updated. Statement count: 114 -> 115 (110 MUST, 5 SHOULD). |
+| 0.1.32  | 2026-08-23 | Spec-citation fold for authoritative legacy plugin skill declarations (closes #2537). Added [req-pr-006] (Section 8.1, consumer MUST): omitted `skills` alone enables conventional discovery; a string or list replaces discovery; explicit empty, invalid, escaping, symlinked, and duplicate-derived entries contribute no skills; declared containers contribute only immediate child skills; and only resulting names are eligible for enumeration, selection, or deployment. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 115 -> 116 (111 MUST, 5 SHOULD). |
+| 0.1.33  | 2026-08-23 | Spec-citation fold for authorized pre-deployment scan scope (closes #2490 Mode-B silent-extension gate). Added [req-sc-015] (Section 10.16, consumer MUST): a consumer derives one post-authorization source-file set for every install and uninstall re-integration materialization lifecycle; excludes symlink files and does not traverse symlinked directories; scans and materializes only that set; rejects a selected blocking finding before a source-derived target write; and does not scan or materialize source-only package files. Added row 20 to the Section 10.11 summary table. Reconciled with concurrent [req-pl-017] and [req-pr-006] and retained all amendments. Section 1.3, Section 11.3.2, and Appendix C updated. Statement count: 116 -> 117 (112 MUST, 5 SHOULD). |
+| 0.1.34  | 2026-08-25 | Spec-citation fold for root-declared Plugin component staging containment (closes #2556). Added [req-pr-007] (Section 8.1, consumer MUST): a consumer canonicalizes the non-symlink component-source root and prunes the current operation's materialization subtree before traversal. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 117 -> 118 (113 MUST, 5 SHOULD). |
+| 0.1.35  | 2026-08-27 | Stale-spec (Mode C) amendment recording a machine-verifiable native Agent Plugins lifecycle. Added [req-tg-013] (Section 8.5.7, consumer MUST): schema, effective-target, integrity, security, and executable admission drives one aggregate direct-plus-transitive registration per scope without locating, invoking, or version-checking a host binary during lifecycle operations; packages remain materialized in place and opaque to legacy projection; direct dependencies win plugin-name collisions over transitive dependencies, same-precedence collisions fail, and recorded ownership does not silently repoint to a transitive claimant; a consumer-owned marketplace identifier and activation suffix are reserved only with the exact generated directory-marketplace entry; the ownership record is primary evidence, while missing-record recovery may re-adopt only that exact entry and reconcile the reserved namespace; foreign collisions and invalid JSON fail closed; unrelated JSON values are preserved semantically though stable serialization may reformat them; and catalog, ownership-record, and settings writes form one rollback unit. Revised [req-tg-011] to clarify that acquisition, materialization, and lock recording may precede target exclusion, which creates no target registration or primitive projection and does not block ordinary dependencies in the same batch. Compatibility is qualified at release or build time by the pinned real-host lifecycle suite; runtime availability is the operator's responsibility. Added the native plugin namespace and ownership-recovery threat to Section 10. Section 8.7, Section 11.3.2 Consumer enumeration, Appendix C, and conformance coverage updated. Statement count: 118 -> 119 (114 MUST, 5 SHOULD). |
+| 0.1.36  | 2026-08-29 | Editorial and defensive alignment for [req-tg-011] and [req-tg-013]. Named the [req-tg-008] result as the effective target intersection; scoped aggregate registration and plugin-name claimant selection to dependencies that passed admission; required target contraction to retire consumer-owned native registration; required advisory uninstall, prune, and restore reconciliation to omit ambiguous or changed-owner plugin entries without blocking cleanup; restored exact removal boundaries; defined directory-marketplace entries; and added reserved namespace disclosure to Section 11.2. Added conformance coverage for direct-owner promotion, advisory collision cleanup, and transitive owner-repoint refusal. Statement count remains 119 (114 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

@@ -22,6 +22,7 @@
 # by every worker before any test in any test directory runs, so this is
 # the earliest hook we have without writing a pytest plugin.
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
@@ -122,3 +123,24 @@ def _isolate_discovery_state():
     yield
     clear_discovery_cache()
     perf_stats.reset()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_copilot_plugin_capability():
+    """Reset native Agent Plugin registration state between tests.
+
+    Admission is a pure function of resolved target names -- it never reads
+    the host (no binary probe, no version, no environment override), so
+    there is nothing to pin here. This fixture only resets the published
+    capability contextvar so one test's ``activate_native_registration``
+    call can never leak into the next.
+    """
+    from apm_cli.copilot_plugins.capability import _ACTIVE as _capability_var
+    from apm_cli.copilot_plugins.capability import reset_native_registration
+
+    token = _capability_var.set(None)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(ValueError):
+            reset_native_registration(token)

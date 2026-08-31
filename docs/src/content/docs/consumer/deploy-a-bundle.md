@@ -36,10 +36,13 @@ my-bundle/
 under `.github/plugin/`, `.claude-plugin/`, or `.cursor-plugin/`. For the
 full schema see [Package anatomy](../../concepts/package-anatomy/).
 
-:::note[Planned]
-This flow deploys Claude plugin bundles (the default `apm pack` output).
-Portable Agent Plugin bundles built with `apm pack --format agent-plugin` are not yet
-deployable through `apm install` -- see [Package Types](../../reference/package-types/#agent-plugin-pluginjson-with-an-agent-plugins-schema).
+:::note[Claude bundles only]
+This imperative flow deploys Claude plugin bundles (the default `apm pack`
+output). A portable Agent Plugin built with `apm pack --format agent-plugin`
+installs through the declarative route instead: declare it in `apm.yml` and
+run `apm install --target copilot`, which keeps the plugin whole and registers
+it with GitHub Copilot -- see
+[Install Agent Plugins for Copilot](../copilot-agent-plugins/).
 :::
 
 The optional `apm.lock.yaml` carries `pack.bundle_files` -- a SHA-256

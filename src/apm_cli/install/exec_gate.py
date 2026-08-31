@@ -139,6 +139,59 @@ def resolve_package_key(package_info: Any, package_name: str) -> str:
     return package_name
 
 
+def resolve_bin_skip(
+    bin_approved: bool,
+    trust_bin: bool | None,
+    *,
+    non_interactive: bool = False,
+) -> tuple[bool, str | None]:
+    """Combine executable approval with the ``--trust-bin`` posture."""
+    if not bin_approved:
+        return True, "not_approved"
+    if trust_bin is False:
+        return True, "not_trusted"
+    if trust_bin is None and non_interactive:
+        return True, "not_trusted"
+    return False, None
+
+
+def plugin_bin_deployable(
+    package_info: Any,
+    targets: list[Any],
+    *,
+    project_root: Path,
+    scope: Any,
+    policy: Any,
+    skip_bin: bool,
+) -> bool:
+    """Return whether approved marketplace plugin bin files can reach a target."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.models.apm_package import PackageType
+    from apm_cli.security.executables import normalize_bin_deploy_deny_key
+
+    if (
+        skip_bin
+        or package_info.package_type is not PackageType.MARKETPLACE_PLUGIN
+        or scope is not InstallScope.USER
+        or not (Path(package_info.install_path) / "bin").is_dir()
+        or not any(
+            target.name == "claude"
+            and target.supports("skills")
+            and (target.auto_create or (project_root / target.root_dir).is_dir())
+            for target in targets
+        )
+    ):
+        return False
+    bin_policy = getattr(policy, "bin_deploy", None)
+    if bin_policy is None:
+        return True
+    if bin_policy.deny_all:
+        return False
+    package_key = normalize_bin_deploy_deny_key(package_info.get_canonical_dependency_string())
+    denied = {normalize_bin_deploy_deny_key(item) for item in bin_policy.deny}
+    return package_key not in denied
+
+
 def log_bin_status(
     skill_result: Any,
     suffix: str,
@@ -147,6 +200,9 @@ def log_bin_status(
     log_fn,
 ) -> None:
     """Emit integration-tree lines for bin/ deployment or skip reasons."""
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    package_label = printable_ascii_text(package_name or getattr(package_info, "name", "unknown"))
     if skill_result.bin_deployed > 0:
         log_fn(
             f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
@@ -162,10 +218,17 @@ def log_bin_status(
             "  |-- plugin ships executables; no active Claude Code skills target to receive them"
         )
     elif skill_result.bin_skipped_reason == "not_approved":
-        _pkg_label = package_name or getattr(package_info, "name", "unknown")
         log_fn(
             f"  |-- bin/ executables skipped (not approved in allowExecutables). "
-            f"Run 'apm approve {_pkg_label}' to approve."
+            f"Run 'apm approve {package_label}' to approve."
         )
     elif skill_result.bin_skipped_reason == "not_trusted":
-        log_fn("  |-- bin/ executables skipped (--no-trust-bin). Pass --trust-bin to deploy.")
+        log_fn(
+            "  |-- bin/ executables skipped (not trusted). "
+            f"Run 'apm install --trust-bin {package_label}' to deploy."
+        )
+    elif skill_result.bin_skipped_reason == "not_retrusted_on_uninstall":
+        log_fn(
+            "  |-- bin/ executables not re-deployed during uninstall cleanup. "
+            f"Run 'apm install --trust-bin {package_label}' to restore them."
+        )

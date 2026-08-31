@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.cache.url_normalize import normalize_repo_url
+from apm_cli.deps.plugin_parser import _map_plugin_artifacts
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 from apm_cli.deps.tiered_ref_resolver import (
     L0PerRunCache,
@@ -366,6 +367,40 @@ def test_consumer_rejects_primitive_collisions():
     assert_spec_contains(
         "first declared",
         "MUST NOT replace",
+    )
+
+
+@pytest.mark.req("req-pr-007")
+def test_root_declared_plugin_component_excludes_generated_staging_tree(tmp_path: Path):
+    """A root declaration never re-copies its consumer-generated staging tree."""
+    plugin_root = tmp_path / "plugin"
+    staging_root = plugin_root / ".apm"
+    plugin_root.mkdir()
+    staging_root.mkdir()
+    (plugin_root / "agent.md").write_text("# Agent\n", encoding="ascii")
+    (staging_root / "generated.md").write_text("# Generated\n", encoding="ascii")
+
+    manifest = {"name": "plugin", "agents": ["./"]}
+    _map_plugin_artifacts(plugin_root, staging_root, manifest)
+    first_tree = {
+        path.relative_to(staging_root).as_posix(): path.read_bytes()
+        for path in staging_root.rglob("*")
+        if path.is_file()
+    }
+    _map_plugin_artifacts(plugin_root, staging_root, manifest)
+    second_tree = {
+        path.relative_to(staging_root).as_posix(): path.read_bytes()
+        for path in staging_root.rglob("*")
+        if path.is_file()
+    }
+
+    assert "agents/.apm/generated.md" not in first_tree
+    assert first_tree == second_tree
+    assert_spec_contains(
+        "copying a declared Plugin collection component source",
+        "canonicalize the\nnon-symlink source root",
+        "materialization root created by the current operation",
+        "MUST prune every such staging\nsubtree before traversing the source",
     )
 
 

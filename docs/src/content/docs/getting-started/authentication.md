@@ -24,7 +24,7 @@ Azure DevOps uses its own chain. Azure DevOps Services checks
 only. See [Azure DevOps](#azure-devops).
 If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an anonymous `github.com` attempt, APM disables credential helpers and authorization headers without discarding caller-supplied global/system Git config such as CA paths, URL rewrites, and `credential.interactive=never`.
 
-Results are cached per-process. Validation and later fetch phases for the same private repository reuse one path-scoped fallback instead of prompting repeatedly, while another repository can resolve its own credential. All token-bearing requests use HTTPS.
+Results are cached per-process. Validation, persistent Git cache population, and later fetch phases for the same private repository reuse one path-scoped fallback instead of prompting repeatedly, while another repository can resolve its own credential. APM never writes the credential into persistent cache keys or stored remote URLs. All token-bearing requests use HTTPS.
 
 ## Token lookup
 ### GitHub-class hosts (`github.com`, `*.ghe.com`, GHES via `GITHUB_HOST`)

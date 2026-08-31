@@ -118,3 +118,29 @@ def test_https_ado_url_classified_as_git() -> None:
     # Use urlsplit().hostname for exact host match (CodeQL: avoid substring sanitization).
     assert urlsplit(url).hostname == "dev.azure.com"
     assert host == "dev.azure.com"
+
+
+def test_https_ado_url_preserves_encoded_path_presentation() -> None:
+    url, kind, host = _parse_marketplace_source(
+        "https://dev.azure.com/contoso/My%20Projects/_git/agent-forge",
+        host_flag=None,
+    )
+
+    parsed = urlsplit(url)
+    assert kind == "git"
+    assert host == "dev.azure.com"
+    assert parsed.path == "/contoso/My%20Projects/_git/agent-forge"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://dev.azure.com/contoso/%/_git/repo",
+        "https://dev.azure.com/contoso/%FF/_git/repo",
+        "https://dev.azure.com/contoso/%2F/_git/repo",
+        "https://dev.azure.com/contoso/%252E%252E/_git/repo",
+    ],
+)
+def test_https_ado_url_rejects_unsafe_encoded_path(raw: str) -> None:
+    with pytest.raises(ValueError):
+        _parse_marketplace_source(raw, host_flag=None)

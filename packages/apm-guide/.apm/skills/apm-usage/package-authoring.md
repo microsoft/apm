@@ -12,7 +12,11 @@ how to install it:
 | `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
 | `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
-| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Not yet installable -- fails closed |
+| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; registered when effective targets include Copilot and admission gates pass. Excluded targets create no native registration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
+
+For Agent Plugins with the same declared name, a direct dependency wins over a
+transitive dependency. APM refuses same-precedence collisions and does not
+silently repoint a ledger-recorded owner to a transitive claimant.
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
 also uses APM dependency resolution. APM installs it as a skill -- it
@@ -294,6 +298,9 @@ for this package. Add a 'license:' field ...`). The SBOM still exports
 correctly -- the component just records NOASSERTION (genuinely unknown).
 This warning fires only on the **authoring** path (your own `apm.yml`);
 installing or exporting other people's dependencies is silent.
+
+Encode primitive Markdown as UTF-8. APM accepts files with or without a
+leading UTF-8 BOM and strips the BOM before parsing frontmatter.
 
 ## The 7 primitive types
 
@@ -603,12 +610,15 @@ preserved through to the consumer. APM appends each repository name without a
 `.git` suffix. Authentication uses `ADO_APM_PAT` when set, or an Azure CLI
 bearer credential when the PAT is unset and `az` is signed in:
 
+Percent-encode spaces in ADO paths, such as `My%20Projects`. The generated
+source URL preserves the encoding while APM resolves its decoded ADO identity.
+
 ```yaml
 marketplace:
-  sourceBase: https://dev.azure.com/contoso/platform/_git
+  sourceBase: https://dev.azure.com/contoso/My%20Projects/_git
   packages:
     - name: agent-skills
-      source: agent-skills          # -> contoso/platform/_git/agent-skills
+      source: agent-skills          # -> contoso/My%20Projects/_git/agent-skills
       ref: 3f2a9b1c
 ```
 

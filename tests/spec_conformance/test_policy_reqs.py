@@ -119,6 +119,30 @@ def test_policy_provides_default_allow_list_shape():
     assert "allow" in deps and deps["allow"]["oneOf"][0]["type"] == "array"
 
 
+@pytest.mark.req("req-pl-011")
+def test_policy_gitlab_discovery_provider_is_a_distinct_convention():
+    """req-pl-011: discovery is a pluggable, per-host extension point.
+
+    The spec names `gitlab-project-yml` as an example additional provider
+    (Section 6.1.1) alongside the registered `github-owner-dotgithub`
+    default, and requires that "a consumer MUST NOT hard-code a
+    host-specific discovery convention as the sole discovery path." GitLab
+    rejects project paths starting with `.` or `_`, so it cannot reuse the
+    GitHub-default candidate conventions -- it needs (and has) its own
+    valid GitLab project convention. GitLab and ADO intentionally share the
+    ``apm-policy`` leaf name while resolving it under different coordinates.
+    """
+    from apm_cli.policy.discovery import _policy_repo_candidates
+
+    github_candidates = _policy_repo_candidates("github.com")
+    gitlab_candidates = _policy_repo_candidates("gitlab.com")
+
+    assert gitlab_candidates == ("apm-policy",)
+    assert gitlab_candidates != github_candidates
+    assert all(not name.startswith((".", "_")) for name in gitlab_candidates)
+    assert_spec_contains("gitlab-project-yml")
+
+
 @pytest.mark.req("req-pl-012")
 def test_policy_provides_default_deny_list_shape():
     schema = load_schema("policy-v0.1.schema.json")

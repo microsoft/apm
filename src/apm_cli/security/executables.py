@@ -201,6 +201,45 @@ LAYER_ORG_RECOMMEND = "org-recommend"
 LAYER_DEFAULT_DENY = "default-deny"
 
 
+# Deny-wins severity ladder for the lockfile ``exec_status`` field, shared by
+# every writer so no path can silently downgrade a worse-case verdict.
+_EXEC_STATUS_SEVERITY = {
+    None: 0,
+    TRUST_ABSENT: 0,
+    TRUST_DEPLOYED: 1,
+    TRUST_GATED: 2,
+    TRUST_DENIED: 3,
+}
+
+
+def more_severe_exec_status(current: str | None, candidate: str | None) -> str | None:
+    """Return the MORE severe of two lockfile ``exec_status`` values.
+
+    Severity follows the canonical deny-wins ladder: ``denied`` >
+    ``gated_pending_approval`` > ``deployed`` > ``absent``/``None``. Ties keep
+    *current* (stable). An unknown value ranks above every known one so a
+    surprise status never silently downgrades trust. Owning the ordering here
+    keeps every writer -- the exec gate and native plugin admission -- folding
+    against one ladder instead of guessing independently.
+    """
+    ceiling = max(_EXEC_STATUS_SEVERITY.values()) + 1
+
+    def _rank(value: str | None) -> int:
+        return _EXEC_STATUS_SEVERITY.get(value, ceiling)
+
+    return candidate if _rank(candidate) > _rank(current) else current
+
+
+# The ONLY ``exec_status`` values that may reach native Copilot registration.
+# This is an ALLOWLIST on purpose. The severity ladder above ranks an unknown
+# status ABOVE ``denied`` (fail closed), so a denylist of
+# ``(TRUST_DENIED, TRUST_GATED)`` would disagree with it and let a status the
+# ladder calls worse-than-denied through the registration gate on forward
+# version skew -- e.g. a future APM writing ``quarantined`` that an older CLI
+# reads back. Both registration gates read this one definition.
+REGISTRABLE_EXEC_STATUSES: frozenset[str | None] = frozenset({None, TRUST_ABSENT, TRUST_DEPLOYED})
+
+
 @dataclass(frozen=True)
 class ExecDecision:
     """The resolved trust decision for one (package, exec_type) pair.
