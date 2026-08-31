@@ -76,14 +76,6 @@ class MutationCase:
 
 MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
-        guard_id="contracts-tooling-generation-footer",
-        rule_id="contracts-tooling-generation-footer",
-        path="src/apm_cli/compilation/footer.py",
-        old="def build_generation_footer(",
-        new="def build_generation_footer_v2(",
-        intent="Generated footer owner loses the one canonical builder definition.",
-    ),
-    MutationCase(
         guard_id="contracts-tests-taxonomy-classification",
         rule_id="contracts-tests-taxonomy-classification",
         path="tests/quality/taxonomy_inventory_plugin.py",
@@ -122,6 +114,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='def load_frontmatter(fd: Any, encoding: str = "utf-8-sig")',
         new='def load_frontmatter(fd: Any, encoding: str = "utf-8")',
         intent="Frontmatter owner loses its BOM-aware utf-8-sig decoding default.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-generation-footer",
+        rule_id="contracts-tooling-generation-footer",
+        path="src/apm_cli/compilation/footer.py",
+        old="def build_generation_footer(",
+        new="def build_generation_footer_v2(",
+        intent="Generated footer owner loses the one canonical builder definition.",
     ),
     MutationCase(
         guard_id="hooks-integrations-copilot-cli-mcp-paths",
