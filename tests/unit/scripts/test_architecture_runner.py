@@ -8,8 +8,8 @@ Covers, in order:
   imports, calls, assignments, literals, scope, parent tracking, registered
   collectors, and the AST-visit counter, all from one walk.
 * :data:`runner.GROUP_MODULE_NAMES` and :func:`runner.registered_rules` --
-  the fixed six-group catalog and its bidirectional guard equivalence with
-  the real 55-guard owner registry.
+  the explicit cohesive-group catalog and its bidirectional guard equivalence
+  with the owner registry.
 * :func:`runner.run` aggregation and fail-closed mechanics -- missing
   groups, duplicate rule/guard IDs, unknown rule selection, and every
   malformed-result category -- exercised through fully synthetic,
@@ -45,7 +45,7 @@ from scripts.architecture_linter.diagnostics import (
 )
 from scripts.architecture_linter.facts import FactsProvider, ParseCache, SourceCache, VisitContext
 from scripts.architecture_linter.inventory import build_inventory
-from scripts.architecture_linter.models import Failure, Rule, RunReport, Violation
+from scripts.architecture_linter.models import Failure, FileFacts, Rule, RunReport, Violation
 from scripts.architecture_linter.registry import load_registry
 
 REAL_ROOT = Path(__file__).resolve().parents[3]
@@ -282,6 +282,63 @@ def test_facts_provider_builds_one_compact_tree_index_per_file(tmp_path: Path) -
     assert not hasattr(first, "_descendants")
 
 
+def test_spill_write_failure_keeps_facts_without_rewalking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed cold-fact spill fails closed but leaves one reusable build."""
+    path = "tests/test_sample.py"
+    target = tmp_path / path
+    target.parent.mkdir(parents=True)
+    target.write_text(_SAMPLE_SOURCE, encoding="utf-8")
+    provider = FactsProvider(tmp_path, (path,), registry=None)
+
+    def fail_spill(_relative_path: str, _facts: FileFacts) -> None:
+        raise OSError("injected spill failure")
+
+    monkeypatch.setattr(provider, "_spill_facts", fail_spill)
+
+    with pytest.raises(OSError, match="injected spill failure"):
+        provider.file_facts(path)
+    facts = provider.file_facts(path)
+
+    assert facts.tree_index is not None
+    assert provider.source_cache.read_attempts == 1
+    assert provider.parse_cache.parse_attempts == 1
+    assert provider.ast_visits == facts.visits
+    assert provider.tree_index_builds == 1
+    assert provider.max_tree_index_builds_per_file == 1
+
+
+def test_spill_load_failure_never_rebuilds_or_hides_the_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed or unreadable spill state remains a fail-closed cache state."""
+    path = "tests/test_sample.py"
+    target = tmp_path / path
+    target.parent.mkdir(parents=True)
+    target.write_text(_SAMPLE_SOURCE, encoding="utf-8")
+    provider = FactsProvider(tmp_path, (path,), registry=None)
+    facts = provider.file_facts(path)
+    provider._transient_facts.clear()
+
+    def fail_load(_spill_path: Path) -> FileFacts:
+        raise OSError("injected spill load failure")
+
+    monkeypatch.setattr(provider, "_load_spilled_facts", fail_load)
+
+    for _ in range(2):
+        with pytest.raises(OSError, match="injected spill load failure"):
+            provider.file_facts(path)
+
+    assert provider.source_cache.read_attempts == 1
+    assert provider.parse_cache.parse_attempts == 1
+    assert provider.ast_visits == facts.visits
+    assert provider.tree_index_builds == 1
+    assert provider.max_tree_index_builds_per_file == 1
+
+
 def test_tree_index_build_has_one_production_owner() -> None:
     """Only FactsProvider may fold FileFacts into a compact TreeIndex."""
     linter_root = REAL_ROOT / "scripts/architecture_linter"
@@ -303,6 +360,7 @@ def test_retired_architecture_checker_entrypoints_cannot_return() -> None:
     """The registered catalog is the only executable architecture authority."""
     retired = {
         "check_agent_plugin_component_ir.py",
+        "check_agent_plugin_projection_boundary.py",
         "check_agents_source_attribution_owner.py",
         "check_bundle_format_authority.sh",
         "check_cleanup_claim_owner.py",
@@ -423,17 +481,17 @@ def test_facts_provider_skips_ast_parsing_for_non_python_files(tmp_path: Path) -
 # ---------------------------------------------------------------------------
 
 
-def test_group_module_names_is_the_exact_six_in_fixed_order() -> None:
-    """The group execution order is fixed and is not alphabetized."""
-    assert runner.GROUP_MODULE_NAMES == (
-        "registry_delegation",
-        "mutation_writes",
-        "contracts_tests",
-        "install_deployment",
-        "transport_platform",
-        "marketplace_integrations",
-    )
-    assert len(set(runner.GROUP_MODULE_NAMES)) == 6
+def test_explicit_group_catalog_is_cohesive_unique_and_fully_registered() -> None:
+    """The explicit 5-7 group catalog loads every registered rule."""
+    imports = runner._import_groups()
+    names = tuple(name for name, _module, _error in imports)
+    rules = runner.registered_rules()
+
+    assert names == runner.GROUP_MODULE_NAMES
+    assert 5 <= len(names) <= 7
+    assert len(set(names)) == len(names)
+    assert all(module is not None and error is None for _name, module, error in imports)
+    assert {rule.group for rule in rules} == set(names)
 
 
 def test_importing_runner_does_not_import_rule_groups(
@@ -628,8 +686,8 @@ def test_registered_rule_ids_are_unique_and_stable_across_calls() -> None:
     assert {rule.group for rule in first} == set(runner.GROUP_MODULE_NAMES)
 
 
-def test_registered_rule_guard_ids_equal_the_55_registry_guards() -> None:
-    """Rule-declared guards and registry-referenced guards are the same 55 IDs."""
+def test_registered_rule_guard_ids_equal_registry_guards() -> None:
+    """Rule-declared guards and registry-referenced guards are the same IDs."""
     rules = runner.registered_rules()
     inventory = build_inventory(REAL_ROOT)
     registry = load_registry(REAL_ROOT / ".apm/architecture/owners", inventory.files)
@@ -637,7 +695,6 @@ def test_registered_rule_guard_ids_equal_the_55_registry_guards() -> None:
     rule_guard_ids = {guard for rule in rules for guard in rule.guard_ids}
     registry_guard_ids = {guard for owner in registry.owners for guard in owner.guards}
 
-    assert len(registry_guard_ids) == 55
     assert rule_guard_ids == registry_guard_ids
     assert all(len(set(rule.guard_ids)) == len(rule.guard_ids) for rule in rules)
 

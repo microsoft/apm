@@ -26,20 +26,20 @@ The timed command was identical in each worktree:
 `/usr/bin/time` process. The order was three ABBA blocks, where A is baseline
 and B is candidate.
 
-| Seq | Revision | Wall (s) | User (s) | Sys (s) | Peak RSS (MiB) |
-|---:|:---|---:|---:|---:|---:|
-| 1 | baseline | 49.93 | 38.39 | 3.25 | 187.83 |
-| 2 | candidate | 11.70 | 9.95 | 0.41 | 326.47 |
-| 3 | candidate | 11.76 | 9.96 | 0.41 | 329.67 |
-| 4 | baseline | 57.60 | 39.03 | 3.17 | 187.80 |
-| 5 | baseline | 55.10 | 38.63 | 3.39 | 187.75 |
-| 6 | candidate | 12.90 | 9.95 | 0.41 | 330.58 |
-| 7 | candidate | 12.05 | 10.02 | 0.41 | 330.69 |
-| 8 | baseline | 50.14 | 38.55 | 3.30 | 187.78 |
-| 9 | baseline | 50.34 | 39.78 | 3.06 | 187.78 |
-| 10 | candidate | 13.64 | 11.12 | 0.47 | 327.97 |
-| 11 | candidate | 13.26 | 11.27 | 0.47 | 331.98 |
-| 12 | baseline | 51.04 | 39.66 | 3.26 | 187.69 |
+| Seq | Timestamp (UTC) | Revision | Wall (s) | User (s) | Sys (s) | Peak RSS (MiB) |
+|---:|:---|:---|---:|---:|---:|---:|
+| 1 | 2026-08-31T19:58:24.769262Z | baseline | 49.93 | 38.39 | 3.25 | 187.83 |
+| 2 | 2026-08-31T19:59:14.721270Z | candidate | 11.70 | 9.95 | 0.41 | 326.47 |
+| 3 | 2026-08-31T19:59:26.441424Z | candidate | 11.76 | 9.96 | 0.41 | 329.67 |
+| 4 | 2026-08-31T19:59:38.239256Z | baseline | 57.60 | 39.03 | 3.17 | 187.80 |
+| 5 | 2026-08-31T20:00:35.849774Z | baseline | 55.10 | 38.63 | 3.39 | 187.75 |
+| 6 | 2026-08-31T20:01:30.970936Z | candidate | 12.90 | 9.95 | 0.41 | 330.58 |
+| 7 | 2026-08-31T20:01:43.903840Z | candidate | 12.05 | 10.02 | 0.41 | 330.69 |
+| 8 | 2026-08-31T20:01:55.970320Z | baseline | 50.14 | 38.55 | 3.30 | 187.78 |
+| 9 | 2026-08-31T20:02:46.129401Z | baseline | 50.34 | 39.78 | 3.06 | 187.78 |
+| 10 | 2026-08-31T20:03:36.506038Z | candidate | 13.64 | 11.12 | 0.47 | 327.97 |
+| 11 | 2026-08-31T20:03:50.161451Z | candidate | 13.26 | 11.27 | 0.47 | 331.98 |
+| 12 | 2026-08-31T20:04:03.443246Z | baseline | 51.04 | 39.66 | 3.26 | 187.69 |
 
 | Statistic | Baseline | Candidate | Change |
 |:---|---:|---:|---:|
@@ -131,6 +131,8 @@ The executable normalized matrices are:
 
 - `tests/integration/test_architecture_owner_rule_mutations.py`
 - `tests/integration/test_architecture_semantic_rule_mutations.py`
+- `tests/perf/architecture_linter_parity_matrix.json` (independent
+  current-main and candidate outcomes for every case)
 
 They assert set equality against every registry guard and every guard-less
 registered rule, use surgical in-memory source overrides, reject syntax/read
@@ -141,16 +143,18 @@ Results:
 - clean current-main legacy entrypoint: exit 0 in all six ABBA samples
 - clean candidate entrypoint: exit 0 in all six ABBA samples
 - candidate mutations: 103/103 detected, zero runner failures
-- the same 103 mutations applied to current main: two compatible batches
-  (102 + 1) because two CLI mutations overlap textually; both legacy runs
-  exited 1
-- historical display-alias normalization: 100/100 alias-mapped cases observed
-- three rules have no non-ambiguous historical AC alias; their candidate
-  semantic IDs and mutations are still required by set equality
+- the same 103 mutations each ran independently against a restored clean
+  current-main copy through the retired shell entrypoint: 100/103 detected
+- the three legacy misses are `install-deployment-base-integrator`,
+  `install-deployment-outcome`, and
+  `registry_delegation.manifest_schema_negotiation`; the candidate detects all
+  three, so the semantic catalog strengthens rather than weakens those seams
 
-Historical AC numbers were duplicated, so legacy evidence is normalized at
-AC-family granularity rather than claiming a false one-to-one old rule ID.
-The candidate matrix is exact at semantic-rule granularity.
+The legacy runs used eight isolated worktree and virtual-environment copies.
+Every row records the exact mutation intent, baseline exit code, wall time,
+observed historical aliases, output hash, candidate semantic outcome, and
+revisions. Historical AC numbers were duplicated, so the raw aliases remain
+display metadata; candidate attribution is exact at semantic-rule granularity.
 
 ## Conflict and fail-closed proofs
 
@@ -163,5 +167,5 @@ not modify:
 - the instruction deployment hash in `apm.lock.yaml`
 
 Registry contract tests also reject malformed, missing, and unlisted shards.
-The retired checker inventory contract prevents the 24 deleted executable
+The retired checker inventory contract prevents the 25 deleted executable
 authorities, or imports of them from the canonical linter, from returning.

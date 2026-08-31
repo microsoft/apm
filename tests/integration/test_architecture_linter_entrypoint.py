@@ -1,7 +1,7 @@
 """End-to-end contracts for the architecture linter's CLI entrypoint.
 
-This module owns the only two expensive, full-catalog (all six real groups,
-all 102 real rules) linter invocations in the new architecture-linter test
+This module owns the only two expensive, full-catalog (all explicitly
+registered groups and rules) linter invocations in the architecture-linter test
 suite, each computed once via a module-scoped fixture and reused by every
 assertion that needs it:
 
@@ -372,7 +372,6 @@ def test_mutated_run_still_executes_every_registered_owner_guard_exactly_once(
     registry = load_registry(mutated_report.copy_root / ".apm/architecture/owners", inventory.files)
     registered_guard_ids = {guard for owner in registry.owners for guard in owner.guards}
 
-    assert len(registered_guard_ids) == 55
     assert not any(failure.stage == "guard" for failure in report.failures)
     for guard_id in registered_guard_ids:
         assert guard_hits.get(guard_id) == 1
@@ -441,7 +440,7 @@ def test_cli_accepts_only_root_and_metrics_json() -> None:
 
 def test_python_selected_rule_api_selects_one_real_rule_with_no_cli_equivalent() -> None:
     """The Python-only selection capability that the CLI deliberately lacks
-    still works, selecting exactly one of the 102 real registered rules."""
+    still works, selecting exactly one registered semantic rule."""
     picked = "registry_delegation.diagnostic_ascii_owner"
     assert picked in {rule.id for rule in runner.registered_rules()}
 

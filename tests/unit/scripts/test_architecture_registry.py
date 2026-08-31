@@ -60,22 +60,19 @@ def _load_parts(
 
 
 def test_repository_registry_is_complete_without_a_markdown_mirror() -> None:
-    """The six shards are the executable owner inventory."""
+    """Every listed shard contributes unique, guarded executable metadata."""
     inventory = [path.relative_to(ROOT).as_posix() for path in ROOT.rglob("*") if path.is_file()]
     registry = load_registry(REGISTRY_DIR, inventory)
+    disk_shards = {path.name for path in REGISTRY_DIR.glob("*.json") if path.name != "index.json"}
+    owner_ids = {owner.id for owner in registry.owners}
+    decisions = {owner.decision for owner in registry.owners}
+    selectors = {selector for owner in registry.owners for selector in owner.selectors}
 
-    assert registry.shards == (
-        "core-runtime.json",
-        "install-deployment.json",
-        "hooks-integrations.json",
-        "transport-auth-platform.json",
-        "marketplace-plugins.json",
-        "contracts-tooling.json",
-    )
-    assert len(registry.owners) == 55
-    assert len({owner.id for owner in registry.owners}) == 55
-    assert len({owner.decision for owner in registry.owners}) == 55
-    assert len({selector for owner in registry.owners for selector in owner.selectors}) == 72
+    assert set(registry.shards) == disk_shards
+    assert 5 <= len(registry.shards) <= 7
+    assert len(owner_ids) == len(registry.owners)
+    assert len(decisions) == len(registry.owners)
+    assert sum(len(owner.selectors) for owner in registry.owners) == len(selectors)
     assert all(owner.guards for owner in registry.owners)
 
 

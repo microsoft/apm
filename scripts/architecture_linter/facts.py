@@ -523,15 +523,22 @@ class FactsProvider:
         self._ast_visits += facts.visits
         if facts.tree_index is not None:
             self.tree_index_builds += 1
-            self._tree_index_builds_per_file[relative_path] = 1
+            self._tree_index_builds_per_file[relative_path] = (
+                self._tree_index_builds_per_file.get(relative_path, 0) + 1
+            )
             self._tree_index_node_count += len(facts.tree_index.nodes)
             self.peak_tree_index_nodes = max(
                 self.peak_tree_index_nodes,
                 self._tree_index_node_count,
             )
         if self._should_spill(relative_path, facts):
+            # Keep the built facts reachable until persistence succeeds. A
+            # spill error must fail closed without allowing another rule to
+            # repeat the AST walk or under-report the build counter.
+            self._file_facts[relative_path] = facts
             self._spill_facts(relative_path, facts)
             self.parse_cache.release_tree(relative_path)
+            self._file_facts.pop(relative_path)
             self._remember_transient(relative_path, facts)
         else:
             self._file_facts[relative_path] = facts
