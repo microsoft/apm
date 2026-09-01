@@ -1051,6 +1051,29 @@ def test_claude_lsp_collision_requires_force_and_force_reconciles(
     assert plugin["name"] == "apm-lsp"
     assert set(plugin["lspServers"]) == {"pyright"}
 
+    foreign = b'{"name":"custom-plugin","lspServers":{"pyright":{"command":"foreign"}}}\n'
+    plugin_path.write_bytes(foreign)
+    (update_refused,) = runner.run_sequence(
+        (("update", "--yes"),),
+        expected_returncodes=(1,),
+        scenario_id="claude-lsp-update-collision-refused",
+        cwd=project.root,
+        env=environment,
+    )
+    assert "--force" in update_refused.stdout
+    assert plugin_path.read_bytes() == foreign
+
+    runner.run_sequence(
+        (("update", "--yes", "--force"),),
+        expected_returncodes=(0,),
+        scenario_id="claude-lsp-update-collision-forced",
+        cwd=project.root,
+        env=environment,
+    )
+    repaired = json.loads(plugin_path.read_text(encoding="utf-8"))
+    assert repaired["name"] == "apm-lsp"
+    assert repaired["lspServers"]["pyright"]["command"] == "pyright-langserver"
+
 
 def test_claude_lsp_unapproved_package_is_not_discoverable(
     tmp_path: Path,

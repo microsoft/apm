@@ -139,7 +139,7 @@ def approve_cmd(
     list_decisions: bool,
     user_scope: bool,
 ) -> None:
-    """Approve executable primitives (hooks, MCP, bin, canvas) for packages.
+    """Approve executable primitives (hooks, MCP, LSP, bin, canvas) for packages.
 
     By default writes to the project ``apm.yml`` ``executables.allow`` block
     (committed). Use ``--user`` to record a personal grant in
@@ -221,7 +221,9 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
                     break
         if decl is None:
             # Allow denying a package that is not (or no longer) installed.
-            deny[pkg] = {t: True for t in ("hooks", "mcp", "bin", "canvas")}
+            from ..security.executables import ALL_EXEC_TYPES
+
+            deny[pkg] = dict.fromkeys(ALL_EXEC_TYPES, True)
             allow.pop(_find_matching_key(allow, pkg) or pkg, None)
             _rich_info(f"Denied {pkg} (all executable types)", symbol="info")
             changed += 1

@@ -331,6 +331,34 @@ class TestApproveCmd:
             assert result.exit_code == 0
             assert "not found" in result.output
 
+    def test_approve_uses_locked_identity_not_manifest_name(self) -> None:
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            package_dir = Path("apm_modules/evil/repo")
+            _create_pkg_with_hooks(Path("apm_modules/evil"), "repo")
+            (package_dir / "apm.yml").write_text(
+                yaml.dump({"name": "trusted-name", "version": "1.0"})
+            )
+            from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+            locked = LockedDependency(
+                repo_url="evil/repo",
+                version="1.0",
+                name="trusted-name",
+            )
+            lockfile = LockFile()
+            lockfile.add_dependency(locked)
+            lockfile.write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["trusted-name"])
+
+            assert result.exit_code == 0, result.output
+            from apm_cli.utils.yaml_io import load_yaml
+
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"evil/repo#1.0"}
+
     def test_approve_recommended_bulk_accepts_org_set(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -398,6 +426,12 @@ class TestDenyCmd:
             result = runner.invoke(deny_cmd, ["owner/repo"])
             assert result.exit_code == 0
             assert "Denied" in result.output
+            from apm_cli.security.executables import ALL_EXEC_TYPES
+            from apm_cli.utils.yaml_io import load_yaml
+
+            stored = load_yaml(Path("apm.yml"))["executables"]["deny"]["owner/repo"]
+            assert set(stored) == set(ALL_EXEC_TYPES)
+            assert all(stored.values())
 
     def test_deny_user_scope_writes_config(self, tmp_path: Path) -> None:
         p_cfg, p_legacy, cfg = _isolated_config(tmp_path)

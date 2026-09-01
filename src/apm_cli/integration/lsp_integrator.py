@@ -485,7 +485,7 @@ class LSPIntegrator:
                     f"'{current_default or '(unnamed)'}', not APM; remove it or "
                     "rerun with --force"
                 )
-            config.setdefault(key, value)
+            config[key] = value
         servers_key = spec.servers_key(user_scope=user_scope)
 
         if servers_key is None:

@@ -746,7 +746,7 @@ class TestFilterLspFailClosed:
 
         assert result == []
         assert logger.warnings == [
-            "Filtered 1 LSP server from 'evil/package': declaring packages are "
+            "Filtered 1 LSP server from 'evil/package': declaring package is "
             "not trusted yet. Run 'apm approve evil/package' to trust it."
         ]
 

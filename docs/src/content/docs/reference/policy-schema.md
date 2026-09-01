@@ -69,7 +69,7 @@ possible.
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
 | `security`         | object              | see section      | no       | Rules over APM's security checks (install-time content audit + external scanners; requires `external-scanners` flag). |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
-| `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, canvas). See [executables](#executables). |
+| `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, LSP, canvas). See [executables](#executables). |
 | `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
 
 Unknown top-level keys produce a warning, never an error -- so newer policy

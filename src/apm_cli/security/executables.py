@@ -713,7 +713,7 @@ def parse_allow_executables(data: dict[str, Any]) -> dict[str, dict[str, bool]] 
     if not isinstance(raw, dict):
         raise ValueError(
             "allowExecutables must be a mapping of "
-            "package keys to {hooks: bool, mcp: bool, bin: bool, canvas: bool}"
+            "package keys to {hooks: bool, mcp: bool, lsp: bool, bin: bool, canvas: bool}"
         )
 
     result: dict[str, dict[str, bool]] = {}
@@ -1023,9 +1023,10 @@ def filter_lsp_by_allow_executables(
             remediation = (
                 " Run 'apm install' to regenerate apm.lock.yaml, then approve the package."
             )
+        package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
         logger.warning(
-            f"Filtered {skipped_count} LSP {noun} from {owners}: declaring "
-            f"packages are not trusted yet.{remediation}",
+            f"Filtered {skipped_count} LSP {noun} from {owners}: "
+            f"{package_clause} not trusted yet.{remediation}",
             symbol="warning",
         )
     return filtered
@@ -1073,7 +1074,7 @@ def _parse_grant_block(
     if not isinstance(raw, dict):
         raise ValueError(
             f"{where} must be a mapping of package keys to "
-            "{hooks: bool, mcp: bool, bin: bool, canvas: bool}"
+            "{hooks: bool, mcp: bool, lsp: bool, bin: bool, canvas: bool}"
         )
     result: dict[str, dict[str, bool]] = {}
     for pkg_key, entry in raw.items():

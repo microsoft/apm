@@ -15,6 +15,7 @@ GUARD_CLAUDE_LSP_PLUGIN = "install-deployment-claude-lsp-plugin"
 
 _EXECUTABLES = "src/apm_cli/security/executables.py"
 _APPROVE_COMMAND = "src/apm_cli/commands/approve.py"
+_INSTALL_COMMAND = "src/apm_cli/commands/install.py"
 _INSTALL_TEMPLATE = "src/apm_cli/install/template.py"
 _LSP_INTEGRATOR = "src/apm_cli/integration/lsp_integrator.py"
 _LSP_PIPELINE = "src/apm_cli/install/lsp/integration.py"
@@ -58,6 +59,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 'approval_keys = getattr(dependency, "approval_keys", ())',
             ),
             _APPROVE_COMMAND: ("approval_identity=locked.get_unique_key()",),
+            _INSTALL_COMMAND: (
+                "def _effective_bundle_allow_map(",
+                "return effective_exec_map_for_project(",
+            ),
             _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
             _LSP_PIPELINE: (
                 "effective_allow_executables = effective_exec_map_for_project(",

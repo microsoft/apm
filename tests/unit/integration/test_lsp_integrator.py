@@ -226,9 +226,24 @@ class TestInstallProjectScope:
         LSPIntegrator.install([_make_dep("new-server")], project_root=tmp_path, force=True)
 
         data = json.loads(plugin_json.read_text())
-        assert data["name"] == "custom-lsp-plugin"
+        assert data["name"] == "apm-lsp"
         assert data["description"] == "Preserve this metadata"
         assert set(data["lspServers"]) == {"existing-server", "new-server"}
+        assert (
+            LSPIntegrator.install(
+                [_make_dep("new-server")],
+                project_root=tmp_path,
+                managed_server_names={"new-server"},
+                fail_on_write_error=True,
+            )
+            == 0
+        )
+        LSPIntegrator.remove_stale(
+            {"new-server"},
+            project_root=tmp_path,
+            fail_on_write_error=True,
+        )
+        assert set(json.loads(plugin_json.read_text())["lspServers"]) == {"existing-server"}
 
     def test_update_existing_server_counts_as_change(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN

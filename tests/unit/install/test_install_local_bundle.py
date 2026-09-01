@@ -142,6 +142,46 @@ def _invoke(project: Path, monkeypatch, *args: str):
     return _invoke_cli(project, monkeypatch, "install", *args)
 
 
+def test_local_bundle_receives_enabled_empty_executable_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bundle LSP filtering must distinguish an enabled empty gate from disabled."""
+    bundle = _make_bundle(
+        tmp_path / "source",
+        files={
+            "lsp.json": json.dumps(
+                {
+                    "lspServers": {
+                        "unsafe": {
+                            "command": "unsafe-language-server",
+                            "extensionToLanguage": {".unsafe": "unsafe"},
+                        }
+                    }
+                }
+            )
+        },
+    )
+    project = _make_project(tmp_path / "destination")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["executables"] = {}
+    (project / "apm.yml").write_text(yaml.dump(manifest), encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "apm_cli.install.local_bundle_handler.install_local_bundle",
+        _capture,
+    )
+
+    result = _invoke(project, monkeypatch, str(bundle), "--no-policy")
+
+    assert result.exit_code == 0, result.output
+    assert captured["allow_executables"] == {}
+
+
 # ---------------------------------------------------------------------------
 # Duck-type contract test for package_info
 # ---------------------------------------------------------------------------
