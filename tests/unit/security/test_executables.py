@@ -770,6 +770,15 @@ class TestFilterLspFailClosed:
 
         assert result == [approved]
 
+    def test_unlocked_declarer_gets_lock_recovery_guidance(self) -> None:
+        dependency = _FakeMcpDep("pyright", resolved_by="ghe.example/owner/repo")
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables([dependency], {}, logger)
+
+        assert result == []
+        assert "regenerate apm.lock.yaml" in logger.verbose[0]
+
 
 @pytest.mark.parametrize(
     ("current", "candidate", "expected"),

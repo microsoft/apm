@@ -556,9 +556,7 @@ class LSPIntegrator:
         for key, value in spec.config_defaults(user_scope=user_scope):
             if config.get(key) != value:
                 if fail_on_write_error:
-                    raise ValueError(
-                        f"{spec.label(user_scope=user_scope)} is not owned by APM"
-                    )
+                    raise ValueError(f"{spec.label(user_scope=user_scope)} is not owned by APM")
                 return []
         servers_key = spec.servers_key(user_scope=user_scope)
 
@@ -623,8 +621,9 @@ class LSPIntegrator:
                     from apm_cli.install.errors import RequiredIntegrationError
 
                     raise RequiredIntegrationError(
-                        f"LSP cleanup failed for target '{runtime}'. "
-                        "Check the target config path and permissions, then retry."
+                        f"LSP cleanup failed for target '{runtime}' at "
+                        f"{spec.label(user_scope=user_scope)}: {exc} "
+                        "Review the path and permissions, then retry."
                     ) from exc
 
     # ------------------------------------------------------------------

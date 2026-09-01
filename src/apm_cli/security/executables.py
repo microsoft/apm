@@ -988,10 +988,17 @@ def filter_lsp_by_allow_executables(
         ):
             filtered.append(dependency)
             continue
-        logger.verbose_detail(
-            f"Skipping LSP server from '{owner}': executables not trusted yet. "
-            f"Run 'apm approve {owner}' to trust it."
-        )
+        if approval_keys:
+            logger.verbose_detail(
+                f"Skipping LSP server from '{owner}': executables not trusted yet. "
+                f"Run 'apm approve {owner}' to trust it."
+            )
+        else:
+            logger.verbose_detail(
+                f"Skipping LSP server from '{owner}': package identity cannot be "
+                "verified without lock state. Run 'apm install' to regenerate "
+                "apm.lock.yaml, then approve the package."
+            )
     if len(filtered) < len(lsp_deps):
         logger.warning(
             f"Filtered {len(lsp_deps) - len(filtered)} LSP server(s) whose "
