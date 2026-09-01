@@ -749,6 +749,7 @@ class TestFilterLspFailClosed:
             "Filtered 1 LSP server from 'evil/package': declaring package is "
             "not trusted yet. Run 'apm approve evil/package' to trust it."
         ]
+        assert "LSP server 'pyright' from 'evil/package'" in logger.verbose[0]
 
     def test_approval_is_bound_to_declarer_not_server_name(self) -> None:
         approved = _FakeMcpDep(
@@ -779,6 +780,20 @@ class TestFilterLspFailClosed:
 
         assert result == []
         assert "regenerate apm.lock.yaml" in logger.verbose[0]
+
+    def test_multiple_unlocked_declarers_get_plural_recovery_guidance(self) -> None:
+        dependencies = [
+            _FakeMcpDep("pyright", resolved_by="ghe.example/owner/one"),
+            _FakeMcpDep("ruff", resolved_by="ghe.example/owner/two"),
+        ]
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables(dependencies, {}, logger)
+
+        assert result == []
+        assert "approve each package" in logger.warnings[0]
+        assert "LSP server 'pyright'" in logger.verbose[0]
+        assert "LSP server 'ruff'" in logger.verbose[1]
 
 
 @pytest.mark.parametrize(

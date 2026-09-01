@@ -998,16 +998,17 @@ def filter_lsp_by_allow_executables(
             filtered.append(dependency)
             continue
         skipped[owner] = bool(approval_keys)
+        dependency_name = getattr(dependency, "name", "(unnamed)")
         if approval_keys:
             logger.verbose_detail(
-                f"Skipping LSP server from '{owner}': executables not trusted yet. "
-                f"Run 'apm approve {owner}' to trust it."
+                f"Skipping LSP server '{dependency_name}' from '{owner}': "
+                f"executables not trusted yet. Run 'apm approve {owner}' to trust it."
             )
         else:
             logger.verbose_detail(
-                f"Skipping LSP server from '{owner}': package identity cannot be "
-                "verified without lock state. Run 'apm install' to regenerate "
-                "apm.lock.yaml, then approve the package."
+                f"Skipping LSP server '{dependency_name}' from '{owner}': package "
+                "identity cannot be verified without lock state. Run 'apm install' "
+                "to regenerate apm.lock.yaml, then approve the package."
             )
     if len(filtered) < len(lsp_deps):
         skipped_count = len(lsp_deps) - len(filtered)
@@ -1020,8 +1021,9 @@ def filter_lsp_by_allow_executables(
                 else " Run 'apm approve <package>' for each listed package."
             )
         else:
+            package_noun = "the package" if len(skipped) == 1 else "each package"
             remediation = (
-                " Run 'apm install' to regenerate apm.lock.yaml, then approve the package."
+                f" Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
             )
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
         logger.warning(

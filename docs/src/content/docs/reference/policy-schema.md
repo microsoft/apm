@@ -417,11 +417,11 @@ registry_source:
 ## executables
 
 The org ceiling for executable-primitive trust. Unifies the executable-trust
-vocabulary onto one noun, `executables`, governing all four gated types: hooks,
-`bin/` executables, self-defined MCP servers (`registry: false`), and canvas
-extensions. The org layer is the ceiling on **deny** -- it can deny and require
-fleet-wide, and recommend a vetted set, but personal or project consent can
-never widen past an org deny.
+vocabulary onto one noun, `executables`, governing all five gated types: hooks,
+`bin/` executables, self-defined MCP servers (`registry: false`), LSP servers,
+and canvas extensions. The org layer is the ceiling on **deny** -- it can deny
+and require fleet-wide, and recommend a vetted set, but personal or project
+consent can never widen past an org deny.
 
 | Field | Type | Default | Description |
 |---|---|---|---|

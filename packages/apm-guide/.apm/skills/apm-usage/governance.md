@@ -175,10 +175,10 @@ Notes:
 ## Executable trust governance
 
 Issue #1873 unifies executable-primitive trust (hooks, `bin/` executables,
-self-defined MCP servers, canvas extensions) onto one noun, `executables`,
-across three layers. The org policy is the **ceiling on deny**: it can deny and
-require fleet-wide and recommend a vetted set, but personal or project consent
-can never widen past an org deny.
+self-defined MCP servers, LSP servers, canvas extensions) onto one noun,
+`executables`, across three layers. The org policy is the **ceiling on deny**:
+it can deny and require fleet-wide and recommend a vetted set, but personal or
+project consent can never widen past an org deny.
 
 ```yaml
 # .github/apm-policy.yml
@@ -309,12 +309,12 @@ global canvas.
 
 The trust gate is enforced on every install path -- normal install and offline
 bundle install (`apm install <bundle>`) -- so a vendored bundle cannot smuggle
-an executable canvas past trust. Canvas trust is unified with the `executables`
-default-deny gate (hooks, bin, MCP, LSP, canvas); approve once and all five
-executable types are governed consistently. The org `executables:` policy block
-governs canvas trust alongside the other types (`deny_all`, `deny`, `require`,
-`recommend`); a canvas-only policy knob is not part of this experimental
-release.
+an executable canvas past trust. Once an `executables:` block enables the
+default-deny gate, canvas trust is unified with hooks, bin, MCP, LSP, and canvas
+execution; approve once and all five executable types are governed
+consistently. The org `executables:` policy block governs canvas trust alongside
+the other types (`deny_all`, `deny`, `require`, `recommend`); a canvas-only
+policy knob is not part of this experimental release.
 
 ## Local content governance
 
