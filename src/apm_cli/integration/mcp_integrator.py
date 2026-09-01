@@ -858,7 +858,7 @@ class MCPIntegrator:
             ):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return
-            lockfile.save(lock_path)
+            lockfile.save(lock_path, existing_lockfile=existing_lockfile)
         except Exception as exc:
             _log.debug(
                 "MCP lockfile persistence failed at %s",
