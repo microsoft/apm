@@ -147,6 +147,7 @@ All four conformance classes (Producer, Consumer, Registry, Governance) carry ac
 | [req-tg-011](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-011) | MUST | 8.5.5 | consumer | active | 2 | - |
 | [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 1 | - |
 | [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 7 | - |
+| [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 1 | - |
 
 ## Waivers
 

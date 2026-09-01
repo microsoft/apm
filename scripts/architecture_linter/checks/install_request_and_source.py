@@ -221,6 +221,8 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
     run_calls = _named_calls(handler_nodes, "_run_mcp_install")
     target_calls = _named_calls(handler_nodes, "resolve_manifest_target_decision")
     scope_partition_calls = _named_calls(handler_nodes, "partition_user_scope_runtimes")
+    scope_discovery_calls = _named_calls(handler_nodes, "discover_user_scope_mcp_runtimes")
+    bootstrap_calls = _named_calls(handler_nodes, "_create_minimal_apm_yml")
     manifest_calls = _named_calls(handler_nodes, "get_manifest_path")
     apm_dir_calls = _named_calls(handler_nodes, "get_apm_dir")
     validator_args = (
@@ -240,6 +242,11 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
         and len(target_calls) == 1
         and _has_scope_projection_keyword(target_calls[0], "user_scope")
         and len(scope_partition_calls) == 1
+        and len(scope_discovery_calls) == 1
+        and len(bootstrap_calls) == 1
+        and target_calls[0].lineno < bootstrap_calls[0].lineno
+        and scope_partition_calls[0].lineno < bootstrap_calls[0].lineno
+        and scope_discovery_calls[0].lineno < bootstrap_calls[0].lineno
         and len(manifest_calls) == 1
         and _takes_scope(manifest_calls[0])
         and len(apm_dir_calls) == 1

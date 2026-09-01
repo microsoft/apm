@@ -438,6 +438,11 @@ requirements:
     section: "8.5.7"
     conformance_class: consumer
     notes: "schema, effective-target, integrity, security, and executable admission drives one in-place aggregate registration opaque to legacy projection without lifecycle host-binary probing; only admitted dependencies participate in claimant selection and registration, direct dependencies win plugin-name collisions over transitive dependencies, equal-precedence collisions fail during admission, advisory cleanup omits ambiguous or changed-owner entries, and ledger-primary ownership permits exact-entry recovery of a reserved namespace while rejecting foreign collisions and invalid JSON, preserving unrelated JSON semantics, and rolling back catalog, ledger, and settings together"
+  - id: req-tg-014
+    keyword: MUST
+    section: "8.5.8"
+    conformance_class: consumer
+    notes: "user-scoped MCP target selection uses a disclosed versioned capability contract, ignores project-only detection signals, applies first-source precedence without fallback, filters mixed sets, and refuses zero-supported selections before user manifest, lockfile, or target-config mutation"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"

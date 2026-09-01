@@ -2214,6 +2214,10 @@ class TestInstallMcpFlag:
         with (
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch(
+                "apm_cli.integration.mcp_integrator_install.discover_user_scope_mcp_runtimes",
+                return_value=(["claude"], []),
+            ),
             patch("apm_cli.install.mcp.command.MCPIntegrator") as integrator,
         ):
             result = self.runner.invoke(cli, argv[1:])
@@ -2236,21 +2240,15 @@ class TestInstallMcpFlag:
         assert install_call.kwargs["scope"] is InstallScope.USER
         assert install_call.kwargs["user_scope"] is True
         assert install_call.kwargs["project_root"] == user_apm_dir
-        assert install_call.kwargs["target_decision"].value is None
+        assert install_call.kwargs["target_decision"].value == ["claude"]
+        assert install_call.kwargs["target_decision"].source == "auto-detect"
 
     def test_global_mcp_rejects_workspace_only_target_before_manifest_write(
         self, tmp_path, monkeypatch
     ):
         fake_home = tmp_path / "home"
         user_apm_dir = fake_home / ".apm"
-        user_apm_dir.mkdir(parents=True)
         user_manifest = user_apm_dir / "apm.yml"
-        original = {
-            "name": "user-scope",
-            "version": "0.1.0",
-            "dependencies": {"mcp": []},
-        }
-        user_manifest.write_text(yaml.safe_dump(original), encoding="utf-8")
         project = tmp_path / "project"
         project.mkdir()
         monkeypatch.chdir(project)
@@ -2276,7 +2274,89 @@ class TestInstallMcpFlag:
 
         assert result.exit_code == 2, (result.output, result.exception)
         assert "choose a global-capable target" in result.output
-        assert yaml.safe_load(user_manifest.read_text(encoding="utf-8")) == original
+        assert not user_manifest.exists()
+
+    def test_global_mcp_rejects_unsupported_saved_target_without_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        fake_home = tmp_path / "home"
+        user_manifest = fake_home / ".apm" / "apm.yml"
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".claude").mkdir()
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "-g",
+            "--mcp",
+            "probe",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.config.get_install_target", return_value="vscode"),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 2
+        assert "choose a global-capable target" in result.output
+        assert not user_manifest.exists()
+
+    def test_global_mcp_filters_mixed_target_set_before_dispatch(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "-g",
+            "--target",
+            "vscode,claude",
+            "--mcp",
+            "probe",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv) as invocation,
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+            replay_argv = [
+                "apm",
+                "install",
+                "-g",
+                "--mcp",
+                "probe-two",
+                "--no-policy",
+                "--",
+                "echo",
+                "ready",
+            ]
+            invocation.return_value = replay_argv
+            replay = self.runner.invoke(cli, replay_argv[1:])
+
+        assert result.exit_code == 0, result.output
+        assert replay.exit_code == 0, replay.output
+        first_call, replay_call = run_mcp_install.call_args_list
+        decision = first_call.kwargs["target_decision"]
+        assert decision.value == ["claude"]
+        assert replay_call.kwargs["target_decision"].value == ["claude"]
+        user_manifest = yaml.safe_load((fake_home / ".apm" / "apm.yml").read_text(encoding="utf-8"))
+        assert user_manifest["targets"] == ["claude"]
+        assert "Skipped workspace-only runtimes at user scope: vscode" in result.output
+        assert "Skipped workspace-only runtimes" not in replay.output
 
     def test_e3_mcp_with_only_apm(self):
         with self._chdir_with_apm_yml():
