@@ -1299,6 +1299,11 @@ class AuthResolver:
         env["SSH_ASKPASS_REQUIRE"] = "never"
         env.pop("GIT_ASKPASS", None)
         env.pop("SSH_ASKPASS", None)
+        for name in tuple(env):
+            if name == "PROXY_REGISTRY_TOKEN" or name.startswith(
+                ("APM_REGISTRY_TOKEN_", "APM_REGISTRY_USER_", "APM_REGISTRY_PASS_")
+            ):
+                env.pop(name, None)
         return env
 
     @staticmethod

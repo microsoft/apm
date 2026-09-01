@@ -587,7 +587,7 @@ class GitCache:
             if final_dir.is_dir() and verify_checkout_sha(final_dir, sha):
                 _log.debug(
                     "Write-dedup HIT under lock: %s @ %s [%s]",
-                    url,
+                    _sanitize_url(url),
                     sha[:12],
                     variant,
                 )
