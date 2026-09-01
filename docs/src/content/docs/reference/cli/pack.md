@@ -40,11 +40,11 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--include-prerelease` | off | Marketplace: allow pre-release tags to satisfy version ranges. |
 | `-m`, `--marketplace FORMATS` | all configured | Comma-separated list of marketplace formats to build. Sentinels: `all` (every configured format), `none` (skip marketplace entirely). |
 | `--marketplace-path FORMAT=PATH` | manifest default | Override the output path for a specific format. Repeatable. Example: `--marketplace-path codex=./dist/codex.json`. |
-| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Shape: `{ok, dry_run, warnings, errors, metadata_enrichment: {certifiable, outcomes: [...]}, marketplace: {outputs: [...]}}`. |
+| `--json` | off | Emit machine-readable JSON to stdout. All logs move to stderr. Includes `metadata_enrichment.certifiable` and per-package outcomes. |
 | `--legacy-skill-paths` | off | Bundle skills under per-client paths (e.g. `.cursor/skills/`) instead of the converged `.agents/skills/`. Compatibility flag. |
 | `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
-| `--check-clean` | off | Read-only release gate: regenerate every configured marketplace output to a temporary representation and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. It never writes pack outputs and exits `4` for drift or uncertifiable remote Claude metadata. |
-| `--strict-metadata` | off | Claude marketplace: fail before writing when remote package metadata cannot be fetched. Use it in publishing CI to require those fetches to succeed. Exits `5`. |
+| `--check-clean` | off | Read-only release gate: regenerate every configured marketplace output in memory and diff against the same effective path used by `apm pack`, including `--marketplace-path` overrides. Exits `4` for drift or uncertifiable remote Claude metadata. It automatically suppresses normal pack writes. |
+| `--strict-metadata` | off | Claude marketplace: fail before writing when remote package metadata cannot be fetched. Use it in publishing CI to require those fetches to succeed. Exits `5` before `--check-clean` runs when both flags are present. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
 :::caution[Migrating automation from `.tar.gz`?]
@@ -52,6 +52,43 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 upload step still matches `build/*.tar.gz`, add `--archive-format tar.gz` or
 update the downstream glob to `.zip`.
 :::
+
+### Metadata outcome JSON
+
+The `metadata_enrichment` object has a closed per-package status vocabulary:
+
+| Status | Meaning | Certifiable |
+|---|---|---|
+| `fetched` | Remote `apm.yml` supplied metadata. | yes |
+| `empty` | Remote `apm.yml` was reachable but had no description or version. | yes |
+| `local` | Metadata came from a local package. | yes |
+| `failed` | The remote manifest could not be fetched. | no |
+| `offline` | Fetching was intentionally skipped by `--offline`. | no |
+
+```json
+{
+  "metadata_enrichment": {
+    "certifiable": false,
+    "outcomes": [
+      {
+        "package": "remote-tool",
+        "status": "failed",
+        "cause": "request timed out"
+      }
+    ]
+  },
+  "errors": [
+    {
+      "code": "marketplace_metadata_uncertifiable",
+      "message": "remote metadata unavailable; regeneration is uncertifiable"
+    }
+  ]
+}
+```
+
+Default packing reports an uncertifiable result as a warning. `--check-clean`
+uses `marketplace_metadata_uncertifiable` and exits `4`; `--strict-metadata`
+uses `metadata_incomplete` and exits `5` before writing.
 
 ## Examples
 

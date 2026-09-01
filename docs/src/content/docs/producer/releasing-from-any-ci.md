@@ -7,8 +7,8 @@ sidebar:
 
 A marketplace release is three steps the CLI gives you primitives
 for: build with release gates, produce checksums, publish a tagged
-release. Every CI system runs the same three commands. The wrappers
-below differ only in syntax.
+release. Every CI system runs the same sequence. The wrappers below
+differ only in syntax.
 
 ## The canonical sequence
 
@@ -87,14 +87,10 @@ jobs:
 ```
 
 [`microsoft/apm-action@v1`](https://github.com/microsoft/apm-action)
-with `mode: release` is a convenience wrapper for the canonical
-sequence above. It installs the CLI, runs the read-only gates, packs
-the release artifacts separately, generates the sidecars, and calls
-`gh release create` against the pushed tag. Use it when you
-want one less script to maintain; use the raw `run:` form below when
-you need to customise any step, including `--strict-metadata`
-certification before artifact generation. The split gate-and-pack flow
-requires apm-action `v1.10.0` or newer.
+with `mode: release` is a convenience for the basic release flow. It does not
+currently enforce `--strict-metadata` before artifact generation. Use the raw
+`run:` form below when remote metadata must be certified, or when you need to
+customize another step.
 
 > **Reference deployment.** [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config)
 > runs this exact pipeline. The
@@ -102,8 +98,9 @@ requires apm-action `v1.10.0` or newer.
 > attaches 7 per-plugin bundles + their `.sha256` companions +
 > `marketplace-6.1.2.json` (15 assets total) via the workflow in
 > [`.github/workflows/release.yml`](https://github.com/DevExpGbb/zava-agent-config/blob/main/.github/workflows/release.yml).
-> APM `0.16.0` or newer is required; use apm-action `v1.10.0` or newer
-> for the split gate-and-pack flow documented here.
+> APM `0.16.0` or newer is required. apm-action `v1.10.0` provides the
+> read-only split flow; use the raw CLI block above when strict metadata
+> certification is required.
 
 :::caution[Migrating release workflows from `.tar.gz`?]
 The examples below assume the new `.zip` default from `apm pack --archive`.
@@ -223,13 +220,13 @@ steps:
 | 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack, or remote Claude package metadata was unfetchable. For drift, run `apm pack` locally, commit the diff, then re-tag. For metadata unavailability, restore the remote source or CI credentials and rerun; committing a regenerated file cannot certify unavailable metadata. |
 | 5    | `--strict-metadata`| Remote Claude package metadata could not be fetched, so `apm pack` refused to write. Retry with network access, or omit `--strict-metadata` when the default warning is acceptable. |
 
-`--check-versions` and `--check-clean` are validation-only and never
-write to disk. `--strict-metadata` certifies metadata before the
-subsequent pack writes artifacts. Recover drift by running `apm pack`
-locally without `--check-*`, inspecting the diff, and pushing a clean
-tag. For metadata unavailability, restore the remote source or CI
-credentials instead; regenerating a file cannot certify missing
-metadata.
+`--check-clean` is always read-only. `--check-versions` does not suppress normal
+pack writes by itself; pair it with `--dry-run` or `--check-clean` for a
+validation-only invocation. `--strict-metadata` certifies metadata before the
+subsequent pack writes artifacts. Recover drift by running `apm pack` locally
+without `--check-*`, inspecting the diff, and pushing a clean tag. For metadata
+unavailability, restore the remote source or CI credentials instead;
+regenerating a file cannot certify missing metadata.
 
 :::note
 `microsoft/apm-action@v1` is a thin convenience wrapper, not a new

@@ -1885,6 +1885,7 @@ class TestFetchRemoteMetadata:
         builder = self._make_builder(tmp_path)
         resolver = MagicMock()
         builder._auth_resolver = resolver
+        resolver.uses_public_github_anonymous_first.return_value = True
         resolver.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: operation(
             "ghp_faketoken123", {}
         )
@@ -1906,7 +1907,7 @@ class TestFetchRemoteMetadata:
             ANY,
             org="acme",
             path="acme/my-tool",
-            unauth_first=False,
+            unauth_first=True,
         )
 
     def test_no_auth_header_when_resolver_has_no_token(self, tmp_path: Path) -> None:
@@ -1914,7 +1915,8 @@ class TestFetchRemoteMetadata:
         pkg = self._make_pkg()
         builder = self._make_builder(tmp_path)
         builder._auth_resolver = SimpleNamespace(
-            try_with_fallback=lambda _host, operation, **_kwargs: operation(None, {})
+            uses_public_github_anonymous_first=lambda _host: True,
+            try_with_fallback=lambda _host, operation, **_kwargs: operation(None, {}),
         )
         yaml_body = b"description: Public plugin\nversion: 2.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
@@ -2613,7 +2615,7 @@ class TestFetchRemoteMetadataGHEHost:
         builder._host_info = SimpleNamespace(kind="github", api_base="https://api.github.com")
         # AuthResolver returns a GHE-specific token for the package's host.
         fake_auth = MagicMock()
-        fake_auth.resolve.return_value = AuthContext(
+        auth_context = AuthContext(
             token="ghs_ghe_specific_token",
             source="GITHUB_APM_PAT_GHE",
             token_type="classic",
@@ -2625,6 +2627,10 @@ class TestFetchRemoteMetadataGHEHost:
             ),
             git_env={},
             auth_scheme="basic",
+        )
+        fake_auth.uses_public_github_anonymous_first.return_value = False
+        fake_auth.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: operation(
+            auth_context.token, {}
         )
         builder._auth_resolver = fake_auth
         yaml_body = b"description: GHE tool\nversion: 0.3.1\n"

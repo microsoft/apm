@@ -252,8 +252,8 @@ def _parse_marketplace_filter(
     help=(
         "Release gate: regenerate every configured marketplace output to a "
         "temp representation and diff against the effective on-disk path, "
-        "including --marketplace-path overrides. This mode is read-only and "
-        "exits 4 for drift."
+        "including --marketplace-path overrides. This check is always read-only. "
+        "Exits 4 for drift or uncertifiable remote metadata."
     ),
 )
 @click.option(
@@ -307,7 +307,7 @@ def _parse_marketplace_filter(
     ),
 )
 @click.pass_context
-def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
+def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CLI option
     ctx,
     select_claude_plugin,
     fmt,
@@ -437,6 +437,14 @@ def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
     gate_errors: list[dict] = []
     version_gate_failed = False
     drift_gate_failed = False
+    prepared_marketplace = next(
+        (
+            sub.prepared
+            for sub in result.producer_results
+            if sub.kind is OutputKind.MARKETPLACE and sub.prepared is not None
+        ),
+        None,
+    )
 
     if check_versions or check_clean:
         from ..marketplace.builder import BuildOptions as MktBuildOptions
@@ -508,19 +516,25 @@ def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
             if check_clean:
                 # Use a builder with dry_run=True so the gate itself
                 # never mutates the working tree.
-                mkt_opts = MktBuildOptions(
-                    dry_run=True,
-                    offline=options.marketplace_offline,
-                    include_prerelease=options.marketplace_include_prerelease,
-                )
-                drift_builder = MarketplaceBuilder.from_config(
-                    gate_config, project_root=project_root, options=mkt_opts
-                )
+                prepared_resolve_result = None
+                if prepared_marketplace is not None and prepared_marketplace.outputs:
+                    drift_builder = prepared_marketplace.builder
+                    prepared_resolve_result = prepared_marketplace.resolve_result
+                else:
+                    mkt_opts = MktBuildOptions(
+                        dry_run=True,
+                        offline=options.marketplace_offline,
+                        include_prerelease=options.marketplace_include_prerelease,
+                    )
+                    drift_builder = MarketplaceBuilder.from_config(
+                        gate_config, project_root=project_root, options=mkt_opts
+                    )
                 d_report = check_marketplace_drift(
                     drift_builder,
                     gate_config,
                     project_root,
                     options.marketplace_path_overrides,
+                    resolve_result=prepared_resolve_result,
                 )
                 drift_payload = d_report.to_json_dict()
                 drift_metadata_enrichment = d_report.metadata_enrichment
@@ -536,7 +550,15 @@ def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
                         dirty_formats = ", ".join(
                             o.format for o in d_report.outputs if o.status != "unchanged"
                         )
-                        logger.error(f"Marketplace working tree dirty [outputs={dirty_formats}]")
+                        if any(out.status == "uncertifiable" for out in d_report.outputs):
+                            logger.error(
+                                "Marketplace clean check failed: remote metadata unavailable "
+                                f"[outputs={dirty_formats}]"
+                            )
+                        else:
+                            logger.error(
+                                f"Marketplace working tree dirty [outputs={dirty_formats}]"
+                            )
                         for out in d_report.outputs:
                             if out.status == "unchanged":
                                 logger.info(f"    {out.path}  [unchanged]")
@@ -573,17 +595,7 @@ def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
                             if out.status == "uncertifiable"
                             else "marketplace_drift"
                         )
-                        messages = (
-                            out.metadata_warnings
-                            if out.status == "uncertifiable"
-                            else (
-                                next(
-                                    msg
-                                    for msg in d_report.error_messages()
-                                    if msg.startswith(out.path)
-                                ),
-                            )
-                        )
+                        messages = out.error_messages()
                         gate_errors.extend(
                             {"code": code, "message": message} for message in messages
                         )
@@ -614,6 +626,10 @@ def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
                 envelope["plugin_manifests"] = sub.payload
         if drift_metadata_enrichment is not None:
             envelope["metadata_enrichment"] = drift_metadata_enrichment.to_json_dict()
+            metadata_warnings = set(drift_metadata_enrichment.warnings)
+            envelope["warnings"] = [
+                warning for warning in envelope["warnings"] if warning not in metadata_warnings
+            ]
         if gate_errors:
             envelope["errors"] = list(envelope["errors"]) + gate_errors
             envelope["ok"] = False
@@ -645,6 +661,8 @@ def pack_cmd(  # noqa: C901, PLR0913 -- Click handler, one param per CLI option
                 ),
             )
         elif sub.kind is OutputKind.MARKETPLACE:
+            if check_clean:
+                continue
             _render_marketplace_result(
                 logger, sub.payload, effective_dry_run, sub.warnings, sub.outputs
             )

@@ -70,6 +70,16 @@ class DriftOutputReport:
             "metadata_warnings": list(self.metadata_warnings),
         }
 
+    def error_messages(self) -> tuple[str, ...]:
+        """Return the bounded error messages for this output."""
+        if self.status == "missing":
+            return (f"{self.path}: missing on disk (would be created)",)
+        if self.status == "drift":
+            return (f"{self.path}: {len(self.differences)} differences vs. regenerated output",)
+        if self.status == "uncertifiable":
+            return (f"{self.path}: remote metadata unavailable; regeneration is uncertifiable",)
+        return ()
+
 
 @dataclass(frozen=True)
 class DriftReport:
@@ -86,16 +96,7 @@ class DriftReport:
         }
 
     def error_messages(self) -> list[str]:
-        msgs: list[str] = []
-        for out in self.outputs:
-            if out.status == "missing":
-                msgs.append(f"{out.path}: missing on disk (would be created)")
-            elif out.status == "drift":
-                count = len(out.differences)
-                msgs.append(f"{out.path}: {count} differences vs. regenerated output")
-            elif out.status == "uncertifiable":
-                msgs.extend(out.metadata_warnings)
-        return msgs
+        return [message for output in self.outputs for message in output.error_messages()]
 
 
 def _format_path_segment(parent: str, key: str) -> str:
@@ -162,12 +163,15 @@ def check_marketplace_drift(
     config: MarketplaceConfig,
     project_root: Path,
     output_overrides: Mapping[str, str | Path] | None = None,
+    *,
+    resolve_result: ResolveResult | None = None,
 ) -> DriftReport:
     """Run the drift gate using *builder* (must be dry-run) and compare
     its composed output for each configured profile against the on-disk
     artifact at the profile's resolved output path.
     """
-    resolve_result: ResolveResult = builder.resolve()
+    if resolve_result is None:
+        resolve_result = builder.resolve()
 
     # Honor the configured outputs list (claude / codex / ...).
     configured = tuple(config.outputs) if config.outputs else ("claude",)

@@ -123,6 +123,54 @@ def test_metadata_outcome_mapping_uses_the_precomputed_package_index() -> None:
     assert result["first"] == {"version": "1.0.0"}
 
 
+def test_metadata_outcomes_reject_unknown_statuses() -> None:
+    """Unknown future states cannot silently become certifiable."""
+    with pytest.raises(ValueError, match="unknown metadata enrichment status"):
+        MetadataEnrichmentOutcome("remote-tool", "future")  # type: ignore[arg-type]
+
+
+def test_metadata_failure_cause_never_exposes_exception_secrets(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Raw exception text must not enter warnings or JSON."""
+    _write_config(tmp_path)
+    builder = _builder(tmp_path)
+    secret = "github_pat_secret_material_1234567890"
+    auth_resolver = MagicMock()
+    auth_resolver.uses_public_github_anonymous_first.return_value = True
+    auth_resolver.try_with_fallback.side_effect = RuntimeError(f"Authorization: Bearer {secret}")
+    builder._auth_resolver = auth_resolver
+
+    outcome = builder._fetch_remote_metadata_outcome(_resolved_package())
+    result = MetadataEnrichmentResult((outcome,))
+
+    assert outcome.cause == "RuntimeError"
+    assert secret not in json.dumps(result.to_json_dict())
+    assert secret not in " ".join(result.warnings)
+
+
+def test_marketplace_none_skips_resolution(tmp_path: Path, monkeypatch) -> None:
+    """An explicit marketplace opt-out performs no resolution or fetch."""
+    _write_config(tmp_path)
+    monkeypatch.setattr(
+        MarketplaceBuilder,
+        "resolve",
+        lambda _self: (_ for _ in ()).throw(AssertionError("must not resolve")),
+    )
+    options = OrchestratorBuildOptions(
+        project_root=tmp_path,
+        apm_yml_path=tmp_path / "apm.yml",
+        marketplace_formats=(),
+        dry_run=True,
+    )
+
+    result = BuildOrchestrator(producers=[MarketplaceProducer()]).run(options)
+
+    assert result.outputs == []
+    assert result.producer_results[0].payload.outputs == ()
+
+
 def test_drift_refuses_uncertifiable_metadata_before_comparing_output(
     tmp_path: Path,
     monkeypatch,
@@ -232,27 +280,23 @@ def test_check_clean_never_writes_before_reporting_uncertifiable_metadata(
     assert artifact.read_bytes() == before
 
 
-def test_pack_json_reports_the_final_clean_check_metadata_outcome(
+def test_pack_json_reuses_build_metadata_for_clean_check(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """A later clean-check fetch failure must replace an earlier success in JSON."""
+    """The clean gate must compare the exact metadata snapshot built once."""
     _write_config(tmp_path)
-    outcomes = iter(
-        (
-            MetadataEnrichmentOutcome(
-                "remote-tool",
-                "fetched",
-                values=(("description", "available"), ("version", "1.0.0")),
-            ),
-            MetadataEnrichmentOutcome("remote-tool", "failed", cause="transport closed"),
-        )
+    fetched = MetadataEnrichmentOutcome(
+        "remote-tool",
+        "fetched",
+        values=(("description", "available"), ("version", "1.0.0")),
     )
     monkeypatch.setattr(MarketplaceBuilder, "_ensure_auth", lambda _self: None)
+    fetch = MagicMock(return_value=fetched)
     monkeypatch.setattr(
         MarketplaceBuilder,
         "_fetch_remote_metadata_outcome",
-        lambda _self, _pkg: next(outcomes),
+        fetch,
     )
     monkeypatch.chdir(tmp_path)
 
@@ -260,11 +304,12 @@ def test_pack_json_reports_the_final_clean_check_metadata_outcome(
 
     assert result.exit_code == 4, result.output
     payload = json.loads(result.output)
-    assert payload["metadata_enrichment"]["certifiable"] is False
+    assert fetch.call_count == 1
+    assert payload["metadata_enrichment"]["certifiable"] is True
     assert payload["metadata_enrichment"]["outcomes"] == [
-        {"package": "remote-tool", "status": "failed", "cause": "transport closed"}
+        {"package": "remote-tool", "status": "fetched"}
     ]
-    assert payload["errors"][0]["code"] == "marketplace_metadata_uncertifiable"
+    assert payload["errors"][0]["code"] == "marketplace_drift"
 
 
 def test_strict_metadata_preflight_prevents_bundle_and_marketplace_mutations(

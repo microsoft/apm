@@ -27,7 +27,7 @@ from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from ..core.auth import AuthContext, HostInfo
@@ -74,6 +74,9 @@ from .yml_schema import (
 logger = logging.getLogger(__name__)
 
 _LOCAL_METADATA_MAX_BYTES = 64 * 1024
+_METADATA_STATUSES = frozenset({"fetched", "empty", "failed", "offline", "local"})
+_CERTIFIABLE_METADATA_STATUSES = frozenset({"fetched", "empty", "local"})
+MetadataEnrichmentStatus = Literal["fetched", "empty", "failed", "offline", "local"]
 
 
 def _read_capped_text(resp: Any) -> str:
@@ -88,6 +91,19 @@ def _read_capped_text(resp: Any) -> str:
     if len(raw) > _LOCAL_METADATA_MAX_BYTES:
         raise ValueError("remote metadata exceeds byte cap")
     return raw.decode("utf-8")
+
+
+def _safe_metadata_failure_cause(exc: BaseException) -> str:
+    """Return a stable failure category without propagating exception secrets."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTP {exc.code}"
+    if isinstance(exc, TimeoutError):
+        return "request timed out"
+    if isinstance(exc, urllib.error.URLError):
+        return "network request failed"
+    if isinstance(exc, PermissionError):
+        return "authentication required"
+    return type(exc).__name__
 
 
 __all__ = [
@@ -130,9 +146,14 @@ class MetadataEnrichmentOutcome:
     """The metadata-fetch result for one resolved marketplace package."""
 
     package: str
-    status: str  # "fetched" | "empty" | "failed" | "offline" | "local"
+    status: MetadataEnrichmentStatus
     values: tuple[tuple[str, str], ...] = ()
     cause: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject unknown states so certification always fails closed."""
+        if self.status not in _METADATA_STATUSES:
+            raise ValueError(f"unknown metadata enrichment status: {self.status!r}")
 
     @property
     def metadata(self) -> dict[str, str]:
@@ -184,7 +205,7 @@ class MetadataEnrichmentResult(Mapping[str, dict[str, str]]):
     @property
     def certifiable(self) -> bool:
         """Whether output based on this enrichment may certify clean drift."""
-        return all(outcome.status not in {"failed", "offline"} for outcome in self.outcomes)
+        return all(outcome.status in _CERTIFIABLE_METADATA_STATUSES for outcome in self.outcomes)
 
     @property
     def warnings(self) -> tuple[str, ...]:
@@ -194,15 +215,13 @@ class MetadataEnrichmentResult(Mapping[str, dict[str, str]]):
             if outcome.status == "offline":
                 warnings.append(
                     f"Package '{outcome.package}': metadata enrichment skipped by "
-                    "--offline. Add description/version to the marketplace entry or "
-                    "rerun without --offline."
+                    "--offline. Rerun without --offline when certification is required."
                 )
             elif outcome.status == "failed":
                 cause = outcome.cause or "unknown failure"
                 warnings.append(
                     f"Package '{outcome.package}': metadata enrichment failed "
-                    f"({cause}). Add description/version to the marketplace entry or "
-                    "retry with network access."
+                    f"({cause}). Restore repository, network, or credential access and retry."
                 )
         return tuple(warnings)
 
@@ -1143,9 +1162,9 @@ class MarketplaceBuilder:
             host_kind = host_info.kind if host_info else "github"
 
             if host_kind not in ("github", "ghe_cloud", "ghes"):
-                # Non-GitHub hosts -- skip metadata enrichment
+                # Non-GitHub hosts cannot provide this GitHub-specific enrichment.
                 logger.debug(
-                    "Skipping metadata fetch for %s (non-GitHub host: %s)",
+                    "Metadata fetch unsupported for %s (non-GitHub host: %s)",
                     pkg.name,
                     effective_host,
                 )
@@ -1206,12 +1225,13 @@ class MarketplaceBuilder:
                 # path, which initializes AuthResolver before worker threads.
                 raw = _open_metadata(self._github_token, {})
             else:
+                unauth_first = auth_resolver.uses_public_github_anonymous_first(effective_host)
                 raw = auth_resolver.try_with_fallback(
                     effective_host,
                     _open_metadata,
                     org=org,
                     path=pkg.source_repo,
-                    unauth_first=False,
+                    unauth_first=unauth_first,
                 )
             data = load_yaml_str(raw)
             if not isinstance(data, dict):
@@ -1243,7 +1263,7 @@ class MarketplaceBuilder:
                 pkg.name,
                 exc_info=True,
             )
-            cause = str(exc).strip() or type(exc).__name__
+            cause = _safe_metadata_failure_cause(exc)
             return MetadataEnrichmentOutcome(pkg.name, "failed", cause=cause)
 
     def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> dict[str, str] | None:
@@ -1352,7 +1372,7 @@ class MarketplaceBuilder:
                                 values=tuple(sorted((metadata or {}).items())),
                             )
                     except Exception as exc:
-                        cause = str(exc).strip() or type(exc).__name__
+                        cause = _safe_metadata_failure_cause(exc)
                         outcomes_by_package[pkg.name] = MetadataEnrichmentOutcome(
                             pkg.name,
                             "failed",

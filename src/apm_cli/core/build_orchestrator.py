@@ -66,6 +66,7 @@ class ProducerResult:
     outputs: list[Path] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     payload: Any = None
+    prepared: Any = None
 
 
 @dataclass
@@ -157,6 +158,7 @@ class MarketplaceProducer:
         )
         from ..marketplace.builder import (
             MarketplaceBuilder,
+            ResolveResult,
         )
         from ..marketplace.errors import BuildError as MktBuildError
         from ..marketplace.migration import (
@@ -213,6 +215,14 @@ class MarketplaceProducer:
                     f"Valid targets: {valid_targets}"
                 )
             output_profiles.append(profile)
+
+        if not output_profiles:
+            return _MarketplaceBuildPlan(
+                builder=builder,
+                resolve_result=ResolveResult(entries=(), errors=()),
+                warnings=warnings,
+                outputs=(),
+            )
 
         try:
             resolve_result = builder.resolve()
@@ -289,6 +299,7 @@ class MarketplaceProducer:
             outputs=outputs,
             warnings=warnings,
             payload=marketplace_report,
+            prepared=plan,
         )
 
     def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
