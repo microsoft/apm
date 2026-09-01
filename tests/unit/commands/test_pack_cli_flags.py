@@ -221,11 +221,14 @@ class TestCheckCleanFlag:
 
     def test_skip_when_no_marketplace_block(self, tmp_path: _Path, monkeypatch) -> None:
         (tmp_path / "apm.yml").write_text(
-            "name: x\ndescription: y\nversion: 1.0.0\n", encoding="utf-8"
+            "name: x\ndescription: y\nversion: 1.0.0\ndependencies: {}\n",
+            encoding="utf-8",
         )
         monkeypatch.chdir(tmp_path)
-        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run"])
+        result = CliRunner().invoke(pack_cmd, ["--check-clean"])
         assert result.exit_code != 4
+        assert "Marketplace drift check skipped" in result.output
+        assert "--check-clean is read-only" not in result.output
 
     def test_fails_when_on_disk_missing(self, tmp_path: _Path, monkeypatch) -> None:
         _write_project(tmp_path, _APM_ALIGNED)
@@ -269,7 +272,9 @@ class TestCheckCleanFlag:
         result = CliRunner().invoke(pack_cmd, ["--check-clean", "--offline"])
 
         assert result.exit_code == 0, result.output
-        assert "--check-clean is read-only; no pack outputs were written." in result.output
+        assert (
+            "[dry-run] --check-clean is read-only; no pack outputs were written." in result.output
+        )
         assert "Packed" not in result.output
 
     def test_json_envelope_carries_drift(self, tmp_path: _Path, monkeypatch) -> None:

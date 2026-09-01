@@ -317,6 +317,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
     effective_dry_run = dry_run or check_clean
+    implicit_check_clean_dry_run = check_clean and not dry_run
     logger = CommandLogger("pack", verbose=verbose, dry_run=effective_dry_run)
 
     try:
@@ -403,6 +404,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     gate_errors: list[dict] = []
     version_gate_failed = False
     drift_gate_failed = False
+    gate_config = None
 
     if check_versions or check_clean:
         from ..marketplace.builder import BuildOptions as MktBuildOptions
@@ -416,7 +418,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         from ..marketplace.yml_schema import MarketplaceYmlError
 
         # Try to load the marketplace config; if absent, skip both gates with [i].
-        gate_config = None
         try:
             source = detect_config_source(project_root)
             if source != ConfigSource.NONE:
@@ -556,11 +557,11 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             ctx.exit(4)
         return
 
-    if check_clean and not dry_run:
-        logger.info("--check-clean is read-only; no pack outputs were written.")
+    if implicit_check_clean_dry_run and gate_config is not None:
+        logger.dry_run_notice("--check-clean is read-only; no pack outputs were written.")
 
     for sub in result.producer_results:
-        if check_clean and not dry_run:
+        if implicit_check_clean_dry_run:
             continue
         if sub.kind is OutputKind.BUNDLE:
             _render_bundle_result(
