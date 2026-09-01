@@ -491,13 +491,14 @@ def scan_installed_executable_packages(manifest: Path) -> list:
 
     lockfile = LockFile.read(get_lockfile_path(manifest.parent))
     if lockfile is not None:
-        from ..deps.path_anchoring import resolve_local_dep_dir
+        from ..deps.path_anchoring import resolve_local_dep_dirs
         from ..utils.yaml_io import load_yaml
 
+        local_dependency_dirs = resolve_local_dep_dirs(lockfile, manifest.parent)
         for locked in lockfile.get_package_dependencies():
             try:
                 package_dir = (
-                    resolve_local_dep_dir(locked, lockfile, manifest.parent)
+                    local_dependency_dirs[locked.get_unique_key()]
                     if locked.source == "local"
                     else locked.to_dependency_ref().get_install_path(apm_modules)
                 )

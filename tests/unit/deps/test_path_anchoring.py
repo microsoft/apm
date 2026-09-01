@@ -19,11 +19,16 @@ the helper is pure path math + corruption detection, and the caller
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
+from apm_cli.deps.path_anchoring import (
+    LocalResolutionError,
+    resolve_local_dep_dir,
+    resolve_local_dep_dirs,
+)
 
 
 def _local(repo_url: str, local_path: str, resolved_by: str | None = None) -> LockedDependency:
@@ -67,6 +72,30 @@ class TestParentWalk:
         c = _local("_local/c", "../c", resolved_by="_local/b")
         result = resolve_local_dep_dir(c, _lockfile(a, b, c), tmp_path)
         assert result == (tmp_path / "packages" / "c").resolve()
+
+    def test_shared_index_and_cache_resolve_chain_linearly(self, tmp_path: Path) -> None:
+        """Batch callers must resolve each ancestry edge at most once."""
+        from apm_cli.deps import path_anchoring
+
+        dependencies = [_local("_local/0", "./packages/0")]
+        for index in range(1, 40):
+            dependencies.append(
+                _local(
+                    f"_local/{index}",
+                    f"../{index}",
+                    resolved_by=f"_local/{index - 1}",
+                )
+            )
+        lockfile = _lockfile(*dependencies)
+        with patch.object(
+            path_anchoring,
+            "_find_parent",
+            wraps=path_anchoring._find_parent,
+        ) as find_parent:
+            resolved = resolve_local_dep_dirs(lockfile, tmp_path)
+
+        assert find_parent.call_count == len(dependencies) - 1
+        assert len(resolved) == len(dependencies)
 
 
 class TestAbsoluteBypass:
