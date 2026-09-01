@@ -694,6 +694,7 @@ transport-platform-github-throttle
 transport-platform-host-credential-resolution
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
+transport-platform-revision-pin-outcome
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
