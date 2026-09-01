@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from apm_cli.commands.uninstall.cli import uninstall
+from apm_cli.commands.uninstall.cli import _cleanup_stale_lsp, uninstall
 from apm_cli.commands.uninstall.engine import (
     LocalSlotRefresh,
     _activate_staged_local_refresh,
@@ -31,6 +31,29 @@ def _write_manifest(project: Path, dependencies: Sequence[object]) -> None:
         },
         project / "apm.yml",
     )
+
+
+def test_global_lsp_cleanup_failure_uses_global_recovery_command(tmp_path: Path) -> None:
+    """User-scope cleanup must not prescribe a project-scope reinstall."""
+    logger = MagicMock()
+    with patch(
+        "apm_cli.install.lsp.integration.reconcile_lsp_after_uninstall",
+        side_effect=OSError("foreign config"),
+    ):
+        updated, error = _cleanup_stale_lsp(
+            apm_package=MagicMock(),
+            lockfile=MagicMock(),
+            lockfile_path=tmp_path / "apm.lock.yaml",
+            modules_dir=tmp_path / "apm_modules",
+            deploy_root=tmp_path,
+            user_scope=True,
+            logger=logger,
+        )
+
+    assert updated is False
+    assert isinstance(error, OSError)
+    message = logger.error.call_args.args[0]
+    assert "'apm install --global'" in message
 
 
 def test_uninstall_help_points_to_actionable_dependency_keys() -> None:

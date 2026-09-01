@@ -747,9 +747,11 @@ class TestFilterLspFailClosed:
         assert result == []
         assert logger.warnings == [
             "Filtered 1 LSP server from 'evil/package': declaring package is "
-            "not trusted yet. Run 'apm approve evil/package' to trust it."
+            "not trusted yet. Run 'apm policy explain evil/package'; approve it "
+            "only if policy permits."
         ]
         assert "LSP server 'pyright' from 'evil/package'" in logger.verbose[0]
+        assert "if policy permits" in logger.verbose[0]
 
     def test_approval_is_bound_to_declarer_not_server_name(self) -> None:
         approved = _FakeMcpDep(

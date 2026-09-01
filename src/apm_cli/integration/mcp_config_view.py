@@ -12,7 +12,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
+from apm_cli.deps.path_anchoring import (
+    LocalResolutionError,
+    build_local_parent_index,
+    resolve_local_dep_dir,
+)
 from apm_cli.integration._shared import deduplicate_deps
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
@@ -197,10 +201,19 @@ def _package_manifest_path(
     lockfile: LockFile,
     modules_root: Path,
     project_root: Path,
+    *,
+    parent_index: dict[str, tuple[LockedDependency, ...]],
+    resolved_cache: dict[str, Path],
 ) -> Path:
     """Resolve a locked package's canonical current manifest path."""
     if dependency.source == "local":
-        package_dir = resolve_local_dep_dir(dependency, lockfile, project_root)
+        package_dir = resolve_local_dep_dir(
+            dependency,
+            lockfile,
+            project_root,
+            parent_index=parent_index,
+            resolved_cache=resolved_cache,
+        )
     else:
         package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
     return (package_dir / "apm.yml").resolve()
@@ -267,6 +280,8 @@ def _collect_locked_dependencies(
 
     collected: list[MCPDependency] = []
     problems: list[McpSourceProblem] = []
+    parent_index = build_local_parent_index(lockfile)
+    resolved_cache: dict[str, Path] = {}
     for package_key, dependency in lockfile.dependencies.items():
         if package_key == ".":
             continue
@@ -277,6 +292,8 @@ def _collect_locked_dependencies(
                 lockfile,
                 modules_root,
                 project_root,
+                parent_index=parent_index,
+                resolved_cache=resolved_cache,
             )
         except LocalResolutionError as exc:
             problems.append(

@@ -1002,7 +1002,8 @@ def filter_lsp_by_allow_executables(
         if approval_keys:
             logger.verbose_detail(
                 f"Skipping LSP server '{dependency_name}' from '{owner}': "
-                f"executables not trusted yet. Run 'apm approve {owner}' to trust it."
+                f"executables not trusted. Run 'apm policy explain {owner}'; "
+                f"if policy permits, run 'apm approve {owner}'."
             )
         else:
             logger.verbose_detail(
@@ -1016,9 +1017,11 @@ def filter_lsp_by_allow_executables(
         owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
         if skipped and all(skipped.values()):
             remediation = (
-                f" Run 'apm approve {next(iter(sorted(skipped)))}' to trust it."
+                f" Run 'apm policy explain {next(iter(sorted(skipped)))}'; "
+                "approve it only if policy permits."
                 if len(skipped) == 1
-                else " Run 'apm approve <package>' for each listed package."
+                else " Run 'apm policy explain <package>' for each listed package; "
+                "approve only packages policy permits."
             )
         else:
             package_noun = "the package" if len(skipped) == 1 else "each package"

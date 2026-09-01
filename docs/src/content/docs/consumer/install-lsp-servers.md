@@ -170,15 +170,11 @@ never touched.
 
 ## Lockfile
 
-`apm install` persists the LSP definition and target ownership in
-`apm.lock.yaml`:
-
-- `lsp_servers` -- sorted list of APM-managed server names.
-- `lsp_configs` -- server-name-to-config baseline for drift detection.
-- `lsp_target_servers` -- target-to-server ownership used to remove entries
-  when a target is dropped.
-
-See the [Lockfile specification](../../reference/lockfile-spec/).
+`apm install` records resolved LSP configuration, declaration ownership, and
+target ownership in `apm.lock.yaml`. These fields let lifecycle commands
+reconcile only APM-owned entries. See the
+[Lockfile specification](../../reference/lockfile-spec/) for the canonical
+field definitions.
 
 ## Plugin extraction
 

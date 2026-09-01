@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from apm_cli.core.command_logger import CommandLogger
-from apm_cli.deps.path_anchoring import resolve_local_dep_dir
+from apm_cli.deps.path_anchoring import build_local_parent_index, resolve_local_dep_dir
 from apm_cli.install.drift_render import (
     render_drift as render_drift,
 )
@@ -264,6 +264,8 @@ def _materialize_install_path(
     cache_only: bool,
     *,
     lockfile: LockFile | None = None,
+    parent_index: dict[str, tuple[LockedDependency, ...]] | None = None,
+    resolved_cache: dict[str, Path] | None = None,
     live_modules_dir: Path | None = None,
     downloader: Any | None = None,
     registry_resolver: Any | None = None,
@@ -297,7 +299,13 @@ def _materialize_install_path(
     if lock_dep.source == "local":
         if not lock_dep.local_path:
             raise CacheMissError(f"local dep {lock_dep.repo_url!r} has no local_path in lockfile")
-        candidate = resolve_local_dep_dir(lock_dep, lockfile, project_root)
+        candidate = resolve_local_dep_dir(
+            lock_dep,
+            lockfile,
+            project_root,
+            parent_index=parent_index,
+            resolved_cache=resolved_cache,
+        )
         if not candidate.exists():
             raise CacheMissError(
                 f"local source missing for {lock_dep.local_path!r}: expected {candidate}"
@@ -624,6 +632,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     logger.replay_start()
     replayed_count = 0
+    local_parent_index = build_local_parent_index(lock)
+    local_resolved_cache: dict[str, Path] = {}
     try:
         with _ReadOnlyProjectGuard(project_root, protected_subpaths):
             for lock_dep in lock.get_all_dependencies():
@@ -638,6 +648,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         apm_modules_dir,
                         cache_only=config.cache_only,
                         lockfile=lock,
+                        parent_index=local_parent_index,
+                        resolved_cache=local_resolved_cache,
                         live_modules_dir=live_modules_dir,
                         downloader=downloader,
                         registry_resolver=registry_resolver,

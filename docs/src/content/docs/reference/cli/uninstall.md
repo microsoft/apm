@@ -96,12 +96,15 @@ What gets removed, in order:
 4. Transitive dependencies that no remaining package depends on (npm-style pruning, computed from `apm.lock.yaml`). A transitive dependency still declared by any surviving package is preserved, even when two packages share it (a diamond-shaped install). If a surviving package's manifest can't be read, APM keeps every remaining candidate for that run rather than guessing -- re-run with `--verbose` to see which manifest failed, then fix or restore it and re-run to complete cleanup.
 5. Every remaining file in the lockfile's `deployed_files` for the removed packages and pruned orphans, across configured target-owned folders such as `.github/`, `.claude/`, `.grok/`, and `.agents/`.
 6. Hook entries inside `.claude/settings.json`, `.cursor/hooks.json`, `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages contributed. Remaining packages -- including transitive dependencies still required by another package -- have their hook entries rebuilt from the post-removal lockfile.
-7. MCP servers contributed only by the removed packages. For current lockfiles,
-   cleanup touches only the runtimes recorded as owners in `mcp_target_servers`.
-   An explicitly empty ownership map is a no-op. Older lockfiles adopt only
-   self-defined entries that exactly match their stored configuration baseline.
-   Cleanup attempts every owning runtime before exiting nonzero on failure. Fix
-   the reported configs, then run `apm install` to reconcile stale entries.
+7. MCP and LSP servers contributed only by the removed packages. For current
+   lockfiles, MCP cleanup touches only the runtimes recorded as owners in
+   `mcp_target_servers`. An explicitly empty ownership map is a no-op. Older
+   lockfiles adopt only self-defined entries that exactly match their stored
+   configuration baseline. When another surviving package declares the same LSP
+   server name, ownership transfers to that package instead of deleting the
+   shared entry. Cleanup attempts every owning runtime before exiting nonzero on
+   failure. Fix the reported configs, then run `apm install` to reconcile stale
+   entries.
 8. The lockfile entries themselves. If no dependencies remain, `apm.lock.yaml` is deleted.
 9. Empty parent directories left behind by the cleanup.
 
@@ -112,6 +115,11 @@ matched package in the same invocation is removed. Fix the identifier and retry.
 If a target-scoped file owned only by a removed package was edited or cannot be
 deleted, uninstall lists the retained paths and exits before changing `apm.yml`,
 `apm.lock.yaml`, or package modules. Resolve the listed files and retry.
+
+If safe LSP cleanup fails after package removal, uninstall exits nonzero,
+preserves the conflicting configuration, and tells you to repair the path or
+ownership conflict. Run `apm install` to reconcile project state, or
+`apm install --global` after a global uninstall.
 
 `_local/<name>` is resolved from the manifest and lockfile metadata that produced
 the `apm deps list` row. APM does not reinterpret it as `owner/repo` or rebuild an

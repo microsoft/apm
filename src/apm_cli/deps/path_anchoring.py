@@ -87,6 +87,8 @@ def resolve_local_dep_dir(
             f"not a resolvable local dependency: repo_url={lock_dep.repo_url!r} "
             f"source={lock_dep.source!r} local_path={lock_dep.local_path!r}"
         )
+    if not lock_dep.resolved_by:
+        return _join(project_root.resolve(), lock_dep.local_path)
     index = parent_index if parent_index is not None else build_local_parent_index(lockfile)
     cache = resolved_cache if resolved_cache is not None else {}
     return _resolve_dep_dir(

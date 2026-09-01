@@ -113,7 +113,7 @@ class TestOwnedLspIntegration:
         ).write(lock_path)
         mock_integrator.get_server_names.return_value = {"pyright"}
 
-        with pytest.raises(ValueError, match="conflicts with another owner"):
+        with pytest.raises(ValueError, match="conflicts with another owner") as exc_info:
             run_owned_lsp_integration(
                 dependencies=[_make_dep("pyright")],
                 owner="bundle#1",
@@ -123,6 +123,8 @@ class TestOwnedLspIntegration:
                 target_runtimes=["copilot"],
                 logger=_mock_logger(),
             )
+        assert "other#1" in str(exc_info.value)
+        assert "--force does not transfer ownership" in str(exc_info.value)
 
     @patch(_PATCH_TARGET)
     def test_legacy_bundle_provenance_does_not_infer_current_target(
@@ -230,6 +232,40 @@ class TestRunLspIntegration:
 
         assert count == 1
         mock_integrator.install.assert_called_once()
+
+    @patch(_PATCH_TARGET)
+    def test_manifest_conflict_names_bundle_owner_and_recovery(self, mock_integrator, tmp_path):
+        """A cross-owner conflict must not imply that --force transfers it."""
+        dependency = _make_dep("shared")
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [dependency]
+        old_lock = _mock_lock(
+            lsp_servers=["shared"],
+            lsp_configs={"shared": {}},
+            lsp_config_provenance={"shared": "bundle:vendor/tool"},
+            lsp_target_servers={"claude": ["shared"]},
+            target_servers_present=True,
+        )
+        mock_integrator.resolve_target_runtimes.return_value = ["claude"]
+        mock_integrator.get_server_names.return_value = {"shared"}
+
+        with pytest.raises(
+            ValueError,
+            match="installed bundle owner",
+        ) as exc_info:
+            run_lsp_integration(
+                apm_package=package,
+                apm_modules_path=tmp_path / "apm_modules",
+                lock_path=tmp_path / "apm.lock.yaml",
+                existing_lock=old_lock,
+                project_root=tmp_path,
+                user_scope=False,
+                should_install=True,
+                logger=_mock_logger(),
+            )
+
+        assert "bundle:vendor/tool" in str(exc_info.value)
+        assert "--force does not transfer ownership" in str(exc_info.value)
 
     @patch(_PATCH_TARGET)
     def test_filters_unapproved_lsp_dependencies(self, mock_integrator, tmp_path):

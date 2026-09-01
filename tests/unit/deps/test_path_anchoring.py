@@ -58,6 +58,17 @@ class TestDirectDep:
         result = resolve_local_dep_dir(dep, None, tmp_path)
         assert result == (tmp_path / "packages" / "foo").resolve()
 
+    def test_root_dep_does_not_build_parent_index(self, tmp_path: Path) -> None:
+        """Wide direct-only graphs must retain constant-time singular resolution."""
+        dep = _local("_local/foo", "./packages/foo")
+        with patch(
+            "apm_cli.deps.path_anchoring.build_local_parent_index",
+            side_effect=AssertionError("direct dependency built an index"),
+        ):
+            result = resolve_local_dep_dir(dep, _lockfile(dep), tmp_path)
+
+        assert result == (tmp_path / "packages" / "foo").resolve()
+
 
 class TestParentWalk:
     def test_single_hop(self, tmp_path: Path) -> None:

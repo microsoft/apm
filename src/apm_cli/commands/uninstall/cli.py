@@ -69,10 +69,11 @@ def _cleanup_stale_lsp(
         )
         return updated, None
     except Exception as cleanup_error:
+        recovery_command = "apm install --global" if user_scope else "apm install"
         logger.error(
             "Uninstall incomplete: package removal completed, but LSP cleanup "
             f"failed: {cleanup_error}. Fix the LSP config path, then run "
-            "'apm install' to reconcile stale entries."
+            f"'{recovery_command}' to reconcile stale entries."
         )
         logger.verbose_detail(traceback.format_exc().rstrip())
         return False, cleanup_error

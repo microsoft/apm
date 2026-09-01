@@ -1112,7 +1112,7 @@ def test_claude_lsp_unapproved_package_is_not_discoverable(
     )
 
     assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
-    assert "apm approve" in result.stdout
+    assert "apm policy explain" in result.stdout
     (partial,) = _runner(apm_binary_path).run_sequence(
         (("install", "--only", "mcp", "--no-policy"),),
         expected_returncodes=(0,),
@@ -1130,7 +1130,7 @@ def test_claude_lsp_unapproved_package_is_not_discoverable(
         env=fixture.isolated.subprocess_env(),
     )
     assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
-    assert "apm approve" in updated.stdout
+    assert "apm policy explain" in updated.stdout
 
 
 def test_claude_lsp_approved_declaring_package_is_discoverable(
@@ -1255,6 +1255,50 @@ def test_only_mcp_does_not_materialize_root_lsp(
     )
 
     assert not (project.root / _CLAUDE_LSP_PLUGIN).exists()
+
+
+def test_lsp_uninstall_cleanup_failure_is_nonzero_and_actionable(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Unsafe LSP cleanup must preserve foreign config and report recovery."""
+    fixture = _create_git_lifecycle_project(
+        tmp_path / "lsp-uninstall-cleanup-failure",
+        source_name="lsp-uninstall-source",
+        lsp_dependencies=(
+            {
+                "name": "uninstall-lsp",
+                "command": "uninstall-language-server",
+                "extensionToLanguage": {".uninstall": "uninstall"},
+            },
+        ),
+        targets=("claude",),
+    )
+    runner = _runner(apm_binary_path)
+    environment = fixture.isolated.subprocess_env()
+    runner.run_sequence(
+        (("install", "--no-policy"),),
+        expected_returncodes=(0,),
+        scenario_id="lsp-uninstall-cleanup-install",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    plugin_path = fixture.project_root / _CLAUDE_LSP_PLUGIN
+    foreign = b'{"name":"foreign-plugin","lspServers":{"uninstall-lsp":{"command":"keep"}}}\n'
+    plugin_path.write_bytes(foreign)
+
+    (result,) = runner.run_sequence(
+        (("uninstall", fixture.source),),
+        expected_returncodes=(1,),
+        scenario_id="lsp-uninstall-cleanup-refusal",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+
+    assert plugin_path.read_bytes() == foreign
+    normalized_output = " ".join(result.stdout.split())
+    assert "Uninstall incomplete" in normalized_output
+    assert "'apm install'" in normalized_output
 
 
 def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(

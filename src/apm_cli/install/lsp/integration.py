@@ -100,8 +100,14 @@ def run_owned_lsp_integration(
         and lockfile.lsp_config_provenance.get(name) not in {owner, owner_token}
     }
     if conflicts:
+        conflict_details = ", ".join(
+            f"{name} (owned by {lockfile.lsp_config_provenance.get(name, 'legacy lock state')})"
+            for name in sorted(conflicts)
+        )
         raise ValueError(
-            "Bundle LSP server name conflicts with another owner: " + ", ".join(sorted(conflicts))
+            "Bundle LSP server name conflicts with another owner: "
+            f"{conflict_details}. Rename the declaration or remove and reinstall "
+            "the owning bundle; --force does not transfer ownership."
         )
 
     if not dependencies and not old_owned:
@@ -372,9 +378,13 @@ def run_lsp_integration(  # noqa: PLR0913
         new_regular_names = LSPIntegrator.get_server_names(lsp_deps) if lsp_deps else builtins.set()
         conflicts = new_regular_names & bundle_names
         if conflicts:
+            conflict_details = ", ".join(
+                f"{name} (owned by {old_lsp_provenance[name]})" for name in sorted(conflicts)
+            )
             raise ValueError(
                 "Manifest LSP server name conflicts with an installed bundle owner: "
-                + ", ".join(sorted(conflicts))
+                f"{conflict_details}. Rename the declaration or remove and reinstall "
+                "the owning bundle; --force does not transfer ownership."
             )
 
         if lsp_deps:
