@@ -36,6 +36,7 @@ LEGACY_AC_ALIASES: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "contracts-tooling-dependency-identity": ("AC23", "AC25", "AC29"),
         "contracts-tooling-frontmatter-yaml": ("AC36",),
         "contracts-tooling-lockfile-timestamp": ("AC2",),
+        "contracts-tooling-lockfile-timestamp-constructor": ("AC2",),
         "contracts-tooling-lockfile-timestamp-fallback": ("AC2",),
         "install-deployment-approval-outcome-routing": ("AC3",),
         "install-deployment-audit-policy-discovery": ("AC3",),

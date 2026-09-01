@@ -75,6 +75,9 @@ _GUARD_LOCKFILE_TIMESTAMP = "contracts-tooling-lockfile-timestamp"
 _GUARD_LOCKFILE_TIMESTAMP_FALLBACK = "contracts-tooling-lockfile-timestamp-fallback"
 
 
+_GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-constructor"
+
+
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
 
@@ -295,6 +298,42 @@ def check_lockfile_timestamp_authority(provider: FactsProvider) -> tuple[Violati
                         line=node.lineno,
                     )
                 )
+    return tuple(findings)
+
+
+def _constructs_lockfile_timestamp(node: ast.AST) -> bool:
+    """Return whether a LockFile constructor sets timestamp metadata."""
+    if not isinstance(node, ast.Call):
+        return False
+    if isinstance(node.func, ast.Name):
+        is_lockfile = node.func.id == "LockFile"
+    else:
+        is_lockfile = isinstance(node.func, ast.Attribute) and node.func.attr == "LockFile"
+    return is_lockfile and any(keyword.arg == "generated_at" for keyword in node.keywords)
+
+
+def check_lockfile_timestamp_constructor(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Lockfile timestamp construction must stay inside its owner."""
+    rule_id = _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path == _LOCKFILE_OWNER:
+            continue
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures or facts.tree_index is None:
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "Lockfile timestamp writes and fallback policy must route through "
+                "deps/lockfile.py",
+                line=node.lineno,
+            )
+            for node in facts.tree_index.nodes
+            if _constructs_lockfile_timestamp(node)
+        )
     return tuple(findings)
 
 
@@ -820,6 +859,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LOCKFILE_TIMESTAMP,
         "Lockfile timestamp emission stays owned by deps/lockfile.py.",
         check_lockfile_timestamp_authority,
+    ),
+    _owner_rule(
+        _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR,
+        "Lockfile timestamp construction stays owned by deps/lockfile.py.",
+        check_lockfile_timestamp_constructor,
     ),
     _owner_rule(
         _GUARD_LOCKFILE_TIMESTAMP_FALLBACK,
