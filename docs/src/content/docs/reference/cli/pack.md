@@ -62,6 +62,7 @@ The `metadata_enrichment` object has a closed per-package status vocabulary:
 | `fetched` | Remote `apm.yml` supplied metadata. | yes |
 | `empty` | Remote `apm.yml` was reachable but had no description or version. | yes |
 | `local` | Metadata came from a local package. | yes |
+| `explicit` | Fixed description and version came from the marketplace entry. | yes |
 | `failed` | The remote manifest could not be fetched. | no |
 | `offline` | Fetching was intentionally skipped by `--offline`. | no |
 
@@ -89,6 +90,11 @@ The `metadata_enrichment` object has a closed per-package status vocabulary:
 Default packing reports an uncertifiable result as a warning. `--check-clean`
 uses `marketplace_metadata_uncertifiable` and exits `4`; `--strict-metadata`
 uses `metadata_incomplete` and exits `5` before writing.
+
+GitHub-hosted packages can inherit description and version from their remote
+`apm.yml`. For GitLab, Azure DevOps, and other hosts, set fixed `description`
+and `version` fields on the marketplace package entry so strict checks can
+certify without a GitHub metadata request.
 
 ## Examples
 

@@ -74,9 +74,10 @@ from .yml_schema import (
 logger = logging.getLogger(__name__)
 
 _LOCAL_METADATA_MAX_BYTES = 64 * 1024
-_METADATA_STATUSES = frozenset({"fetched", "empty", "failed", "offline", "local"})
-_CERTIFIABLE_METADATA_STATUSES = frozenset({"fetched", "empty", "local"})
-MetadataEnrichmentStatus = Literal["fetched", "empty", "failed", "offline", "local"]
+_METADATA_STATUSES = frozenset({"fetched", "empty", "failed", "offline", "local", "explicit"})
+_CERTIFIABLE_METADATA_STATUSES = frozenset({"fetched", "empty", "local", "explicit"})
+_CERTIFYING_METADATA_FIELDS = frozenset({"description", "version"})
+MetadataEnrichmentStatus = Literal["fetched", "empty", "failed", "offline", "local", "explicit"]
 
 
 def _read_capped_text(resp: Any) -> str:
@@ -139,6 +140,7 @@ class ResolvedPackage:
     # Propagated to marketplace.json so consumer range resolution and
     # diagnostics use the producer's convention without re-reading apm.yml.
     effective_tag_pattern: str = ""
+    curator_metadata: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -219,10 +221,17 @@ class MetadataEnrichmentResult(Mapping[str, dict[str, str]]):
                 )
             elif outcome.status == "failed":
                 cause = outcome.cause or "unknown failure"
-                warnings.append(
-                    f"Package '{outcome.package}': metadata enrichment failed "
-                    f"({cause}). Restore repository, network, or credential access and retry."
-                )
+                if cause.startswith("metadata fetch is unsupported for host"):
+                    warnings.append(
+                        f"Package '{outcome.package}': metadata enrichment failed "
+                        f"({cause}). Add fixed description and version fields to certify "
+                        "this package."
+                    )
+                else:
+                    warnings.append(
+                        f"Package '{outcome.package}': metadata enrichment failed "
+                        f"({cause}). Restore repository, network, or credential access and retry."
+                    )
         return tuple(warnings)
 
     def to_json_dict(self) -> dict[str, Any]:
@@ -789,6 +798,7 @@ class MarketplaceBuilder:
                 requested_version=entry.version,
                 tags=tuple(entry.tags),
                 is_prerelease=False,
+                curator_metadata=self._curator_metadata(entry),
             )
         yml = self._load_yml()
         source_host, owner_repo, source_url, source_org = self._remote_source_coordinates(entry)
@@ -815,6 +825,17 @@ class MarketplaceBuilder:
             source_host=source_host,
             source_url=source_url,
         )
+
+    @staticmethod
+    def _curator_metadata(entry: PackageEntry) -> tuple[tuple[str, str], ...]:
+        """Return fixed curator fields that can certify without a remote fetch."""
+        metadata: dict[str, str] = {}
+        if entry.description:
+            metadata["description"] = entry.description
+        if _is_display_version(entry.version):
+            assert entry.version is not None  # noqa: S101
+            metadata["version"] = entry.version
+        return tuple(sorted(metadata.items()))
 
     def _resolve_explicit_ref(
         self,
@@ -845,6 +866,7 @@ class MarketplaceBuilder:
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
                 effective_tag_pattern=effective_tag_pattern,
+                curator_metadata=self._curator_metadata(entry),
             )
 
         refs = resolver.list_remote_refs(owner_repo)
@@ -879,6 +901,7 @@ class MarketplaceBuilder:
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
                 effective_tag_pattern=effective_tag_pattern,
+                curator_metadata=self._curator_metadata(entry),
             )
 
         # Try as full refname
@@ -901,6 +924,7 @@ class MarketplaceBuilder:
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
                 effective_tag_pattern=effective_tag_pattern,
+                curator_metadata=self._curator_metadata(entry),
             )
 
         # Try as branch name
@@ -920,6 +944,7 @@ class MarketplaceBuilder:
                 host=self._resolved_output_host(source_host=source_host, source_url=source_url),
                 source_url=source_url,
                 effective_tag_pattern=effective_tag_pattern,
+                curator_metadata=self._curator_metadata(entry),
             )
 
         # HEAD special case
@@ -984,6 +1009,7 @@ class MarketplaceBuilder:
             host=self._resolved_output_host(source_host=source_host, source_url=source_url),
             source_url=source_url,
             effective_tag_pattern=pattern,
+            curator_metadata=self._curator_metadata(entry),
         )
 
     # -- concurrent resolution ----------------------------------------------
@@ -1332,7 +1358,14 @@ class MarketplaceBuilder:
         outcomes_by_package: dict[str, MetadataEnrichmentOutcome] = {}
         remote: list[ResolvedPackage] = []
         for pkg in resolved:
-            if pkg.source_repo:
+            curator_metadata = dict(pkg.curator_metadata)
+            if pkg.source_repo and curator_metadata.keys() >= _CERTIFYING_METADATA_FIELDS:
+                outcomes_by_package[pkg.name] = MetadataEnrichmentOutcome(
+                    pkg.name,
+                    "explicit",
+                    values=pkg.curator_metadata,
+                )
+            elif pkg.source_repo:
                 remote.append(pkg)
             else:
                 outcomes_by_package[pkg.name] = self._fetch_local_metadata_outcome(pkg)
@@ -1345,8 +1378,12 @@ class MarketplaceBuilder:
                     cause="metadata fetch skipped by --offline",
                 )
         elif remote:
-            # Resolve token once -- threads read self._github_token (immutable).
-            self._ensure_auth()
+            from ..core.auth import AuthResolver
+
+            if self._auth_resolver is None:
+                self._auth_resolver = AuthResolver()
+            if self._host_info is None:
+                self._host_info = AuthResolver.classify_host(self._host)
             workers = min(self._options.concurrency, len(remote))
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 future_to_package = {

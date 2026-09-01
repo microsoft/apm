@@ -234,6 +234,11 @@ apm pack --marketplace=claude --json   # JSON output for CI pipelines
 apm pack --strict-metadata      # require remote Claude package metadata fetches
 ```
 
+Strict remote metadata inheritance currently uses GitHub APIs. For GitLab,
+Azure DevOps, or another host, give each remote package a fixed `description`
+and fixed display `version` (not a range) so `--strict-metadata` can certify it
+without fetching `apm.yml`.
+
 For the release-gate flags (`--check-versions`, `--check-clean`),
 see [Releasing from any CI](../releasing-from-any-ci/).
 

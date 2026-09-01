@@ -2310,11 +2310,11 @@ class TestResolveGitHubToken:
         assert token == "ghp_lazy_token"
         assert builder._auth_resolver is not None
 
-    def test_prefetch_metadata_resolves_token_before_fetching(
+    def test_prefetch_metadata_defers_credentials_to_fallback(
         self,
         tmp_path: Path,
     ) -> None:
-        """_prefetch_metadata resolves the token once, then workers use it."""
+        """Prefetch delegates credential selection without eager resolution."""
         from unittest.mock import MagicMock
 
         mock_resolver = MagicMock()
@@ -2322,6 +2322,7 @@ class TestResolveGitHubToken:
         mock_ctx.token = "ghp_prefetch_token"
         mock_ctx.source = "GITHUB_APM_PAT"
         mock_resolver.resolve.return_value = mock_ctx
+        mock_resolver.uses_public_github_anonymous_first.return_value = True
 
         def invoke_with_token(
             _host: str,
@@ -2353,9 +2354,9 @@ class TestResolveGitHubToken:
             return_value=mock_resp,
         ) as mock_open:
             results = builder._prefetch_metadata(resolved)
-        # Token was resolved
-        assert builder._github_token == "ghp_prefetch_token"
-        mock_resolver.resolve.assert_called_once_with("github.com")
+        # The fallback owner selected the token without an eager unscoped lookup.
+        assert builder._github_token is None
+        mock_resolver.resolve.assert_not_called()
         mock_resolver.try_with_fallback.assert_called_once()
         # Request included auth header
         call_args = mock_open.call_args
@@ -2374,6 +2375,7 @@ class TestResolveGitHubToken:
         mock_ctx = MagicMock()
         mock_ctx.token = None
         mock_resolver.resolve.return_value = mock_ctx
+        mock_resolver.uses_public_github_anonymous_first.return_value = True
 
         def invoke_without_token(
             _host: str,
@@ -2407,7 +2409,7 @@ class TestResolveGitHubToken:
             results = builder._prefetch_metadata(resolved)
         # No token was set
         assert builder._github_token is None
-        mock_resolver.resolve.assert_called_once_with("github.com")
+        mock_resolver.resolve.assert_not_called()
         mock_resolver.try_with_fallback.assert_called_once()
         # Request had no auth header
         call_args = mock_open.call_args

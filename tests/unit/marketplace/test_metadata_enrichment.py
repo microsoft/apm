@@ -129,6 +129,42 @@ def test_metadata_outcomes_reject_unknown_statuses() -> None:
         MetadataEnrichmentOutcome("remote-tool", "future")  # type: ignore[arg-type]
 
 
+def test_explicit_metadata_certifies_non_github_package(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Fixed curator fields certify hosts without metadata fetch support."""
+    _write_config(tmp_path)
+    builder = _builder(tmp_path)
+    remote = ResolvedPackage(
+        name="remote-tool",
+        source_repo="acme/remote-tool",
+        subdir=None,
+        ref="v1.0.0",
+        sha="0123456789abcdef0123456789abcdef01234567",
+        requested_version="1.0.0",
+        tags=(),
+        is_prerelease=False,
+        host="gitlab.example.com",
+        curator_metadata=(
+            ("description", "Curated description"),
+            ("version", "1.0.0"),
+        ),
+    )
+    fetch = MagicMock(side_effect=AssertionError("must not fetch"))
+    monkeypatch.setattr(builder, "_fetch_remote_metadata", fetch)
+
+    result = builder._prefetch_metadata((remote,))
+
+    fetch.assert_not_called()
+    assert result.certifiable
+    assert result.outcomes[0].status == "explicit"
+    assert result["remote-tool"] == {
+        "description": "Curated description",
+        "version": "1.0.0",
+    }
+
+
 def test_metadata_failure_cause_never_exposes_exception_secrets(
     tmp_path: Path,
     monkeypatch,
