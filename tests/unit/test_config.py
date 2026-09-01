@@ -223,6 +223,17 @@ class TestMcpRegistryUrlConfig:
         config_mod._invalidate_config_cache()
         assert config_mod.get_mcp_registry_url() == "https://corp.mcp.example.com"
 
+    @pytest.mark.parametrize(
+        "url",
+        (
+            "https://corp.mcp.example.com?token=secret",
+            "https://corp.mcp.example.com#token=secret",
+        ),
+    )
+    def test_set_rejects_query_and_fragment(self, isolated_config, url):
+        with pytest.raises(ValueError, match="must not contain a query or fragment"):
+            config_mod.set_mcp_registry_url(url)
+
     def test_set_strips_trailing_slash(self, isolated_config):
         config_mod.set_mcp_registry_url("https://corp.mcp.example.com/")
         assert config_mod.get_mcp_registry_url() == "https://corp.mcp.example.com"

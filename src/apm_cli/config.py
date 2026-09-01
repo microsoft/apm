@@ -778,6 +778,8 @@ def _validate_mcp_registry_url(url: str) -> str:
             "mcp-registry-url: URL must not contain credentials; "
             "use the MCP_REGISTRY_URL environment variable or a credential helper instead."
         )
+    if parsed.query or parsed.fragment:
+        raise ValueError("mcp-registry-url: base URL must not contain a query or fragment")
     if not parsed.hostname:
         raise ValueError(
             f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "

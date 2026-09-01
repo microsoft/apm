@@ -27,6 +27,11 @@
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
+For `apm install -g --mcp`, mixed target selections warn and skip
+workspace-only runtimes. If no selected target supports user scope, the command
+exits `2` before creating or changing the user manifest, lockfile, or runtime
+configuration.
+
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
 validate replacement packages before publication. A failed download,
 validation, or activation leaves the previous package and lockfile active;

@@ -1,4 +1,9 @@
 {
+  "consumer_user_scope": {
+    "lockfile_location": "~/.apm/apm.lock.yaml",
+    "manifest_location": "~/.apm/apm.yml",
+    "target_capability_declaration": "MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)"
+  },
   "generator": "gen_statement.py v1",
   "requirements": [
     {

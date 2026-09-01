@@ -245,6 +245,17 @@ class TestValidateRegistryUrl:
         with pytest.raises(click.UsageError, match="must not contain credentials"):
             validate_registry_url("https://user:secret@mcp.example.com")
 
+    @pytest.mark.parametrize(
+        "url",
+        (
+            "https://mcp.example.com?token=secret",
+            "https://mcp.example.com#token=secret",
+        ),
+    )
+    def test_query_and_fragment_rejected(self, url):
+        with pytest.raises(click.UsageError, match="must not contain a query or fragment"):
+            validate_registry_url(url)
+
     def test_http_accepted(self):
         validate_registry_url("http://intranet.example.com")
 

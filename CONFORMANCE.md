@@ -14,6 +14,12 @@ There is NO automated CI detector for spec-vs-behaviour drift beyond the four se
 
 All four conformance classes (Producer, Consumer, Registry, Governance) carry active coverage in this statement. The Registry class is exercised via the trust-anchor invariant test in `tests/spec_conformance/test_registry_reqs.py`, which hashes the committed Registry-archive fixture and asserts equality with the digest the paired lockfile advertises (sec.11.3.3, req-rg-001).
 
+## Consumer user-scope disclosure
+
+- Manifest: `~/.apm/apm.yml`
+- Lockfile: `~/.apm/apm.lock.yaml`
+- Target capability declaration: `MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)`
+
 ## Coverage summary
 
 | Class | Active | Skipped | Xfail | Unbound |

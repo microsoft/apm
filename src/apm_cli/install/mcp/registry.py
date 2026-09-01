@@ -35,11 +35,11 @@ _MAX_REGISTRY_URL_LENGTH = 2048
 
 
 def _redact_url_credentials(url: str) -> str:
-    """Strip ``user:password@`` from a URL before logging it.
+    """Redact URL userinfo, query, and fragment data before logging.
 
     Registry URLs may legitimately carry credentials for private mirrors
     (``https://user:token@registry.internal/``); we accept them at the
-    flag layer but never echo them back to the terminal where they could
+    environment layer but never echo them back to the terminal where they could
     leak via shell history, CI logs, or screenshots.
 
     Falls back to the original string on any parse error so a misformed
@@ -47,12 +47,16 @@ def _redact_url_credentials(url: str) -> str:
     """
     try:
         parsed = urlparse(url)
-        if not parsed.netloc or "@" not in parsed.netloc:
-            return url
-        host = parsed.hostname or ""
-        if parsed.port is not None:
-            host = f"{host}:{parsed.port}"
-        sanitized = parsed._replace(netloc=host)
+        netloc = parsed.netloc
+        if "@" in netloc:
+            netloc = parsed.hostname or ""
+            if parsed.port is not None:
+                netloc = f"{netloc}:{parsed.port}"
+        sanitized = parsed._replace(
+            netloc=netloc,
+            query="<redacted>" if parsed.query else "",
+            fragment="<redacted>" if parsed.fragment else "",
+        )
         return urlunparse(sanitized)
     except (ValueError, TypeError):
         return url
@@ -127,6 +131,8 @@ def validate_registry_url(value: str | None) -> str | None:
             "--registry: URL must not contain credentials; "
             "use MCP_REGISTRY_URL or a credential helper instead"
         )
+    if parsed.query or parsed.fragment:
+        raise click.UsageError("--registry: base URL must not contain a query or fragment")
     return normalized
 
 
@@ -177,6 +183,14 @@ def resolve_registry_url(
 
     config_value = _get_mcp_registry_url()
     if config_value:
+        try:
+            config_value = validate_registry_url(config_value)
+        except click.UsageError as exc:
+            detail = exc.message.removeprefix("--registry: ")
+            raise click.UsageError(
+                "Configured mcp-registry-url is invalid; run "
+                f"'apm config unset mcp-registry-url' and retry: {detail}"
+            ) from exc
         if logger is not None:
             logger.progress(
                 f"Using MCP registry: {_redact_url_credentials(config_value)} (from apm config)",

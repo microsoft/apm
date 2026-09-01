@@ -2811,7 +2811,10 @@ class TestInstallMcpFlag:
 
     def test_registry_env_url_stays_at_transport_boundary(self, monkeypatch):
         """Ambient registry URLs must not be persisted or logged downstream."""
-        monkeypatch.setenv("MCP_REGISTRY_URL", "http://user:secret@env.example.com")
+        monkeypatch.setenv(
+            "MCP_REGISTRY_URL",
+            "http://user:secret@env.example.com?token=query-secret#fragment-secret",
+        )
         argv = ["apm", "install", "--mcp", "srv", "--no-policy"]
         with (
             self._chdir_with_apm_yml(),
@@ -2825,6 +2828,26 @@ class TestInstallMcpFlag:
         assert run_mcp_install.call_args.kwargs["registry_url"] is None
         assert run_mcp_install.call_args.kwargs["registry_allow_http"] is False
         assert "secret" not in result.output
+
+    def test_invalid_configured_registry_url_fails_before_dispatch(self, monkeypatch):
+        """Stale persisted URLs must pass current validation before use."""
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        argv = ["apm", "install", "--mcp", "srv", "--no-policy"]
+        with (
+            self._chdir_with_apm_yml(),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch(
+                "apm_cli.config.get_mcp_registry_url",
+                return_value="https://config.example.com?token=secret",
+            ),
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 2
+        assert "Configured mcp-registry-url is invalid" in result.output
+        assert "secret" not in result.output
+        run_mcp_install.assert_not_called()
 
     def test_registry_with_version_overlay_persists_both(self):
         with (
