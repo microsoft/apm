@@ -56,7 +56,10 @@ def validate_ls_remote_tag_output(output: str) -> None:
         parts = line.split("\t")
         if len(parts) != 2:
             raise RemoteRefParseError("Malformed git ls-remote tag output.")
-        sha, refname = (part.strip() for part in parts)
+        raw_sha, raw_refname = parts
+        if raw_sha != raw_sha.strip() or raw_refname != raw_refname.strip():
+            raise RemoteRefParseError("Malformed git ls-remote tag output.")
+        sha, refname = raw_sha, raw_refname
         if not _REMOTE_SHA_RE.fullmatch(sha) or sha == "0" * 40 or refname in records:
             raise RemoteRefParseError("Malformed git ls-remote tag output.")
         records[refname] = sha

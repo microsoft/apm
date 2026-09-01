@@ -172,11 +172,7 @@ def _resolve_and_stage_revision_pin_updates(
             max_workers=max_workers,
         )
     except RevisionPinResolutionError as e:
-        logger.error(str(e))
-        logger.info(
-            "No files changed. Retry the update; if the error persists, run with "
-            "--verbose and report the upstream response."
-        )
+        logger.revision_pin_resolution_failed(e)
         sys.exit(1)
     except (GitCommandError, OSError) as e:
         logger.error(f"Failed to resolve revision pins: {e}")

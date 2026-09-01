@@ -165,6 +165,10 @@ def test_update_retains_unreleased_pin_in_dry_run_and_apply(
 
     assert dry_run.returncode == 0, dry_run.stdout + dry_run.stderr
     assert "Retained 1 revision pin" in dry_run.stdout
+    assert (
+        f"{scenario.released_old.sha[:8]} -> {scenario.released_new.sha[:8]} (v2.0.0)"
+        in dry_run.stdout
+    )
     assert manifest.read_bytes() == manifest_before
     assert lock_path.read_bytes() == lock_before
 

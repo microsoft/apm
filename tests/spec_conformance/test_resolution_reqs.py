@@ -433,6 +433,7 @@ def test_revision_pin_update_retains_missing_release() -> None:
         "\n",
         f"{'0' * 40}\trefs/tags/v2.0.0",
         f"{'a' * 40}\trefs/tags/bad name",
+        f"{'a' * 40}\trefs/tags/v2.0.0 ",
         f"{'a' * 40}\trefs/tags/v2.0.0\n{'a' * 40}\trefs/tags/v2.0.0",
         f"{'a' * 40}\trefs/tags/v2.0.0^{{}}",
     ],
@@ -472,6 +473,7 @@ def test_revision_pin_update_projection_and_scope_are_normative() -> None:
         "MUST replay the full commit",
         "package manifests MUST NOT be rewritten",
         "aborts the requested update scope",
+        "non-commit object is also a fatal outcome",
     )
 
 

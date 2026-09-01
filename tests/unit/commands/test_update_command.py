@@ -1090,6 +1090,30 @@ class TestRevisionPinResolutionErrors:
         assert result.exit_code == 1
         assert "Remote returned an invalid SHA" in result.output
 
+    def test_revision_pin_parse_error_has_verbose_context_without_stale_hint(
+        self,
+        runner,
+        tmp_path,
+    ) -> None:
+        from apm_cli.deps.git_remote_ops import RemoteRefParseError
+        from apm_cli.deps.revision_pins import RevisionPinResolutionError
+
+        parse_error = RemoteRefParseError("Malformed git ls-remote tag output.")
+        resolution_error = RevisionPinResolutionError("Malformed remote tag data for org/pkg")
+        resolution_error.__cause__ = parse_error
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.update.resolve_revision_pin_updates",
+                side_effect=resolution_error,
+            ):
+                result = runner.invoke(cli, ["update", "--verbose"])
+
+        assert result.exit_code == 1
+        assert "Parser cause: Malformed git ls-remote tag output." in result.output
+        assert "report the upstream response" in result.output
+        assert "Run with --verbose" not in result.output
+
     def test_revision_pin_git_error_exits_1_with_verbose_hint(self, runner, tmp_path) -> None:
         from git.exc import GitCommandError
 

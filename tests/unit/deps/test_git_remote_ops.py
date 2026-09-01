@@ -167,6 +167,8 @@ class TestValidateLsRemoteTagOutput:
             f"{'a' * 40}\trefs/tags/.hidden",
             f"{'a' * 40}\trefs/tags/release.lock",
             f"{'a' * 40}\trefs/tags/v1..0",
+            f"{'a' * 40}\trefs/tags/v1.0.0 ",
+            f" {'a' * 40}\trefs/tags/v1.0.0",
         ],
     )
     def test_invalid_or_ambiguous_records_are_rejected(self, output: str) -> None:

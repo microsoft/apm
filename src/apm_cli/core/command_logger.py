@@ -257,6 +257,17 @@ class InstallLogger(CommandLogger):
         for skipped in skips:
             self.verbose_detail(f"  {skipped.display_name}: {skipped.old_sha[:8]}")
 
+    def revision_pin_resolution_failed(self, error: Exception) -> None:
+        """Render a safe-stop error with verbose parser context."""
+        self.error(str(error))
+        if error.__cause__ is not None:
+            self.verbose_detail(f"  Parser cause: {error.__cause__}")
+        self.info(
+            "No files changed. Retry the update; report the upstream response if it persists."
+        )
+        if not self.verbose:
+            self.info("Run with --verbose for parser context.")
+
     # --- Validation phase ---
 
     def validation_start(self, count: int):

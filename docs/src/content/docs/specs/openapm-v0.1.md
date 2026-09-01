@@ -2096,8 +2096,8 @@ package manifest.
 **[req-rs-017]** A conforming **consumer** implementation that offers
 an update extension for a git-literal dependency pinned to a full
 hexadecimal commit ID MUST form one candidate set from annotated tags
-whose peeled object is a commit and whose parsed semantic version has
-an empty pre-release identifier under
+whose peeled object has been verified as a commit and whose parsed
+semantic version has an empty pre-release identifier under
 [Section 7.3.1](#731-semver-dialect-normative). A `0.x.y` version with
 an empty pre-release identifier remains eligible. The consumer MUST NOT
 select a branch or lightweight tag.
@@ -2120,7 +2120,9 @@ and continue resolving other dependencies in the requested update
 scope. A transport failure, an invalid or all-zero object ID, an invalid
 tag refname, a duplicate tag ref record, or a peeled tag record without
 its base record MUST fail the update before any manifest or lockfile
-write. These failures MUST NOT be converted into the retained-pin
+write. An otherwise eligible annotated tag that peels to a tree, blob,
+or other non-commit object is also a fatal outcome, not an ignored
+candidate. These failures MUST NOT be converted into the retained-pin
 outcome.
 
 For a successful replacement, the consumer MUST rewrite only the

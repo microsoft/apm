@@ -39,6 +39,7 @@ def test_revision_pin_resolution_has_single_owner() -> None:
     assert '.removesuffix(".git")' in owner
     assert "max(candidates, key=lambda item: (item[0], item[1]))" in owner
     assert "logger.revision_pins_retained(resolution.skips)" in command
+    assert "logger.revision_pin_resolution_failed(e)" in command
     assert "revision_pin_updates = revision_pin_resolution.updates" in command
     assert "root_package=ctx.apm_package" in resolver
     assert (

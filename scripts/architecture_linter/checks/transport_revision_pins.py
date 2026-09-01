@@ -76,6 +76,7 @@ def _check_revision_pin_outcome(provider: FactsProvider) -> tuple[Violation, ...
             (
                 "resolution = resolve_revision_pin_updates(",
                 "logger.revision_pins_retained(resolution.skips)",
+                "logger.revision_pin_resolution_failed(e)",
                 "revision_pin_updates = revision_pin_resolution.updates",
             ),
             "The update command must consume both revision-pin outcome collections",
