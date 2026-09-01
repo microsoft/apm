@@ -453,6 +453,27 @@ def _parse_legacy_bundle_mcp_servers(
     return out
 
 
+def effective_bundle_allow_map(
+    project_root: Path,
+    *,
+    no_policy: bool,
+    logger: Any,
+) -> dict[str, dict[str, bool]] | None:
+    """Resolve local-bundle trust through the canonical project owner."""
+    from ..security.executables import effective_exec_map_for_project
+
+    policy = None
+    if not no_policy:
+        from ..policy.discovery import discover_policy_with_chain
+
+        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
+    return effective_exec_map_for_project(
+        project_root,
+        policy=policy,
+        logger=logger,
+    )
+
+
 def _filter_bundle_executables(
     dependencies: list[Any],
     *,

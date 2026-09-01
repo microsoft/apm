@@ -59,10 +59,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 'approval_keys = getattr(dependency, "approval_keys", ())',
             ),
             _APPROVE_COMMAND: ("approval_identity=locked.get_unique_key()",),
-            _INSTALL_COMMAND: (
-                "def _effective_bundle_allow_map(",
-                "return effective_exec_map_for_project(",
-            ),
+            _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
             _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
             _LSP_PIPELINE: (
                 "effective_allow_executables = effective_exec_map_for_project(",
@@ -93,6 +90,8 @@ def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
                     "lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)",
                 ),
                 _LOCAL_BUNDLE: (
+                    "def effective_bundle_allow_map(",
+                    "return effective_exec_map_for_project(",
                     "def _wire_bundle_lsp_servers(",
                     "force=force,",
                 ),

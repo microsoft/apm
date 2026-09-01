@@ -877,27 +877,6 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
 
 
-def _effective_bundle_allow_map(
-    project_root: Path,
-    *,
-    no_policy: bool,
-    logger: Any,
-) -> dict[str, dict[str, bool]] | None:
-    """Resolve local-bundle trust through the canonical project owner."""
-    from ..security.executables import effective_exec_map_for_project
-
-    policy = None
-    if not no_policy:
-        from ..policy.discovery import discover_policy_with_chain
-
-        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
-    return effective_exec_map_for_project(
-        project_root,
-        policy=policy,
-        logger=logger,
-    )
-
-
 @click.command(
     help="Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
@@ -1295,6 +1274,9 @@ def install(  # noqa: C901, PLR0913
                 raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
                 enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)
+                from ..install.local_bundle_handler import (
+                    effective_bundle_allow_map as _effective_bundle_allow_map,
+                )
                 from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
                 _bundle_project_root = Path(root or ".")
