@@ -52,6 +52,12 @@ What each command does:
   and the sidecars under one tag. Use whichever release API your
   forge exposes; the file set is what matters.
 
+:::caution[Upgrading an existing release pipeline?]
+`--check-clean` is now always read-only. If an older pipeline relied on one
+`apm pack --check-clean` call to both validate and produce artifacts, split it
+into the gate and pack calls shown above.
+:::
+
 Authenticate `gh` with a token that has `contents: write` on the
 repo. Substitute the equivalent verb for non-GitHub forges
 (`glab release create`, `az repos`, REST upload).
@@ -83,7 +89,8 @@ sequence above. It installs the CLI, runs the read-only gates, packs
 the release artifacts separately, generates the sidecars, and calls
 `gh release create` against the pushed tag. Use it when you
 want one less script to maintain; use the raw `run:` form below when
-you need to customise any step.
+you need to customise any step. The split gate-and-pack flow requires
+apm-action `v1.10.0` or newer.
 
 > **Reference deployment.** [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config)
 > runs this exact pipeline. The
