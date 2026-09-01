@@ -617,8 +617,10 @@ install-deployment-audit-policy-discovery
 install-deployment-audit-replay
 install-deployment-base-integrator
 install-deployment-cached-claude-skill-metadata
+install-deployment-claude-lsp-plugin
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
+install-deployment-executable-trust-context
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
 install-deployment-gitlab-facade-orchestration

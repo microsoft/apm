@@ -278,12 +278,20 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
     ),
     MutationCase(
-        guard_id="install-deployment-claude-lsp-plugin-ownership",
-        rule_id="install-deployment-claude-lsp-plugin-ownership",
+        guard_id="install-deployment-claude-lsp-plugin",
+        rule_id="install-deployment-claude-lsp-plugin",
         path="src/apm_cli/integration/lsp_integrator.py",
         old="    def reserved_project_skill_names(",
         new="    def reserved_lsp_project_skill_names(",
         intent="Claude project LSP plugin cleanup loses the reserved skill namespace owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-executable-trust-context",
+        rule_id="install-deployment-executable-trust-context",
+        path="src/apm_cli/security/executables.py",
+        old="def exec_trust_context_for_project(",
+        new="def exec_trust_context_for_project_disabled(",
+        intent="LSP executable trust loses the shared trust-context owner.",
     ),
     MutationCase(
         guard_id="install-deployment-frozen-mutation-eligibility",

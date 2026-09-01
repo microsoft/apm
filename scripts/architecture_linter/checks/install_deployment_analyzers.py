@@ -37,8 +37,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
     check_uninstall_reachability,
 )
 from scripts.architecture_linter.checks.install_lsp_plugin import (
-    _GUARD_CLAUDE_LSP_PLUGIN,
-    check_claude_lsp_plugin_ownership,
+    GUARD_CLAUDE_LSP_PLUGIN,
+    GUARD_EXECUTABLE_TRUST,
+    check_claude_lsp_plugin,
+    check_executable_trust_context,
 )
 from scripts.architecture_linter.checks.install_package_target_authorization import (
     _GUARD_PACKAGE_TARGET,
@@ -125,9 +127,14 @@ RULES: tuple[Rule, ...] = (
         check_base_integrator,
     ),
     _rule(
-        _GUARD_CLAUDE_LSP_PLUGIN,
+        GUARD_CLAUDE_LSP_PLUGIN,
         "Claude project LSP plugin writes, trust, and cleanup route through LSPIntegrator.",
-        check_claude_lsp_plugin_ownership,
+        check_claude_lsp_plugin,
+    ),
+    _rule(
+        GUARD_EXECUTABLE_TRUST,
+        "Executable trust context and per-package approval route through security/executables.py.",
+        check_executable_trust_context,
     ),
     _rule(
         _GUARD_UNINSTALL_REACHABILITY,

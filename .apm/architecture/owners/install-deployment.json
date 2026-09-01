@@ -87,14 +87,24 @@
     },
     {
       "id": "claude-project-lsp-plugin-ownership",
-      "decision": "Claude project LSP plugin path, shape, trust, and reserved skill namespace",
+      "decision": "Claude project LSP plugin path, shape, and reserved skill namespace",
       "owner": "integration/lsp_integrator.py (_LSP_TARGET_SPECS, reserved_project_skill_names)",
       "selectors": [
         "src/apm_cli/integration/lsp_integrator.py",
-        "src/apm_cli/integration/skill_support.py",
-        "src/apm_cli/security/executables.py"
+        "src/apm_cli/integration/skill_support.py"
       ],
-      "guards": ["install-deployment-claude-lsp-plugin-ownership"]
+      "guards": ["install-deployment-claude-lsp-plugin"]
+    },
+    {
+      "id": "executable-trust-context",
+      "decision": "Executable trust context and per-package approval",
+      "owner": "security/executables.py (exec_trust_context_for_project, resolve_exec_decision)",
+      "selectors": [
+        "src/apm_cli/security/executables.py",
+        "src/apm_cli/install/template.py",
+        "src/apm_cli/install/lsp/integration.py"
+      ],
+      "guards": ["install-deployment-executable-trust-context"]
     },
     {
       "id": "post-uninstall-dependency-reachability",

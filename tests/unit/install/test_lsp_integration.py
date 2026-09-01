@@ -163,9 +163,16 @@ class TestRunLspIntegration:
     def test_filters_unapproved_lsp_dependencies(self, mock_integrator, tmp_path):
         """An explicit executable gate blocks LSP servers until approved."""
         apm_package = MagicMock()
-        apm_package.get_lsp_dependencies.return_value = [_make_dep("pyright")]
+        apm_package.get_lsp_dependencies.return_value = []
         apm_package.allow_executables = {}
-        mock_integrator.collect_transitive.return_value = []
+        mock_integrator.collect_transitive.return_value = [
+            _make_dep(
+                "pyright",
+                resolved_by="owner/package",
+                approval_keys=("owner/package",),
+            )
+        ]
+        mock_integrator.deduplicate.return_value = []
         mock_integrator.get_server_names.return_value = set()
         mock_integrator.get_server_configs.return_value = {}
         modules = tmp_path / "apm_modules"
@@ -180,6 +187,7 @@ class TestRunLspIntegration:
             user_scope=False,
             should_install=True,
             logger=_mock_logger(),
+            effective_allow_executables={},
         )
 
         assert count == 0
@@ -220,6 +228,8 @@ class TestRunLspIntegration:
             diagnostics=None,
             target_runtimes=["copilot"],
             fail_on_write_error=False,
+            managed_server_names=set(),
+            force=False,
         )
 
     @patch(_PATCH_TARGET)

@@ -1,73 +1,113 @@
-"""Claude project LSP plugin architecture boundary."""
+"""Claude LSP plugin and executable-trust architecture guards."""
 
 from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _facts_for,
-    _lines,
+    _present,
     _summary,
 )
 from scripts.architecture_linter.facts import FactsProvider
-from scripts.architecture_linter.groups.common import source_text
 from scripts.architecture_linter.models import Violation
 
-_GUARD_CLAUDE_LSP_PLUGIN = "install-deployment-claude-lsp-plugin-ownership"
+GUARD_EXECUTABLE_TRUST = "install-deployment-executable-trust-context"
+GUARD_CLAUDE_LSP_PLUGIN = "install-deployment-claude-lsp-plugin"
 
-_LSP_INTEGRATOR = "src/apm_cli/integration/lsp_integrator.py"
-_SKILL_SUPPORT = "src/apm_cli/integration/skill_support.py"
 _EXECUTABLES = "src/apm_cli/security/executables.py"
 _INSTALL_TEMPLATE = "src/apm_cli/install/template.py"
-_INSTALL_COMMAND = "src/apm_cli/commands/install.py"
-_UPDATE_COMMAND = "src/apm_cli/commands/update.py"
-
-_PATHS = (
-    _LSP_INTEGRATOR,
-    _SKILL_SUPPORT,
-    _EXECUTABLES,
-    _INSTALL_TEMPLATE,
-    _INSTALL_COMMAND,
-    _UPDATE_COMMAND,
-)
-
-_REQUIRED_FRAGMENTS: tuple[tuple[str, str], ...] = (
-    (_LSP_INTEGRATOR, "BaseIntegrator.resolve_deploy_path(relative_path, project_root)"),
-    (_SKILL_SUPPORT, "LSPIntegrator.reserved_project_skill_names(skills_dir, project_root)"),
-    (_EXECUTABLES, 'owner = getattr(dependency, "resolved_by", None)'),
-    (_EXECUTABLES, 'approval_keys = getattr(dependency, "approval_keys", ())'),
-    (_INSTALL_TEMPLATE, "trust_ctx = exec_trust_context_for_project("),
-    (_INSTALL_COMMAND, "ctx.exec_allow_map = effective_exec_map_for_project("),
-    (_UPDATE_COMMAND, "effective_allow_executables = effective_exec_map_for_project("),
-)
+_LSP_INTEGRATOR = "src/apm_cli/integration/lsp_integrator.py"
+_LSP_PIPELINE = "src/apm_cli/install/lsp/integration.py"
+_SKILL_SUPPORT = "src/apm_cli/integration/skill_support.py"
 
 
-def check_claude_lsp_plugin_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Require Claude project LSP writes, cleanup, and trust to share the LSP owner."""
-    facts_by_path = {}
-    failures: list[Violation] = []
-    for path in _PATHS:
-        facts, path_failures = _facts_for(provider, path, _GUARD_CLAUDE_LSP_PLUGIN)
-        facts_by_path[path] = facts
-        failures.extend(path_failures)
-    if failures:
-        return tuple(failures)
+def _missing_tokens(
+    provider: FactsProvider,
+    rule_id: str,
+    required: dict[str, tuple[str, ...]],
+) -> tuple[Violation, ...]:
+    findings: list[Violation] = []
+    for path, tokens in required.items():
+        facts, failures = _facts_for(provider, path, rule_id)
+        if failures:
+            findings.extend(failures)
+            continue
+        missing = [token for token in tokens if not _present(facts, token)]
+        if missing:
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    "Canonical routing tokens are missing: " + ", ".join(missing),
+                )
+            )
+    return tuple(findings)
 
-    defects: list[str] = []
-    lsp_text = "\n".join(_lines(facts_by_path[_LSP_INTEGRATOR]))
-    if lsp_text.count("def reserved_project_skill_names(") != 1:
-        defects.append(f"{_LSP_INTEGRATOR} must define reserved_project_skill_names exactly once")
-    for path, fragment in _REQUIRED_FRAGMENTS:
-        if fragment not in source_text(facts_by_path[path]):
-            defects.append(f"{path} is missing {fragment!r}")
-    if not defects:
-        return ()
-    return (
-        _summary(
-            _GUARD_CLAUDE_LSP_PLUGIN,
-            _LSP_INTEGRATOR,
-            "Claude project LSP plugin writes, trust, and cleanup must route through "
-            f"LSPIntegrator; {'; '.join(defects)}",
-        ),
+
+def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Install and update must consume one effective executable-trust owner."""
+    return _missing_tokens(
+        provider,
+        GUARD_EXECUTABLE_TRUST,
+        {
+            _EXECUTABLES: (
+                "def exec_trust_context_for_project(",
+                'owner = getattr(dependency, "resolved_by", None)',
+                'approval_keys = getattr(dependency, "approval_keys", ())',
+            ),
+            _INSTALL_TEMPLATE: ("trust_ctx = exec_trust_context_for_project(",),
+            _LSP_PIPELINE: ("effective_allow_executables = effective_exec_map_for_project(",),
+        },
     )
 
 
-__all__ = ["_GUARD_CLAUDE_LSP_PLUGIN", "check_claude_lsp_plugin_ownership"]
+def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Claude plugin writes and cleanup must route through the LSP owner."""
+    findings = list(
+        _missing_tokens(
+            provider,
+            GUARD_CLAUDE_LSP_PLUGIN,
+            {
+                _LSP_INTEGRATOR: (
+                    "def reserved_project_skill_names(",
+                    "BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
+                    "approval_keys=approval_keys",
+                ),
+                _SKILL_SUPPORT: (
+                    "LSPIntegrator.reserved_project_skill_names(skills_dir, project_root)",
+                ),
+                _LSP_PIPELINE: (
+                    "transitive_lsp = filter_lsp_by_allow_executables(",
+                    "lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)",
+                ),
+            },
+        )
+    )
+    pipeline, failures = _facts_for(provider, _LSP_PIPELINE, GUARD_CLAUDE_LSP_PLUGIN)
+    if failures:
+        return tuple([*findings, *failures])
+    lines = getattr(pipeline, "lines", ())
+    filter_line = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if "transitive_lsp = filter_lsp_by_allow_executables(" in line
+        ),
+        None,
+    )
+    dedup_line = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if "lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)" in line
+        ),
+        None,
+    )
+    if filter_line is not None and dedup_line is not None and filter_line >= dedup_line:
+        findings.append(
+            _summary(
+                GUARD_CLAUDE_LSP_PLUGIN,
+                _LSP_PIPELINE,
+                "Transitive LSP trust filtering must run before first-wins deduplication",
+            )
+        )
+    return tuple(findings)

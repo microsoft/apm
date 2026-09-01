@@ -126,5 +126,6 @@ def run_service_integrations(
         fail_on_write_error=True,
         effective_allow_executables=ctx.exec_allow_map,
         force=ctx.force,
+        no_policy=ctx.no_policy,
     )
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)

@@ -299,18 +299,6 @@ def _run_mcp_lsp_integration(
         logger.render_summary()
         sys.exit(1)
 
-    if effective_allow_executables is None:
-        from apm_cli.policy.discovery import discover_policy_with_chain
-        from apm_cli.security.executables import effective_exec_map_for_project
-
-        policy_result = discover_policy_with_chain(project_root)
-        effective_allow_executables = effective_exec_map_for_project(
-            project_root,
-            policy=getattr(policy_result, "policy", None),
-            fallback_allow_executables=getattr(apm_package, "allow_executables", None),
-            logger=logger,
-        )
-
     run_lsp_integration(
         apm_package=apm_package,
         apm_modules_path=apm_modules_path,

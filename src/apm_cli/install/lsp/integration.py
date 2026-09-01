@@ -101,6 +101,7 @@ def run_lsp_integration(  # noqa: PLR0913
     fail_on_write_error: bool = False,
     effective_allow_executables: dict[str, dict[str, bool]] | None = None,
     force: bool = False,
+    no_policy: bool = False,
 ) -> int:
     """Run LSP server integration after APM package installation.
 
@@ -159,6 +160,28 @@ def run_lsp_integration(  # noqa: PLR0913
         )
         if transitive_lsp:
             logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")
+            if effective_allow_executables is None:
+                from apm_cli.security.executables import effective_exec_map_for_project
+
+                policy = None
+                if not no_policy:
+                    from apm_cli.policy.discovery import discover_policy_with_chain
+
+                    policy = getattr(
+                        discover_policy_with_chain(project_root),
+                        "policy",
+                        None,
+                    )
+                effective_allow_executables = effective_exec_map_for_project(
+                    project_root,
+                    policy=policy,
+                    fallback_allow_executables=getattr(
+                        apm_package,
+                        "allow_executables",
+                        None,
+                    ),
+                    logger=logger,
+                )
             transitive_lsp = filter_lsp_by_allow_executables(
                 transitive_lsp,
                 effective_allow_executables,

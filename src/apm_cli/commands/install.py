@@ -1974,21 +1974,6 @@ def _install_apm_packages(ctx, outcome):
 
         clear_apm_yml_cache()
 
-    if ctx.exec_allow_map is None:
-        from apm_cli.security.executables import effective_exec_map_for_project
-
-        policy = None
-        if not ctx.no_policy:
-            from apm_cli.policy.discovery import discover_policy_with_chain
-
-            policy = getattr(discover_policy_with_chain(ctx.project_root), "policy", None)
-        ctx.exec_allow_map = effective_exec_map_for_project(
-            ctx.project_root,
-            policy=policy,
-            fallback_allow_executables=getattr(apm_package, "allow_executables", None),
-            logger=logger,
-        )
-
     from apm_cli.install.service_integration import run_service_integrations
     from apm_cli.policy.install_preflight import PolicyBlockError
 
