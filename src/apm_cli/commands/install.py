@@ -768,9 +768,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     scope,
 ):
     """Resolve and execute the direct ``--mcp`` install path."""
-    from ..core.scope import get_apm_dir, get_manifest_path, is_user_scope
+    from ..core.scope import get_apm_dir, get_deploy_root, get_manifest_path, is_user_scope
 
-    # Apply CLI > env > default precedence; emit override diagnostic.
     resolved_registry_url, registry_source = _resolve_registry_url(
         validated_registry_url,
         logger=logger,
@@ -794,7 +793,9 @@ def _handle_mcp_install(  # noqa: PLR0913
         )
 
         if target_decision.runtime_targets is None:
-            supported_runtimes, skipped_runtimes = discover_user_scope_mcp_runtimes(mcp_apm_dir)
+            supported_runtimes, skipped_runtimes = discover_user_scope_mcp_runtimes(
+                get_deploy_root(scope)
+            )
         else:
             supported_runtimes, skipped_runtimes = partition_user_scope_runtimes(
                 list(target_decision.runtime_targets)
@@ -810,14 +811,6 @@ def _handle_mcp_install(  # noqa: PLR0913
                 "choose a global-capable target such as copilot or omit --global"
             )
         target_decision = EffectiveTargetDecision(supported_runtimes, target_decision.source)
-        if not mcp_manifest_path.exists():
-            mcp_apm_dir.mkdir(parents=True, exist_ok=True)
-            project_name = _resolve_bootstrap_project_name(Path.home().name)
-            config = _get_default_config(project_name)
-            if target is not None or runtime is not None:
-                config["targets"] = supported_runtimes
-            _create_minimal_apm_yml(config, target_path=mcp_manifest_path)
-            logger.success(f"Created {mcp_manifest_path}")
 
     # -- W2-mcp-preflight: policy enforcement before MCP install --
     # Build a lightweight MCPDependency for policy evaluation.
@@ -874,6 +867,14 @@ def _handle_mcp_install(  # noqa: PLR0913
         )
         logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {mcp_manifest_path}")
         return
+    if is_user_scope(scope) and not mcp_manifest_path.exists():
+        mcp_apm_dir.mkdir(parents=True, exist_ok=True)
+        project_name = _resolve_bootstrap_project_name(Path.home().name)
+        config = _get_default_config(project_name)
+        if target is not None or runtime is not None:
+            config["targets"] = supported_runtimes
+        _create_minimal_apm_yml(config, target_path=mcp_manifest_path)
+        logger.success(f"Created {mcp_manifest_path}")
     _run_mcp_install(
         mcp_name=mcp_name,
         transport=transport,
@@ -990,7 +991,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot, and Hermes when enabled).",
+    help="Install to user scope (~/.apm/) instead of the current project. Direct MCP installs create or update ~/.apm/apm.yml. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing user state. Supported runtimes include Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot, and Hermes when enabled.",
 )
 @click.option(
     "--ssh",

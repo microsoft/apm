@@ -59,7 +59,7 @@ def _redact_url_credentials(url: str) -> str:
         )
         return urlunparse(sanitized)
     except (ValueError, TypeError):
-        return url
+        return "<redacted-invalid-registry-url>"
 
 
 def _is_local_or_metadata_host(host: str | None) -> bool:

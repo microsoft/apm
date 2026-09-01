@@ -173,6 +173,21 @@ def _takes_scope(call: ast.Call) -> bool:
     )
 
 
+def _takes_deploy_root(call: ast.Call) -> bool:
+    """Return whether discovery consumes the canonical deploy-root projection."""
+    if len(call.args) != 1 or call.keywords:
+        return False
+    value = call.args[0]
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "get_deploy_root"
+        and len(value.args) == 1
+        and isinstance(value.args[0], ast.Name)
+        and value.args[0].id == "scope"
+    )
+
+
 def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, ...]:
     """Direct MCP installs must consume the install command's scope decision."""
     rule_id = _GUARD_INSTALL_SCOPE
@@ -223,6 +238,7 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
     scope_partition_calls = _named_calls(handler_nodes, "partition_user_scope_runtimes")
     scope_discovery_calls = _named_calls(handler_nodes, "discover_user_scope_mcp_runtimes")
     bootstrap_calls = _named_calls(handler_nodes, "_create_minimal_apm_yml")
+    dry_run_validation_calls = _named_calls(handler_nodes, "_validate_mcp_dry_run_entry")
     manifest_calls = _named_calls(handler_nodes, "get_manifest_path")
     apm_dir_calls = _named_calls(handler_nodes, "get_apm_dir")
     validator_args = (
@@ -243,10 +259,13 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
         and _has_scope_projection_keyword(target_calls[0], "user_scope")
         and len(scope_partition_calls) == 1
         and len(scope_discovery_calls) == 1
+        and _takes_deploy_root(scope_discovery_calls[0])
         and len(bootstrap_calls) == 1
+        and len(dry_run_validation_calls) == 1
         and target_calls[0].lineno < bootstrap_calls[0].lineno
         and scope_partition_calls[0].lineno < bootstrap_calls[0].lineno
         and scope_discovery_calls[0].lineno < bootstrap_calls[0].lineno
+        and dry_run_validation_calls[0].lineno < bootstrap_calls[0].lineno
         and len(manifest_calls) == 1
         and _takes_scope(manifest_calls[0])
         and len(apm_dir_calls) == 1

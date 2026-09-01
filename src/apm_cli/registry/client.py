@@ -99,6 +99,24 @@ _V0_1_PREFIX = "/v0.1"
 _SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)?$")
 
 
+def _safe_registry_url_for_display(value: str) -> str:
+    """Return a credential-free registry URL for diagnostics."""
+    try:
+        parsed = urlparse(value)
+        netloc = parsed.netloc
+        if "@" in netloc:
+            netloc = parsed.hostname or ""
+            if parsed.port is not None:
+                netloc = f"{netloc}:{parsed.port}"
+        return parsed._replace(
+            netloc=netloc,
+            query="<redacted>" if parsed.query else "",
+            fragment="<redacted>" if parsed.fragment else "",
+        ).geturl()
+    except (TypeError, ValueError):
+        return "<redacted-invalid-registry-url>"
+
+
 class ServerNotFoundError(ValueError):
     """Raised when a server lookup against the registry returns 404.
 
@@ -176,20 +194,33 @@ class SimpleRegistryClient:
         resolved = resolved.strip().rstrip("/")
 
         parsed = urlparse(resolved)
+        safe_resolved = _safe_registry_url_for_display(resolved)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError(
-                f"Invalid MCP registry URL {resolved!r}: expected scheme://host "
+                f"Invalid MCP registry URL {safe_resolved!r}: expected scheme://host "
                 f"(e.g. https://mcp.example.com). Check MCP_REGISTRY_URL if set."
+            )
+        try:
+            parsed_port = parsed.port
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid MCP registry URL {safe_resolved!r}: invalid port. "
+                "Check MCP_REGISTRY_URL if set."
+            ) from exc
+        if parsed.query or parsed.fragment:
+            raise ValueError(
+                f"Invalid MCP registry base URL {safe_resolved!r}: "
+                "query strings and fragments are not supported."
             )
         if parsed.scheme not in ("http", "https"):
             raise ValueError(
                 f"Unsupported scheme {parsed.scheme!r} in MCP registry URL "
-                f"{resolved!r}: only https:// is supported (http:// requires "
+                f"{safe_resolved!r}: only https:// is supported (http:// requires "
                 f"MCP_REGISTRY_ALLOW_HTTP=1). Check MCP_REGISTRY_URL if set."
             )
         if parsed.scheme == "http" and not os.environ.get("MCP_REGISTRY_ALLOW_HTTP"):
             raise ValueError(
-                f"Insecure MCP registry URL {resolved!r}: http:// is not allowed "
+                f"Insecure MCP registry URL {safe_resolved!r}: http:// is not allowed "
                 f"by default. Set MCP_REGISTRY_ALLOW_HTTP=1 to opt in to plaintext "
                 f"HTTP (not recommended for production). "
                 f"Check MCP_REGISTRY_URL if set."
@@ -203,7 +234,7 @@ class SimpleRegistryClient:
         # elsewhere), but we never echo them back.
         if parsed.username or parsed.password:
             host = parsed.hostname or ""
-            sanitized_netloc = host + (f":{parsed.port}" if parsed.port else "")
+            sanitized_netloc = host + (f":{parsed_port}" if parsed_port else "")
             resolved = parsed._replace(netloc=sanitized_netloc).geturl().rstrip("/")
 
         self.registry_url = resolved

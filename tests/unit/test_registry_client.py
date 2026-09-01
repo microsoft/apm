@@ -312,6 +312,34 @@ class TestSimpleRegistryClient(unittest.TestCase):
         client = SimpleRegistryClient("https://explicit-url.example.com")
         self.assertEqual(client.registry_url, "https://explicit-url.example.com")
 
+    def test_environment_query_and_fragment_are_rejected_without_leaking(self):
+        secret = "registry-query-secret"
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"MCP_REGISTRY_URL": f"https://registry.example.com?token={secret}#{secret}"},
+                clear=False,
+            ),
+            self.assertRaises(ValueError) as raised,
+        ):
+            SimpleRegistryClient()
+
+        self.assertNotIn(secret, str(raised.exception))
+
+    def test_malformed_port_is_rejected_without_leaking_userinfo(self):
+        secret = "registry-port-secret"
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"MCP_REGISTRY_URL": f"https://user:{secret}@registry.example.com:notaport"},
+                clear=False,
+            ),
+            self.assertRaises(ValueError) as raised,
+        ):
+            SimpleRegistryClient()
+
+        self.assertNotIn(secret, str(raised.exception))
+
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     def test_find_server_by_reference_uuid_input_returns_none(self, mock_search_servers):
         """The legacy UUID strategy is removed; UUID-shaped refs route to search and miss."""

@@ -2358,6 +2358,36 @@ class TestInstallMcpFlag:
         assert "Skipped workspace-only runtimes at user scope: vscode" in result.output
         assert "Skipped workspace-only runtimes" not in replay.output
 
+    def test_global_mcp_dry_run_creates_no_user_state(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "-g",
+            "--target",
+            "claude",
+            "--mcp",
+            "probe",
+            "--dry-run",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 0, result.output
+        assert "would add MCP server" in result.output
+        assert not (fake_home / ".apm" / "apm.yml").exists()
+
     def test_e3_mcp_with_only_apm(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(

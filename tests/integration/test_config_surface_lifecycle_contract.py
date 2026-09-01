@@ -1205,11 +1205,7 @@ def test_global_direct_mcp_uses_user_manifest_and_runtime_config(
         base_env=dict(os.environ),
     )
     user_manifest = isolated.home / ".apm" / "apm.yml"
-    fake_bin = isolated.root / "bin"
-    fake_bin.mkdir()
-    claude_binary = fake_bin / "claude"
-    claude_binary.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
-    claude_binary.chmod(0o755)
+    (isolated.home / ".gemini").mkdir()
     project = isolated.work_root / "consumer"
     project.mkdir()
     (project / ".cursor").mkdir()
@@ -1240,22 +1236,19 @@ def test_global_direct_mcp_uses_user_manifest_and_runtime_config(
         expected_returncodes=(0,),
         scenario_id="global-direct-mcp",
         cwd=project,
-        env=isolated.subprocess_env(
-            overrides={
-                "PATH": f"{fake_bin}{os.pathsep}{isolated.process_environment['PATH']}",
-            }
-        ),
+        env=isolated.subprocess_env(),
     )[0]
 
     user_config = load_yaml(user_manifest)
     assert user_config["dependencies"]["mcp"][0]["name"] == "global-direct-server"
     project_config = load_yaml(project_manifest)
     assert project_config["dependencies"]["mcp"] == []
-    claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
-    assert claude_config["mcpServers"]["global-direct-server"] == {
+    gemini_config = json.loads(
+        (isolated.home / ".gemini" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert gemini_config["mcpServers"]["global-direct-server"] == {
         "args": ["ready"],
         "command": "echo",
-        "type": "stdio",
     }
     assert "Install interrupted" not in result.stdout + result.stderr
 
@@ -1330,6 +1323,172 @@ def test_configured_mcp_registry_drives_global_direct_install(
     )
     claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
     assert "configured-registry" in claude_config["mcpServers"]
+
+
+def test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """User-scope capability filtering precedes state and survives replay."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "global-target-capability",
+        base_env=dict(os.environ),
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    environment = isolated.subprocess_env()
+    runner = _runner(apm_binary_path)
+    user_manifest = isolated.home / ".apm" / "apm.yml"
+
+    rejected = runner.run(
+        (
+            "install",
+            "-g",
+            "--target",
+            "vscode",
+            "--mcp",
+            "rejected-server",
+            "--no-policy",
+            "--",
+            "echo",
+            "rejected",
+        ),
+        scenario_id="global-zero-supported-target",
+        cwd=project,
+        env=environment,
+    )
+
+    assert rejected.returncode == 2
+    assert not user_manifest.exists()
+
+    mixed, replay = runner.run_sequence(
+        (
+            (
+                "install",
+                "-g",
+                "--target",
+                "vscode,claude",
+                "--mcp",
+                "mixed-server",
+                "--no-policy",
+                "--",
+                "echo",
+                "mixed",
+            ),
+            (
+                "install",
+                "-g",
+                "--mcp",
+                "replay-server",
+                "--no-policy",
+                "--",
+                "echo",
+                "replay",
+            ),
+        ),
+        expected_returncodes=(0, 0),
+        scenario_id="global-mixed-target-replay",
+        cwd=project,
+        env=environment,
+    )
+
+    assert "Skipped workspace-only runtimes at user scope: vscode" in (mixed.stdout + mixed.stderr)
+    assert "Skipped workspace-only runtimes" not in replay.stdout + replay.stderr
+    user_config = load_yaml(user_manifest)
+    assert user_config["targets"] == ["claude"]
+    claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
+    assert set(claude_config["mcpServers"]) == {"mixed-server", "replay-server"}
+
+
+def test_global_direct_mcp_dry_run_creates_no_user_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A user-scope preview must not bootstrap any persistent state."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "global-direct-dry-run",
+        base_env=dict(os.environ),
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+
+    result = _runner(apm_binary_path).run(
+        (
+            "install",
+            "-g",
+            "--target",
+            "claude",
+            "--mcp",
+            "dry-run-server",
+            "--dry-run",
+            "--no-policy",
+        ),
+        scenario_id="global-direct-mcp-dry-run",
+        cwd=project,
+        env=isolated.subprocess_env(),
+    )
+
+    assert result.returncode == 0
+    assert not (isolated.home / ".apm" / "apm.yml").exists()
+    assert not (isolated.home / ".apm" / "apm.lock.yaml").exists()
+    assert not (isolated.home / ".claude.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("ambient_url", "secrets"),
+    (
+        (
+            "https://user:userinfo-secret@registry.example.invalid"
+            "?token=query-secret#fragment-secret",
+            ("userinfo-secret", "query-secret", "fragment-secret"),
+        ),
+        (
+            "https://user:port-secret@registry.example.invalid:notaport",
+            ("port-secret",),
+        ),
+    ),
+)
+def test_ambient_registry_credentials_never_reach_manifest_or_output(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    ambient_url: str,
+    secrets: tuple[str, ...],
+) -> None:
+    """Ambient registry parse failures redact every credential-bearing component."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / f"ambient-registry-{len(secrets)}",
+        base_env=dict(os.environ),
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    environment = isolated.subprocess_env()
+    environment["MCP_REGISTRY_URL"] = ambient_url
+
+    result = _runner(apm_binary_path).run(
+        (
+            "install",
+            "-g",
+            "--target",
+            "claude",
+            "--mcp",
+            "ambient-registry-server",
+            "--no-policy",
+            "--verbose",
+        ),
+        scenario_id="ambient-registry-redaction",
+        cwd=project,
+        env=environment,
+    )
+
+    assert result.returncode == 2
+    combined_output = result.stdout + result.stderr
+    user_manifest_path = isolated.home / ".apm" / "apm.yml"
+    user_manifest = (
+        user_manifest_path.read_text(encoding="utf-8") if user_manifest_path.is_file() else ""
+    )
+    for secret in secrets:
+        assert secret not in combined_output
+        assert secret not in user_manifest
 
 
 def test_saved_target_drives_declared_mcp_and_lsp_without_package(
