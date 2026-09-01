@@ -269,9 +269,7 @@ class TestCheckCleanFlag:
         result = CliRunner().invoke(pack_cmd, ["--check-clean", "--offline"])
 
         assert result.exit_code == 0, result.output
-        assert "--check-clean is read-only; no bundle or marketplace outputs were written." in (
-            result.output
-        )
+        assert "--check-clean is read-only; no pack outputs were written." in result.output
         assert "Packed" not in result.output
 
     def test_json_envelope_carries_drift(self, tmp_path: _Path, monkeypatch) -> None:

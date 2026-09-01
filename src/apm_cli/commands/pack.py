@@ -557,7 +557,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         return
 
     if check_clean and not dry_run:
-        logger.info("--check-clean is read-only; no bundle or marketplace outputs were written.")
+        logger.info("--check-clean is read-only; no pack outputs were written.")
 
     for sub in result.producer_results:
         if check_clean and not dry_run:

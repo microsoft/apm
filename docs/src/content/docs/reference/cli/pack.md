@@ -240,7 +240,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 
 | Code | Meaning |
 |---|---|
-| `0` | Success. Requested artifacts written (or, with `--dry-run`, planned). |
+| `0` | Success. Requested artifacts written, planned with `--dry-run`, or validated without writes by `--check-clean`. |
 | `1` | Build or runtime error: network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
 | `2` | `apm.yml` schema validation error. |
 | `3` | `--check-versions` failed: per-package versions disagree with the configured marketplace versioning strategy. |
