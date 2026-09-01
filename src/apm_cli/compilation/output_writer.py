@@ -70,14 +70,36 @@ class CompiledOutputWriter:
             raise CompiledOutputPolicyError(verdict)
         return prepared, verdict
 
-    def write_many(self, outputs: Mapping[Path, str]) -> ScanVerdict:
-        """Validate the whole batch, then persist only through atomic writes."""
+    def write_many(
+        self,
+        outputs: Mapping[Path, str],
+        *,
+        preserve_line_endings: bool | Mapping[Path, bool] = False,
+    ) -> ScanVerdict:
+        """Validate a batch, then persist it only through atomic writes.
+
+        ``preserve_line_endings`` is for managed-section outputs whose
+        hand-authored content must retain its original byte representation. A
+        mapping selects that behavior per output while preserving a single
+        validate-then-write batch.
+        """
         prepared, verdict = self.prepare(outputs)
         for path, final in prepared.items():
             path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(path, final)
+            preserve = (
+                preserve_line_endings.get(path, False)
+                if isinstance(preserve_line_endings, Mapping)
+                else preserve_line_endings
+            )
+            atomic_write_text(path, final, normalize_line_endings=not preserve)
         return verdict
 
-    def write(self, path: Path, content: str) -> ScanVerdict:
+    def write(
+        self,
+        path: Path,
+        content: str,
+        *,
+        preserve_line_endings: bool = False,
+    ) -> ScanVerdict:
         """Validate and persist one compiled output."""
-        return self.write_many({path: content})
+        return self.write_many({path: content}, preserve_line_endings=preserve_line_endings)

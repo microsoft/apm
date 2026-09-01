@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "owners": [
+    {
+      "id": "mcp-target-selection-precedence",
+      "decision": "MCP target-selection precedence",
+      "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes)",
+      "selectors": ["src/apm_cli/integration/mcp_integrator_install.py"],
+      "guards": ["hooks-integrations-mcp-target-selection"]
+    },
+    {
+      "id": "neutral-hook-contract",
+      "decision": "Neutral hook source grammar, per-target native shape, and shared-config APM-owned drift projection",
+      "owner": "hook_contract.py (HOOK_COMMAND_KEYS, parse_hook_source, _entries_to_ir), per-target renderers, hook_ownership.py (project_apm_owned_hook_entries)",
+      "selectors": [
+        "src/apm_cli/hook_contract.py",
+        "src/apm_cli/integration/hook_ir.py",
+        "src/apm_cli/integration/hook_native_formats.py",
+        "src/apm_cli/integration/hook_integrator.py",
+        "src/apm_cli/integration/hook_ownership.py"
+      ],
+      "guards": ["hooks-integrations-neutral-hook-contract"]
+    },
+    {
+      "id": "plugin-root-hook-command-vocabulary",
+      "decision": "Plugin-root hook command vocabulary + parsing",
+      "owner": "integration/hook_command_paths.py",
+      "selectors": ["src/apm_cli/integration/hook_command_paths.py"],
+      "guards": ["hooks-integrations-hook-command-vocabulary"]
+    },
+    {
+      "id": "mcp-declaration-scope",
+      "decision": "Root vs dependency MCP declaration scope",
+      "owner": "integration/mcp_config_view.py (CurrentMcpConfigView)",
+      "selectors": ["src/apm_cli/integration/mcp_config_view.py"],
+      "guards": ["hooks-integrations-mcp-declaration-scope"]
+    },
+    {
+      "id": "mcp-package-launcher",
+      "decision": "MCP package launcher selection and argv shape (container and non-container)",
+      "owner": "adapters/client/base.py (MCPClientAdapter)",
+      "selectors": ["src/apm_cli/adapters/client/base.py"],
+      "guards": ["hooks-integrations-mcp-package-launcher"]
+    },
+    {
+      "id": "jetbrains-copilot-mcp-config-path",
+      "decision": "JetBrains Copilot MCP config path",
+      "owner": "adapters/client/intellij.py",
+      "selectors": ["src/apm_cli/adapters/client/intellij.py"],
+      "guards": ["hooks-integrations-jetbrains-mcp-path"]
+    },
+    {
+      "id": "copilot-cli-mcp-config-paths",
+      "decision": "Copilot CLI MCP config paths",
+      "owner": "adapters/client/copilot.py",
+      "selectors": ["src/apm_cli/adapters/client/copilot.py"],
+      "guards": ["hooks-integrations-copilot-cli-mcp-paths"]
+    },
+    {
+      "id": "user-root-scoped-instruction-eligibility",
+      "decision": "User-root scoped instruction eligibility",
+      "owner": "integration/targets.py (TargetProfile.include_scoped_in_user_root_context)",
+      "selectors": ["src/apm_cli/integration/targets.py"],
+      "guards": ["hooks-integrations-user-root-scope"]
+    }
+  ]
+}

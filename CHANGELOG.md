@@ -7,11 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Architecture ownership guards now use a sharded JSON registry and a
+  single-process Python linter while preserving exact-revision compatibility
+  and reducing warm median lint time by 75%. (#2739)
+
 ### Fixed
 
 - `apm pack --check-clean` is now read-only and detects marketplace drift
   without overwriting artifacts. Release pipelines that also produce artifacts
   must run `apm pack` separately. (by @danielmeppiel, closes #2727, #2730)
+- Distributed `apm compile` now reconciles existing managed-section
+  `AGENTS.md` files without overwriting hand-authored content, generates new
+  placements safely, and never discovers, writes, or cleans content across
+  nested Git repository or linked-worktree boundaries. (by @aryansk; fixes
+  #2560 and #2713) (#2578)
+- Windows admin lifecycle policies now resolve from `%ProgramData%` instead of
+  assuming `C:\ProgramData`, while retaining the historical fallback.
+  (by @lukiod; closes #2684) (#2686)
 - Marketplace installs now materialize catalog-only LSP and MCP metadata
   without requiring a package manifest in the downloaded source
   (by @lkshrk, #2709).

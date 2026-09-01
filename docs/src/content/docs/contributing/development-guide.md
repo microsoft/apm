@@ -167,6 +167,34 @@ uv run --extra dev ruff check src/ tests/ && uv run --extra dev ruff format --ch
 
 CI also runs repository guardrails from `.github/workflows/ci.yml`, including duplication and auth-boundary checks.
 
+### Architecture guardrails
+
+Durable architecture decisions have one canonical owner. Executable owner metadata
+lives in `.apm/architecture/owners/index.json` and the six shards it lists:
+
+- `core-runtime.json`
+- `install-deployment.json`
+- `hooks-integrations.json`
+- `transport-auth-platform.json`
+- `marketplace-plugins.json`
+- `contracts-tooling.json`
+
+For an ordinary owner addition, edit the appropriate shard. Do not edit
+`.apm/instructions/architecture.instructions.md`, `.github/instructions/...`
+files, or `apm.lock.yaml`. Each owner entry has `id`, `decision`, `owner`,
+`selectors`, and `guards` fields; this metadata is an ownership registry, not a
+rule DSL.
+
+When centralizing behavior, add a behavioral test and register a semantic static
+guard. Run the stable architecture check with:
+
+```bash
+bash scripts/lint-architecture-boundaries.sh
+```
+
+The check fails closed when metadata is malformed, missing, or not listed in the
+index.
+
 ### Optional: local pre-commit hooks
 
 For instant feedback before pushing, install the pre-commit hooks:

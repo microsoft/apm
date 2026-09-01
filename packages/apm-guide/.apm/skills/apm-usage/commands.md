@@ -144,9 +144,19 @@ When `apm install` has already deployed instructions to `.claude/rules/`, `apm c
 
 **Dry-run preview.** Use `--dry-run` with `--clean` to preview what would be removed without touching any files. If a hand-authored `CLAUDE.md` would block deletion, the preview surfaces that outcome as well.
 
-**Nested Git worktrees (`--clean`).** Cleanup does not descend into linked worktrees below its cleanup root. To clean generated files in a nested checkout, make it the cleanup root, usually by running `apm compile --clean` there.
+**Nested Git boundaries.** Compile does not discover, write, or clean content
+inside nested Git repositories or linked worktrees below its root. This also
+applies to `includes: auto`. Run `apm compile` from the nested checkout when you
+want to compile it.
 
 When `apm install --target copilot` has already deployed instructions to `.github/instructions/`, `apm compile --target copilot` omits `AGENTS.md` entirely if its only content would be the duplicated instructions section. `AGENTS.md` is still generated when it carries non-instruction content such as a constitution. Pass `--force-instructions` (alias: `--no-dedup`) to force full `AGENTS.md` output.
+
+**Distributed managed sections.** With `compilation.agents_md.mode:
+managed_section`, existing distributed `AGENTS.md` files retain content
+outside their APM markers. New placements are created with a managed block. Run
+`apm compile --dry-run` to inspect the same eligible placement set a real
+compile uses; nested Git repositories and linked worktrees, including their
+descendants, are skipped.
 
 ## Scripts
 
@@ -182,7 +192,7 @@ If the install cache has not been warmed (e.g. a fresh checkout before the first
 | `apm lifecycle trust` | Trust `apm.yml` `lifecycle:` at its current contents so project scripts run on install | -- |
 | `apm lifecycle untrust` | Revoke trust for `apm.yml` `lifecycle:`; project scripts will stop running | -- |
 
-Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. `post-install` fires only after success or partial success; failed and dry-run installs skip it. Script files are discovered from three sources (additive): policy (POSIX: `/etc/apm/policy.d/*.json`; Windows: `C:\ProgramData\APM\policy.d\*.json`; JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
+Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. `post-install` fires only after success or partial success; failed and dry-run installs skip it. Script files are discovered from three sources (additive): policy (POSIX: `/etc/apm/policy.d/*.json`; Windows: `%ProgramData%\APM\policy.d\*.json`; JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
 
 ## Distribution
 

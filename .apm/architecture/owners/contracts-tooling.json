@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "owners": [
+    {
+      "id": "dependency-identity-materialization",
+      "decision": "Dependency comparison identity vs display-cased materialization path",
+      "owner": "models/dependency/identity.py + materialization.py + DependencyReference",
+      "selectors": [
+        "src/apm_cli/models/dependency/identity.py",
+        "src/apm_cli/models/dependency/materialization.py",
+        "src/apm_cli/models/dependency/reference.py"
+      ],
+      "guards": ["contracts-tooling-dependency-identity"]
+    },
+    {
+      "id": "cached-policy-shape",
+      "decision": "Cached policy shape",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY)",
+      "selectors": ["src/apm_cli/policy/discovery.py"],
+      "guards": ["contracts-tooling-cached-policy-shape"]
+    },
+    {
+      "id": "apply-to-hidden-tool-placement",
+      "decision": "applyTo normalization and hidden-tool placement",
+      "owner": "utils/patterns.py (normalize_apply_to); compilation/context_optimizer.py (ContextOptimizer)",
+      "selectors": [
+        "src/apm_cli/utils/patterns.py",
+        "src/apm_cli/compilation/context_optimizer.py"
+      ],
+      "guards": ["contracts-tooling-apply-to-placement"]
+    },
+    {
+      "id": "frontmatter-bom-bounded-yaml",
+      "decision": "Frontmatter BOM decoding and bounded YAML parsing",
+      "owner": "utils/yaml_io.py (load_frontmatter, _BoundedYAMLHandler)",
+      "selectors": ["src/apm_cli/utils/yaml_io.py"],
+      "guards": ["contracts-tooling-frontmatter-yaml"]
+    },
+    {
+      "id": "read-only-lockfile-path",
+      "decision": "Read-only lockfile path resolution",
+      "owner": "deps/lockfile.py (resolve_lockfile_path_for_read)",
+      "selectors": ["src/apm_cli/deps/lockfile.py"],
+      "guards": ["contracts-tooling-lockfile-read"]
+    },
+    {
+      "id": "generated-content-footer-wording",
+      "decision": "Generated-content footer ownership wording",
+      "owner": "compilation/footer.py (build_generation_footer)",
+      "selectors": ["src/apm_cli/compilation/footer.py"],
+      "guards": ["contracts-tooling-generation-footer"]
+    }
+  ]
+}
