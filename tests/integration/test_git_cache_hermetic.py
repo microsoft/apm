@@ -863,6 +863,18 @@ class TestHelperFunctions:
         url = "https://alice@example.com/repo.git"
         assert _sanitize_url(url) == "https://example.com/repo.git"
 
+    def test_sanitize_url_removes_query_fragment_and_embedded_credentials(self) -> None:
+        diagnostic = (
+            "fatal: fetch https://user:pass@example.com/repo.git"
+            "?access_token=SECRET123#main failed"
+        )
+
+        sanitized = _sanitize_url(diagnostic)
+
+        assert "SECRET123" not in sanitized
+        assert "user:pass" not in sanitized
+        assert sanitized == "fatal: fetch https://example.com/repo.git failed"
+
     def test_sanitize_url_redacts_parser_errors(self) -> None:
         with patch("urllib.parse.urlparse", side_effect=ValueError("bad url")):
             assert _sanitize_url("https://example.com/repo.git") == "<redacted git URL>"

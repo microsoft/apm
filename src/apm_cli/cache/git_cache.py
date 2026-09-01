@@ -261,7 +261,8 @@ class GitCache:
 
         if result.returncode != 0:
             raise RuntimeError(
-                f"git ls-remote failed for {_sanitize_url(url)}: {result.stderr.strip()}"
+                f"git ls-remote failed for {_sanitize_url(url)}: "
+                f"{_sanitize_url(result.stderr.strip())}"
             )
 
         # Parse ls-remote output: first column is SHA
@@ -826,19 +827,25 @@ def _dir_size(path: Path) -> int:
     return total
 
 
-def _sanitize_url(url: str) -> str:
-    """Remove all URL userinfo before including a transport in diagnostics."""
+_DIAGNOSTIC_URL_RE = re.compile(r"(?i)\b(?:https?|ssh|git)://[^\s'\"<>]+")
+
+
+def _sanitize_url(value: str) -> str:
+    """Remove URL userinfo, query, and fragment data from diagnostics."""
     import urllib.parse
 
-    try:
-        parsed = urllib.parse.urlparse(url)
-        if parsed.username is not None or parsed.password is not None:
+    def _redact(match: re.Match[str]) -> str:
+        try:
+            parsed = urllib.parse.urlparse(match.group(0))
             host = parsed.hostname or ""
             if ":" in host:
                 host = f"[{host}]"
             if parsed.port is not None:
                 host = f"{host}:{parsed.port}"
-            return urllib.parse.urlunparse(parsed._replace(netloc=host))
-    except Exception:
-        return "<redacted git URL>"
-    return url
+            return urllib.parse.urlunparse(
+                parsed._replace(netloc=host, query="", fragment="")
+            )
+        except Exception:
+            return "<redacted git URL>"
+
+    return _DIAGNOSTIC_URL_RE.sub(_redact, value)
