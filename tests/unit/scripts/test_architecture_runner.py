@@ -605,6 +605,7 @@ contracts-tooling-cached-policy-shape
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
+contracts-tooling-lockfile-read
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
