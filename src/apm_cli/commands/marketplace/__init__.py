@@ -420,11 +420,19 @@ def add(source, name, ref, branch, host, verbose):
         if _should_warn_unpinned_git_url(
             source_arg, kind, is_direct_url, fragment_ref, explicit_ref
         ):
-            logger.warning(
-                "Pin this git marketplace with a #ref (for example, "
-                f"{source_arg}#v1.0.0) or --ref to avoid mutable branch updates.",
-                symbol="warning",
-            )
+            from ...marketplace.source_identity import parse_marketplace_source
+
+            if parse_marketplace_source(url).transport in {"ssh", "scp"}:
+                warning = (
+                    "Pin this git marketplace with --ref v1.0.0 "
+                    "to avoid mutable branch updates."
+                )
+            else:
+                warning = (
+                    "Pin this git marketplace with a #ref (for example, "
+                    f"{source_arg}#v1.0.0) or --ref to avoid mutable branch updates."
+                )
+            logger.warning(warning, symbol="warning")
 
         # Probe for marketplace.json location. The probe source's name is a
         # placeholder -- _auto_detect_path only consults url/ref/path/kind.

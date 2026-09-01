@@ -484,6 +484,8 @@ class TestMarketplaceAdd:
 
         assert result.exit_code == 0, result.output
         assert "Pin this git marketplace" in result.output
+        assert "--ref v1.0.0" in result.output
+        assert "#v1.0.0" not in result.output
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")

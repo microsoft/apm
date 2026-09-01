@@ -1288,13 +1288,26 @@ class AuthResolver:
     def _harden_ssh_command(command: str) -> str:
         """Preserve shell syntax while overriding prompt-related SSH options."""
         safe_command = command.strip() or "ssh"
-        for option in ("BatchMode", "ConnectTimeout"):
-            safe_command = re.sub(
-                rf"(?i)(?:-o\s*{option}\s*=\s*\S+|-o{option}\s*=\s*\S+)\s*",
-                "",
-                safe_command,
+        safe_command = re.sub(
+            r"""(?ix)
+            -o\s*
+            (?:
+                ["']BatchMode(?:\s+|=)[^"']*["']
+                |
+                BatchMode\s*=\s*(?:"[^"]*"|'[^']*'|\S+)
             )
-        return f"{safe_command.rstrip()} -o BatchMode=yes -o ConnectTimeout=30"
+            \s*
+            """,
+            "",
+            safe_command,
+        )
+        timeout = ""
+        if not re.search(
+            r"""(?ix)-o\s*(?:["']?ConnectTimeout(?:\s+|=))""",
+            safe_command,
+        ):
+            timeout = " -o ConnectTimeout=30"
+        return f"{safe_command.rstrip()} -o BatchMode=yes{timeout}"
 
     @classmethod
     def build_public_github_anonymous_git_env(
