@@ -483,10 +483,65 @@ class TestInstallCommandAutoBootstrap:
             assert result.exit_code == 0, result.output
             assert "APM dependencies (1):" in result.output
             assert "./local-package" in result.output
+            assert "Dry run completed: would install 1 APM dependency" in result.output
             assert Path("apm.yml").read_bytes() == manifest_before
             assert not Path("apm.lock.yaml").exists()
             assert not Path("apm_modules").exists()
             assert not Path(".github").exists()
+
+    def test_positional_dry_run_excludes_unrequested_manifest_dependencies(self):
+        """Dry-run renders and counts only the requested positional package."""
+        with self._chdir_tmp():
+            for name in ("existing-package", "requested-package"):
+                package = Path(name)
+                package.mkdir()
+                (package / "apm.yml").write_text(
+                    f"name: {name}\nversion: 1.0.0\n",
+                    encoding="utf-8",
+                )
+            Path("apm.yml").write_text(
+                "name: project\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                "    - path: ./existing-package\n",
+                encoding="utf-8",
+            )
+            manifest_before = Path("apm.yml").read_bytes()
+
+            result = self.runner.invoke(
+                cli,
+                ["install", "./requested-package", "--dry-run"],
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "APM dependencies (1):" in result.output
+            assert "./requested-package" in result.output
+            assert "./existing-package" not in result.output
+            assert Path("apm.yml").read_bytes() == manifest_before
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    def test_positional_dry_run_previews_ref_update_without_persisting(
+        self,
+        _mock_validate,
+    ):
+        """A changed positional ref remains prospective during dry-run."""
+        with self._chdir_tmp():
+            Path("apm.yml").write_text(
+                "name: project\nversion: 1.0.0\ndependencies:\n  apm:\n    - owner/repo#main\n",
+                encoding="utf-8",
+            )
+            manifest_before = Path("apm.yml").read_bytes()
+
+            result = self.runner.invoke(
+                cli,
+                ["install", "owner/repo#dev", "--dry-run"],
+            )
+
+            assert result.exit_code == 0, result.output
+            assert "owner/repo#dev" in result.output
+            assert "would update ref in apm.yml" in result.output
+            assert Path("apm.yml").read_bytes() == manifest_before
 
 
 class TestValidationFailureReasonMessages:

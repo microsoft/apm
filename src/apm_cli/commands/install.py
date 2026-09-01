@@ -190,7 +190,6 @@ class InstallContext:
     legacy_skill_paths: bool = False
     frozen: bool = False
     plan_callback: "Callable[[UpdatePlan], bool] | None" = None
-    validated_additions: builtins.tuple[str, ...] = ()
     skill_subset: "builtins.tuple[str, ...] | None" = None
     skill_subset_from_cli: bool = False
     audit_override: str | None = None
@@ -271,6 +270,7 @@ def _resolve_package_references(
     skill_subset=None,
     skill_subset_from_cli=False,
     default_registry=None,
+    dry_run=False,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -490,7 +490,7 @@ def _resolve_package_references(
                 continue
             valid_outcomes.append((canonical, already_in_deps))
             if logger:
-                logger.validation_pass(canonical, already_in_deps, updates_existing_entry)
+                logger.validation_pass(canonical, already_in_deps, updates_existing_entry, dry_run)
             if not already_in_deps:
                 validated_packages.append(canonical)
                 existing_identities.add(identity)
@@ -654,12 +654,28 @@ def _validate_and_add_packages_to_apm_yml(
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         default_registry=_default_registry_for_cli,
+        dry_run=dry_run,
     )
+
+    prospective_package = None
+    if dry_run and valid_outcomes:
+        prospective_dependencies = list(current_deps)
+        prospective_dependencies.extend(
+            _apm_yml_entries.get(package, package) for package in validated_packages
+        )
+        data[dep_section]["apm"] = prospective_dependencies
+        prospective_package = APMPackage.from_mapping(
+            data,
+            package_path=apm_yml_path.parent,
+            source_path=apm_yml_path.parent,
+            manifest_path=apm_yml_path,
+        )
 
     outcome = _ValidationOutcome(
         valid=valid_outcomes,
         invalid=invalid_outcomes,
         marketplace_provenance=_marketplace_provenance or None,
+        prospective_package=prospective_package,
     )
 
     # Let the logger emit a summary and decide whether to continue
@@ -672,18 +688,19 @@ def _validate_and_add_packages_to_apm_yml(
         if dry_run:
             if logger:
                 logger.progress("No new packages to add")
-        # If all packages already exist in apm.yml, that's OK - we'll reinstall them
-        persist_dependency_list_if_changed(
-            dependencies_changed=dependencies_changed,
-            data=data,
-            dep_section=dep_section,
-            current_deps=current_deps,
-            apm_yml_path=apm_yml_path,
-            apm_yml_filename=APM_YML_FILENAME,
-            logger=logger,
-            rich_error=_rich_error,
-            sys_exit=sys.exit,
-        )
+        # If all packages already exist in apm.yml, that's OK - we'll reinstall them.
+        if not dry_run:
+            persist_dependency_list_if_changed(
+                dependencies_changed=dependencies_changed,
+                data=data,
+                dep_section=dep_section,
+                current_deps=current_deps,
+                apm_yml_path=apm_yml_path,
+                apm_yml_filename=APM_YML_FILENAME,
+                logger=logger,
+                rich_error=_rich_error,
+                sys_exit=sys.exit,
+            )
         return [], outcome
 
     if dry_run:
@@ -1537,7 +1554,6 @@ def install(  # noqa: C901, PLR0913
                 transaction=transaction,
                 refresh=refresh,
                 only_packages=only_packages_from_validation(packages, outcome),
-                validated_additions=tuple(_validated_packages),
                 legacy_skill_paths=legacy_skill_paths,
                 frozen=frozen,
                 plan_callback=None,
@@ -1716,9 +1732,10 @@ def _install_apm_packages(ctx, outcome):
         lockfile_count=0,  # Refined later inside _install_apm_dependencies
     )
 
-    # Parse apm.yml to get both APM and MCP dependencies
     try:
         apm_package = APMPackage.from_apm_yml(ctx.manifest_path)
+        if ctx.dry_run and outcome is not None and outcome.prospective_package is not None:
+            apm_package = outcome.prospective_package
     except click.UsageError:
         raise
     except Exception as e:
@@ -1764,18 +1781,14 @@ def _install_apm_packages(ctx, outcome):
 
     # Show what will be installed if dry run
     if ctx.dry_run:
-        prospective_plan = ProspectiveInstallPlan.from_manifest_and_validated_additions(
-            apm_dependencies=apm_deps,
-            dev_apm_dependencies=dev_apm_deps,
-            mcp_dependencies=mcp_deps,
-            validated_additions=ctx.validated_additions,
-            additions_are_dev=ctx.dev,
+        prospective_plan = ProspectiveInstallPlan.from_apm_package(
+            apm_package,
             should_install_apm=should_install_apm,
             should_install_mcp=should_install_mcp,
             only_packages=ctx.only_packages,
         )
         _check_insecure_dependencies(
-            prospective_plan.all_apm_dependencies,
+            prospective_plan.selected_apm_dependencies,
             ctx.allow_insecure,
             logger,
         )
@@ -1784,7 +1797,7 @@ def _install_apm_packages(ctx, outcome):
         if should_install_apm:
             preflight_agent_plugin_dry_run(
                 ctx,
-                list(prospective_plan.all_apm_dependencies),
+                list(prospective_plan.selected_apm_dependencies),
                 apm_package=apm_package,
             )
         # -- W2-dry-run (#827): policy preflight in preview mode --
@@ -1796,7 +1809,7 @@ def _install_apm_packages(ctx, outcome):
 
         _dr_preflight(
             project_root=ctx.project_root,
-            apm_deps=list(prospective_plan.all_apm_dependencies),
+            apm_deps=list(prospective_plan.selected_apm_dependencies),
             mcp_deps=mcp_deps if should_install_mcp else None,
             no_policy=ctx.no_policy,
             logger=logger,
@@ -1811,12 +1824,7 @@ def _install_apm_packages(ctx, outcome):
             update=ctx.update,
             apm_dir=ctx.apm_dir,
         )
-        return (
-            prospective_plan.apm_dependency_count,
-            prospective_plan.mcp_dependency_count,
-            0,
-            None,
-        )
+        return prospective_plan.apm_dependency_count, prospective_plan.mcp_dependency_count, 0, None
 
     _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
 

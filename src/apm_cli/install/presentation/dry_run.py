@@ -6,8 +6,7 @@ original block that lived at lines 525-581.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 
@@ -20,14 +19,8 @@ if TYPE_CHECKING:
 def render_and_exit(
     *,
     logger: InstallLogger,
-    plan: ProspectiveInstallPlan | None = None,
-    should_install_apm: bool | None = None,
-    apm_deps: Sequence[Any] = (),
-    mcp_deps: Sequence[Any] = (),
-    dev_apm_deps: Sequence[Any] = (),
-    should_install_mcp: bool | None = None,
+    plan: ProspectiveInstallPlan,
     update: bool,
-    only_packages: Sequence[str] | None = None,
     apm_dir: Path,
 ) -> None:
     """Render the dry-run preview to the user.
@@ -35,24 +28,14 @@ def render_and_exit(
     The caller is responsible for ``return``-ing after this function
     completes -- this function does NOT exit or return early on its own.
     """
-    if plan is None:
-        plan = ProspectiveInstallPlan(
-            apm_dependencies=tuple(apm_deps),
-            dev_apm_dependencies=tuple(dev_apm_deps),
-            mcp_dependencies=tuple(mcp_deps),
-            should_install_apm=bool(should_install_apm),
-            should_install_mcp=bool(should_install_mcp),
-            only_packages=tuple(only_packages) if only_packages is not None else None,
-        )
-
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.drift import detect_orphans
 
     logger.progress("Dry run mode - showing what would be installed:")
 
-    if plan.should_install_apm and plan.apm_dependencies:
+    if plan.should_install_apm and plan.selected_apm_dependencies:
         logger.progress(f"APM dependencies ({plan.apm_dependency_count}):")
-        for dep in plan.apm_dependencies:
+        for dep in plan.selected_apm_dependencies:
             action = "update" if update else "install"
             logger.progress(f"  - {dep.repo_url}#{dep.reference or 'main'} -> {action}")
 
@@ -61,7 +44,9 @@ def render_and_exit(
         for dep in plan.mcp_dependencies:
             logger.progress(f"  - {dep}")
 
-    if not plan.all_apm_dependencies and not plan.mcp_dependencies:
+    if not plan.selected_apm_dependencies and not (
+        plan.should_install_mcp and plan.mcp_dependencies
+    ):
         logger.progress("No dependencies found in apm.yml")
 
     # Orphan preview: lockfile + manifest difference -- no integration
@@ -86,11 +71,9 @@ def render_and_exit(
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
 
-    if plan.all_apm_dependencies:
+    if plan.selected_apm_dependencies:
         logger.dry_run_notice(
             "Per-package stale-file cleanup (renames within a package) is "
             "not previewed -- it requires running integration. Run without "
             "--dry-run to apply."
         )
-
-    logger.success("Dry run complete - no changes made")

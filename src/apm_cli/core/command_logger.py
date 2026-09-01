@@ -31,6 +31,7 @@ class _ValidationOutcome:
     valid: list  # List of (canonical_name, already_present: bool) tuples
     invalid: list  # List of (package_name, reason: str) tuples
     marketplace_provenance: dict = None  # canonical -> {discovered_via, marketplace_plugin_name}
+    prospective_package: object | None = None
 
     @property
     def all_failed(self) -> bool:
@@ -239,10 +240,17 @@ class InstallLogger(CommandLogger):
         noun = "package" if count == 1 else "packages"
         _rich_info(f"Validating {count} {noun}...", symbol="gear")
 
-    def validation_pass(self, canonical: str, already_present: bool, updated: bool = False):
+    def validation_pass(
+        self,
+        canonical: str,
+        already_present: bool,
+        updated: bool = False,
+        dry_run: bool = False,
+    ):
         """Log a package that passed validation."""
         if updated:
-            _rich_echo(f"{canonical} (updated ref in apm.yml)", color="dim", symbol="check")
+            verb = "would update" if dry_run else "updated"
+            _rich_echo(f"{canonical} ({verb} ref in apm.yml)", color="dim", symbol="check")
         elif already_present:
             _rich_echo(f"{canonical} (already in apm.yml)", color="dim", symbol="check")
         else:

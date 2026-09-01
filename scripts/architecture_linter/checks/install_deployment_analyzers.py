@@ -22,6 +22,10 @@ from scripts.architecture_linter.checks.install_base_integrator_and_contraction 
     check_target_file_contraction,
 )
 from scripts.architecture_linter.checks.install_deployment_shared import _rule
+from scripts.architecture_linter.checks.install_dry_run_plan import (
+    _GUARD_DRY_RUN_PLAN,
+    check_prospective_dry_run_plan,
+)
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
     _GUARD_FROZEN,
@@ -88,6 +92,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_FROZEN,
         "Frozen install mutation eligibility routes through InstallService before mutation.",
         check_frozen,
+    ),
+    _rule(
+        _GUARD_DRY_RUN_PLAN,
+        "Prospective dry-run state and selection stay owned by ProspectiveInstallPlan.",
+        check_prospective_dry_run_plan,
     ),
     _rule(
         _GUARD_SOURCE_PLAN,

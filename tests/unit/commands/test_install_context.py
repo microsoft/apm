@@ -69,7 +69,6 @@ class TestInstallContextFields:
         # issue #1203: --frozen + plan-callback for `apm update`
         "frozen",
         "plan_callback",
-        "validated_additions",
         # issue #1395: --skill filter persisted to apm.yml
         "skill_subset",
         "skill_subset_from_cli",

@@ -51,6 +51,13 @@
       "guards": ["install-deployment-frozen-mutation-eligibility"]
     },
     {
+      "id": "prospective-dry-run-install-plan",
+      "decision": "Prospective dry-run install plan",
+      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan)",
+      "selectors": ["src/apm_cli/install/dry_run_plan.py"],
+      "guards": ["install-deployment-prospective-dry-run-plan"]
+    },
+    {
       "id": "authorized-deployable-source-paths",
       "decision": "Authorized deployable source paths",
       "owner": "install/deployable_source_plan.py (DeployableSourcePlan)",

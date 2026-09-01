@@ -367,6 +367,6 @@ The project `apm.yml` must carry an `executables:` block (even empty `{}`) to en
 
 The legacy top-level `allowExecutables:` block is a deprecated alias for `executables.allow`, read for one minor cycle and migrated on the next approve/deny write; the standalone `~/.apm/approvals.yml` is removed and migrated into `~/.apm/config.json` on first read. Grant keys are package-scoped in v1: `owner/repo` and `owner/repo#version` both match the package regardless of installed version. In CI, pre-approve packages by committing them to `executables.allow`; untrusted required executables fail `apm audit` with `required-executable-untrusted`.
 
-`apm install PACKAGE --dry-run` validates and previews a positional package without
-persisting it to an existing `apm.yml`; a newly bootstrapped manifest remains for the
-next run.
+`apm install PACKAGE --dry-run` validates and previews a positional package or ref
+change without changing an existing `apm.yml`; a newly bootstrapped manifest remains
+for the next run.

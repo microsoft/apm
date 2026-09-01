@@ -15,37 +15,40 @@ class ProspectiveInstallPlan:
 
     apm_dependencies: tuple[DependencyReference, ...]
     dev_apm_dependencies: tuple[DependencyReference, ...]
+    selected_apm_dependencies: tuple[DependencyReference, ...]
     mcp_dependencies: tuple[Any, ...]
     should_install_apm: bool
     should_install_mcp: bool
     only_packages: tuple[str, ...] | None
 
     @classmethod
-    def from_manifest_and_validated_additions(
+    def from_apm_package(
         cls,
+        apm_package: Any,
         *,
-        apm_dependencies: Sequence[DependencyReference],
-        dev_apm_dependencies: Sequence[DependencyReference],
-        mcp_dependencies: Sequence[Any],
-        validated_additions: Sequence[str],
-        additions_are_dev: bool,
         should_install_apm: bool,
         should_install_mcp: bool,
         only_packages: Sequence[str] | None,
     ) -> ProspectiveInstallPlan:
-        """Build the preview from manifest dependencies and validated CLI additions."""
-        additions = tuple(DependencyReference.parse(package) for package in validated_additions)
-        prospective_apm_dependencies = tuple(apm_dependencies)
-        prospective_dev_apm_dependencies = tuple(dev_apm_dependencies)
-        if additions_are_dev:
-            prospective_dev_apm_dependencies += additions
-        else:
-            prospective_apm_dependencies += additions
-
+        """Build the preview from one interpreted prospective package."""
+        apm_dependencies = tuple(apm_package.get_apm_dependencies())
+        dev_apm_dependencies = tuple(apm_package.get_dev_apm_dependencies())
+        all_apm_dependencies = apm_dependencies + dev_apm_dependencies
+        selected_apm_dependencies = all_apm_dependencies
+        if only_packages is not None:
+            selected_identities = {
+                DependencyReference.parse(package).get_identity() for package in only_packages
+            }
+            selected_apm_dependencies = tuple(
+                dependency
+                for dependency in all_apm_dependencies
+                if dependency.get_identity() in selected_identities
+            )
         return cls(
-            apm_dependencies=prospective_apm_dependencies,
-            dev_apm_dependencies=prospective_dev_apm_dependencies,
-            mcp_dependencies=tuple(mcp_dependencies),
+            apm_dependencies=apm_dependencies,
+            dev_apm_dependencies=dev_apm_dependencies,
+            selected_apm_dependencies=selected_apm_dependencies,
+            mcp_dependencies=tuple(apm_package.get_all_mcp_dependencies()),
             should_install_apm=should_install_apm,
             should_install_mcp=should_install_mcp,
             only_packages=tuple(only_packages) if only_packages is not None else None,
@@ -59,7 +62,7 @@ class ProspectiveInstallPlan:
     @property
     def apm_dependency_count(self) -> int:
         """Return the number of APM dependencies selected for preview."""
-        return len(self.all_apm_dependencies) if self.should_install_apm else 0
+        return len(self.selected_apm_dependencies) if self.should_install_apm else 0
 
     @property
     def mcp_dependency_count(self) -> int:

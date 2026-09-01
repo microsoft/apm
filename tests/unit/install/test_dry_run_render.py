@@ -11,14 +11,18 @@ from unittest.mock import MagicMock, patch
 
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.install.presentation.dry_run import render_and_exit as _render_and_exit
+from apm_cli.models.dependency.reference import DependencyReference
 
 
 def render_and_exit(**kwargs) -> None:
     """Adapt legacy test fixtures to the frozen dry-run plan input."""
     if "plan" not in kwargs:
+        apm_dependencies = tuple(kwargs.pop("apm_deps"))
+        dev_apm_dependencies = tuple(kwargs.pop("dev_apm_deps"))
         kwargs["plan"] = ProspectiveInstallPlan(
-            apm_dependencies=tuple(kwargs.pop("apm_deps")),
-            dev_apm_dependencies=tuple(kwargs.pop("dev_apm_deps")),
+            apm_dependencies=apm_dependencies,
+            dev_apm_dependencies=dev_apm_dependencies,
+            selected_apm_dependencies=apm_dependencies + dev_apm_dependencies,
             mcp_dependencies=tuple(kwargs.pop("mcp_deps")),
             should_install_apm=kwargs.pop("should_install_apm"),
             should_install_mcp=kwargs.pop("should_install_mcp"),
@@ -69,6 +73,7 @@ class TestRenderApmDeps:
         plan = ProspectiveInstallPlan(
             apm_dependencies=(_make_apm_dep(),),
             dev_apm_dependencies=(),
+            selected_apm_dependencies=(_make_apm_dep(),),
             mcp_dependencies=(_make_mcp_dep(),),
             should_install_apm=False,
             should_install_mcp=True,
@@ -77,6 +82,28 @@ class TestRenderApmDeps:
 
         assert plan.apm_dependency_count == 0
         assert plan.mcp_dependency_count == 1
+
+    def test_plan_selects_only_requested_dependency_without_reparsing_it(self) -> None:
+        """Preview selection retains the interpreted dependency object."""
+        existing = DependencyReference.parse("owner/existing#1.0.0")
+        requested = DependencyReference.parse("owner/requested#2.0.0")
+        requested.source = "registry"
+        requested.registry_name = "private"
+        package = MagicMock()
+        package.get_apm_dependencies.return_value = [existing, requested]
+        package.get_dev_apm_dependencies.return_value = []
+        package.get_all_mcp_dependencies.return_value = []
+
+        plan = ProspectiveInstallPlan.from_apm_package(
+            package,
+            should_install_apm=True,
+            should_install_mcp=True,
+            only_packages=["owner/requested#2.0.0"],
+        )
+
+        assert plan.selected_apm_dependencies == (requested,)
+        assert plan.selected_apm_dependencies[0].source == "registry"
+        assert plan.selected_apm_dependencies[0].registry_name == "private"
 
     def test_apm_deps_install_action_shown(self, tmp_path: Path) -> None:
         """APM deps rendered with 'install' when update=False (lines 42-45)."""
@@ -198,7 +225,7 @@ class TestRenderApmDeps:
                 apm_dir=tmp_path,
             )
 
-        logger.success.assert_called_once()
+        logger.success.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -435,8 +462,8 @@ class TestDryRunNoticeAndSuccess:
 
         logger.dry_run_notice.assert_not_called()
 
-    def test_success_message_always_shown(self, tmp_path: Path) -> None:
-        """Success message is always shown at the end of render_and_exit (line 92)."""
+    def test_renderer_leaves_completion_summary_to_caller(self, tmp_path: Path) -> None:
+        """The command lifecycle owns the one final dry-run summary."""
         logger = _make_logger()
 
         with patch("apm_cli.deps.lockfile.LockFile.read", side_effect=Exception):
@@ -451,7 +478,7 @@ class TestDryRunNoticeAndSuccess:
                 apm_dir=tmp_path,
             )
 
-        logger.success.assert_called_once()
+        logger.success.assert_not_called()
 
     def test_only_packages_forwarded_to_detect_orphans(self, tmp_path: Path) -> None:
         """only_packages argument is passed through to detect_orphans."""
