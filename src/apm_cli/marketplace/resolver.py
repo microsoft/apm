@@ -857,7 +857,22 @@ def resolve_marketplace_plugin(
 
     plugin = manifest.find_plugin(plugin_name)
     if plugin is None:
-        raise PluginNotFoundError(plugin_name, marketplace_name)
+        from ..utils.suggestions import close_name_matches
+
+        plugin_names: list[str] = []
+        try:
+            plugin_names = [p.name for p in manifest.plugins]
+        except Exception:
+            logger.debug(
+                "Could not enumerate marketplace plugins for suggestions",
+                exc_info=True,
+            )
+        suggestions = close_name_matches(plugin_name, plugin_names)
+        raise PluginNotFoundError(
+            plugin_name,
+            marketplace_name,
+            suggestions=suggestions,
+        )
 
     if plugin.registry:
         selector = version_spec or plugin.version

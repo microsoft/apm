@@ -47,6 +47,34 @@ class TestMarketplaceErrors:
         assert err.plugin_name == "my-plugin"
         assert err.marketplace_name == "acme"
 
+    def test_plugin_not_found_message_with_single_suggestion(self):
+        err = PluginNotFoundError(
+            "apm-review-panl",
+            "acme",
+            suggestions=["apm-review-panel"],
+        )
+        text = str(err)
+        assert text.startswith(
+            "Plugin 'apm-review-panl' not found in marketplace 'acme'. "
+            "Run 'apm marketplace browse acme' to see available plugins."
+        )
+        assert "Did you mean: apm-review-panel?" in text
+
+    def test_plugin_not_found_message_with_multiple_suggestions(self):
+        err = PluginNotFoundError(
+            "apm-review",
+            "acme",
+            suggestions=["apm-review-panel", "apm-triage-panel"],
+        )
+        assert "Similar plugins: apm-review-panel, apm-triage-panel" in str(err)
+
+    def test_plugin_not_found_message_without_suggestions_unchanged(self):
+        err = PluginNotFoundError("my-plugin", "acme", suggestions=[])
+        assert str(err) == (
+            "Plugin 'my-plugin' not found in marketplace 'acme'. "
+            "Run 'apm marketplace browse acme' to see available plugins."
+        )
+
     def test_fetch_error_message(self):
         err = MarketplaceFetchError("acme", "timeout")
         assert "acme" in str(err)
