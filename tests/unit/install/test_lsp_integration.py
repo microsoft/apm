@@ -103,6 +103,29 @@ class TestOwnedLspIntegration:
                 logger=_mock_logger(),
             )
 
+    def test_local_bundle_force_reaches_owned_lsp_writer(self, tmp_path) -> None:
+        from types import SimpleNamespace
+
+        from apm_cli.install.local_bundle_handler import _wire_bundle_lsp_servers
+
+        with patch(
+            "apm_cli.install.lsp.integration.run_owned_lsp_integration",
+            return_value=0,
+        ) as run_owned:
+            _wire_bundle_lsp_servers(
+                bundle_dir=tmp_path / "bundle",
+                targets=[SimpleNamespace(name="claude")],
+                project_root=tmp_path,
+                user_scope=False,
+                verbose=False,
+                logger=_mock_logger(),
+                deps=[_make_dep("pyright")],
+                owner="bundle#1",
+                force=True,
+            )
+
+        assert run_owned.call_args.kwargs["force"] is True
+
 
 # ===========================================================================
 # Basic orchestration

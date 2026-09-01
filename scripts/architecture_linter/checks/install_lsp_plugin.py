@@ -18,6 +18,7 @@ _APPROVE_COMMAND = "src/apm_cli/commands/approve.py"
 _INSTALL_TEMPLATE = "src/apm_cli/install/template.py"
 _LSP_INTEGRATOR = "src/apm_cli/integration/lsp_integrator.py"
 _LSP_PIPELINE = "src/apm_cli/install/lsp/integration.py"
+_LOCAL_BUNDLE = "src/apm_cli/install/local_bundle_handler.py"
 _SKILL_SUPPORT = "src/apm_cli/integration/skill_support.py"
 
 
@@ -85,6 +86,10 @@ def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
                 _LSP_PIPELINE: (
                     "transitive_lsp = filter_lsp_by_allow_executables(",
                     "lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)",
+                ),
+                _LOCAL_BUNDLE: (
+                    "def _wire_bundle_lsp_servers(",
+                    "force=force,",
                 ),
             },
         )
