@@ -640,7 +640,7 @@ class TestFindOrphanedAgentsFiles:
             orphans: list[Path] = compiler._find_orphaned_agents_files([])
 
         assert nested_agents not in orphans
-        assert "Skipping nested Git worktree during orphan cleanup: nested" in caplog.text
+        assert "Skipping nested Git repository during orphan cleanup: nested" in caplog.text
 
     def test_skips_files_in_node_modules(self, tmp_path: Path) -> None:
         """AGENTS.md inside node_modules/ is skipped."""
@@ -932,6 +932,27 @@ class TestCompileDistributed:
         assert result.success is True
         # The APM-generated orphan should have been cleaned up
         assert not orphan.exists()
+
+    def test_deferred_clean_orphaned_reports_without_cleanup(self, tmp_path: Path) -> None:
+        """defer_orphan_cleanup leaves cleanup to the caller."""
+        compiler = self._setup_compiler(tmp_path)
+        orphan: Path = tmp_path / "old" / "AGENTS.md"
+        orphan.parent.mkdir()
+        orphan.write_text(_GENERATED_CONTENT)
+        prims = _make_primitives()
+
+        result = compiler.compile_distributed(
+            prims,
+            config={
+                "clean_orphaned": True,
+                "defer_orphan_cleanup": True,
+                "dry_run": False,
+            },
+        )
+
+        assert result.success is True
+        assert orphan.exists()
+        assert orphan in result.orphaned_files
 
     def test_dry_run_does_not_delete_orphaned(self, tmp_path: Path) -> None:
         """dry_run=True with clean_orphaned=True does NOT delete orphaned files."""

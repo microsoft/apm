@@ -100,12 +100,28 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Policy cache serializer stops routing through the canonical shape helper.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-compile-inventory",
+        rule_id="registry_delegation.compile_inventory_authority",
+        path="src/apm_cli/compilation/inventory.py",
+        old='if path != root and (".git" in file_names or ".git" in child_dirs):',
+        new="if False:",
+        intent="Compile inventory stops identifying nested Git repository boundaries.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-dependency-identity",
         rule_id="contracts-tooling-dependency-identity",
         path="src/apm_cli/models/dependency/identity.py",
         old="    key = normalize_package_repo_url(",
         new="    key = canonical_repo_url(",
         intent="Unique-key construction skips the one sanctioned casing-normalization call.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-distributed-agents-output",
+        rule_id="registry_delegation.compile_inventory_authority",
+        path="src/apm_cli/compilation/agents_compiler.py",
+        old="deploy_inventory.nested_repository_root_for(agents_path.parent)",
+        new="None",
+        intent="Distributed AGENTS output stops consulting the shared nested-repository boundary.",
     ),
     MutationCase(
         guard_id="contracts-tooling-frontmatter-yaml",

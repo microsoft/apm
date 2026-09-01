@@ -7,7 +7,7 @@ primitives & constitution are unchanged.
 
 import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
 
@@ -413,7 +413,6 @@ class AgentsCompiler:
             if self.source_dir == self.base_dir and not config.exclude
             else CompileInventory.collect(self.base_dir)
         )
-
         try:
             # Use provided primitives or discover them (with dependency support)
             if primitives is None:
@@ -622,6 +621,8 @@ class AgentsCompiler:
             "source_attribution": config.source_attribution,
             "debug": config.debug,
             "clean_orphaned": config.clean_orphaned,
+            "defer_orphan_cleanup": True,
+            "defer_orphan_warnings": config.agents_md_mode == "managed_section",
             "dry_run": config.dry_run,
             "skip_instructions": skip_instructions,
             "with_constitution": config.with_constitution,
@@ -637,31 +638,6 @@ class AgentsCompiler:
         distributed_result = distributed_compiler.compile_distributed(
             primitives, distributed_config
         )
-
-        # Display professional compilation output (always show, not just in debug).
-        # Guard: when ALL placements were suppressed (skip_instructions active and
-        # content_map is empty), skip the placement-table formatter so the terminal
-        # does not print "placing N files" immediately before "AGENTS.md not generated
-        # (N files)" -- the two messages would be contradictory.  The INFO suppression
-        # message below still fires unconditionally.
-        # Mirrors the CLAUDE.md guard: `if compilation_results and not (skip_instructions
-        # and files_written == 0)`.
-        compilation_results = distributed_compiler.get_compilation_results_for_display(
-            config.dry_run
-        )
-        if compilation_results and not distributed_result.all_suppressed:
-            if config.debug or config.trace:
-                # Verbose mode with mathematical analysis
-                output = distributed_compiler.output_formatter.format_verbose(compilation_results)
-            elif config.dry_run:
-                # Dry run mode with placement preview
-                output = distributed_compiler.output_formatter.format_dry_run(compilation_results)
-            else:
-                # Default mode with essential information
-                output = distributed_compiler.output_formatter.format_default(compilation_results)
-
-            # Display the professional output
-            self._log("progress", output)
 
         if not distributed_result.success:
             self.warnings.extend(distributed_result.warnings)
@@ -704,52 +680,113 @@ class AgentsCompiler:
                     symbol="info",
                 )
 
-        # Handle dry-run mode (preview placement without writing files)
-        if config.dry_run:
-            # Count files that would be written (directories that exist)
-            successful_writes = 0
-            for agents_path in distributed_result.content_map.keys():  # noqa: SIM118
-                if agents_path.parent.exists():
-                    successful_writes += 1
+        pending_outputs: dict[Path, str] = {}
+        preserve_line_endings: dict[Path, bool] = {}
+        for agents_path, content in distributed_result.content_map.items():
+            try:
+                prepared_content = self._prepare_distributed_file(agents_path, content, config)
+                if prepared_content is not None:
+                    pending_outputs[agents_path] = prepared_content
+                    preserve_line_endings[agents_path] = (
+                        config.agents_md_mode == "managed_section" and agents_path.is_file()
+                    )
+            except (OSError, ValueError) as e:
+                self.errors.append(f"Failed to write {agents_path}: {e!s}")
 
-            # Update stats with actual files that would be written
-            if distributed_result.stats:
-                distributed_result.stats["agents_files_generated"] = successful_writes
-
-            # Don't write files in preview mode - output already shown above
+        if self.errors:
+            self.warnings.extend(distributed_result.warnings)
+            self.errors.extend(distributed_result.errors)
             return CompilationResult(
-                success=True,
+                success=False,
+                output_path="",
+                content="",
+                warnings=self.warnings.copy(),
+                errors=self.errors.copy(),
+                stats=distributed_result.stats,
+            )
+
+        cleanup_paths = distributed_result.orphaned_files
+        managed_orphans: list[Path] = []
+        if config.agents_md_mode == "managed_section":
+            cleanup_paths = []
+            for path in distributed_result.orphaned_files:
+                if self._has_managed_section_markers(path, config):
+                    managed_orphans.append(path)
+                else:
+                    cleanup_paths.append(path)
+            if config.clean_orphaned and config.dry_run and cleanup_paths:
+                self.warnings.extend(
+                    distributed_compiler._cleanup_orphaned_files(cleanup_paths, dry_run=True)
+                )
+            if managed_orphans:
+                self.warnings.append(self._managed_orphan_retention_warning(managed_orphans))
+            if not config.clean_orphaned and cleanup_paths:
+                self.warnings.extend(distributed_compiler._generate_orphan_warnings(cleanup_paths))
+
+        # Display professional compilation output only after the canonical
+        # preparation gate, so previews include exactly the eligible write set.
+        compilation_results = distributed_compiler.get_compilation_results_for_display(
+            config.dry_run
+        )
+        if compilation_results and pending_outputs:
+            compilation_results = replace(
+                compilation_results,
+                placement_summaries=[
+                    summary
+                    for summary in compilation_results.placement_summaries
+                    if summary.path / "AGENTS.md" in pending_outputs
+                ],
+                optimization_stats=replace(
+                    compilation_results.optimization_stats,
+                    total_agents_files=len(pending_outputs),
+                ),
+            )
+            if config.debug or config.trace:
+                output = distributed_compiler.output_formatter.format_verbose(compilation_results)
+            elif config.dry_run:
+                output = distributed_compiler.output_formatter.format_dry_run(compilation_results)
+            else:
+                output = distributed_compiler.output_formatter.format_default(compilation_results)
+            self._log("progress", output)
+
+        # Handle dry-run mode after the canonical preparation gate so its
+        # reported placements match the files a real compile can write.
+        if config.dry_run:
+            distributed_result.stats["agents_files_generated"] = len(pending_outputs)
+            distributed_result.stats["nested_git_placements_skipped"] = len(
+                distributed_result.content_map
+            ) - len(pending_outputs)
+            return CompilationResult(
+                success=len(self.errors) == 0,
                 output_path="Preview mode - no files written",
-                content=self._generate_placement_summary(distributed_result),
-                warnings=self.warnings + distributed_result.warnings,
+                content=self._generate_placement_summary(distributed_result, pending_outputs),
+                warnings=(self.warnings + distributed_result.warnings),
                 errors=self.errors + distributed_result.errors,
                 stats=distributed_result.stats,
             )
 
         # Write distributed AGENTS.md files
         successful_writes = 0
-        total_content_entries = len(distributed_result.content_map)  # noqa: F841
-
-        pending_outputs: dict[Path, str] = {}
-        for agents_path, content in distributed_result.content_map.items():
-            try:
-                pending_outputs[agents_path] = self._prepare_distributed_file(
-                    agents_path, content, config
-                )
-            except (OSError, ValueError) as e:
-                self.errors.append(f"Failed to write {agents_path}: {e!s}")
         if pending_outputs:
             from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
             try:
-                CompiledOutputWriter().write_many(pending_outputs)
+                CompiledOutputWriter().write_many(
+                    pending_outputs,
+                    preserve_line_endings=preserve_line_endings,
+                )
                 successful_writes = len(pending_outputs)
             except (OSError, CompiledOutputPolicyError) as exc:
                 self.errors.append(f"Failed to write distributed output batch: {exc}")
 
+        if not self.errors and config.clean_orphaned and cleanup_paths:
+            cleanup_messages = distributed_compiler._cleanup_orphaned_files(cleanup_paths)
+            self.warnings.extend(cleanup_messages)
         # Update stats with actual files written
-        if distributed_result.stats:
-            distributed_result.stats["agents_files_generated"] = successful_writes
+        distributed_result.stats["agents_files_generated"] = successful_writes
+        distributed_result.stats["nested_git_placements_skipped"] = len(
+            distributed_result.content_map
+        ) - len(pending_outputs)
 
         # Merge warnings and errors
         self.warnings.extend(distributed_result.warnings)
@@ -760,7 +797,7 @@ class AgentsCompiler:
 
         return CompilationResult(
             success=len(self.errors) == 0,
-            output_path=f"Distributed: {len(distributed_result.placements)} AGENTS.md files",
+            output_path=f"Distributed: {successful_writes} AGENTS.md files",
             content=summary_content,
             warnings=self.warnings.copy(),
             errors=self.errors.copy(),
@@ -1602,9 +1639,15 @@ class AgentsCompiler:
         """
         from .output_writer import CompiledOutputWriter
 
+        target = Path(output_path)
         content = self._prepare_output_content_with_config(output_path, content, config)
         try:
-            CompiledOutputWriter().write(Path(output_path), content)
+            CompiledOutputWriter().write(
+                target,
+                content,
+                preserve_line_endings=config.agents_md_mode == "managed_section"
+                and target.is_file(),
+            )
         except OSError as e:
             self.errors.append(f"Failed to write output file {output_path}: {e!s}")
 
@@ -1622,7 +1665,8 @@ class AgentsCompiler:
                     "Create it with the managed-section markers first, "
                     "or set agents_md.mode: full in apm.yml for initial generation."
                 )
-            existing = target.read_text(encoding="utf-8")
+            with target.open(encoding="utf-8", newline="") as handle:
+                existing = handle.read()
             try:
                 content = apply_managed_section(
                     existing,
@@ -1664,8 +1708,8 @@ class AgentsCompiler:
 
     def _prepare_distributed_file(
         self, agents_path: Path, content: str, config: CompilationConfig
-    ) -> str:
-        """Build one distributed AGENTS.md output without mutating disk.
+    ) -> str | None:
+        """Build one eligible distributed AGENTS.md output without mutating disk.
 
         Args:
             agents_path (Path): Path to write the AGENTS.md file.
@@ -1673,6 +1717,19 @@ class AgentsCompiler:
             config (CompilationConfig): Compilation configuration.
         """
         try:
+            ensure_path_within(agents_path, self.base_dir)
+            deploy_inventory = self._deploy_inventory or CompileInventory.collect(self.base_dir)
+            nested_root = deploy_inventory.nested_repository_root_for(agents_path.parent)
+            if nested_root is not None:
+                agents_rel = portable_relpath(agents_path, self.base_dir)
+                root_rel = portable_relpath(nested_root, self.base_dir)
+                self.warnings.append(
+                    f"Skipping AGENTS.md at {agents_rel}: nested Git repository "
+                    f"{root_rel} belongs to a separate repository. "
+                    f"Run apm compile from {nested_root} to compile it separately"
+                )
+                return None
+
             # Handle constitution injection for distributed files
             final_content = content
 
@@ -1688,17 +1745,49 @@ class AgentsCompiler:
                 except Exception as exc:
                     _logger.debug("Constitution injection failed for %s: %s", agents_path, exc)
 
-            # Honour managed_section mode for the root AGENTS.md (issue #1764).
-            # Sub-directory files are fully APM-generated and always overwritten.
-            is_root = agents_path.parent.resolve() == self.base_dir.resolve()
-            if is_root and config.agents_md_mode == "managed_section":
-                return self._prepare_output_content_with_config(
-                    str(agents_path), final_content, config
-                )
+            if config.agents_md_mode == "managed_section":
+                if agents_path.is_file():
+                    return self._prepare_output_content_with_config(
+                        str(agents_path), final_content, config
+                    )
+                return self._new_managed_section_content(final_content, config)
             return final_content
 
         except OSError as e:
             raise OSError(f"Failed to prepare distributed AGENTS.md file {agents_path}: {e!s}")  # noqa: B904
+
+    @staticmethod
+    def _new_managed_section_content(content: str, config: CompilationConfig) -> str:
+        """Wrap a new distributed output so future managed compiles reconcile it."""
+        managed_content = content.rstrip("\n")
+        return (
+            f"{config.agents_md_start_marker}\n{managed_content}\n{config.agents_md_end_marker}\n"
+        )
+
+    @staticmethod
+    def _has_managed_section_markers(path: Path, config: CompilationConfig) -> bool:
+        """Treat any marker-bearing orphan as hand-authored managed content."""
+        try:
+            with path.open(encoding="utf-8", newline="") as handle:
+                content = handle.read()
+        except OSError:
+            return True
+        return config.agents_md_start_marker in content or config.agents_md_end_marker in content
+
+    def _managed_orphan_retention_warning(self, managed_orphans: list[Path]) -> str:
+        """Describe protected managed orphans and the required manual action."""
+        paths = [portable_relpath(path, self.base_dir) for path in managed_orphans]
+        if len(paths) == 1:
+            return (
+                f"Retained managed AGENTS.md orphan: {paths[0]} -- "
+                "remove it manually when its team-owned content is no longer needed"
+            )
+        displayed_paths = ", ".join(paths[:5])
+        remainder = "" if len(paths) <= 5 else f", and {len(paths) - 5} more"
+        return (
+            f"Retained {len(paths)} managed AGENTS.md orphans: {displayed_paths}{remainder} -- "
+            "remove them manually when their team-owned content is no longer needed"
+        )
 
     def _write_distributed_file(
         self, agents_path: Path, content: str, config: CompilationConfig
@@ -1706,8 +1795,16 @@ class AgentsCompiler:
         """Write one distributed file through the canonical writer."""
         from .output_writer import CompiledOutputWriter
 
-        final_content = self._prepare_distributed_file(agents_path, content, config)
-        CompiledOutputWriter().write(agents_path, final_content)
+        prepared_content = self._prepare_distributed_file(agents_path, content, config)
+        if prepared_content is None:
+            return
+
+        CompiledOutputWriter().write(
+            agents_path,
+            prepared_content,
+            preserve_line_endings=config.agents_md_mode == "managed_section"
+            and agents_path.is_file(),
+        )
 
     def _display_placement_preview(self, distributed_result) -> None:
         """Display placement preview for --show-placement mode.
@@ -1757,7 +1854,9 @@ class AgentsCompiler:
                 )
             self._log("verbose_detail", "")
 
-    def _generate_placement_summary(self, distributed_result) -> str:
+    def _generate_placement_summary(
+        self, distributed_result, output_paths: dict[Path, str] | None = None
+    ) -> str:
         """Generate a text summary of placement results.
 
         Args:
@@ -1768,14 +1867,20 @@ class AgentsCompiler:
         """
         lines = ["Distributed AGENTS.md Placement Summary:", ""]
 
+        eligible_paths = None if output_paths is None else set(output_paths)
         for placement in distributed_result.placements:
+            if eligible_paths is not None and placement.agents_path not in eligible_paths:
+                continue
             rel_path = portable_relpath(placement.agents_path, self.base_dir)
             lines.append(f"{rel_path}")
             lines.append(f"   Instructions: {len(placement.instructions)}")
             lines.append(f"   Patterns: {', '.join(sorted(placement.coverage_patterns))}")
             lines.append("")
 
-        lines.append(f"Total AGENTS.md files: {len(distributed_result.placements)}")
+        total = (
+            len(distributed_result.placements) if eligible_paths is None else len(eligible_paths)
+        )
+        lines.append(f"Total AGENTS.md files: {total}")
         return "\n".join(lines)
 
     def _generate_distributed_summary(self, distributed_result, config: CompilationConfig) -> str:

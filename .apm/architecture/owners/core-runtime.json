@@ -50,6 +50,20 @@
       "guards": ["registry-delegation-compiled-output-writes"]
     },
     {
+      "id": "distributed-agents-output-preparation",
+      "decision": "Distributed AGENTS.md output eligibility and content preparation",
+      "owner": "compilation/agents_compiler.py (_prepare_distributed_file)",
+      "selectors": ["src/apm_cli/compilation/agents_compiler.py"],
+      "guards": ["contracts-tooling-distributed-agents-output"]
+    },
+    {
+      "id": "compile-nested-git-boundary",
+      "decision": "Compile traversal and nested Git repository boundary",
+      "owner": "compilation/inventory.py (CompileInventory)",
+      "selectors": ["src/apm_cli/compilation/inventory.py"],
+      "guards": ["contracts-tooling-compile-inventory"]
+    },
+    {
       "id": "bootstrap-project-name",
       "decision": "Bootstrap project-name validation and fallback",
       "owner": "core/project_name.py (resolve_bootstrap_project_name)",

@@ -352,14 +352,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A command routes machine output itself instead of the root CLI.",
     ),
     MutationCase(
-        rule_id="registry_delegation.compile_inventory_authority",
-        path="src/apm_cli/compilation/agents_compiler.py",
-        old="source_inventory=self._source_inventory",
-        new="source_inventory=None",
-        intent="The AGENTS compiler stops threading the shared compile inventory.",
-        replace_all=True,
-    ),
-    MutationCase(
         rule_id="registry_delegation.diagnostic_ascii_owner",
         path="src/apm_cli/integration/agent_integrator.py",
         old='f"Codex agent {printable_ascii_text(source.name)}: {issue}. "',

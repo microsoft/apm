@@ -276,6 +276,25 @@ class TestManagedSectionWriteIntegration:
         assert "New generated block." in written
         assert "Old generated block." not in written
 
+    def test_write_output_file_managed_section_preserves_crlf(self, tmp_path):
+        """Single-file managed output retains hand-authored line endings."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        output_file = tmp_path / "AGENTS.md"
+        output_file.write_bytes(
+            b"# Team guidance\r\n<!-- apm:start -->\r\nOld block\r\n<!-- apm:end -->\r\nFooter\r\n"
+        )
+
+        AgentsCompiler(str(tmp_path))._write_output_file_with_config(
+            str(output_file),
+            "New block.\n",
+            CompilationConfig(agents_md_mode="managed_section", dry_run=False),
+        )
+
+        assert output_file.read_bytes() == (
+            b"# Team guidance\r\n<!-- apm:start -->\nNew block.\n<!-- apm:end -->\r\nFooter\r\n"
+        )
+
     def test_write_output_file_managed_section_missing_markers(self, tmp_path):
         """When mode=managed_section and markers absent, error is raised."""
         from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
@@ -387,8 +406,8 @@ class TestManagedSectionDistributed:
         assert "New APM block." in written
         assert "Old APM block." not in written
 
-    def test_distributed_subdir_agents_md_ignores_managed_section(self, tmp_path):
-        """Sub-directory AGENTS.md is fully overwritten even with managed_section."""
+    def test_distributed_subdir_agents_md_reconciles_managed_section(self, tmp_path):
+        """Sub-directory AGENTS.md markers are reconciled, preserving hand content (#2560)."""
         from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
 
         start = "<!-- apm:start -->"
@@ -396,13 +415,13 @@ class TestManagedSectionDistributed:
         subdir = tmp_path / "src"
         subdir.mkdir()
         subdir_agents = subdir / "AGENTS.md"
-        subdir_agents.write_text(
-            "# Old content\n\n"
-            f"{start}\n"
-            "Old APM block.\n"
-            f"{end}\n\n"
-            "Human content that will be overwritten.\n"
+        original = (
+            f"# Old content\r\n\r\n{start}\r\nOld APM block.\r\n{end}"
+            "\r\n\r\nHuman content that must survive.\r\n"
         )
+        subdir_agents.write_bytes(original.encode())
+        before, _, after = original.partition(start)
+        _, end_marker, after = after.partition(end)
 
         config = CompilationConfig(
             agents_md_mode="managed_section",
@@ -412,11 +431,118 @@ class TestManagedSectionDistributed:
         )
 
         compiler = AgentsCompiler(str(tmp_path))
-        compiler._write_distributed_file(subdir_agents, "Fully new content.", config)
+        compiler._write_distributed_file(subdir_agents, "New APM block.", config)
 
         written = subdir_agents.read_text()
-        assert written == "Fully new content."
-        assert "Human content that will be overwritten." not in written
+        assert "Human content that must survive." in written
+        assert "New APM block." in written
+        assert "Old APM block." not in written
+        written_bytes = subdir_agents.read_bytes()
+        assert written_bytes.startswith((before + start).encode())
+        assert written_bytes.endswith((end_marker + after).encode())
+
+    def test_distributed_new_agents_md_uses_full_content_in_managed_section_mode(self, tmp_path):
+        """A new placement has no hand-authored range to reconcile."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        agents_path = tmp_path / "src" / "AGENTS.md"
+        agents_path.parent.mkdir()
+        compiler = AgentsCompiler(str(tmp_path))
+
+        compiler._write_distributed_file(
+            agents_path,
+            "New generated content.\r\n",
+            CompilationConfig(agents_md_mode="managed_section", dry_run=False),
+        )
+
+        assert agents_path.read_bytes() == (
+            b"<!-- apm:start -->\nNew generated content.\n<!-- apm:end -->\n"
+        )
+
+    @pytest.mark.parametrize("git_metadata_is_file", [False, True])
+    def test_distributed_subdir_agents_md_skips_nested_git_repository(
+        self, tmp_path, git_metadata_is_file
+    ):
+        """Nested Git repositories and worktrees are never written to (#2560 case B)."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        nested = tmp_path / "nested"
+        nested.mkdir()
+        git_metadata = nested / ".git"
+        if git_metadata_is_file:
+            git_metadata.write_text("gitdir: /elsewhere/.git\n", encoding="utf-8")
+        else:
+            git_metadata.mkdir()
+        subdir_agents = nested / "src" / "AGENTS.md"
+
+        config = CompilationConfig(agents_md_mode="full", dry_run=False)
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(subdir_agents, "Should not be written.", config)
+
+        assert not subdir_agents.exists()
+        assert any("nested Git repository" in warning for warning in compiler.warnings)
+
+    def test_distributed_root_agents_md_allows_base_git_repository(self, tmp_path):
+        """The compiler base repository is not mistaken for a nested boundary."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        (tmp_path / ".git").mkdir()
+        root_agents = tmp_path / "AGENTS.md"
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(
+            root_agents,
+            "Root content.",
+            CompilationConfig(agents_md_mode="full", dry_run=False),
+        )
+
+        assert root_agents.read_text() == "Root content."
+        assert compiler.warnings == []
+
+    def test_distributed_agents_md_rejects_symlink_outside_base(self, tmp_path):
+        """A placement symlink cannot redirect compiled output outside the project."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+        from apm_cli.utils.path_security import PathTraversalError
+
+        external = tmp_path.parent / "external"
+        external.mkdir()
+        linked = tmp_path / "linked"
+        try:
+            linked.symlink_to(external, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks are unavailable: {exc}")
+
+        with pytest.raises(PathTraversalError, match=r"outside.*allowed base directory"):
+            AgentsCompiler(str(tmp_path))._write_distributed_file(
+                linked / "AGENTS.md",
+                "Must not escape.",
+                CompilationConfig(agents_md_mode="full", dry_run=False),
+            )
+
+        assert not (external / "AGENTS.md").exists()
+
+    def test_distributed_agents_md_rejects_external_file_symlink(self, tmp_path):
+        """An AGENTS.md symlink cannot redirect output outside the project."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+        from apm_cli.utils.path_security import PathTraversalError
+
+        external_agents = tmp_path.parent / "external-agents.md"
+        external_agents.write_text("External guidance.\n", encoding="utf-8")
+        target_dir = tmp_path / "src"
+        target_dir.mkdir()
+        target = target_dir / "AGENTS.md"
+        try:
+            target.symlink_to(external_agents)
+        except OSError as exc:
+            pytest.skip(f"file symlinks are unavailable: {exc}")
+
+        with pytest.raises(PathTraversalError, match=r"outside.*allowed base directory"):
+            AgentsCompiler(str(tmp_path))._write_distributed_file(
+                target,
+                "Must not escape.",
+                CompilationConfig(agents_md_mode="full", dry_run=False),
+            )
+
+        assert external_agents.read_text(encoding="utf-8") == "External guidance.\n"
 
     def test_distributed_root_agents_md_full_mode_overwrites(self, tmp_path):
         """Root AGENTS.md is fully overwritten when mode is 'full' (default)."""
@@ -504,7 +630,7 @@ class TestManagedSectionSingleAgents:
 
         writes = {"count": 0}
 
-        def fail_second_write(self, output_path, content):
+        def fail_second_write(self, output_path, content, *, preserve_line_endings=False):
             writes["count"] += 1
             if writes["count"] == 2:
                 raise OSError("disk full")

@@ -47,7 +47,13 @@ def write_text_lf(path: Path, data: str) -> None:
     path.write_text(normalize_crlf_to_lf(data), encoding="utf-8", newline="")
 
 
-def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None) -> None:
+def atomic_write_text(
+    path: Path,
+    data: str,
+    *,
+    new_file_mode: int | None = None,
+    normalize_line_endings: bool = True,
+) -> None:
     """Atomically write ``data`` (UTF-8) to ``path``.
 
     The temp file is created in ``path.parent`` so the eventual
@@ -62,6 +68,10 @@ def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None
     ignored on platforms where ``os.fchmod`` is unavailable
     (e.g. Windows), where POSIX mode bits are not enforced anyway.
 
+    By default CRLF sequences are normalized to LF for deterministic
+    generated output. Callers preserving hand-authored byte ranges can
+    disable normalization with ``normalize_line_endings=False``.
+
     On any failure, the temp file is removed and the original target
     file (if any) remains untouched.
     """
@@ -75,7 +85,7 @@ def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None
         fh = os.fdopen(fd, "w", encoding="utf-8", newline="")
         fd_wrapped = True
         with fh:
-            fh.write(normalize_crlf_to_lf(data))
+            fh.write(normalize_crlf_to_lf(data) if normalize_line_endings else data)
         _replace_atomic_file(tmp_name, path)
     except Exception:
         if not fd_wrapped:

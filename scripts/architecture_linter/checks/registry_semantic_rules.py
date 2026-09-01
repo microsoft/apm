@@ -101,6 +101,13 @@ _COMPILE_INVENTORY_CLASS = "class CompileInventory"
 _OS_WALK = "os.walk("
 
 
+_COMPILE_OWNER_FRAGMENTS = (
+    'if path != root and (".git" in file_names or ".git" in child_dirs):',
+    "nested_repository_roots.add(path)",
+    "def nested_repository_root_for(",
+)
+
+
 _COMPILE_REQUIRED_FRAGMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _COMPILE_OPTIMIZER,
@@ -114,7 +121,9 @@ _COMPILE_REQUIRED_FRAGMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
         _COMPILE_DISCOVERY,
         (
             "inventory: CompileInventory | None = None",
+            "inventory = CompileInventory.collect(base_path, exclude_patterns=exclude_patterns)",
             "inventory.files_within(base_path)",
+            "inventory.nested_repository_root_for(directory)",
         ),
     ),
     (
@@ -122,8 +131,7 @@ _COMPILE_REQUIRED_FRAGMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "source_inventory: CompileInventory | None = None",
             "deploy_inventory: CompileInventory | None = None",
-            '(entry.path / ".git").is_file()',
-            "relative_path.is_relative_to(worktree_root)",
+            "deploy_inventory.nested_repository_root_for(directory_path)",
             "for directory_path, (relative_path, files) in sorted(cleanup_directories.items()):",
         ),
     ),
@@ -134,8 +142,16 @@ _COMPILE_REQUIRED_FRAGMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "self.source_dir, exclude_patterns=config.exclude",
             "source_inventory=self._source_inventory",
             "deploy_inventory=self._deploy_inventory",
+            "deploy_inventory.nested_repository_root_for(agents_path.parent)",
         ),
     ),
+)
+
+
+_COMPILE_FORBIDDEN_FRAGMENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (_COMPILE_AGENTS, ("_nested_git_repository_root", ' / ".git"')),
+    (registry_legacy.DISTRIBUTED_COMPILER_PATH, (' / ".git"',)),
+    (_COMPILE_DISCOVERY, (' / ".git"',)),
 )
 
 
@@ -283,15 +299,15 @@ def _check_experimental_target_hints(provider: FactsProvider) -> Iterable[Violat
 
 
 def _check_compile_inventory_authority(provider: FactsProvider) -> Iterable[Violation]:
-    """Compile traversal must route through ``compilation/inventory.py``.
+    """Compile nested Git boundaries must route through ``compilation/inventory.py``.
 
     Ports ``scripts/check_compile_inventory_authority.py`` in full: the single
     ``CompileInventory`` class, the single ``os.walk(`` traversal owned by the
-    inventory, the two consumers that must not walk the tree themselves, and
-    the fourteen wiring fragments the optimizer, primitive discovery, the
-    distributed compiler, and the AGENTS compiler must each carry. The helper
-    printed exactly one message for any combination of defects, so this rule
-    reports exactly one violation and names every failing subcondition in it.
+    inventory, consumers that must not walk or probe nested repositories
+    themselves, and the wiring fragments the optimizer, primitive discovery,
+    distributed compiler, and AGENTS compiler must each carry. The retired
+    helper printed exactly one message for any combination of defects, so this
+    rule reports exactly one violation and names every failing subcondition.
     """
     rule_id = "registry_delegation.compile_inventory_authority"
     facts_by_path, failures = _read_required(provider, rule_id, _COMPILE_INVENTORY_PATHS)
@@ -307,7 +323,17 @@ def _check_compile_inventory_authority(provider: FactsProvider) -> Iterable[Viol
         )
     if owner_text.count(_OS_WALK) != 1:
         defects.append(f"{_COMPILE_INVENTORY_OWNER} must own exactly one {_OS_WALK} traversal")
-    for path in (_COMPILE_OPTIMIZER, registry_legacy.DISTRIBUTED_COMPILER_PATH):
+    missing_owner = tuple(
+        fragment for fragment in _COMPILE_OWNER_FRAGMENTS if fragment not in owner_text
+    )
+    if missing_owner:
+        joined = ", ".join(repr(fragment) for fragment in missing_owner)
+        defects.append(f"{_COMPILE_INVENTORY_OWNER} is missing: {joined}")
+    for path in (
+        _COMPILE_OPTIMIZER,
+        registry_legacy.DISTRIBUTED_COMPILER_PATH,
+        _COMPILE_DISCOVERY,
+    ):
         if _OS_WALK in texts[path]:
             defects.append(f"{path} must not call {_OS_WALK} directly")
     for path, fragments in _COMPILE_REQUIRED_FRAGMENTS:
@@ -315,13 +341,19 @@ def _check_compile_inventory_authority(provider: FactsProvider) -> Iterable[Viol
         if missing:
             joined = ", ".join(repr(fragment) for fragment in missing)
             defects.append(f"{path} is missing: {joined}")
+    for path, fragments in _COMPILE_FORBIDDEN_FRAGMENTS:
+        present = tuple(fragment for fragment in fragments if fragment in texts[path])
+        if present:
+            joined = ", ".join(repr(fragment) for fragment in present)
+            defects.append(f"{path} must not contain: {joined}")
     if not defects:
         return ()
     return (
         violation(
             rule_id,
             _COMPILE_INVENTORY_OWNER,
-            "compile traversal must route through compilation/inventory.py; " + "; ".join(defects),
+            "compile nested Git boundaries must route through compilation/inventory.py; "
+            + "; ".join(defects),
         ),
     )
 
@@ -531,8 +563,14 @@ RULES: tuple[Rule, ...] = (
     Rule(
         id="registry_delegation.compile_inventory_authority",
         group=GROUP,
-        guard_ids=(),
-        description="Compile traversal must route through compilation/inventory.py.",
+        guard_ids=(
+            "contracts-tooling-compile-inventory",
+            "contracts-tooling-distributed-agents-output",
+        ),
+        description=(
+            "Compile traversal must route through compilation/inventory.py, including nested Git "
+            "boundaries."
+        ),
         check=_check_compile_inventory_authority,
     ),
     Rule(
