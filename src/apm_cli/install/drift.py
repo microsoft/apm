@@ -41,6 +41,12 @@ import click
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.deps.path_anchoring import build_local_parent_index, resolve_local_dep_dir
 from apm_cli.install.drift_render import (
+    _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
+)
+from apm_cli.install.drift_render import (
+    _inline_diff_for,
+)
+from apm_cli.install.drift_render import (
     render_drift as render_drift,
 )
 from apm_cli.install.drift_render import (
@@ -715,11 +721,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     return scratch_root
 
 
-# ---------------------------------------------------------------------------
 # Diff engine
-# ---------------------------------------------------------------------------
-
-_INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
 
 
 def _governed_root_dirs(targets: list[TargetProfile]) -> set[str]:
@@ -810,18 +812,6 @@ def _collect_hashed_files(lockfile: LockFile) -> set[str]:
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     return set(DeploymentLedgerCodec.legacy_deployed_file_hash_paths(lockfile))
-
-
-def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
-    """Build an inline diff hint, capped to keep findings compact."""
-    try:
-        s_size = scratch_path.stat().st_size
-        p_size = project_path.stat().st_size
-    except OSError:
-        return ""
-    if s_size > _INLINE_DIFF_BYTE_CAP or p_size > _INLINE_DIFF_BYTE_CAP:
-        return "(file too large for inline diff; use 'git diff --no-index' to compare)"
-    return ""
 
 
 def _canvas_deploy_prefixes(targets) -> set[str]:
