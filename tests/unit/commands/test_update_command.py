@@ -233,7 +233,7 @@ class TestUpdateDryRun:
                 result = runner.invoke(cli, ["update", "--dry-run"])
 
             assert result.exit_code == 0, result.output
-            assert "Skipped revision pin for org/no-release" in result.output
+            assert "Retained 1 revision pin" in result.output
             assert "Keeping the current SHA" in result.output
             assert "Revision pin updates" in result.output
             assert "Update plan" in result.output
@@ -242,6 +242,42 @@ class TestUpdateDryRun:
             assert manifest.read_text(encoding="utf-8") == original
             assert lock_path.read_bytes() == original_lock
             annotate.assert_not_called()
+
+    def test_dry_run_retained_only_does_not_claim_latest_refs(self, runner, tmp_path) -> None:
+        retained_sha = "a" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            Path("apm.yml").write_text(
+                "name: test\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                f"    - org/no-release#{retained_sha}\n",
+                encoding="utf-8",
+            )
+            from apm_cli.deps.revision_pins import RevisionPinSkip
+            from apm_cli.models.results import InstallResult
+
+            def fake_install(_apm, **kwargs):
+                assert kwargs["plan_callback"](UpdatePlan(entries=())) is False
+                return InstallResult()
+
+            with (
+                patch(
+                    "apm_cli.commands.update.resolve_revision_pin_updates",
+                    return_value=_revision_pin_result(
+                        skips=(RevisionPinSkip("org/no-release", retained_sha, "org/no-release"),)
+                    ),
+                ),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+            ):
+                result = runner.invoke(cli, ["update", "--dry-run"])
+
+            assert result.exit_code == 0, result.output
+            assert "No dependencies updated; retained 1 revision pin" in result.output
+            assert "already at their latest matching refs" not in result.output
 
 
 class TestUpdateAssumeYes:

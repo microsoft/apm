@@ -5,7 +5,11 @@ Provides CommandLogger (base for all commands) and InstallLogger
 from apm_cli.utils.console — no new output primitives.
 """
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from apm_cli.models.results import InstallDisposition
 from apm_cli.utils.console import (
@@ -15,6 +19,9 @@ from apm_cli.utils.console import (
     _rich_success,
     _rich_warning,
 )
+
+if TYPE_CHECKING:
+    from apm_cli.deps.revision_pins import RevisionPinSkip
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -231,6 +238,24 @@ class InstallLogger(CommandLogger):
         super().__init__("install", verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
+
+    def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
+        """Report retained revision pins once, with per-pin verbose detail."""
+        count = len(skips)
+        if count == 0:
+            return
+        noun = "pin" if count == 1 else "pins"
+        self.warning(
+            f"Retained {count} revision {noun}: no eligible stable annotated semver tag was found."
+        )
+        self.info(
+            "Keeping the current SHA. Publish an annotated stable tag matching a "
+            "supported pattern to refresh it."
+        )
+        if not self.verbose:
+            self.info("Run with --verbose to see retained pins.")
+        for skipped in skips:
+            self.verbose_detail(f"  {skipped.display_name}: {skipped.old_sha[:8]}")
 
     # --- Validation phase ---
 

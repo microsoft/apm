@@ -543,9 +543,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-revision-pin-outcome",
         rule_id="transport-platform-revision-pin-outcome",
         path="src/apm_cli/commands/update.py",
-        old="revision_pin_updates = revision_pin_resolution.updates",
-        new="revision_pin_updates = ()",
-        intent="Update discards resolver-provided revision-pin updates.",
+        old="logger.revision_pins_retained(resolution.skips)",
+        new="logger.revision_pins_retained(())",
+        intent="Update discards resolver-provided retained revision pins.",
     ),
     MutationCase(
         guard_id="transport-platform-self-update-resolution",

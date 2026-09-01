@@ -221,12 +221,19 @@ class APMDependencyResolver:
                 return True
         return False
 
-    def resolve_dependencies(self, project_root: Path) -> DependencyGraph:
+    def resolve_dependencies(
+        self,
+        project_root: Path,
+        *,
+        root_package: APMPackage | None = None,
+    ) -> DependencyGraph:
         """
         Resolve all APM dependencies recursively.
 
         Args:
-            project_root: Path to the project root containing apm.yml
+            project_root: Path to the project root containing apm.yml.
+            root_package: Optional parsed root package. A caller can supply
+                staged dependency refs without writing the manifest first.
 
         Returns:
             DependencyGraph: Complete resolved dependency graph
@@ -238,7 +245,7 @@ class APMDependencyResolver:
 
         # Load the root package
         apm_yml_path = project_root / "apm.yml"
-        if not apm_yml_path.exists():
+        if not apm_yml_path.exists() and root_package is None:
             # Create empty dependency graph for projects without apm.yml
             empty_package = APMPackage(name="unknown", version="0.0.0", package_path=project_root)
             empty_tree = DependencyTree(root_package=empty_package)
@@ -249,23 +256,32 @@ class APMDependencyResolver:
                 flattened_dependencies=empty_flat,
             )
 
-        try:
-            root_package = APMPackage.from_apm_yml(apm_yml_path, source_path=project_root.resolve())
-        except (ValueError, FileNotFoundError) as e:
-            # Create error graph
-            empty_package = APMPackage(name="error", version="0.0.0", package_path=project_root)
-            empty_tree = DependencyTree(root_package=empty_package)
-            empty_flat = FlatDependencyMap()
-            graph = DependencyGraph(
-                root_package=empty_package,
-                dependency_tree=empty_tree,
-                flattened_dependencies=empty_flat,
-            )
-            graph.add_error(f"Failed to load root apm.yml: {e}")
-            return graph
+        if root_package is None:
+            try:
+                root_package = APMPackage.from_apm_yml(
+                    apm_yml_path,
+                    source_path=project_root.resolve(),
+                )
+            except (ValueError, FileNotFoundError) as e:
+                # Create error graph
+                empty_package = APMPackage(name="error", version="0.0.0", package_path=project_root)
+                empty_tree = DependencyTree(root_package=empty_package)
+                empty_flat = FlatDependencyMap()
+                graph = DependencyGraph(
+                    root_package=empty_package,
+                    dependency_tree=empty_tree,
+                    flattened_dependencies=empty_flat,
+                )
+                graph.add_error(f"Failed to load root apm.yml: {e}")
+                return graph
+        elif root_package.source_path is None:
+            root_package = replace(root_package, source_path=project_root.resolve())
 
         # Build the complete dependency tree
-        dependency_tree = self.build_dependency_tree(apm_yml_path)
+        dependency_tree = self.build_dependency_tree(
+            apm_yml_path,
+            root_package=root_package,
+        )
 
         # Detect circular dependencies
         circular_deps = self.detect_circular_dependencies(dependency_tree)
@@ -589,7 +605,12 @@ class APMDependencyResolver:
             )
             return None
 
-    def build_dependency_tree(self, root_apm_yml: Path) -> DependencyTree:
+    def build_dependency_tree(
+        self,
+        root_apm_yml: Path,
+        *,
+        root_package: APMPackage | None = None,
+    ) -> DependencyTree:
         """
         Build complete tree of all dependencies and sub-dependencies.
 
@@ -597,25 +618,28 @@ class APMDependencyResolver:
         This allows for early conflict detection and clearer error reporting.
 
         Args:
-            root_apm_yml: Path to the root apm.yml file
+            root_apm_yml: Path to the root apm.yml file.
+            root_package: Optional parsed root package to use instead of
+                reading the file again.
 
         Returns:
             DependencyTree: Hierarchical dependency tree
         """
-        # Load root package. Anchor source_path on the project root so direct
-        # dep relative paths resolve from there (#857).
-        try:
-            root_package = APMPackage.from_apm_yml(
-                root_apm_yml,
-                source_path=self._project_root.resolve()
-                if self._project_root is not None
-                else root_apm_yml.parent.resolve(),
-            )
-        except (ValueError, FileNotFoundError) as e:
-            _logger.warning("Failed to parse root apm.yml: %s", e)
-            empty_package = APMPackage(name="error", version="0.0.0")
-            tree = DependencyTree(root_package=empty_package)
-            return tree
+        # Load the root unless the caller has staged in-memory refs that must
+        # remain unwritten until a consent gate.
+        if root_package is None:
+            try:
+                root_package = APMPackage.from_apm_yml(
+                    root_apm_yml,
+                    source_path=self._project_root.resolve()
+                    if self._project_root is not None
+                    else root_apm_yml.parent.resolve(),
+                )
+            except (ValueError, FileNotFoundError) as e:
+                _logger.warning("Failed to parse root apm.yml: %s", e)
+                empty_package = APMPackage(name="error", version="0.0.0")
+                tree = DependencyTree(root_package=empty_package)
+                return tree
 
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)

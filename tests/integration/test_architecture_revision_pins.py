@@ -29,13 +29,20 @@ def test_revision_pin_resolution_has_single_owner() -> None:
     """The registered rule must defend the typed owner and both consumers."""
     owner = (ROOT / "src/apm_cli/deps/revision_pins.py").read_text(encoding="utf-8")
     command = _command_source()
+    resolver = (ROOT / "src/apm_cli/install/phases/resolve.py").read_text(encoding="utf-8")
+    dependency_resolver = (ROOT / "src/apm_cli/deps/apm_resolver.py").read_text(encoding="utf-8")
     rule = next(rule for rule in registered_rules() if rule.id == RULE_ID)
 
     assert owner.count("class RevisionPinResolutionResult:") == 1
     assert owner.count("class RevisionPinSkip:") == 1
     assert owner.count("def resolve_revision_pin_updates(") == 1
-    assert "for skipped in resolution.skips:" in command
+    assert "logger.revision_pins_retained(resolution.skips)" in command
     assert "revision_pin_updates = revision_pin_resolution.updates" in command
+    assert "root_package=ctx.apm_package" in resolver
+    assert (
+        "root_package = replace(root_package, source_path=project_root.resolve())"
+        in dependency_resolver
+    )
     assert "Revision-pin updates and retained SHAs share one typed outcome owner" in (
         rule.description
     )
@@ -44,7 +51,10 @@ def test_revision_pin_resolution_has_single_owner() -> None:
 @pytest.mark.parametrize(
     ("old", "new"),
     [
-        ("for skipped in resolution.skips:", "for skipped in ():"),
+        (
+            "logger.revision_pins_retained(resolution.skips)",
+            "logger.revision_pins_retained(())",
+        ),
         (
             "revision_pin_updates = revision_pin_resolution.updates",
             "revision_pin_updates = ()",
@@ -70,6 +80,45 @@ def test_revision_pin_guard_rejects_command_local_tag_lookup() -> None:
         ROOT,
         (RULE_ID,),
         source_overrides={"src/apm_cli/commands/update.py": command},
+    )
+
+    assert _violated(report)
+
+
+def test_revision_pin_guard_rejects_unstaged_root_resolution() -> None:
+    """The install resolver must not reload pre-consent refs from disk."""
+    path = "src/apm_cli/install/phases/resolve.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(
+        "resolver.resolve_dependencies(\n        manifest_anchor,\n"
+        "        root_package=ctx.apm_package,\n    )",
+        "resolver.resolve_dependencies(manifest_anchor)",
+        1,
+    )
+
+    report = run_selected_rules(
+        ROOT,
+        (RULE_ID,),
+        source_overrides={path: mutated},
+    )
+
+    assert _violated(report)
+
+
+def test_revision_pin_guard_rejects_unanchored_staged_root() -> None:
+    """A staged root must preserve portable local-dependency anchoring."""
+    path = "src/apm_cli/deps/apm_resolver.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(
+        "root_package = replace(root_package, source_path=project_root.resolve())",
+        "root_package = root_package",
+        1,
+    )
+
+    report = run_selected_rules(
+        ROOT,
+        (RULE_ID,),
+        source_overrides={path: mutated},
     )
 
     assert _violated(report)

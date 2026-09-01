@@ -15,6 +15,25 @@ class RemoteRefParseError(RuntimeError):
 
 
 _REMOTE_SHA_RE = re.compile(r"^[a-fA-F0-9]{40}$")
+_INVALID_REF_CHARS = frozenset(" ~^:?*[\\")
+
+
+def _is_valid_tag_refname(refname: str) -> bool:
+    """Return whether *refname* follows Git's tag refname restrictions."""
+    if not refname.startswith("refs/tags/"):
+        return False
+    tag_name = refname.removeprefix("refs/tags/")
+    if not tag_name or tag_name == "@" or tag_name.endswith("."):
+        return False
+    if ".." in tag_name or "@{" in tag_name or "//" in tag_name:
+        return False
+    if any(ord(char) < 32 or ord(char) == 127 or char in _INVALID_REF_CHARS for char in tag_name):
+        return False
+    components = tag_name.split("/")
+    return all(
+        component and not component.startswith(".") and not component.casefold().endswith(".lock")
+        for component in components
+    )
 
 
 def validate_ls_remote_tag_output(output: str) -> None:
@@ -25,23 +44,27 @@ def validate_ls_remote_tag_output(output: str) -> None:
     revision-pin refresh must fail rather than treating transport corruption as
     a missing release tag.
     """
+    if output == "":
+        return
+
     plain_tags: set[str] = set()
     peeled_tags: set[str] = set()
+    records: dict[str, str] = {}
     for line in output.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split("\t", 1)
+        if not line.strip():
+            raise RemoteRefParseError("Malformed git ls-remote tag output.")
+        parts = line.split("\t")
         if len(parts) != 2:
             raise RemoteRefParseError("Malformed git ls-remote tag output.")
         sha, refname = (part.strip() for part in parts)
-        if not _REMOTE_SHA_RE.fullmatch(sha) or not refname.startswith("refs/tags/"):
+        if not _REMOTE_SHA_RE.fullmatch(sha) or sha == "0" * 40 or refname in records:
             raise RemoteRefParseError("Malformed git ls-remote tag output.")
-        raw_tag_name = refname.removeprefix("refs/tags/")
-        is_peeled = raw_tag_name.endswith("^{}")
-        tag_name = raw_tag_name[:-3] if is_peeled else raw_tag_name
-        if not tag_name or "^{}" in tag_name:
+        records[refname] = sha
+        is_peeled = refname.endswith("^{}")
+        base_refname = refname[:-3] if is_peeled else refname
+        if not _is_valid_tag_refname(base_refname):
             raise RemoteRefParseError("Malformed git ls-remote tag output.")
+        tag_name = base_refname.removeprefix("refs/tags/")
         if is_peeled:
             peeled_tags.add(tag_name)
         else:
@@ -96,10 +119,11 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
                 # branch or lightweight tag named like a release can never
                 # masquerade as a SHA-pin update target. A transport that
                 # suppressed peeled refs would misclassify a genuine annotated
-                # tag as lightweight -- the resolver then raises rather than
-                # downgrading the pin, which is the safe direction. Any future
-                # edit here that marks a non-peeled ref as annotated would
-                # break this anti-spoofing fence.
+                # tag as lightweight. Revision-pin updates then retain the
+                # current SHA rather than selecting an unverified target, which
+                # is the safe direction. Any future edit here that marks a
+                # non-peeled ref as annotated would break this anti-spoofing
+                # fence.
                 tag_name = tag_name[:-3]
                 tags[tag_name] = sha
                 annotated_tags.add(tag_name)

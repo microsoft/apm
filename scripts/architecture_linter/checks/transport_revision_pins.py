@@ -16,7 +16,9 @@ from scripts.architecture_linter.models import Rule, Violation
 
 _RULE_ID = "transport-platform-revision-pin-outcome"
 _OWNER = "src/apm_cli/deps/revision_pins.py"
+_DEPENDENCY_RESOLVER = "src/apm_cli/deps/apm_resolver.py"
 _COMMAND = "src/apm_cli/commands/update.py"
+_INSTALL_RESOLVER = "src/apm_cli/install/phases/resolve.py"
 _OWNER_DEFINITIONS = re.compile(
     r"^class (RevisionPinResolutionResult|RevisionPinSkip):"
     r"|^def resolve_revision_pin_updates\("
@@ -60,7 +62,7 @@ def _check_revision_pin_outcome(provider: FactsProvider) -> tuple[Violation, ...
             _COMMAND,
             (
                 "resolution = resolve_revision_pin_updates(",
-                "for skipped in resolution.skips:",
+                "logger.revision_pins_retained(resolution.skips)",
                 "revision_pin_updates = revision_pin_resolution.updates",
             ),
             "The update command must consume both revision-pin outcome collections",
@@ -75,6 +77,26 @@ def _check_revision_pin_outcome(provider: FactsProvider) -> tuple[Violation, ...
             _COMMAND_TAG_LOOKUP,
             "The update command must not independently resolve annotated tags",
             exempt=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inventory,
+            _RULE_ID,
+            _INSTALL_RESOLVER,
+            ("root_package=ctx.apm_package",),
+            "Install resolution must consume the caller's staged root package",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inventory,
+            _RULE_ID,
+            _DEPENDENCY_RESOLVER,
+            ("root_package = replace(root_package, source_path=project_root.resolve())",),
+            "Staged root packages must retain a portable project source anchor",
         )
     )
     return tuple(findings)

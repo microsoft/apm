@@ -129,6 +129,13 @@ class TestValidateLsRemoteTagOutput:
     def test_empty_output_is_a_valid_no_tag_result(self) -> None:
         validate_ls_remote_tag_output("")
 
+    def test_valid_lightweight_and_annotated_tags_are_accepted(self) -> None:
+        validate_ls_remote_tag_output(
+            f"{'a' * 40}\trefs/tags/v1.0.0\n"
+            f"{'b' * 40}\trefs/tags/v2.0.0\n"
+            f"{'c' * 40}\trefs/tags/v2.0.0^{{}}\n"
+        )
+
     def test_malformed_line_is_rejected(self) -> None:
         with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
             validate_ls_remote_tag_output("not a git ref")
@@ -148,6 +155,29 @@ class TestValidateLsRemoteTagOutput:
     def test_unsupported_sha_width_is_rejected(self) -> None:
         with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
             validate_ls_remote_tag_output(f"{'a' * 64}\trefs/tags/v1.0.0")
+
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "\n",
+            f"{'a' * 40}\trefs/tags/v1.0.0\textra",
+            f"{'0' * 40}\trefs/tags/v1.0.0",
+            f"{'a' * 40}\trefs/tags/bad name",
+            f"{'a' * 40}\trefs/tags/bad\x00name",
+            f"{'a' * 40}\trefs/tags/.hidden",
+            f"{'a' * 40}\trefs/tags/release.lock",
+            f"{'a' * 40}\trefs/tags/v1..0",
+        ],
+    )
+    def test_invalid_or_ambiguous_records_are_rejected(self, output: str) -> None:
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            validate_ls_remote_tag_output(output)
+
+    @pytest.mark.parametrize("conflicting_sha", ["a", "b"])
+    def test_duplicate_records_are_rejected(self, conflicting_sha: str) -> None:
+        output = f"{'a' * 40}\trefs/tags/v1.0.0\n{conflicting_sha * 40}\trefs/tags/v1.0.0\n"
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            validate_ls_remote_tag_output(output)
 
 
 # ---------------------------------------------------------------------------

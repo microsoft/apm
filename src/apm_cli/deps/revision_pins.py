@@ -13,6 +13,8 @@ from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from apm_cli.utils.console import STATUS_SYMBOLS
 
+from .git_remote_ops import RemoteRefParseError
+
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency
 
@@ -168,7 +170,12 @@ def resolve_revision_pin_updates(
     ) -> RevisionPinUpdate | RevisionPinSkip | None:
         dep_key = dep_ref.get_unique_key()
         old_sha = (dep_ref.reference or "").strip().lower()
-        remote_refs = downloader.list_remote_tag_refs(dep_ref)
+        try:
+            remote_refs = downloader.list_remote_tag_refs(dep_ref)
+        except RemoteRefParseError as exc:
+            raise RevisionPinResolutionError(
+                f"Malformed remote tag data for {dep_key}; refusing to update or retain its SHA."
+            ) from exc
         try:
             latest = find_latest_annotated_tag(remote_refs, package_name=package_name(dep_ref))
         except NoAnnotatedRevisionPinTagError:

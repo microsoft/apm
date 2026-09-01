@@ -173,6 +173,10 @@ def _resolve_and_stage_revision_pin_updates(
         )
     except RevisionPinResolutionError as e:
         logger.error(str(e))
+        logger.info(
+            "No files changed. Retry the update; if the error persists, run with "
+            "--verbose and report the upstream response."
+        )
         sys.exit(1)
     except (GitCommandError, OSError) as e:
         logger.error(f"Failed to resolve revision pins: {e}")
@@ -180,11 +184,7 @@ def _resolve_and_stage_revision_pin_updates(
             logger.info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
-    for skipped in resolution.skips:
-        logger.warning(
-            f"Skipped revision pin for {skipped.display_name}: no annotated semver tag exists "
-            "upstream. Keeping the current SHA; publish an annotated release tag to refresh it."
-        )
+    logger.revision_pins_retained(resolution.skips)
 
     updates_by_key = {update.dep_key: update for update in resolution.updates}
     for dep_ref in all_declared_deps:
@@ -698,10 +698,18 @@ def _run_dep_update(
                 _rich_echo("")
         elif not revision_pin_updates:
             if not _cache_rehydration_required:
-                _rich_success(
-                    "All dependencies already at their latest matching refs.",
-                    symbol="check",
-                )
+                retained_count = len(revision_pin_resolution.skips)
+                if retained_count:
+                    noun = "pin" if retained_count == 1 else "pins"
+                    logger.info(
+                        f"No dependencies updated; retained {retained_count} revision "
+                        f"{noun} at the current SHA."
+                    )
+                else:
+                    _rich_success(
+                        "All dependencies already at their latest matching refs.",
+                        symbol="check",
+                    )
                 return False
             plan_state.cache_rehydration_requested = True
 

@@ -112,10 +112,10 @@ apm update
 
 ### Missing annotated revision-pin tags
 
-When a revision-pinned dependency has no eligible annotated tag, APM warns and
-retains its current SHA while continuing with unrelated updates. Transport
-failures and malformed or invalid remote SHAs still fail the update before
-writes.
+When a revision-pinned dependency has no eligible stable annotated semver tag,
+APM emits one summary warning and retains its current SHA while continuing with
+unrelated updates. Use `--verbose` to list each retained pin. Transport failures
+and malformed or ambiguous tag records still fail the update before writes.
 
 ## Back-compat: `apm update` used to be the self-updater
 

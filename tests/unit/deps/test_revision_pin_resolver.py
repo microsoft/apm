@@ -259,7 +259,10 @@ def test_resolve_revision_pin_updates_propagates_malformed_remote_output() -> No
         def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
             raise RemoteRefParseError("Malformed git ls-remote tag output.")
 
-    with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+    with pytest.raises(
+        RevisionPinResolutionError,
+        match="Malformed remote tag data for org/pkg",
+    ):
         resolve_revision_pin_updates(
             [DependencyReference(repo_url="org/pkg", reference=OLD_SHA)],
             MalformedOutputDownloader(),
