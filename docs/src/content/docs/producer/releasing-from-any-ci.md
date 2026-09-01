@@ -55,7 +55,8 @@ What each command does:
 :::caution[Upgrading an existing release pipeline?]
 `--check-clean` is now always read-only. If an older pipeline relied on one
 `apm pack --check-clean` call to both validate and produce artifacts, split it
-into the gate and pack calls shown above.
+into the gate and pack calls shown above. Install one pinned apm-cli version
+for the job so both calls use identical generation logic.
 :::
 
 Authenticate `gh` with a token that has `contents: write` on the
@@ -98,7 +99,8 @@ apm-action `v1.10.0` or newer.
 > attaches 7 per-plugin bundles + their `.sha256` companions +
 > `marketplace-6.1.2.json` (15 assets total) via the workflow in
 > [`.github/workflows/release.yml`](https://github.com/DevExpGbb/zava-agent-config/blob/main/.github/workflows/release.yml).
-> APM `0.16.0` and apm-action `v1.9.1` or newer required.
+> APM `0.16.0` or newer is required; use apm-action `v1.10.0` or newer
+> for the split gate-and-pack flow documented here.
 
 :::caution[Migrating release workflows from `.tar.gz`?]
 The examples below assume the new `.zip` default from `apm pack --archive`.
