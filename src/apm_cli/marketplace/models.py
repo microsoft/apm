@@ -201,7 +201,7 @@ class MarketplaceSource:
             if self.owner and self.repo:
                 host = self.host or "github.com"
                 owner = quote(self.owner, safe="/")
-                repo = quote(self.repo, safe="")
+                repo = quote(self.repo, safe="/")
                 object.__setattr__(self, "url", f"https://{host}/{owner}/{repo}")
             # If neither URL nor legacy fields are usable, leave url empty; callers/tests
             # that pass only name=... will fail later when something tries to use it.
