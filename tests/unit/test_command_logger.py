@@ -93,6 +93,38 @@ class TestCommandLogger:
         logger.warning("Careful!")
         mock_warning.assert_called_once_with("Careful!", symbol="warning")
 
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_progress_is_suppressed_when_quiet(self, mock_info):
+        logger = CommandLogger("test", quiet=True)
+        logger.progress("Downloading packages...")
+        mock_info.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_progress_emits_when_not_quiet(self, mock_info):
+        logger = CommandLogger("test")
+        logger.progress("Downloading packages...")
+        mock_info.assert_called_once_with("Downloading packages...", symbol="info")
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_mcp_lookup_heartbeat_is_suppressed_when_quiet(self, mock_info):
+        logger = CommandLogger("test", quiet=True)
+        logger.mcp_lookup_heartbeat(3)
+        mock_info.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    @patch("apm_cli.core.command_logger._rich_error")
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_quiet_still_emits_errors_warnings_and_info(self, mock_info, mock_error, mock_warning):
+        logger = CommandLogger("test", quiet=True)
+        logger.error("blocked by org policy")
+        logger.warning("cleanup skipped for user-edited file")
+        logger.info("retry with --force")
+        mock_error.assert_called_once_with("blocked by org policy", symbol="error")
+        mock_warning.assert_called_once_with(
+            "cleanup skipped for user-edited file", symbol="warning"
+        )
+        mock_info.assert_called_once_with("retry with --force", symbol="info")
+
     @patch("apm_cli.core.command_logger._rich_echo")
     def test_verbose_detail_when_verbose(self, mock_echo):
         logger = CommandLogger("test", verbose=True)

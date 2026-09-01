@@ -7,6 +7,7 @@ from apm_cli.utils.console — no new output primitives.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -22,6 +23,8 @@ from apm_cli.utils.console import (
 
 if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
+
+_QUIET_PROGRESS_MODES = frozenset({"never", "quiet", "off", "0", "false", "no"})
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -70,10 +73,21 @@ class CommandLogger:
         logger.render_summary()
     """
 
-    def __init__(self, command: str, verbose: bool = False, dry_run: bool = False):
+    def __init__(
+        self,
+        command: str,
+        verbose: bool = False,
+        dry_run: bool = False,
+        quiet: bool = False,
+    ):
         self.command = command
         self.verbose = verbose
         self.dry_run = dry_run
+        if quiet:
+            self._quiet = True
+        else:
+            mode = os.environ.get("APM_PROGRESS", "").strip().lower()
+            self._quiet = mode in _QUIET_PROGRESS_MODES
         self._diagnostics = None  # Lazy init
 
     @property
@@ -93,6 +107,8 @@ class CommandLogger:
 
     def progress(self, message: str, symbol: str = "info"):
         """Log progress during an operation."""
+        if self._quiet:
+            return
         _rich_info(message, symbol=symbol)
 
     def mcp_lookup_heartbeat(self, count: int):
@@ -106,9 +122,10 @@ class CommandLogger:
         and ``2>&1 | tee`` pipelines.
 
         Skipped silently when ``count <= 0`` to avoid noisy zero-batch
-        output on installs with no registry MCP deps.
+        output on installs with no registry MCP deps, and when ``--quiet``
+        is active (progress-only; warnings and errors still emit).
         """
-        if count <= 0:
+        if self._quiet or count <= 0:
             return
         noun = "server" if count == 1 else "servers"
         _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
@@ -116,13 +133,11 @@ class CommandLogger:
     def info(self, message: str, symbol: str = "info"):
         """Log static advisory / informational context.
 
-        Distinct from :meth:`progress` only at the semantic level:
-        ``progress`` narrates an in-flight step (may be suppressed in
-        ``--quiet``/CI), while ``info`` carries persistent advisory
+        Distinct from :meth:`progress` at the quiet-mode boundary:
+        ``progress`` narrates an in-flight step and is suppressed when
+        ``--quiet`` is set, while ``info`` carries persistent advisory
         context such as recovery hints that must survive quiet-mode
-        suppression. Both currently delegate to ``_rich_info``; the
-        split exists so future quiet-mode policy can drop ``progress``
-        without dropping advisory context.
+        suppression.
         """
         _rich_info(message, symbol=symbol)
 
@@ -236,8 +251,14 @@ class InstallLogger(CommandLogger):
     full install (all deps from apm.yml). Adjusts messages accordingly.
     """
 
-    def __init__(self, verbose: bool = False, dry_run: bool = False, partial: bool = False):
-        super().__init__("install", verbose=verbose, dry_run=dry_run)
+    def __init__(
+        self,
+        verbose: bool = False,
+        dry_run: bool = False,
+        partial: bool = False,
+        quiet: bool = False,
+    ):
+        super().__init__("install", verbose=verbose, dry_run=dry_run, quiet=quiet)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
         self._dry_run_apm_update_count = 0
