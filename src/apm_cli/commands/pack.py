@@ -661,8 +661,6 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 ),
             )
         elif sub.kind is OutputKind.MARKETPLACE:
-            if check_clean:
-                continue
             _render_marketplace_result(
                 logger, sub.payload, effective_dry_run, sub.warnings, sub.outputs
             )
