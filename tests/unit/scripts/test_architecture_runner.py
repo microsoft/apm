@@ -627,6 +627,7 @@ install-deployment-mcp-ownership-migration
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
+install-deployment-prospective-dry-run-plan
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-registry-dependency-intent

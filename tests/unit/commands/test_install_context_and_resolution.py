@@ -295,7 +295,7 @@ class TestValidateAndAddPackagesToApmYml:
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
 
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text("name: project\ndependencies:\n  apm: []\n")
+        apm_yml.write_text("name: project\nversion: 1.0.0\ndependencies:\n  apm: []\n")
         logger = _make_install_logger()
         logger.validation_summary.return_value = True
 
