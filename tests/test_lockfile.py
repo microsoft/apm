@@ -1,6 +1,6 @@
 """Tests for the APM lock file module."""
 
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
