@@ -2109,6 +2109,45 @@ definitions = [
 ]
 if len(definitions) != 1:
     raise SystemExit("resolve_lockfile_path_for_read must have exactly one definition")
+resolver = definitions[0]
+read_only_guards = [
+    node
+    for node in resolver.body
+    if isinstance(node, ast.If)
+    and isinstance(node.test, ast.Name)
+    and node.test.id == "read_only"
+]
+if len(read_only_guards) != 1:
+    raise SystemExit("resolve_lockfile_path_for_read must guard read-only resolution")
+
+lockfile_class = next(
+    node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "LockFile"
+)
+installed_paths = next(
+    node
+    for node in lockfile_class.body
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    and node.name == "installed_paths_for_project"
+)
+installed_calls = [
+    node
+    for node in ast.walk(installed_paths)
+    if isinstance(node, ast.Call)
+    and isinstance(node.func, ast.Name)
+    and node.func.id == "resolve_lockfile_path_for_read"
+]
+if len(installed_calls) != 1 or not any(
+    keyword.arg == "read_only"
+    and isinstance(keyword.value, ast.Constant)
+    and keyword.value.value is True
+    for keyword in installed_calls[0].keywords
+):
+    raise SystemExit("LockFile.installed_paths_for_project bypasses read-only resolution")
+if any(
+    isinstance(node, ast.Name) and node.id == "LEGACY_LOCKFILE_NAME"
+    for node in ast.walk(installed_paths)
+):
+    raise SystemExit("LockFile.installed_paths_for_project re-derives legacy fallback")
 
 consumers = (
     Path("src/apm_cli/bundle/packer.py"),
@@ -2126,7 +2165,19 @@ for consumer in consumers:
     }
     if {"get_lockfile_path", "migrate_lockfile_if_needed"} & imported:
         raise SystemExit(f"{consumer} imports a mutating lockfile path primitive")
-    if "resolve_lockfile_path_for_read(project_root, read_only=dry_run)" not in source:
+    calls = [
+        node
+        for node in ast.walk(consumer_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "resolve_lockfile_path_for_read"
+    ]
+    if len(calls) != 1 or not any(
+        keyword.arg == "read_only"
+        and isinstance(keyword.value, ast.Name)
+        and keyword.value.id == "dry_run"
+        for keyword in calls[0].keywords
+    ):
         raise SystemExit(f"{consumer} bypasses read-only lockfile path resolution")
 PY
 then

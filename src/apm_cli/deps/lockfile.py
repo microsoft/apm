@@ -1080,12 +1080,7 @@ class LockFile:
                        ordered by depth then repo_url (no duplicates).
         """
         try:
-            lockfile_path = get_lockfile_path(project_root)
-            if not lockfile_path.exists():
-                # Fallback to legacy lockfile for pre-migration reads
-                legacy_path = project_root / LEGACY_LOCKFILE_NAME
-                if legacy_path.exists():
-                    lockfile_path = legacy_path
+            lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
             lockfile = cls.read(lockfile_path)
             if not lockfile:
                 return []
