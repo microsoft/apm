@@ -965,6 +965,7 @@ class LockFile:
         from ..utils.yaml_io import load_yaml_str
 
         existing: LockFile | None
+        legacy_timestamp_present = False
         if isinstance(existing_lockfile, _ExistingLockfileUnset) and path.exists():
             existing_text = path.read_text(encoding="utf-8")
             try:
@@ -973,9 +974,15 @@ class LockFile:
                 existing_data = None
             existing = None
             if isinstance(existing_data, dict) and existing_data.get("generated_at") is not None:
-                existing = type(self)._from_validated_data(
-                    _validate_lockfile_container(existing_data)
-                )
+                legacy_timestamp_present = True
+                try:
+                    existing = type(self)._from_validated_data(
+                        _validate_lockfile_container(existing_data)
+                    )
+                except UnsupportedLockfileVersionError:
+                    raise
+                except LockfileFormatError:
+                    existing = None
         elif isinstance(existing_lockfile, _ExistingLockfileUnset):
             existing = None
         else:
@@ -985,6 +992,8 @@ class LockFile:
                 self.generated_at = existing.generated_at
             else:
                 self.generated_at = datetime.now(timezone.utc).isoformat()
+        elif legacy_timestamp_present:
+            self.generated_at = datetime.now(timezone.utc).isoformat()
         else:
             self.generated_at = None
         atomic_write_text(path, self.to_yaml())

@@ -302,6 +302,25 @@ class TestLockFile:
         assert written["dependencies"] == []
         assert "generated_at" not in written
 
+    def test_write_repairs_malformed_legacy_file_and_refreshes_timestamp(
+        self, tmp_path, monkeypatch
+    ):
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: {}\n",
+            encoding="utf-8",
+        )
+        next_write = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        fixed_datetime = Mock()
+        fixed_datetime.now.return_value = next_write
+        monkeypatch.setattr("apm_cli.deps.lockfile.datetime", fixed_datetime)
+
+        LockFile().write(lock_path)
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["dependencies"] == []
+        assert written["generated_at"] == next_write.isoformat()
+
     def test_write_parses_legacy_lockfile_once(self, tmp_path, monkeypatch):
         from apm_cli.utils import yaml_io
 
