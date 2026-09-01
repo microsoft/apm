@@ -793,6 +793,20 @@ class TestExportPluginBundle:
         assert len(result.files) > 0
         assert "plugin.json" in result.files
 
+    def test_dry_run_reads_legacy_lockfile_without_migration(self, tmp_path: Path) -> None:
+        project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
+        canonical = project / "apm.lock.yaml"
+        legacy = project / "apm.lock"
+        canonical.rename(legacy)
+        initial_bytes = legacy.read_bytes()
+        out = tmp_path / "build"
+
+        export_plugin_bundle(project, out, dry_run=True)
+
+        assert legacy.read_bytes() == initial_bytes
+        assert not canonical.exists()
+        assert not out.exists()
+
     def test_archive_dry_run_reports_projected_zip_path(self, tmp_path):
         project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
         out = tmp_path / "build"
