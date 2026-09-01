@@ -404,7 +404,6 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     gate_errors: list[dict] = []
     version_gate_failed = False
     drift_gate_failed = False
-    gate_config = None
 
     if check_versions or check_clean:
         from ..marketplace.builder import BuildOptions as MktBuildOptions
@@ -418,6 +417,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         from ..marketplace.yml_schema import MarketplaceYmlError
 
         # Try to load the marketplace config; if absent, skip both gates with [i].
+        gate_config = None
         try:
             source = detect_config_source(project_root)
             if source != ConfigSource.NONE:
@@ -557,7 +557,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             ctx.exit(4)
         return
 
-    if implicit_check_clean_dry_run and gate_config is not None:
+    if implicit_check_clean_dry_run:
         logger.dry_run_notice("--check-clean is read-only; no pack outputs were written.")
 
     for sub in result.producer_results:

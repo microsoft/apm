@@ -228,7 +228,9 @@ class TestCheckCleanFlag:
         result = CliRunner().invoke(pack_cmd, ["--check-clean"])
         assert result.exit_code != 4
         assert "Marketplace drift check skipped" in result.output
-        assert "--check-clean is read-only" not in result.output
+        assert (
+            "[dry-run] --check-clean is read-only; no pack outputs were written." in result.output
+        )
 
     def test_fails_when_on_disk_missing(self, tmp_path: _Path, monkeypatch) -> None:
         _write_project(tmp_path, _APM_ALIGNED)
