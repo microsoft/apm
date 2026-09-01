@@ -7,7 +7,6 @@ from apm_cli.utils.console — no new output primitives.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -24,7 +23,13 @@ from apm_cli.utils.console import (
 if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
 
-_QUIET_PROGRESS_MODES = frozenset({"never", "quiet", "off", "0", "false", "no"})
+_process_quiet = False
+
+
+def configure_quiet_mode(enabled: bool) -> None:
+    """Record whether the current CLI process was invoked with ``--quiet``."""
+    global _process_quiet
+    _process_quiet = enabled
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -78,16 +83,12 @@ class CommandLogger:
         command: str,
         verbose: bool = False,
         dry_run: bool = False,
-        quiet: bool = False,
+        quiet: bool | None = None,
     ):
         self.command = command
         self.verbose = verbose
         self.dry_run = dry_run
-        if quiet:
-            self._quiet = True
-        else:
-            mode = os.environ.get("APM_PROGRESS", "").strip().lower()
-            self._quiet = mode in _QUIET_PROGRESS_MODES
+        self._quiet = _process_quiet if quiet is None else quiet
         self._diagnostics = None  # Lazy init
 
     @property
@@ -256,7 +257,7 @@ class InstallLogger(CommandLogger):
         verbose: bool = False,
         dry_run: bool = False,
         partial: bool = False,
-        quiet: bool = False,
+        quiet: bool | None = None,
     ):
         super().__init__("install", verbose=verbose, dry_run=dry_run, quiet=quiet)
         self.partial = partial  # True when specific packages are passed to `apm install`

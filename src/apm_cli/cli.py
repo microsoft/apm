@@ -171,15 +171,18 @@ def cli(ctx, verbose: bool, quiet: bool) -> None:
 
     if quiet:
         previous_progress = os.environ.get("APM_PROGRESS")
+        from apm_cli.core.command_logger import configure_quiet_mode
 
-        def _restore_apm_progress() -> None:
+        def _restore_quiet_mode() -> None:
+            configure_quiet_mode(False)
             if previous_progress is None:
                 os.environ.pop("APM_PROGRESS", None)
             else:
                 os.environ["APM_PROGRESS"] = previous_progress
 
         os.environ["APM_PROGRESS"] = "quiet"
-        ctx.call_on_close(_restore_apm_progress)
+        configure_quiet_mode(True)
+        ctx.call_on_close(_restore_quiet_mode)
 
     if verbose:
         # Upgrade to DEBUG when the flag is set; env-var path runs in main().

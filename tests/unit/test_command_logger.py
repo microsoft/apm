@@ -125,6 +125,21 @@ class TestCommandLogger:
         )
         mock_info.assert_called_once_with("retry with --force", symbol="info")
 
+    def test_apm_progress_never_does_not_enable_logger_quiet(self, monkeypatch):
+        """APM_PROGRESS=never only disables the TUI; it is not --quiet."""
+        monkeypatch.setenv("APM_PROGRESS", "never")
+        logger = CommandLogger("test")
+        assert logger._quiet is False
+
+    def test_install_logger_inherits_process_quiet(self):
+        from apm_cli.core.command_logger import configure_quiet_mode
+
+        configure_quiet_mode(True)
+        try:
+            assert InstallLogger()._quiet is True
+        finally:
+            configure_quiet_mode(False)
+
     @patch("apm_cli.core.command_logger._rich_echo")
     def test_verbose_detail_when_verbose(self, mock_echo):
         logger = CommandLogger("test", verbose=True)
