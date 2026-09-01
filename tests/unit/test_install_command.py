@@ -2671,6 +2671,24 @@ class TestInstallMcpFlag:
             data = yaml.safe_load((tmp / "apm.yml").read_text())
             assert data["dependencies"]["mcp"][0]["registry"] == "https://flag.example.com"
 
+    def test_registry_config_url_reaches_install_integration(self, monkeypatch):
+        """The persisted registry override must reach the integration call."""
+        configured_url = "https://config.example.com"
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        argv = ["apm", "install", "--mcp", "srv", "--no-policy"]
+        with (
+            self._chdir_with_apm_yml(),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.config.get_mcp_registry_url", return_value=configured_url),
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 0, result.output
+        run_mcp_install.assert_called_once()
+        assert run_mcp_install.call_args.kwargs["registry_url"] == configured_url
+        assert "(from apm config)" in result.output
+
     def test_registry_with_version_overlay_persists_both(self):
         with (
             self._chdir_with_apm_yml() as tmp,

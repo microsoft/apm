@@ -866,7 +866,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         logger=logger,
         apm_dir=mcp_apm_dir,
         scope=scope,
-        registry_url=validated_registry_url,
+        registry_url=resolved_registry_url,
     )
 
 
