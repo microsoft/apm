@@ -114,6 +114,8 @@ marketplace:
       version: 1.0.0
 """
 
+_APM_ALIGNED_WITH_BUNDLE = _APM_ALIGNED + "dependencies: {}\n"
+
 _APM_MISALIGNED = """\
 name: my-project
 description: A project.
@@ -255,6 +257,22 @@ class TestCheckCleanFlag:
         assert result.exit_code == 4, result.output
         assert output.read_bytes() == initial_bytes
         assert "[dry-run] Would write" not in result.output
+
+    def test_reports_suppressed_bundle_output_as_read_only(
+        self, tmp_path: _Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_project(tmp_path, _APM_ALIGNED_WITH_BUNDLE)
+        monkeypatch.chdir(tmp_path)
+        initial_pack = CliRunner().invoke(pack_cmd, ["--offline"])
+        assert initial_pack.exit_code == 0, initial_pack.output
+
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--offline"])
+
+        assert result.exit_code == 0, result.output
+        assert "--check-clean is read-only; no bundle or marketplace outputs were written." in (
+            result.output
+        )
+        assert "Packed" not in result.output
 
     def test_json_envelope_carries_drift(self, tmp_path: _Path, monkeypatch) -> None:
         _write_project(tmp_path, _APM_ALIGNED)
