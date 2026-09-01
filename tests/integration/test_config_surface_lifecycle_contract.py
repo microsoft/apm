@@ -1286,6 +1286,7 @@ def test_configured_mcp_registry_drives_global_direct_install(
         assert parsed_registry.port is not None
         environment = isolated.subprocess_env()
         environment["APM_TEST_LOOPBACK_PORTS"] = str(parsed_registry.port)
+        environment["MCP_REGISTRY_ALLOW_HTTP"] = "0"
         runner = _runner(apm_binary_path)
         config_result = runner.run(
             ("config", "set", "mcp-registry-url", registry.url),
@@ -1486,6 +1487,9 @@ def test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets(
         env=environment,
     )
     assert excluded.returncode == 2
+    excluded_output = excluded.stdout + excluded.stderr
+    assert "removed by --exclude" in excluded_output
+    assert "remove the exclusion" in excluded_output
     assert not user_manifest.exists()
 
     hermes = runner.run(

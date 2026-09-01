@@ -775,6 +775,10 @@ def _validate_mcp_registry_url(url: str) -> str:
         )
     if parsed.username is not None:
         raise ValueError("mcp-registry-url: embedded credentials are not supported")
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("mcp-registry-url: URL has an invalid port") from exc
     if parsed.query or parsed.fragment:
         raise ValueError("mcp-registry-url: base URL must not contain a query or fragment")
     if not parsed.hostname:

@@ -84,7 +84,7 @@ def _is_local_or_metadata_host(host: str | None) -> bool:
 
 def _require_ambient_http_opt_in(url: str, source: str) -> None:
     """Require the existing explicit opt-in for ambient plaintext endpoints."""
-    if urlparse(url).scheme.lower() == "http" and not os.environ.get("MCP_REGISTRY_ALLOW_HTTP"):
+    if urlparse(url).scheme.lower() == "http" and os.environ.get("MCP_REGISTRY_ALLOW_HTTP") != "1":
         raise click.UsageError(
             f"{source} uses plaintext HTTP; set MCP_REGISTRY_ALLOW_HTTP=1 "
             "only if this endpoint is trusted"

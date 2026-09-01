@@ -573,28 +573,37 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
             SimpleRegistryClient()
         self.assertIn("MCP_REGISTRY_URL", str(cm.exception))
 
-    def test_userinfo_stripped_from_registry_url(self):
-        """SimpleRegistryClient must strip user:pass@ from the stored URL.
+    def test_explicit_userinfo_is_rejected_without_leaking(self):
+        secret = "explicit-userinfo-secret"
+        with self.assertRaises(ValueError) as raised:
+            SimpleRegistryClient(f"https://user:{secret}@registry.corp.example.com/")
+        self.assertNotIn(secret, str(raised.exception))
 
-        Regression trap for the credential-leak path: if userinfo survives
-        into ``self.registry_url``, ``ServerNotFoundError`` interpolates it
-        into terminal output and CI logs.
-        """
-        c = SimpleRegistryClient("https://token:x-oauth@registry.corp.example.com/")
-        parsed = urlparse(c.registry_url)
-        self.assertEqual(parsed.scheme, "https")
-        self.assertEqual(parsed.hostname, "registry.corp.example.com")
-        self.assertIsNone(parsed.username)
-        self.assertIsNone(parsed.password)
-        self.assertEqual(c.registry_url, "https://registry.corp.example.com")
+    def test_environment_userinfo_is_rejected_without_leaking(self):
+        secret = "environment-userinfo-secret"
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"MCP_REGISTRY_URL": f"https://user:{secret}@registry.corp.example.com:8443/"},
+                clear=False,
+            ),
+            self.assertRaises(ValueError) as raised,
+        ):
+            SimpleRegistryClient()
+        self.assertNotIn(secret, str(raised.exception))
 
-    def test_userinfo_stripped_preserves_explicit_port(self):
-        c = SimpleRegistryClient("https://user:pass@registry.corp.example.com:8443/")
-        parsed = urlparse(c.registry_url)
-        self.assertEqual(parsed.hostname, "registry.corp.example.com")
-        self.assertEqual(parsed.port, 8443)
-        self.assertIsNone(parsed.username)
-        self.assertIsNone(parsed.password)
+    def test_false_like_http_opt_in_values_are_rejected(self):
+        for value in ("0", "false", "no"):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(
+                    os.environ,
+                    {"MCP_REGISTRY_ALLOW_HTTP": value},
+                    clear=False,
+                ),
+                self.assertRaises(ValueError),
+            ):
+                SimpleRegistryClient("http://mcp.example.com")
 
 
 class TestNormalizeV01Package(unittest.TestCase):

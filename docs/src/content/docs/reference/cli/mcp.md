@@ -123,6 +123,10 @@ Registry URL resolution order (first set value wins):
 3. `mcp-registry-url` in `~/.apm/config.json` (set via `apm config set mcp-registry-url`) -- prints `Registry (config): <url>` diagnostic
 4. Built-in public default (silent)
 
+Configured or environment-selected `http://` endpoints require
+`MCP_REGISTRY_ALLOW_HTTP=1` when used. An explicit `--registry http://...` flag
+is the per-invocation opt-in.
+
 ## Examples
 
 Discover and inspect:

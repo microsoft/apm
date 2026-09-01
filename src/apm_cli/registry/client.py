@@ -201,12 +201,14 @@ class SimpleRegistryClient:
                 f"(e.g. https://mcp.example.com). Check MCP_REGISTRY_URL if set."
             )
         try:
-            parsed_port = parsed.port
+            _ = parsed.port
         except ValueError as exc:
             raise ValueError(
                 f"Invalid MCP registry URL {safe_resolved!r}: invalid port. "
                 "Check MCP_REGISTRY_URL if set."
             ) from exc
+        if parsed.username or parsed.password:
+            raise ValueError("MCP registry base URLs do not support embedded credentials.")
         if parsed.query or parsed.fragment:
             raise ValueError(
                 f"Invalid MCP registry base URL {safe_resolved!r}: "
@@ -218,24 +220,13 @@ class SimpleRegistryClient:
                 f"{safe_resolved!r}: only https:// is supported (http:// requires "
                 f"MCP_REGISTRY_ALLOW_HTTP=1). Check MCP_REGISTRY_URL if set."
             )
-        if parsed.scheme == "http" and not os.environ.get("MCP_REGISTRY_ALLOW_HTTP"):
+        if parsed.scheme == "http" and os.environ.get("MCP_REGISTRY_ALLOW_HTTP") != "1":
             raise ValueError(
                 f"Insecure MCP registry URL {safe_resolved!r}: http:// is not allowed "
                 f"by default. Set MCP_REGISTRY_ALLOW_HTTP=1 to opt in to plaintext "
                 f"HTTP (not recommended for production). "
                 f"Check MCP_REGISTRY_URL if set."
             )
-
-        # Strip any embedded userinfo (``user:pass@``) before storing the URL so
-        # ``ServerNotFoundError`` and other diagnostics cannot leak credentials
-        # into terminal output or CI logs. Enterprise users sometimes set
-        # ``MCP_REGISTRY_URL=https://token:x-oauth@registry.corp/`` -- we still
-        # accept the URL (the credentials are passed via Authorization headers
-        # elsewhere), but we never echo them back.
-        if parsed.username or parsed.password:
-            host = parsed.hostname or ""
-            sanitized_netloc = host + (f":{parsed_port}" if parsed_port else "")
-            resolved = parsed._replace(netloc=sanitized_netloc).geturl().rstrip("/")
 
         self.registry_url = resolved
         # True when the URL came from an explicit caller arg or MCP_REGISTRY_URL env var.

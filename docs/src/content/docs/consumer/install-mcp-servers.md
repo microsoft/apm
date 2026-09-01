@@ -228,7 +228,7 @@ restricts targets, all detected user-scope-capable runtimes are
 configured. Workspace-only runtimes (VS Code, Cursor, OpenCode) are
 skipped with a warning when a mixed target set also contains a global-capable
 runtime. If none of the selected targets supports user scope, the command exits
-`2` before changing user state. The direct command creates or updates
+`2` before changing the user manifest, lockfile, or runtime configuration. The direct command creates or updates
 `~/.apm/apm.yml`; it does not fall back to the current project's manifest.
 
 ## stdio vs HTTP servers

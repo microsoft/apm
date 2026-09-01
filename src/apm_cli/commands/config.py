@@ -492,7 +492,12 @@ def set(key, value):  # noqa: F811
 
         try:
             set_mcp_registry_url(value)
-            logger.success(f"MCP registry URL set to: {get_mcp_registry_url()}")
+            configured_url = get_mcp_registry_url()
+            logger.success(f"MCP registry URL set to: {configured_url}")
+            if configured_url and configured_url.startswith("http://"):
+                logger.info(
+                    "Set MCP_REGISTRY_ALLOW_HTTP=1 when using this trusted plaintext endpoint."
+                )
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)

@@ -270,3 +270,9 @@ class TestMcpRegistryUrlConfig:
     def test_unset_is_noop_when_absent(self, isolated_config):
         config_mod.unset_mcp_registry_url()
         assert config_mod.get_mcp_registry_url() is None
+
+    def test_set_rejects_invalid_port_without_echoing_value(self, isolated_config):
+        secret = "config-port-secret"
+        with pytest.raises(ValueError) as raised:
+            config_mod.set_mcp_registry_url(f"https://corp.mcp.example.com:{secret}")
+        assert secret not in str(raised.value)
