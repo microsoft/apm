@@ -274,7 +274,7 @@ def install_local_bundle(
                 deps=bundle_mcp_deps,
                 owner=_bundle_owner_key(bundle_info),
             )
-        if bundle_lsp_deps and bundle_info.source_dir is not None:
+        if bundle_info.source_dir is not None:
             _wire_bundle_lsp_servers(
                 bundle_dir=bundle_info.source_dir,
                 targets=targets,

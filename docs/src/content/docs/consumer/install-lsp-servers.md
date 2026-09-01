@@ -41,8 +41,9 @@ APM writes runtime-specific config for each detected target. At project scope,
 Claude Code discovers LSP servers from the APM-managed plugin manifest at
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; user-scope installs use
 `~/.claude.json`. Copilot CLI uses `.github/lsp.json` or
-`~/.copilot/lsp-config.json`. The runtime starts the configured language
-servers automatically.
+`~/.copilot/lsp-config.json`. This generated shape matches each runtime's
+documented discovery contract. Restart Claude Code or run `/reload-plugins`
+after install so the current session loads a newly generated plugin.
 
 If an earlier APM version created a project-root `.lsp.json`, APM leaves it
 unchanged because it may contain user-owned entries. Claude Code does not use
@@ -169,10 +170,13 @@ never touched.
 
 ## Lockfile
 
-`apm install` persists two fields in `apm.lock.yaml`:
+`apm install` persists the LSP definition and target ownership in
+`apm.lock.yaml`:
 
 - `lsp_servers` -- sorted list of APM-managed server names.
 - `lsp_configs` -- server-name-to-config baseline for drift detection.
+- `lsp_target_servers` -- target-to-server ownership used to remove entries
+  when a target is dropped.
 
 See the [Lockfile specification](../../reference/lockfile-spec/).
 

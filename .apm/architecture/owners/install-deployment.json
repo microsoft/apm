@@ -86,11 +86,12 @@
       "guards": ["install-deployment-base-integrator"]
     },
     {
-      "id": "claude-project-lsp-plugin-ownership",
-      "decision": "Claude project LSP plugin path, shape, and reserved skill namespace",
-      "owner": "integration/lsp_integrator.py (_LSP_TARGET_SPECS, reserved_project_skill_names)",
+      "id": "claude-project-lsp-plugin",
+      "decision": "LSP target path, shape, reserved Claude namespace, and lifecycle ownership",
+      "owner": "integration/lsp_integrator.py and install/lsp/integration.py",
       "selectors": [
         "src/apm_cli/integration/lsp_integrator.py",
+        "src/apm_cli/install/lsp/integration.py",
         "src/apm_cli/integration/skill_support.py"
       ],
       "guards": ["install-deployment-claude-lsp-plugin"]

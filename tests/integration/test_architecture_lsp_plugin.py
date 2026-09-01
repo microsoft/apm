@@ -46,6 +46,42 @@ def test_claude_lsp_plugin_path_bypass_is_rejected() -> None:
     assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}
 
 
+def test_user_lsp_config_path_bypass_is_rejected() -> None:
+    """The LSP rule must reject a direct user-config path write."""
+    path = "src/apm_cli/integration/lsp_integrator.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    old = "allowed_prefixes=(relative_path,)"
+    assert old in source
+    mutated = source.replace(old, "allowed_prefixes=()", 1)
+
+    report = run_selected_rules(
+        ROOT,
+        ("install-deployment-claude-lsp-plugin",),
+        source_overrides={path: mutated},
+    )
+
+    assert report.exit_code == 2
+    assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}
+
+
+def test_lsp_target_ownership_bypass_is_rejected() -> None:
+    """The LSP rule must require target-scoped state at the lifecycle owner."""
+    path = "src/apm_cli/install/lsp/integration.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    old = "lsp_target_servers=new_targets"
+    assert old in source
+    mutated = source.replace(old, "lsp_target_servers={}")
+
+    report = run_selected_rules(
+        ROOT,
+        ("install-deployment-claude-lsp-plugin",),
+        source_overrides={path: mutated},
+    )
+
+    assert report.exit_code == 2
+    assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}
+
+
 def test_claude_lsp_approval_alias_bypass_is_rejected() -> None:
     """The LSP rule must reject local approval-key derivation."""
     path = "src/apm_cli/integration/lsp_integrator.py"

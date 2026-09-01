@@ -1210,6 +1210,101 @@ class TestInstallLocalBundleIssue1207:
 
 
 # ---------------------------------------------------------------------------
+# E2E: bundle LSP wiring through the owned lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestInstallLocalBundleLsp:
+    """Local-bundle LSP writes must preserve consent and owner lifecycle."""
+
+    @staticmethod
+    def _bundle(tmp_path: Path) -> Path:
+        lsp_json = json.dumps(
+            {
+                "lspServers": {
+                    "bundle-lsp": {
+                        "command": "bundle-language-server",
+                        "extensionToLanguage": {".bundle": "bundle"},
+                    }
+                }
+            }
+        )
+        return _make_plugin_bundle(tmp_path, files={"lsp.json": lsp_json})
+
+    def test_lsp_collision_force_reconciles(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Foreign plugin content survives unless the operator passes --force."""
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        plugin_path.parent.mkdir(parents=True)
+        foreign = b'{"name":"apm-lsp","lspServers":{"bundle-lsp":{"command":"foreign"}}}\n'
+        plugin_path.write_bytes(foreign)
+
+        refused = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert refused.exit_code != 0
+        assert plugin_path.read_bytes() == foreign
+
+        forced = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            "--force",
+            monkeypatch=monkeypatch,
+        )
+
+        assert forced.exit_code == 0, forced.output
+        plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+        assert plugin["name"] == "apm-lsp"
+        assert plugin["lspServers"]["bundle-lsp"]["command"] == "bundle-language-server"
+
+    def test_explicit_deny_revokes_previously_owned_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reinstalling under a closed gate removes the bundle's old command."""
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+
+        installed = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+        assert installed.exit_code == 0, installed.output
+        assert "bundle-lsp" in json.loads(plugin_path.read_text())["lspServers"]
+
+        manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+        manifest["allowExecutables"] = {}
+        (project / "apm.yml").write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        denied = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert denied.exit_code == 0, denied.output
+        assert json.loads(plugin_path.read_text())["lspServers"] == {}
+
+
+# ---------------------------------------------------------------------------
 # E2E: bundle .mcp.json wiring through MCPIntegrator
 # ---------------------------------------------------------------------------
 

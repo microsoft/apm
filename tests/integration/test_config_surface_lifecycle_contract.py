@@ -1121,7 +1121,7 @@ def test_claude_lsp_unapproved_package_is_not_discoverable(
         env=fixture.isolated.subprocess_env(),
     )
     assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
-    assert "apm approve" in partial.stdout
+    assert "apm approve" not in partial.stdout
     (updated,) = _runner(apm_binary_path).run_sequence(
         (("update", "--yes"),),
         expected_returncodes=(0,),
@@ -1174,6 +1174,87 @@ def test_claude_lsp_approved_declaring_package_is_discoverable(
 
     plugin = json.loads((fixture.project_root / _CLAUDE_LSP_PLUGIN).read_text(encoding="utf-8"))
     assert set(plugin["lspServers"]) == {"server-name-is-not-the-approval-key"}
+
+
+def test_lsp_target_contraction_revokes_dropped_claude_plugin_entry(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Changing the manifest target must revoke the old executable config."""
+    fixture = _create_git_lifecycle_project(
+        tmp_path / "lsp-target-contraction",
+        source_name="target-contraction-source",
+        lsp_dependencies=(
+            {
+                "name": "target-contraction-lsp",
+                "command": "target-contraction-language-server",
+                "extensionToLanguage": {".target": "target"},
+            },
+        ),
+        targets=("claude",),
+    )
+    runner = _runner(apm_binary_path)
+    environment = fixture.isolated.subprocess_env()
+    runner.run_sequence(
+        ((("install", "--no-policy")),),
+        expected_returncodes=(0,),
+        scenario_id="lsp-target-contraction-initial",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+    claude_lsp = fixture.project_root / _CLAUDE_LSP_PLUGIN
+    assert "target-contraction-lsp" in json.loads(claude_lsp.read_text())["lspServers"]
+
+    manifest_path = fixture.project_root / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["targets"] = ["copilot"]
+    dump_yaml(manifest, manifest_path)
+    runner.run_sequence(
+        ((("install", "--no-policy")),),
+        expected_returncodes=(0,),
+        scenario_id="lsp-target-contraction-copilot",
+        cwd=fixture.project_root,
+        env=environment,
+    )
+
+    copilot_lsp = fixture.project_root / ".github" / "lsp.json"
+    assert "target-contraction-lsp" in json.loads(copilot_lsp.read_text())["lspServers"]
+    assert "target-contraction-lsp" not in json.loads(claude_lsp.read_text())["lspServers"]
+    lockfile = LockFile.read(fixture.project_root / "apm.lock.yaml")
+    assert lockfile is not None
+    assert lockfile.lsp_target_servers == {"copilot": ["target-contraction-lsp"]}
+
+
+def test_only_mcp_does_not_materialize_root_lsp(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """The MCP-only filter must exclude root-project LSP declarations."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "only-mcp-lsp",
+        base_env=dict(os.environ),
+    )
+    project = LocalPackageFactory(isolated.work_root).create(
+        "consumer",
+        lsp_dependencies=(
+            {
+                "name": "must-not-deploy",
+                "command": "must-not-run",
+                "extensionToLanguage": {".none": "none"},
+            },
+        ),
+        targets=("claude",),
+    )
+
+    _runner(apm_binary_path).run_sequence(
+        (("install", "--only", "mcp", "--no-policy"),),
+        expected_returncodes=(0,),
+        scenario_id="only-mcp-excludes-lsp",
+        cwd=project.root,
+        env=isolated.subprocess_env(),
+    )
+
+    assert not (project.root / _CLAUDE_LSP_PLUGIN).exists()
 
 
 def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
@@ -1285,13 +1366,17 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
     )
 
     runner.run_sequence(
-        (("uninstall", fixture.source), install),
-        expected_returncodes=(0, 0),
+        (("uninstall", fixture.source),),
+        expected_returncodes=(0,),
         scenario_id="saved-target-uninstall-reconcile",
         cwd=fixture.project_root,
         env=environment,
     )
     assert not claude_instruction.exists()
+    post_uninstall_lock = LockFile.read(fixture.project_root / "apm.lock.yaml")
+    assert lsp_name not in json.loads(claude_lsp.read_text(encoding="utf-8"))["lspServers"], (
+        post_uninstall_lock.lsp_config_provenance if post_uninstall_lock is not None else None
+    )
 
     runner.run_sequence(
         (

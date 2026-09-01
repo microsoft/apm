@@ -121,7 +121,7 @@ def test_capture_preserves_raw_bytes_and_canonical_semantics(tmp_path: Path) -> 
     assert snapshot.lsp_state_bytes == (
         b'{"configs":{"fixture-lsp":{"command":"fixture-lsp",'
         b'"extensionToLanguage":{".py":"python"},"name":"fixture-lsp"}},'
-        b'"servers":["fixture-lsp"]}'
+        b'"provenance":{},"servers":["fixture-lsp"],"target_servers":{}}'
     )
     assert snapshot.file(".agents/skills/review/SKILL.md").content == deployed_bytes
     assert snapshot.file(".agents/skills/review/SKILL.md").roles == frozenset({"deployment"})

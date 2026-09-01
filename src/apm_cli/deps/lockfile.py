@@ -109,6 +109,7 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         "mcp_target_servers",
         "mcp_config_provenance",
         "lsp_configs",
+        "lsp_target_servers",
         "lsp_config_provenance",
         "local_deployed_file_hashes",
     )
@@ -125,13 +126,14 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
     for index, dependency in enumerate(data.get("dependencies", [])):
         if not isinstance(dependency, dict):
             raise LockfileFormatError(f"Lockfile dependency at index {index} must be a mapping")
-    for target, servers in (data.get("mcp_target_servers") or {}).items():
-        if not isinstance(target, str) or not target or not isinstance(servers, list):
-            raise LockfileFormatError(
-                "Lockfile mcp_target_servers values must be string-to-list mappings"
-            )
-        if not all(isinstance(server, str) and bool(server) for server in servers):
-            raise LockfileFormatError("Lockfile mcp_target_servers entries must be strings")
+    for field_name in ("mcp_target_servers", "lsp_target_servers"):
+        for target, servers in (data.get(field_name) or {}).items():
+            if not isinstance(target, str) or not target or not isinstance(servers, list):
+                raise LockfileFormatError(
+                    f"Lockfile {field_name} values must be string-to-list mappings"
+                )
+            if not all(isinstance(server, str) and bool(server) for server in servers):
+                raise LockfileFormatError(f"Lockfile {field_name} entries must be strings")
     for server, provenance in (data.get("mcp_config_provenance") or {}).items():
         if not isinstance(server, str) or not (
             (isinstance(provenance, str) and bool(provenance))
@@ -749,6 +751,7 @@ class LockFile:
     mcp_config_provenance: dict[str, str | list[str]] = field(default_factory=dict)
     lsp_servers: list[str] = field(default_factory=list)
     lsp_configs: dict[str, dict] = field(default_factory=dict)
+    lsp_target_servers: dict[str, list[str]] = field(default_factory=dict)
     lsp_config_provenance: dict[str, str] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
@@ -757,6 +760,7 @@ class LockFile:
     )
     _deployments_present: bool = field(default=False, repr=False, compare=False)
     _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
+    _lsp_target_servers_present: bool = field(default=False, repr=False, compare=False)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -865,6 +869,11 @@ class LockFile:
                 data["lsp_servers"] = sorted(self.lsp_servers)
             if self.lsp_configs:
                 data["lsp_configs"] = dict(sorted(self.lsp_configs.items()))
+            if self.lsp_target_servers:
+                data["lsp_target_servers"] = {
+                    target: sorted(servers)
+                    for target, servers in sorted(self.lsp_target_servers.items())
+                }
             if self.lsp_config_provenance:
                 data["lsp_config_provenance"] = dict(sorted(self.lsp_config_provenance.items()))
             if self.local_deployed_files:
@@ -916,6 +925,11 @@ class LockFile:
         lock.mcp_config_provenance = dict(data.get("mcp_config_provenance") or {})
         lock.lsp_servers = list(data.get("lsp_servers", []))
         lock.lsp_configs = dict(data.get("lsp_configs") or {})
+        lock.lsp_target_servers = {
+            target: list(servers)
+            for target, servers in (data.get("lsp_target_servers") or {}).items()
+        }
+        lock._lsp_target_servers_present = "lsp_target_servers" in data
         lock.lsp_config_provenance = dict(data.get("lsp_config_provenance") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
@@ -1146,6 +1160,8 @@ class LockFile:
         if sorted(self.lsp_servers) != sorted(other.lsp_servers):
             return False
         if self.lsp_configs != other.lsp_configs:
+            return False
+        if self.lsp_target_servers != other.lsp_target_servers:
             return False
         if self.lsp_config_provenance != other.lsp_config_provenance:
             return False

@@ -68,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must run `apm pack` separately; see
   [Releasing from any CI](docs/src/content/docs/producer/releasing-from-any-ci.md#the-canonical-sequence).
   (by @danielmeppiel, closes #2727, #2730)
+- Claude project LSP installs now write a discoverable APM-managed plugin
+  manifest. Upgrade users can rerun `apm install --target claude`; legacy
+  project-root `.lsp.json` files remain unchanged for manual review, and target
+  changes, package uninstall, and executable denial revoke only recorded
+  APM-owned entries. (#2733)
 - Distributed `apm compile` now reconciles existing managed-section
   `AGENTS.md` files without overwriting hand-authored content, generates new
   placements safely, and never discovers, writes, or cleans content across

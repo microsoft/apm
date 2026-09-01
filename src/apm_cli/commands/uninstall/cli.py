@@ -4,6 +4,7 @@ import builtins
 import contextlib
 import sys
 import traceback
+from typing import Any
 
 import click
 
@@ -41,6 +42,40 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
     prod_deps = data["dependencies"]["apm"] or []
     dev_deps = data["devDependencies"]["apm"] or []
     return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]
+
+
+def _cleanup_stale_lsp(
+    *,
+    apm_package: Any,
+    lockfile: Any,
+    lockfile_path: Any,
+    modules_dir: Any,
+    deploy_root: Any,
+    user_scope: bool,
+    logger: Any,
+) -> tuple[bool, Exception | None]:
+    """Reconcile LSP state after uninstall and render an actionable failure."""
+    try:
+        from ...install.lsp.integration import reconcile_lsp_after_uninstall
+
+        updated = reconcile_lsp_after_uninstall(
+            apm_package=apm_package,
+            lockfile=lockfile,
+            lock_path=lockfile_path,
+            modules_dir=modules_dir,
+            project_root=deploy_root,
+            user_scope=user_scope,
+            logger=logger,
+        )
+        return updated, None
+    except Exception as cleanup_error:
+        logger.error(
+            "Uninstall incomplete: package removal completed, but LSP cleanup "
+            f"failed: {cleanup_error}. Fix the LSP config path, then run "
+            "'apm install' to reconcile stale entries."
+        )
+        logger.verbose_detail(traceback.format_exc().rstrip())
+        return False, cleanup_error
 
 
 @click.command(
@@ -485,6 +520,17 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
             logger.verbose_detail(traceback.format_exc().rstrip())
 
+        lsp_lock_updated, lsp_cleanup_error = _cleanup_stale_lsp(
+            apm_package=apm_package,
+            lockfile=lockfile,
+            lockfile_path=lockfile_path,
+            modules_dir=modules_dir,
+            deploy_root=deploy_root,
+            user_scope=scope is InstallScope.USER,
+            logger=logger,
+        )
+        lockfile_updated = lsp_lock_updated or lockfile_updated
+
         if lockfile and lockfile_updated and lockfile_ready:
             try:
                 from .lockfile_state import lockfile_has_persisted_state
@@ -512,7 +558,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]
         if removed_from_modules > 0:
             summary_lines.append(f"Removed {removed_from_modules} package(s) from apm_modules/")
-        if mcp_cleanup_error is None:
+        if mcp_cleanup_error is None and lsp_cleanup_error is None:
             logger.success("Uninstall complete: " + ", ".join(summary_lines))
 
         # Fire post-uninstall lifecycle scripts
@@ -525,7 +571,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             verbose=verbose,
             deploy_root=deploy_root,
         )
-        if mcp_cleanup_error is not None:
+        if mcp_cleanup_error is not None or lsp_cleanup_error is not None:
             sys.exit(1)
 
     except Exception as e:

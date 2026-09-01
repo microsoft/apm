@@ -330,6 +330,32 @@ class TestInstallProjectScope:
             "command": "user-command"
         }
 
+    def test_other_target_ownership_does_not_authorize_claude_overwrite(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "apm-lsp",
+                    "lspServers": {"pyright": {"command": "user-command"}},
+                }
+            )
+        )
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError, match="not managed by APM"):
+            LSPIntegrator.install(
+                [_make_dep("pyright")],
+                project_root=tmp_path,
+                target_runtimes=["claude"],
+                managed_target_servers={"copilot": {"pyright"}},
+                fail_on_write_error=True,
+            )
+
+        assert json.loads(plugin_json.read_text())["lspServers"]["pyright"] == {
+            "command": "user-command"
+        }
+
     def test_managed_server_does_not_adopt_foreign_skill_content(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
         plugin_json.parent.mkdir(parents=True)
@@ -383,6 +409,28 @@ class TestInstallUserScope:
         data = json.loads(claude_json.read_text())
         assert data["existingKey"] is True
         assert "ruff" in data["lspServers"]
+
+    def test_rejects_symlinked_user_config_before_writing(self, tmp_path):
+        outside = tmp_path / "outside.json"
+        outside.write_text('{"sentinel": true}\n', encoding="ascii")
+        claude_json = tmp_path / ".claude.json"
+        try:
+            claude_json.symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"file symlinks unavailable: {exc}")
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with (
+            patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path),
+            pytest.raises(RequiredIntegrationError, match="symlinked path component"),
+        ):
+            LSPIntegrator.install(
+                [_make_dep("pyright")],
+                user_scope=True,
+                fail_on_write_error=True,
+            )
+
+        assert json.loads(outside.read_text(encoding="ascii")) == {"sentinel": True}
 
 
 class TestInstallCopilotTarget:

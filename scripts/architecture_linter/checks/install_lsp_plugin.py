@@ -79,6 +79,7 @@ def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
                 _LSP_INTEGRATOR: (
                     "def reserved_project_skill_names(",
                     "BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
+                    "allowed_prefixes=(relative_path,)",
                     "locked_dependency_approval_keys(locked_dependency)",
                     "approval_keys=approval_keys",
                 ),
@@ -88,6 +89,9 @@ def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
                 _LSP_PIPELINE: (
                     "transitive_lsp = filter_lsp_by_allow_executables(",
                     "lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)",
+                    "def reconcile_lsp_after_uninstall(",
+                    "lsp_target_servers=new_targets",
+                    "managed_target_servers=old_lsp_targets",
                 ),
                 _LOCAL_BUNDLE: (
                     "def effective_bundle_allow_map(",

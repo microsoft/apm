@@ -405,7 +405,13 @@ class LSPIntegrator:
     ) -> Path:
         """Resolve a target config through the canonical deployment-path gate."""
         if user_scope:
-            return spec.path(project_root, user_scope=True)
+            user_root = Path.home()
+            relative_path = Path(*spec.user_relative_path).as_posix()
+            return BaseIntegrator.resolve_deploy_path(
+                relative_path,
+                user_root,
+                allowed_prefixes=(relative_path,),
+            )
         relative_path = Path(*spec.project_relative_path).as_posix()
         return BaseIntegrator.resolve_deploy_path(relative_path, project_root)
 
@@ -630,19 +636,39 @@ class LSPIntegrator:
         lock_path: Path | None = None,
         *,
         lsp_configs: builtins.dict | None = None,
+        lsp_target_servers: dict[str, set[str]] | None = None,
+        lsp_config_provenance: dict[str, str] | None = None,
+        lockfile_state: LockFile | None = None,
+        persist: bool = True,
         fail_on_write_error: bool = False,
     ) -> None:
         """Update the lockfile with the current set of APM-managed LSP servers."""
-        if lock_path is None:
+        if lock_path is None and persist:
             lock_path = get_lockfile_path(Path.cwd())
         try:
-            lockfile = LockFile.read(lock_path) if lock_path.exists() else LockFile()
+            lockfile = lockfile_state
+            if lockfile is None and lock_path is not None:
+                lockfile = LockFile.read(lock_path) if lock_path.exists() else LockFile()
             if lockfile is None:
                 lockfile = LockFile()
             lockfile.lsp_servers = sorted(lsp_server_names)
             if lsp_configs is not None:
                 lockfile.lsp_configs = lsp_configs
-            lockfile.save(lock_path)
+            if lsp_config_provenance is not None:
+                lockfile.lsp_config_provenance = lsp_config_provenance
+            if lsp_target_servers is not None:
+                from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+                DeploymentLedgerCodec.replace_lsp_target_servers(
+                    lockfile,
+                    {
+                        runtime: sorted(names)
+                        for runtime, names in lsp_target_servers.items()
+                        if names
+                    },
+                )
+            if persist and lock_path is not None:
+                lockfile.save(lock_path)
         except Exception as exc:
             _log.debug(
                 "Failed to update LSP servers in lockfile at %s",
@@ -670,6 +696,7 @@ class LSPIntegrator:
         target_runtimes: list[str] | None = None,
         fail_on_write_error: bool = False,
         managed_server_names: builtins.set | None = None,
+        managed_target_servers: dict[str, set[str]] | None = None,
         force: bool = False,
     ) -> int:
         """Install LSP dependencies by writing target-specific runtime config."""
@@ -694,12 +721,15 @@ class LSPIntegrator:
             spec = _LSP_TARGET_SPECS[runtime]
             servers = LSPIntegrator._servers_for_target(base_servers, spec)
             try:
+                managed_names = managed_server_names
+                if managed_target_servers is not None:
+                    managed_names = managed_target_servers.get(runtime, set())
                 changed = LSPIntegrator._write_target_config(
                     spec,
                     servers,
                     project_root=project_root_path,
                     user_scope=user_scope,
-                    managed_server_names=managed_server_names,
+                    managed_server_names=managed_names,
                     force=force,
                 )
                 changed_servers.update(changed)

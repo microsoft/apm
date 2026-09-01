@@ -289,6 +289,7 @@ _OWNED_STATE_FIELDS = frozenset(
         "local_deployed_files",
         "local_deployed_file_hashes",
         "mcp_target_servers",
+        "lsp_target_servers",
     }
 )
 

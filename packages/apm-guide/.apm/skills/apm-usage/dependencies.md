@@ -580,7 +580,9 @@ an alias for `startupTimeout`; a non-null canonical value wins when both are
 supplied, while a null canonical value falls back to its alias. APM ignores the
 unsupported Copilot `cwd` field and warns that the consumer runtime chooses the
 working directory. Copilot output uses `fileExtensions` and `warmupTimeoutMs`;
-manifests and lockfiles retain `extensionToLanguage` and `startupTimeout`.
+manifests and lockfiles retain `extensionToLanguage` and `startupTimeout`. APM
+records target-scoped LSP ownership in the lockfile so target changes and
+package uninstall revoke only entries it wrote.
 
 ## Version pinning
 

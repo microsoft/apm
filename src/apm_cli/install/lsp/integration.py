@@ -13,6 +13,60 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.lsp import LSPDependency
 
+_PROJECT_LSP_OWNER = "project:."
+_PACKAGE_LSP_OWNER_PREFIX = "package:"
+_BUNDLE_LSP_OWNER_PREFIX = "bundle:"
+
+
+def _target_server_sets(lockfile: "LockFile") -> dict[str, set[str]]:
+    """Return a mutable target ownership view from one lockfile."""
+    target_servers = getattr(lockfile, "lsp_target_servers", {})
+    if not isinstance(target_servers, dict):
+        return {}
+    return {runtime: set(server_names) for runtime, server_names in target_servers.items()}
+
+
+def _dependency_provenance(dependencies: list["LSPDependency"]) -> dict[str, str]:
+    """Map every regular install declaration to its stable owner token."""
+    return {
+        dependency.name: (
+            f"{_PACKAGE_LSP_OWNER_PREFIX}{dependency.resolved_by}"
+            if dependency.resolved_by
+            else _PROJECT_LSP_OWNER
+        )
+        for dependency in dependencies
+    }
+
+
+def _is_regular_owner(owner: str) -> bool:
+    """Return whether an LSP owner belongs to the replayable install graph."""
+    return owner == _PROJECT_LSP_OWNER or owner.startswith(_PACKAGE_LSP_OWNER_PREFIX)
+
+
+def _clean_target_differences(
+    *,
+    old_targets: dict[str, set[str]],
+    new_targets: dict[str, set[str]],
+    project_root: Path,
+    user_scope: bool,
+    logger,
+    fail_on_write_error: bool,
+) -> None:
+    """Remove only target-scoped LSP entries whose recorded ownership was dropped."""
+    from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+    for runtime, old_names in old_targets.items():
+        stale = old_names - new_targets.get(runtime, set())
+        if stale:
+            LSPIntegrator.remove_stale(
+                stale,
+                project_root=project_root,
+                user_scope=user_scope,
+                logger=logger,
+                target_runtimes=[runtime],
+                fail_on_write_error=fail_on_write_error,
+            )
+
 
 def run_owned_lsp_integration(
     *,
@@ -31,10 +85,11 @@ def run_owned_lsp_integration(
     from apm_cli.integration.lsp_integrator import LSPIntegrator
 
     lockfile = LockFile.read(lock_path) or LockFile()
+    owner_token = f"{_BUNDLE_LSP_OWNER_PREFIX}{owner}"
     old_owned = {
         name
         for name, recorded_owner in lockfile.lsp_config_provenance.items()
-        if recorded_owner == owner
+        if recorded_owner in {owner, owner_token}
     }
     new_names = LSPIntegrator.get_server_names(dependencies)
     conflicts = {
@@ -42,12 +97,22 @@ def run_owned_lsp_integration(
         for name in new_names
         if name in lockfile.lsp_servers
         and name not in old_owned
-        and lockfile.lsp_config_provenance.get(name) != owner
+        and lockfile.lsp_config_provenance.get(name) not in {owner, owner_token}
     }
     if conflicts:
         raise ValueError(
             "Bundle LSP server name conflicts with another owner: " + ", ".join(sorted(conflicts))
         )
+
+    if not dependencies and not old_owned:
+        return 0
+
+    old_targets = _target_server_sets(lockfile)
+    new_targets = {runtime: set(names) for runtime, names in old_targets.items()}
+    for names in new_targets.values():
+        names.difference_update(old_owned)
+    for runtime in target_runtimes:
+        new_targets.setdefault(runtime, set()).update(new_names)
 
     count = 0
     if dependencies:
@@ -58,28 +123,91 @@ def run_owned_lsp_integration(
             logger=logger,
             target_runtimes=target_runtimes,
             fail_on_write_error=fail_on_write_error,
-            managed_server_names=old_owned,
+            managed_target_servers=old_targets,
             force=force,
         )
-    stale = old_owned - new_names
-    if stale:
-        LSPIntegrator.remove_stale(
-            stale,
-            project_root=project_root,
-            user_scope=user_scope,
-            logger=logger,
-            target_runtimes=target_runtimes,
-            fail_on_write_error=fail_on_write_error,
-        )
+    _clean_target_differences(
+        old_targets=old_targets,
+        new_targets=new_targets,
+        project_root=project_root,
+        user_scope=user_scope,
+        logger=logger,
+        fail_on_write_error=fail_on_write_error,
+    )
 
     for name in old_owned:
         lockfile.lsp_configs.pop(name, None)
         lockfile.lsp_config_provenance.pop(name, None)
     lockfile.lsp_servers = sorted((set(lockfile.lsp_servers) - old_owned) | new_names)
     lockfile.lsp_configs.update(LSPIntegrator.get_server_configs(dependencies))
-    lockfile.lsp_config_provenance.update(dict.fromkeys(new_names, owner))
+    lockfile.lsp_config_provenance.update(dict.fromkeys(new_names, owner_token))
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    DeploymentLedgerCodec.replace_lsp_target_servers(
+        lockfile,
+        {
+            runtime: sorted(server_names)
+            for runtime, server_names in new_targets.items()
+            if server_names
+        },
+    )
     lockfile.write(lock_path)
     return count
+
+
+def reconcile_lsp_after_uninstall(
+    *,
+    apm_package: "APMPackage",
+    lockfile: "LockFile | None",
+    lock_path: Path,
+    modules_dir: Path,
+    project_root: Path,
+    user_scope: bool,
+    logger,
+) -> bool:
+    """Recompute trusted LSP state from every surviving declaration."""
+    if lockfile is None:
+        return False
+    before = (
+        list(lockfile.lsp_servers),
+        dict(lockfile.lsp_configs),
+        dict(lockfile.lsp_target_servers),
+        dict(lockfile.lsp_config_provenance),
+    )
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.core.target_detection import resolve_package_target_decision
+    from apm_cli.models.apm_package import canonical_package_target_config
+
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    target_decision = resolve_package_target_decision(
+        project_root,
+        package=apm_package,
+        explicit_target=None,
+        user_scope=user_scope,
+    )
+    apm_config = {"scripts": apm_package.scripts or {}}
+    apm_config.update(canonical_package_target_config(apm_package))
+    run_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=modules_dir,
+        lock_path=lock_path,
+        existing_lock=lockfile,
+        project_root=project_root,
+        user_scope=user_scope,
+        should_install=True,
+        logger=logger,
+        target_context=(apm_config, target_decision.value, scope),
+        target_decision=target_decision,
+        fail_on_write_error=True,
+        persist=False,
+    )
+    after = (
+        list(lockfile.lsp_servers),
+        dict(lockfile.lsp_configs),
+        dict(lockfile.lsp_target_servers),
+        dict(lockfile.lsp_config_provenance),
+    )
+    return before != after
 
 
 def run_lsp_integration(  # noqa: PLR0913
@@ -105,6 +233,7 @@ def run_lsp_integration(  # noqa: PLR0913
     effective_allow_resolved: bool = False,
     force: bool = False,
     no_policy: bool = False,
+    persist: bool = True,
 ) -> int:
     """Run LSP server integration after APM package installation.
 
@@ -147,9 +276,18 @@ def run_lsp_integration(  # noqa: PLR0913
     # Capture old LSP servers from lockfile
     old_lsp_servers: builtins.set = builtins.set()
     old_lsp_configs: builtins.dict = {}
+    old_lsp_provenance: dict[str, str] = {}
+    old_lsp_targets: dict[str, set[str]] = {}
+    old_lsp_targets_present = False
     if existing_lock:
         old_lsp_servers = builtins.set(existing_lock.lsp_servers)
         old_lsp_configs = builtins.dict(existing_lock.lsp_configs)
+        raw_provenance = getattr(existing_lock, "lsp_config_provenance", {})
+        old_lsp_provenance = dict(raw_provenance) if isinstance(raw_provenance, dict) else {}
+        old_lsp_targets = _target_server_sets(existing_lock)
+        old_lsp_targets_present = (
+            getattr(existing_lock, "_lsp_target_servers_present", False) is True
+        )
 
     from apm_cli.security.executables import filter_lsp_by_allow_executables
 
@@ -194,7 +332,6 @@ def run_lsp_integration(  # noqa: PLR0913
             lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)
 
     lsp_count = 0
-    new_lsp_servers: builtins.set = builtins.set()
 
     if target_context is not None:
         apm_config, explicit_target, scope = target_context
@@ -213,73 +350,94 @@ def run_lsp_integration(  # noqa: PLR0913
             logger=logger,
         )
 
-    if should_install and lsp_deps:
-        if not target_runtimes and fail_on_write_error:
-            from apm_cli.install.errors import RequiredIntegrationError
-
-            raise RequiredIntegrationError(
-                "LSP dependencies are declared, but no effective target supports "
-                "LSP configuration. Choose --target claude or --target copilot, then retry."
+    if should_install:
+        bundle_names = {
+            name for name, owner in old_lsp_provenance.items() if not _is_regular_owner(owner)
+        }
+        old_regular_names = {
+            name for name, owner in old_lsp_provenance.items() if _is_regular_owner(owner)
+        }
+        if old_lsp_targets_present:
+            old_regular_names.update(set().union(*old_lsp_targets.values(), set()) - bundle_names)
+        new_regular_names = LSPIntegrator.get_server_names(lsp_deps) if lsp_deps else builtins.set()
+        conflicts = new_regular_names & bundle_names
+        if conflicts:
+            raise ValueError(
+                "Manifest LSP server name conflicts with an installed bundle owner: "
+                + ", ".join(sorted(conflicts))
             )
-        lsp_count = LSPIntegrator.install(
-            lsp_deps,
-            project_root=project_root,
-            user_scope=user_scope,
-            logger=logger,
-            diagnostics=diagnostics,
-            target_runtimes=target_runtimes,
-            fail_on_write_error=fail_on_write_error,
-            managed_server_names=old_lsp_servers,
-            force=force,
-        )
-        new_lsp_servers = LSPIntegrator.get_server_names(lsp_deps)
-        new_lsp_configs = LSPIntegrator.get_server_configs(lsp_deps)
 
-        # Remove stale LSP servers
-        stale_lsp = old_lsp_servers - new_lsp_servers
-        if stale_lsp:
-            LSPIntegrator.remove_stale(
-                stale_lsp,
+        if lsp_deps:
+            if not target_runtimes and fail_on_write_error:
+                from apm_cli.install.errors import RequiredIntegrationError
+
+                raise RequiredIntegrationError(
+                    "LSP dependencies are declared, but no effective target supports "
+                    "LSP configuration. Choose --target claude or --target copilot, then retry."
+                )
+            lsp_count = LSPIntegrator.install(
+                lsp_deps,
                 project_root=project_root,
                 user_scope=user_scope,
                 logger=logger,
+                diagnostics=diagnostics,
                 target_runtimes=target_runtimes,
+                fail_on_write_error=fail_on_write_error,
+                managed_target_servers=old_lsp_targets,
+                force=force,
+            )
+
+        new_targets = {
+            runtime_name: set(server_names)
+            for runtime_name, server_names in old_lsp_targets.items()
+        }
+        for server_names in new_targets.values():
+            server_names.difference_update(old_regular_names)
+        for target_runtime in target_runtimes or []:
+            new_targets.setdefault(target_runtime, set()).update(new_regular_names)
+        if old_lsp_targets_present:
+            _clean_target_differences(
+                old_targets=old_lsp_targets,
+                new_targets=new_targets,
+                project_root=project_root,
+                user_scope=user_scope,
+                logger=logger,
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # Persist LSP servers in lockfile
+        new_regular_configs = LSPIntegrator.get_server_configs(lsp_deps)
+        new_configs = {
+            name: config for name, config in old_lsp_configs.items() if name in bundle_names
+        }
+        new_configs.update(new_regular_configs)
+        new_provenance = {
+            name: owner for name, owner in old_lsp_provenance.items() if name in bundle_names
+        }
+        new_provenance.update(_dependency_provenance(lsp_deps))
+        all_names = bundle_names | new_regular_names
         LSPIntegrator.update_lockfile(
-            new_lsp_servers,
+            all_names,
             lock_path,
-            lsp_configs=new_lsp_configs,
+            lsp_configs=new_configs,
+            lsp_target_servers=new_targets,
+            lsp_config_provenance=new_provenance,
+            lockfile_state=existing_lock if not persist else None,
+            persist=persist,
             fail_on_write_error=fail_on_write_error,
         )
+        if not lsp_deps:
+            logger.verbose_detail("No LSP dependencies found in apm.yml")
 
-    elif should_install and not lsp_deps:
-        # No LSP deps -- remove any old APM-managed servers
-        if old_lsp_servers:
-            LSPIntegrator.remove_stale(
-                old_lsp_servers,
-                project_root=project_root,
-                user_scope=user_scope,
-                logger=logger,
-                target_runtimes=target_runtimes,
-                fail_on_write_error=fail_on_write_error,
-            )
-            LSPIntegrator.update_lockfile(
-                builtins.set(),
-                lock_path,
-                lsp_configs={},
-                fail_on_write_error=fail_on_write_error,
-            )
-        logger.verbose_detail("No LSP dependencies found in apm.yml")
-
-    elif not should_install and old_lsp_servers:
-        # --only=apm: restore old LSP servers
+    elif old_lsp_servers:
+        # Selective APM or MCP installs preserve every LSP ownership view.
         LSPIntegrator.update_lockfile(
             old_lsp_servers,
             lock_path,
             lsp_configs=old_lsp_configs,
+            lsp_target_servers=old_lsp_targets,
+            lsp_config_provenance=old_lsp_provenance,
+            lockfile_state=existing_lock if not persist else None,
+            persist=persist,
             fail_on_write_error=fail_on_write_error,
         )
 
