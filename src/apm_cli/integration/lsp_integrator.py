@@ -10,13 +10,17 @@ from __future__ import annotations
 import builtins
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
+from apm_cli.integration._shared import (
+    deduplicate_deps,
+    resolve_locked_apm_yml_sources,
+)
+from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import write_text_lf
 
@@ -126,8 +130,8 @@ class LSPIntegrator:
         picking up stale/orphaned packages from previous installs.
         Falls back to scanning all apm.yml files if no lock file is available.
 
-        All LSP servers from installed packages are trusted (unlike MCP,
-        LSP has no registry vs self-defined distinction).
+        Declaring-package provenance is attached so the install pipeline can
+        enforce executable approval before exposing transitive servers.
         """
         if logger is None:
             logger = NullCommandLogger()
@@ -136,16 +140,54 @@ class LSPIntegrator:
 
         from apm_cli.models.apm_package import APMPackage
 
-        resolved, _ = resolve_locked_apm_yml_paths(apm_modules_dir, lock_path)
-        apm_yml_paths = resolved if resolved is not None else apm_modules_dir.rglob("apm.yml")
+        resolved, _ = resolve_locked_apm_yml_sources(apm_modules_dir, lock_path)
+        if resolved is None:
+            apm_yml_sources = [
+                (
+                    path,
+                    None,
+                )
+                for path in apm_modules_dir.rglob("apm.yml")
+            ]
+        else:
+            apm_yml_sources = resolved
 
         collected = []
-        for apm_yml_path in apm_yml_paths:
+        for apm_yml_path, locked_dependency in apm_yml_sources:
             try:
                 pkg = APMPackage.from_apm_yml(apm_yml_path)
                 lsp = pkg.get_lsp_dependencies()
                 if lsp:
-                    collected.extend(lsp)
+                    if locked_dependency is None:
+                        owner = apm_yml_path.parent.relative_to(apm_modules_dir).as_posix()
+                        approval_keys: tuple[str, ...] = ()
+                    else:
+                        from apm_cli.security.executables import build_approval_key
+
+                        owner = locked_dependency.get_unique_key()
+                        package_name = (
+                            pkg.name or locked_dependency.name or locked_dependency.repo_url
+                        )
+                        package_version = pkg.version or locked_dependency.version or ""
+                        approval_keys = tuple(
+                            dict.fromkeys(
+                                (
+                                    owner,
+                                    owner.split("#", 1)[0],
+                                    locked_dependency.get_canonical_dependency_string(),
+                                    package_name,
+                                    build_approval_key(package_name, package_version),
+                                )
+                            )
+                        )
+                    collected.extend(
+                        replace(
+                            dependency,
+                            resolved_by=owner,
+                            approval_keys=approval_keys,
+                        )
+                        for dependency in lsp
+                    )
             except Exception:
                 _log.debug(
                     "Skipping package at %s: failed to parse apm.yml",
@@ -355,6 +397,31 @@ class LSPIntegrator:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def reserved_project_skill_names(skills_dir: Path, project_root: Path) -> set[str]:
+        """Return LSP-owned names nested under one target's skills directory."""
+        reserved: set[str] = set()
+        for spec in _LSP_TARGET_SPECS.values():
+            parts = spec.project_relative_path
+            if len(parts) < 3 or parts[1] != "skills":
+                continue
+            if skills_dir == project_root.joinpath(*parts[:2]):
+                reserved.add(parts[2])
+        return reserved
+
+    @staticmethod
+    def _target_config_path(
+        spec: _LSPTargetSpec,
+        project_root: Path,
+        *,
+        user_scope: bool,
+    ) -> Path:
+        """Resolve a target config through the canonical deployment-path gate."""
+        if user_scope:
+            return spec.path(project_root, user_scope=True)
+        relative_path = Path(*spec.project_relative_path).as_posix()
+        return BaseIntegrator.resolve_deploy_path(relative_path, project_root)
+
+    @staticmethod
     def _read_json_object(config_path: Path, *, fail_on_error: bool = False) -> dict:
         """Read a JSON object from disk, returning an empty object on malformed input."""
         if not config_path.exists():
@@ -374,11 +441,56 @@ class LSPIntegrator:
         *,
         project_root: Path,
         user_scope: bool,
+        managed_server_names: builtins.set | None = None,
+        force: bool = False,
     ) -> builtins.set:
         """Merge servers into one target config and return changed server names."""
-        config_path = spec.path(project_root, user_scope=user_scope)
-        config = LSPIntegrator._read_json_object(config_path)
+        config_path = LSPIntegrator._target_config_path(
+            spec,
+            project_root,
+            user_scope=user_scope,
+        )
+        managed_names = managed_server_names or builtins.set()
+        protected_plugin = bool(spec.config_defaults(user_scope=user_scope))
+        skill_root = config_path.parent.parent
+        if protected_plugin and skill_root.exists() and not force:
+            foreign_entries = [
+                entry.name for entry in skill_root.iterdir() if entry.name != ".claude-plugin"
+            ]
+            if config_path.parent.exists():
+                foreign_entries.extend(
+                    f".claude-plugin/{entry.name}"
+                    for entry in config_path.parent.iterdir()
+                    if entry != config_path
+                )
+            if foreign_entries:
+                raise FileExistsError(
+                    f"{spec.label(user_scope=user_scope)} shares its reserved skill "
+                    f"directory with unowned content ({', '.join(sorted(foreign_entries))}); "
+                    "move that content or rerun with --force"
+                )
+        if (
+            protected_plugin
+            and not managed_names
+            and skill_root.exists()
+            and not config_path.exists()
+        ):
+            if any(skill_root.iterdir()) and not force:
+                raise FileExistsError(
+                    f"{spec.label(user_scope=user_scope)} is inside an existing "
+                    "skill directory not owned by APM; remove it or rerun with --force"
+                )
+        config = LSPIntegrator._read_json_object(
+            config_path,
+            fail_on_error=protected_plugin and not force,
+        )
         for key, value in spec.config_defaults(user_scope=user_scope):
+            current_default = config.get(key)
+            if current_default not in (None, value) and not force:
+                raise FileExistsError(
+                    f"{spec.label(user_scope=user_scope)} is owned by plugin "
+                    f"'{current_default}', not APM; remove it or rerun with --force"
+                )
             config.setdefault(key, value)
         servers_key = spec.servers_key(user_scope=user_scope)
 
@@ -390,11 +502,28 @@ class LSPIntegrator:
         else:
             existing = config.get(servers_key, {})
             if not isinstance(existing, dict):
+                if protected_plugin and not force:
+                    raise ValueError(
+                        f"{spec.label(user_scope=user_scope)} has a non-object "
+                        f"'{servers_key}' value; repair it or rerun with --force"
+                    )
                 existing = {}
             config[servers_key] = existing
 
         changed: builtins.set = builtins.set()
         for name, server_config in servers.items():
+            if (
+                protected_plugin
+                and name in existing
+                and existing[name] != server_config
+                and name not in managed_names
+                and not force
+            ):
+                raise FileExistsError(
+                    f"LSP server '{name}' already exists in "
+                    f"{spec.label(user_scope=user_scope)} and is not managed by APM; "
+                    "rename it or rerun with --force"
+                )
             if existing.get(name) != server_config:
                 changed.add(name)
             existing[name] = server_config
@@ -413,13 +542,24 @@ class LSPIntegrator:
         fail_on_write_error: bool = False,
     ) -> list[str]:
         """Remove stale names from one target config and return removed names."""
-        config_path = spec.path(project_root, user_scope=user_scope)
+        config_path = LSPIntegrator._target_config_path(
+            spec,
+            project_root,
+            user_scope=user_scope,
+        )
         if not config_path.exists():
             return []
         config = LSPIntegrator._read_json_object(
             config_path,
             fail_on_error=fail_on_write_error,
         )
+        for key, value in spec.config_defaults(user_scope=user_scope):
+            if config.get(key) != value:
+                if fail_on_write_error:
+                    raise ValueError(
+                        f"{spec.label(user_scope=user_scope)} is not owned by APM"
+                    )
+                return []
         servers_key = spec.servers_key(user_scope=user_scope)
 
         servers = config if servers_key is None else config.get(servers_key, {})
@@ -536,6 +676,8 @@ class LSPIntegrator:
         diagnostics=None,
         target_runtimes: list[str] | None = None,
         fail_on_write_error: bool = False,
+        managed_server_names: builtins.set | None = None,
+        force: bool = False,
     ) -> int:
         """Install LSP dependencies by writing target-specific runtime config."""
         if logger is None:
@@ -564,13 +706,28 @@ class LSPIntegrator:
                     servers,
                     project_root=project_root_path,
                     user_scope=user_scope,
+                    managed_server_names=managed_server_names,
+                    force=force,
                 )
                 changed_servers.update(changed)
                 if changed:
+                    noun = "server" if len(changed) == 1 else "servers"
                     logger.progress(
-                        f"Configured {len(changed)} LSP server(s) in "
+                        f"Configured {len(changed)} LSP {noun} in "
                         f"{spec.label(user_scope=user_scope)}"
                     )
+                if runtime == "claude" and not user_scope:
+                    legacy_path = project_root_path / ".lsp.json"
+                    if legacy_path.exists():
+                        message = (
+                            "Retained legacy .lsp.json. Claude Code does not discover "
+                            "project LSP servers there; review and remove it after "
+                            "migrating any user-owned entries."
+                        )
+                        if diagnostics is not None:
+                            diagnostics.warn(message)
+                        else:
+                            logger.warning(message)
             except Exception as exc:
                 _log.debug(
                     "Failed to write LSP config to %s",
@@ -586,8 +743,10 @@ class LSPIntegrator:
                     from apm_cli.install.errors import RequiredIntegrationError
 
                     raise RequiredIntegrationError(
-                        f"LSP configuration failed for target '{runtime}'. "
-                        "Check the target config path and permissions, then retry."
+                        f"LSP configuration failed for target '{runtime}' at "
+                        f"{spec.label(user_scope=user_scope)}: {exc} "
+                        "Review the path and permissions, then retry; use --force "
+                        "only for a reviewed ownership collision."
                     ) from exc
 
         return len(changed_servers)

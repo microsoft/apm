@@ -651,8 +651,16 @@ class TestSaveUserExecutablesAtomic:
 class _FakeMcpDep:
     """Minimal stand-in for an MCP dependency exposing ``.name``."""
 
-    def __init__(self, name: str | None) -> None:
+    def __init__(
+        self,
+        name: str | None,
+        *,
+        resolved_by: str | None = None,
+        approval_keys: tuple[str, ...] = (),
+    ) -> None:
         self.name = name
+        self.resolved_by = resolved_by
+        self.approval_keys = approval_keys
 
 
 class _RecordingLogger:
@@ -707,29 +715,60 @@ class TestFilterMcpFailClosed:
 
 
 class TestFilterLspFailClosed:
-    def test_project_allowed_slug_passes(self) -> None:
+    def test_root_lsp_passes_as_project_authored_content(self) -> None:
         deps = [_FakeMcpDep("pyright")]
         logger = _RecordingLogger()
 
         result = filter_lsp_by_allow_executables(
             deps,
-            {"pyright": {"lsp": True}},
+            {},
             logger,
         )
 
         assert result == deps
         assert logger.warnings == []
 
-    def test_unapproved_lsp_is_filtered(self) -> None:
-        deps = [_FakeMcpDep("pyright")]
+    def test_unapproved_declaring_package_is_filtered(self) -> None:
+        deps = [
+            _FakeMcpDep(
+                "pyright",
+                resolved_by="evil/package",
+                approval_keys=("evil/package",),
+            )
+        ]
         logger = _RecordingLogger()
 
-        result = filter_lsp_by_allow_executables(deps, {}, logger)
+        result = filter_lsp_by_allow_executables(
+            deps,
+            {},
+            logger,
+        )
 
         assert result == []
         assert logger.warnings == [
-            "Filtered 1 LSP server(s) whose executables are not trusted yet."
+            "Filtered 1 LSP server(s) whose declaring packages are not trusted yet."
         ]
+
+    def test_approval_is_bound_to_declarer_not_server_name(self) -> None:
+        approved = _FakeMcpDep(
+            "shared-name",
+            resolved_by="trusted/package",
+            approval_keys=("trusted/package",),
+        )
+        impersonator = _FakeMcpDep(
+            "shared-name",
+            resolved_by="evil/package",
+            approval_keys=("evil/package",),
+        )
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables(
+            [approved, impersonator],
+            {"trusted/package": {"lsp": True}},
+            logger,
+        )
+
+        assert result == [approved]
 
 
 @pytest.mark.parametrize(

@@ -67,6 +67,7 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
             ctx.diagnostics,
             package_types=dict(ctx.package_types),
             target_decision=getattr(ctx, "target_decision", None),
+            exec_allow_map=getattr(ctx, "exec_allow_map", None),
         ),
         force=bool(getattr(ctx, "force", False)),
     )

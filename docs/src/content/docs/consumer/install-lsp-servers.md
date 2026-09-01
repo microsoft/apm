@@ -34,7 +34,7 @@ dependencies:
 ```
 
 ```bash
-apm install
+apm install --target claude
 ```
 
 APM writes runtime-specific config for each detected target. At project scope,
@@ -43,6 +43,11 @@ Claude Code discovers LSP servers from the APM-managed plugin manifest at
 `~/.claude.json`. Copilot CLI uses `.github/lsp.json` or
 `~/.copilot/lsp-config.json`. The runtime starts the configured language
 servers automatically.
+
+If an earlier APM version created a project-root `.lsp.json`, APM leaves it
+unchanged because it may contain user-owned entries. Claude Code does not use
+that file for project plugin discovery. Review it, migrate any entries you
+still need, then remove it.
 
 ## The `lsp:` section in apm.yml
 
@@ -147,8 +152,11 @@ entries, APM collects them transitively after installation. Direct
 transitive package both declare a server with the same name, the
 root definition wins.
 
-Unlike MCP, LSP has no registry vs self-defined distinction. All
-LSP servers from installed packages are treated as trusted.
+Unlike MCP, LSP has no registry vs self-defined distinction. LSP commands from
+dependency packages still pass the executable trust gate for their declaring
+package. Approve the package with `apm approve <package>` before APM exposes
+its server to a supported runtime. Root-project LSP declarations are trusted
+as local project content.
 
 ## Stale server cleanup
 
@@ -174,6 +182,8 @@ wired into the install pipeline. Plugin `.lsp.json` files may use either
 a flat server map or a `{ "lspServers": { ... } }` envelope. The
 `${CLAUDE_PLUGIN_ROOT}` placeholder in server configs is replaced with
 the absolute plugin path for legacy Claude Code plugin compatibility.
+These are source files shipped by a dependency package, distinct from the
+`.claude-plugin/plugin.json` that APM generates for Claude project discovery.
 Plugins authored for Copilot CLI may use `fileExtensions` instead of
 `extensionToLanguage` and `warmupTimeoutMs` instead of `startupTimeout`;
 APM normalizes those aliases before validation. A non-null canonical value

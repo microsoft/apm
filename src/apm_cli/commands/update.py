@@ -230,6 +230,8 @@ def _run_mcp_lsp_integration(
     diagnostics: Any,
     logger: InstallLogger,
     verbose: bool,
+    effective_allow_executables: dict[str, dict[str, bool]] | None = None,
+    force: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -297,6 +299,18 @@ def _run_mcp_lsp_integration(
         logger.render_summary()
         sys.exit(1)
 
+    if effective_allow_executables is None:
+        from apm_cli.policy.discovery import discover_policy_with_chain
+        from apm_cli.security.executables import effective_exec_map_for_project
+
+        policy_result = discover_policy_with_chain(project_root)
+        effective_allow_executables = effective_exec_map_for_project(
+            project_root,
+            policy=getattr(policy_result, "policy", None),
+            fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+            logger=logger,
+        )
+
     run_lsp_integration(
         apm_package=apm_package,
         apm_modules_path=apm_modules_path,
@@ -310,6 +324,8 @@ def _run_mcp_lsp_integration(
         target_context=(mcp_apm_config, effective_target, scope),
         target_decision=target_decision,
         fail_on_write_error=True,
+        effective_allow_executables=effective_allow_executables,
+        force=force,
     )
 
 
@@ -321,6 +337,7 @@ def _handle_service_only_update(
     dry_run: bool,
     logger: InstallLogger,
     verbose: bool,
+    force: bool,
 ) -> bool:
     """Reconcile service-only manifests and return whether update is complete."""
     if apm_package.has_any_apm_dependencies():
@@ -362,6 +379,7 @@ def _handle_service_only_update(
             diagnostics=None,
             logger=logger,
             verbose=verbose,
+            force=force,
         )
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
@@ -609,6 +627,7 @@ def _run_dep_update(
         dry_run=dry_run,
         logger=logger,
         verbose=verbose,
+        force=force,
     ):
         return
 
@@ -834,6 +853,8 @@ def _run_dep_update(
                 diagnostics=getattr(result, "diagnostics", None),
                 logger=logger,
                 verbose=verbose,
+                effective_allow_executables=getattr(result, "exec_allow_map", None),
+                force=force,
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))

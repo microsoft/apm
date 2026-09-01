@@ -56,6 +56,11 @@ def clean_orphaned_skills(
     get_lockfile_owned_agent_skills: Callable[[Path], set[str]],
 ) -> dict[str, int]:
     """Remove legacy-orphan skill directories without touching foreign agents."""
+    protected_names = set(installed_skill_names)
+    if project_root is not None:
+        from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+        protected_names.update(LSPIntegrator.reserved_project_skill_names(skills_dir, project_root))
     files_removed = 0
     errors = 0
     lockfile_owned_skills: set[str] | None = None
@@ -63,7 +68,7 @@ def clean_orphaned_skills(
         lockfile_owned_skills = get_lockfile_owned_agent_skills(project_root)
 
     for skill_subdir in skills_dir.iterdir():
-        if not skill_subdir.is_dir() or skill_subdir.name in installed_skill_names:
+        if not skill_subdir.is_dir() or skill_subdir.name in protected_names:
             continue
         if lockfile_owned_skills is not None and skill_subdir.name not in lockfile_owned_skills:
             continue

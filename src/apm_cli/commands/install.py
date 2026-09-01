@@ -203,6 +203,7 @@ class InstallContext:
     install_result: InstallResult | None = None
     target_decision: "EffectiveTargetDecision | None" = None
     trust_bin: bool | None = None
+    exec_allow_map: builtins.dict[str, builtins.dict[str, bool]] | None = None
 
 
 # APM Dependencies (conditional import for graceful degradation)
@@ -1918,6 +1919,7 @@ def _install_apm_packages(ctx, outcome):
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
             ctx.target_decision = install_result.target_decision
+            ctx.exec_allow_map = install_result.exec_allow_map
             if install_result.disposition not in {
                 InstallDisposition.SUCCESS,
                 InstallDisposition.PARTIAL_SUCCESS,
@@ -1971,6 +1973,21 @@ def _install_apm_packages(ctx, outcome):
         from apm_cli.models.apm_package import clear_apm_yml_cache
 
         clear_apm_yml_cache()
+
+    if ctx.exec_allow_map is None:
+        from apm_cli.security.executables import effective_exec_map_for_project
+
+        policy = None
+        if not ctx.no_policy:
+            from apm_cli.policy.discovery import discover_policy_with_chain
+
+            policy = getattr(discover_policy_with_chain(ctx.project_root), "policy", None)
+        ctx.exec_allow_map = effective_exec_map_for_project(
+            ctx.project_root,
+            policy=policy,
+            fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+            logger=logger,
+        )
 
     from apm_cli.install.service_integration import run_service_integrations
     from apm_cli.policy.install_preflight import PolicyBlockError

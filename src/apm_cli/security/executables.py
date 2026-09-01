@@ -851,6 +851,47 @@ def build_effective_exec_map(
     return materialize_exec_map(ctx)
 
 
+def exec_trust_context_for_project(
+    project_root: Path,
+    *,
+    policy: Any | None,
+    fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
+    logger: Any | None = None,
+) -> ExecTrustContext:
+    """Resolve project, user, and policy executable trust through one owner."""
+    from apm_cli.utils.yaml_io import load_yaml
+
+    project_data: dict[str, Any] | None = None
+    manifest_path = project_root / "apm.yml"
+    if manifest_path.is_file():
+        data = load_yaml(manifest_path)
+        if isinstance(data, dict):
+            project_data = data
+            if data.get("allowExecutables") is not None:
+                warn_allow_executables_alias_once(logger)
+    if project_data is None and isinstance(fallback_allow_executables, dict):
+        project_data = {"allowExecutables": fallback_allow_executables}
+    return build_exec_trust_context(policy=policy, project_data=project_data)
+
+
+def effective_exec_map_for_project(
+    project_root: Path,
+    *,
+    policy: Any | None,
+    fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
+    logger: Any | None = None,
+) -> dict[str, dict[str, bool]] | None:
+    """Materialize the canonical trust context for one project."""
+    return materialize_exec_map(
+        exec_trust_context_for_project(
+            project_root,
+            policy=policy,
+            fallback_allow_executables=fallback_allow_executables,
+            logger=logger,
+        )
+    )
+
+
 def effective_allow_executables(
     project_allow_executables: dict[str, dict[str, bool]] | None,
 ) -> dict[str, dict[str, bool]] | None:
@@ -932,17 +973,32 @@ def filter_mcp_by_allow_executables(
 
 def filter_lsp_by_allow_executables(
     lsp_deps: list,
-    project_allow_execs: dict | None,
+    effective_allow_execs: dict | None,
     logger: Any,
 ) -> list:
-    """Filter LSP deps not approved in allowExecutables."""
-    return _filter_service_dependencies_by_allow_executables(
-        lsp_deps,
-        project_allow_execs,
-        logger,
-        exec_type=EXEC_TYPE_LSP,
-        service_label="LSP",
-    )
+    """Filter transitive LSP deps by their declaring package's decision."""
+    if effective_allow_execs is None or not lsp_deps:
+        return lsp_deps
+    filtered = []
+    for dependency in lsp_deps:
+        owner = getattr(dependency, "resolved_by", None)
+        approval_keys = getattr(dependency, "approval_keys", ())
+        if owner is None or any(
+            is_package_approved(effective_allow_execs, key, EXEC_TYPE_LSP) for key in approval_keys
+        ):
+            filtered.append(dependency)
+            continue
+        logger.verbose_detail(
+            f"Skipping LSP server from '{owner}': executables not trusted yet. "
+            f"Run 'apm approve {owner}' to trust it."
+        )
+    if len(filtered) < len(lsp_deps):
+        logger.warning(
+            f"Filtered {len(lsp_deps) - len(filtered)} LSP server(s) whose "
+            "declaring packages are not trusted yet.",
+            symbol="warning",
+        )
+    return filtered
 
 
 def read_bundle_allow_executables(apm_yml_path: Path, logger: Any) -> dict | None:

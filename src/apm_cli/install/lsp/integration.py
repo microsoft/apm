@@ -57,6 +57,7 @@ def run_owned_lsp_integration(
             logger=logger,
             target_runtimes=target_runtimes,
             fail_on_write_error=fail_on_write_error,
+            managed_server_names=old_owned,
         )
     stale = old_owned - new_names
     if stale:
@@ -98,6 +99,8 @@ def run_lsp_integration(  # noqa: PLR0913
     target_context: tuple[dict | None, str | list[str] | None, object] | None = None,
     target_decision: "EffectiveTargetDecision | None" = None,
     fail_on_write_error: bool = False,
+    effective_allow_executables: dict[str, dict[str, bool]] | None = None,
+    force: bool = False,
 ) -> int:
     """Run LSP server integration after APM package installation.
 
@@ -144,7 +147,10 @@ def run_lsp_integration(  # noqa: PLR0913
         old_lsp_servers = builtins.set(existing_lock.lsp_servers)
         old_lsp_configs = builtins.dict(existing_lock.lsp_configs)
 
-    # Collect transitive LSP deps from installed packages
+    from apm_cli.security.executables import filter_lsp_by_allow_executables
+
+    # Filter transitive declarations before first-wins deduplication so an
+    # untrusted package cannot shadow an approved package's same-name server.
     if should_install and apm_modules_path.exists():
         transitive_lsp = LSPIntegrator.collect_transitive(
             apm_modules_path,
@@ -153,14 +159,12 @@ def run_lsp_integration(  # noqa: PLR0913
         )
         if transitive_lsp:
             logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")
+            transitive_lsp = filter_lsp_by_allow_executables(
+                transitive_lsp,
+                effective_allow_executables,
+                logger,
+            )
             lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)
-
-    from apm_cli.security.executables import filter_lsp_by_allow_executables
-
-    package_allow = getattr(apm_package, "allow_executables", None)
-    if not isinstance(package_allow, dict):
-        package_allow = None
-    lsp_deps = filter_lsp_by_allow_executables(lsp_deps, package_allow, logger)
 
     lsp_count = 0
     new_lsp_servers: builtins.set = builtins.set()
@@ -198,6 +202,8 @@ def run_lsp_integration(  # noqa: PLR0913
             diagnostics=diagnostics,
             target_runtimes=target_runtimes,
             fail_on_write_error=fail_on_write_error,
+            managed_server_names=old_lsp_servers,
+            force=force,
         )
         new_lsp_servers = LSPIntegrator.get_server_names(lsp_deps)
         new_lsp_configs = LSPIntegrator.get_server_configs(lsp_deps)

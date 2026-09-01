@@ -27,6 +27,8 @@ class ServiceCommandContext(Protocol):
     trust_transitive_mcp: bool
     no_policy: bool
     verbose: bool
+    force: bool
+    exec_allow_map: dict[str, dict[str, bool]] | None
 
 
 @dataclass(frozen=True)
@@ -122,5 +124,7 @@ def run_service_integrations(
         ),
         target_decision=target_decision,
         fail_on_write_error=True,
+        effective_allow_executables=ctx.exec_allow_map,
+        force=ctx.force,
     )
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)

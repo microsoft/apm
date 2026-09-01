@@ -976,8 +976,11 @@ def test_claude_lsp_install_writes_discoverable_skills_directory_plugin(
         ),
         targets=("claude",),
     )
+    legacy_path = fixture.project_root / ".lsp.json"
+    legacy_bytes = b'{"lspServers":{"user-owned":{"command":"keep-me"}}}\n'
+    legacy_path.write_bytes(legacy_bytes)
 
-    _runner(apm_binary_path).run_sequence(
+    result = _runner(apm_binary_path).run_sequence(
         (("install", "--no-policy"),),
         expected_returncodes=(0,),
         scenario_id="claude-lsp-discovery",
@@ -985,9 +988,7 @@ def test_claude_lsp_install_writes_discoverable_skills_directory_plugin(
         env=fixture.isolated.subprocess_env(),
     )
 
-    plugin_path = (
-        fixture.project_root / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
-    )
+    plugin_path = fixture.project_root / _CLAUDE_LSP_PLUGIN
     assert json.loads(plugin_path.read_text(encoding="utf-8")) == {
         "name": "apm-lsp",
         "lspServers": {
@@ -998,7 +999,106 @@ def test_claude_lsp_install_writes_discoverable_skills_directory_plugin(
             }
         },
     }
-    assert not (fixture.project_root / ".lsp.json").exists()
+    assert legacy_path.read_bytes() == legacy_bytes
+    assert "Retained legacy .lsp.json" in result[0].stdout
+
+
+def test_claude_lsp_unapproved_package_is_not_discoverable(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Executable approval must bind a generated LSP to its declaring package."""
+    fixture = _create_git_lifecycle_project(
+        tmp_path / "claude-lsp-approval",
+        source_name="unapproved-lsp-source",
+        lsp_dependencies=(
+            {
+                "name": "shared-approved-name",
+                "command": "unapproved-language-server",
+                "extensionToLanguage": {".unsafe": "unsafe"},
+            },
+        ),
+        targets=("claude",),
+    )
+    manifest_path = fixture.project_root / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["executables"] = {
+        "allow": {
+            "different/package": {
+                "lsp": True,
+            }
+        }
+    }
+    dump_yaml(manifest, manifest_path)
+
+    (result,) = _runner(apm_binary_path).run_sequence(
+        (("install", "--no-policy"),),
+        expected_returncodes=(0,),
+        scenario_id="claude-lsp-unapproved-package",
+        cwd=fixture.project_root,
+        env=fixture.isolated.subprocess_env(),
+    )
+
+    assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
+    assert "declaring packages are not trusted yet" in result.stdout
+    (partial,) = _runner(apm_binary_path).run_sequence(
+        (("install", "--only", "mcp", "--no-policy"),),
+        expected_returncodes=(0,),
+        scenario_id="claude-lsp-unapproved-package-partial-install",
+        cwd=fixture.project_root,
+        env=fixture.isolated.subprocess_env(),
+    )
+    assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
+    assert "declaring packages are not trusted yet" in partial.stdout
+    (updated,) = _runner(apm_binary_path).run_sequence(
+        (("update", "--yes"),),
+        expected_returncodes=(0,),
+        scenario_id="claude-lsp-unapproved-package-update",
+        cwd=fixture.project_root,
+        env=fixture.isolated.subprocess_env(),
+    )
+    assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
+    assert "declaring packages are not trusted yet" in updated.stdout
+
+
+def test_claude_lsp_approved_declaring_package_is_discoverable(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A package-scoped LSP grant must materialize that package's server."""
+    fixture = _create_git_lifecycle_project(
+        tmp_path / "claude-lsp-approved",
+        source_name="approved-lsp-source",
+        lsp_dependencies=(
+            {
+                "name": "server-name-is-not-the-approval-key",
+                "command": "approved-language-server",
+                "extensionToLanguage": {".safe": "safe"},
+            },
+        ),
+        targets=("claude",),
+    )
+    manifest_path = fixture.project_root / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["executables"] = {
+        "allow": {
+            "approved-lsp-source": {
+                "lsp": True,
+            }
+        }
+    }
+    dump_yaml(manifest, manifest_path)
+
+    _runner(apm_binary_path).run_sequence(
+        (("install", "--no-policy"),),
+        expected_returncodes=(0,),
+        scenario_id="claude-lsp-approved-package",
+        cwd=fixture.project_root,
+        env=fixture.isolated.subprocess_env(),
+    )
+
+    plugin = json.loads((fixture.project_root / _CLAUDE_LSP_PLUGIN).read_text(encoding="utf-8"))
+    assert set(plugin["lspServers"]) == {"server-name-is-not-the-approval-key"}
 
 
 def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(

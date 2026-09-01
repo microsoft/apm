@@ -420,9 +420,10 @@ across targets.
 ## Executable trust gate
 
 APM blocks executable primitives from dependency packages by default: hooks,
-`bin/` executables, self-defined MCP servers (`registry: false`), and canvas
-extensions. Text primitives (skills, agents, instructions) are never gated, and
-local root `.apm/` content is always trusted.
+`bin/` executables, self-defined MCP servers (`registry: false`), LSP servers,
+and canvas extensions. Text primitives (skills, agents, instructions) are never
+gated, and local root `.apm/` content is always trusted. Supported runtimes may
+start an approved generated LSP command automatically after install.
 
 Trust is expressed through one noun, `executables`, across three layers, and the
 install gate and `apm audit` resolve it through a single deny-wins,

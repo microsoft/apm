@@ -153,7 +153,7 @@ class TestInstallProjectScope:
         assert data["lspServers"]["pyright"]["command"] == "pyright-langserver"
         assert "name" not in data["lspServers"]["pyright"]
 
-    def test_merges_with_existing_claude_plugin_manifest(self, tmp_path):
+    def test_refuses_existing_foreign_claude_plugin_manifest(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
         plugin_json.parent.mkdir(parents=True)
         plugin_json.write_text(
@@ -167,13 +167,36 @@ class TestInstallProjectScope:
         )
 
         deps = [_make_dep("new-server")]
-        LSPIntegrator.install(deps, project_root=tmp_path)
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError, match="not APM"):
+            LSPIntegrator.install(
+                deps,
+                project_root=tmp_path,
+                fail_on_write_error=True,
+            )
+
+        assert json.loads(plugin_json.read_text())["name"] == "custom-lsp-plugin"
+
+    def test_force_merges_with_existing_foreign_claude_plugin_manifest(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "custom-lsp-plugin",
+                    "description": "Preserve this metadata",
+                    "lspServers": {"existing-server": {"command": "x"}},
+                }
+            )
+        )
+
+        LSPIntegrator.install([_make_dep("new-server")], project_root=tmp_path, force=True)
 
         data = json.loads(plugin_json.read_text())
         assert data["name"] == "custom-lsp-plugin"
         assert data["description"] == "Preserve this metadata"
-        assert "existing-server" in data["lspServers"]
-        assert "new-server" in data["lspServers"]
+        assert set(data["lspServers"]) == {"existing-server", "new-server"}
 
     def test_update_existing_server_counts_as_change(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
@@ -188,7 +211,11 @@ class TestInstallProjectScope:
         )
 
         deps = [_make_dep("pyright")]
-        count = LSPIntegrator.install(deps, project_root=tmp_path)
+        count = LSPIntegrator.install(
+            deps,
+            project_root=tmp_path,
+            managed_server_names={"pyright"},
+        )
         assert count == 1  # changed config counts
 
     def test_no_change_returns_zero(self, tmp_path):
@@ -210,6 +237,76 @@ class TestInstallProjectScope:
         deps = [_make_dep("pyright"), _make_dep("ruff-lsp")]
         count = LSPIntegrator.install(deps, project_root=tmp_path)
         assert count == 2
+
+    def test_rejects_symlink_escape_before_writing_claude_plugin(self, tmp_path):
+        project = tmp_path / "project"
+        outside = tmp_path / "outside"
+        project.mkdir()
+        outside.mkdir()
+        try:
+            (project / ".claude").symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks unavailable: {exc}")
+
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError, match="symlinked path component"):
+            LSPIntegrator.install(
+                [_make_dep("pyright")],
+                project_root=project,
+                fail_on_write_error=True,
+            )
+
+        assert not (outside / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json").exists()
+
+    def test_refuses_foreign_server_collision_without_force(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "apm-lsp",
+                    "lspServers": {"pyright": {"command": "user-command"}},
+                }
+            )
+        )
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError, match="not managed by APM"):
+            LSPIntegrator.install(
+                [_make_dep("pyright")],
+                project_root=tmp_path,
+                fail_on_write_error=True,
+            )
+
+        assert json.loads(plugin_json.read_text())["lspServers"]["pyright"] == {
+            "command": "user-command"
+        }
+
+    def test_managed_server_does_not_adopt_foreign_skill_content(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "apm-lsp",
+                    "lspServers": {"pyright": {"command": "old-command"}},
+                }
+            )
+        )
+        skill_root = plugin_json.parent.parent
+        (skill_root / "SKILL.md").write_text("# user-owned\n", encoding="utf-8")
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError, match="unowned content"):
+            LSPIntegrator.install(
+                [_make_dep("pyright")],
+                project_root=tmp_path,
+                managed_server_names={"pyright"},
+                fail_on_write_error=True,
+            )
+
+        assert (skill_root / "SKILL.md").is_file()
 
 
 # ===========================================================================
@@ -378,6 +475,30 @@ class TestRemoveStale:
                 fail_on_write_error=True,
             )
 
+    def test_cleanup_refuses_foreign_plugin_manifest(self, tmp_path):
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "user-plugin",
+                    "lspServers": {"stale": {"command": "keep"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(RequiredIntegrationError, match="not owned by APM"):
+            LSPIntegrator.remove_stale(
+                {"stale"},
+                project_root=tmp_path,
+                fail_on_write_error=True,
+            )
+
+        assert "stale" in json.loads(plugin_json.read_text())["lspServers"]
+
     def test_multiple_stale_removed(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
         plugin_json.parent.mkdir(parents=True)
@@ -504,3 +625,49 @@ class TestCollectTransitive:
         result = LSPIntegrator.collect_transitive(modules_dir, lock_path)
         assert len(result) == 1
         assert result[0].name == "pyright"
+        assert result[0].resolved_by == dep.get_unique_key()
+        assert dep.get_unique_key() in result[0].approval_keys
+        assert "test-pkg#1.0.0" in result[0].approval_keys
+
+    def test_unlocked_fallback_does_not_invent_approval_keys(self, tmp_path):
+        pkg_dir = tmp_path / "apm_modules" / "ghe.example" / "owner" / "repo"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            "name: enterprise-lsp\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  lsp:\n"
+            "    - name: pyright\n"
+            "      command: pyright-langserver\n"
+            "      extensionToLanguage:\n"
+            "        .py: python\n",
+            encoding="utf-8",
+        )
+
+        result = LSPIntegrator.collect_transitive(tmp_path / "apm_modules")
+
+        assert result[0].resolved_by == "ghe.example/owner/repo"
+        assert result[0].approval_keys == ()
+
+
+def test_skill_cleanup_preserves_reserved_claude_lsp_plugin(tmp_path: Path) -> None:
+    """Legacy skill cleanup must consume the LSP owner's reservation."""
+    from apm_cli.integration.skill_support import clean_orphaned_skills
+
+    skills_dir = tmp_path / ".claude" / "skills"
+    plugin = skills_dir / "apm-lsp" / ".claude-plugin" / "plugin.json"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_text('{"name": "apm-lsp", "lspServers": {}}', encoding="utf-8")
+    orphan = skills_dir / "old-apm-skill"
+    orphan.mkdir()
+
+    result = clean_orphaned_skills(
+        skills_dir,
+        set(),
+        project_root=tmp_path,
+        get_lockfile_owned_agent_skills=lambda _root: set(),
+    )
+
+    assert plugin.is_file()
+    assert not orphan.exists()
+    assert result == {"files_removed": 1, "errors": 0}

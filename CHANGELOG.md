@@ -68,6 +68,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must run `apm pack` separately; see
   [Releasing from any CI](docs/src/content/docs/producer/releasing-from-any-ci.md#the-canonical-sequence).
   (by @danielmeppiel, closes #2727, #2730)
+- Distributed `apm compile` now reconciles existing managed-section
+  `AGENTS.md` files without overwriting hand-authored content, generates new
+  placements safely, and never discovers, writes, or cleans content across
+  nested Git repository or linked-worktree boundaries. (by @aryansk; fixes
+  #2560 and #2713) (#2578)
+- Windows admin lifecycle policies now resolve from `%ProgramData%` instead of
+  assuming `C:\ProgramData`, while retaining the historical fallback.
+  (by @lukiod; closes #2684) (#2686)
+- Claude project LSP installs now write a discoverable APM-managed plugin
+  manifest. Upgrade users can rerun `apm install --target claude`; legacy
+  project-root `.lsp.json` files remain unchanged for manual review. (#2733)
+- Marketplace installs now materialize catalog-only LSP and MCP metadata
+  without requiring a package manifest in the downloaded source
+  (by @lkshrk, #2709).
+- Private `github.com` subdirectory packages now populate the persistent Git
+- Private `github.com` packages now populate the persistent Git
+  cache through repository-scoped credential fallback without storing
+  credentials in cache keys or remote URLs. (#2722)
+- Plugin refreshes now keep the existing package and its registered hooks live
+  while replacement content downloads and validates. Failed refreshes retain
+  the prior package instead of accepting stale content. (#2723)
+- Successful installs now remove inactive resolution staging directories left
+  by interrupted earlier runs while preserving active and unrelated entries.
+  (closes #2716)
+- Successful installs now safely clean up temporary backups left by interrupted
+  lock-aware runs without disturbing active installs or unrelated files. Legacy
+  lockless backups are preserved with manual recovery guidance. (#2720)
+- `apm doctor` now reports malformed project `executables` configuration as an
+  actionable informational warning instead of omitting the check. (#2719)
+- `apm doctor` now reports malformed project `executables` or deprecated
+  `allowExecutables` configuration as an actionable informational warning
+  instead of omitting the check. (#2719)
 - `apm doctor` now reports malformed project executable-trust configuration
   under either `executables` or the deprecated `allowExecutables` key as an
   actionable informational warning instead of omitting the check. (#2719)

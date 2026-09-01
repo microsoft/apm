@@ -119,6 +119,11 @@ in `apm.yml`, then run `apm install` again.
 - **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Its name comes from the current directory (or home directory for global installs) and falls back to `my-project` if that derived name is invalid. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
 - **Target persistence on bootstrap.** When `--target` maps to recognized manifest targets, those target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` redeploys to the same targets without re-specifying `--target`.
 - **One effective target.** Package primitives, MCP servers, and LSP servers consume one target decision per invocation: `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. A saved target therefore applies to `apm install`, `apm install --mcp`, and later `apm update` runs without another flag.
+- **Claude LSP discovery.** Project installs write the APM-owned plugin at
+  `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs write
+  `~/.claude.json`. Existing project-root `.lsp.json` files are preserved for
+  manual review because they may contain user-owned entries. See
+  [Install LSP servers](../../../consumer/install-lsp-servers/).
 - **Required service writes fail loudly.** If MCP or LSP work is declared but no target can be resolved, install exits non-zero before changing the manifest, package deployment, or native service config. A native MCP/LSP config write failure also exits non-zero with the failed target and a permissions/path next step. A successful direct `--mcp` add never reports `Install interrupted`.
 - **Direct registry lookup fails closed.** Registry-form MCP entries (`apm install --mcp NAME` with no `--url` and no post-`--` command) resolve one unique registry identity before writing the manifest or user config. An unreachable registry, missing identity, or ambiguous bare server name exits non-zero without changing state.
 - **Diff-aware.** Packages whose ref or version changed in `apm.yml` are re-downloaded automatically. MCP servers with matching config are skipped (`already configured`); changed config is re-applied (`updated`).

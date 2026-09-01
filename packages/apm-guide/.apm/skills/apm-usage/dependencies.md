@@ -568,15 +568,18 @@ project installs use the `lspServers` section in
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs use
 `~/.claude.json`. GitHub Copilot CLI uses `.github/lsp.json` or
 `~/.copilot/lsp-config.json`. Copilot CLI uses `fileExtensions` on disk;
-manifests continue to use `extensionToLanguage`. Plugin `.lsp.json` files may
-use either a flat server map or a `{ "lspServers": { ... } }` envelope. For
-Copilot-dialect plugin input, APM accepts `fileExtensions` as an alias for
-`extensionToLanguage` and `warmupTimeoutMs` as an alias for `startupTimeout`;
-a non-null canonical value wins when both are supplied, while a null canonical
-value falls back to its alias. APM ignores the unsupported Copilot `cwd` field
-and warns that the consumer runtime chooses the working directory. Copilot
-output uses `fileExtensions` and `warmupTimeoutMs`; manifests and lockfiles
-retain `extensionToLanguage` and `startupTimeout`.
+manifests continue to use `extensionToLanguage`. A dependency package's source
+`.lsp.json` may use either a flat server map or a
+`{ "lspServers": { ... } }` envelope; it is distinct from the Claude project
+plugin manifest that APM generates. Dependency-provided LSP commands require
+executable approval for the declaring package. For Copilot-dialect plugin
+input, APM accepts `fileExtensions` as an alias for `extensionToLanguage` and
+`warmupTimeoutMs` as an alias for `startupTimeout`; a non-null canonical value
+wins when both are supplied, while a null canonical value falls back to its
+alias. APM ignores the unsupported Copilot `cwd` field and warns that the
+consumer runtime chooses the working directory. Copilot output uses
+`fileExtensions` and `warmupTimeoutMs`; manifests and lockfiles retain
+`extensionToLanguage` and `startupTimeout`.
 
 ## Version pinning
 

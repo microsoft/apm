@@ -12,7 +12,11 @@ from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+)
 
 
 def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
@@ -552,6 +556,28 @@ class BaseIntegrator:
         except (ValueError, OSError):
             return False
         return True
+
+    @staticmethod
+    def resolve_deploy_path(
+        rel_path: str,
+        project_root: Path,
+        allowed_prefixes: tuple | None = None,
+        targets=None,
+    ) -> Path:
+        """Return a safe project deployment path without following symlinks."""
+        target = project_root / rel_path
+        if has_symlink_component(project_root, target):
+            raise PathTraversalError(
+                f"Refusing deployment through a symlinked path component: {rel_path}"
+            )
+        if not BaseIntegrator.validate_deploy_path(
+            rel_path,
+            project_root,
+            allowed_prefixes=allowed_prefixes,
+            targets=targets,
+        ):
+            raise PathTraversalError(f"Refusing unsafe deployment path: {rel_path}")
+        return ensure_path_within(target, project_root)
 
     # Backward-compat aliases mapping raw ``{prim}_{target}`` keys to
     # the bucket names that existing callers expect.  Shared between

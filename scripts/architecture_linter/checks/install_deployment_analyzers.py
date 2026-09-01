@@ -36,6 +36,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
     check_mcp_ownership_migration,
     check_uninstall_reachability,
 )
+from scripts.architecture_linter.checks.install_lsp_plugin import (
+    _GUARD_CLAUDE_LSP_PLUGIN,
+    check_claude_lsp_plugin_ownership,
+)
 from scripts.architecture_linter.checks.install_package_target_authorization import (
     _GUARD_PACKAGE_TARGET,
     check_package_target_authorization,
@@ -119,6 +123,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_BASE_INTEGRATOR,
         "File-level deploy/sync/cleanup stays owned by BaseIntegrator.",
         check_base_integrator,
+    ),
+    _rule(
+        _GUARD_CLAUDE_LSP_PLUGIN,
+        "Claude project LSP plugin writes, trust, and cleanup route through LSPIntegrator.",
+        check_claude_lsp_plugin_ownership,
     ),
     _rule(
         _GUARD_UNINSTALL_REACHABILITY,

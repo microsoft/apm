@@ -86,6 +86,17 @@
       "guards": ["install-deployment-base-integrator"]
     },
     {
+      "id": "claude-project-lsp-plugin-ownership",
+      "decision": "Claude project LSP plugin path, shape, trust, and reserved skill namespace",
+      "owner": "integration/lsp_integrator.py (_LSP_TARGET_SPECS, reserved_project_skill_names)",
+      "selectors": [
+        "src/apm_cli/integration/lsp_integrator.py",
+        "src/apm_cli/integration/skill_support.py",
+        "src/apm_cli/security/executables.py"
+      ],
+      "guards": ["install-deployment-claude-lsp-plugin-ownership"]
+    },
+    {
       "id": "post-uninstall-dependency-reachability",
       "decision": "Post-uninstall dependency reachability",
       "owner": "deps/reachability.py (compute_forward_reachable_keys)",
