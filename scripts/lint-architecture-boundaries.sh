@@ -837,12 +837,15 @@ fi
 marketplace_identity_owner="src/apm_cli/marketplace/source_identity.py"
 marketplace_command_source="src/apm_cli/commands/marketplace/__init__.py"
 marketplace_model_source="src/apm_cli/marketplace/models.py"
+marketplace_client_source="src/apm_cli/marketplace/client.py"
 if [ ! -f "$marketplace_identity_owner" ] \
     || ! grep -Fq 'def parse_marketplace_source(' "$marketplace_identity_owner" \
     || ! grep -Fq 'identity = parse_marketplace_source(source, host_flag)' \
         "$marketplace_command_source" \
     || ! grep -Fq 'identity = parse_marketplace_source(self.url)' \
         "$marketplace_model_source" \
+    || grep -Fq 'def _host_from_url(' "$marketplace_client_source" \
+    || ! grep -Fq 'host = source.host' "$marketplace_client_source" \
     || grep -Eq 'SCP_LIKE_RE|AuthResolver\.classify_host' "$marketplace_command_source"; then
     echo "[x] Marketplace source admission must route through marketplace/source_identity.py"
     violations=$((violations + 1))

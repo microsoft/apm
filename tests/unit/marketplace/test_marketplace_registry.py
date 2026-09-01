@@ -1,6 +1,7 @@
 """Tests for marketplace registry CRUD with tmp_path isolation."""
 
-import json  # noqa: F401
+import json
+from pathlib import Path
 
 import pytest
 
@@ -115,6 +116,31 @@ class TestRegistryPersistence:
 
         registry_mod._invalidate_cache()
         assert registry_mod.get_registered_marketplaces() == []
+
+    def test_invalid_persisted_source_does_not_hide_valid_entries(self):
+        path = Path(registry_mod._ensure_file())
+        path.write_text(
+            json.dumps(
+                {
+                    "marketplaces": [
+                        {
+                            "name": "valid",
+                            "url": "https://github.com/acme/marketplace",
+                        },
+                        {
+                            "name": "invalid",
+                            "url": "ssh:///missing-host.git",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        registry_mod._invalidate_cache()
+        sources = registry_mod.get_registered_marketplaces()
+
+        assert [source.name for source in sources] == ["valid"]
 
 
 class TestRegistryUtf8RoundTrip:

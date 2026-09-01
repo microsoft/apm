@@ -1320,12 +1320,56 @@ def test_marketplace_source_admission_has_single_owner() -> None:
     owner = (root / "src/apm_cli/marketplace/source_identity.py").read_text(encoding="utf-8")
     command = (root / "src/apm_cli/commands/marketplace/__init__.py").read_text(encoding="utf-8")
     model = (root / "src/apm_cli/marketplace/models.py").read_text(encoding="utf-8")
+    client = (root / "src/apm_cli/marketplace/client.py").read_text(encoding="utf-8")
     guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
 
     assert owner.count("def parse_marketplace_source(") == 1
     assert "identity = parse_marketplace_source(source, host_flag)" in command
     assert "identity = parse_marketplace_source(self.url)" in model
+    assert "def _host_from_url(" not in client
+    assert "host = source.host" in client
     assert "Marketplace source admission must route through marketplace/source_identity.py" in guard
+
+
+def test_marketplace_source_admission_guard_rejects_client_host_parser(
+    tmp_path: Path,
+) -> None:
+    """The static boundary rejects restoring host parsing in the client."""
+    root = Path(__file__).parents[2]
+    sandbox = tmp_path / "repo"
+    shutil.copytree(
+        root,
+        sandbox,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+            ".ruff_cache",
+            "node_modules",
+        ),
+    )
+    client = sandbox / "src/apm_cli/marketplace/client.py"
+    client.write_text(
+        client.read_text(encoding="utf-8")
+        + "\ndef _host_from_url(url: str) -> str:\n    return url\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ("bash", "scripts/lint-architecture-boundaries.sh"),
+        cwd=sandbox,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Marketplace source admission must route through marketplace/source_identity.py"
+        in result.stdout
+    )
 
 
 def test_marketplace_source_admission_guard_rejects_parallel_parser(tmp_path: Path) -> None:
