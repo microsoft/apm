@@ -37,6 +37,7 @@ AUDIT_RULE = "install-deployment-audit-replay"
 UNINSTALL_RULE = "install-deployment-uninstall-selection"
 REPLACEMENT_RULE = "install-deployment-resolution-replacement"
 TARGET_RULE = "install-deployment-package-target-authorization"
+REQUEST_DEFAULTS_RULE = "install-deployment-request-defaults"
 
 MUTATIONS: tuple[CompoundMutation, ...] = (
     CompoundMutation(
@@ -616,3 +617,23 @@ def test_each_install_compound_subcheck_has_mutation_proof(
     assert report.failures == ()
     assert report.exit_code == 2
     assert any(violation.rule_id == case.rule_id for violation in report.violations)
+
+
+def test_request_defaults_accepts_wrapper_without_positional_defaults() -> None:
+    """A zero-default wrapper has no trailing defaulted positional arguments."""
+    path = "src/apm_cli/commands/install.py"
+    source = """
+def _install_apm_dependencies(context, package):
+    request = InstallRequest()
+    return request
+""".lstrip()
+
+    report = run_selected_rules(
+        ROOT,
+        (REQUEST_DEFAULTS_RULE,),
+        source_overrides={path: source},
+    )
+
+    assert report.failures == ()
+    assert report.exit_code == 2
+    assert report.violations == ()

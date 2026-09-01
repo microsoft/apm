@@ -58,6 +58,8 @@ def _wrapper_default_args(index: TreeIndex) -> list[str]:
     if wrapper is None:
         return []
     default_count = len(wrapper.args.defaults)
+    if default_count == 0:
+        return []
     positional = wrapper.args.args[-default_count:]
     return [arg.arg for arg in positional if arg.arg not in _ALLOWED_WRAPPER_DEFAULTS]
 
