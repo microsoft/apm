@@ -59,6 +59,19 @@ def _check_revision_pin_outcome(provider: FactsProvider) -> tuple[Violation, ...
             provider,
             inventory,
             _RULE_ID,
+            _OWNER,
+            (
+                '.removesuffix(".git")',
+                "max(candidates, key=lambda item: (item[0], item[1]))",
+            ),
+            "Revision-pin candidate naming and tie-breaking must stay deterministic",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inventory,
+            _RULE_ID,
             _COMMAND,
             (
                 "resolution = resolve_revision_pin_updates(",

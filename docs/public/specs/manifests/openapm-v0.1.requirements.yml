@@ -356,6 +356,11 @@ requirements:
     section: "7.2"
     conformance_class: consumer
     notes: "minimum repository identity binds every cache layer; distinct identities must not share source material"
+  - id: req-rs-017
+    keyword: MUST
+    section: "7.7"
+    conformance_class: consumer
+    notes: "full-SHA update extensions deterministically select the highest eligible non-prerelease annotated tag, retain pins with no eligible tag, persist git-literal provenance, and stop before writes on malformed or failed remote resolution"
   - id: req-pr-001
     keyword: MUST
     section: "8.2"

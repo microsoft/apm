@@ -18,6 +18,7 @@ from apm_cli.deps.revision_pins import (
     RevisionPinUpdate,
     apply_revision_pin_updates,
     find_latest_annotated_tag,
+    package_name,
     resolve_revision_pin_updates,
 )
 from apm_cli.models.dependency.reference import DependencyReference
@@ -80,6 +81,24 @@ def test_latest_revision_pin_tag_ignores_prereleases_by_default() -> None:
 
     assert candidate.tag == "v1.5.0"
     assert candidate.commit_sha == OLD_SHA
+
+
+def test_latest_revision_pin_tag_breaks_equal_precedence_ties_by_tag_name() -> None:
+    refs = [
+        RemoteRef("v2.0.0+alpha", GitReferenceType.TAG, "b" * 40, annotated=True),
+        RemoteRef("v2.0.0+zeta", GitReferenceType.TAG, "c" * 40, annotated=True),
+    ]
+
+    latest = find_latest_annotated_tag(refs, package_name="pkg")
+
+    assert latest.tag == "v2.0.0+zeta"
+    assert latest.commit_sha == "c" * 40
+
+
+def test_revision_pin_package_name_strips_git_suffix() -> None:
+    dependency = DependencyReference(repo_url="org/pkg.git")
+
+    assert package_name(dependency) == "pkg"
 
 
 def test_apply_revision_pin_updates_annotates_manifest_atomically(tmp_path: Path) -> None:

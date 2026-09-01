@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (by @danielmeppiel, closes #2727, #2730)
 - `apm update` now retains full-SHA pins without an eligible stable annotated
   semver tag while continuing unrelated updates; malformed remote tag records
-  still fail before writes. (#2667)
+  still fail before writes. The contract is recorded in `openapm-v0.1.md`.
+  (#2667)
 - Distributed `apm compile` now reconciles existing managed-section
   `AGENTS.md` files without overwriting hand-authored content, generates new
   placements safely, and never discovers, writes, or cleans content across

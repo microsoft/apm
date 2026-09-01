@@ -36,6 +36,8 @@ def test_revision_pin_resolution_has_single_owner() -> None:
     assert owner.count("class RevisionPinResolutionResult:") == 1
     assert owner.count("class RevisionPinSkip:") == 1
     assert owner.count("def resolve_revision_pin_updates(") == 1
+    assert '.removesuffix(".git")' in owner
+    assert "max(candidates, key=lambda item: (item[0], item[1]))" in owner
     assert "logger.revision_pins_retained(resolution.skips)" in command
     assert "revision_pin_updates = revision_pin_resolution.updates" in command
     assert "root_package=ctx.apm_package" in resolver
@@ -112,6 +114,25 @@ def test_revision_pin_guard_rejects_unanchored_staged_root() -> None:
     mutated = source.replace(
         "root_package = replace(root_package, source_path=project_root.resolve())",
         "root_package = root_package",
+        1,
+    )
+
+    report = run_selected_rules(
+        ROOT,
+        (RULE_ID,),
+        source_overrides={path: mutated},
+    )
+
+    assert _violated(report)
+
+
+def test_revision_pin_guard_rejects_nondeterministic_tag_tie() -> None:
+    """Equal-precedence tags must not depend on remote record order."""
+    path = "src/apm_cli/deps/revision_pins.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(
+        "max(candidates, key=lambda item: (item[0], item[1]))",
+        "max(candidates, key=lambda item: item[0])",
         1,
     )
 

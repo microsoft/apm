@@ -13,7 +13,11 @@ import pytest
 
 from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-from tests.utils.local_git_repository import GitCommit, LocalGitRepositoryFactory
+from tests.utils.local_git_repository import (
+    GitCommit,
+    LocalGitRepository,
+    LocalGitRepositoryFactory,
+)
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
 
 pytestmark = [
@@ -48,6 +52,8 @@ class _Scenario:
 
     environment: dict[str, str]
     consumer: LocalPackage
+    repositories: LocalGitRepositoryFactory
+    released_repository: LocalGitRepository
     released_old: GitCommit
     released_new: GitCommit
     retained: GitCommit
@@ -101,6 +107,8 @@ def _new_scenario(root: Path) -> _Scenario:
     return _Scenario(
         environment=environment,
         consumer=consumer,
+        repositories=repositories,
+        released_repository=released_repo,
         released_old=released_old,
         released_new=released_new,
         retained=retained,
@@ -172,6 +180,14 @@ def test_update_retains_unreleased_pin_in_dry_run_and_apply(
         scenario.released_new.sha,
         scenario.retained.sha,
     }
+    released_lock = next(
+        entry
+        for entry in lock["dependencies"]
+        if entry["resolved_commit"] == scenario.released_new.sha
+    )
+    assert released_lock["resolved_ref"] == scenario.released_new.sha
+    assert released_lock["resolved_tag"] == "v2.0.0"
+    assert "constraint" not in released_lock
 
 
 def _write_malformed_git_shim(shim_dir: Path, real_git: Path) -> None:
@@ -196,6 +212,55 @@ raise SystemExit(
     )
     shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     assert real_git.is_file()
+
+
+def _publish_tree_tag(scenario: _Scenario) -> None:
+    """Publish a higher annotated tag whose peeled object is a tree."""
+    worktree = scenario.released_repository.worktree
+    tree = subprocess.run(
+        ("git", "rev-parse", "HEAD^{tree}"),
+        cwd=worktree,
+        env=scenario.environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    subprocess.run(
+        ("git", "tag", "-a", "v3.0.0", tree, "-m", "Release v3.0.0"),
+        cwd=worktree,
+        env=scenario.environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    subprocess.run(
+        ("git", "push", "origin", "refs/tags/v3.0.0"),
+        cwd=worktree,
+        env=scenario.environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+def test_update_rejects_annotated_noncommit_before_writes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """An annotated tag peeled to a tree cannot update project state."""
+    scenario = _new_scenario(tmp_path / "noncommit")
+    installed = _install(apm_binary_path, scenario)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    _publish_tree_tag(scenario)
+    manifest_before = scenario.consumer.manifest_path.read_bytes()
+    lock_path = scenario.consumer.root / "apm.lock.yaml"
+    lock_before = lock_path.read_bytes()
+
+    result = _run(apm_binary_path, scenario, "--yes", "--verbose")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert scenario.consumer.manifest_path.read_bytes() == manifest_before
+    assert lock_path.read_bytes() == lock_before
 
 
 def test_update_malformed_tag_output_exits_before_writes(

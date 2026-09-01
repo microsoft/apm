@@ -88,7 +88,7 @@ def package_name(dep_ref: DependencyReference) -> str:
     """Return the tag-pattern package name for *dep_ref*."""
     if dep_ref.is_virtual_subdirectory() and dep_ref.virtual_path:
         return dep_ref.virtual_path.rstrip("/").rsplit("/", 1)[-1]
-    return dep_ref.repo_url.rstrip("/").rsplit("/", 1)[-1]
+    return dep_ref.repo_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
 
 
 def find_latest_annotated_tag(
@@ -135,7 +135,7 @@ def find_latest_annotated_tag(
             "APM will not replace a SHA pin with a branch or lightweight tag."
         )
 
-    _, tag, sha = max(candidates, key=lambda item: item[0])
+    _, tag, sha = max(candidates, key=lambda item: (item[0], item[1]))
     return AnnotatedTagCandidate(tag=tag, commit_sha=sha)
 
 

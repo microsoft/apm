@@ -1047,6 +1047,30 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-rs-017",
+      "keyword": "MUST",
+      "section": "7.7",
+      "status": "active",
+      "test_count": 14,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_accepts_each_normative_tag_form[1.2.3]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_accepts_each_normative_tag_form[revision-pin--v1.2.3]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_accepts_each_normative_tag_form[revision-pin-v1.2.3]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_accepts_each_normative_tag_form[v1.2.3]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_derives_repository_and_virtual_names",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_projection_and_scope_are_normative",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[0000000000000000000000000000000000000000\\trefs/tags/v2.0.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[\\n]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/bad name]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0\\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0^{}]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_retains_missing_release",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_selects_highest_stable_tag_deterministically",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_wraps_transport_parse_failure"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-sc-001",
       "keyword": "MUST",
       "section": "10.4",
@@ -1368,7 +1392,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 88,
+      "active": 89,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1392,5 +1416,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 119
+  "total_requirements": 120
 }
