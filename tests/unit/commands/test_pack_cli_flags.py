@@ -277,6 +277,24 @@ class TestCheckCleanFlag:
         )
         assert "Packed" not in result.output
 
+    def test_explicit_dry_run_keeps_full_bundle_and_marketplace_preview(
+        self, tmp_path: _Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_project(tmp_path, _APM_ALIGNED_WITH_BUNDLE)
+        monkeypatch.chdir(tmp_path)
+        initial_pack = CliRunner().invoke(pack_cmd, ["--offline"])
+        assert initial_pack.exit_code == 0, initial_pack.output
+
+        result = CliRunner().invoke(
+            pack_cmd,
+            ["--check-clean", "--dry-run", "--offline"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "[dry-run] Would pack" in result.output
+        assert "[dry-run] Would write marketplace.json" in result.output
+        assert "[dry-run] --check-clean is read-only" not in result.output
+
     def test_json_envelope_carries_drift(self, tmp_path: _Path, monkeypatch) -> None:
         _write_project(tmp_path, _APM_ALIGNED)
         monkeypatch.chdir(tmp_path)
