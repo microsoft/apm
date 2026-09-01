@@ -32,6 +32,7 @@ class _ValidationOutcome:
     invalid: list  # List of (package_name, reason: str) tuples
     marketplace_provenance: dict = None  # canonical -> {discovered_via, marketplace_plugin_name}
     prospective_package: object | None = None
+    updated_packages: tuple[str, ...] = ()
 
     @property
     def all_failed(self) -> bool:
@@ -232,6 +233,7 @@ class InstallLogger(CommandLogger):
         super().__init__("install", verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
+        self._dry_run_apm_update_count = 0
 
     # --- Validation phase ---
 
@@ -278,11 +280,26 @@ class InstallLogger(CommandLogger):
 
     # --- Resolution phase ---
 
-    def resolution_start(self, to_install_count: int, lockfile_count: int):
+    def resolution_start(
+        self,
+        to_install_count: int,
+        lockfile_count: int,
+        update_count: int = 0,
+    ):
         """Log start of dependency resolution."""
         if self.partial:
             noun = "package" if to_install_count == 1 else "packages"
-            _rich_info(f"Installing {to_install_count} new {noun}...", symbol="running")
+            if self.dry_run:
+                update_note = ""
+                if update_count:
+                    update_noun = "update" if update_count == 1 else "updates"
+                    update_note = f" ({update_count} ref {update_noun})"
+                _rich_info(
+                    f"Previewing {to_install_count} {noun}{update_note}...",
+                    symbol="running",
+                )
+            else:
+                _rich_info(f"Installing {to_install_count} new {noun}...", symbol="running")
             if lockfile_count > 0 and self.verbose:
                 _rich_echo(
                     f"  ({lockfile_count} existing dependencies in lockfile)",
@@ -292,6 +309,10 @@ class InstallLogger(CommandLogger):
             _rich_info("Installing dependencies from apm.yml...", symbol="running")
             if lockfile_count > 0:
                 _rich_info(f"Using apm.lock.yaml ({lockfile_count} locked dependencies)")
+
+    def record_dry_run_apm_updates(self, count: int) -> None:
+        """Record how many selected APM refs the preview would update."""
+        self._dry_run_apm_update_count = count
 
     def nothing_to_install(
         self,
@@ -830,6 +851,26 @@ class InstallLogger(CommandLogger):
             timing_suffix = f" in {elapsed_seconds:.1f}s"
 
         if disposition is InstallDisposition.DRY_RUN:
+            update_count = min(self._dry_run_apm_update_count, apm_count)
+            if update_count:
+                update_noun = "update" if update_count == 1 else "updates"
+                dry_parts = [f"{update_count} APM dependency {update_noun}"]
+                install_count = apm_count - update_count
+                if install_count:
+                    noun = "dependency" if install_count == 1 else "dependencies"
+                    dry_parts.append(f"{install_count} APM {noun} to install")
+                if mcp_count:
+                    noun = "server" if mcp_count == 1 else "servers"
+                    dry_parts.append(f"{mcp_count} MCP {noun}")
+                if lsp_count:
+                    noun = "server" if lsp_count == 1 else "servers"
+                    dry_parts.append(f"{lsp_count} LSP {noun}")
+                summary = " and ".join(dry_parts)
+                _rich_info(
+                    f"Dry run completed: would apply {summary}{timing_suffix}.",
+                    symbol="info",
+                )
+                return
             summary = " and ".join(parts) if parts else "no changes"
             _rich_info(
                 f"Dry run completed: would install {summary}{timing_suffix}.",

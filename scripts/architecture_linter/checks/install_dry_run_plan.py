@@ -51,8 +51,14 @@ def check_prospective_dry_run_plan(provider: FactsProvider) -> tuple[Violation, 
             for line in getattr(command, "lines", ())
         )
         >= 3
+        and _present(
+            command,
+            "mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None",
+        )
+        and _present(command, "prospective_plan.mcp_dependency_count")
         and _present(renderer, "plan: ProspectiveInstallPlan")
         and _present(renderer, "for dep in plan.selected_apm_dependencies:")
+        and _present(renderer, "for dep in plan.selected_mcp_dependencies:")
         and not _present(renderer, "ProspectiveInstallPlan(")
         and not duplicates
     )

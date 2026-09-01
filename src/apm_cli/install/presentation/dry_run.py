@@ -36,17 +36,19 @@ def render_and_exit(
     if plan.should_install_apm and plan.selected_apm_dependencies:
         logger.progress(f"APM dependencies ({plan.apm_dependency_count}):")
         for dep in plan.selected_apm_dependencies:
-            action = "update" if update else "install"
-            logger.progress(f"  - {dep.repo_url}#{dep.reference or 'main'} -> {action}")
+            action = (
+                "update"
+                if update or dep.get_identity() in plan.updated_apm_identities
+                else "install"
+            )
+            logger.progress(f"  - {dep.to_display_reference()} -> {action}")
 
-    if plan.should_install_mcp and plan.mcp_dependencies:
+    if plan.selected_mcp_dependencies:
         logger.progress(f"MCP dependencies ({plan.mcp_dependency_count}):")
-        for dep in plan.mcp_dependencies:
+        for dep in plan.selected_mcp_dependencies:
             logger.progress(f"  - {dep}")
 
-    if not plan.selected_apm_dependencies and not (
-        plan.should_install_mcp and plan.mcp_dependencies
-    ):
+    if not plan.selected_apm_dependencies and not plan.selected_mcp_dependencies:
         logger.progress("No dependencies found in apm.yml")
 
     # Orphan preview: lockfile + manifest difference -- no integration

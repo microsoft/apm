@@ -53,6 +53,7 @@ def _make_apm_dep(
     dep.repo_url = repo_url
     dep.reference = reference
     dep.get_unique_key.return_value = repo_url
+    dep.to_display_reference.return_value = f"{repo_url}#{reference or 'main'}"
     return dep
 
 

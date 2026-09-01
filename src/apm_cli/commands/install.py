@@ -271,6 +271,7 @@ def _resolve_package_references(
     skill_subset_from_cli=False,
     default_registry=None,
     dry_run=False,
+    updated_packages_out=None,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -280,9 +281,7 @@ def _resolve_package_references(
     *existing_identities* is mutated (new identities are added to prevent
     duplicates within the same batch).
 
-    Returns:
-        Tuple of ``(valid_outcomes, invalid_outcomes, validated_packages,
-        marketplace_provenance, apm_yml_entries, dependencies_changed)``.
+    Returns the validation outcomes, manifest entries, and change state.
     """
     from ..install.registry_wiring import should_skip_github_probe_for_dep, validate_registry_ref
 
@@ -495,6 +494,8 @@ def _resolve_package_references(
                 validated_packages.append(canonical)
                 existing_identities.add(identity)
             dependencies_changed = dependencies_changed or updates_existing_entry
+            if updates_existing_entry and updated_packages_out is not None:
+                updated_packages_out.append(canonical)
             if marketplace_provenance:
                 _marketplace_provenance[identity] = marketplace_provenance
         else:
@@ -636,6 +637,7 @@ def _validate_and_add_packages_to_apm_yml(
     existing_identities = _check_package_conflicts(current_deps)
 
     # Validate and canonicalize all package references
+    updated_packages = []
     (
         valid_outcomes,
         invalid_outcomes,
@@ -655,6 +657,7 @@ def _validate_and_add_packages_to_apm_yml(
         skill_subset_from_cli=skill_subset_from_cli,
         default_registry=_default_registry_for_cli,
         dry_run=dry_run,
+        updated_packages_out=updated_packages,
     )
 
     prospective_package = None
@@ -676,9 +679,9 @@ def _validate_and_add_packages_to_apm_yml(
         invalid=invalid_outcomes,
         marketplace_provenance=_marketplace_provenance or None,
         prospective_package=prospective_package,
+        updated_packages=tuple(updated_packages),
     )
 
-    # Let the logger emit a summary and decide whether to continue
     if logger:
         should_continue = logger.validation_summary(outcome)
         if not should_continue:
@@ -687,7 +690,10 @@ def _validate_and_add_packages_to_apm_yml(
     if not validated_packages:
         if dry_run:
             if logger:
-                logger.progress("No new packages to add")
+                if dependencies_changed:
+                    logger.progress("Dry run: Would update dependency entries in apm.yml")
+                else:
+                    logger.progress("No new packages to add")
         # If all packages already exist in apm.yml, that's OK - we'll reinstall them.
         if not dry_run:
             persist_dependency_list_if_changed(
@@ -1692,11 +1698,6 @@ def install(  # noqa: C901, PLR0913
         ctx.exit(command_result.exit_code)
 
 
-# ---------------------------------------------------------------------------
-# install() decomposition: APM pipeline + post-install summary
-# ---------------------------------------------------------------------------
-
-
 def _frozen_install_tip(error: FrozenInstallError) -> str:
     """Return recovery guidance tailored to package or MCP lock drift."""
     has_mcp_drift = any("MCP server" in reason for reason in error.reasons)
@@ -1730,6 +1731,7 @@ def _install_apm_packages(ctx, outcome):
     logger.resolution_start(
         to_install_count=len(ctx.only_packages or []) if ctx.packages else 0,
         lockfile_count=0,  # Refined later inside _install_apm_dependencies
+        update_count=len(outcome.updated_packages) if outcome is not None else 0,
     )
 
     try:
@@ -1779,14 +1781,15 @@ def _install_apm_packages(ctx, outcome):
     should_install_apm = ctx.install_mode != InstallMode.MCP
     should_install_mcp = ctx.install_mode != InstallMode.APM
 
-    # Show what will be installed if dry run
     if ctx.dry_run:
         prospective_plan = ProspectiveInstallPlan.from_apm_package(
             apm_package,
             should_install_apm=should_install_apm,
             should_install_mcp=should_install_mcp,
             only_packages=ctx.only_packages,
+            updated_packages=outcome.updated_packages if outcome is not None else (),
         )
+        logger.record_dry_run_apm_updates(len(prospective_plan.updated_apm_identities))
         _check_insecure_dependencies(
             prospective_plan.selected_apm_dependencies,
             ctx.allow_insecure,
@@ -1800,17 +1803,12 @@ def _install_apm_packages(ctx, outcome):
                 list(prospective_plan.selected_apm_dependencies),
                 apm_package=apm_package,
             )
-        # -- W2-dry-run (#827): policy preflight in preview mode --
-        # Runs discovery + checks against direct manifest deps, not transitives.
-        # Block-severity violations render as "Would be blocked by
-        # policy" without raising.  Documented limitation: transitive
-        # deps are NOT evaluated since the resolver does not run.
         from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
 
         _dr_preflight(
             project_root=ctx.project_root,
             apm_deps=list(prospective_plan.selected_apm_dependencies),
-            mcp_deps=mcp_deps if should_install_mcp else None,
+            mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None,
             no_policy=ctx.no_policy,
             logger=logger,
             dry_run=True,

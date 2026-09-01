@@ -20,6 +20,7 @@ class ProspectiveInstallPlan:
     should_install_apm: bool
     should_install_mcp: bool
     only_packages: tuple[str, ...] | None
+    updated_apm_identities: frozenset[str] = frozenset()
 
     @classmethod
     def from_apm_package(
@@ -29,6 +30,7 @@ class ProspectiveInstallPlan:
         should_install_apm: bool,
         should_install_mcp: bool,
         only_packages: Sequence[str] | None,
+        updated_packages: Sequence[str] = (),
     ) -> ProspectiveInstallPlan:
         """Build the preview from one interpreted prospective package."""
         apm_dependencies = tuple(apm_package.get_apm_dependencies())
@@ -52,6 +54,9 @@ class ProspectiveInstallPlan:
             should_install_apm=should_install_apm,
             should_install_mcp=should_install_mcp,
             only_packages=tuple(only_packages) if only_packages is not None else None,
+            updated_apm_identities=frozenset(
+                DependencyReference.parse(package).get_identity() for package in updated_packages
+            ),
         )
 
     @property
@@ -67,7 +72,12 @@ class ProspectiveInstallPlan:
     @property
     def mcp_dependency_count(self) -> int:
         """Return the number of MCP dependencies selected for preview."""
-        return len(self.mcp_dependencies) if self.should_install_mcp else 0
+        return len(self.selected_mcp_dependencies)
+
+    @property
+    def selected_mcp_dependencies(self) -> tuple[Any, ...]:
+        """Return MCP dependencies only when the invocation selected MCP."""
+        return self.mcp_dependencies if self.should_install_mcp else ()
 
     @property
     def intended_dependency_keys(self) -> frozenset[str]:

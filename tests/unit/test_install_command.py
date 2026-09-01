@@ -483,6 +483,7 @@ class TestInstallCommandAutoBootstrap:
             assert result.exit_code == 0, result.output
             assert "APM dependencies (1):" in result.output
             assert "./local-package" in result.output
+            assert "_local/local-package" not in result.output
             assert "Dry run completed: would install 1 APM dependency" in result.output
             assert Path("apm.yml").read_bytes() == manifest_before
             assert not Path("apm.lock.yaml").exists()
@@ -541,6 +542,11 @@ class TestInstallCommandAutoBootstrap:
             assert result.exit_code == 0, result.output
             assert "owner/repo#dev" in result.output
             assert "would update ref in apm.yml" in result.output
+            assert "Previewing 1 package (1 ref update)" in result.output
+            assert "-> update" in result.output
+            assert "Dry run completed: would apply 1 APM dependency update" in result.output
+            assert "No new packages to add" not in result.output
+            assert "Installing 1 new package" not in result.output
             assert Path("apm.yml").read_bytes() == manifest_before
 
 
