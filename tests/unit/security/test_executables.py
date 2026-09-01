@@ -27,6 +27,11 @@ from apm_cli.security.executables import (
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_LSP,
     EXEC_TYPE_MCP,
+    REGISTRABLE_EXEC_STATUSES,
+    TRUST_ABSENT,
+    TRUST_DENIED,
+    TRUST_DEPLOYED,
+    TRUST_GATED,
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
@@ -34,6 +39,7 @@ from apm_cli.security.executables import (
     filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
+    more_severe_exec_status,
     parse_allow_executables,
     prompt_executable_approval,
     scan_package_executables,
@@ -724,3 +730,31 @@ class TestFilterLspFailClosed:
         assert logger.warnings == [
             "Filtered 1 LSP server(s) whose executables are not trusted yet."
         ]
+
+
+@pytest.mark.parametrize(
+    ("current", "candidate", "expected"),
+    [
+        (TRUST_DENIED, TRUST_DEPLOYED, TRUST_DENIED),
+        (TRUST_DEPLOYED, TRUST_GATED, TRUST_GATED),
+        (TRUST_GATED, TRUST_DENIED, TRUST_DENIED),
+        (None, TRUST_ABSENT, None),
+        (TRUST_ABSENT, None, TRUST_ABSENT),
+        (TRUST_DEPLOYED, TRUST_DEPLOYED, TRUST_DEPLOYED),
+        # Fail closed: an unrecognised status ranks ABOVE every known one, so a
+        # surprise value can never silently downgrade a denial.
+        (TRUST_DENIED, "some-future-status", "some-future-status"),
+        ("some-future-status", TRUST_DEPLOYED, "some-future-status"),
+    ],
+)
+def test_more_severe_exec_status_never_downgrades(current, candidate, expected) -> None:
+    """The deny-wins ladder is total and monotonic in both argument orders."""
+    assert more_severe_exec_status(current, candidate) == expected
+
+
+def test_registrable_exec_statuses_excludes_every_untrusted_value() -> None:
+    """Only cleared statuses may reach native Copilot registration."""
+    assert TRUST_DENIED not in REGISTRABLE_EXEC_STATUSES
+    assert TRUST_GATED not in REGISTRABLE_EXEC_STATUSES
+    assert "some-future-status" not in REGISTRABLE_EXEC_STATUSES
+    assert frozenset({None, TRUST_ABSENT, TRUST_DEPLOYED}) == REGISTRABLE_EXEC_STATUSES

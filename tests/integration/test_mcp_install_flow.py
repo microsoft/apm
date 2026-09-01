@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 import tomlkit
@@ -102,6 +103,25 @@ def _self_defined_manifest(*, targets: list[str] | None) -> dict:
     return manifest
 
 
+def _self_defined_remote_manifest(*, targets: list[str], url: str) -> dict:
+    """Build one self-defined remote MCP manifest for lifecycle assertions."""
+    return {
+        "name": "mcp-remote-target-lifecycle",
+        "version": "0.0.1",
+        "targets": targets,
+        "dependencies": {
+            "mcp": [
+                {
+                    "name": "loopback-remote",
+                    "registry": False,
+                    "transport": "streamable-http",
+                    "url": url,
+                }
+            ]
+        },
+    }
+
+
 def test_install_restores_dev_mcp_dependencies_to_lockfile_and_config(tmp_path, monkeypatch):
     """apm install restores dev MCP servers to runtime config and lockfile."""
     monkeypatch.chdir(tmp_path)
@@ -182,6 +202,83 @@ def test_manifest_targets_make_mcp_ownership_portable_across_machines(
         "copilot": ["apm-managed"],
     }
     assert {row["runtime"] for row in payload["deployments"]} == {"codex", "copilot"}
+
+
+def test_install_loopback_http_remote_is_byte_idempotent_for_requested_targets(
+    tmp_path, monkeypatch
+) -> None:
+    """A real CLI install records only successful Codex and Copilot remote writes."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    (tmp_path / "apm.yml").write_text(
+        yaml.safe_dump(
+            _self_defined_remote_manifest(
+                targets=["codex", "copilot"],
+                url="http://localhost:5500/mcp",
+            )
+        ),
+        encoding="utf-8",
+    )
+    clear_apm_yml_cache()
+
+    first = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert first.exit_code == 0, first.output
+    codex_config_path = tmp_path / ".codex" / "config.toml"
+    codex_config = tomlkit.parse(codex_config_path.read_text(encoding="utf-8"))
+    codex_url = urlparse(codex_config["mcp_servers"]["loopback-remote"]["url"])
+    assert (codex_url.scheme, codex_url.hostname, codex_url.port, codex_url.path) == (
+        "http",
+        "localhost",
+        5500,
+        "/mcp",
+    )
+    copilot_config_path = tmp_path / ".github" / "mcp.json"
+    copilot_config = json.loads(copilot_config_path.read_text(encoding="utf-8"))
+    copilot_url = urlparse(copilot_config["mcpServers"]["loopback-remote"]["url"])
+    assert (copilot_url.scheme, copilot_url.hostname, copilot_url.port, copilot_url.path) == (
+        "http",
+        "localhost",
+        5500,
+        "/mcp",
+    )
+    first_lock = _mcp_ownership_bytes(tmp_path / "apm.lock.yaml")
+    assert json.loads(first_lock)["mcp_target_servers"] == {
+        "codex": ["loopback-remote"],
+        "copilot": ["loopback-remote"],
+    }
+    assert {row["runtime"] for row in json.loads(first_lock)["deployments"]} == {"codex", "copilot"}
+    first_configs = (codex_config_path.read_bytes(), copilot_config_path.read_bytes())
+
+    retry = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert retry.exit_code == 0, retry.output
+    assert _mcp_ownership_bytes(tmp_path / "apm.lock.yaml") == first_lock
+    assert (codex_config_path.read_bytes(), copilot_config_path.read_bytes()) == first_configs
+
+
+def test_install_rejects_nonloopback_http_without_ownership_claim(tmp_path, monkeypatch) -> None:
+    """A rejected Codex HTTP remote cannot create target or deployment state."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    manifest = _self_defined_remote_manifest(
+        targets=["codex"],
+        url="http://example.com/mcp",
+    )
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()
+
+    result = CliRunner().invoke(cli, ["install", "--no-policy"])
+
+    assert result.exit_code != 0
+    assert yaml.safe_load((tmp_path / "apm.yml").read_text(encoding="utf-8")) == manifest
+    lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+    assert lockfile is not None
+    assert lockfile.mcp_target_servers == {}
+    assert DeploymentLedgerCodec.from_lockfile(lockfile).records == {}
+    assert not (tmp_path / ".codex" / "config.toml").exists()
 
 
 def test_omitted_targets_use_project_harness_detection(tmp_path, monkeypatch) -> None:

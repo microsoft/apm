@@ -76,18 +76,28 @@ def get_git_executable() -> str:
     return _git_executable
 
 
-def git_subprocess_env() -> dict[str, str]:
+def git_subprocess_env(overrides: dict[str, object] | None = None) -> dict[str, str]:
     """Return a sanitized environment dict for git subprocesses.
 
     Restores PyInstaller-managed dynamic-library variables first, then
     strips ambient git state variables while preserving user-controlled
-    configuration (proxy, auth, SSH settings).
+    configuration (proxy, auth, SSH settings). Optional overrides are
+    applied through the same state-variable filter.
 
     Returns:
         An external-process-safe copy of ``os.environ`` with problematic
         git variables removed.
     """
-    return {k: v for k, v in external_process_env().items() if k not in _STRIP_GIT_VARS}
+    base = (
+        None
+        if overrides is None
+        else {key: value for key, value in overrides.items() if isinstance(value, str)}
+    )
+    return {
+        key: value
+        for key, value in external_process_env(base).items()
+        if key not in _STRIP_GIT_VARS
+    }
 
 
 def reset_git_cache() -> None:

@@ -275,9 +275,9 @@ def _run_lock(
     "timestamp",
     default=None,
     help=(
-        "Pin the SBOM timestamp (ISO 8601, e.g. 2024-06-01T00:00:00+00:00) for "
-        "reproducible output. Defaults to SOURCE_DATE_EPOCH, then the lockfile's "
-        "generated_at."
+        "Pin the SBOM timestamp (ISO 8601 with timezone required, e.g. "
+        "2024-06-01T00:00:00+00:00) for reproducible output. Defaults to "
+        "SOURCE_DATE_EPOCH, then the lockfile's generated_at."
     ),
 )
 def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | None) -> None:
@@ -324,8 +324,19 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
     import os
     from datetime import datetime, timezone
 
-    if explicit:
-        return explicit
+    if explicit is not None:
+        try:
+            dt = datetime.fromisoformat(_normalize_utc_designator(explicit))
+        except (ValueError, TypeError):
+            dt = None
+        if dt is None or dt.tzinfo is None:
+            display_value = explicit.strip()
+            raise click.BadParameter(
+                f"Invalid timestamp {display_value!r}. Expected timezone-aware ISO "
+                "8601 format, e.g. 2024-06-01T00:00:00+00:00.",
+                param_hint="'--timestamp'",
+            )
+        return dt.isoformat()
     epoch = os.environ.get("SOURCE_DATE_EPOCH")
     if epoch:
         try:
@@ -335,6 +346,11 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
     if lockfile_generated_at:
         return lockfile_generated_at
     return "1970-01-01T00:00:00+00:00"
+
+
+def _normalize_utc_designator(value: str) -> str:
+    """Normalize ISO 8601 UTC syntax for Python 3.10 ``fromisoformat``."""
+    return f"{value[:-1]}+00:00" if value.endswith("Z") else value
 
 
 __all__ = ["lock"]

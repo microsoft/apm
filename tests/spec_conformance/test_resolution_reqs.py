@@ -20,6 +20,16 @@ from pathlib import Path
 import pytest
 
 from apm_cli.cache.url_normalize import normalize_repo_url
+from apm_cli.deps.git_remote_ops import RemoteRefParseError, validate_ls_remote_tag_output
+from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+from apm_cli.deps.revision_pins import (
+    RevisionPinResolutionError,
+    RevisionPinResolutionResult,
+    RevisionPinSkip,
+    find_latest_annotated_tag,
+    package_name,
+    resolve_revision_pin_updates,
+)
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 from apm_cli.deps.tiered_ref_resolver import (
     L0PerRunCache,
@@ -28,6 +38,7 @@ from apm_cli.deps.tiered_ref_resolver import (
     _repository_cache_identity,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from tests.integration.test_install_subdir_dedup_e2e import (
     test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
 )
@@ -342,6 +353,130 @@ def test_repository_identity_isolates_same_host_nested_repositories_through_reso
     assert cache.size() == 2
 
 
+@pytest.mark.req("req-rs-017")
+@pytest.mark.parametrize(
+    "tag",
+    ["v1.2.3", "revision-pin--v1.2.3", "revision-pin-v1.2.3", "1.2.3"],
+)
+def test_revision_pin_update_accepts_each_normative_tag_form(tag: str) -> None:
+    """Every req-rs-017 tag form maps to the same semantic version."""
+    candidate = find_latest_annotated_tag(
+        [RemoteRef(tag, GitReferenceType.TAG, "b" * 40, annotated=True)],
+        package_name="revision-pin",
+    )
+
+    assert candidate.tag == tag
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_selects_highest_stable_tag_deterministically() -> None:
+    """Selection excludes prerelease/lightweight refs and breaks ties by name."""
+    refs = [
+        RemoteRef("v0.9.0", GitReferenceType.TAG, "b" * 40, annotated=True),
+        RemoteRef("v1.0.0+alpha", GitReferenceType.TAG, "c" * 40, annotated=True),
+        RemoteRef("v1.0.0+zeta", GitReferenceType.TAG, "d" * 40, annotated=True),
+        RemoteRef("v2.0.0-rc.1", GitReferenceType.TAG, "e" * 40, annotated=True),
+        RemoteRef("v3.0.0", GitReferenceType.TAG, "f" * 40, annotated=False),
+        RemoteRef("v4.0.0", GitReferenceType.BRANCH, "1" * 40),
+    ]
+
+    forward = find_latest_annotated_tag(refs, package_name="revision-pin")
+    reverse = find_latest_annotated_tag(reversed(refs), package_name="revision-pin")
+
+    assert forward == reverse
+    assert forward.tag == "v1.0.0+zeta"
+    assert forward.commit_sha == "d" * 40
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_derives_repository_and_virtual_names() -> None:
+    """Repository suffixes and virtual paths produce deterministic tag names."""
+    repository = DependencyReference(repo_url="acme/revision-pin.git")
+    virtual = DependencyReference(
+        repo_url="acme/mono",
+        virtual_path="packages/revision-pin",
+        is_virtual=True,
+    )
+
+    assert package_name(repository) == "revision-pin"
+    assert package_name(virtual) == "revision-pin"
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_retains_missing_release() -> None:
+    """No eligible tag is an entry-local retained-pin result."""
+
+    class TagDownloader:
+        def __init__(self, refs: list[RemoteRef]) -> None:
+            self.refs = refs
+
+        def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            return self.refs
+
+    old_sha = "a" * 40
+    dependency = DependencyReference(
+        repo_url="acme/revision-pin",
+        host="github.com",
+        reference=old_sha,
+    )
+
+    retained = resolve_revision_pin_updates([dependency], TagDownloader([]), max_workers=1)
+    assert retained == RevisionPinResolutionResult(
+        skips=(RevisionPinSkip("acme/revision-pin", old_sha, "acme/revision-pin"),),
+    )
+
+
+@pytest.mark.req("req-rs-017")
+@pytest.mark.parametrize(
+    "output",
+    [
+        "\n",
+        f"{'0' * 40}\trefs/tags/v2.0.0",
+        f"{'a' * 40}\trefs/tags/bad name",
+        f"{'a' * 40}\trefs/tags/v2.0.0 ",
+        f"{'a' * 40}\trefs/tags/v2.0.0\n{'a' * 40}\trefs/tags/v2.0.0",
+        f"{'a' * 40}\trefs/tags/v2.0.0^{{}}",
+    ],
+)
+def test_revision_pin_update_rejects_malformed_tag_records(output: str) -> None:
+    """Every listed malformed-record class fails before candidate selection."""
+    with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+        validate_ls_remote_tag_output(output)
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_wraps_transport_parse_failure() -> None:
+    """Malformed remote data cannot become a retained-pin outcome."""
+
+    class BrokenDownloader:
+        def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            raise RemoteRefParseError("Malformed git ls-remote tag output.")
+
+    dependency = DependencyReference(
+        repo_url="acme/revision-pin",
+        host="github.com",
+        reference="a" * 40,
+    )
+
+    with pytest.raises(RevisionPinResolutionError, match="Malformed remote tag data"):
+        resolve_revision_pin_updates([dependency], BrokenDownloader(), max_workers=1)
+
+
+@pytest.mark.req("req-rs-017")
+def test_revision_pin_update_projection_and_scope_are_normative() -> None:
+    """The spec pins persistence, replay, scope, and atomic failure semantics."""
+    assert_spec_contains(
+        "resolved_ref",
+        "resolved_commit",
+        "resolved_tag",
+        "does not become a trust anchor",
+        "MUST replay the full commit",
+        "package manifests MUST NOT be rewritten",
+        "aborts the requested update scope",
+        "non-commit object is also a fatal outcome",
+    )
+
+
 # --- req-pr-001..005: primitives ---------------------------------------
 
 
@@ -366,6 +501,40 @@ def test_consumer_rejects_primitive_collisions():
     assert_spec_contains(
         "first declared",
         "MUST NOT replace",
+    )
+
+
+@pytest.mark.req("req-pr-007")
+def test_root_declared_plugin_component_excludes_generated_staging_tree(tmp_path: Path):
+    """A root declaration never re-copies its consumer-generated staging tree."""
+    plugin_root = tmp_path / "plugin"
+    staging_root = plugin_root / ".apm"
+    plugin_root.mkdir()
+    staging_root.mkdir()
+    (plugin_root / "agent.md").write_text("# Agent\n", encoding="ascii")
+    (staging_root / "generated.md").write_text("# Generated\n", encoding="ascii")
+
+    manifest = {"name": "plugin", "agents": ["./"]}
+    _map_plugin_artifacts(plugin_root, staging_root, manifest)
+    first_tree = {
+        path.relative_to(staging_root).as_posix(): path.read_bytes()
+        for path in staging_root.rglob("*")
+        if path.is_file()
+    }
+    _map_plugin_artifacts(plugin_root, staging_root, manifest)
+    second_tree = {
+        path.relative_to(staging_root).as_posix(): path.read_bytes()
+        for path in staging_root.rglob("*")
+        if path.is_file()
+    }
+
+    assert "agents/.apm/generated.md" not in first_tree
+    assert first_tree == second_tree
+    assert_spec_contains(
+        "copying a declared Plugin collection component source",
+        "canonicalize the\nnon-symlink source root",
+        "materialization root created by the current operation",
+        "MUST prune every such staging\nsubtree before traversing the source",
     )
 
 

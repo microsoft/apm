@@ -154,6 +154,19 @@ class BaseIntegrator:
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
 
+    @staticmethod
+    def filter_authorized_files(files: list[Path], source_plan=None) -> list[Path]:
+        """Keep only files admitted by the canonical deployment source plan."""
+        if source_plan is None:
+            return files
+        from apm_cli.utils.paths import portable_relpath
+
+        return [
+            path
+            for path in files
+            if source_plan.includes(portable_relpath(path, source_plan.source_root))
+        ]
+
     # ------------------------------------------------------------------
     # Common behaviour  -- subclasses inherit directly
     # ------------------------------------------------------------------

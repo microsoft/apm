@@ -186,6 +186,14 @@ class InstallContext:
     package_exec_status: dict[str, str] = field(default_factory=dict)  # dep_key -> exec_status
 
     # ------------------------------------------------------------------
+    # copilot_plugins (#2703)
+    # ------------------------------------------------------------------
+    # Native GitHub Copilot Agent Plugin registration capability, published
+    # once per install so the deployment boundary and the registrar agree.
+    copilot_registration: Any = None  # Optional[NativeRegistrationCapability]
+    _copilot_registration_token: Any = field(default=None, repr=False, compare=False)
+
+    # ------------------------------------------------------------------
     # policy_gate
     # ------------------------------------------------------------------
     policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery

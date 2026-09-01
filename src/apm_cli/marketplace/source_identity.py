@@ -14,10 +14,7 @@ from urllib.parse import urlsplit
 
 from apm_cli.cache.url_normalize import SCP_LIKE_RE
 from apm_cli.utils.github_host import default_host, is_valid_fqdn, validate_ssh_user
-from apm_cli.utils.path_security import validate_path_segments
-
-_MALFORMED_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
-_ENCODED_SEPARATOR_RE = re.compile(r"%(?:2[fF]|5[cC])")
+from apm_cli.utils.path_security import decode_url_path_segments, validate_path_segments
 
 
 @dataclass(frozen=True)
@@ -160,9 +157,7 @@ def _parse_https_url(raw: str, host_flag: str | None) -> MarketplaceSourceIdenti
 
 def _parse_shorthand(raw: str, host_flag: str | None) -> MarketplaceSourceIdentity:
     """Build a validated HTTPS identity from shorthand source syntax."""
-    _reject_malformed_escapes(raw)
-    decoded = _decode_percent(raw, context="marketplace shorthand")
-    segments = [segment for segment in decoded.split("/") if segment]
+    segments = list(decode_url_path_segments(raw, context="marketplace shorthand"))
     if len(segments) < 2:
         raise ValueError(
             "Invalid format. Expected OWNER/REPO, HOST/OWNER/REPO, a full HTTPS URL, "
@@ -210,38 +205,15 @@ def _validate_remote_path(path: str, *, context: str, require_absolute: bool = F
     """Reject malformed encodings and path forms that alter Git's target."""
     if not path or path == "/":
         raise ValueError(f"{context} is missing a repo path")
-    _reject_malformed_escapes(path)
-    if _ENCODED_SEPARATOR_RE.search(path):
-        raise ValueError(f"{context} must not contain encoded path separators")
-    decoded = _decode_percent(path, context=context)
-    if any(ord(char) < 32 for char in decoded):
-        raise ValueError(f"{context} contains invalid control characters")
     if require_absolute:
-        if not decoded.startswith("/") or decoded.startswith("//"):
+        if not path.startswith("/") or path.startswith("//"):
             raise ValueError(f"{context} must begin with one repository path separator")
-        normalized = decoded[1:]
-    else:
-        normalized = decoded
-    validate_path_segments(normalized, context=context, reject_empty=True)
-
-
-def _decode_percent(value: str, *, context: str) -> str:
-    """Decode all percent layers after validating each escape sequence."""
-    from urllib.parse import unquote
-
-    decoded = value
-    for _ in range(8):
-        next_value = unquote(decoded)
-        if next_value == decoded:
-            return decoded
-        _reject_malformed_escapes(next_value)
-        decoded = next_value
-    return decoded
-
-
-def _reject_malformed_escapes(value: str) -> None:
-    if _MALFORMED_ESCAPE_RE.search(value):
-        raise ValueError("URL contains a malformed percent escape")
+    decoded_segments = decode_url_path_segments(path, context=context)
+    validate_path_segments(
+        "/".join(decoded_segments),
+        context=context,
+        reject_empty=True,
+    )
 
 
 def _authority(url: str) -> str:

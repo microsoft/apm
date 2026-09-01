@@ -162,6 +162,7 @@ class CanvasIntegrator(BaseIntegrator):
         trust_canvas: bool = False,
         is_first_party: bool = False,
         package_name: str = "",
+        source_plan=None,
     ) -> IntegrationResult:
         """Deploy canvas bundles for a single *target* (copilot only).
 
@@ -249,6 +250,7 @@ class CanvasIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 package_name=package_name,
                 target_paths=target_paths,
+                source_plan=source_plan,
             )
             if outcome == "integrated":
                 files_integrated += 1
@@ -319,6 +321,7 @@ class CanvasIntegrator(BaseIntegrator):
         diagnostics,
         package_name: str,
         target_paths: list[Path],
+        source_plan=None,
     ) -> str:
         """Deploy one canvas bundle atomically.
 
@@ -345,7 +348,13 @@ class CanvasIntegrator(BaseIntegrator):
             return "skipped"
 
         planned = self._plan_bundle_files(
-            bundle, canvas_root, project_root, diagnostics, name, package_name
+            bundle,
+            canvas_root,
+            project_root,
+            diagnostics,
+            name,
+            package_name,
+            source_plan=source_plan,
         )
         if planned is None:
             return "skipped"
@@ -421,6 +430,7 @@ class CanvasIntegrator(BaseIntegrator):
         diagnostics,
         name: str,
         package_name: str = "",
+        source_plan=None,
     ) -> list[tuple[Path, Path, str]] | None:
         """Walk *bundle* and return ``(src, dest, rel)`` triples to copy.
 
@@ -436,6 +446,10 @@ class CanvasIntegrator(BaseIntegrator):
             if src.name == MARKER_FILENAME:
                 continue
             if not src.is_file():
+                continue
+            if source_plan is not None and not source_plan.includes(
+                portable_relpath(src, source_plan.source_root)
+            ):
                 continue
             rel_within = src.relative_to(bundle)
             dest = canvas_root / rel_within

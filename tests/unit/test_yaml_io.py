@@ -115,6 +115,24 @@ class TestDumpYaml:
         assert "- a" in raw
         assert "{" not in raw
 
+    @pytest.mark.windows_compat
+    def test_dump_writes_lf_only_bytes(self, tmp_path):
+        """On-disk bytes use LF exclusively on every platform (apm#2619).
+
+        Callers such as ``stamp_plugin_version`` rewrite ``apm.yml`` INSIDE
+        an installed package tree that ``compute_package_hash`` hashes raw,
+        so a platform-native CRLF write on Windows would make the lockfile
+        ``content_hash`` diverge from POSIX for identical upstream content.
+        """
+        p = tmp_path / "test.yml"
+        dump_yaml(
+            {"name": "skills", "version": "2c7ec5e", "description": "", "type": "hybrid"},
+            p,
+        )
+        raw = p.read_bytes()
+        assert b"\r" not in raw
+        assert raw.endswith(b"\n")
+
 
 class TestYamlToStr:
     """Tests for yaml_to_str()."""
@@ -280,6 +298,36 @@ class TestLoadFrontmatter:
         bomb = "---\n" + "\n".join(lines) + "\n---\nbody\n"
         with pytest.raises(yaml.YAMLError):
             load_frontmatter(io.StringIO(bomb))
+
+    @pytest.mark.windows_compat
+    def test_leading_bom_does_not_break_the_fence(self, tmp_path):
+        """A UTF-8 BOM (PowerShell/Notepad on Windows) doesn't hide the front matter (apm#2683)."""
+        text = '---\ndescription: Scoped rule\napplyTo: "**/*.py"\n---\n# Style\n'
+        path = tmp_path / "withbom.md"
+        path.write_bytes(text.encode("utf-8-sig"))
+        post = load_frontmatter(str(path))
+        assert post.metadata["applyTo"] == "**/*.py"
+        assert post.metadata["description"] == "Scoped rule"
+
+    @pytest.mark.windows_compat
+    def test_bom_and_no_bom_files_parse_identically(self, tmp_path):
+        """A BOM'd and a plain file with the same content yield the same metadata."""
+        text = '---\napplyTo: "**/*.py"\n---\nbody\n'
+        no_bom = tmp_path / "nobom.md"
+        with_bom = tmp_path / "withbom.md"
+        no_bom.write_bytes(text.encode("utf-8"))
+        with_bom.write_bytes(text.encode("utf-8-sig"))
+        assert load_frontmatter(str(no_bom)).metadata == load_frontmatter(str(with_bom)).metadata
+
+    @pytest.mark.windows_compat
+    def test_leading_bom_is_stripped_from_already_open_utf8_stream(self, tmp_path):
+        """The shared parser owns BOM removal even for already-open streams."""
+        text = '---\napplyTo: "**/*.py"\n---\nbody\n'
+        path = tmp_path / "withbom.md"
+        path.write_bytes(text.encode("utf-8-sig"))
+
+        with path.open(encoding="utf-8") as f:
+            assert load_frontmatter(f).metadata["applyTo"] == "**/*.py"
 
 
 class TestBoundedMergeHappyPath:

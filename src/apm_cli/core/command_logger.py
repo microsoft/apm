@@ -5,7 +5,11 @@ Provides CommandLogger (base for all commands) and InstallLogger
 from apm_cli.utils.console — no new output primitives.
 """
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from apm_cli.models.results import InstallDisposition
 from apm_cli.utils.console import (
@@ -15,6 +19,9 @@ from apm_cli.utils.console import (
     _rich_success,
     _rich_warning,
 )
+
+if TYPE_CHECKING:
+    from apm_cli.deps.revision_pins import RevisionPinSkip
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -31,6 +38,8 @@ class _ValidationOutcome:
     valid: list  # List of (canonical_name, already_present: bool) tuples
     invalid: list  # List of (package_name, reason: str) tuples
     marketplace_provenance: dict = None  # canonical -> {discovered_via, marketplace_plugin_name}
+    prospective_package: object | None = None
+    updated_packages: tuple[str, ...] = ()
 
     @property
     def all_failed(self) -> bool:
@@ -231,6 +240,36 @@ class InstallLogger(CommandLogger):
         super().__init__("install", verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
+        self._dry_run_apm_update_count = 0
+
+    def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
+        """Report retained revision pins once, with per-pin verbose detail."""
+        count = len(skips)
+        if count == 0:
+            return
+        noun = "pin" if count == 1 else "pins"
+        self.warning(
+            f"Retained {count} revision {noun}: no eligible stable annotated semver tag was found."
+        )
+        self.info(
+            "Keeping the current SHA. Publish an annotated stable tag matching a "
+            "supported pattern to refresh it."
+        )
+        if not self.verbose:
+            self.info("Run with --verbose to see retained pins.")
+        for skipped in skips:
+            self.verbose_detail(f"  {skipped.display_name}: {skipped.old_sha[:8]}")
+
+    def revision_pin_resolution_failed(self, error: Exception) -> None:
+        """Render a safe-stop error with verbose parser context."""
+        self.error(str(error))
+        if error.__cause__ is not None:
+            self.verbose_detail(f"  Parser cause: {error.__cause__}")
+        self.info(
+            "No files changed. Retry the update; report the upstream response if it persists."
+        )
+        if not self.verbose:
+            self.info("Run with --verbose for parser context.")
 
     # --- Validation phase ---
 
@@ -239,10 +278,17 @@ class InstallLogger(CommandLogger):
         noun = "package" if count == 1 else "packages"
         _rich_info(f"Validating {count} {noun}...", symbol="gear")
 
-    def validation_pass(self, canonical: str, already_present: bool, updated: bool = False):
+    def validation_pass(
+        self,
+        canonical: str,
+        already_present: bool,
+        updated: bool = False,
+        dry_run: bool = False,
+    ):
         """Log a package that passed validation."""
         if updated:
-            _rich_echo(f"{canonical} (updated ref in apm.yml)", color="dim", symbol="check")
+            verb = "would update" if dry_run else "updated"
+            _rich_echo(f"{canonical} ({verb} ref in apm.yml)", color="dim", symbol="check")
         elif already_present:
             _rich_echo(f"{canonical} (already in apm.yml)", color="dim", symbol="check")
         else:
@@ -270,11 +316,26 @@ class InstallLogger(CommandLogger):
 
     # --- Resolution phase ---
 
-    def resolution_start(self, to_install_count: int, lockfile_count: int):
+    def resolution_start(
+        self,
+        to_install_count: int,
+        lockfile_count: int,
+        update_count: int = 0,
+    ):
         """Log start of dependency resolution."""
         if self.partial:
             noun = "package" if to_install_count == 1 else "packages"
-            _rich_info(f"Installing {to_install_count} new {noun}...", symbol="running")
+            if self.dry_run:
+                update_note = ""
+                if update_count:
+                    update_noun = "update" if update_count == 1 else "updates"
+                    update_note = f" ({update_count} ref {update_noun})"
+                _rich_info(
+                    f"Previewing {to_install_count} {noun}{update_note}...",
+                    symbol="running",
+                )
+            else:
+                _rich_info(f"Installing {to_install_count} new {noun}...", symbol="running")
             if lockfile_count > 0 and self.verbose:
                 _rich_echo(
                     f"  ({lockfile_count} existing dependencies in lockfile)",
@@ -284,6 +345,10 @@ class InstallLogger(CommandLogger):
             _rich_info("Installing dependencies from apm.yml...", symbol="running")
             if lockfile_count > 0:
                 _rich_info(f"Using apm.lock.yaml ({lockfile_count} locked dependencies)")
+
+    def record_dry_run_apm_updates(self, count: int) -> None:
+        """Record how many selected APM refs the preview would update."""
+        self._dry_run_apm_update_count = count
 
     def nothing_to_install(
         self,
@@ -822,6 +887,26 @@ class InstallLogger(CommandLogger):
             timing_suffix = f" in {elapsed_seconds:.1f}s"
 
         if disposition is InstallDisposition.DRY_RUN:
+            update_count = min(self._dry_run_apm_update_count, apm_count)
+            if update_count:
+                update_noun = "update" if update_count == 1 else "updates"
+                dry_parts = [f"{update_count} APM dependency {update_noun}"]
+                install_count = apm_count - update_count
+                if install_count:
+                    noun = "dependency" if install_count == 1 else "dependencies"
+                    dry_parts.append(f"{install_count} APM {noun} to install")
+                if mcp_count:
+                    noun = "server" if mcp_count == 1 else "servers"
+                    dry_parts.append(f"{mcp_count} MCP {noun}")
+                if lsp_count:
+                    noun = "server" if lsp_count == 1 else "servers"
+                    dry_parts.append(f"{lsp_count} LSP {noun}")
+                summary = " and ".join(dry_parts)
+                _rich_info(
+                    f"Dry run completed: would apply {summary}{timing_suffix}.",
+                    symbol="info",
+                )
+                return
             summary = " and ".join(parts) if parts else "no changes"
             _rich_info(
                 f"Dry run completed: would install {summary}{timing_suffix}.",

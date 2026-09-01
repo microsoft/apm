@@ -865,8 +865,7 @@ class TestHelperFunctions:
 
     def test_sanitize_url_removes_query_fragment_and_embedded_credentials(self) -> None:
         diagnostic = (
-            "fatal: fetch https://user:pass@example.com/repo.git"
-            "?access_token=SECRET123#main failed"
+            "fatal: fetch https://user:pass@example.com/repo.git?access_token=SECRET123#main failed"
         )
 
         sanitized = _sanitize_url(diagnostic)

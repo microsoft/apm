@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core.target_detection import detect_target
-from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 from ..models.apm_package import APMPackage
 from ..utils.archive import (
     projected_archive_path,
@@ -13,6 +13,7 @@ from ..utils.archive import (
     write_tar_archive,
     write_zip_archive,
 )
+from ..utils.atomic_io import write_text_lf
 from .attest import verify_attested_file
 from .formats import BundleFormat, coerce_bundle_format
 from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
@@ -66,8 +67,6 @@ def pack_bundle(
         FileNotFoundError: If ``apm.lock.yaml`` is missing.
         ValueError: If deployed files referenced in the lockfile are missing on disk.
     """
-    # 1. Read lockfile (migrate legacy apm.lock → apm.lock.yaml if needed)
-    migrate_lockfile_if_needed(project_root)
     bundle_format = coerce_bundle_format(fmt)
 
     if bundle_format is BundleFormat.AGENT_PLUGIN:
@@ -97,7 +96,7 @@ def pack_bundle(
             logger=logger,
         )
 
-    lockfile_path = get_lockfile_path(project_root)
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
         raise FileNotFoundError(
@@ -334,7 +333,7 @@ def pack_bundle(
 
     # 8. Enrich lockfile copy and write to bundle
     enriched_yaml = enrich_lockfile_for_pack(lockfile, bundle_format.lock_value, effective_target)
-    (bundle_dir / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")
+    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
     result = PackResult(
         bundle_path=bundle_dir,

@@ -231,16 +231,11 @@ def test_ssh_git_environment_overrides_quoted_batch_mode_and_preserves_timeout()
     with patch.object(
         resolver,
         "hardened_git_base_env",
-        return_value={
-            "GIT_SSH_COMMAND": 'ssh -o "BatchMode no" -o "ConnectTimeout 5"'
-        },
+        return_value={"GIT_SSH_COMMAND": 'ssh -o "BatchMode no" -o "ConnectTimeout 5"'},
     ):
         env = resolver.build_ssh_git_env()
 
-    assert (
-        env["GIT_SSH_COMMAND"]
-        == 'ssh -o "ConnectTimeout 5" -o BatchMode=yes'
-    )
+    assert env["GIT_SSH_COMMAND"] == 'ssh -o "ConnectTimeout 5" -o BatchMode=yes'
 
 
 def test_fetch_git_ado_url_routes_via_subprocess(

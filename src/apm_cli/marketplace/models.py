@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE
 from apm_cli.models.dependency.reference import DependencyReference
@@ -199,7 +200,9 @@ class MarketplaceSource:
         if not self.url:
             if self.owner and self.repo:
                 host = self.host or "github.com"
-                object.__setattr__(self, "url", f"https://{host}/{self.owner}/{self.repo}")
+                owner = quote(self.owner, safe="/")
+                repo = quote(self.repo, safe="")
+                object.__setattr__(self, "url", f"https://{host}/{owner}/{repo}")
             # If neither URL nor legacy fields are usable, leave url empty; callers/tests
             # that pass only name=... will fail later when something tries to use it.
 
@@ -367,6 +370,7 @@ class MarketplacePlugin:
     # ``None`` means the field was absent (old marketplace.json); the resolver
     # falls back to its built-in default in that case.
     tag_pattern: str | None = None
+    manifest: dict[str, Any] | None = field(default=None, compare=False, hash=False, repr=False)
 
     def matches_query(self, query: str) -> bool:
         """Return True if the plugin matches a search query (case-insensitive)."""
@@ -538,6 +542,11 @@ def _parse_plugin_entry(
             source_marketplace=source_name,
             registry=registry_name,
             tag_pattern=tag_pattern,
+            manifest={
+                key: deepcopy(entry[key])
+                for key in ("name", "description", "version", "lspServers", "mcpServers")
+                if key in entry
+            },
         ),
         None,
     )

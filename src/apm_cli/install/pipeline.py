@@ -47,6 +47,7 @@ from functools import wraps
 from typing import TYPE_CHECKING
 
 from ..agent_plugins.errors import AgentPluginError
+from ..copilot_plugins.settings import CopilotSettingsCollisionError
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
@@ -643,11 +644,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # --------------------------------------------------------------
         # Phase 2: Target detection + integrator initialization.
         # Skipped in lockfile_only mode -- no primitives are deployed.
+        #
+        # Phase 2.1 (native Copilot plugin registration capability) shares
+        # this guard: it publishes the capability so the Agent Plugin
+        # deployment boundary can admit a verified plugin (issue #2703). In
+        # lockfile_only mode no primitives are deployed, so no native plugin
+        # can be admitted and resolving the capability would be pure waste.
         # --------------------------------------------------------------
         if not lockfile_only:
+            from .phases import copilot_plugins as _copilot_plugins_phase
             from .phases import targets as _targets_phase
 
             _run_phase("targets", _targets_phase, ctx)
+            _run_phase("copilot_activate", _copilot_plugins_phase.ActivatePhase, ctx)
 
         # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)
@@ -918,6 +927,18 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
             except PolicyViolationError:
                 raise
 
+        # ------------------------------------------------------------------
+        # Phase: Native GitHub Copilot Agent Plugin registration (#2703).
+        # Runs LAST -- after the lockfile is canonical, after the require-hashes
+        # integrity gate, and after the content-audit gate -- so the APM-owned
+        # marketplace catalog, ownership ledger, and enabled-plugin settings
+        # entries are written only for an install those gates actually allowed
+        # to complete. Writing earlier would leave Copilot loading a plugin a
+        # later gate refused.
+        # ------------------------------------------------------------------
+        if not lockfile_only:
+            _run_phase("copilot_plugins", _copilot_plugins_phase, ctx)
+
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
 
@@ -951,11 +972,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         raise
     except InstallFailureAlreadyRendered:
         raise
-    except (PathTraversalError, MaterializationPathCollisionError):
-        # Path-safety and package-directory collision errors already include
-        # actionable guidance; preserve them instead of adding generic wrappers.
+    except (PathTraversalError, MaterializationPathCollisionError, CopilotSettingsCollisionError):
+        # Path-safety, package-directory collision, and Copilot settings
+        # collision errors already include actionable guidance; re-raise them
+        # verbatim. A settings collision in particular means dependency
+        # resolution SUCCEEDED and the lockfile is written -- only the Copilot
+        # merge collided -- so wrapping it into "Failed to resolve APM
+        # dependencies: ..." would mis-attribute the failure and double-wrap
+        # once commands/install.py prefixes again.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
     finally:
+        from .phases import copilot_plugins as _copilot_plugins_cleanup
+
+        _copilot_plugins_cleanup.deactivate(ctx)
         ctx.tui.__exit__()

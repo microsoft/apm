@@ -53,8 +53,11 @@ bundle (`plugin.json` + `skills/` + `mcp.json` only, no Claude-specific
 directories) for producers targeting Agent-Plugin-aware hosts beyond APM.
 That format is stricter -- it fails before writing anything if your source
 has agents, commands, instructions, extensions, hooks, or LSP config it
-cannot represent -- and `apm install` does not deploy it yet. Use the
-default Claude plugin bundle above for anything you need to install today.
+cannot represent. To install one, declare it as a dependency in `apm.yml`
+and run `apm install --target copilot`, which registers it natively without
+locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer is required
+when loading the projection; see
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 Add `--archive` to get a single archive (`.zip` by default; use `--archive-format tar.gz`
 for legacy CI pipelines) instead of a directory; use `-o` to change the output location
@@ -196,7 +199,7 @@ primitive type:
 | command (prompt) | `.apm/prompts/*.prompt.md` | No |
 | hook | `.apm/hooks/*.json` | Yes: `hooks/*.json` |
 | agent | `.apm/agents/**/*.agent.md` | Yes: `*.agent.md` at package root |
-| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
+| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE; for MARKETPLACE_PLUGIN only when `plugin.json` declares it) |
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,
 `src/apm_cli/integration/command_integrator.py`,
@@ -222,6 +225,10 @@ If you publish a plugin that consumers install via `apm install`, use
 `.apm/<type>/` for **every** primitive type. This layout is the only
 one that works symmetrically through both `apm pack` (export) and
 `apm install` (discovery).
+
+For a marketplace plugin, `plugin.json` is authoritative when it declares
+`skills`: declare each skill or an immediate container, or omit `skills` to
+use conventional discovery. See [Package Types](../../reference/package-types/#plugin-collection-pluginjson).
 
 ```
 plugins/my-plugin/
@@ -291,11 +298,13 @@ the older layout; new bundles should use the default Claude plugin format
 apm pack --archive
 ```
 
-**`apm install` does not deploy Agent Plugin output yet.** `apm pack --format agent-plugin`
-produces a valid, portable Agent Plugins v1 bundle, but installing one with
-`apm install` fails closed today, pending native runtime integration. Use the
-default Claude plugin bundle (or `--format apm` for legacy tooling) for
-anything you need `apm install` to deploy.
+**Install Agent Plugin output through the declarative route.** `apm pack --format agent-plugin`
+produces a valid, portable Agent Plugins v1 bundle. Declare it as a dependency
+in `apm.yml` and run `apm install --target copilot`, which registers it without
+locating or executing Copilot. Stable Copilot CLI 1.0.81 or newer is required
+when loading the projection; the imperative `apm install <bundle>` route fails
+closed for Agent Plugins. See
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
 
 **Do not set `--target`.** The flag is deprecated. Bundles are
 target-agnostic: the consumer's project decides which harness layouts

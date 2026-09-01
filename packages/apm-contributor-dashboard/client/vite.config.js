@@ -26,6 +26,7 @@ export default defineConfig({
       "/approve-pr": "http://127.0.0.1:3456",
       "/approve-workflow-runs": "http://127.0.0.1:3456",
       "/merge-when-ready": "http://127.0.0.1:3456",
+      "/refresh-data": "http://127.0.0.1:3456",
     },
   },
 });

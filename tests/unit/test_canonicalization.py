@@ -68,6 +68,11 @@ class TestToCanonical:
         with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
             DependencyReference.parse("owner/repo%40my-alias")
 
+    def test_url_encoded_at_in_alias_shorthand_with_ref_rejected(self):
+        """An encoded shorthand alias is rejected even when a ref follows it."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo%40my-alias#v1.0.0")
+
     def test_trailing_at_with_no_alias_rejected(self):
         """A bare trailing ``@`` is rejected (not silently stripped)."""
         with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):

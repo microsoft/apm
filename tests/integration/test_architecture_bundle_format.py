@@ -1,242 +1,118 @@
-"""Architecture guardrails for the bundle-format authority."""
+"""Per-subcheck mutations for the registered bundle-format authority rule."""
 
 from __future__ import annotations
 
-import shutil
-import subprocess
+import ast
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+from scripts.architecture_linter.runner import run_selected_rules
 
-def test_bundle_format_guard_rejects_parallel_authority(tmp_path: Path) -> None:
-    """The boundary checker must reject a second format resolver."""
-    root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    script = sandbox / "scripts/check_bundle_format_authority.sh"
-    owner = sandbox / "src/apm_cli/bundle/formats.py"
-    duplicate = sandbox / "src/apm_cli/bundle/duplicate.py"
-    script.parent.mkdir(parents=True)
-    owner.parent.mkdir(parents=True)
-    shutil.copy2(root / "scripts/check_bundle_format_authority.sh", script)
-    shutil.copy2(root / "src/apm_cli/bundle/formats.py", owner)
-    duplicate.write_text(
-        "def resolve_bundle_format():\n    return 'parallel'\n",
-        encoding="utf-8",
-    )
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.xdist_group(name="architecture_bundle_format_mutations"),
+]
 
-    result = subprocess.run(
-        ("bash", str(script), str(sandbox)),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-
-    assert result.returncode == 1
-    assert result.stdout.splitlines()[0] == (
-        "[x] Bundle format authority must live in src/apm_cli/bundle/formats.py"
-    )
+ROOT = Path(__file__).resolve().parents[2]
+RULE_ID = "marketplace-integrations-bundle-format-authority"
 
 
-def test_agent_plugin_guard_rejects_parallel_contract_loader(tmp_path: Path) -> None:
-    """The boundary checker must reject a second Agent Plugin interpreter."""
-    root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    paths = (
-        "scripts/check_bundle_format_authority.sh",
+@dataclass(frozen=True)
+class BundleMutation:
+    name: str
+    path: str
+    old: str | None = None
+    new: str | None = None
+    append: str = ""
+
+
+MUTATIONS: tuple[BundleMutation, ...] = (
+    BundleMutation(
+        "B1-single-format-owner",
+        "src/apm_cli/bundle/packer.py",
+        append="\n\ndef resolve_bundle_format(value):\n    return value\n",
+    ),
+    BundleMutation(
+        "B2-preferred-plugin-pin",
         "src/apm_cli/bundle/formats.py",
-        "src/apm_cli/agent_plugins/loader.py",
-        "src/apm_cli/models/validation.py",
-        "src/apm_cli/models/format_detection.py",
-        "src/apm_cli/deps/plugin_parser.py",
-    )
-    for relative in paths:
-        source = root / relative
-        destination = sandbox / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-    duplicate = sandbox / "src/apm_cli/duplicate_agent_plugin.py"
-    duplicate.write_text(
-        "def load_agent_plugin(package_root):\n    return package_root\n",
-        encoding="utf-8",
-    )
-
-    result = subprocess.run(
-        ("bash", str(sandbox / "scripts/check_bundle_format_authority.sh"), str(sandbox)),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-
-    assert result.returncode == 1
-    assert result.stdout.splitlines()[0] == (
-        "[x] Agent Plugin interpretation must live in src/apm_cli/agent_plugins/loader.py"
-    )
-
-
-def test_agent_plugin_guard_rejects_parallel_in_package_loader(tmp_path: Path) -> None:
-    """The checker must not exempt parallel owners inside agent_plugins."""
-    root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    paths = (
-        "scripts/check_bundle_format_authority.sh",
+        "PREFERRED_PLUGIN_FORMAT = BundleFormat.CLAUDE_PLUGIN",
+        "PREFERRED_PLUGIN_FORMAT = BundleFormat.AGENT_PLUGIN",
+    ),
+    BundleMutation(
+        "B3-plugin-token-pin",
         "src/apm_cli/bundle/formats.py",
-        "src/apm_cli/agent_plugins/loader.py",
-        "src/apm_cli/agent_plugins/ir.py",
-        "src/apm_cli/models/validation.py",
-        "src/apm_cli/models/format_detection.py",
-        "src/apm_cli/deps/plugin_parser.py",
-    )
-    for relative in paths:
-        source = root / relative
-        destination = sandbox / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-    duplicate = sandbox / "src/apm_cli/agent_plugins/parallel.py"
-    duplicate.write_text(
-        "def load_agent_plugin(package_root):\n    return package_root\n",
-        encoding="utf-8",
-    )
-
-    result = subprocess.run(
-        ("bash", str(sandbox / "scripts/check_bundle_format_authority.sh"), str(sandbox)),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-
-    assert result.returncode == 1
-    assert result.stdout.splitlines()[0] == (
-        "[x] Agent Plugin interpretation must live in src/apm_cli/agent_plugins/loader.py"
-    )
-
-
-def test_agent_plugin_guard_requires_admissibility_before_legacy_fallback(
-    tmp_path: Path,
-) -> None:
-    """The checker must reject removal of the present-manifest admissibility gate."""
-    root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    paths = (
-        "scripts/check_bundle_format_authority.sh",
+        '"plugin": BundleFormat.CLAUDE_PLUGIN',
+        '"plugin": BundleFormat.AGENT_PLUGIN',
+    ),
+    BundleMutation(
+        "B4-selector-seam",
         "src/apm_cli/bundle/formats.py",
-        "src/apm_cli/agent_plugins/loader.py",
-        "src/apm_cli/models/validation.py",
-        "src/apm_cli/models/format_detection.py",
-        "src/apm_cli/deps/plugin_parser.py",
-    )
-    for relative in paths:
-        source = root / relative
-        destination = sandbox / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-
-    loader = sandbox / "src/apm_cli/agent_plugins/loader.py"
-    loader.write_text(
-        loader.read_text(encoding="utf-8").replace(
-            "read_json_document(manifest_path, reject_duplicate_schema=True)",
-            "read_json_document(manifest_path)",
+        "if len(selections) > 1:",
+        "if len(selections) > 2:",
+    ),
+    BundleMutation(
+        "B5-plugin-option-ban",
+        "src/apm_cli/commands/plugin/init.py",
+        '    "--format",',
+        '    "--plugin",',
+    ),
+    BundleMutation(
+        "B8-streaming-archive",
+        "src/apm_cli/bundle/reproducible_archive.py",
+        "shutil.copyfileobj(source, member)",
+        "member.write(source.read())",
+    ),
+    BundleMutation(
+        "B9-init-scaffolding",
+        "src/apm_cli/commands/init.py",
+        "plugin = load_agent_plugin(staged_root)",
+        "plugin = None",
+    ),
+    BundleMutation(
+        "B17-schema-admission",
+        "src/apm_cli/marketplace/resolver.py",
+        append=(
+            "\n\ndef _rogue_schema_admission(schema):\n    return detect_agent_plugin(schema)\n"
         ),
-        encoding="utf-8",
-    )
-
-    result = subprocess.run(
-        ("bash", str(sandbox / "scripts/check_bundle_format_authority.sh"), str(sandbox)),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-
-    assert result.returncode == 1
-    assert result.stdout.splitlines()[0] == (
-        "[x] Agent Plugin loader must own admissibility, detection, loading, and manifest authority"
-    )
-
-
-@pytest.mark.parametrize(
-    ("relative_path", "old", "new", "message"),
-    [
+    ),
+    BundleMutation(
+        "B18-boundary-order",
+        "src/apm_cli/commands/install.py",
         (
-            "src/apm_cli/bundle/formats.py",
-            "PREFERRED_PLUGIN_FORMAT = BundleFormat.CLAUDE_PLUGIN",
-            "PREFERRED_PLUGIN_FORMAT = BundleFormat.AGENT_PLUGIN",
-            "Agent Plugin preferred-default flip is reserved for T10 after G3",
+            "                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)\n"
+            "                from ..install.local_bundle_handler import install_local_bundle as _install_lb"
         ),
         (
-            "src/apm_cli/bundle/formats.py",
-            '"plugin": BundleFormat.CLAUDE_PLUGIN',
-            '"plugin": BundleFormat.AGENT_PLUGIN',
-            "plugin format token must remain Claude-compatible for apm-action@v1",
+            "                from ..install.local_bundle_handler import install_local_bundle as _install_lb\n"
+            "                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)"
         ),
-        (
-            "src/apm_cli/commands/plugin/init.py",
-            '    "--format",',
-            '    "--plugin",',
-            "Portable Agent Plugins must use --format agent-plugin, not --plugin",
-        ),
-        (
-            "src/apm_cli/bundle/formats.py",
-            "if len(selections) > 1:",
-            "if len(selections) > 2:",
-            "Bundle selectors and no-flag behavior must route through the canonical format seam",
-        ),
-        (
-            "src/apm_cli/commands/init.py",
-            "plugin = load_agent_plugin(staged_root)",
-            "plugin = None",
-            "Plugin scaffolding must share the preferred-format seam and canonical reload",
-        ),
-        (
-            "src/apm_cli/bundle/reproducible_archive.py",
-            "shutil.copyfileobj(source, member)",
-            "member.write(path.read_bytes())",
-            "Reproducible archives must stream file payloads without full-file buffering",
-        ),
-        (
-            "src/apm_cli/bundle/agent_plugin_exporter.py",
-            "    _require_portable_agent_plugin(dropped_surfaces)\n",
-            "    # Portable-surface admission bypassed.\n",
-            "Agent Plugin portable-surface admission must fail before output projection",
-        ),
-    ],
+    ),
 )
-def test_producer_projection_guard_kills_contract_mutations(
-    tmp_path: Path,
-    relative_path: str,
-    old: str,
-    new: str,
-    message: str,
+
+
+def _mutate(case: BundleMutation) -> str:
+    source = (ROOT / case.path).read_text(encoding="utf-8")
+    if case.old is not None:
+        assert case.new is not None
+        assert source.count(case.old) == 1
+        source = source.replace(case.old, case.new, 1)
+    source += case.append
+    ast.parse(source, filename=case.path)
+    return source
+
+
+@pytest.mark.parametrize("case", MUTATIONS, ids=[case.name for case in MUTATIONS])
+def test_registered_bundle_rule_rejects_each_compound_subcheck(
+    case: BundleMutation,
 ) -> None:
-    """The static gate must kill default, init, omission, and streaming mutants."""
-    root = Path(__file__).parents[2]
-    sandbox = tmp_path / "repo"
-    paths = {
-        "scripts/check_bundle_format_authority.sh",
-        "src/apm_cli/bundle/formats.py",
-        relative_path,
-    }
-    for relative in paths:
-        source = root / relative
-        destination = sandbox / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-
-    mutation_path = sandbox / relative_path
-    source = mutation_path.read_text(encoding="utf-8")
-    assert old in source
-    mutation_path.write_text(source.replace(old, new, 1), encoding="utf-8")
-
-    result = subprocess.run(
-        ("bash", str(sandbox / "scripts/check_bundle_format_authority.sh"), str(sandbox)),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
+    report = run_selected_rules(
+        ROOT,
+        (RULE_ID,),
+        source_overrides={case.path: _mutate(case)},
     )
 
-    assert result.returncode == 1
-    assert message in result.stdout
+    assert report.failures == ()
+    assert report.exit_code == 2
+    assert any(violation.rule_id == RULE_ID for violation in report.violations)

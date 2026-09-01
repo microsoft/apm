@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -263,6 +265,7 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
     packages = LocalPackageFactory(isolated.package_root)
     source = packages.create("private-package", targets=("copilot",))
     packages.add_skill(source, "private-package", _skill_source("private-package"))
+    packages.add_skill(source, "private-subpackage", _skill_source("private-subpackage"))
     repositories = LocalGitRepositoryFactory(
         isolated.repository_root,
         env=base_environment,
@@ -271,7 +274,10 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
     repositories.commit(repository, message="seed private package")
     project = LocalPackageFactory(isolated.work_root).create(
         "private-consumer",
-        dependencies=(f"{_PRIVATE_OWNER}/private-package#main",),
+        dependencies=(
+            f"{_PRIVATE_OWNER}/private-package#main",
+            f"{_PRIVATE_OWNER}/private-package/skills/private-subpackage#main",
+        ),
         targets=("copilot",),
     )
 
@@ -298,6 +304,7 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
             shim,
             proxy_url=server.proxy_url,
         )
+        environment["GIT_HTTP_EXTRAHEADER"] = "Authorization: Bearer ambient-must-not-leak"
         result = ApmLifecycleRunner((str(apm_binary_path),)).run(
             (*_INSTALL_ARGS, "--verbose"),
             scenario_id="private-github-scoped-fallback",
@@ -310,7 +317,10 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
             f"shim_events={shim.events()!r}\n"
             f"http_observations={server.observations!r}"
         )
+        assert "Partial clone unavailable" not in result.stdout
+        assert "Partial clone unavailable" not in result.stderr
         assert (project.root / ".agents/skills/private-package/SKILL.md").is_file()
+        assert (project.root / ".agents/skills/private-subpackage/SKILL.md").is_file()
 
         credential_events = [
             event for event in shim.events() if event.get("event") == "credential-fill"
@@ -332,9 +342,16 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
         remote_attempts = [remote for event in remote_events for remote in event["remotes"]]
         assert remote_attempts[0]["authenticated_url"] is False
         assert any(remote["authenticated_url"] is True for remote in remote_attempts)
+        header_authenticated_events = [
+            event for event in remote_events if event["auth_config_present"] is True
+        ]
+        assert header_authenticated_events
         for event in remote_events:
             remotes = event["remotes"]
-            if all(remote["authenticated_url"] is False for remote in remotes):
+            if event["auth_config_present"] is True:
+                assert event["git_token_present"] is False
+                assert all(remote["authenticated_url"] is False for remote in remotes)
+            elif all(remote["authenticated_url"] is False for remote in remotes):
                 _assert_anonymous_remote_event(event)
 
         private_requests = [
@@ -347,3 +364,26 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
             observation.accepted and observation.authorization_present
             for observation in private_requests
         )
+
+        bare_cache = isolated.cache_root / "git" / "db_v1"
+        bare_repositories = [path for path in bare_cache.iterdir() if path.is_dir()]
+        assert len(bare_repositories) >= 2
+        assert all(_PRIVATE_TOKEN not in path.name for path in bare_repositories)
+        for bare_repository in bare_repositories:
+            remote = subprocess.run(
+                (
+                    str(_real_git()),
+                    "-C",
+                    str(bare_repository),
+                    "config",
+                    "--get",
+                    "remote.origin.url",
+                ),
+                check=True,
+                capture_output=True,
+                text=True,
+                env=base_environment,
+            ).stdout.strip()
+            parsed = urlparse(remote)
+            assert parsed.username is None
+            assert parsed.password is None

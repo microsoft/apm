@@ -73,6 +73,21 @@ def _git_semver_package_name(dep_ref: DependencyReference) -> str:
     return dep_ref.repo_url.rsplit("/", 1)[-1]
 
 
+def is_git_semver_resolution_eligible(dep_ref: DependencyReference) -> bool:
+    """Return whether a dependency must resolve its semver constraint from Git tags.
+
+    Registry routing is decided before this helper is called by positional CLI
+    ingress. This helper owns the remaining source and reference checks shared
+    by that ingress and the resolve phase.
+    """
+    return (
+        not dep_ref.is_local
+        and getattr(dep_ref, "source", None) != "registry"
+        and not getattr(dep_ref, "artifactory_prefix", None)
+        and dep_ref.ref_kind == "semver"
+    )
+
+
 def maybe_resolve_git_semver(
     *,
     dep_ref: DependencyReference,
@@ -85,13 +100,7 @@ def maybe_resolve_git_semver(
     protocol_pref: ProtocolPreference | None = None,
 ) -> Any:
     """Resolve a git-source semver range or replay its locked resolution."""
-    if dep_ref.is_local:
-        return None
-    if getattr(dep_ref, "source", None) == "registry":
-        return None
-    if getattr(dep_ref, "artifactory_prefix", None):
-        return None
-    if dep_ref.ref_kind != "semver":
+    if not is_git_semver_resolution_eligible(dep_ref):
         return None
 
     constraint = dep_ref.reference

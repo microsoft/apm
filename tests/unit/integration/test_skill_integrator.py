@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -1187,7 +1188,7 @@ Use when building MCP servers or tools.
         (skill_source / "assets").mkdir()
         (skill_source / "assets" / "config.json").write_text("{}")
 
-        # Also create a custom subdirectory (should be copied too)
+        # Custom directories are part of the documented whole-skill bundle.
         (skill_source / "examples").mkdir()
         (skill_source / "examples" / "basic.md").write_text("# Basic Example")
 
@@ -1267,7 +1268,7 @@ Use when building MCP servers or tools.
         assert "# NEW CONTENT" in skill_content
         assert "# OLD CONTENT" not in skill_content
 
-        # Old file should be removed, new file should exist
+        # Reinstall replaces stale files while preserving new bundle resources.
         assert not (skill_dir / "old-file.txt").exists()
         assert (skill_dir / "new-file.txt").exists()
 
@@ -3911,6 +3912,40 @@ class TestPromoteSubSkillsCowork:
         )
         assert count >= 1
         assert (cowork_root / "my-sub" / "SKILL.md").exists()
+
+    def test_promote_sub_skills_uses_deployable_source_plan(self, tmp_path: Path) -> None:
+        """A source plan reaches non-root skill promotion without changing its copy set."""
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        pkg_dir = tmp_path / "src" / "parent-pkg"
+        sub_skill = pkg_dir / ".apm" / "skills" / "my-sub"
+        sub_skill.mkdir(parents=True)
+        (sub_skill / "SKILL.md").write_text("# Sub Skill")
+        (sub_skill / "assets").mkdir()
+        (sub_skill / "assets" / "guide.txt").write_text("deploy me")
+
+        pkg_info = _make_package_info(pkg_dir)
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+        source_plan = DeployableSourcePlan.create(
+            pkg_info,
+            [cowork_target],
+            skill_subset=None,
+            hooks_approved=False,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        count, _ = SkillIntegrator()._promote_sub_skills_standalone(
+            pkg_info,
+            project_root,
+            targets=[cowork_target],
+            source_plan=source_plan,
+        )
+
+        assert count == 1
+        assert (cowork_root / "my-sub" / "assets" / "guide.txt").exists()
 
     def test_promote_sub_skills_rel_prefix_no_relative_to_crash(self, tmp_path: Path) -> None:
         cowork_root = tmp_path / "cowork-skills"

@@ -20,13 +20,14 @@ from ..agent_plugins import (
     load_agent_plugin,
     url_contains_literal_secret,
 )
-from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
 from ..models.apm_package import APMPackage
 from ..utils.archive import (
     projected_archive_path,
     validate_archive_format,
 )
+from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import ensure_path_within, safe_rmtree
 from .export_common import (
@@ -299,8 +300,7 @@ def export_agent_plugin_bundle(
     logger=None,
 ) -> PackResult:
     """Export the project as an Agent Plugin bundle."""
-    migrate_lockfile_if_needed(project_root)
-    lockfile_path = get_lockfile_path(project_root)
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
         raise FileNotFoundError(
@@ -469,14 +469,11 @@ def export_agent_plugin_bundle(
 
         mcp_path = staged_bundle / "mcp.json"
         mcp_path.parent.mkdir(parents=True, exist_ok=True)
-        mcp_path.write_text(
-            json.dumps(mcp_document, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        write_text_lf(mcp_path, json.dumps(mcp_document, indent=2, sort_keys=True) + "\n")
 
-        (staged_bundle / "plugin.json").write_text(
+        write_text_lf(
+            staged_bundle / "plugin.json",
             json.dumps(plugin_json, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
         )
 
         for doc_name in ("README.md", "LICENSE", "CHANGELOG.md", "CHANGELOG"):
@@ -498,7 +495,7 @@ def export_agent_plugin_bundle(
             bundle_files=bundle_files,
             packed_at=lockfile.generated_at,
         )
-        (staged_bundle / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")
+        write_text_lf(staged_bundle / "apm.lock.yaml", enriched_yaml)
 
         _validate_agent_plugin_round_trip(
             staged_bundle,

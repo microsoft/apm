@@ -26,6 +26,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.integration.hook_source_selection import HookSourceSelection
+
 # ---------------------------------------------------------------------------
 # kiro_hook_integrator -- pure helpers
 # ---------------------------------------------------------------------------
@@ -232,7 +234,7 @@ class TestIntegrateKiroHooksFlow:
         """Build a mock HookIntegrator."""
         integrator = MagicMock()
         integrator.HOOK_COMMAND_KEYS = ("bash", "command")
-        integrator.find_hook_files.return_value = []
+        integrator.select_hook_sources_for_target.return_value = HookSourceSelection({}, {})
         integrator._get_package_name.return_value = "my-pkg"
         integrator._parse_hook_json.return_value = None
         integrator._rewrite_hooks_data.return_value = ({}, [])
@@ -257,7 +259,7 @@ class TestIntegrateKiroHooksFlow:
         kiro_dir = tmp_path / ".kiro"
         kiro_dir.mkdir()
         integrator = self._make_integrator()
-        integrator.find_hook_files.return_value = []
+        integrator.select_hook_sources_for_target.return_value = HookSourceSelection({}, {})
         pkg_info = self._make_package_info(tmp_path / "pkg")
         result = integrate_kiro_hooks(integrator, pkg_info, tmp_path)
         assert result.files_integrated == 0
@@ -275,7 +277,10 @@ class TestIntegrateKiroHooksFlow:
         hook_file.write_text('{"hooks":{}}', encoding="utf-8")
 
         integrator = self._make_integrator()
-        integrator.find_hook_files.return_value = [hook_file]
+        integrator.select_hook_sources_for_target.return_value = HookSourceSelection(
+            {"kiro": frozenset({hook_file})},
+            {"kiro": frozenset()},
+        )
         rewritten = {
             "hooks": {
                 "preToolUse": [
@@ -316,7 +321,10 @@ class TestIntegrateKiroHooksFlow:
         }
 
         integrator = self._make_integrator()
-        integrator.find_hook_files.return_value = [hook_file]
+        integrator.select_hook_sources_for_target.return_value = HookSourceSelection(
+            {"kiro": frozenset({hook_file})},
+            {"kiro": frozenset()},
+        )
         integrator._parse_hook_json.return_value = rewritten
         integrator._rewrite_hooks_data.return_value = (rewritten, [])
 

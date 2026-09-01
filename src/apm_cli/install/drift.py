@@ -374,6 +374,31 @@ def _materialize_install_path(
     return candidate
 
 
+def _normalize_legacy_local_plugin_for_replay(
+    lock_dep: LockedDependency,
+    install_path: Path,
+    apm_modules_dir: Path,
+) -> Path:
+    """Normalize a local legacy plugin only in the scratch replay tree."""
+    from apm_cli.agent_plugins.loader import detect_agent_plugin
+    from apm_cli.deps.plugin_parser import normalize_plugin_directory
+    from apm_cli.utils.helpers import find_plugin_json
+
+    if detect_agent_plugin(install_path) is not None:
+        return install_path
+
+    plugin_json = find_plugin_json(install_path)
+    if plugin_json is None:
+        return install_path
+
+    replay_path = lock_dep.to_dependency_ref().get_install_path(apm_modules_dir)
+    _copy_install_tree(install_path, replay_path)
+    # The canonical loader has already excluded native Agent Plugin inputs.
+    manifest_path = replay_path / plugin_json.relative_to(install_path)
+    normalize_plugin_directory(replay_path, manifest_path)
+    return replay_path
+
+
 def _build_package_info(
     lock_dep: LockedDependency,
     install_path: Path,
@@ -618,6 +643,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         registry_resolver=registry_resolver,
                         registries=registries,
                     )
+                    if lock_dep.source == "local":
+                        install_path = _normalize_legacy_local_plugin_for_replay(
+                            lock_dep,
+                            install_path,
+                            apm_modules_dir,
+                        )
 
                 package_info = _build_package_info(lock_dep, install_path)
                 if lock_dep.local_path == _SELF_KEY:
@@ -846,12 +877,15 @@ def diff_scratch_against_project(
         _collect_hashed_files(lockfile),
         project_files,
     )
-    # Hook merge targets (.claude/settings.json, .cursor/hooks.json, and their
-    # apm-hooks.json sidecars) are shared with the user and never claimed in
-    # deployed_files, so they can never be "unrecorded".
-    from apm_cli.install.manifest_reconcile import merge_hook_config_paths
+    # Hook merge targets are shared with the user and never claimed in
+    # deployed_files, so they can never be "unrecorded". Their APM-owned slice
+    # is compared through hook_ownership; sidecars remain byte-for-byte owned.
+    from apm_cli.install.manifest_reconcile import merge_hook_config_projection_specs
 
-    merge_config_paths = merge_hook_config_paths(targets)
+    merge_config_specs = merge_hook_config_projection_specs(targets)
+    merge_config_paths = set(merge_config_specs) | {
+        sidecar_path for sidecar_path, _ in merge_config_specs.values()
+    }
 
     # Imperative local bundles have no authored source tree for replay. Their
     # deployed bytes are already bound by local_deployed_file_hashes and the
@@ -906,7 +940,21 @@ def diff_scratch_against_project(
         try:
             s_bytes = _normalize(scratch_path.read_bytes())
             p_bytes = _normalize(project_path.read_bytes())
-        except OSError as exc:
+            if projection_spec := merge_config_specs.get(rel):
+                from apm_cli.integration.hook_ownership import project_apm_owned_hook_entries
+
+                sidecar_rel, event_container_key = projection_spec
+                s_bytes = project_apm_owned_hook_entries(
+                    s_bytes,
+                    _normalize((scratch_root / sidecar_rel).read_bytes()),
+                    event_container_key,
+                )
+                p_bytes = project_apm_owned_hook_entries(
+                    p_bytes,
+                    _normalize((project_root / sidecar_rel).read_bytes()),
+                    event_container_key,
+                )
+        except (OSError, ValueError) as exc:
             findings.append(
                 DriftFinding(
                     path=rel,

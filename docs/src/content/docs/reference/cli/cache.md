@@ -129,7 +129,10 @@ Inside the cache root:
                      #                    for sparse-checkout consumers
     checkouts_v1/    # per-SHA worktree checkouts, variant-keyed
                      #   <shard>/<sha>/full/             -- full tree
-                     #   <shard>/<sha>/sparse-<hash>/    -- sparse cone
+                     #   <shard>/<sha>/sparse-<hash>/    -- sparse cone, or a
+                     #                                     full tree when a
+                     #                                     symlink target lies
+                     #                                     outside the cone
                      #                                     (<hash> = first
                      #                                      16 hex of
                      #                                      sha256(paths))
@@ -140,7 +143,9 @@ The `full/` and `sparse-<variant>/` subdirs let two consumers of the
 same commit share storage when they want the same subdirs, and keep
 distinct shards when they do not -- without the variant suffix the
 sparse checkout would clobber the full tree for any other consumer
-of that SHA.
+of that SHA. A sparse variant widens to the full tree when a package
+symlink targets a tracked file excluded from the sparse cone, so that
+variant can consume more disk than its name suggests.
 
 The cache root is created with mode `0700` and validated to be
 absolute with no NUL bytes before use.

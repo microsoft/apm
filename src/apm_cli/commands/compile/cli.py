@@ -767,20 +767,45 @@ def _run_compilation(
                 # unreachable in normal flow, but silent zero-effect
                 # success is the worst-case package-manager DX.
                 #
-                # Pattern-based stat scan (instead of a hardcoded key
-                # list) so new compile-time targets pick up the guard
-                # automatically: any stat ending in ``_files_written``
-                # or ``_files_generated`` contributes to the total.
-                _files_written = sum(
-                    int(v or 0)
-                    for k, v in result.stats.items()
-                    if k.endswith(("_files_written", "_files_generated"))
+                agents_generated = int(
+                    result.stats.get(
+                        "agents_files_generated",
+                        result.stats.get("agents_files_written", 0),
+                    )
+                    or 0
+                )
+                _files_written = agents_generated + sum(
+                    int(result.stats.get(key, 0) or 0)
+                    for key in (
+                        "claude_files_written",
+                        "gemini_files_written",
+                        "copilot_root_instructions_written",
+                    )
                 )
                 if _files_written > 0:
-                    logger.success(
-                        "Compilation completed successfully!",
-                        symbol="check",
+                    nested_skips = max(
+                        int(result.stats.get("nested_git_placements_skipped", 0) or 0),
+                        sum(
+                            "Skipping AGENTS.md at " in warning
+                            and ": nested Git repository " in warning
+                            for warning in result.warnings
+                        ),
                     )
+                    if nested_skips:
+                        output_noun = "file" if _files_written == 1 else "files"
+                        generated_noun = "file" if agents_generated == 1 else "files"
+                        skipped_noun = "placement" if nested_skips == 1 else "placements"
+                        logger.success(
+                            f"Compiled {_files_written} output {output_noun} "
+                            f"({agents_generated} AGENTS.md {generated_noun}); "
+                            f"skipped {nested_skips} nested Git repository {skipped_noun}.",
+                            symbol="check",
+                        )
+                    else:
+                        logger.success(
+                            "Compilation completed successfully!",
+                            symbol="check",
+                        )
                 elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
                     # The compiler already reported the expected cleanup outcome.
                     pass

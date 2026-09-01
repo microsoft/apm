@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_info, _rich_success, _rich_warning
 from ..utils.path_security import ensure_path_within
 
@@ -477,10 +478,7 @@ def write_plugin_manifest_with_outcome(
     # component could have been swapped for a symlink between the first check
     # and directory creation.
     ensure_path_within(output_path, project_root)
-    output_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=False) + "\n",
-        encoding="utf-8",
-    )
+    write_text_lf(output_path, json.dumps(manifest, indent=2, sort_keys=False) + "\n")
 
     _success = f"Generated plugin manifest: {output_path}"
     _emit("success", _success, logger, "check")

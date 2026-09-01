@@ -1322,7 +1322,29 @@ class TestDryRunPresentation:
         dep.repo_url = repo_url
         dep.reference = reference
         dep.get_unique_key.return_value = repo_url
+        dep.to_display_reference.return_value = f"{repo_url}#{reference or 'main'}"
         return dep
+
+    @staticmethod
+    def _plan(
+        *,
+        apm_deps: list,
+        mcp_deps: list,
+        should_install_apm: bool,
+        should_install_mcp: bool,
+    ):
+        from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
+
+        apm_dependencies = tuple(apm_deps)
+        return ProspectiveInstallPlan(
+            apm_dependencies=apm_dependencies,
+            dev_apm_dependencies=(),
+            selected_apm_dependencies=apm_dependencies,
+            mcp_dependencies=tuple(mcp_deps),
+            should_install_apm=should_install_apm,
+            should_install_mcp=should_install_mcp,
+            only_packages=None,
+        )
 
     def test_renders_mcp_deps(self, tmp_path: Path) -> None:
         from apm_cli.install.presentation.dry_run import render_and_exit
@@ -1341,11 +1363,12 @@ class TestDryRunPresentation:
             mock_lf.read.return_value = MagicMock()
             render_and_exit(
                 logger=logger,
-                should_install_apm=False,
-                apm_deps=[],
-                mcp_deps=[mcp_dep],
-                dev_apm_deps=[],
-                should_install_mcp=True,
+                plan=self._plan(
+                    apm_deps=[],
+                    mcp_deps=[mcp_dep],
+                    should_install_apm=False,
+                    should_install_mcp=True,
+                ),
                 update=False,
                 apm_dir=tmp_path,
             )
@@ -1367,11 +1390,12 @@ class TestDryRunPresentation:
             mock_lf.read.return_value = None
             render_and_exit(
                 logger=logger,
-                should_install_apm=False,
-                apm_deps=[],
-                mcp_deps=[],
-                dev_apm_deps=[],
-                should_install_mcp=False,
+                plan=self._plan(
+                    apm_deps=[],
+                    mcp_deps=[],
+                    should_install_apm=False,
+                    should_install_mcp=False,
+                ),
                 update=False,
                 apm_dir=tmp_path,
             )
@@ -1396,11 +1420,12 @@ class TestDryRunPresentation:
             mock_lf.read.return_value = MagicMock()
             render_and_exit(
                 logger=logger,
-                should_install_apm=True,
-                apm_deps=[dep],
-                mcp_deps=[],
-                dev_apm_deps=[],
-                should_install_mcp=False,
+                plan=self._plan(
+                    apm_deps=[dep],
+                    mcp_deps=[],
+                    should_install_apm=True,
+                    should_install_mcp=False,
+                ),
                 update=False,
                 apm_dir=tmp_path,
             )
@@ -1426,11 +1451,12 @@ class TestDryRunPresentation:
             mock_lf.read.return_value = MagicMock()
             render_and_exit(
                 logger=logger,
-                should_install_apm=True,
-                apm_deps=[dep],
-                mcp_deps=[],
-                dev_apm_deps=[],
-                should_install_mcp=False,
+                plan=self._plan(
+                    apm_deps=[dep],
+                    mcp_deps=[],
+                    should_install_apm=True,
+                    should_install_mcp=False,
+                ),
                 update=False,
                 apm_dir=tmp_path,
             )
@@ -1453,16 +1479,17 @@ class TestDryRunPresentation:
             mock_lf.read.side_effect = OSError("no lockfile")
             render_and_exit(
                 logger=logger,
-                should_install_apm=False,
-                apm_deps=[],
-                mcp_deps=[],
-                dev_apm_deps=[],
-                should_install_mcp=False,
+                plan=self._plan(
+                    apm_deps=[],
+                    mcp_deps=[],
+                    should_install_apm=False,
+                    should_install_mcp=False,
+                ),
                 update=False,
                 apm_dir=tmp_path,
             )
 
-        logger.success.assert_called_once()
+        logger.success.assert_not_called()
 
     def test_renders_apm_deps_update_action(self, tmp_path: Path) -> None:
         from apm_cli.install.presentation.dry_run import render_and_exit
@@ -1480,11 +1507,12 @@ class TestDryRunPresentation:
             mock_lf.read.return_value = MagicMock()
             render_and_exit(
                 logger=logger,
-                should_install_apm=True,
-                apm_deps=[dep],
-                mcp_deps=[],
-                dev_apm_deps=[],
-                should_install_mcp=False,
+                plan=self._plan(
+                    apm_deps=[dep],
+                    mcp_deps=[],
+                    should_install_apm=True,
+                    should_install_mcp=False,
+                ),
                 update=True,
                 apm_dir=tmp_path,
             )

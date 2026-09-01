@@ -403,6 +403,102 @@ class TestCleanRemovesEmptyShells:
             "Plain `apm compile` must NOT delete pre-existing AGENTS.md files."
         )
 
+    def test_failed_output_batch_preserves_stale_shell(self, project_with_stale_shell):
+        """A failed output batch must not remove an orphan during --clean."""
+        from unittest.mock import patch
+
+        tmp_path, primitives, stale_shell = project_with_stale_shell
+        stale_shell.unlink()
+        stale_shell = tmp_path / "stale" / "AGENTS.md"
+        stale_shell.parent.mkdir()
+        stale_shell.write_text(_apm_generated_marker_content(), encoding="utf-8")
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(target="codex", clean_orphaned=True, dry_run=False)
+        with patch(
+            "apm_cli.compilation.output_writer.CompiledOutputWriter.write_many",
+            side_effect=OSError("write failed"),
+        ):
+            result = compiler._compile_distributed(config, primitives)
+
+        assert not result.success
+        assert stale_shell.exists()
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_managed_orphan_retention_reports_path_and_manual_action(
+        self, project_with_stale_shell, dry_run: bool
+    ):
+        """Managed orphan retention is actionable in previews and writes."""
+        tmp_path, primitives, stale_shell = project_with_stale_shell
+        team_owned_content = (
+            f"# Team guidance\n{AGENTS_MD_GENERATED_MARKER}\n"
+            "<!-- apm:start -->\nold APM content\n<!-- apm:end -->\n"
+        )
+        stale_shell.write_text(team_owned_content, encoding="utf-8")
+
+        compiler = AgentsCompiler(str(tmp_path))
+        result = compiler._compile_distributed(
+            CompilationConfig(
+                target="vscode",
+                agents_md_mode="managed_section",
+                clean_orphaned=True,
+                dry_run=dry_run,
+            ),
+            primitives,
+        )
+
+        assert result.success
+        assert stale_shell.exists()
+        assert stale_shell.read_bytes() == team_owned_content.encode()
+        retained_orphan_warning = (
+            "Retained managed AGENTS.md orphan: AGENTS.md -- "
+            "remove it manually when its team-owned content is no longer needed"
+        )
+        assert retained_orphan_warning in result.warnings
+        assert result.warnings.count(retained_orphan_warning) == 1
+        assert any(
+            "global.instructions.md: No 'applyTo' pattern specified" in warning
+            for warning in result.warnings
+        )
+        assert all(
+            "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
+        )
+
+    def test_plain_compile_reports_managed_orphan_retention(self, project_with_stale_shell) -> None:
+        """Without --clean, team-owned managed orphans remain actionable."""
+        tmp_path, primitives, stale_shell = project_with_stale_shell
+        team_owned_content = (
+            f"# Team guidance\n{AGENTS_MD_GENERATED_MARKER}\n"
+            "<!-- apm:start -->\nold APM content\n<!-- apm:end -->\n"
+        )
+        stale_shell.write_text(team_owned_content, encoding="utf-8")
+
+        result = AgentsCompiler(str(tmp_path))._compile_distributed(
+            CompilationConfig(
+                target="vscode",
+                agents_md_mode="managed_section",
+                clean_orphaned=False,
+            ),
+            primitives,
+        )
+
+        assert result.success
+        assert stale_shell.exists()
+        assert stale_shell.read_bytes() == team_owned_content.encode()
+        retained_orphan_warning = (
+            "Retained managed AGENTS.md orphan: AGENTS.md -- "
+            "remove it manually when its team-owned content is no longer needed"
+        )
+        assert retained_orphan_warning in result.warnings
+        assert result.warnings.count(retained_orphan_warning) == 1
+        assert any(
+            "global.instructions.md: No 'applyTo' pattern specified" in warning
+            for warning in result.warnings
+        )
+        assert all(
+            "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
+        )
+
 
 # ---------------------------------------------------------------------------
 # Hand-authored AGENTS.md protection

@@ -9,6 +9,11 @@ root context files each agent harness reads at startup. It does not
 fetch packages, does not resolve dependencies, does not write the
 lockfile, and does not deploy other primitive types.
 
+Compile is bounded to the active Git checkout. It does not discover
+instructions inside a nested Git repository or linked worktree, even when
+`includes: auto` is set, and it does not write or clean generated files there.
+Run `apm compile` from the nested checkout when you want to compile it.
+
 :::note[When you actually need it]
 Compile is **optional for the `copilot` target** -- GitHub Copilot
 natively reads `.github/instructions/*.instructions.md` (with their
@@ -235,19 +240,39 @@ The default markers are `<!-- apm:start -->` and `<!-- apm:end -->`, so
 you can omit `start_marker` and `end_marker` if you use those verbatim.
 
 **Constraints:**
-- The target file must already exist: if it does not, APM raises a clear
-  error ("does not exist yet") instead of a confusing "markers not found".
-  Use `mode: full` for the first run to create the file, then switch to
-  `managed_section`.
+- An existing target file must carry the markers. New distributed placements
+  are created with a managed block, ready for later recompiles. This automatic
+  bootstrap applies only to distributed placements; add markers yourself before
+  enabling the mode for a single-file `AGENTS.md`.
 - Both markers must be present in the file exactly once (missing or
   duplicate markers raise a loud error so no content is silently lost).
 - The start marker must appear before the end marker; reversed order raises a loud error.
 - `start_marker` and `end_marker` must be distinct non-empty strings.
 - Content outside the markers is preserved verbatim across every compile
-  run for the root `AGENTS.md`; only the block between the markers is
-  replaced.
-- In distributed compile mode, subdirectory `AGENTS.md` files remain fully
-  APM-owned and are overwritten on each run.
+  run; only the block between the markers is replaced. When source attribution
+  emits a footer, it identifies this block as a generated section rather than
+  describing the whole file as generated.
+- In distributed compile mode, the same marker rules apply to every generated
+  `AGENTS.md`. A placement in a nested Git repository (a `.git` directory or
+  gitfile), including its descendants, is excluded from discovery and output.
+- After adding markers and enabling managed-section mode, use
+  `apm compile --dry-run --clean` to inspect the eligible placement set. The
+  preview excludes nested repositories and reports managed orphan files that
+  `--clean` retains, just like a real compile.
+- `apm compile --clean` never removes an orphan with either managed marker,
+  because the file can contain team-owned content outside the managed block.
+  Remove it manually when that content is no longer needed.
+
+For example, compile scoped rules while retaining the rest of each generated
+file:
+
+```bash
+apm compile --target codex --dry-run --clean
+apm compile --target codex --clean
+```
+
+If an existing distributed `AGENTS.md` has no markers, add the marker block
+around the content APM should own before the first managed-section compile.
 
 ## Global compilation (-g)
 
@@ -270,6 +295,9 @@ root-context targets:
 - `~/.copilot/AGENTS.md`
 - `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
+
+OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
+retains explicit sections for `applyTo` instructions as well.
 
 ### Overwrite protection
 

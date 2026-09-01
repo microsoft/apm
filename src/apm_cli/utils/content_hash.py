@@ -31,11 +31,18 @@ def compute_package_hash(package_path: Path) -> str:
 
     Note: this whole-tree hash intentionally hashes raw file bytes, unlike
     the per-file :func:`compute_file_hash` which normalizes CRLF->LF for
-    text (apm#1952). The package tree is hashed at the git-checkout
-    boundary where content is already platform-canonical, and the path is
-    bound into the digest, so cross-platform line-ending identity is
-    unnecessary here. Do not unify the two without re-checking that
-    invariant.
+    text (apm#1952). For the raw hash to be platform-invariant, EVERY file
+    in the tree must therefore carry platform-canonical bytes:
+    git-materialized content already does (identical bytes at a pinned
+    commit on every OS), and every file APM itself writes into the tree
+    MUST be written LF-deterministically (``atomic_write_text`` /
+    ``write_text_lf`` / ``dump_yaml``). apm#2187/PR #2223 and apm#2619 are
+    the incidents where platform-native in-tree writers broke that
+    invariant and made lockfiles non-portable. Do not add an in-tree
+    writer that uses platform-native newlines, and do not normalize line
+    endings HERE instead: that would silently change the recorded hash of
+    every package whose upstream content legitimately contains CRLF,
+    invalidating existing correct lockfiles.
 
     Args:
         package_path: Root directory of the installed package.

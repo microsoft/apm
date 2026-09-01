@@ -7,7 +7,6 @@ for nested agent context files.
 
 import builtins
 import logging
-import os
 from collections import defaultdict
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
@@ -21,6 +20,8 @@ from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import find_constitution
 from .context_optimizer import ContextOptimizer
+from .footer import build_generation_footer
+from .inventory import CompileInventory
 from .link_resolver import UnifiedLinkResolver
 from .template_builder import (
     build_attributed_instructions,
@@ -94,6 +95,7 @@ class CompilationResult:
     warnings: builtins.list[str] = field(default_factory=list)
     errors: builtins.list[str] = field(default_factory=list)
     stats: builtins.dict[str, float] = field(default_factory=dict)  # Support optimization metrics
+    orphaned_files: builtins.list[Path] = field(default_factory=list)
     # Paths suppressed because they would have been header/footer-only shells
     # (skip_instructions=True, no constitution).  Exposed for callers that
     # need to emit a user-visible INFO message or perform --clean removal.
@@ -113,6 +115,8 @@ class DistributedAgentsCompiler:
         base_dir: str = ".",
         exclude_patterns: builtins.list[str] | None = None,
         source_dir: str | None = None,
+        source_inventory: CompileInventory | None = None,
+        deploy_inventory: CompileInventory | None = None,
     ):
         """Initialize the distributed AGENTS.md compiler.
 
@@ -127,18 +131,53 @@ class DistributedAgentsCompiler:
                 ``base_dir`` for back-compat; set explicitly when ``apm
                 compile --root`` redirects writes but sources remain in
                 ``$PWD``.
+            source_inventory: Shared source-tree filesystem snapshot.
+            deploy_inventory: Shared deploy-tree snapshot for orphan cleanup.
         """
         self.base_dir, self.source_dir = resolve_base_and_source_dirs(base_dir, source_dir)
+        self._exclude_patterns = exclude_patterns
+        self._owns_source_inventory = source_inventory is None
+        self._owns_deploy_inventory = deploy_inventory is None
+        self._source_inventory = source_inventory
+        self._deploy_inventory = deploy_inventory
 
         self.warnings: builtins.list[str] = []
         self.errors: builtins.list[str] = []
         self.total_files_written = 0
         self.context_optimizer = ContextOptimizer(
-            str(self.source_dir), exclude_patterns=exclude_patterns
+            str(self.source_dir),
+            exclude_patterns=exclude_patterns,
+            inventory=self._source_inventory,
         )
         self.link_resolver = UnifiedLinkResolver(self.source_dir)
         self.output_formatter = CompilationFormatter()
         self._placement_map = None
+
+    def _refresh_owned_inventories(self) -> None:
+        """Refresh direct-construction snapshots at the start of a compile."""
+        if self._owns_source_inventory:
+            self._source_inventory = CompileInventory.collect(
+                self.source_dir, exclude_patterns=self._exclude_patterns
+            )
+        if self._owns_deploy_inventory:
+            self._deploy_inventory = (
+                self._source_inventory
+                if self.base_dir == self.source_dir and not self._exclude_patterns
+                else CompileInventory.collect(self.base_dir)
+            )
+        self.context_optimizer._inventory = self._source_inventory
+
+    def _deploy_inventory_for_cleanup(self) -> CompileInventory:
+        """Return the deploy snapshot, collecting it lazily for direct callers."""
+        if self._deploy_inventory is None:
+            if self.base_dir == self.source_dir and not self._exclude_patterns:
+                self._source_inventory = self._source_inventory or CompileInventory.collect(
+                    self.source_dir, exclude_patterns=self._exclude_patterns
+                )
+                self._deploy_inventory = self._source_inventory
+            else:
+                self._deploy_inventory = CompileInventory.collect(self.base_dir)
+        return self._deploy_inventory
 
     def _source_to_base(self, path: Path) -> Path:
         """Map a path rooted at source_dir to the equivalent base_dir path.
@@ -170,6 +209,7 @@ class DistributedAgentsCompiler:
         """
         self.warnings.clear()
         self.errors.clear()
+        self._refresh_owned_inventories()
 
         try:
             # Configuration with defaults aligned to Minimal Context Principle
@@ -180,6 +220,8 @@ class DistributedAgentsCompiler:
             source_attribution = config.get("source_attribution", True)
             debug = config.get("debug", False)
             clean_orphaned = config.get("clean_orphaned", False)
+            defer_orphan_cleanup = config.get("defer_orphan_cleanup", False)
+            defer_orphan_warnings = config.get("defer_orphan_warnings", False)
             dry_run = config.get("dry_run", False)
             # True when apm install has already deployed instructions to
             # .github/instructions/; omitting them here avoids Copilot reading
@@ -188,6 +230,7 @@ class DistributedAgentsCompiler:
             # Mirrors CompilationConfig.with_constitution: when False, the writer
             # skips constitution injection, so the emptiness predicate must agree.
             with_constitution = config.get("with_constitution", True)
+            agents_md_mode = config.get("agents_md_mode", "full")
 
             # Phase 0: Context Link Resolution
             # Register all context files and compile referenced ones
@@ -277,31 +320,31 @@ class DistributedAgentsCompiler:
                     primitives,
                     skip_instructions=skip_instructions,
                     source_attribution=source_attribution,
+                    agents_md_mode=agents_md_mode,
                 )
 
             # Phase 4: Handle orphaned file cleanup.
             # generated_paths = ALL placement paths (written + suppressed this run).
             # suppressed_set (built inside _find_orphaned_agents_files) promotes
-            # suppressed paths to orphan candidates only under --clean, so stale
-            # empty shells from prior runs are removed.  Marker-gated: hand-authored
-            # files are never deleted.
+            # suppressed paths to orphan candidates. Deletion remains --clean-only,
+            # while non-clean compiles retain actionable orphan diagnostics.
+            # Marker-gated: hand-authored files are never deleted.
             generated_paths = [p.agents_path for p in placements]
             orphaned_files = self._find_orphaned_agents_files(
                 generated_paths,
-                suppressed_empty_paths=suppressed_paths if clean_orphaned else [],
+                suppressed_empty_paths=suppressed_paths,
             )
 
-            if orphaned_files:
+            if orphaned_files and not defer_orphan_warnings:
                 # Always show warnings about orphaned files
                 warning_messages = self._generate_orphan_warnings(orphaned_files)
                 if warning_messages:
                     self.warnings.extend(warning_messages)
-
-                # Only perform actual cleanup if not dry_run and clean_orphaned is True
-                if not dry_run and clean_orphaned:
-                    cleanup_messages = self._cleanup_orphaned_files(orphaned_files, dry_run=False)
-                    if cleanup_messages:
-                        self.warnings.extend(cleanup_messages)
+                # Standalone callers retain the established cleanup behavior.
+                # AgentsCompiler defers cleanup until its full write preflight has
+                # succeeded, preserving all-or-nothing distributed writes.
+                if clean_orphaned and not dry_run and not defer_orphan_cleanup:
+                    self.warnings.extend(self._cleanup_orphaned_files(orphaned_files))
 
             # Phase 5: Validate coverage
             coverage_validation = self._validate_coverage(placements, primitives.instructions)
@@ -333,6 +376,7 @@ class DistributedAgentsCompiler:
                 errors=self.errors.copy(),
                 stats=stats,
                 suppressed_empty_paths=suppressed_paths,
+                orphaned_files=orphaned_files,
             )
 
         except Exception as e:
@@ -643,6 +687,7 @@ class DistributedAgentsCompiler:
         *,
         skip_instructions: bool = False,
         source_attribution: bool = True,
+        agents_md_mode: str = "full",
     ) -> str:
         """Generate AGENTS.md content for a specific placement.
 
@@ -656,6 +701,8 @@ class DistributedAgentsCompiler:
                 (APM version comment, generated-by footer), mirroring the
                 CLAUDE.md path.  Distinct from ``placement.source_attribution``,
                 which is the per-instruction source map.
+            agents_md_mode: Root AGENTS.md ownership mode. Subdirectory files
+                always use full-file ownership wording.
 
         Returns:
             str: Generated AGENTS.md content.
@@ -693,10 +740,9 @@ class DistributedAgentsCompiler:
 
         # Footer is opt-in (cosmetic).
         if source_attribution:
-            sections.append("---")
-            sections.append("*This file was generated by APM CLI. Do not edit manually.*")
-            sections.append("*To regenerate: `apm compile`*")
-            sections.append("")
+            is_root = placement.agents_path.parent == self.base_dir
+            footer_mode = agents_md_mode if is_root else "full"
+            sections.extend(build_generation_footer(footer_mode))
 
         content = "\n".join(sections)
 
@@ -842,23 +888,29 @@ class DistributedAgentsCompiler:
         orphaned_files = []
         generated_set = set(generated_paths)
         suppressed_set = set(suppressed_empty_paths or [])
-
-        for directory, child_dirs, files in os.walk(self.base_dir, followlinks=False):
-            directory_path = Path(directory)
-            if (
-                directory_path != self.base_dir
-                and ".git" in files
-                and (directory_path / ".git").is_file()
-            ):
-                _logger.debug(
-                    "Skipping nested Git worktree during orphan cleanup: %s",
-                    portable_relpath(directory_path, self.base_dir),
-                )
-                child_dirs.clear()
+        deploy_inventory = self._deploy_inventory_for_cleanup()
+        for nested_root in sorted(deploy_inventory.nested_repository_roots):
+            _logger.debug(
+                "Skipping nested Git repository during orphan cleanup: %s",
+                portable_relpath(nested_root, self.base_dir),
+            )
+        cleanup_directories = {
+            entry.path: (entry.relative_path, entry.file_names)
+            for entry in deploy_inventory.directories
+        }
+        for suppressed_path in suppressed_set:
+            try:
+                relative_path = suppressed_path.parent.relative_to(self.base_dir)
+            except ValueError:
                 continue
+            cleanup_directories.setdefault(suppressed_path.parent, (relative_path, ()))
 
-            child_dirs[:] = [child for child in child_dirs if child not in _CLEANUP_SKIP_DIRS]
+        for directory_path, (relative_path, files) in sorted(cleanup_directories.items()):
+            if any(part in _CLEANUP_SKIP_DIRS for part in relative_path.parts):
+                continue
             if "AGENTS.md" not in files:
+                continue
+            if deploy_inventory.nested_repository_root_for(directory_path) is not None:
                 continue
 
             agents_file = directory_path / "AGENTS.md"

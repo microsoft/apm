@@ -311,6 +311,7 @@ class TestInstallLocalBundleE2E:
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
 
+    @pytest.mark.lifecycle_smoke
     def test_install_native_pack_is_blocked_before_project_mutation(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -349,8 +350,8 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 1
         output = " ".join(result.output.split())
-        assert "no native harness is binary-qualified" in output
-        assert "apm pack --claude-plugin" in output
+        assert "cannot be installed through the imperative" in output
+        assert "apm install --target copilot" in output
         assert sorted(path.relative_to(project) for path in project.rglob("*")) == before_paths
         assert {
             path.relative_to(project): path.read_bytes()
@@ -585,6 +586,7 @@ class TestInstallLocalBundleDryRun:
         assert not (project / "apm.lock.yaml").exists()
 
 
+@pytest.mark.lifecycle_smoke
 @pytest.mark.parametrize("archive", (False, True), ids=("directory", "archive"))
 @pytest.mark.parametrize("dry_run", (False, True), ids=("real", "dry-run"))
 def test_native_local_bundle_boundary_renders_typed_cli_failure(
@@ -612,9 +614,9 @@ def test_native_local_bundle_boundary_renders_typed_cli_failure(
     source_after = bundle_arg.read_bytes() if bundle_arg.is_file() else _tree_snapshot(bundle_arg)
     assert source_after == source_before
     output = " ".join(result.output.split())
-    assert "no native harness is binary-qualified" in output
-    assert "apm pack --claude-plugin" in output
-    assert "ask the publisher for a legacy-compatible package" in output
+    assert "cannot be installed through the imperative" in output
+    assert "apm install --target copilot" in output
+    assert "registers it natively with GitHub Copilot" in output
     assert "Error installing dependencies" not in output
     assert "Run with --verbose" not in output
     assert "Install complete" not in output
