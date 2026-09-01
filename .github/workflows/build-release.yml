@@ -52,6 +52,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -132,6 +134,13 @@ jobs:
         run: |
           uv run pwsh scripts/windows/sign-binary.ps1
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/${{ matrix.binary_name }}/**/*
+            ./dist/${{ matrix.binary_name }}.sha256
+
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -159,6 +168,8 @@ jobs:
     runs-on: macos-15-intel
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout code
@@ -209,6 +220,13 @@ jobs:
             tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs \
             tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_rich_table_runs \
             -vv -ra --tb=short
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/apm-darwin-x86_64/**/*
+            ./dist/apm-darwin-x86_64.sha256
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -281,6 +299,8 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout code
@@ -326,6 +346,13 @@ jobs:
             tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_version_runs \
             tests/integration/test_core_smoke.py::TestBinaryStartup::test_apm_rich_table_runs \
             -vv -ra --tb=short
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/apm-darwin-arm64/**/*
+            ./dist/apm-darwin-arm64.sha256
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -779,3 +806,163 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           verbose: true
+
+  # Update Homebrew formula (only stable releases from public repo)
+  update-homebrew:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation, create-release, publish-pypi]
+    if: github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Extract SHA256 checksums from GitHub release
+        id: checksums
+        run: |
+          # Download the SHA256 checksum files from the GitHub release
+          RELEASE_TAG="${{ github.ref_name }}"
+
+          echo "Downloading checksums for release $RELEASE_TAG"
+
+          # Download checksum files directly from the release
+          curl -L -o apm-darwin-arm64.tar.gz.sha256 \
+            "https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/apm-darwin-arm64.tar.gz.sha256"
+          curl -L -o apm-darwin-x86_64.tar.gz.sha256 \
+            "https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/apm-darwin-x86_64.tar.gz.sha256"
+          curl -L -o apm-linux-x86_64.tar.gz.sha256 \
+            "https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/apm-linux-x86_64.tar.gz.sha256"
+          curl -L -o apm-linux-arm64.tar.gz.sha256 \
+            "https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/apm-linux-arm64.tar.gz.sha256"
+
+          # Extract SHA256 checksums
+          DARWIN_ARM64_SHA=$(cat apm-darwin-arm64.tar.gz.sha256 | cut -d' ' -f1)
+          DARWIN_X86_64_SHA=$(cat apm-darwin-x86_64.tar.gz.sha256 | cut -d' ' -f1)
+          LINUX_X86_64_SHA=$(cat apm-linux-x86_64.tar.gz.sha256 | cut -d' ' -f1)
+          LINUX_ARM64_SHA=$(cat apm-linux-arm64.tar.gz.sha256 | cut -d' ' -f1)
+
+          echo "darwin-arm64-sha=$DARWIN_ARM64_SHA" >> $GITHUB_OUTPUT
+          echo "darwin-x86_64-sha=$DARWIN_X86_64_SHA" >> $GITHUB_OUTPUT
+          echo "linux-x86_64-sha=$LINUX_X86_64_SHA" >> $GITHUB_OUTPUT
+          echo "linux-arm64-sha=$LINUX_ARM64_SHA" >> $GITHUB_OUTPUT
+
+          echo "Darwin ARM64 SHA: $DARWIN_ARM64_SHA"
+          echo "Darwin x86_64 SHA: $DARWIN_X86_64_SHA"
+          echo "Linux x86_64 SHA: $LINUX_X86_64_SHA"
+          echo "Linux ARM64 SHA: $LINUX_ARM64_SHA"
+
+      - name: Trigger Homebrew tap repository update
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GH_PKG_PAT }}
+          repository: microsoft/homebrew-apm
+          event-type: formula-update
+          client-payload: |
+            {
+              "release": {
+                "version": "${{ github.ref_name }}",
+                "tag": "${{ github.ref_name }}",
+                "repository": "${{ github.repository }}"
+              },
+              "checksums": {
+                "darwin_arm64": "${{ steps.checksums.outputs.darwin-arm64-sha }}",
+                "darwin_x86_64": "${{ steps.checksums.outputs.darwin-x86_64-sha }}",
+                "linux_x86_64": "${{ steps.checksums.outputs.linux-x86_64-sha }}",
+                "linux_arm64": "${{ steps.checksums.outputs.linux-arm64-sha }}"
+              }
+            }
+
+  # Update Scoop bucket (only stable releases from public repo)
+  update-scoop:
+    name: Update Scoop Bucket
+    runs-on: ubuntu-latest
+    needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation, create-release, publish-pypi]
+    # TODO: Enable once downstream repository and secrets are configured (see #88)
+    if: false && github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Extract Windows checksum from GitHub release
+        id: checksums
+        run: |
+          RELEASE_TAG="${{ github.ref_name }}"
+          curl -L -o apm-windows-x86_64.zip.sha256 \
+            "https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/apm-windows-x86_64.zip.sha256"
+          WINDOWS_X86_64_SHA=$(cat apm-windows-x86_64.zip.sha256 | cut -d' ' -f1)
+          echo "windows-x86_64-sha=$WINDOWS_X86_64_SHA" >> $GITHUB_OUTPUT
+          echo "Windows x86_64 SHA: $WINDOWS_X86_64_SHA"
+
+      - name: Trigger Scoop bucket repository update
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GH_PKG_PAT }}
+          repository: microsoft/scoop-apm
+          event-type: bucket-update
+          client-payload: |
+            {
+              "release": {
+                "version": "${{ github.ref_name }}",
+                "tag": "${{ github.ref_name }}",
+                "repository": "${{ github.repository }}"
+              },
+              "checksums": {
+                "windows_x86_64": "${{ steps.checksums.outputs.windows-x86_64-sha }}"
+              }
+            }
+  
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation, create-release]
+    if: github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
+    permissions:
+      contents: read
+      id-token: write  # Required for OIDC
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: apm-*
+          merge-multiple: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install test dependencies
+        run: uv sync --extra build
+
+      - name: Build npm packages
+        run: uv run scripts/npm_publish.py
+
+      # Publish platform packages first, then the main wrapper that lists
+      # them as optionalDependencies.
+      - name: Publish npm packages
+        run: |
+          for package in \
+            dist/npm/apm-cli-linux-x64 \
+            dist/npm/apm-cli-linux-arm64 \
+            dist/npm/apm-cli-darwin-x64 \
+            dist/npm/apm-cli-darwin-arm64 \
+            dist/npm/apm-cli-win32-x64 \
+            dist/npm/apm-cli; do
+            npm publish "$package" --tag latest --access public
+          done
