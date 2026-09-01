@@ -485,6 +485,45 @@ def scan_installed_executable_packages(manifest: Path) -> list:
     if not apm_modules.is_dir():
         return results
 
+    from ..deps.lockfile import LockFile, get_lockfile_path
+
+    lockfile = LockFile.read(get_lockfile_path(manifest.parent))
+    if lockfile is not None:
+        from ..deps.path_anchoring import resolve_local_dep_dir
+        from ..utils.yaml_io import load_yaml
+
+        for locked in lockfile.get_package_dependencies():
+            try:
+                package_dir = (
+                    resolve_local_dep_dir(locked, lockfile, manifest.parent)
+                    if locked.source == "local"
+                    else locked.to_dependency_ref().get_install_path(apm_modules)
+                )
+            except (OSError, ValueError):
+                continue
+            if not package_dir.is_dir():
+                continue
+            name = locked.name or package_dir.name
+            version = str(locked.version or "")
+            package_manifest = package_dir / "apm.yml"
+            if package_manifest.is_file():
+                try:
+                    data = load_yaml(package_manifest)
+                    if isinstance(data, dict):
+                        name = data.get("name", name)
+                        version = str(data.get("version", version))
+                except Exception:
+                    pass
+            declaration = scan_package_executables(
+                package_dir,
+                name,
+                version,
+                approval_identity=locked.get_unique_key(),
+            )
+            if declaration.has_executables:
+                results.append(declaration)
+        return results
+
     def _scan_dir(base: Path) -> None:
         for pkg_dir in sorted(base.iterdir()):
             if not pkg_dir.is_dir() or pkg_dir.name.startswith("."):

@@ -24,6 +24,7 @@ def run_owned_lsp_integration(
     target_runtimes: list[str],
     logger,
     fail_on_write_error: bool = True,
+    force: bool = False,
 ) -> int:
     """Reconcile one bundle owner's LSP servers and persist ownership."""
     from apm_cli.deps.lockfile import LockFile
@@ -58,6 +59,7 @@ def run_owned_lsp_integration(
             target_runtimes=target_runtimes,
             fail_on_write_error=fail_on_write_error,
             managed_server_names=old_owned,
+            force=force,
         )
     stale = old_owned - new_names
     if stale:
@@ -100,6 +102,7 @@ def run_lsp_integration(  # noqa: PLR0913
     target_decision: "EffectiveTargetDecision | None" = None,
     fail_on_write_error: bool = False,
     effective_allow_executables: dict[str, dict[str, bool]] | None = None,
+    effective_allow_resolved: bool = False,
     force: bool = False,
     no_policy: bool = False,
 ) -> int:
@@ -160,7 +163,7 @@ def run_lsp_integration(  # noqa: PLR0913
         )
         if transitive_lsp:
             logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")
-            if effective_allow_executables is None:
+            if not effective_allow_resolved:
                 from apm_cli.security.executables import effective_exec_map_for_project
 
                 policy = None
@@ -182,6 +185,7 @@ def run_lsp_integration(  # noqa: PLR0913
                     ),
                     logger=logger,
                 )
+                effective_allow_resolved = True
             transitive_lsp = filter_lsp_by_allow_executables(
                 transitive_lsp,
                 effective_allow_executables,

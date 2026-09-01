@@ -231,6 +231,7 @@ def _run_mcp_lsp_integration(
     logger: InstallLogger,
     verbose: bool,
     effective_allow_executables: dict[str, dict[str, bool]] | None = None,
+    effective_allow_resolved: bool = False,
     force: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
@@ -313,6 +314,7 @@ def _run_mcp_lsp_integration(
         target_decision=target_decision,
         fail_on_write_error=True,
         effective_allow_executables=effective_allow_executables,
+        effective_allow_resolved=effective_allow_resolved,
         force=force,
     )
 
@@ -842,6 +844,7 @@ def _run_dep_update(
                 logger=logger,
                 verbose=verbose,
                 effective_allow_executables=getattr(result, "exec_allow_map", None),
+                effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
                 force=force,
             )
         except RequiredIntegrationError as e:

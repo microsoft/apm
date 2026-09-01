@@ -746,7 +746,8 @@ class TestFilterLspFailClosed:
 
         assert result == []
         assert logger.warnings == [
-            "Filtered 1 LSP server(s) whose declaring packages are not trusted yet."
+            "Filtered 1 LSP server from 'evil/package': declaring packages are "
+            "not trusted yet. Run 'apm approve evil/package' to trust it."
         ]
 
     def test_approval_is_bound_to_declarer_not_server_name(self) -> None:

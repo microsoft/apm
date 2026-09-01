@@ -284,6 +284,7 @@ def install_local_bundle(
                 logger=logger,
                 deps=bundle_lsp_deps,
                 owner=_bundle_owner_key(bundle_info),
+                force=force,
             )
 
         # Persist into project lockfile -- never mutate apm.yml (per design).
@@ -616,6 +617,7 @@ def _wire_bundle_lsp_servers(
     logger,
     deps,
     owner: str,
+    force: bool = False,
 ) -> int:
     """Wire bundle LSP servers through the canonical owned lifecycle."""
     from apm_cli.deps.lockfile import get_lockfile_path
@@ -631,6 +633,7 @@ def _wire_bundle_lsp_servers(
         logger=logger,
         target_runtimes=target_names,
         fail_on_write_error=True,
+        force=force,
     )
 
     if count:

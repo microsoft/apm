@@ -153,10 +153,12 @@ transitive package both declare a server with the same name, the
 root definition wins.
 
 Unlike MCP, LSP has no registry vs self-defined distinction. LSP commands from
-dependency packages still pass the executable trust gate for their declaring
-package. Approve the package with `apm approve <package>` before APM exposes
-its server to a supported runtime. Root-project LSP declarations are trusted
-as local project content.
+dependency packages pass the executable trust gate for their declaring package
+when the gate is enabled. Approve the package with `apm approve <package>`
+before APM exposes its server to a supported runtime. Without a project or org
+`executables` opt-in, the compatibility default permits dependency
+executables. Root-project LSP declarations are trusted as local project
+content.
 
 ## Stale server cleanup
 

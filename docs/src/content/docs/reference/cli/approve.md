@@ -14,9 +14,10 @@ apm policy explain <PACKAGE_REF>
 
 ## Description
 
-APM blocks executable primitives (hooks, `bin/` executables, self-defined MCP
-servers, and canvas extensions) from dependency packages by default. Trust is
-expressed through one noun, `executables`, across three layers:
+When the executable gate is enabled, APM blocks unapproved executable
+primitives (hooks, `bin/` executables, self-defined MCP servers, LSP servers,
+and canvas extensions) from dependency packages. Trust is expressed through
+one noun, `executables`, across three layers:
 
 | Layer | Store | Who manages it | Committed? | Authority |
 |-------|-------|----------------|------------|-----------|
@@ -40,6 +41,7 @@ content (the root `.apm/` directory) is always trusted.
 | Hooks (`.apm/hooks/`, `hooks/`) | Yes | Auto-fire in IDE on lifecycle events |
 | Bin executables (`bin/`) | Yes | Deployed to agent PATH via symlinks |
 | MCP servers (self-defined) | Yes | `registry: false` servers write to IDE MCP config |
+| LSP servers | Yes | Supported runtimes may start generated server commands automatically |
 | Canvas extensions (`.apm/extensions/`) | Yes | Deploys executable Node.js to IDE extensions |
 | Text primitives (skills, agents, instructions) | No | No code execution risk |
 
@@ -117,12 +119,14 @@ executables:
     "owner/repo#1.2.0":
       hooks: true
       bin: true
+      lsp: true
   deny:
     "evil/pkg":
       hooks: true
       mcp: true
       bin: true
       canvas: true
+      lsp: true
 ```
 
 The legacy top-level `allowExecutables:` block is **deprecated**. It is still

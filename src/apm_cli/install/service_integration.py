@@ -29,6 +29,7 @@ class ServiceCommandContext(Protocol):
     verbose: bool
     force: bool
     exec_allow_map: dict[str, dict[str, bool]] | None
+    exec_allow_resolved: bool
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,7 @@ def run_service_integrations(
         target_decision=target_decision,
         fail_on_write_error=True,
         effective_allow_executables=ctx.exec_allow_map,
+        effective_allow_resolved=ctx.exec_allow_resolved,
         force=ctx.force,
         no_policy=ctx.no_policy,
     )

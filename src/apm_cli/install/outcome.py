@@ -68,6 +68,7 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
             package_types=dict(ctx.package_types),
             target_decision=getattr(ctx, "target_decision", None),
             exec_allow_map=getattr(ctx, "exec_allow_map", None),
+            exec_allow_resolved=getattr(ctx, "exec_trust_ctx", None) is not None,
         ),
         force=bool(getattr(ctx, "force", False)),
     )

@@ -1003,6 +1003,55 @@ def test_claude_lsp_install_writes_discoverable_skills_directory_plugin(
     assert "Retained legacy .lsp.json" in result[0].stdout
 
 
+def test_claude_lsp_collision_requires_force_and_force_reconciles(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """The installed CLI must require explicit consent before replacement."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "claude-lsp-collision",
+        base_env=dict(os.environ),
+    )
+    project = LocalPackageFactory(isolated.work_root).create(
+        "consumer",
+        lsp_dependencies=(
+            {
+                "name": "pyright",
+                "command": "pyright-langserver",
+                "extensionToLanguage": {".py": "python"},
+            },
+        ),
+        targets=("claude",),
+    )
+    plugin_path = project.root / _CLAUDE_LSP_PLUGIN
+    plugin_path.parent.mkdir(parents=True)
+    original = b"[]\n"
+    plugin_path.write_bytes(original)
+    runner = _runner(apm_binary_path)
+    environment = isolated.subprocess_env()
+
+    (refused,) = runner.run_sequence(
+        (("install", "--no-policy"),),
+        expected_returncodes=(1,),
+        scenario_id="claude-lsp-collision-refused",
+        cwd=project.root,
+        env=environment,
+    )
+    assert "--force" in refused.stdout
+    assert plugin_path.read_bytes() == original
+
+    runner.run_sequence(
+        (("install", "--no-policy", "--force"),),
+        expected_returncodes=(0,),
+        scenario_id="claude-lsp-collision-forced",
+        cwd=project.root,
+        env=environment,
+    )
+    plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+    assert plugin["name"] == "apm-lsp"
+    assert set(plugin["lspServers"]) == {"pyright"}
+
+
 def test_claude_lsp_unapproved_package_is_not_discoverable(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -1040,7 +1089,7 @@ def test_claude_lsp_unapproved_package_is_not_discoverable(
     )
 
     assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
-    assert "declaring packages are not trusted yet" in result.stdout
+    assert "apm approve" in result.stdout
     (partial,) = _runner(apm_binary_path).run_sequence(
         (("install", "--only", "mcp", "--no-policy"),),
         expected_returncodes=(0,),
@@ -1049,7 +1098,7 @@ def test_claude_lsp_unapproved_package_is_not_discoverable(
         env=fixture.isolated.subprocess_env(),
     )
     assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
-    assert "declaring packages are not trusted yet" in partial.stdout
+    assert "apm approve" in partial.stdout
     (updated,) = _runner(apm_binary_path).run_sequence(
         (("update", "--yes"),),
         expected_returncodes=(0,),
@@ -1058,7 +1107,7 @@ def test_claude_lsp_unapproved_package_is_not_discoverable(
         env=fixture.isolated.subprocess_env(),
     )
     assert not (fixture.project_root / _CLAUDE_LSP_PLUGIN).exists()
-    assert "declaring packages are not trusted yet" in updated.stdout
+    assert "apm approve" in updated.stdout
 
 
 def test_claude_lsp_approved_declaring_package_is_discoverable(
@@ -1080,9 +1129,12 @@ def test_claude_lsp_approved_declaring_package_is_discoverable(
     )
     manifest_path = fixture.project_root / "apm.yml"
     manifest = load_yaml(manifest_path)
+    from apm_cli.models.apm_package import APMPackage
+
+    approval_key = APMPackage.from_apm_yml(manifest_path).get_apm_dependencies()[0].get_unique_key()
     manifest["executables"] = {
         "allow": {
-            "approved-lsp-source": {
+            approval_key: {
                 "lsp": True,
             }
         }

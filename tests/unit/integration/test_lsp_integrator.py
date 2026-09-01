@@ -178,6 +178,38 @@ class TestInstallProjectScope:
 
         assert json.loads(plugin_json.read_text())["name"] == "custom-lsp-plugin"
 
+    def test_refuses_non_object_plugin_without_overwriting(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        original = b"[]\n"
+        plugin_json.write_bytes(original)
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError, match="must contain a JSON object"):
+            LSPIntegrator.install(
+                [_make_dep("pyright")],
+                project_root=tmp_path,
+                fail_on_write_error=True,
+            )
+
+        assert plugin_json.read_bytes() == original
+
+    def test_refuses_unnamed_plugin_without_adopting_it(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        original = b'{"lspServers":{"user-owned":{"command":"keep"}}}\n'
+        plugin_json.write_bytes(original)
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with pytest.raises(RequiredIntegrationError, match="unnamed"):
+            LSPIntegrator.install(
+                [_make_dep("pyright")],
+                project_root=tmp_path,
+                fail_on_write_error=True,
+            )
+
+        assert plugin_json.read_bytes() == original
+
     def test_force_merges_with_existing_foreign_claude_plugin_manifest(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
         plugin_json.parent.mkdir(parents=True)
@@ -627,7 +659,11 @@ class TestCollectTransitive:
         assert result[0].name == "pyright"
         assert result[0].resolved_by == dep.get_unique_key()
         assert dep.get_unique_key() in result[0].approval_keys
-        assert "test-pkg#1.0.0" in result[0].approval_keys
+        assert "test-pkg#1.0.0" not in result[0].approval_keys
+        assert set(result[0].approval_keys) == {
+            dep.get_unique_key(),
+            f"{dep.get_unique_key()}#1.0.0",
+        }
 
     def test_unlocked_fallback_does_not_invent_approval_keys(self, tmp_path):
         pkg_dir = tmp_path / "apm_modules" / "ghe.example" / "owner" / "repo"

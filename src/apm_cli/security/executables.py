@@ -450,6 +450,13 @@ def build_approval_key(package_name: str, version: str) -> str:
     return f"{package_name}#{version}"
 
 
+def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
+    """Return trust keys derived only from a locked package identity."""
+    identity = dependency.get_unique_key()
+    versioned = build_approval_key(identity, dependency.version or "")
+    return tuple(dict.fromkeys((identity, versioned)))
+
+
 # -------------------------------------------------------------------
 # Package scanning
 # -------------------------------------------------------------------
@@ -460,6 +467,7 @@ def scan_package_executables(
     package_name: str,
     package_version: str,
     *,
+    approval_identity: str | None = None,
     is_transitive: bool = False,
     parent_name: str | None = None,
 ) -> ExecutableDeclaration:
@@ -477,7 +485,7 @@ def scan_package_executables(
     Returns an :class:`ExecutableDeclaration` (may have zero counts if
     the package declares no executables).
     """
-    key = build_approval_key(package_name, package_version)
+    key = build_approval_key(approval_identity or package_name, package_version)
 
     # 1. Hooks: .apm/hooks/*.json and hooks/*.json (aligned with
     #    HookIntegrator.find_hook_files -- only JSON files are actionable).
@@ -980,6 +988,7 @@ def filter_lsp_by_allow_executables(
     if effective_allow_execs is None or not lsp_deps:
         return lsp_deps
     filtered = []
+    skipped: dict[str, bool] = {}
     for dependency in lsp_deps:
         owner = getattr(dependency, "resolved_by", None)
         approval_keys = getattr(dependency, "approval_keys", ())
@@ -988,6 +997,7 @@ def filter_lsp_by_allow_executables(
         ):
             filtered.append(dependency)
             continue
+        skipped[owner] = bool(approval_keys)
         if approval_keys:
             logger.verbose_detail(
                 f"Skipping LSP server from '{owner}': executables not trusted yet. "
@@ -1000,9 +1010,22 @@ def filter_lsp_by_allow_executables(
                 "apm.lock.yaml, then approve the package."
             )
     if len(filtered) < len(lsp_deps):
+        skipped_count = len(lsp_deps) - len(filtered)
+        noun = "server" if skipped_count == 1 else "servers"
+        owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
+        if skipped and all(skipped.values()):
+            remediation = (
+                f" Run 'apm approve {next(iter(sorted(skipped)))}' to trust it."
+                if len(skipped) == 1
+                else " Run 'apm approve <package>' for each listed package."
+            )
+        else:
+            remediation = (
+                " Run 'apm install' to regenerate apm.lock.yaml, then approve the package."
+            )
         logger.warning(
-            f"Filtered {len(lsp_deps) - len(filtered)} LSP server(s) whose "
-            "declaring packages are not trusted yet.",
+            f"Filtered {skipped_count} LSP {noun} from {owners}: declaring "
+            f"packages are not trusted yet.{remediation}",
             symbol="warning",
         )
     return filtered

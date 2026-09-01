@@ -204,6 +204,7 @@ class InstallContext:
     target_decision: "EffectiveTargetDecision | None" = None
     trust_bin: bool | None = None
     exec_allow_map: builtins.dict[str, builtins.dict[str, bool]] | None = None
+    exec_allow_resolved: bool = False
 
 
 # APM Dependencies (conditional import for graceful degradation)
@@ -1920,6 +1921,7 @@ def _install_apm_packages(ctx, outcome):
             apm_diagnostics = install_result.diagnostics
             ctx.target_decision = install_result.target_decision
             ctx.exec_allow_map = install_result.exec_allow_map
+            ctx.exec_allow_resolved = install_result.exec_allow_resolved
             if install_result.disposition not in {
                 InstallDisposition.SUCCESS,
                 InstallDisposition.PARTIAL_SUCCESS,

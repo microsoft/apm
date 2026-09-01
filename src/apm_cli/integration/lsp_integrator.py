@@ -162,24 +162,12 @@ class LSPIntegrator:
                         owner = apm_yml_path.parent.relative_to(apm_modules_dir).as_posix()
                         approval_keys: tuple[str, ...] = ()
                     else:
-                        from apm_cli.security.executables import build_approval_key
+                        from apm_cli.security.executables import (
+                            locked_dependency_approval_keys,
+                        )
 
                         owner = locked_dependency.get_unique_key()
-                        package_name = (
-                            pkg.name or locked_dependency.name or locked_dependency.repo_url
-                        )
-                        package_version = pkg.version or locked_dependency.version or ""
-                        approval_keys = tuple(
-                            dict.fromkeys(
-                                (
-                                    owner,
-                                    owner.split("#", 1)[0],
-                                    locked_dependency.get_canonical_dependency_string(),
-                                    package_name,
-                                    build_approval_key(package_name, package_version),
-                                )
-                            )
-                        )
+                        approval_keys = locked_dependency_approval_keys(locked_dependency)
                     collected.extend(
                         replace(
                             dependency,
@@ -432,7 +420,11 @@ class LSPIntegrator:
             if fail_on_error:
                 raise
             return {}
-        return data if isinstance(data, dict) else {}
+        if isinstance(data, dict):
+            return data
+        if fail_on_error:
+            raise ValueError(f"{config_path} must contain a JSON object")
+        return {}
 
     @staticmethod
     def _write_target_config(
@@ -480,16 +472,18 @@ class LSPIntegrator:
                     f"{spec.label(user_scope=user_scope)} is inside an existing "
                     "skill directory not owned by APM; remove it or rerun with --force"
                 )
+        config_exists = config_path.exists()
         config = LSPIntegrator._read_json_object(
             config_path,
             fail_on_error=protected_plugin and not force,
         )
         for key, value in spec.config_defaults(user_scope=user_scope):
             current_default = config.get(key)
-            if current_default not in (None, value) and not force:
+            if config_exists and current_default != value and not force:
                 raise FileExistsError(
                     f"{spec.label(user_scope=user_scope)} is owned by plugin "
-                    f"'{current_default}', not APM; remove it or rerun with --force"
+                    f"'{current_default or '(unnamed)'}', not APM; remove it or "
+                    "rerun with --force"
                 )
             config.setdefault(key, value)
         servers_key = spec.servers_key(user_scope=user_scope)

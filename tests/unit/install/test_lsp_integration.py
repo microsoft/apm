@@ -264,6 +264,44 @@ class TestRunLspIntegration:
         assert count == 2
         mock_integrator.deduplicate.assert_called_once()
 
+    @patch(_PATCH_TARGET)
+    def test_precomputed_disabled_allow_map_does_not_rediscover_policy(
+        self, mock_integrator, tmp_path
+    ):
+        """A resolved disabled gate is distinct from an unresolved trust map."""
+        apm_package = MagicMock()
+        apm_package.get_lsp_dependencies.return_value = []
+        transitive = _make_dep(
+            "pyright",
+            resolved_by="owner/package",
+            approval_keys=("owner/package",),
+        )
+        mock_integrator.collect_transitive.return_value = [transitive]
+        mock_integrator.deduplicate.return_value = [transitive]
+        mock_integrator.resolve_target_runtimes.return_value = ["claude"]
+        mock_integrator.install.return_value = 1
+        mock_integrator.get_server_names.return_value = {"pyright"}
+        mock_integrator.get_server_configs.return_value = {"pyright": {}}
+        modules = tmp_path / "apm_modules"
+        modules.mkdir()
+
+        with patch("apm_cli.policy.discovery.discover_policy_with_chain") as discover:
+            count = run_lsp_integration(
+                apm_package=apm_package,
+                apm_modules_path=modules,
+                lock_path=tmp_path / "apm.lock.yaml",
+                existing_lock=None,
+                project_root=tmp_path,
+                user_scope=False,
+                should_install=True,
+                logger=_mock_logger(),
+                effective_allow_executables=None,
+                effective_allow_resolved=True,
+            )
+
+        assert count == 1
+        discover.assert_not_called()
+
 
 # ===========================================================================
 # Stale cleanup

@@ -79,6 +79,7 @@ class TestInstallContextFields:
         "trust_bin",
         # effective executable-trust projection consumed by service reconciliation
         "exec_allow_map",
+        "exec_allow_resolved",
     )
 
     def test_all_required_fields_present(self):
