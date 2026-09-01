@@ -128,6 +128,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
     logger = CommandLogger("uninstall", verbose=verbose, dry_run=dry_run)
     staged_local_refreshes = {}
+    apm_package = None
     registration_token = _publish_native_registration(deploy_root, scope, manifest_path)
     try:
         # Check if apm.yml exists

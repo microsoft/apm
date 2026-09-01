@@ -166,8 +166,12 @@ def reconcile_lsp_after_uninstall(
     logger,
 ) -> bool:
     """Recompute trusted LSP state from every surviving declaration."""
-    if lockfile is None:
+    if lockfile is None or not (
+        lockfile.lsp_servers or lockfile.lsp_target_servers or lockfile.lsp_config_provenance
+    ):
         return False
+    if apm_package is None:
+        raise ValueError("Cannot reconcile existing LSP state without a valid project manifest")
     before = (
         list(lockfile.lsp_servers),
         dict(lockfile.lsp_configs),
@@ -330,6 +334,12 @@ def run_lsp_integration(  # noqa: PLR0913
                 logger,
             )
             lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)
+
+    if should_install and not (
+        lsp_deps or old_lsp_servers or old_lsp_provenance or old_lsp_targets
+    ):
+        logger.verbose_detail("No LSP dependencies found in apm.yml")
+        return 0
 
     lsp_count = 0
 

@@ -199,6 +199,8 @@ class TestRunLspIntegration:
 
         assert count == 0
         mock_integrator.install.assert_not_called()
+        mock_integrator.resolve_target_runtimes.assert_not_called()
+        mock_integrator.update_lockfile.assert_not_called()
 
     @patch(_PATCH_TARGET)
     def test_installs_direct_deps(self, mock_integrator, tmp_path):
