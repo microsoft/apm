@@ -774,10 +774,7 @@ def _validate_mcp_registry_url(url: str) -> str:
             f"WebSocket URLs (ws/wss) and file:// paths are rejected for security."
         )
     if parsed.username is not None:
-        raise ValueError(
-            "mcp-registry-url: URL must not contain credentials; "
-            "use the MCP_REGISTRY_URL environment variable or a credential helper instead."
-        )
+        raise ValueError("mcp-registry-url: embedded credentials are not supported")
     if parsed.query or parsed.fragment:
         raise ValueError("mcp-registry-url: base URL must not contain a query or fragment")
     if not parsed.hostname:

@@ -242,7 +242,7 @@ class TestValidateRegistryUrl:
         validate_registry_url("https://mcp.example.com")
 
     def test_credentials_rejected(self):
-        with pytest.raises(click.UsageError, match="must not contain credentials"):
+        with pytest.raises(click.UsageError, match="embedded credentials are not supported"):
             validate_registry_url("https://user:secret@mcp.example.com")
 
     @pytest.mark.parametrize(
@@ -356,10 +356,10 @@ class TestRedactUrlCredentials:
         """End-to-end: B3 env-source diagnostic must redact creds."""
         monkeypatch.setenv("MCP_REGISTRY_URL", "https://u:topsecret@x.example.com/")
         logger = MagicMock()
-        resolve_registry_url(None, logger=logger)
-        msg = logger.progress.call_args.args[0]
-        assert "topsecret" not in msg
-        assert "u:" not in msg
+        with pytest.raises(click.UsageError) as raised:
+            resolve_registry_url(None, logger=logger)
+        assert "topsecret" not in str(raised.value)
+        logger.progress.assert_not_called()
 
 
 class TestSsrfWarning:

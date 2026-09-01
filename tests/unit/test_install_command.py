@@ -2273,7 +2273,7 @@ class TestInstallMcpFlag:
             result = self.runner.invoke(cli, argv[1:])
 
         assert result.exit_code == 2, (result.output, result.exception)
-        assert "choose a global-capable target" in result.output
+        assert "enable selected experimental targets" in result.output
         assert not user_manifest.exists()
 
     def test_global_mcp_rejects_unsupported_saved_target_without_fallback(
@@ -2305,7 +2305,7 @@ class TestInstallMcpFlag:
             result = self.runner.invoke(cli, argv[1:])
 
         assert result.exit_code == 2
-        assert "choose a global-capable target" in result.output
+        assert "enable selected experimental targets" in result.output
         assert not user_manifest.exists()
 
     def test_global_mcp_filters_mixed_target_set_before_dispatch(self, tmp_path, monkeypatch):
@@ -2839,12 +2839,10 @@ class TestInstallMcpFlag:
         assert run_mcp_install.call_args.kwargs["registry_allow_http"] is False
         assert "(from apm config)" in result.output
 
-    def test_registry_env_url_stays_at_transport_boundary(self, monkeypatch):
-        """Ambient registry URLs must not be persisted or logged downstream."""
-        monkeypatch.setenv(
-            "MCP_REGISTRY_URL",
-            "http://user:secret@env.example.com?token=query-secret#fragment-secret",
-        )
+    def test_registry_env_url_pins_source_without_http_opt_in(self, monkeypatch):
+        """A valid ambient endpoint is persisted without relaxing HTTP policy."""
+        configured_url = "https://env.example.com"
+        monkeypatch.setenv("MCP_REGISTRY_URL", configured_url)
         argv = ["apm", "install", "--mcp", "srv", "--no-policy"]
         with (
             self._chdir_with_apm_yml(),
@@ -2855,9 +2853,8 @@ class TestInstallMcpFlag:
 
         assert result.exit_code == 0, result.output
         run_mcp_install.assert_called_once()
-        assert run_mcp_install.call_args.kwargs["registry_url"] is None
+        assert run_mcp_install.call_args.kwargs["registry_url"] == configured_url
         assert run_mcp_install.call_args.kwargs["registry_allow_http"] is False
-        assert "secret" not in result.output
 
     def test_invalid_configured_registry_url_fails_before_dispatch(self, monkeypatch):
         """Stale persisted URLs must pass current validation before use."""

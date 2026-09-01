@@ -47,11 +47,12 @@ def _redact_url_credentials(url: str) -> str:
     """
     try:
         parsed = urlparse(url)
+        parsed_port = parsed.port
         netloc = parsed.netloc
         if "@" in netloc:
             netloc = parsed.hostname or ""
-            if parsed.port is not None:
-                netloc = f"{netloc}:{parsed.port}"
+            if parsed_port is not None:
+                netloc = f"{netloc}:{parsed_port}"
         sanitized = parsed._replace(
             netloc=netloc,
             query="<redacted>" if parsed.query else "",
@@ -79,6 +80,15 @@ def _is_local_or_metadata_host(host: str | None) -> bool:
     if addr is None:
         return False
     return addr.is_link_local or addr.is_private or addr.is_multicast or addr.is_unspecified
+
+
+def _require_ambient_http_opt_in(url: str, source: str) -> None:
+    """Require the existing explicit opt-in for ambient plaintext endpoints."""
+    if urlparse(url).scheme.lower() == "http" and not os.environ.get("MCP_REGISTRY_ALLOW_HTTP"):
+        raise click.UsageError(
+            f"{source} uses plaintext HTTP; set MCP_REGISTRY_ALLOW_HTTP=1 "
+            "only if this endpoint is trusted"
+        )
 
 
 def validate_registry_url(value: str | None) -> str | None:
@@ -120,6 +130,10 @@ def validate_registry_url(value: str | None) -> str | None:
             f"(e.g. https://mcp.internal.example.com)"
         )
     scheme = parsed.scheme.lower()
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise click.UsageError(f"--registry: Invalid URL '{safe_value}': invalid port") from exc
     if scheme not in _ALLOWED_URL_SCHEMES:
         raise click.UsageError(
             f"--registry: Invalid URL '{safe_value}': scheme '{scheme}' is not "
@@ -127,10 +141,7 @@ def validate_registry_url(value: str | None) -> str | None:
             f"and file:// paths are rejected for security."
         )
     if parsed.username is not None:
-        raise click.UsageError(
-            "--registry: URL must not contain credentials; "
-            "use MCP_REGISTRY_URL or a credential helper instead"
-        )
+        raise click.UsageError("--registry: embedded credentials are not supported")
     if parsed.query or parsed.fragment:
         raise click.UsageError("--registry: base URL must not contain a query or fragment")
     return normalized
@@ -170,6 +181,12 @@ def resolve_registry_url(
         # Defaults are quiet, overrides are visible: surface the env-driven
         # registry redirect so a poisoned MCP_REGISTRY_URL cannot silently
         # change package resolution. Always emitted (not verbose-gated).
+        try:
+            env_value = validate_registry_url(env_value)
+        except click.UsageError as exc:
+            detail = exc.message.removeprefix("--registry: ")
+            raise click.UsageError(f"MCP_REGISTRY_URL is invalid: {detail}") from exc
+        _require_ambient_http_opt_in(env_value, "MCP_REGISTRY_URL")
         if logger is not None:
             logger.progress(
                 f"Using MCP registry: {_redact_url_credentials(env_value)} (from MCP_REGISTRY_URL)",
@@ -191,6 +208,7 @@ def resolve_registry_url(
                 "Configured mcp-registry-url is invalid; run "
                 f"'apm config unset mcp-registry-url' and retry: {detail}"
             ) from exc
+        _require_ambient_http_opt_in(config_value, "Configured mcp-registry-url")
         if logger is not None:
             logger.progress(
                 f"Using MCP registry: {_redact_url_credentials(config_value)} (from apm config)",

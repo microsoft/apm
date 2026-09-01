@@ -32,6 +32,10 @@ workspace-only runtimes. If no selected target supports user scope, the command
 exits `2` before creating or changing the user manifest, lockfile, or runtime
 configuration.
 
+Positional-package dry-runs retain any bootstrapped manifest for inspection.
+`apm install -g --mcp ... --dry-run` does not create a user manifest, lockfile,
+or runtime configuration.
+
 `apm update`, `apm install --update`, and `apm install --refresh` stage and
 validate replacement packages before publication. A failed download,
 validation, or activation leaves the previous package and lockfile active;

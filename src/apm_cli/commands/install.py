@@ -742,10 +742,6 @@ def _validate_and_add_packages_to_apm_yml(
 # MCP registry / dry-run helpers are imported at module top (see
 # ``..install.mcp.*`` imports above) so test patches keep working.
 
-# ---------------------------------------------------------------------------
-# install() decomposition: extracted flow helpers
-# ---------------------------------------------------------------------------
-
 
 def _handle_mcp_install(  # noqa: PLR0913
     *,
@@ -774,7 +770,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         validated_registry_url,
         logger=logger,
     )
-    integration_registry_url = None if registry_source == "env" else resolved_registry_url
+    integration_registry_url = resolved_registry_url
     mcp_manifest_path = get_manifest_path(scope)
     mcp_apm_dir = get_apm_dir(scope)
     from ..core.target_detection import resolve_manifest_target_decision
@@ -789,33 +785,36 @@ def _handle_mcp_install(  # noqa: PLR0913
         from ..core.target_detection import EffectiveTargetDecision
         from ..integration.mcp_integrator_install import (
             discover_user_scope_mcp_runtimes,
+            filter_excluded_mcp_runtimes,
             partition_user_scope_runtimes,
         )
 
-        if target_decision.runtime_targets is None:
+        scoped_runtime_targets = target_decision.runtime_targets_for_scope(user_scope=True)
+        if scoped_runtime_targets is None:
             supported_runtimes, skipped_runtimes = discover_user_scope_mcp_runtimes(
                 get_deploy_root(scope)
             )
         else:
             supported_runtimes, skipped_runtimes = partition_user_scope_runtimes(
-                list(target_decision.runtime_targets)
+                list(scoped_runtime_targets)
             )
+        supported_runtimes = filter_excluded_mcp_runtimes(supported_runtimes, exclude)
         if skipped_runtimes:
             logger.warning(
                 "Skipped workspace-only runtimes at user scope: "
                 f"{', '.join(sorted(skipped_runtimes))} -- omit --global to install these"
             )
         if not supported_runtimes:
+            if exclude:
+                raise click.UsageError(
+                    f"All selected MCP runtimes were removed by --exclude {exclude}; "
+                    "choose another target or remove the exclusion"
+                )
             raise click.UsageError(
-                "Selected targets do not support user-scope MCP installation; "
-                "choose a global-capable target such as copilot or omit --global"
+                "Selected targets are unavailable for user-scope MCP installation; "
+                "enable selected experimental targets, choose copilot, or omit --global"
             )
         target_decision = EffectiveTargetDecision(supported_runtimes, target_decision.source)
-
-    # -- W2-mcp-preflight: policy enforcement before MCP install --
-    # Build a lightweight MCPDependency for policy evaluation.
-    # This mirrors _build_mcp_entry routing but we only need the
-    # fields that policy checks inspect (name, transport, registry).
     from ..models.dependency.mcp import MCPDependency as _MCPDep
     from ..policy.install_preflight import (
         PolicyBlockError,
@@ -849,12 +848,10 @@ def _handle_mcp_install(  # noqa: PLR0913
             effective_target=policy_targets,
         )
     except PolicyBlockError:
-        # Diagnostics already emitted by the helper + logger.
         logger.render_summary()
         sys.exit(1)
 
     if logger.dry_run:
-        # C1: validate eagerly so dry-run rejects what real install would.
         _validate_mcp_dry_run_entry(
             mcp_name,
             transport=transport,

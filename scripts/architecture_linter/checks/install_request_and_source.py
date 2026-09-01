@@ -237,6 +237,7 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
     target_calls = _named_calls(handler_nodes, "resolve_manifest_target_decision")
     scope_partition_calls = _named_calls(handler_nodes, "partition_user_scope_runtimes")
     scope_discovery_calls = _named_calls(handler_nodes, "discover_user_scope_mcp_runtimes")
+    exclusion_calls = _named_calls(handler_nodes, "filter_excluded_mcp_runtimes")
     bootstrap_calls = _named_calls(handler_nodes, "_create_minimal_apm_yml")
     dry_run_validation_calls = _named_calls(handler_nodes, "_validate_mcp_dry_run_entry")
     manifest_calls = _named_calls(handler_nodes, "get_manifest_path")
@@ -260,11 +261,13 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
         and len(scope_partition_calls) == 1
         and len(scope_discovery_calls) == 1
         and _takes_deploy_root(scope_discovery_calls[0])
+        and len(exclusion_calls) == 1
         and len(bootstrap_calls) == 1
         and len(dry_run_validation_calls) == 1
         and target_calls[0].lineno < bootstrap_calls[0].lineno
         and scope_partition_calls[0].lineno < bootstrap_calls[0].lineno
         and scope_discovery_calls[0].lineno < bootstrap_calls[0].lineno
+        and exclusion_calls[0].lineno < bootstrap_calls[0].lineno
         and dry_run_validation_calls[0].lineno < bootstrap_calls[0].lineno
         and len(manifest_calls) == 1
         and _takes_scope(manifest_calls[0])
