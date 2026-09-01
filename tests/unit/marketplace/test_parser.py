@@ -62,6 +62,19 @@ def test_scp_ssh_url_classified_as_git() -> None:
     assert host == "gitea.example.com"
 
 
+def test_scp_ssh_url_rejects_query_instead_of_falling_back_to_shorthand() -> None:
+    with pytest.raises(ValueError, match="SSH URLs cannot include queries"):
+        _parse_marketplace_source(
+            "git@gitea.example.com:org/repo.git?ref=main",
+            host_flag=None,
+        )
+
+
+def test_direct_parser_rejects_invalid_host_flag() -> None:
+    with pytest.raises(ValueError, match="Invalid host"):
+        _parse_marketplace_source("owner/repo", host_flag="not a host")
+
+
 @pytest.mark.parametrize(
     ("raw", "expected_port"),
     [

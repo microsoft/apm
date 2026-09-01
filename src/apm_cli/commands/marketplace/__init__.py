@@ -339,7 +339,6 @@ def add(source, name, ref, branch, host, verbose):
         from ...marketplace.client import _auto_detect_path, fetch_marketplace
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
-        from ...utils.github_host import is_valid_fqdn
 
         source_arg, fragment_ref = _split_source_fragment_ref(source)
 
@@ -371,13 +370,6 @@ def add(source, name, ref, branch, host, verbose):
             sys.exit(1)
         except ValueError as exc:
             logger.error(str(exc))
-            sys.exit(1)
-
-        if host is not None and not is_valid_fqdn(host.strip().lower()):
-            logger.error(
-                f"Invalid host: '{host}'. Expected a valid host FQDN (for example, 'github.com').",
-                symbol="error",
-            )
             sys.exit(1)
 
         # --host is meaningful only for shorthand OWNER/REPO inputs. For URL

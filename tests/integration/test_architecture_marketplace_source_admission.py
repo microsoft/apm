@@ -24,6 +24,7 @@ def test_marketplace_source_admission_has_single_owner() -> None:
     assert "identity = parse_marketplace_source(self.url)" in model
     assert "def _host_from_url(" not in client
     assert "host = source.host" in client
+    assert "is_valid_fqdn" not in command
     assert (
         "Marketplace source admission stays owned by marketplace/source_identity.py"
         in rule.description

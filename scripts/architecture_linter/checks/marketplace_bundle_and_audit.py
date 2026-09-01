@@ -305,7 +305,7 @@ def _check_marketplace_source_admission(
             inventory,
             _RID_SOURCE_ADMISSION,
             (_MARKETPLACE_COMMAND,),
-            re.compile(r"SCP_LIKE_RE|AuthResolver\.classify_host"),
+            re.compile(r"SCP_LIKE_RE|AuthResolver\.classify_host|is_valid_fqdn"),
             "Marketplace command must not reimplement source classification",
             exempt=False,
         )

@@ -16,6 +16,8 @@ from apm_cli.cache.url_normalize import SCP_LIKE_RE
 from apm_cli.utils.github_host import default_host, is_valid_fqdn, validate_ssh_user
 from apm_cli.utils.path_security import decode_url_path_segments, validate_path_segments
 
+_SCP_PREFIX_RE = re.compile(r"^[^/@:\s]+@(?:\[[^\]]+\]|[^/:\s]+):")
+
 
 @dataclass(frozen=True)
 class MarketplaceSourceIdentity:
@@ -43,6 +45,10 @@ def parse_marketplace_source(
         raise ValueError("Empty source argument")
     if any(ord(char) < 32 for char in raw):
         raise ValueError("Source argument contains invalid control characters")
+    if host_flag is not None and not is_valid_fqdn(host_flag.strip().lower()):
+        raise ValueError(
+            f"Invalid host: '{host_flag}'. Expected a valid host FQDN (for example, 'github.com')."
+        )
 
     if _looks_like_local_marketplace_source(raw):
         url = raw if raw.lower().startswith("file://") else f"file://{_expand_local_path(raw)}"
@@ -53,6 +59,9 @@ def parse_marketplace_source(
         raise ValueError("Insecure HTTP URL rejected. Use HTTPS for marketplace registration.")
     if lowered.startswith("ssh://"):
         return _parse_ssh_url(raw, host_flag)
+
+    if "?" in raw and _SCP_PREFIX_RE.match(raw):
+        raise ValueError("SSH URLs cannot include queries; remove the query and use --ref REF.")
 
     scp_match = SCP_LIKE_RE.fullmatch(raw)
     if scp_match:
