@@ -101,13 +101,30 @@ class TestValidateUninstallPackages:
         assert "org/missing" in not_found
         logger.error.assert_called_once()
 
-    def test_invalid_format_no_slash_logs_error(self):
-        """Package without slash is rejected with an error message and tracked in not_found."""
+    def test_unique_short_name_matches_installed_package(self):
+        """A package basename selects its unambiguous manifest entry."""
         logger = _make_logger()
-        to_remove, not_found = _validate_uninstall_packages(["badpackage"], ["org/repo"], logger)
+        to_remove, not_found = _validate_uninstall_packages(
+            ["perform-code-review"],
+            ["jfrog/perform-code-review#v1.15.0"],
+            logger,
+        )
+        assert to_remove == ["jfrog/perform-code-review#v1.15.0"]
+        assert not_found == []
+        logger.error.assert_not_called()
+
+    def test_ambiguous_short_name_requires_exact_identifier(self):
+        """A basename shared by multiple owners is rejected without guessing."""
+        logger = _make_logger()
+        to_remove, not_found = _validate_uninstall_packages(
+            ["shared-skill"],
+            ["acme/shared-skill", "contoso/shared-skill"],
+            logger,
+        )
         assert to_remove == []
-        assert "badpackage" in not_found
+        assert not_found == ["shared-skill"]
         logger.error.assert_called_once()
+        assert "Ambiguous dependency 'shared-skill'" in logger.error.call_args.args[0]
 
     def test_multiple_packages_partial_match(self):
         """Some packages matched, others not."""
@@ -1086,20 +1103,18 @@ class TestValidateUninstallPackagesMarketplace:
         progress_msg = logger.progress.call_args[0][0]
         assert "(as " not in progress_msg
 
-    def test_invalid_format_no_slash_no_at_still_errors(self):
-        """A bare word with neither slash nor @ still triggers an error."""
+    def test_unmatched_short_name_reports_installed_inventory_hint(self):
+        """An unknown bare name follows the ordinary not-found path."""
         logger = _make_logger()
 
         to_remove, not_found = _validate_uninstall_packages(["badpackage"], ["org/repo"], logger)
 
         assert to_remove == []
-        # Invalid-format inputs MUST appear in packages_not_found (API contract).
         assert "badpackage" in not_found
         logger.error.assert_called_once()
         err_msg = logger.error.call_args[0][0]
-        assert "owner/repo" in err_msg
-        # Error must surface marketplace notation symmetrically with install.
-        assert "plugin-name@marketplace" in err_msg
+        assert "not found in apm.yml" in err_msg
+        assert "apm deps list" in err_msg
 
     def test_mixed_canonical_and_marketplace_refs(self):
         """Batch mixing canonical and marketplace refs processes both correctly."""

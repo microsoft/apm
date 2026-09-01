@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm uninstall` now accepts an unambiguous package short name, while
+  requiring the full installed identifier when multiple owners use the same
+  name.
 - Architecture ownership guards now use a sharded JSON registry and a
   single-process Python linter while preserving exact-revision compatibility
   and reducing warm median lint time by 75%. (#2739)
