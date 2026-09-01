@@ -60,6 +60,7 @@ def run_mcp_install(  # noqa: PLR0913
     target: str | list[str] | None = None,
     target_decision: EffectiveTargetDecision | None = None,
     registry_url: str | None = None,
+    registry_allow_http: bool = True,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
@@ -128,7 +129,7 @@ def run_mcp_install(  # noqa: PLR0913
         if target is not None and logger:
             rendered_target = target if isinstance(target, str) else ", ".join(target)
             logger.verbose_detail(f"Target: {rendered_target}")
-        with registry_env_override(registry_url):
+        with registry_env_override(registry_url, allow_http=registry_allow_http):
             try:
                 # Migrate before creating apm.lock.yaml so legacy state is not shadowed.
                 migrate_lockfile_if_needed(apm_dir)

@@ -115,6 +115,23 @@ def _has_name_keyword(call: ast.Call, keyword: str, name: str) -> bool:
     )
 
 
+def _has_scope_projection_keyword(call: ast.Call, keyword: str) -> bool:
+    """Return whether a keyword projects user scope through the canonical helper."""
+    for item in call.keywords:
+        value = item.value
+        if (
+            item.arg == keyword
+            and isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "is_user_scope"
+            and len(value.args) == 1
+            and isinstance(value.args[0], ast.Name)
+            and value.args[0].id == "scope"
+        ):
+            return True
+    return False
+
+
 def _canonical_scope_assignment(node: ast.Assign) -> bool:
     """Return whether an assignment owns the global-to-install-scope mapping."""
     value = node.value
@@ -202,6 +219,8 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
     ]
     handler_calls = _named_calls(install_nodes, "_handle_mcp_install")
     run_calls = _named_calls(handler_nodes, "_run_mcp_install")
+    target_calls = _named_calls(handler_nodes, "resolve_manifest_target_decision")
+    scope_partition_calls = _named_calls(handler_nodes, "partition_user_scope_runtimes")
     manifest_calls = _named_calls(handler_nodes, "get_manifest_path")
     apm_dir_calls = _named_calls(handler_nodes, "get_apm_dir")
     validator_args = (
@@ -218,6 +237,9 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
         and _has_name_keyword(handler_calls[0], "scope", "scope")
         and len(run_calls) == 1
         and _has_name_keyword(run_calls[0], "scope", "scope")
+        and len(target_calls) == 1
+        and _has_scope_projection_keyword(target_calls[0], "user_scope")
+        and len(scope_partition_calls) == 1
         and len(manifest_calls) == 1
         and _takes_scope(manifest_calls[0])
         and len(apm_dir_calls) == 1

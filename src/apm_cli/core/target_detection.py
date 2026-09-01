@@ -964,6 +964,7 @@ def resolve_manifest_target_decision(
     *,
     manifest_path: Path,
     explicit_target: str | list[str] | None,
+    user_scope: bool = False,
 ) -> EffectiveTargetDecision:
     """Resolve one effective target decision from an optional manifest path."""
     package = None
@@ -975,6 +976,7 @@ def resolve_manifest_target_decision(
         project_root,
         package=package,
         explicit_target=explicit_target,
+        user_scope=user_scope,
     )
 
 

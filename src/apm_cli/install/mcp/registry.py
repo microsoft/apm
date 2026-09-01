@@ -122,6 +122,11 @@ def validate_registry_url(value: str | None) -> str | None:
             f"supported; use http:// or https://. WebSocket URLs (ws/wss) "
             f"and file:// paths are rejected for security."
         )
+    if parsed.username is not None:
+        raise click.UsageError(
+            "--registry: URL must not contain credentials; "
+            "use MCP_REGISTRY_URL or a credential helper instead"
+        )
     return normalized
 
 
@@ -206,7 +211,11 @@ _REGISTRY_ENV_KEYS = ("MCP_REGISTRY_URL", "MCP_REGISTRY_ALLOW_HTTP")
 
 
 @contextlib.contextmanager
-def registry_env_override(registry_url: str | None) -> Iterator[None]:
+def registry_env_override(
+    registry_url: str | None,
+    *,
+    allow_http: bool = True,
+) -> Iterator[None]:
     """Temporarily export ``MCP_REGISTRY_URL`` for the duration of a call.
 
     ``MCPIntegrator.install`` constructs ``MCPServerOperations()`` deep in
@@ -230,7 +239,7 @@ def registry_env_override(registry_url: str | None) -> Iterator[None]:
     saved = {k: os.environ.get(k) for k in _REGISTRY_ENV_KEYS}
     try:
         os.environ["MCP_REGISTRY_URL"] = registry_url
-        if urlparse(registry_url).scheme.lower() == "http":
+        if allow_http and urlparse(registry_url).scheme.lower() == "http":
             os.environ["MCP_REGISTRY_ALLOW_HTTP"] = "1"
         yield
     finally:

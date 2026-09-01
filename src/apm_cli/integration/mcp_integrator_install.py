@@ -469,6 +469,25 @@ def _declared_manifest_target_runtimes(
     return list(projected or ()), True
 
 
+def partition_user_scope_runtimes(
+    target_runtimes: list[str],
+) -> tuple[list[str], list[str]]:
+    """Partition runtime names by their adapter's user-scope capability."""
+    from apm_cli.factory import ClientFactory
+
+    supported: list[str] = []
+    skipped: list[str] = []
+    for runtime in target_runtimes:
+        try:
+            client = ClientFactory.create_client(runtime)
+        except ValueError:
+            skipped.append(runtime)
+            continue
+        destination = supported if client.supports_user_scope else skipped
+        destination.append(runtime)
+    return supported, skipped
+
+
 def _resolve_target_runtimes(
     runtime: str | None,
     exclude: str | None,
@@ -725,19 +744,7 @@ def _resolve_target_runtimes(
     from apm_cli.core.scope import InstallScope as _IS
 
     if scope is _IS.USER:
-        from apm_cli.factory import ClientFactory as _CF
-
-        pre_filter = list(target_runtimes)
-        filtered_runtimes = []
-        for rt in target_runtimes:
-            try:
-                client = _CF.create_client(rt)
-            except ValueError:
-                continue
-            if client.supports_user_scope:
-                filtered_runtimes.append(rt)
-        target_runtimes = filtered_runtimes
-        skipped = set(pre_filter) - set(target_runtimes)
+        target_runtimes, skipped = partition_user_scope_runtimes(target_runtimes)
         if skipped:
             msg = (
                 f"Skipped workspace-only runtimes at user scope: "

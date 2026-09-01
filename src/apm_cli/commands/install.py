@@ -777,22 +777,45 @@ def _handle_mcp_install(  # noqa: PLR0913
     from ..core.scope import (
         get_apm_dir,
         get_manifest_path,
+        is_user_scope,
     )
 
     # Apply CLI > env > default precedence; emit override diagnostic.
-    resolved_registry_url, _registry_source = _resolve_registry_url(
+    resolved_registry_url, registry_source = _resolve_registry_url(
         validated_registry_url,
         logger=logger,
     )
+    integration_registry_url = None if registry_source == "env" else resolved_registry_url
     mcp_manifest_path = get_manifest_path(scope)
     mcp_apm_dir = get_apm_dir(scope)
+    if is_user_scope(scope) and not mcp_manifest_path.exists():
+        mcp_apm_dir.mkdir(parents=True, exist_ok=True)
+        project_name = _resolve_bootstrap_project_name(Path.home().name)
+        config = _get_default_config(project_name)
+        if manifest_targets := manifest_targets_from_target_option(target or runtime):
+            config["targets"] = manifest_targets
+        _create_minimal_apm_yml(config, target_path=mcp_manifest_path)
+        logger.success(f"Created {mcp_manifest_path}")
+
     from ..core.target_detection import resolve_manifest_target_decision
 
     target_decision = resolve_manifest_target_decision(
         Path.cwd(),
         manifest_path=mcp_manifest_path,
         explicit_target=target or runtime,
+        user_scope=is_user_scope(scope),
     )
+    if is_user_scope(scope) and target_decision.runtime_targets is not None:
+        from ..integration.mcp_integrator_install import partition_user_scope_runtimes
+
+        supported_runtimes, _skipped_runtimes = partition_user_scope_runtimes(
+            list(target_decision.runtime_targets)
+        )
+        if not supported_runtimes:
+            raise click.UsageError(
+                "Selected targets do not support user-scope MCP installation; "
+                "choose a global-capable target such as copilot or omit --global"
+            )
 
     # -- W2-mcp-preflight: policy enforcement before MCP install --
     # Build a lightweight MCPDependency for policy evaluation.
@@ -866,7 +889,8 @@ def _handle_mcp_install(  # noqa: PLR0913
         logger=logger,
         apm_dir=mcp_apm_dir,
         scope=scope,
-        registry_url=resolved_registry_url,
+        registry_url=integration_registry_url,
+        registry_allow_http=registry_source == "flag",
     )
 
 

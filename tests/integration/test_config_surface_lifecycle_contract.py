@@ -8,6 +8,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import pytest
 
@@ -22,6 +23,7 @@ from tests.utils.local_git_repository import (
     LocalGitRepository,
     LocalGitRepositoryFactory,
 )
+from tests.utils.local_mcp_registry import LocalMcpRegistryFactory
 from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
@@ -1203,17 +1205,14 @@ def test_global_direct_mcp_uses_user_manifest_and_runtime_config(
         base_env=dict(os.environ),
     )
     user_manifest = isolated.home / ".apm" / "apm.yml"
-    dump_yaml(
-        {
-            "name": "global-direct",
-            "version": "0.1.0",
-            "targets": ["claude"],
-            "dependencies": {"mcp": []},
-        },
-        user_manifest,
-    )
+    fake_bin = isolated.root / "bin"
+    fake_bin.mkdir()
+    claude_binary = fake_bin / "claude"
+    claude_binary.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+    claude_binary.chmod(0o755)
     project = isolated.work_root / "consumer"
     project.mkdir()
+    (project / ".cursor").mkdir()
     project_manifest = project / "apm.yml"
     dump_yaml(
         {
@@ -1241,7 +1240,11 @@ def test_global_direct_mcp_uses_user_manifest_and_runtime_config(
         expected_returncodes=(0,),
         scenario_id="global-direct-mcp",
         cwd=project,
-        env=isolated.subprocess_env(),
+        env=isolated.subprocess_env(
+            overrides={
+                "PATH": f"{fake_bin}{os.pathsep}{isolated.process_environment['PATH']}",
+            }
+        ),
     )[0]
 
     user_config = load_yaml(user_manifest)
@@ -1255,6 +1258,78 @@ def test_global_direct_mcp_uses_user_manifest_and_runtime_config(
         "type": "stdio",
     }
     assert "Install interrupted" not in result.stdout + result.stderr
+
+
+def test_configured_mcp_registry_drives_global_direct_install(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Persisted registry config must reach a real direct MCP integration."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "configured-direct-registry",
+        base_env=dict(os.environ),
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    server_name = "io.github.apm/configured-registry"
+    document = {
+        "name": server_name,
+        "description": "Configured direct registry fixture",
+        "version": "1.0.0",
+        "packages": [
+            {
+                "registryType": "npm",
+                "identifier": "@apm/configured-registry",
+                "runtimeHint": "npx",
+                "transport": {"type": "stdio"},
+                "runtimeArguments": [],
+            }
+        ],
+    }
+    registry_factory = LocalMcpRegistryFactory(isolated.root / "registries")
+
+    with registry_factory.start(document) as registry:
+        parsed_registry = urlparse(registry.url)
+        assert parsed_registry.port is not None
+        environment = isolated.subprocess_env()
+        environment["APM_TEST_LOOPBACK_PORTS"] = str(parsed_registry.port)
+        environment["MCP_REGISTRY_ALLOW_HTTP"] = "1"
+        _runner(apm_binary_path).run_sequence(
+            (
+                ("config", "set", "mcp-registry-url", registry.url),
+                (
+                    "install",
+                    "-g",
+                    "--mcp",
+                    server_name,
+                    "--target",
+                    "claude",
+                    "--no-policy",
+                ),
+            ),
+            expected_returncodes=(0, 0),
+            scenario_id="configured-global-direct-registry",
+            cwd=project,
+            env=environment,
+        )
+
+        assert any(path.startswith("/v0.1/servers?") for path in registry.request_paths)
+        assert any(path.endswith("/versions/latest") for path in registry.request_paths)
+
+    user_manifest = load_yaml(isolated.home / ".apm" / "apm.yml")
+    entry = user_manifest["dependencies"]["mcp"][0]
+    stored_registry = urlparse(entry["registry"])
+    assert (
+        stored_registry.scheme,
+        stored_registry.hostname,
+        stored_registry.port,
+    ) == (
+        parsed_registry.scheme,
+        parsed_registry.hostname,
+        parsed_registry.port,
+    )
+    claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
+    assert "configured-registry" in claude_config["mcpServers"]
 
 
 def test_saved_target_drives_declared_mcp_and_lsp_without_package(

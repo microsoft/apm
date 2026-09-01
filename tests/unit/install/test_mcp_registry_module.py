@@ -11,6 +11,7 @@ Covers:
 import typing
 from unittest.mock import MagicMock
 
+import click
 import pytest
 
 from apm_cli.install.mcp.registry import (
@@ -217,6 +218,14 @@ class TestRegistryEnvOverride:
             assert os.environ.get("MCP_REGISTRY_ALLOW_HTTP") == "1"
         assert "MCP_REGISTRY_ALLOW_HTTP" not in os.environ
 
+    def test_http_url_preserves_separate_opt_in_when_disabled(self, monkeypatch):
+        monkeypatch.delenv("MCP_REGISTRY_ALLOW_HTTP", raising=False)
+        import os
+
+        with registry_env_override("http://intranet.example.com", allow_http=False):
+            assert "MCP_REGISTRY_ALLOW_HTTP" not in os.environ
+        assert "MCP_REGISTRY_ALLOW_HTTP" not in os.environ
+
     def test_none_is_no_op(self, monkeypatch):
         monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
         import os
@@ -231,6 +240,10 @@ class TestValidateRegistryUrl:
 
     def test_https_accepted(self):
         validate_registry_url("https://mcp.example.com")
+
+    def test_credentials_rejected(self):
+        with pytest.raises(click.UsageError, match="must not contain credentials"):
+            validate_registry_url("https://user:secret@mcp.example.com")
 
     def test_http_accepted(self):
         validate_registry_url("http://intranet.example.com")

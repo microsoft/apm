@@ -2179,7 +2179,6 @@ class TestInstallMcpFlag:
                 {
                     "name": "user-scope",
                     "version": "0.1.0",
-                    "targets": ["claude"],
                     "dependencies": {"mcp": []},
                 }
             ),
@@ -2237,7 +2236,47 @@ class TestInstallMcpFlag:
         assert install_call.kwargs["scope"] is InstallScope.USER
         assert install_call.kwargs["user_scope"] is True
         assert install_call.kwargs["project_root"] == user_apm_dir
-        assert install_call.kwargs["target_decision"].value == ["claude"]
+        assert install_call.kwargs["target_decision"].value is None
+
+    def test_global_mcp_rejects_workspace_only_target_before_manifest_write(
+        self, tmp_path, monkeypatch
+    ):
+        fake_home = tmp_path / "home"
+        user_apm_dir = fake_home / ".apm"
+        user_apm_dir.mkdir(parents=True)
+        user_manifest = user_apm_dir / "apm.yml"
+        original = {
+            "name": "user-scope",
+            "version": "0.1.0",
+            "dependencies": {"mcp": []},
+        }
+        user_manifest.write_text(yaml.safe_dump(original), encoding="utf-8")
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "-g",
+            "--target",
+            "vscode",
+            "--mcp",
+            "probe",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 2, (result.output, result.exception)
+        assert "choose a global-capable target" in result.output
+        assert yaml.safe_load(user_manifest.read_text(encoding="utf-8")) == original
 
     def test_e3_mcp_with_only_apm(self):
         with self._chdir_with_apm_yml():
@@ -2687,7 +2726,25 @@ class TestInstallMcpFlag:
         assert result.exit_code == 0, result.output
         run_mcp_install.assert_called_once()
         assert run_mcp_install.call_args.kwargs["registry_url"] == configured_url
+        assert run_mcp_install.call_args.kwargs["registry_allow_http"] is False
         assert "(from apm config)" in result.output
+
+    def test_registry_env_url_stays_at_transport_boundary(self, monkeypatch):
+        """Ambient registry URLs must not be persisted or logged downstream."""
+        monkeypatch.setenv("MCP_REGISTRY_URL", "http://user:secret@env.example.com")
+        argv = ["apm", "install", "--mcp", "srv", "--no-policy"]
+        with (
+            self._chdir_with_apm_yml(),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 0, result.output
+        run_mcp_install.assert_called_once()
+        assert run_mcp_install.call_args.kwargs["registry_url"] is None
+        assert run_mcp_install.call_args.kwargs["registry_allow_http"] is False
+        assert "secret" not in result.output
 
     def test_registry_with_version_overlay_persists_both(self):
         with (
