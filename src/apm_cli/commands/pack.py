@@ -388,7 +388,6 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
             "pack.target metadata only and is ignored by 'apm install'."
         )
         effective_target = target
-    effective_dry_run = dry_run or check_clean
     options = BuildOptions(
         project_root=project_root,
         apm_yml_path=project_root / "apm.yml",
@@ -661,6 +660,12 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 ),
             )
         elif sub.kind is OutputKind.MARKETPLACE:
+            if (
+                check_clean
+                and drift_metadata_enrichment is not None
+                and not drift_metadata_enrichment.certifiable
+            ):
+                continue
             _render_marketplace_result(
                 logger, sub.payload, effective_dry_run, sub.warnings, sub.outputs
             )

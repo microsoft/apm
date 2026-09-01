@@ -82,5 +82,5 @@ def test_metadata_prefetch_uses_real_resolver_token_and_anonymous_paths(
     outcome = builder._fetch_remote_metadata_outcome(_package())
 
     assert outcome.status == "fetched"
-    expected = [None] if token is None else [None, None, f"token {token}"]
+    expected = [None] if token is None else [None, f"token {token}"]
     assert authorization == expected

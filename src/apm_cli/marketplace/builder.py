@@ -1195,6 +1195,8 @@ class MarketplaceBuilder:
                     except urllib.error.HTTPError as exc:
                         if exc.code != 404:
                             raise
+                        if token is None:
+                            raise
                         api_base = (
                             host_info.api_base if host_info else None
                         ) or "https://api.github.com"

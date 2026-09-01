@@ -280,6 +280,27 @@ def test_check_clean_never_writes_before_reporting_uncertifiable_metadata(
     assert artifact.read_bytes() == before
 
 
+def test_explicit_clean_check_dry_run_reports_uncertifiable_metadata_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """An uncertifiable preview must not repeat warnings or promise a write."""
+    _write_config(tmp_path)
+    monkeypatch.setattr(MarketplaceBuilder, "_ensure_auth", lambda _self: None)
+    monkeypatch.setattr(
+        MarketplaceBuilder,
+        "_fetch_remote_metadata_outcome",
+        lambda _self, pkg: MetadataEnrichmentOutcome(pkg.name, "failed", cause="transport closed"),
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run"])
+
+    assert result.exit_code == 4, result.output
+    assert result.output.count("metadata enrichment failed") == 1
+    assert "[dry-run] Would write marketplace.json" not in result.output
+
+
 def test_pack_json_reuses_build_metadata_for_clean_check(
     tmp_path: Path,
     monkeypatch,
