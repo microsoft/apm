@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install` no longer silently drops instruction or skill Markdown whose
+- `apm install` no longer silently drops instruction Markdown whose
   unfenced bodies contain `---` horizontal rules; selected instruction targets
   now reject invalid or unsafe decoded frontmatter before package writes.
   (by @manideep-malyala, #2666)

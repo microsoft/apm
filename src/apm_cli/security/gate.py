@@ -216,6 +216,7 @@ class SecurityGate:
         package: str = "",
         force: bool = False,
         force_action: str = "Deployed",
+        force_detail: str | None = None,
     ) -> None:
         """Record findings into a DiagnosticCollector with consistent messaging."""
         if not verdict.has_findings:
@@ -226,7 +227,8 @@ class SecurityGate:
             diagnostics.security(
                 message=(f"{force_action} with --force despite critical hidden characters"),
                 package=package,
-                detail=(
+                detail=force_detail
+                or (
                     f"{verdict.critical_count} critical finding(s) — "
                     "run 'apm audit --strip' to clean up"
                 ),

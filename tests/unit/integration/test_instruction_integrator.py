@@ -177,6 +177,10 @@ class TestInstructionIntegrator:
             package="pkg",
             force=True,
             force_action="Allowed by preflight",
+            force_detail=(
+                "Decoded frontmatter contains critical hidden characters; "
+                "edit the escaped value in forced.instructions.md"
+            ),
         )
 
     def test_identity_target_materializes_preflight_validated_content(self):

@@ -215,10 +215,12 @@ class TestReport:
             package="pkg",
             force=True,
             force_action="Allowed by preflight",
+            force_detail="Edit the escaped value in decoded.yml",
         )
 
         message = diag.security.call_args.kwargs["message"]
         assert message == "Allowed by preflight with --force despite critical hidden characters"
+        assert diag.security.call_args.kwargs["detail"] == "Edit the escaped value in decoded.yml"
 
     def test_warning_only_reports(self):
         diag = MagicMock()

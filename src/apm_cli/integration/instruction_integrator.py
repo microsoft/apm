@@ -145,6 +145,10 @@ class InstructionIntegrator(BaseIntegrator):
                 package=package_name,
                 force=force,
                 force_action="Allowed by preflight",
+                force_detail=(
+                    "Decoded frontmatter contains critical hidden characters; "
+                    f"edit the escaped value in {source.name}"
+                ),
             )
         if verdict.should_block:
             raise yaml.YAMLError(
