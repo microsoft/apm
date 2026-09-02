@@ -78,13 +78,26 @@ def _write_credential_helper(home: Path, log_path: Path) -> Path:
     return helper
 
 
-def _write_tls_certificate(root: Path) -> tuple[Path, Path]:
-    """Generate a short-lived loopback certificate for the HTTPS Git fixture."""
+def _write_tls_certificate(root: Path) -> tuple[Path, Path, Path]:
+    """Generate a test CA and CA-signed loopback certificate."""
     openssl = shutil.which("openssl")
     if openssl is None:
         pytest.skip("openssl is required for the HTTPS Git fixture")
+    authority = root / "authority.pem"
+    authority_key = root / "authority-key.pem"
     certificate = root / "certificate.pem"
     key = root / "key.pem"
+    request = root / "certificate.csr"
+    extensions = root / "certificate-extensions.cnf"
+    extensions.write_text(
+        "basicConstraints=critical,CA:FALSE\n"
+        "keyUsage=critical,digitalSignature,keyEncipherment\n"
+        "extendedKeyUsage=serverAuth\n"
+        "subjectKeyIdentifier=hash\n"
+        "authorityKeyIdentifier=keyid,issuer\n"
+        "subjectAltName=IP:127.0.0.1\n",
+        encoding="ascii",
+    )
     subprocess.run(
         (
             openssl,
@@ -94,13 +107,18 @@ def _write_tls_certificate(root: Path) -> tuple[Path, Path]:
             "rsa:2048",
             "-nodes",
             "-keyout",
-            str(key),
+            str(authority_key),
             "-out",
-            str(certificate),
+            str(authority),
             "-subj",
-            "/CN=127.0.0.1",
+            "/CN=APM Test Certificate Authority",
             "-addext",
-            "subjectAltName=IP:127.0.0.1",
+            "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
+            "-addext",
+            "subjectKeyIdentifier=hash",
+            "-sha256",
             "-days",
             "1",
         ),
@@ -108,7 +126,78 @@ def _write_tls_certificate(root: Path) -> tuple[Path, Path]:
         capture_output=True,
         text=True,
     )
-    return certificate, key
+    subprocess.run(
+        (
+            openssl,
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(request),
+            "-subj",
+            "/CN=127.0.0.1",
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        (
+            openssl,
+            "x509",
+            "-req",
+            "-in",
+            str(request),
+            "-CA",
+            str(authority),
+            "-CAkey",
+            str(authority_key),
+            "-CAcreateserial",
+            "-out",
+            str(certificate),
+            "-sha256",
+            "-days",
+            "1",
+            "-extfile",
+            str(extensions),
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return certificate, key, authority
+
+
+def _verify_git_https_fixture(
+    git: Path,
+    *,
+    remote_url: str,
+    environment: dict[str, str],
+) -> None:
+    """Verify the native Git TLS backend and helper can reach the fixture."""
+    verification_env = dict(environment)
+    verification_env.pop("GIT_CONFIG_GLOBAL")
+    verification_env.pop("GIT_CONFIG_NOSYSTEM")
+    for name in _SENTINEL_NAMES:
+        verification_env.pop(name, None)
+    result = subprocess.run(
+        (str(git), "ls-remote", "--heads", remote_url),
+        cwd=Path(environment["HOME"]),
+        env=verification_env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"native Git HTTPS fixture preflight failed\n"
+        f"stdout={result.stdout!r}\n"
+        f"stderr={result.stderr!r}"
+    )
 
 
 def _configure_git_tls_trust(
@@ -170,7 +259,7 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
         real_git=real_git,
         env=environment,
     )
-    certificate, key = _write_tls_certificate(isolated.root)
+    certificate, key, authority = _write_tls_certificate(isolated.root)
 
     # Reproduce the in-process CLI import order that installs truststore globally.
     configure_process_tls_trust()
@@ -184,13 +273,18 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
         _configure_git_tls_trust(
             real_git,
             remote_base_url=server.proxy_url,
-            certificate=certificate,
+            certificate=authority,
             config_paths=(
                 Path(environment["GIT_CONFIG_GLOBAL"]),
                 isolated.home / ".gitconfig",
             ),
         )
         remote_url = server.remote_url(repository)
+        _verify_git_https_fixture(
+            real_git,
+            remote_url=remote_url,
+            environment=environment,
+        )
         runner = ApmLifecycleRunner((str(apm_binary_path),))
         add_result = runner.run(
             ("marketplace", "add", remote_url, "--name", "generic-marketplace"),
@@ -198,6 +292,7 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
             cwd=isolated.work_root,
             env=environment,
         )
+        observations = server.observations
         list_result = runner.run(
             ("marketplace", "list"),
             scenario_id="marketplace-generic-https-native-helper",
@@ -205,7 +300,12 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
             env=environment,
         )
 
-    assert add_result.returncode == 0, add_result.stderr
+    assert add_result.returncode == 0, (
+        f"stdout={add_result.stdout!r}\n"
+        f"stderr={add_result.stderr!r}\n"
+        f"http_observations={observations!r}\n"
+        f"helper_log_exists={helper_log.exists()}"
+    )
     assert list_result.returncode == 0, list_result.stderr
     assert helper_log.exists()
     assert json.loads(helper_log.read_text(encoding="utf-8")) == []
