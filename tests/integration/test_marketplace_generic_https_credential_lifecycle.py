@@ -99,6 +99,8 @@ def _write_tls_certificate(root: Path) -> tuple[Path, Path]:
             str(certificate),
             "-subj",
             "/CN=127.0.0.1",
+            "-addext",
+            "subjectAltName=IP:127.0.0.1",
             "-days",
             "1",
         ),
@@ -107,6 +109,30 @@ def _write_tls_certificate(root: Path) -> tuple[Path, Path]:
         text=True,
     )
     return certificate, key
+
+
+def _configure_git_tls_trust(
+    git: Path,
+    *,
+    remote_base_url: str,
+    certificate: Path,
+    config_paths: tuple[Path, ...],
+) -> None:
+    """Trust the fixture CA in every Git config visible to the CLI."""
+    for config_path in config_paths:
+        subprocess.run(
+            (
+                str(git),
+                "config",
+                "--file",
+                str(config_path),
+                f"http.{remote_base_url}.sslCAInfo",
+                str(certificate),
+            ),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
 
 def test_generic_https_marketplace_add_uses_native_credential_helper(
@@ -128,7 +154,6 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
             "GIT_TOKEN": "git-sentinel",
             "APM_TEST_HELPER_LOG": str(helper_log),
             "GIT_ALLOW_PROTOCOL": "file:http:https",
-            "GIT_SSL_NO_VERIFY": "1",
         }
     )
     real_git = _real_git()
@@ -156,6 +181,15 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
         certfile=certificate,
         keyfile=key,
     ) as server:
+        _configure_git_tls_trust(
+            real_git,
+            remote_base_url=server.proxy_url,
+            certificate=certificate,
+            config_paths=(
+                Path(environment["GIT_CONFIG_GLOBAL"]),
+                isolated.home / ".gitconfig",
+            ),
+        )
         remote_url = server.remote_url(repository)
         runner = ApmLifecycleRunner((str(apm_binary_path),))
         add_result = runner.run(
