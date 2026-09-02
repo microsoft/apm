@@ -9,6 +9,7 @@ Covers the _handle_global_flag function and --global integration in the compile 
 * compile command: --global with --watch rejected
 * compile command: --global with --root rejected
 * compile command: --global without errors exits 0
+* _handle_global_flag: honors targets: declared in the user manifest (#2768)
 """
 
 from __future__ import annotations
@@ -436,3 +437,93 @@ class TestCompileGlobalCommand:
 
             # Runner exit_code should be 1
             assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Declared-target restriction (#2768)
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalCompileHonorsDeclaredTargets:
+    """`apm compile -g` must compile only the targets ~/.apm/apm.yml declares."""
+
+    @staticmethod
+    def _prepare(tmp_path: Path, manifest: str | None) -> Path:
+        """Build a user-scope apm dir, optionally carrying an apm.yml."""
+        source_root = tmp_path / "source"
+        (source_root / "apm_modules").mkdir(parents=True)
+        if manifest is not None:
+            (source_root / "apm.yml").write_text(manifest)
+        return source_root
+
+    @staticmethod
+    def _compiled_target_names(compile_mock: MagicMock) -> list[str]:
+        """Extract the target names handed to compile_user_root_contexts."""
+        profiles = compile_mock.call_args.args[0]
+        return [p.name for p in profiles]
+
+    def _run(self, source_root: Path, logger: MagicMock) -> MagicMock:
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        compile_mock = MagicMock(return_value=[])
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            assert _handle_global_flag(dry_run=False, logger=logger) == 0
+        return compile_mock
+
+    def test_declared_targets_restrict_compiled_set(self, tmp_path):
+        """targets: [claude, codex] -> only those two are compiled."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [claude, codex]\n",
+        )
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert sorted(names) == ["claude", "codex"]
+
+    def test_declared_targets_exclude_explicit_only_and_gated_targets(self, tmp_path):
+        """A narrow targets: must not drag in antigravity or gated harnesses."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [claude]\n",
+        )
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert names == ["claude"]
+        assert "antigravity" not in names
+        assert "hermes" not in names
+
+    def test_singular_target_key_is_honored(self, tmp_path):
+        """The singular `target:` sugar restricts the set the same way."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntarget: codex\n",
+        )
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert names == ["codex"]
+
+    def test_no_declared_targets_compiles_every_known_target(self, tmp_path):
+        """No targets: key -> unchanged behavior, the full known set is passed."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        source_root = self._prepare(tmp_path, "name: h\nversion: 1.0.0\n")
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert sorted(names) == sorted(p.name for p in KNOWN_TARGETS.values())
+
+    def test_absent_manifest_compiles_every_known_target(self, tmp_path):
+        """No ~/.apm/apm.yml at all -> unchanged behavior."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        source_root = self._prepare(tmp_path, None)
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert sorted(names) == sorted(p.name for p in KNOWN_TARGETS.values())

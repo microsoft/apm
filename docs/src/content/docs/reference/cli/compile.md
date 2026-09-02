@@ -142,6 +142,11 @@ one-line hint pointing at `apm compile -g`. Run it manually after adding or
 removing global packages. Hand-authored files (files that do not carry the
 APM-generated marker) are never overwritten.
 
+Because `--target` is rejected alongside `--global`, `targets:` in
+`~/.apm/apm.yml` is how you narrow user-scope output. When it declares a target
+set, `apm compile -g` writes only those targets -- matching what `apm install
+-g` deploys. Declare nothing and every supported user-scope target is written.
+
 For OpenCode, `apm compile -g` writes
 `~/.config/opencode/AGENTS.md` and retains scoped `applyTo` sections.
 

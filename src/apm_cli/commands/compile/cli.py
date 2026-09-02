@@ -11,6 +11,7 @@ import click
 
 if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
+    from ...integration.targets import TargetProfile
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
@@ -366,6 +367,24 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
+def _global_compile_targets(source_root: Path) -> list[TargetProfile]:
+    """Return the target profiles ``apm compile -g`` should write.
+
+    ``--target`` is rejected alongside ``--global``, so the user manifest's
+    ``targets:`` is the only way to narrow user-scope output. Honoring it keeps
+    the resolution chain consistent with ``apm install -g`` and stops compile
+    from creating deploy roots for harnesses the user never declared (#2768).
+    Declaring nothing keeps the historical every-known-target behavior.
+    """
+    from ...core.apm_yml import read_declared_target_names
+    from ...integration.targets import KNOWN_TARGETS
+
+    declared = read_declared_target_names(source_root)
+    if not declared:
+        return list(KNOWN_TARGETS.values())
+    return [KNOWN_TARGETS[name] for name in dict.fromkeys(declared) if name in KNOWN_TARGETS]
+
+
 def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     """Handle --global compilation of user-scope root context files.
 
@@ -374,7 +393,6 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
 
     from ...compilation import compile_user_root_contexts
     from ...core.scope import InstallScope, get_apm_dir
-    from ...integration.targets import KNOWN_TARGETS
 
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
@@ -388,7 +406,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         return 1
 
     results = compile_user_root_contexts(
-        list(KNOWN_TARGETS.values()),
+        _global_compile_targets(source_root),
         source_root,
         dry_run=dry_run,
         logger=None,

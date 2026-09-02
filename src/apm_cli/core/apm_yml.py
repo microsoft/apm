@@ -13,6 +13,8 @@ Validates each token against CANONICAL_TARGETS.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from apm_cli.core.errors import (
     ConflictingTargetsError,
     EmptyTargetsListError,
@@ -21,6 +23,9 @@ from apm_cli.core.errors import (
     render_unknown_target_error,
 )
 from apm_cli.core.target_catalog import get_target_capability, manifest_target_names
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Canonical target names accepted by APM.
 CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
@@ -166,3 +171,19 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
 
     # Neither key present
     return []
+
+
+def read_declared_target_names(root: Path) -> list[str]:
+    """Return the canonical target names ``root/apm.yml`` declares, else ``[]``.
+
+    An unreadable or non-mapping manifest yields ``[]`` so callers fall through
+    to their own default; an invalid ``targets:`` value still raises out of
+    :func:`parse_targets_field` rather than being silently discarded.
+    """
+    from apm_cli.utils.yaml_io import load_yaml
+
+    try:
+        data = load_yaml(root / "apm.yml")
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return []
+    return parse_targets_field(data) if isinstance(data, dict) else []
