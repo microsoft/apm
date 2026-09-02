@@ -25,6 +25,7 @@ pytestmark = [
 ]
 
 _HELPER_PASSWORD = "fixture-marketplace-password"
+_DENY_PROXY = "http://127.0.0.1:9"
 _SENTINEL_NAMES = (
     "ADO_APM_PAT",
     "GH_TOKEN",
@@ -200,28 +201,32 @@ def _verify_git_https_fixture(
     )
 
 
-def _configure_git_tls_trust(
+def _configure_git_https_fixture(
     git: Path,
     *,
     remote_base_url: str,
     certificate: Path,
     config_paths: tuple[Path, ...],
 ) -> None:
-    """Trust the fixture CA in every Git config visible to the CLI."""
+    """Trust and route the fixture directly in every visible Git config."""
     for config_path in config_paths:
-        subprocess.run(
-            (
-                str(git),
-                "config",
-                "--file",
-                str(config_path),
-                f"http.{remote_base_url}.sslCAInfo",
-                str(certificate),
-            ),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        for key, value in (
+            (f"http.{remote_base_url}.sslCAInfo", str(certificate)),
+            (f"http.{remote_base_url}.proxy", ""),
+        ):
+            subprocess.run(
+                (
+                    str(git),
+                    "config",
+                    "--file",
+                    str(config_path),
+                    key,
+                    value,
+                ),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
 
 
 def test_generic_https_marketplace_add_uses_native_credential_helper(
@@ -243,6 +248,14 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
             "GIT_TOKEN": "git-sentinel",
             "APM_TEST_HELPER_LOG": str(helper_log),
             "GIT_ALLOW_PROTOCOL": "file:http:https",
+            "ALL_PROXY": _DENY_PROXY,
+            "HTTP_PROXY": _DENY_PROXY,
+            "HTTPS_PROXY": _DENY_PROXY,
+            "NO_PROXY": "",
+            "all_proxy": _DENY_PROXY,
+            "http_proxy": _DENY_PROXY,
+            "https_proxy": _DENY_PROXY,
+            "no_proxy": "",
         }
     )
     real_git = _real_git()
@@ -270,7 +283,7 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
         certfile=certificate,
         keyfile=key,
     ) as server:
-        _configure_git_tls_trust(
+        _configure_git_https_fixture(
             real_git,
             remote_base_url=server.proxy_url,
             certificate=authority,
