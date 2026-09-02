@@ -387,6 +387,28 @@ class BaseIntegrator:
             return True
         return False
 
+    @staticmethod
+    def is_content_identical_to_text(
+        target_path: Path,
+        expected_content: str,
+        *,
+        lf_normalized_deploy: bool = False,
+    ) -> bool:
+        """Return whether a target matches already-prepared deployment text."""
+        try:
+            if not target_path.exists() or target_path.is_symlink():
+                return False
+            try:
+                target_bytes = _read_bytes_no_follow(target_path)
+            except _SymlinkRaceError:
+                return False
+            expected = (
+                normalize_crlf_to_lf(expected_content) if lf_normalized_deploy else expected_content
+            ).encode("utf-8")
+            return target_bytes == expected
+        except OSError:
+            return False
+
     def _check_adopt_or_skip(
         self,
         target_path: Path,
@@ -396,6 +418,8 @@ class BaseIntegrator:
         force: bool,
         diagnostics,
         target_paths: list,
+        *,
+        expected_content: str | None = None,
     ) -> tuple[bool, bool]:
         """Check whether *target_path* should be adopted or skipped.
 
@@ -431,9 +455,20 @@ class BaseIntegrator:
             is ``True`` only when the existing file already matched the
             deployed content and has been silently adopted.
         """
-        if self.is_content_identical_to_source(
-            target_path, source_file, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
-        ):
+        identical = (
+            self.is_content_identical_to_text(
+                target_path,
+                expected_content,
+                lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY,
+            )
+            if expected_content is not None
+            else self.is_content_identical_to_source(
+                target_path,
+                source_file,
+                lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY,
+            )
+        )
+        if identical:
             target_paths.append(target_path)
             return True, True
         if self.check_collision(

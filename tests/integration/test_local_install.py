@@ -413,6 +413,53 @@ print("ordinary Markdown")
         assert not (fake_home / ".copilot/prompts/good.prompt.md").exists()
         assert not (fake_home / ".copilot/copilot-instructions.md").exists()
 
+    def test_install_rejects_yaml_escaped_hidden_unicode_before_writes(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Decoded frontmatter metadata crosses the same security gate as source."""
+        consumer = temp_workspace / "consumer"
+        package = temp_workspace / "packages" / "local-skills"
+        source = package / ".apm/instructions/test-skill.instructions.md"
+        source.write_text(
+            '---\napplyTo: src/**\ndescription: "\\u202ehidden"\n---\n# Rule\n',
+            encoding="utf-8",
+        )
+        prompt = package / ".apm/prompts/good.prompt.md"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("# Good prompt\n", encoding="utf-8")
+        command = [
+            apm_binary_path,
+            "install",
+            "../packages/local-skills",
+            "--target",
+            "cursor",
+        ]
+
+        rejected = subprocess.run(
+            command,
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert rejected.returncode != 0, rejected.stdout + rejected.stderr
+        assert not (consumer / ".github/prompts/good.prompt.md").exists()
+        assert not (consumer / ".cursor/rules/test-skill.mdc").exists()
+
+        forced = subprocess.run(
+            [*command, "--force"],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert forced.returncode == 0, forced.stdout + forced.stderr
+        assert (consumer / ".cursor/rules/test-skill.mdc").exists()
+
     def test_install_rejects_bounded_frontmatter_bomb(
         self,
         temp_workspace,

@@ -172,6 +172,7 @@ class SecurityGate:
         filename: str,
         *,
         policy: ScanPolicy = BLOCK_POLICY,
+        force: bool = False,
     ) -> ScanVerdict:
         """Scan in-memory text (compiled output, generated files)."""
         file_findings = ContentScanner.scan_text(content, filename=filename)
@@ -182,7 +183,7 @@ class SecurityGate:
             findings_by_file,
             1,
             policy,
-            force=False,
+            force=force,
             scanned_files=frozenset({filename}),
         )
 
@@ -191,6 +192,7 @@ class SecurityGate:
         contents: dict[str, str],
         *,
         policy: ScanPolicy = BLOCK_POLICY,
+        force: bool = False,
     ) -> ScanVerdict:
         """Scan a complete in-memory output batch with one policy decision."""
         findings_by_file: dict[str, list[ScanFinding]] = {}
@@ -202,7 +204,7 @@ class SecurityGate:
             findings_by_file,
             len(contents),
             policy,
-            force=False,
+            force=force,
             scanned_files=frozenset(contents),
         )
 

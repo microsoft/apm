@@ -676,6 +676,26 @@ def _manual_frontmatter_detector(node: ast.Call) -> bool:
     )
 
 
+def _self_method_call(node: ast.Call, method: str) -> bool:
+    return (
+        isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+        and node.func.attr == method
+    )
+
+
+def _prepared_identity_content(node: ast.AST) -> bool:
+    candidate = node.value if isinstance(node, ast.Attribute) and node.attr == "content" else node
+    return (
+        isinstance(candidate, ast.Subscript)
+        and isinstance(candidate.value, ast.Name)
+        and candidate.value.id == "prepared_instructions"
+        and isinstance(candidate.slice, ast.Name)
+        and candidate.slice.id == "source_file"
+    )
+
+
 def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
     """Frontmatter detection, BOM decoding, and parsing must use yaml_io.py."""
     rule_id = _GUARD_FRONTMATTER
@@ -782,6 +802,129 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                         "instruction frontmatter detection must route through loads_frontmatter",
                         line=node.lineno,
                         column=node.col_offset + 1,
+                    )
+                )
+        if path == _INSTRUCTION_INTEGRATOR:
+            integrate_function = facts.tree_index.function(
+                "InstructionIntegrator.integrate_instructions_for_target"
+            )
+            integrate_scope = (
+                facts.tree_index.own_scope(integrate_function)
+                if integrate_function is not None
+                else ()
+            )
+            prepare_calls = [
+                node
+                for node in integrate_scope
+                if isinstance(node, ast.Call) and _self_method_call(node, "_prepare_instruction")
+            ]
+            identity_renders = [
+                node
+                for node in integrate_scope
+                if isinstance(node, ast.Call) and _self_method_call(node, "_render_instruction")
+            ]
+            adoption_calls = [
+                node
+                for node in integrate_scope
+                if isinstance(node, ast.Call) and _self_method_call(node, "_check_adopt_or_skip")
+            ]
+            expected_content = (
+                next(
+                    (
+                        item.value
+                        for item in adoption_calls[0].keywords
+                        if item.arg == "expected_content"
+                    ),
+                    None,
+                )
+                if len(adoption_calls) == 1
+                else None
+            )
+            prepared_value = (
+                next(
+                    (item.value for item in identity_renders[0].keywords if item.arg == "prepared"),
+                    None,
+                )
+                if len(identity_renders) == 1
+                else None
+            )
+            if (
+                len(prepare_calls) != 1
+                or len(identity_renders) != 1
+                or not _prepared_identity_content(prepared_value)
+                or not isinstance(expected_content, ast.Name)
+                or expected_content.id != "new_content"
+            ):
+                findings.append(
+                    _summary(
+                        rule_id,
+                        path,
+                        "identity instructions must materialize the prepared canonical parse",
+                    )
+                )
+            prepare_function = facts.tree_index.function(
+                "InstructionIntegrator._prepare_instruction"
+            )
+            prepare_scope = (
+                facts.tree_index.own_scope(prepare_function) if prepare_function is not None else ()
+            )
+            security_calls = [
+                node
+                for node in prepare_scope
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "SecurityGate"
+                and node.func.attr == "scan_text"
+            ]
+            json_calls = [
+                node
+                for node in prepare_scope
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "json"
+                and node.func.attr == "dumps"
+            ]
+            force_value = (
+                next(
+                    (item.value for item in security_calls[0].keywords if item.arg == "force"),
+                    None,
+                )
+                if len(security_calls) == 1
+                else None
+            )
+            ensure_ascii = (
+                next(
+                    (item.value for item in json_calls[0].keywords if item.arg == "ensure_ascii"),
+                    None,
+                )
+                if len(json_calls) == 1
+                else None
+            )
+            block_checks = [
+                node
+                for node in prepare_scope
+                if isinstance(node, ast.If)
+                and isinstance(node.test, ast.Attribute)
+                and isinstance(node.test.value, ast.Name)
+                and node.test.value.id == "verdict"
+                and node.test.attr == "should_block"
+            ]
+            if (
+                len(security_calls) != 1
+                or not isinstance(force_value, ast.Name)
+                or force_value.id != "force"
+                or len(json_calls) != 1
+                or not isinstance(ensure_ascii, ast.Constant)
+                or ensure_ascii.value is not False
+                or len(block_checks) != 1
+            ):
+                findings.append(
+                    _summary(
+                        rule_id,
+                        path,
+                        "decoded frontmatter metadata must cross SecurityGate with force policy",
                     )
                 )
     return tuple(findings)

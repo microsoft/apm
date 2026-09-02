@@ -9,6 +9,7 @@ Content transforms are selected by the ``format_id`` field in
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -91,12 +92,12 @@ class InstructionIntegrator(BaseIntegrator):
             source_plan,
         )
 
-    def copy_instruction(self, source: Path, target: Path) -> int:
+    def copy_instruction(self, source: Path, target: Path, content: str | None = None) -> int:
         """Copy instruction file with link resolution.
 
         Preserves applyTo: frontmatter and all content as-is.
         """
-        content = source.read_text(encoding="utf-8")
+        content = content if content is not None else source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
         write_text_lf(target, content)
         return links_resolved
@@ -114,13 +115,35 @@ class InstructionIntegrator(BaseIntegrator):
             "Fix or remove the invalid frontmatter, then rerun apm install."
         ) from exc
 
-    def _prepare_instruction(self, source: Path) -> _PreparedInstruction:
+    def _prepare_instruction(
+        self,
+        source: Path,
+        *,
+        force: bool = False,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> _PreparedInstruction:
         """Read and validate one instruction without writing target files."""
+        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+
         content = source.read_text(encoding="utf-8")
         try:
-            _, body = self._parse_frontmatter(content)
+            metadata, body = self._parse_frontmatter(content)
         except yaml.YAMLError as exc:
             self._raise_frontmatter_error(source, exc)
+        decoded_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+        verdict = SecurityGate.scan_text(
+            decoded_metadata,
+            f"{source}#decoded-frontmatter",
+            policy=BLOCK_POLICY,
+            force=force,
+        )
+        if verdict.has_findings and diagnostics is not None:
+            SecurityGate.report(verdict, diagnostics, package=package_name, force=force)
+        if verdict.should_block:
+            raise yaml.YAMLError(
+                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
+            )
         return _PreparedInstruction(content=content, body=body)
 
     def _render_instruction(
@@ -200,6 +223,9 @@ class InstructionIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         source_plan: DeployableSourcePlan,
+        *,
+        force: bool = False,
+        diagnostics=None,
     ) -> None:
         """Validate authorized instructions and prepare conversions before writes."""
         self._prepared_rule_plans.clear()
@@ -221,8 +247,15 @@ class InstructionIntegrator(BaseIntegrator):
             return
 
         self.init_link_resolver(package_info, project_root)
+        package_name = getattr(getattr(package_info, "package", None), "name", "")
         prepared_instructions = {
-            source_file: self._prepare_instruction(source_file) for source_file in instruction_files
+            source_file: self._prepare_instruction(
+                source_file,
+                force=force,
+                diagnostics=diagnostics,
+                package_name=package_name,
+            )
+            for source_file in instruction_files
         }
         self._prepared_instructions[self._package_key(package_path)] = prepared_instructions
         for target, mapping in eligible_targets:
@@ -296,6 +329,17 @@ class InstructionIntegrator(BaseIntegrator):
         )
         if not instruction_files:
             return IntegrationResult(0, 0, 0, [])
+        if prepared_instructions is None:
+            package_name = getattr(getattr(package_info, "package", None), "name", "")
+            prepared_instructions = {
+                source_file: self._prepare_instruction(
+                    source_file,
+                    force=force,
+                    diagnostics=diagnostics,
+                    package_name=package_name,
+                )
+                for source_file in instruction_files
+            }
 
         deploy_dir = target_root / mapping.subdir
         deploy_dir.mkdir(parents=True, exist_ok=True)
@@ -356,6 +400,12 @@ class InstructionIntegrator(BaseIntegrator):
                 # deploy_dir is impossible. Validate against deploy_dir (not
                 # project_root) so user-scope targets outside the workspace work.
                 ensure_path_within(target_path, deploy_dir)
+                new_content, links_resolved = self._render_instruction(
+                    source_file,
+                    target_path,
+                    fmt,
+                    prepared=prepared_instructions[source_file],
+                )
 
             rel_path = portable_relpath(target_path, project_root)
 
@@ -398,7 +448,14 @@ class InstructionIntegrator(BaseIntegrator):
                 continue
 
             skip, adopted = self._check_adopt_or_skip(
-                target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
+                target_path,
+                source_file,
+                rel_path,
+                managed_files,
+                force,
+                diagnostics,
+                target_paths,
+                expected_content=new_content,
             )
             if skip:
                 if adopted:
@@ -407,7 +464,7 @@ class InstructionIntegrator(BaseIntegrator):
                     files_skipped += 1
                 continue
 
-            links_resolved = self.copy_instruction(source_file, target_path)
+            write_text_lf(target_path, new_content)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)

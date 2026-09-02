@@ -90,7 +90,17 @@ def test_frontmatter_bom_guard_rejects_caller_owned_encoding(tmp_path: Path) -> 
     assert _violated(report, "contracts-tooling-frontmatter-yaml")
 
 
-@pytest.mark.parametrize("mutation", ["local-detector", "aliased-parser-bypass"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "local-detector",
+        "aliased-parser-bypass",
+        "identity-reread",
+        "identity-adoption-reread",
+        "decoded-security-bypass",
+        "decoded-force-bypass",
+    ],
+)
 def test_frontmatter_authority_guard_rejects_split_owners(
     tmp_path: Path,
     mutation: str,
@@ -121,12 +131,52 @@ def test_frontmatter_authority_guard_rejects_split_owners(
             ),
             encoding="utf-8",
         )
-    else:
+    elif mutation == "aliased-parser-bypass":
         bypass = sandbox / "src/apm_cli/frontmatter_bypass.py"
         bypass.write_text(
             "from frontmatter import loads as parse\n\n"
             "def read(text: str):\n"
             "    return parse(text)\n",
+            encoding="utf-8",
+        )
+    elif mutation == "identity-reread":
+        integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.write_text(
+            integrator.read_text(encoding="utf-8").replace(
+                "                    prepared=prepared_instructions[source_file],\n",
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "identity-adoption-reread":
+        integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.write_text(
+            integrator.read_text(encoding="utf-8").replace(
+                "                expected_content=new_content,\n",
+                "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "decoded-security-bypass":
+        integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.write_text(
+            integrator.read_text(encoding="utf-8").replace(
+                "        if verdict.should_block:\n",
+                "        if False:\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    else:
+        integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
+        integrator.write_text(
+            integrator.read_text(encoding="utf-8").replace(
+                "            force=force,\n",
+                "            force=False,\n",
+                1,
+            ),
             encoding="utf-8",
         )
 

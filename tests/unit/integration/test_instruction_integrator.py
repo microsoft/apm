@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
+from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
@@ -126,6 +127,73 @@ class TestInstructionIntegrator:
 
         self.integrator.copy_instruction(source, target)
         assert target.read_text() == content
+
+    def test_direct_identity_target_rejects_invalid_frontmatter_before_writes(self):
+        """Direct target integration keeps the same validation boundary as install."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.project_root / "package"
+        instruction_dir = package_dir / ".apm" / "instructions"
+        instruction_dir.mkdir(parents=True)
+        (instruction_dir / "broken.instructions.md").write_text(
+            "---\napplyTo: [\n---\n# Invalid\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(yaml.YAMLError, match="Rejected frontmatter"):
+            self.integrator.integrate_instructions_for_target(
+                KNOWN_TARGETS["copilot"],
+                self._make_package_info(package_dir),
+                self.project_root,
+            )
+
+        assert not (self.project_root / ".github/instructions").exists()
+
+    def test_identity_target_materializes_preflight_validated_content(self):
+        """Identity deployment writes the bytes validated during preflight."""
+        from unittest.mock import patch
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.project_root / "package"
+        instruction_dir = package_dir / ".apm" / "instructions"
+        instruction_dir.mkdir(parents=True)
+        source = instruction_dir / "python.instructions.md"
+        source.write_text("# Validated content\n", encoding="utf-8")
+        package_info = self._make_package_info(package_dir)
+        source_plan = DeployableSourcePlan(
+            package_dir.resolve(),
+            frozenset({".apm/instructions/python.instructions.md"}),
+        )
+
+        self.integrator.preflight_instructions_for_targets(
+            [KNOWN_TARGETS["copilot"]],
+            package_info,
+            self.project_root,
+            source_plan,
+        )
+        changed = "---\napplyTo: [\n---\n# Changed after preflight\n"
+        source.write_text(changed, encoding="utf-8")
+        deployed = self.project_root / ".github/instructions/python.instructions.md"
+        deployed.parent.mkdir(parents=True)
+        deployed.write_text("# Resolved link\n", encoding="utf-8")
+
+        def resolve_prepared(content, _source, _target):
+            assert content == "# Validated content\n"
+            return "# Resolved link\n", 1
+
+        with patch.object(self.integrator, "resolve_links", side_effect=resolve_prepared):
+            result = self.integrator.integrate_instructions_for_target(
+                KNOWN_TARGETS["copilot"],
+                package_info,
+                self.project_root,
+                source_plan=source_plan,
+            )
+
+        assert result.files_integrated == 0
+        assert result.files_adopted == 1
+        assert result.target_paths == [deployed]
+        assert deployed.read_text(encoding="utf-8") == "# Resolved link\n"
 
     # ===== Integration =====
 
