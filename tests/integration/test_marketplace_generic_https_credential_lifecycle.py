@@ -79,26 +79,13 @@ def _write_credential_helper(home: Path, log_path: Path) -> Path:
     return helper
 
 
-def _write_tls_certificate(root: Path) -> tuple[Path, Path, Path]:
-    """Generate a test CA and CA-signed loopback certificate."""
+def _write_tls_certificate(root: Path) -> tuple[Path, Path]:
+    """Generate a short-lived loopback certificate for the HTTPS Git fixture."""
     openssl = shutil.which("openssl")
     if openssl is None:
         pytest.skip("openssl is required for the HTTPS Git fixture")
-    authority = root / "authority.pem"
-    authority_key = root / "authority-key.pem"
     certificate = root / "certificate.pem"
     key = root / "key.pem"
-    request = root / "certificate.csr"
-    extensions = root / "certificate-extensions.cnf"
-    extensions.write_text(
-        "basicConstraints=critical,CA:FALSE\n"
-        "keyUsage=critical,digitalSignature,keyEncipherment\n"
-        "extendedKeyUsage=serverAuth\n"
-        "subjectKeyIdentifier=hash\n"
-        "authorityKeyIdentifier=keyid,issuer\n"
-        "subjectAltName=IP:127.0.0.1\n",
-        encoding="ascii",
-    )
     subprocess.run(
         (
             openssl,
@@ -108,69 +95,22 @@ def _write_tls_certificate(root: Path) -> tuple[Path, Path, Path]:
             "rsa:2048",
             "-nodes",
             "-keyout",
-            str(authority_key),
-            "-out",
-            str(authority),
-            "-subj",
-            "/CN=APM Test Certificate Authority",
-            "-addext",
-            "basicConstraints=critical,CA:TRUE",
-            "-addext",
-            "keyUsage=critical,keyCertSign,cRLSign",
-            "-addext",
-            "subjectKeyIdentifier=hash",
-            "-sha256",
-            "-days",
-            "1",
-        ),
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        (
-            openssl,
-            "req",
-            "-new",
-            "-newkey",
-            "rsa:2048",
-            "-nodes",
-            "-keyout",
             str(key),
             "-out",
-            str(request),
+            str(certificate),
             "-subj",
             "/CN=127.0.0.1",
-        ),
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        (
-            openssl,
-            "x509",
-            "-req",
-            "-in",
-            str(request),
-            "-CA",
-            str(authority),
-            "-CAkey",
-            str(authority_key),
-            "-CAcreateserial",
-            "-out",
-            str(certificate),
+            "-addext",
+            "subjectAltName=IP:127.0.0.1",
             "-sha256",
             "-days",
             "1",
-            "-extfile",
-            str(extensions),
         ),
         check=True,
         capture_output=True,
         text=True,
     )
-    return certificate, key, authority
+    return certificate, key
 
 
 def _verify_git_https_fixture(
@@ -205,13 +145,12 @@ def _configure_git_https_fixture(
     git: Path,
     *,
     remote_base_url: str,
-    certificate: Path,
     config_paths: tuple[Path, ...],
 ) -> None:
-    """Trust and route the fixture directly in every visible Git config."""
+    """Keep the self-signed loopback fixture direct and non-interactive."""
     for config_path in config_paths:
         for key, value in (
-            (f"http.{remote_base_url}.sslCAInfo", str(certificate)),
+            (f"http.{remote_base_url}.sslVerify", "false"),
             (f"http.{remote_base_url}.proxy", ""),
         ):
             subprocess.run(
@@ -272,7 +211,7 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
         real_git=real_git,
         env=environment,
     )
-    certificate, key, authority = _write_tls_certificate(isolated.root)
+    certificate, key = _write_tls_certificate(isolated.root)
 
     # Reproduce the in-process CLI import order that installs truststore globally.
     configure_process_tls_trust()
@@ -286,7 +225,6 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
         _configure_git_https_fixture(
             real_git,
             remote_base_url=server.proxy_url,
-            certificate=authority,
             config_paths=(
                 Path(environment["GIT_CONFIG_GLOBAL"]),
                 isolated.home / ".gitconfig",
