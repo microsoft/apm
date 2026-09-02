@@ -15,78 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed false-positive security blocks from source-only package files:
-  `apm install` and surviving-package reintegration now scan the same authorized
-  file set they can deploy, while deployable prompts, hooks, skills, and approved
-  plugin bins remain protected. (#2490)
-- Marketplace `sourceBase` and full HTTPS repository paths now preserve safe
-  percent-encoded segments, enabling Azure DevOps project names such as
-  `My%20Projects`. (by @aryansk; fixes #2554) (#2584)
-- `apm lock export --timestamp` now rejects malformed or timezone-naive values
-  before they enter CycloneDX or SPDX metadata. (by @manideep-malyala; fixes
-  #2659) (#2660)
-- Generated bundle and plugin metadata now uses deterministic LF line endings,
-  keeping generated metadata byte-stable across operating systems. Existing
-  generated plugin manifests on Windows may have a one-time line-ending-only
-  diff on their next forced rewrite; project YAML files are unchanged. (#2624)
-- Lockfiles generated on Windows for marketplace-plugin / skill-subset git
-  dependencies now pass `apm install --frozen` on Linux, and vice versa. APM
-  writes synthetic `apm.yml` and inline-hooks `.apm/hooks/hooks.json` files
-  with deterministic LF line endings so their `content_hash` is identical on
-  every OS. Existing Windows lockfiles may retain the old CRLF-domain hash;
-  keep the lockfile so its `resolved_commit` pins remain intact while the
-  automatic one-time repair tracked in #2628 lands. (closes #2619)
-- `apm compile` now reduces matching work for literal scoped `applyTo` patterns
-  in large repositories while preserving historical placement. It shares a
-  source inventory across discovery and placement while preserving cleanup
-  behavior, and preserves commas in character classes. (#2595)
 - `apm install` no longer silently drops instruction or skill Markdown whose
-  unfenced bodies contain `---` horizontal rules; converted instruction targets
-  now reject invalid frontmatter before writing any package rules.
+  unfenced bodies contain `---` horizontal rules; selected instruction targets
+  now reject invalid or unsafe decoded frontmatter before package writes.
   (by @manideep-malyala, #2666)
-- Hook commands such as `"${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py` now rewrite to
-  `"${CLAUDE_PLUGIN_ROOT}/hooks/probe.py"` and warn when a supported plugin-root
-  placeholder remains unresolved instead of silently deploying a dead hook.
-  OpenAPM v0.1 (`docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012`) binds
-  the behavior.
-  (by @MohammedAlkindi; closes #2639) (#2645)
-- `apm install` now resolves positional virtual-subdirectory git semver ranges before literal-ref preflight, while preserving registry version validation. (by @aryansk; closes #2514) (#2590)
-- `apm uninstall --global` now cleans removed-only target files before deleting their ownership state, while preserving files owned by surviving packages. (#2658)
-- Windows binary is now Authenticode-signed in the release workflow, eliminating
-  the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
-  PyInstaller bundles. (#2435)
-- `apm install --skill <name>` now matches on plugins whose manifest declares
-  the conventional skills container (`"skills": ["./skills/"]`). The declared
-  container was normalized under its own name, burying every skill at
-  `.apm/skills/skills/<name>/` -- one level below the depth `--skill`
-  enumeration, deployment, the `bin/` security scan and primitive counting all
-  read, so selection reported `Available: (none)` even though a bare install
-  deployed those same skills. A declared entry that is itself a skill
-  (`"skills": "./skills/engineering/tdd"`) still lands under its own leaf name
-  instead of spilling a bare `SKILL.md` into the shared skills root.
-  (closes #2530)
-- Root-declared plugin components (Claude Code single-skill shape
-  `"skills": ["./"]`, and the same for agents/commands/hooks) no longer cause
-  infinite recursion or unbounded writes during `apm install`.
-  `docs/src/content/docs/specs/openapm-v0.1.md` now explicitly requires
-  containment of consumer-generated staging output. (closes #2556)
-- Multi-target `apm compile` now avoids repeating expensive project analysis
-  for each target, making multi-target runs scale like single-target runs
-  without changing generated output. (closes #2482)
-- `deployed-files-present` no longer false-positives on gitignored deploy
-  paths (e.g. `.agents/`), enabling `apm audit --ci` to pass on a fresh
-  checkout when deployed outputs are intentionally not committed. (closes
-  #2452, thanks @sergio-sisternes-epam)
-- YAML expansion guard no longer rejects large anchor-free lockfiles (150K+
-  entries) with a false-positive "billion-laughs" error. APM-generated
-  lockfiles with no anchors or aliases now load without error. (#2389)
-- `apm install` no longer skips the credential retry on non-English machines.
-  Git localises its diagnostics through gettext, so a translated stderr made an
-  authentication failure unrecognisable and private-repo installs failed with
-  misleading network guidance. Git subprocesses in the authentication retry
-  path now run with `LC_ALL=C` and `LANGUAGE=C`. (by @Naofel-eal, closes #2533)
-- Codex MCP configuration now accepts plain HTTP for loopback endpoints while
-  retaining HTTPS for every non-loopback host. (by @normandev92, #2468)
 - `apm pack` now reports unavailable remote package metadata, exposes
   certifiability in JSON, prevents `--check-clean` from certifying degraded
   regeneration, and lets `--strict-metadata` fail before writes. (closes #2524)

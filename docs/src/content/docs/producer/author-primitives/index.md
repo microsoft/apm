@@ -46,7 +46,7 @@ Commands ship as prompts (`.apm/prompts/*.prompt.md`); there is no separate `.ap
 Markdown-based primitive types use a markdown file (or directory containing a primary markdown file). Frontmatter requirements vary by primitive type and declare metadata such as the primitive's name and trigger conditions. `apm compile` reads `.apm/`, applies any policy, and writes per-target output to the right directories on the target's filesystem.
 
 :::note
-When a Markdown primitive has frontmatter, its opening fence of at least three hyphens (for example, `---`) must start at the first character of line 1. Without that opening fence, APM treats the document as body content and later `---` lines remain Markdown horizontal rules. If an instruction has an opening fence but its YAML is invalid, `apm install` stops that package before any primitive is deployed to the selected targets.
+When a Markdown primitive has frontmatter, its opening fence of at least three hyphens (for example, `---`) must be the first content on line 1; an optional UTF-8 BOM may precede it. Without that opening fence, APM treats the document as body content and later `---` lines remain Markdown horizontal rules. If an instruction has an opening fence but its YAML is invalid, `apm install` stops that package before any primitive is deployed to the selected targets.
 :::
 
 Encode primitive Markdown as UTF-8. APM accepts files with or without a
