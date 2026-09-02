@@ -327,8 +327,7 @@ def check_lockfile_timestamp_constructor(provider: FactsProvider) -> tuple[Viola
             violation(
                 rule_id,
                 path,
-                "Lockfile timestamp writes and fallback policy must route through "
-                "deps/lockfile.py",
+                "Lockfile timestamp writes and fallback policy must route through deps/lockfile.py",
                 line=node.lineno,
             )
             for node in facts.tree_index.nodes
@@ -369,8 +368,7 @@ def check_lockfile_timestamp_fallback(provider: FactsProvider) -> tuple[Violatio
             violation(
                 rule_id,
                 path,
-                "Lockfile timestamp writes and fallback policy must route through "
-                "deps/lockfile.py",
+                "Lockfile timestamp writes and fallback policy must route through deps/lockfile.py",
                 line=node.lineno,
             )
             for node in facts.tree_index.nodes
