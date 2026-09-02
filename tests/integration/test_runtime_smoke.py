@@ -79,9 +79,11 @@ class TestRuntimeSmoke:
     @pytest.mark.skipif(sys.platform == "win32", reason="Bash scripts not available on Windows")
     def test_codex_runtime_setup(self, temp_apm_home):
         """Test that Codex runtime setup script works correctly."""
-        # Get the project root (where scripts are located)
+        # Get the project root (where packaged scripts are located)
         project_root = Path(__file__).parent.parent.parent
-        setup_script = project_root / "scripts" / "runtime" / "setup-codex.sh"
+        setup_script = (
+            project_root / "src" / "apm_cli" / "runtime" / "scripts" / "runtime" / "setup-codex.sh"
+        )
 
         assert setup_script.exists(), f"Codex setup script not found: {setup_script}"
 
@@ -113,7 +115,9 @@ class TestRuntimeSmoke:
         """Test that LLM runtime setup script works correctly."""
         # Get the project root
         project_root = Path(__file__).parent.parent.parent
-        setup_script = project_root / "scripts" / "runtime" / "setup-llm.sh"
+        setup_script = (
+            project_root / "src" / "apm_cli" / "runtime" / "scripts" / "runtime" / "setup-llm.sh"
+        )
 
         assert setup_script.exists(), f"LLM setup script not found: {setup_script}"
 

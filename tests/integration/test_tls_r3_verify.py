@@ -314,8 +314,9 @@ def test_v3_writes_module_before_pth(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_v4_setup_llm_truststore_is_best_effort_and_pinned():
     root = _repo_root()
-    sh = (root / "scripts" / "runtime" / "setup-llm.sh").read_text(encoding="utf-8")
-    ps1 = (root / "scripts" / "runtime" / "setup-llm.ps1").read_text(encoding="utf-8")
+    scripts = root / "src" / "apm_cli" / "runtime" / "scripts" / "runtime"
+    sh = (scripts / "setup-llm.sh").read_text(encoding="utf-8")
+    ps1 = (scripts / "setup-llm.ps1").read_text(encoding="utf-8")
 
     # Both scripts pin the floor so the child gets an OS-trust-capable truststore.
     assert "truststore>=0.10.0" in sh

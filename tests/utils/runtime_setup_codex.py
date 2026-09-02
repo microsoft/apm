@@ -13,7 +13,9 @@ import tarfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SETUP_SCRIPT = PROJECT_ROOT / "scripts" / "runtime" / "setup-codex.sh"
+SETUP_SCRIPT = (
+    PROJECT_ROOT / "src" / "apm_cli" / "runtime" / "scripts" / "runtime" / "setup-codex.sh"
+)
 TEST_VERSION = "rust-v9.9.9"
 
 

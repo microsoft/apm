@@ -2117,7 +2117,7 @@ class TestRuntimeManagerScripts:
             mgr.get_embedded_script("nonexistent-script.sh")
 
     def test_get_common_script_loads_real_script(self) -> None:
-        """get_common_script returns script content from repo."""
+        """get_common_script returns package resource content."""
         import sys
 
         from apm_cli.runtime.manager import RuntimeManager
@@ -2126,16 +2126,13 @@ class TestRuntimeManagerScripts:
             pytest.skip("Unix-only test")
 
         mgr = RuntimeManager()
-        # The repo has scripts/runtime/setup-common.sh
-        try:
-            content = mgr.get_common_script()
-            assert isinstance(content, str)
-            assert len(content) > 0
-        except RuntimeError:
-            pytest.skip("setup-common.sh not present in this environment")
+        content = mgr.get_common_script()
+
+        assert isinstance(content, str)
+        assert len(content) > 0
 
     def test_get_token_helper_script_unix(self) -> None:
-        """get_token_helper_script returns string on Unix (may raise if not found)."""
+        """get_token_helper_script returns package resource content on Unix."""
         import sys
 
         from apm_cli.runtime.manager import RuntimeManager
@@ -2144,11 +2141,10 @@ class TestRuntimeManagerScripts:
             pytest.skip("Unix-only test")
 
         mgr = RuntimeManager()
-        try:
-            content = mgr.get_token_helper_script()
-            assert isinstance(content, str)
-        except RuntimeError:
-            pass  # Acceptable if script not in this environment
+        content = mgr.get_token_helper_script()
+
+        assert isinstance(content, str)
+        assert len(content) > 0
 
     def test_setup_runtime_with_mocked_scripts(self) -> None:
         """setup_runtime calls run_embedded_script with script content."""
