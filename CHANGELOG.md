@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now preserves previously deployed skills when package
+  integration is skipped instead of treating them as stale cleanup candidates.
+  (#2758)
 - `apm.yml` now pins the `copilot` target and `.gitignore` covers the harness
   deploy roots this repo does not govern, so a contributor using another
   harness no longer hits `Multiple harnesses detected` on plain `apm install`

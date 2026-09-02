@@ -321,10 +321,9 @@ def _integrate_materialization(
             return deltas
 
     # No-op when targets are empty or acquire decided to skip integration
-    # (signalled by package_info=None).  Still record an empty deployed
-    # list so cleanup phase has a deterministic state.
+    # (signalled by package_info=None). Leave this dependency absent from the
+    # integration outcome so cleanup does not treat every prior file as stale.
     if m.package_info is None or not ctx.targets:
-        ctx.package_deployed_files[dep_key] = []
         return deltas
 
     try:
