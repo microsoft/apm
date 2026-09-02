@@ -635,6 +635,68 @@ class TestTryWithFallbackCredentialChain:
                 with pytest.raises(RuntimeError, match="fail"):
                     resolver.try_with_fallback("github.com", _op)
 
+    def test_ado_rejected_bearer_falls_back_to_repository_credential(self) -> None:
+        provider = MagicMock()
+        provider.is_available.return_value = True
+        provider.get_bearer_token.return_value = "eyJ" + "x" * 120
+        attempts: list[tuple[str | None, dict[str, str]]] = []
+
+        def _op(token, env):
+            attempts.append((token, env))
+            if token == "gcm-token":
+                return "ok"
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+            result = resolver.try_with_fallback(
+                "dev.azure.com",
+                _op,
+                org="contoso",
+                path="contoso/platform/tools",
+            )
+
+        assert result == "ok"
+        assert [token for token, _env in attempts] == [
+            provider.get_bearer_token.return_value,
+            "gcm-token",
+        ]
+        credential_fill.assert_called_once_with(
+            "dev.azure.com",
+            port=None,
+            path="contoso/platform/tools",
+        )
+        gcm_env = attempts[-1][1]
+        assert gcm_env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+        assert gcm_env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+
+    def test_ado_network_failure_does_not_probe_credential_helper(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+
+            def _op(_token, _env):
+                raise RuntimeError("network timeout")
+
+            with pytest.raises(RuntimeError, match="network timeout"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        credential_fill.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # build_error_context — non-ADO paths

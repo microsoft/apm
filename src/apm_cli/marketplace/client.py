@@ -565,33 +565,53 @@ def _fetch_git(
 ) -> dict | None:
     """Fetch marketplace.json from a generic git URL via subprocess + GitCache.
 
-    Sparse-cone clones only the requested manifest path. Uses
-    ``AuthResolver.resolve(host, org).git_env`` to build the git env; for
-    hosts APM doesn't recognise, the env passes through to the user's
-    credential helpers (matches ``apm install`` posture).
+    Sparse-cone clones only the requested manifest path. Generic hosts use
+    ``AuthResolver.resolve(host, org).git_env`` as before. ADO hosts route the
+    checkout through ``AuthResolver.try_with_fallback`` with the repository
+    path, allowing path-scoped ``git credential fill`` after PAT and bearer
+    authentication fail while retaining the hardened Git base environment.
     """
     _validate_ref(source.ref, source.name)
 
     from ..cache.git_cache import GitCache, _sanitize_url
     from ..cache.paths import get_cache_root
 
-    org = source.owner or None
-    auth_ctx = (
-        auth_resolver.resolve(host_info.host, org, port=source.port)
-        if source.port is not None
-        else auth_resolver.resolve(host_info.host, org)
-    )
-    git_env = auth_resolver.hardened_git_env_for_context(auth_ctx)
-
     cache = GitCache(get_cache_root(), refresh=False)
-    try:
-        # Sparse-cone clone -- only the marketplace.json directory tree is fetched.
-        checkout_dir = cache.get_checkout(
+
+    def _checkout(_token, git_env):
+        return cache.get_checkout(
             source.url,
             source.ref,
             env=git_env,
             sparse_paths=[file_path] if "/" in file_path else None,
         )
+
+    try:
+        if getattr(host_info, "kind", "") == "ado":
+            fallback_kwargs = {
+                "org": source.owner or None,
+                "path": urlsplit(source.url).path.lstrip("/"),
+                "unauth_first": False,
+            }
+            if source.port is not None:
+                fallback_kwargs["port"] = source.port
+            fallback_kwargs["base_env"] = auth_resolver.hardened_git_base_env()
+            checkout_dir = auth_resolver.try_with_fallback(
+                host_info.host,
+                _checkout,
+                **fallback_kwargs,
+            )
+        else:
+            org = source.owner or None
+            auth_ctx = (
+                auth_resolver.resolve(host_info.host, org, port=source.port)
+                if source.port is not None
+                else auth_resolver.resolve(host_info.host, org)
+            )
+            checkout_dir = _checkout(
+                None,
+                auth_resolver.hardened_git_env_for_context(auth_ctx),
+            )
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
         # caller's _auto_detect_path probe can try the next candidate path.
