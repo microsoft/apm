@@ -203,13 +203,13 @@ class TestCopilotInstallUninstallCycle:
             assert not (self.project_root / p).exists(), f"not removed: {p}"
 
     def test_user_scope(self):
-        """At user scope, agents and prompts deploy to .copilot/; instructions concat."""
+        """At user scope, agents, prompts, and instructions all deploy to .copilot/."""
         target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
         assert target is not None
         assert target.root_dir == ".copilot"
-        # Instructions supported at user scope via concat (#650)
+        # Instructions supported at user scope via modular .copilot/instructions/
         assert "instructions" in target.primitives
-        assert target.primitives["instructions"].format_id == "copilot_user_instructions"
+        assert target.primitives["instructions"].format_id == "github_instructions"
 
         pkg_info = _make_pkg(self.project_root, instructions=True, agents=True, prompts=True)
 
@@ -221,7 +221,6 @@ class TestCopilotInstallUninstallCycle:
         agent_result = agent_integrator.integrate_agents_for_target(
             target, pkg_info, self.project_root
         )
-        # instructions now deploy as a single concat file
         inst_result = inst_integrator.integrate_instructions_for_target(
             target, pkg_info, self.project_root
         )
@@ -239,13 +238,12 @@ class TestCopilotInstallUninstallCycle:
         deployed = _posix_relpaths(self.project_root, all_paths)
         assert any(p.startswith(".copilot/agents/") for p in deployed)
         assert any(p == ".copilot/prompts/helper.prompt.md" for p in deployed)
-        assert ".copilot/copilot-instructions.md" in deployed
+        assert any(p.startswith(".copilot/instructions/") for p in deployed)
 
         for p in deployed:
             assert (self.project_root / p).exists()
 
         assert (self.project_root / ".copilot" / "prompts" / "helper.prompt.md").exists()
-        assert (self.project_root / ".copilot" / "copilot-instructions.md").exists()
 
         # .github/ must NOT be touched
         assert not (self.project_root / ".github").exists()

@@ -172,11 +172,7 @@ class TargetProfile:
     ``for_scope(user_scope=True)``.
 
     Use this when a primitive must be deployed to a *different* location
-    or via a *different* transform at user scope.  The canonical example
-    is the Copilot target: at project scope each ``*.instructions.md``
-    file deploys individually to ``.github/instructions/``; at user scope
-    they are all concatenated into the single file that Copilot CLI reads
-    (``~/.copilot/copilot-instructions.md``).
+    or via a *different* transform at user scope than at project scope.
     """
 
     include_scoped_in_user_root_context: bool = False
@@ -416,6 +412,14 @@ class TargetProfile:
             return None
 
         new_root = self.user_root_dir or self.root_dir
+        generated_files = self.generated_files
+
+        # Copilot's ``generated_files`` (``copilot-instructions.md``) is a
+        # compile-time output produced by the compiler against the fixed
+        # project root; it has no user-scope equivalent, so drop it here
+        # rather than let it leak into user-scope lockfile/drift tracking.
+        if self.name == "copilot":
+            generated_files = ()
 
         # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
         # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
@@ -456,7 +460,9 @@ class TargetProfile:
             merged.update(self.user_primitive_overrides)
             filtered = merged
 
-        return replace(self, root_dir=new_root, primitives=filtered)
+        return replace(
+            self, root_dir=new_root, primitives=filtered, generated_files=generated_files
+        )
 
 
 def _encode_cowork_locator(path: Path, deploy_root: Path) -> str:
@@ -499,10 +505,10 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 
 KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
-    # instead of ~/.github/.  Instructions are concatenated into
-    # ~/.copilot/copilot-instructions.md because Copilot CLI reads only
-    # that single file at user scope (not individual *.instructions.md).
-    # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
+    # instead of ~/.github/. Copilot CLI supports modular, path-scoped
+    # instructions at user scope via ~/.copilot/instructions/**/*.instructions.md,
+    # mirroring the project-scope .github/instructions/ layout.
+    # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions
     "copilot": TargetProfile(
         capability=TARGET_CAPABILITIES["copilot"],
         root_dir=".github",
@@ -525,9 +531,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".copilot",
-        user_primitive_overrides={
-            "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
-        },
         generated_files=("copilot-instructions.md",),
     ),
     # Claude Code -- the user-level config directory is whatever

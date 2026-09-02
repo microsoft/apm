@@ -113,17 +113,17 @@ GitHub Copilot (CLI and IDE).
 - **Deploy directory.** `.github/` at project scope; `~/.copilot/` at user scope.
 - **Supported primitives.** instructions, prompts, agents, skills, hooks, mcp.
 - **File conventions.**
-  - instructions: `.github/instructions/<name>.instructions.md`
+  - instructions: `.github/instructions/<name>.instructions.md` (project scope),
+    `~/.copilot/instructions/<name>.instructions.md` (user scope)
   - prompts: `.github/prompts/<name>.prompt.md`
   - agents: `.github/agents/<name>.agent.md`
   - skills: `.agents/skills/<name>/SKILL.md` at project scope and
     `~/.agents/skills/<name>/SKILL.md` at user scope
   - hooks: `.github/hooks/<name>.json`
-  - generated: `.github/copilot-instructions.md` (compile output)
+  - generated: `.github/copilot-instructions.md` (compile output, project scope only)
 - **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`;
-  `instructions` from all packages are concatenated into
-  `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file
-  at user scope). User-scope deploys land under `~/.copilot/`, not
+  `instructions` deploy individually under `~/.copilot/instructions/`, mirroring
+  the project-scope layout. User-scope deploys land under `~/.copilot/`, not
   `~/.github/`; hook script commands are written as absolute paths so Copilot
   CLI can invoke them from any working directory.
 - **Global compile.** `apm compile -g` can also render global instructions to
