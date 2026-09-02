@@ -464,8 +464,10 @@ print("ordinary Markdown")
         )
 
         assert forced.returncode == 0, forced.stdout + forced.stderr
-        assert "hidden characters detected" in forced.stdout + forced.stderr
-        assert "Deployed with --force" not in forced.stdout + forced.stderr
+        output = " ".join((forced.stdout + forced.stderr).split())
+        assert "hidden characters detected" in output
+        assert "edit the escaped value in test-skill.instructions.md" in output
+        assert "Deployed with --force" not in output
         assert (consumer / ".cursor/rules/test-skill.mdc").exists()
 
     def test_install_rejects_bounded_frontmatter_bomb(

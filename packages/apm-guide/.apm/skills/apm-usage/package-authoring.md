@@ -299,18 +299,15 @@ correctly -- the component just records NOASSERTION (genuinely unknown).
 This warning fires only on the **authoring** path (your own `apm.yml`);
 installing or exporting other people's dependencies is silent.
 
-Encode primitive Markdown as UTF-8. APM accepts files with or without a
-leading UTF-8 BOM and strips the BOM before parsing frontmatter.
+Encode primitive Markdown as UTF-8. Frontmatter requirements vary by Markdown
+primitive type. When frontmatter is present, its opening fence of at least
+three hyphens (for example, `---`) must be the first content on line 1; an
+optional UTF-8 BOM may precede it and is stripped before parsing. Without that
+opening fence, APM treats the whole document as body content, and later `---`
+lines stay Markdown horizontal rules. Invalid or unsafe instruction
+frontmatter stops the package before any primitive is deployed.
 
 ## The 7 primitive types
-
-Frontmatter requirements vary by Markdown primitive type. When frontmatter is
-present, its opening fence of at least three hyphens (for example, `---`) must
-be the first content on line 1; an optional UTF-8 BOM may precede it. Without
-that opening fence, APM treats the document as body content, and later `---`
-lines remain Markdown horizontal rules. If an instruction has an opening fence
-but its YAML is invalid, `apm install` stops that package before any primitive
-is deployed to the selected targets.
 
 ### 1. Instruction (`*.instructions.md`)
 

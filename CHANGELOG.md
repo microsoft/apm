@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` no longer silently drops instruction Markdown whose
-  unfenced bodies contain `---` horizontal rules; selected instruction targets
-  now reject invalid or unsafe decoded frontmatter before package writes.
+  unfenced bodies contain `---` horizontal rules. It now stops the whole package
+  before deploying any primitive when instruction frontmatter is invalid YAML
+  or contains hidden characters.
   (by @manideep-malyala, #2666)
 - `apm pack` now reports unavailable remote package metadata, exposes
   certifiability in JSON, prevents `--check-clean` from certifying degraded
