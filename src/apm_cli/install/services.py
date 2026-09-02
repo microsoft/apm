@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
+from .deployed_paths import format_target_collapse as _format_target_collapse
 from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
 from .exec_gate import check_executable_approval
 from .exec_gate import plugin_bin_deployable as _plugin_bin_deployable
@@ -202,7 +203,7 @@ def _warn_target_reconcile_failure(
     )
 
 
-def integrate_package_primitives(  # noqa: C901, PLR0913
+def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
     *,
@@ -401,37 +402,6 @@ def integrate_package_primitives(  # noqa: C901, PLR0913
     def _log_integration(msg):
         if logger:
             logger.tree_item(msg)
-
-    def _format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
-        """Apply the 1/2/3+ multi-target collapse rule.
-
-        Returns a tuple ``(suffix, expansion_lines)``:
-
-        * ``suffix`` -- the text appended after ``-> `` on the aggregate line.
-        * ``expansion_lines`` -- extra ``  |     -> <path>`` lines emitted
-          AFTER the aggregate line when ``verbose`` is True. Empty list when
-          collapsed.
-
-        The rule:
-          1 target  -> ``<path1>``
-          2 targets -> ``<path1>, <path2>``
-          3+        -> ``N targets`` (verbose forces full enumeration)
-        """
-        deduped: list[str] = []
-        seen: set = builtins.set()
-        for p in paths:
-            if p not in seen:
-                seen.add(p)
-                deduped.append(p)
-        if verbose and len(deduped) >= 2:
-            return "", [f"  |     -> {p}" for p in deduped]
-        if len(deduped) == 0:
-            return "", []
-        if len(deduped) == 1:
-            return deduped[0], []
-        if len(deduped) == 2:
-            return f"{deduped[0]}, {deduped[1]}", []
-        return f"{len(deduped)} targets", []
 
     _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
 
