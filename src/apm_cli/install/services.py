@@ -35,6 +35,9 @@ from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
+from .target_filter import (
+    log_package_target_restriction as _log_package_target_restriction,
+)
 from .target_filter import resolve_effective_package_targets
 
 if TYPE_CHECKING:
@@ -196,21 +199,6 @@ def _warn_target_reconcile_failure(
             f"targets: [{', '.join(failed_targets)}]; "
             f"configs: [{', '.join(failed_paths)}]; run apm install again"
         ),
-    )
-
-
-def _log_package_target_restriction(logger: InstallLogger | None, target_selection: Any) -> None:
-    """Name the declared and effective target sets when a package narrows them."""
-    if logger is None or not target_selection.package_restriction_active:
-        return
-    declared = (
-        ", ".join(target_selection.package_declared_targets)
-        if target_selection.package_declared_targets
-        else "unrestricted"
-    )
-    effective = ", ".join(target.name for target in target_selection.targets) or "none"
-    logger.verbose_detail(
-        f"Package target restriction: [{declared}]; effective targets: [{effective}]"
     )
 
 

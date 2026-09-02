@@ -437,6 +437,10 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     ``apm install`` / ``apm audit``.
     """
 
+    def detect(self, text: str) -> bool:
+        """Strip one leading UTF-8 BOM before detecting front matter."""
+        return super().detect(text.removeprefix("\ufeff"))
+
     def split(self, text: str) -> tuple[str, str]:
         """Strip one leading UTF-8 BOM before locating the front matter."""
         return super().split(text.removeprefix("\ufeff"))
