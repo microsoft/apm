@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now preserves previously deployed skills when package
+  integration is skipped instead of treating them as stale cleanup candidates.
+  (#2758)
 - `apm install` no longer silently drops instruction Markdown whose
   unfenced bodies contain `---` horizontal rules. It now stops the whole package
   before deploying any primitive when instruction frontmatter is invalid YAML or
