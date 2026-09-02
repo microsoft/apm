@@ -5,7 +5,11 @@ from pathlib import Path  # noqa: F401
 
 import pytest  # noqa: F401
 
-from apm_cli.security.content_scanner import ContentScanner, ScanFinding
+from apm_cli.security.content_scanner import (
+    ContentScanner,
+    ScanFinding,
+    _combine_surrogate_pairs,
+)
 
 
 class TestScanText:
@@ -20,6 +24,11 @@ class TestScanText:
     def test_empty_string_returns_empty(self):
         findings = ContentScanner.scan_text("")
         assert findings == []
+
+    def test_surrogate_normalizer_returns_common_non_ascii_input_unchanged(self):
+        content = "caf\u00e9" * 10_000
+
+        assert _combine_surrogate_pairs(content) is content
 
     def test_whitespace_only_returns_empty(self):
         findings = ContentScanner.scan_text("   \n\n\t\t\n")

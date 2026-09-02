@@ -9,6 +9,7 @@ This module is intentionally dependency-free (no APM internals) so it can
 be tested and used independently.
 """
 
+import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -152,8 +153,13 @@ def _zwj_in_emoji_context(text: str, idx: int) -> bool:
     return prev_ok and next_ok
 
 
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
 def _combine_surrogate_pairs(text: str) -> str:
     """Combine valid UTF-16 surrogate pairs while preserving unpaired units."""
+    if _SURROGATE_RE.search(text) is None:
+        return text
     combined: list[str] = []
     index = 0
     while index < len(text):
