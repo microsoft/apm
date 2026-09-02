@@ -1249,12 +1249,11 @@ class TestDetectPackageType:
         assert pkg_type == PackageType.INVALID
         assert pj_path is None
 
-    def test_apm_yml_takes_precedence_over_plugin_json(self, tmp_path):
-        """plugin.json (manifest) now takes priority over apm.yml."""
+    def test_metadata_only_apm_yml_preserves_plugin_selection(self, tmp_path):
+        """A metadata-only apm.yml leaves plugin.json authoritative."""
         (tmp_path / "apm.yml").write_text("name: test")
         (tmp_path / "plugin.json").write_text('{"name": "test"}')
         pkg_type, _ = detect_package_type(tmp_path)
-        # In the new cascade, plugin manifest wins (step 1)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
 
     def test_hook_package_apm_yml_precedence(self, tmp_path):

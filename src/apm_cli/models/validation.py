@@ -265,14 +265,15 @@ def detect_package_type(
 
     Cascade order (first match wins -- implemented in NormalizationPlanner):
 
-    1. ``AGENT_PLUGIN`` -- root ``plugin.json`` with the Agent Plugins schema.
-    2. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
+    1. Eligible ``apm.yml`` -- preserve root or nested skill semantics,
+       otherwise select ``APM_PACKAGE``.
+    2. ``AGENT_PLUGIN`` -- root ``plugin.json`` with the Agent Plugins schema.
+    3. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
        OR ``.claude-plugin/`` directory.
-    3. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` present.
-    4. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
-    5. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
+    4. ``HYBRID`` -- root ``SKILL.md`` AND metadata-only ``apm.yml``.
+    5. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
+    6. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
        ``apm.yml`` optional; no ``.apm/`` required.
-    6. ``APM_PACKAGE`` -- ``apm.yml`` present with ``.apm/`` or declared deps.
     7. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
     8. ``INVALID`` -- nothing recognisable.
 

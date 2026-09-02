@@ -19,6 +19,11 @@ Pick the form that matches the author's intent -- APM preserves it.
 | `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
 | Marketplace entry with inline `lspServers` or `mcpServers` | Catalog owns server metadata | Synthesize and validate `apm.yml`, then deploy servers |
 
+When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
+An `apm.yml` is eligible when the root also has `.apm/` or the manifest
+declares APM or MCP dependencies. To intentionally select a plugin layout,
+omit `apm.yml` or keep it metadata-only, without `.apm/` or dependencies.
+
 ## APM package (`.apm/` directory)
 
 The classic APM layout. Primitives live under `.apm/` in typed subdirectories.

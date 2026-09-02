@@ -14,6 +14,11 @@ how to install it:
 | `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 | `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; registered when effective targets include Copilot and admission gates pass. Excluded targets create no native registration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
 
+When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
+An `apm.yml` is eligible when the root also has `.apm/` or the manifest
+declares APM or MCP dependencies. To intentionally select a plugin layout,
+omit `apm.yml` or keep it metadata-only, without `.apm/` or dependencies.
+
 For Agent Plugins with the same declared name, a direct dependency wins over a
 transitive dependency. APM refuses same-precedence collisions and does not
 silently repoint a ledger-recorded owner to a transitive claimant.
