@@ -176,14 +176,25 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
 def read_declared_target_names(root: Path) -> list[str]:
     """Return the canonical target names ``root/apm.yml`` declares, else ``[]``.
 
-    An unreadable or non-mapping manifest yields ``[]`` so callers fall through
-    to their own default; an invalid ``targets:`` value still raises out of
-    :func:`parse_targets_field` rather than being silently discarded.
+    Returns ``[]`` when there is nothing to read a declaration from: no
+    manifest, an unreadable one, or one that is empty or not a mapping. Callers
+    then fall through to their own default.
+
+    A manifest that exists and parses to a mapping is authoritative, so its
+    failures propagate rather than degrading to ``[]``: malformed YAML raises
+    ``yaml.YAMLError`` out of :func:`~apm_cli.utils.yaml_io.load_yaml`, and an
+    invalid ``targets:`` value raises out of :func:`parse_targets_field`.
+    Reporting "nothing declared" for either would silently widen a caller's
+    target set on a typo, which is the failure mode callers use this to avoid.
+
+    Names are returned as written, so ``vscode`` comes back as ``vscode``.
+    Callers mapping them onto target profiles must first normalize through
+    :func:`~apm_cli.core.target_catalog.normalize_target_name`.
     """
     from apm_cli.utils.yaml_io import load_yaml
 
     try:
         data = load_yaml(root / "apm.yml")
-    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+    except OSError:
         return []
     return parse_targets_field(data) if isinstance(data, dict) else []

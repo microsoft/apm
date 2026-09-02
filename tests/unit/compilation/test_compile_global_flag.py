@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
@@ -527,3 +528,65 @@ class TestGlobalCompileHonorsDeclaredTargets:
         names = self._compiled_target_names(self._run(source_root, MagicMock()))
 
         assert sorted(names) == sorted(p.name for p in KNOWN_TARGETS.values())
+
+    def test_vscode_alias_is_normalized_to_a_known_profile(self, tmp_path):
+        """`targets: [vscode]` is manifest-legal but not a KNOWN_TARGETS key."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [vscode]\n",
+        )
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert names == ["copilot"]
+
+    def test_alias_and_canonical_name_collapse_to_one_profile(self, tmp_path):
+        """vscode and copilot name the same target, so it is compiled once."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [vscode, copilot]\n",
+        )
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert names == ["copilot"]
+
+    def test_malformed_manifest_fails_closed_without_compiling(self, tmp_path):
+        """Broken YAML must not degrade to "nothing declared" and write all 11."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [claude\n  broken: [[[\n",
+        )
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "failed to parse" in str(logger.error.call_args).lower()
+
+    def test_invalid_target_name_surfaces_as_usage_error(self, tmp_path):
+        """An unknown token raises rather than silently compiling everything."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+        from apm_cli.core.errors import UnknownTargetError
+
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [not-a-harness]\n",
+        )
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts") as compile_mock,
+            pytest.raises(UnknownTargetError),
+        ):
+            _handle_global_flag(dry_run=False, logger=MagicMock())
+
+        compile_mock.assert_not_called()

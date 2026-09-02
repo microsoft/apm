@@ -375,14 +375,21 @@ def _global_compile_targets(source_root: Path) -> list[TargetProfile]:
     the resolution chain consistent with ``apm install -g`` and stops compile
     from creating deploy roots for harnesses the user never declared (#2768).
     Declaring nothing keeps the historical every-known-target behavior.
+
+    Declared names are normalized before lookup because ``apm.yml`` accepts the
+    ``vscode`` alias, which is not a ``KNOWN_TARGETS`` key; matching raw tokens
+    would drop it and silently compile nothing.
     """
     from ...core.apm_yml import read_declared_target_names
+    from ...core.target_catalog import normalize_target_name
     from ...integration.targets import KNOWN_TARGETS
 
     declared = read_declared_target_names(source_root)
     if not declared:
         return list(KNOWN_TARGETS.values())
-    return [KNOWN_TARGETS[name] for name in dict.fromkeys(declared) if name in KNOWN_TARGETS]
+    canonical = dict.fromkeys(normalize_target_name(name) for name in declared)
+    profiles = (KNOWN_TARGETS.get(name) for name in canonical)
+    return [profile for profile in profiles if profile is not None]
 
 
 def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
@@ -390,6 +397,8 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
 
     Returns 0 on success, 1 on error (for sys.exit).
     """
+
+    import yaml
 
     from ...compilation import compile_user_root_contexts
     from ...core.scope import InstallScope, get_apm_dir
@@ -405,8 +414,18 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         )
         return 1
 
+    # A malformed user manifest is authoritative-but-broken, so it fails closed
+    # with the same framing 'apm install -g' uses rather than degrading to
+    # "nothing declared" and compiling every harness.
+    try:
+        compile_targets = _global_compile_targets(source_root)
+    except yaml.YAMLError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        logger.error(f"Failed to parse {display_path}: {exc}", symbol="error")
+        return 1
+
     results = compile_user_root_contexts(
-        _global_compile_targets(source_root),
+        compile_targets,
         source_root,
         dry_run=dry_run,
         logger=None,
