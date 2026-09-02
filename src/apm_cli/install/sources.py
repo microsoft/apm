@@ -491,10 +491,9 @@ class CachedDependencySource(DependencySource):
                 details = "; ".join(native_validation.errors) or "validator returned no package"
                 raise DirectDependencyError(f"Cached Agent Plugin is invalid: {details}")
 
-        # Skip integration entirely if no targets.  The template will
-        # write the empty deployed_files entry on its own (single source
-        # of truth), so we just signal "skip integration" via
-        # package_info=None.
+        # Skip integration entirely if no targets. The template leaves this
+        # dependency absent from the integration outcome so cleanup and
+        # lockfile reconciliation preserve its prior deployment claims.
         # In lockfile_only mode, skip this early return so installed_packages
         # is populated before we return without deploying any files.
         if not ctx.targets and not ctx.lockfile_only and native_validation is None:
