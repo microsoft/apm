@@ -60,8 +60,8 @@ def test_partial_clone_warning_redacts_url_credentials() -> None:
     parsed = urlparse(rendered_url)
 
     assert parsed.hostname == "github.com"
-    assert parsed.username == "alice"
-    assert parsed.password == "***"
+    assert parsed.username is None
+    assert parsed.password is None
 
 
 def test_auth_failure_is_not_classified_as_filter_rejection() -> None:

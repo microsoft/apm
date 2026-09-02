@@ -651,10 +651,16 @@ class DependencyReference(ProviderCoordinateMixin):
             return  # bare shorthand or other form -- not in scope
 
         path_part = path_part.split("#")[0].split("?")[0]
-        decoded_path = urllib.parse.unquote(path_part)
+        # This detection pass must reveal multi-encoded primitive names so it
+        # can return the existing actionable subpath error before full parsing.
+        decoded_path = urllib.parse.unquote(  # architecture-authority-exempt: detection only
+            path_part
+        )
         while decoded_path != path_part:
             path_part = decoded_path
-            decoded_path = urllib.parse.unquote(path_part)
+            decoded_path = urllib.parse.unquote(  # architecture-authority-exempt: detection only
+                path_part
+            )
         segments = [s for s in path_part.replace("\\", "/").split("/") if s]
         if len(segments) < 3:
             return  # too few segments to contain an interior primitive name

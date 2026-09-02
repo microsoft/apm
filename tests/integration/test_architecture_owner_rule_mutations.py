@@ -446,6 +446,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Raw structural diagnostics stop originating empty in the model owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-source-admission",
+        rule_id="marketplace-integrations-source-admission",
+        path="src/apm_cli/marketplace/client.py",
+        old=("        host = source.host\n        host_info = AuthResolver.classify_host"),
+        new=(
+            "        host = _host_from_url(source.url)\n"
+            "        host_info = AuthResolver.classify_host"
+        ),
+        intent="Marketplace client reintroduces source-host parsing outside the owner.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-tag-pattern",
         rule_id="marketplace-integrations-tag-pattern",
         path="src/apm_cli/marketplace/tag_pattern.py",
@@ -580,6 +591,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="ip = parse_host_address(bare)",
         new="ip = None  # bypass",
         intent="MCP warnings stop classifying host literals through utils/net.py.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-artifactory-full-commit-sha",
+        rule_id="transport-platform-artifactory-full-commit-sha",
+        path="src/apm_cli/utils/github_host.py",
+        old="    if is_full_commit_sha(ref):",
+        new="    if False and is_full_commit_sha(ref):",
+        intent="Artifactory archive routing stops consulting the full commit SHA owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-artifactory-netrc-isolation",
+        rule_id="transport-platform-artifactory-netrc-isolation",
+        path="src/apm_cli/deps/artifactory_entry.py",
+        old="                    with _NoNetrcSession() as session:",
+        new="                    with _requests.Session() as session:",
+        intent="Direct Artifactory entry requests regain ambient netrc credentials.",
     ),
     MutationCase(
         guard_id="transport-platform-ref-freshness",

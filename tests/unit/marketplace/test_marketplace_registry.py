@@ -1,6 +1,7 @@
 """Tests for marketplace registry CRUD with tmp_path isolation."""
 
-import json  # noqa: F401
+import json
+from pathlib import Path
 
 import pytest
 
@@ -51,6 +52,29 @@ class TestRegistryBasicOps:
         registry_mod.add_marketplace(src2)
         assert registry_mod.marketplace_count() == 1
 
+    def test_failed_same_alias_replacement_preserves_original_registry_bytes(self):
+        registry_mod.add_marketplace(
+            MarketplaceSource(
+                name="acme",
+                url="ssh://git@[2001:db8::1]:2222/Team/Marketplace.git",
+            )
+        )
+        path = registry_mod._marketplaces_path()
+        with open(path, "rb") as registry_file:
+            before = registry_file.read()
+
+        with pytest.raises(ValueError):
+            MarketplaceSource(
+                name="acme",
+                url="ssh://git:secret@[2001:db8::1]:2222/Team/Marketplace.git",
+            )
+
+        with open(path, "rb") as registry_file:
+            assert registry_file.read() == before
+        registry_mod._invalidate_cache()
+        restored = registry_mod.get_marketplace_by_name("acme")
+        assert restored.url == "ssh://git@[2001:db8::1]:2222/Team/Marketplace.git"
+
     def test_remove(self):
         src = MarketplaceSource(name="acme", owner="o", repo="r")
         registry_mod.add_marketplace(src)
@@ -92,6 +116,31 @@ class TestRegistryPersistence:
 
         registry_mod._invalidate_cache()
         assert registry_mod.get_registered_marketplaces() == []
+
+    def test_invalid_persisted_source_does_not_hide_valid_entries(self):
+        path = Path(registry_mod._ensure_file())
+        path.write_text(
+            json.dumps(
+                {
+                    "marketplaces": [
+                        {
+                            "name": "valid",
+                            "url": "https://github.com/acme/marketplace",
+                        },
+                        {
+                            "name": "invalid",
+                            "url": "ssh:///missing-host.git",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        registry_mod._invalidate_cache()
+        sources = registry_mod.get_registered_marketplaces()
+
+        assert [source.name for source in sources] == ["valid"]
 
 
 class TestRegistryUtf8RoundTrip:

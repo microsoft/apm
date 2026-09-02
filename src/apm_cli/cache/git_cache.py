@@ -191,7 +191,7 @@ class GitCache:
         # Cache hit path (skip if refresh requested)
         if not self._refresh and checkout_dir.is_dir():
             if verify_checkout_sha(checkout_dir, sha):
-                _log.debug("Cache HIT: %s @ %s [%s]", url, sha[:12], variant)
+                _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 with shard_lock(checkout_dir):
                     return self._finalize_sparse_checkout(
                         checkout_dir,
@@ -315,6 +315,7 @@ class GitCache:
                 text=True,
                 timeout=30,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise RuntimeError(
@@ -323,7 +324,8 @@ class GitCache:
 
         if result.returncode != 0:
             raise RuntimeError(
-                f"git ls-remote failed for {_sanitize_url(url)}: {result.stderr.strip()}"
+                f"git ls-remote failed for {_sanitize_url(url)}: "
+                f"{_sanitize_url(result.stderr.strip())}"
             )
 
         # Parse ls-remote output: first column is SHA
@@ -437,6 +439,7 @@ class GitCache:
                     text=True,
                     timeout=300,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
@@ -473,6 +476,7 @@ class GitCache:
                             text=True,
                             timeout=300,
                             env=subprocess_env,
+                            stdin=subprocess.DEVNULL,
                             check=True,
                         )
                         fallback_done = True
@@ -583,7 +587,7 @@ class GitCache:
             if final_dir.is_dir() and verify_checkout_sha(final_dir, sha):
                 _log.debug(
                     "Write-dedup HIT under lock: %s @ %s [%s]",
-                    url,
+                    _sanitize_url(url),
                     sha[:12],
                     variant,
                 )
@@ -634,6 +638,7 @@ class GitCache:
                     text=True,
                     timeout=60,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
                 if promisor_url:
@@ -654,6 +659,7 @@ class GitCache:
                         text=True,
                         timeout=10,
                         env=subprocess_env,
+                        stdin=subprocess.DEVNULL,
                         check=True,
                     )
                 if sparse_paths:
@@ -682,6 +688,7 @@ class GitCache:
                     text=True,
                     timeout=60,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
                 if sparse_paths:
@@ -735,6 +742,7 @@ class GitCache:
                 text=True,
                 timeout=10,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
             )
             return result.returncode == 0 and "commit" in result.stdout.strip()
         except (subprocess.TimeoutExpired, OSError):
@@ -783,6 +791,7 @@ class GitCache:
                 text=True,
                 timeout=120,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
                 check=True,
             )
         except subprocess.CalledProcessError:
@@ -793,6 +802,7 @@ class GitCache:
                 text=True,
                 timeout=120,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
                 check=True,
             )
 
@@ -900,20 +910,23 @@ def _dir_size(path: Path) -> int:
     return total
 
 
-def _sanitize_url(url: str) -> str:
-    """Strip credentials from URL for safe logging."""
+_DIAGNOSTIC_URL_RE = re.compile(r"(?i)\b(?:https?|ssh|git)://[^\s'\"<>]+")
+
+
+def _sanitize_url(value: str) -> str:
+    """Remove URL userinfo, query, and fragment data from diagnostics."""
     import urllib.parse
 
-    try:
-        parsed = urllib.parse.urlparse(url)
-        if parsed.password:
-            # Replace password with ***
-            netloc = parsed.hostname or ""
-            if parsed.username:
-                netloc = f"{parsed.username}:***@{netloc}"
-            if parsed.port:
-                netloc = f"{netloc}:{parsed.port}"
-            return urllib.parse.urlunparse(parsed._replace(netloc=netloc))
-    except Exception:
-        pass
-    return url
+    def _redact(match: re.Match[str]) -> str:
+        try:
+            parsed = urllib.parse.urlparse(match.group(0))
+            host = parsed.hostname or ""
+            if ":" in host:
+                host = f"[{host}]"
+            if parsed.port is not None:
+                host = f"{host}:{parsed.port}"
+            return urllib.parse.urlunparse(parsed._replace(netloc=host, query="", fragment=""))
+        except Exception:
+            return "<redacted git URL>"
+
+    return _DIAGNOSTIC_URL_RE.sub(_redact, value)

@@ -367,12 +367,10 @@ credential under a fully qualified `https://<host>:<port>/` URL.
 
 ### SSH connection hangs on corporate/VPN networks
 
-APM tries SSH as a fallback when HTTPS auth is not available. On networks
-that silently drop SSH traffic (port 22), this can appear to hang. APM sets
-`GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within
-30 seconds and the fallback chain continues to plain HTTPS with git
-credential helpers.
+APM tries SSH as a fallback when HTTPS auth is not available. It forces
+`BatchMode=yes`, disables askpass and HTTP credential channels, and uses a
+30-second connection timeout so SSH attempts fail without prompting.
 
 To override the SSH command (e.g., custom key path), set `GIT_SSH_COMMAND`
-in your environment. APM appends `-o ConnectTimeout=30` unless it finds
-`ConnectTimeout` already present in your value.
+in your environment. APM forces `BatchMode=yes` and appends
+`-o ConnectTimeout=30` unless it finds `ConnectTimeout` already present.

@@ -48,9 +48,12 @@ from scripts.architecture_linter.groups.common import EXEMPT_MARKER, checked_fac
 from scripts.architecture_linter.models import Rule, Violation
 
 _RID_HOST_CRED = "transport-platform-host-credential-resolution"
+_RID_ARTIFACTORY_NETRC = "transport-platform-artifactory-netrc-isolation"
 
 
 _AUTH_OWNER = "src/apm_cli/core/auth.py"
+_ARTIFACTORY_NETRC_OWNER = "src/apm_cli/deps/artifactory_entry.py"
+_ARTIFACTORY_NETRC_CONSUMER = "src/apm_cli/deps/download_strategies.py"
 
 
 _PUBLIC_GH_CONSUMERS: tuple[str, ...] = (
@@ -133,7 +136,10 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             ("probe_env = auth_resolver.git_env_for_context(", "key = (host, dep.port, org)"),
         ),
         ("src/apm_cli/install/helpers/ref_reuse.py", ("hardened_git_env_for_context",)),
-        ("src/apm_cli/marketplace/client.py", ("hardened_git_env_for_context",)),
+        (
+            "src/apm_cli/marketplace/client.py",
+            ("resolve_for_remote", "git_env_for_remote"),
+        ),
         ("src/apm_cli/marketplace/builder.py", ("hardened_git_env_for_context",)),
         ("src/apm_cli/marketplace/auth_helpers.py", ('ctx.token or ctx.host_info.kind == "ado"',)),
         ("src/apm_cli/commands/marketplace/check.py", ("hardened_git_env_for_context",)),
@@ -245,6 +251,60 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             _NONINTERACTIVE_BYPASS,
             "noninteractive Git env must be built only by AuthResolver / git_auth_env.py",
             exempt=True,
+        )
+    )
+    return tuple(findings)
+
+
+def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violation, ...]:
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_ARTIFACTORY_NETRC,
+            _ARTIFACTORY_NETRC_OWNER,
+            (
+                ("re", r"^class _NoNetrcSession\(", 1, "eq"),
+                ("sub", "with _NoNetrcSession() as session:", 1, "eq"),
+            ),
+            "artifactory_entry.py must own ambient netrc suppression",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_ARTIFACTORY_NETRC,
+            _ARTIFACTORY_NETRC_OWNER,
+            (
+                "self.trust_env = False",
+                "def rebuild_auth(",
+                "self.should_strip_auth(",
+            ),
+            "Artifactory requests must preserve redirects without ambient netrc auth",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_ARTIFACTORY_NETRC,
+            _ARTIFACTORY_NETRC_CONSUMER,
+            (("sub", "allow_netrc=False", 3, "eq"),),
+            "Every Artifactory resilient GET path must suppress ambient netrc auth",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_ARTIFACTORY_NETRC,
+            _ARTIFACTORY_NETRC_CONSUMER,
+            ("from .artifactory_entry import _NoNetrcSession",),
+            "Download strategies must reuse the Artifactory netrc-isolation owner",
         )
     )
     return tuple(findings)
@@ -438,9 +498,9 @@ def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inv,
             _RID_URL_PATH,
-            "src/apm_cli/commands/marketplace/__init__.py",
-            ('decode_url_path_segments(parsed.path, context="marketplace URL path")',),
-            "marketplace command must decode URL paths through path_security",
+            "src/apm_cli/marketplace/source_identity.py",
+            ("decode_url_path_segments(path, context=context)",),
+            "marketplace source owner must decode URL paths through path_security",
         )
     )
     findings.extend(
@@ -536,6 +596,13 @@ def _check_windows_stable_path(provider: FactsProvider) -> tuple[Violation, ...]
 
 
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_RID_ARTIFACTORY_NETRC,
+        group=GROUP,
+        guard_ids=(_RID_ARTIFACTORY_NETRC,),
+        description="Artifactory HTTP requests exclude ambient netrc credentials.",
+        check=_check_artifactory_netrc_isolation,
+    ),
     Rule(
         id=_RID_HOST_CRED,
         group=GROUP,

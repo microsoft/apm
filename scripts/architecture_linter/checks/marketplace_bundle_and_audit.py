@@ -1,8 +1,8 @@
 """Bundle-format, audit, projection-boundary, and LF-writer marketplace
 analyzers.
 
-Ports the seven guard-less rules whose owner is not one of the twelve
-registry owners above: the deterministic generated-bundle LF writer guard,
+Ports the source-admission owner guard plus seven guard-less rules whose owner
+is not one of the registry owners above: the generated-bundle LF writer guard,
 the removed native Agent Plugin lifecycle tombstone, the local marketplace
 audit path resolution, the bundle-format authority
 (``check_bundle_format_authority.sh`` subchecks B1-B5, B8, B9, B17, B18), the
@@ -252,6 +252,67 @@ def _check_marketplace_source_parsing(provider: FactsProvider) -> tuple[Violatio
     return check_marketplace_source_parsing(provider, _RID_SOURCE_PARSING)
 
 
+_RID_SOURCE_ADMISSION = "marketplace-integrations-source-admission"
+_SOURCE_IDENTITY = "src/apm_cli/marketplace/source_identity.py"
+_MARKETPLACE_COMMAND = "src/apm_cli/commands/marketplace/__init__.py"
+_MARKETPLACE_MODEL = "src/apm_cli/marketplace/models.py"
+_MARKETPLACE_CLIENT = "src/apm_cli/marketplace/client.py"
+
+
+def _check_marketplace_source_admission(
+    provider: FactsProvider,
+) -> tuple[Violation, ...]:
+    """Marketplace consumers must route source identity through one parser."""
+    inventory = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    required = (
+        (_SOURCE_IDENTITY, ("def parse_marketplace_source(",)),
+        (
+            _MARKETPLACE_COMMAND,
+            ("identity = parse_marketplace_source(source, host_flag)",),
+        ),
+        (
+            _MARKETPLACE_MODEL,
+            ("identity = parse_marketplace_source(self.url)",),
+        ),
+        (_MARKETPLACE_CLIENT, ("host = source.host",)),
+    )
+    for path, literals in required:
+        findings.extend(
+            _require_subs(
+                provider,
+                inventory,
+                _RID_SOURCE_ADMISSION,
+                path,
+                literals,
+                "Marketplace source admission must route through source_identity.py",
+            )
+        )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inventory,
+            _RID_SOURCE_ADMISSION,
+            (_MARKETPLACE_CLIENT,),
+            re.compile(r"\b_host_from_url\("),
+            "Marketplace client must consume the canonical source host",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inventory,
+            _RID_SOURCE_ADMISSION,
+            (_MARKETPLACE_COMMAND,),
+            re.compile(r"SCP_LIKE_RE|AuthResolver\.classify_host|is_valid_fqdn"),
+            "Marketplace command must not reimplement source classification",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 _RID_HASH_LF = "marketplace-integrations-hash-visible-lf-writers"
 
 
@@ -302,6 +363,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(),
         description="Marketplace source coordinates parse through DependencyReference.",
         check=_check_marketplace_source_parsing,
+    ),
+    Rule(
+        id=_RID_SOURCE_ADMISSION,
+        group=GROUP,
+        guard_ids=(_RID_SOURCE_ADMISSION,),
+        description="Marketplace source admission stays owned by marketplace/source_identity.py.",
+        check=_check_marketplace_source_admission,
     ),
     Rule(
         id=_RID_HASH_LF,

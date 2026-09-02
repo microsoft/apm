@@ -335,6 +335,66 @@ def _check_network_host_parsing(provider: FactsProvider) -> tuple[Violation, ...
     return tuple(findings)
 
 
+_RID_ARTIFACTORY_SHA = "transport-platform-artifactory-full-commit-sha"
+
+
+_ARTIFACTORY_SHA_OWNER = "src/apm_cli/utils/github_host.py"
+_ARTIFACTORY_SHA_CONSUMER = "src/apm_cli/deps/artifactory_orchestrator.py"
+_ARTIFACTORY_SHA_DUP = re.compile(r"\{40\}|fullmatch\(")
+
+
+def _check_artifactory_full_commit_sha(provider: FactsProvider) -> tuple[Violation, ...]:
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_ARTIFACTORY_SHA,
+            _ARTIFACTORY_SHA_OWNER,
+            (("re", r"^def is_full_commit_sha\(", 1, "eq"),),
+            "utils/github_host.py must own full commit SHA classification",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_ARTIFACTORY_SHA,
+            _ARTIFACTORY_SHA_OWNER,
+            ("if is_full_commit_sha(ref):",),
+            "Artifactory archive URL selection must use the full commit SHA owner",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_ARTIFACTORY_SHA,
+            _ARTIFACTORY_SHA_CONSUMER,
+            (
+                "from ..utils.github_host import default_host, is_full_commit_sha, "
+                "is_github_hostname",
+                "if is_full_commit_sha(ref):",
+            ),
+            "Artifactory metadata must use the full commit SHA owner",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_ARTIFACTORY_SHA,
+            (_ARTIFACTORY_SHA_CONSUMER,),
+            _ARTIFACTORY_SHA_DUP,
+            "Artifactory full commit SHA classification must route through utils/github_host.py",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
 _RID_TLS = "transport-platform-tls-trust-injection"
 
 
@@ -436,6 +496,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_NET,),
         description="Network host parsing and loopback classification stay owned by utils/net.py.",
         check=_check_network_host_parsing,
+    ),
+    Rule(
+        id=_RID_ARTIFACTORY_SHA,
+        group=GROUP,
+        guard_ids=(_RID_ARTIFACTORY_SHA,),
+        description="Artifactory full commit SHA classification stays owned by github_host.py.",
+        check=_check_artifactory_full_commit_sha,
     ),
     Rule(
         id=_RID_TLS,

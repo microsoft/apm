@@ -80,6 +80,20 @@
       "owner": "utils/net.py (parse_host_address, is_loopback_host)",
       "selectors": ["src/apm_cli/utils/net.py"],
       "guards": ["transport-platform-network-host-parsing"]
+    },
+    {
+      "id": "artifactory-full-commit-sha-classification",
+      "decision": "Full commit SHA classification for Artifactory replay",
+      "owner": "utils/github_host.py (is_full_commit_sha)",
+      "selectors": ["src/apm_cli/utils/github_host.py"],
+      "guards": ["transport-platform-artifactory-full-commit-sha"]
+    },
+    {
+      "id": "artifactory-netrc-isolation",
+      "decision": "Artifactory HTTP requests exclude ambient netrc credentials",
+      "owner": "deps/artifactory_entry.py (_NoNetrcSession)",
+      "selectors": ["src/apm_cli/deps/artifactory_entry.py"],
+      "guards": ["transport-platform-artifactory-netrc-isolation"]
     }
   ]
 }
