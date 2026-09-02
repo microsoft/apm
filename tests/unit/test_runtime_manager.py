@@ -297,34 +297,11 @@ class TestRuntimeManagerRemoveRuntime:
 
 
 class TestRuntimeManagerGetEmbeddedScript:
-    def test_dev_script_found(self, tmp_path):
-        """Script loading works when repo script exists on disk."""
-        manager = RuntimeManager()  # noqa: F841
-        # Script search walks up from __file__ 4 levels then into scripts/runtime/
-        # Create a fake script where the code looks for it
-        current_file = Path(__file__)  # noqa: F841
-        # We just check that when a script is found it returns its content
-        with patch("apm_cli.runtime.manager.Path") as MockPath:
-            fake_script = MagicMock()
-            fake_script.exists.return_value = True
-            fake_script.read_text.return_value = "#!/bin/bash\necho hello"
-            # Set up the path chain
-            instance = MagicMock()
-            instance.__truediv__ = MagicMock(return_value=fake_script)
-            MockPath.return_value = instance
-            MockPath.side_effect = None
-            # Re-create to avoid issues with __init__
-        # Simpler: patch the actual script path resolution
-        manager2 = RuntimeManager()
-        real_script_path = (
-            Path(__file__).parent.parent.parent / "scripts" / "runtime" / "setup-copilot.sh"
-        )
-        if real_script_path.exists():
-            content = manager2.get_embedded_script("setup-copilot.sh")
-            assert len(content) > 0
-        else:
-            with pytest.raises((FileNotFoundError, RuntimeError)):
-                manager2.get_embedded_script("nonexistent-script.sh")
+    def test_package_script_found(self):
+        """Script loading works from package resources."""
+        content = RuntimeManager().get_embedded_script("setup-copilot.sh")
+
+        assert content.startswith("#!/bin/bash")
 
     def test_script_not_found_raises(self):
         manager = RuntimeManager()
