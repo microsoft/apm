@@ -102,7 +102,7 @@ ADDED="$(printf '%s\n' "$RAW_DIFF" \
   | grep -vE '^\+\s*(from |import )' \
   | grep -vE '^\+\s*@' \
   | grep -vE '^\+\s*[a-zA-Z_][a-zA-Z0-9_]*\s*:\s*[A-Za-z_][A-Za-z0-9_\[\], |\.]*\s*(=.*)?$' \
-  | wc -l | tr -d ' ')"
+  | wc -l | tr -d ' ' || true)"
 
 if [ "$ADDED" -lt "$THRESHOLD" ]; then
   echo "[+] mode_b: ${ADDED} substantive added lines (< ${THRESHOLD}); OK"
