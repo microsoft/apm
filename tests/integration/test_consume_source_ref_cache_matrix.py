@@ -619,17 +619,35 @@ def test_gitlab_deep_repository_boundary(
 
 @pytest.mark.lifecycle_smoke
 @pytest.mark.parametrize(
-    "dependency",
+    ("dependency", "expected_error"),
     (
-        "https://github.com/org/repo.git/collections/security",
-        {"git": "git@github.com:org/repo/collections/security.git"},
-        "https://gitlab.com/ai/platform/collections/consume-matrix.git/collections/security",
+        (
+            "https://github.com/org/repo.git/collections/security",
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            {"git": "git@github.com:org/repo/collections/security.git"},
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            "https://gitlab.com/ai/platform/collections/consume-matrix.git/collections/security",
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            "https://github.com/org/repo/%2563ollections/security",
+            "residual percent-encoding",
+        ),
+        (
+            "https://github.com/org/repo/%2Fcollections/security",
+            "must not decode to a path separator",
+        ),
     ),
 )
 def test_embedded_primitive_tail_fails_before_git_state(
     tmp_path: Path,
     apm_binary_path: Path,
     dependency: str | dict[str, str],
+    expected_error: str,
 ) -> None:
     """Malformed explicit paths fail before lock, cache, or module writes."""
     row = _GITLAB_DEEP_BOUNDARY_ROWS[0]
@@ -648,7 +666,7 @@ def test_embedded_primitive_tail_fails_before_git_state(
 
     assert result.returncode != 0
     output = " ".join((result.stdout + result.stderr).split())
-    assert "A subpath cannot be embedded in a git URL" in output
+    assert expected_error in output
     assert not (scenario.project_root / "apm.lock.yaml").exists()
     assert not (scenario.project_root / "apm_modules").exists()
     assert list(scenario.isolated.cache_root.iterdir()) == []

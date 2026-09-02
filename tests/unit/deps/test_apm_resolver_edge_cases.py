@@ -959,6 +959,47 @@ class TestTryLoadDependencyPackageForceRecheck:
         assert package.version == "2.0.0"
         assert package.package_path == live
 
+    def test_legacy_marketplace_candidate_is_normalized_before_activation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A staged legacy plugin is normalized with its source anchor before publication."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "legacy"
+        candidate = mods / ".staging" / "org" / "legacy"
+        candidate.mkdir(parents=True)
+        (candidate / "plugin.json").write_text(
+            json.dumps({"name": "legacy", "version": "2.0.0"}),
+            encoding="utf-8",
+        )
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live, key="org/legacy")
+
+        def activate(path: Path) -> Path:
+            activated.append(path)
+            live.parent.mkdir(parents=True)
+            path.replace(live)
+            return live
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=activate,
+            update_refs=True,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert activated == [candidate]
+        assert package is not None
+        assert package.package_path == live
+        assert package.source_path == live.resolve()
+        assert (live / "apm.yml").is_file()
+        reloaded = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+        assert reloaded is not None
+        assert reloaded.package_path == live
+        assert reloaded.source_path == live.resolve()
+
     def test_cached_local_package_is_not_activated_as_candidate(self, tmp_path: Path) -> None:
         """A live local cache hit remains readable for transitive resolution."""
         mods = tmp_path / "apm_modules"

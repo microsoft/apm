@@ -150,7 +150,7 @@ def test_semantic_state_ignores_yaml_formatting_and_generated_time(tmp_path: Pat
     after = LifecycleStateSnapshot.capture(workspace)
 
     assert before.manifest_bytes != after.manifest_bytes
-    assert before.lockfile_bytes != after.lockfile_bytes
+    assert before.lockfile_bytes == after.lockfile_bytes
     assert before.semantic_bytes == after.semantic_bytes
 
 

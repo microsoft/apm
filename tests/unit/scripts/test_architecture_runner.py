@@ -56,9 +56,10 @@ REAL_ROOT = Path(__file__).resolve().parents[3]
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.windows_compat
 def test_source_cache_reads_each_path_once_including_errors(tmp_path: Path) -> None:
     """A valid file, a missing file, and an undecodable file each read once."""
-    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "ok.py").write_bytes(b"x = 1\n")
     (tmp_path / "bad_utf8.py").write_bytes(b"x = 1\n\xff\xfe")
     cache = SourceCache(tmp_path, ("ok.py", "bad_utf8.py", "missing.py"))
 
@@ -373,6 +374,7 @@ class Container:
     assert provider.tree_index_builds == 1
 
 
+@pytest.mark.windows_compat
 def test_tree_index_build_has_one_production_owner() -> None:
     """Only FactsProvider may fold FileFacts into a compact TreeIndex."""
     linter_root = REAL_ROOT / "scripts/architecture_linter"
@@ -383,7 +385,7 @@ def test_tree_index_build_has_one_production_owner() -> None:
             if not isinstance(node, ast.Call):
                 continue
             if isinstance(node.func, ast.Name) and node.func.id == "build_tree_index":
-                callers.append(str(path.relative_to(REAL_ROOT)))
+                callers.append(path.relative_to(REAL_ROOT).as_posix())
 
     assert callers == [
         "scripts/architecture_linter/facts.py",

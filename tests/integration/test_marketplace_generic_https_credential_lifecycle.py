@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.tls_trust import configure_process_tls_trust
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_http_server import LocalGitHttpServerFactory
@@ -146,6 +147,8 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
     )
     certificate, key = _write_tls_certificate(isolated.root)
 
+    # Reproduce the in-process CLI import order that installs truststore globally.
+    configure_process_tls_trust()
     with server_factory.start(
         (repository,),
         password=_HELPER_PASSWORD,

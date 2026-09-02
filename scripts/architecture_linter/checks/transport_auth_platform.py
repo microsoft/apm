@@ -136,7 +136,10 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             ("probe_env = auth_resolver.git_env_for_context(", "key = (host, dep.port, org)"),
         ),
         ("src/apm_cli/install/helpers/ref_reuse.py", ("hardened_git_env_for_context",)),
-        ("src/apm_cli/marketplace/client.py", ("hardened_git_env_for_context",)),
+        (
+            "src/apm_cli/marketplace/client.py",
+            ("auth_resolver.resolve_for_remote(", "auth_resolver.git_env_for_remote("),
+        ),
         ("src/apm_cli/marketplace/builder.py", ("hardened_git_env_for_context",)),
         ("src/apm_cli/marketplace/auth_helpers.py", ('ctx.token or ctx.host_info.kind == "ado"',)),
         ("src/apm_cli/commands/marketplace/check.py", ("hardened_git_env_for_context",)),

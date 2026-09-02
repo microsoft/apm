@@ -1,5 +1,7 @@
 """Tests for GitHubPackageDownloader.list_remote_refs() and helpers."""
 
+import os
+from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 
 import pytest
@@ -332,6 +334,7 @@ class TestListRemoteRefsGitHub:
         assert "GIT_CONFIG_NOSYSTEM" not in used_env
         assert used_env.get("GIT_TERMINAL_PROMPT") == "0"
 
+    @pytest.mark.windows_compat
     @patch("apm_cli.deps.github_downloader.git.cmd.Git")
     def test_insecure_http_host_no_token_suppresses_credential_helpers(self, MockGitCmd):
         """HTTP ls-remote must block credential helpers and preserve config isolation."""
@@ -354,7 +357,13 @@ class TestListRemoteRefsGitHub:
         call_kwargs = mock_git.ls_remote.call_args
         used_env = call_kwargs.kwargs.get("env")
         assert used_env.get("GIT_ASKPASS") == "echo"
-        assert used_env.get("GIT_CONFIG_GLOBAL") == "/dev/null"
+        global_config = Path(used_env["GIT_CONFIG_GLOBAL"])
+        if os.name == "nt":
+            assert global_config != Path(os.devnull)
+            assert global_config.is_file()
+            assert global_config.read_bytes() == b""
+        else:
+            assert global_config == Path(os.devnull)
         assert used_env.get("GIT_CONFIG_NOSYSTEM") == "1"
         assert used_env.get("GIT_CONFIG_COUNT") == "1"
         assert used_env.get("GIT_CONFIG_KEY_0") == "credential.helper"

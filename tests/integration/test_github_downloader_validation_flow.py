@@ -12,6 +12,7 @@ import contextlib
 from unittest.mock import MagicMock, patch
 
 import pytest
+from git import Actor, Repo
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
@@ -366,7 +367,15 @@ class TestDownloadSubdirectoryPersistentCache:
         # Put a valid subdirectory in the cache
         pkg_dir = cached_checkout / "packages" / "my-pkg"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text("name: my-pkg\nversion: 1.0.0\n")
+        (pkg_dir / "apm.yml").write_bytes(b"name: my-pkg\nversion: 1.0.0\n")
+        actor = Actor("APM Test", "apm-test@example.invalid")
+        cached_repo = Repo.init(cached_checkout)
+        cached_repo.index.add(["packages/my-pkg/apm.yml"])
+        cached_repo.index.commit(
+            "seed cache",
+            author=actor,
+            committer=actor,
+        )
 
         target_path = tmp_path / "target"
 

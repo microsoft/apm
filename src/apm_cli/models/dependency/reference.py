@@ -651,11 +651,14 @@ class DependencyReference(ProviderCoordinateMixin):
             return  # bare shorthand or other form -- not in scope
 
         path_part = path_part.split("#")[0].split("?")[0]
-        decoded_path = urllib.parse.unquote(path_part)
-        while decoded_path != path_part:
-            path_part = decoded_path
-            decoded_path = urllib.parse.unquote(path_part)
-        segments = [s for s in path_part.replace("\\", "/").split("/") if s]
+        if "%" in path_part:
+            _, decoded_segments = parse_url_path_segments(
+                path_part,
+                context="repository URL path",
+            )
+            segments = list(decoded_segments)
+        else:
+            segments = [s for s in path_part.replace("\\", "/").split("/") if s]
         if len(segments) < 3:
             return  # too few segments to contain an interior primitive name
 
