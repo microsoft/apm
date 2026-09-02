@@ -10,6 +10,7 @@ Content transforms are selected by the ``format_id`` field in
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -25,7 +26,16 @@ from apm_cli.utils.patterns import normalize_apply_to, parse_apply_to, yaml_doub
 from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.integration.targets import TargetProfile
+
+
+@dataclass(frozen=True)
+class _PreparedInstruction:
+    """Validated instruction source reused across target plans."""
+
+    content: str
+    body: str
 
 
 class InstructionIntegrator(BaseIntegrator):
@@ -48,6 +58,7 @@ class InstructionIntegrator(BaseIntegrator):
             tuple[str, str, str, str, str],
             dict[Path, tuple[Path, str, int]],
         ] = {}
+        self._prepared_instructions: dict[str, dict[Path, _PreparedInstruction]] = {}
 
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
@@ -90,7 +101,36 @@ class InstructionIntegrator(BaseIntegrator):
         write_text_lf(target, content)
         return links_resolved
 
-    def _render_instruction(self, source: Path, target: Path, fmt: str) -> tuple[str, int]:
+    @staticmethod
+    def _package_key(package_path: Path) -> str:
+        """Return the stable cache key for one package source tree."""
+        return str(package_path.resolve())
+
+    @staticmethod
+    def _raise_frontmatter_error(source: Path, exc: yaml.YAMLError) -> None:
+        """Raise the package-facing malformed-frontmatter error."""
+        raise yaml.YAMLError(
+            f"Rejected frontmatter in {source.name}: {exc}\n"
+            "Fix or remove the invalid frontmatter, then rerun apm install."
+        ) from exc
+
+    def _prepare_instruction(self, source: Path) -> _PreparedInstruction:
+        """Read and validate one instruction without writing target files."""
+        content = source.read_text(encoding="utf-8")
+        try:
+            _, body = self._parse_frontmatter(content)
+        except yaml.YAMLError as exc:
+            self._raise_frontmatter_error(source, exc)
+        return _PreparedInstruction(content=content, body=body)
+
+    def _render_instruction(
+        self,
+        source: Path,
+        target: Path,
+        fmt: str,
+        *,
+        prepared: _PreparedInstruction | None = None,
+    ) -> tuple[str, int]:
         """Render *source* to the content it would deploy for *fmt*, WITHOUT
         writing. Returns ``(content, links_resolved)``.
 
@@ -102,16 +142,13 @@ class InstructionIntegrator(BaseIntegrator):
         the single home for "which formats transform".  Any ``fmt`` outside it
         is copied verbatim (identity transform).
         """
-        content = source.read_text(encoding="utf-8")
+        content = prepared.content if prepared is not None else source.read_text(encoding="utf-8")
         if fmt in RULE_FORMATS:
             converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
             try:
                 content = converter(content)
             except yaml.YAMLError as exc:
-                raise yaml.YAMLError(
-                    f"Rejected frontmatter in {source.name}: {exc}\n"
-                    "Fix or remove the invalid frontmatter, then rerun apm install."
-                ) from exc
+                self._raise_frontmatter_error(source, exc)
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
 
@@ -138,6 +175,7 @@ class InstructionIntegrator(BaseIntegrator):
         deploy_dir: Path,
         extension: str,
         fmt: str,
+        prepared_instructions: dict[Path, _PreparedInstruction] | None = None,
     ) -> dict[Path, tuple[Path, str, int]]:
         """Render every converted rule without writing target files."""
         plan: dict[Path, tuple[Path, str, int]] = {}
@@ -147,7 +185,12 @@ class InstructionIntegrator(BaseIntegrator):
                 stem = stem[: -len(".instructions.md")]
             target_path = deploy_dir / f"{stem}{extension}"
             ensure_path_within(target_path, deploy_dir)
-            content, links_resolved = self._render_instruction(source_file, target_path, fmt)
+            content, links_resolved = self._render_instruction(
+                source_file,
+                target_path,
+                fmt,
+                prepared=(prepared_instructions or {}).get(source_file),
+            )
             plan[source_file] = (target_path, content, links_resolved)
         return plan
 
@@ -156,20 +199,34 @@ class InstructionIntegrator(BaseIntegrator):
         targets: list[TargetProfile],
         package_info,
         project_root: Path,
+        source_plan: DeployableSourcePlan,
     ) -> None:
-        """Prepare all converted targets before any selected target writes."""
+        """Validate authorized instructions and prepare conversions before writes."""
         self._prepared_rule_plans.clear()
-        instruction_files = self.find_instruction_files(package_info.install_path)
+        self._prepared_instructions.clear()
+        eligible_targets = []
+        for target in targets:
+            mapping = target.primitives.get("instructions")
+            if not mapping:
+                continue
+            if not target.auto_create and not (project_root / target.root_dir).is_dir():
+                continue
+            eligible_targets.append((target, mapping))
+        if not eligible_targets:
+            return
+
+        package_path = Path(package_info.install_path)
+        instruction_files = self.find_instruction_files(package_path, source_plan)
         if not instruction_files:
             return
 
         self.init_link_resolver(package_info, project_root)
-        package_path = Path(package_info.install_path)
-        for target in targets:
-            mapping = target.primitives.get("instructions")
-            if not mapping or not mapping.output_compare:
-                continue
-            if not target.auto_create and not (project_root / target.root_dir).is_dir():
+        prepared_instructions = {
+            source_file: self._prepare_instruction(source_file) for source_file in instruction_files
+        }
+        self._prepared_instructions[self._package_key(package_path)] = prepared_instructions
+        for target, mapping in eligible_targets:
+            if not mapping.output_compare:
                 continue
             effective_root = mapping.deploy_root or target.root_dir
             deploy_dir = project_root / effective_root / mapping.subdir
@@ -185,6 +242,7 @@ class InstructionIntegrator(BaseIntegrator):
                 deploy_dir,
                 mapping.extension,
                 mapping.format_id,
+                prepared_instructions,
             )
 
     # ------------------------------------------------------------------
@@ -229,7 +287,13 @@ class InstructionIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         self.init_link_resolver(package_info, project_root)
-        instruction_files = self.find_instruction_files(package_info.install_path, source_plan)
+        package_path = Path(package_info.install_path)
+        prepared_instructions = self._prepared_instructions.get(self._package_key(package_path))
+        instruction_files = (
+            list(prepared_instructions)
+            if prepared_instructions is not None
+            else self.find_instruction_files(package_path, source_plan)
+        )
         if not instruction_files:
             return IntegrationResult(0, 0, 0, [])
 
@@ -247,6 +311,7 @@ class InstructionIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 pkg_source=getattr(getattr(package_info, "package", None), "source", None),
+                prepared_instructions=prepared_instructions,
             )
 
         # APM-owned rule dirs (.claude/rules, .cursor/rules, .windsurf/rules):
@@ -262,7 +327,7 @@ class InstructionIntegrator(BaseIntegrator):
         target_paths: list[Path] = []
         total_links_resolved = 0
         plan_key = self._plan_key(
-            Path(package_info.install_path),
+            package_path,
             project_root,
             deploy_dir,
             mapping.extension,
@@ -277,6 +342,7 @@ class InstructionIntegrator(BaseIntegrator):
                     deploy_dir,
                     mapping.extension,
                     fmt,
+                    prepared_instructions,
                 )
         else:
             rendered_rules = {}
@@ -461,6 +527,7 @@ class InstructionIntegrator(BaseIntegrator):
         managed_files: set[str] | None = None,
         diagnostics=None,
         pkg_source: str | None = None,
+        prepared_instructions: dict[Path, _PreparedInstruction] | None = None,
     ) -> IntegrationResult:
         """Concatenate all instruction files into ~/.copilot/copilot-instructions.md.
 
@@ -488,8 +555,12 @@ class InstructionIntegrator(BaseIntegrator):
 
         bodies: list[str] = []
         for source_file in instruction_files:
-            raw = source_file.read_text(encoding="utf-8")
-            body = self._strip_frontmatter(raw).strip()
+            prepared = (prepared_instructions or {}).get(source_file)
+            body = (
+                prepared.body
+                if prepared is not None
+                else self._strip_frontmatter(source_file.read_text(encoding="utf-8"))
+            ).strip()
             if body:
                 bodies.append(body)
 

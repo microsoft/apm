@@ -464,9 +464,15 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     if not _BOUNDED_FRONTMATTER_HANDLER.detect(text):
         return frontmatter.Post(text)
 
-    post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    try:
+        split = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+        post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    except yaml.YAMLError:
+        raise
+    except (IndexError, ValueError) as exc:
+        raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
     if preserve_body:
-        _, body = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+        _, body = split
         if body.startswith("\r\n"):
             body = body[2:]
         elif body.startswith("\n"):

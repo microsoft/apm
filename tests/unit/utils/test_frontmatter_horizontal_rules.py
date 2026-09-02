@@ -1,5 +1,8 @@
 """Unit tests for load_frontmatter handling of Markdown horizontal rules."""
 
+import pytest
+import yaml
+
 from apm_cli.utils.yaml_io import load_frontmatter
 
 
@@ -82,3 +85,11 @@ Body content.
     post = load_frontmatter(file_path)
     assert post.metadata == {}
     assert post.content == md_content
+
+
+def test_load_frontmatter_with_unterminated_fence_raises_yaml_error(tmp_path):
+    file_path = tmp_path / "broken.instructions.md"
+    file_path.write_text("---\napplyTo: src/**\n# Missing closing fence\n", encoding="utf-8")
+
+    with pytest.raises(yaml.YAMLError, match="malformed frontmatter delimiters"):
+        load_frontmatter(file_path)

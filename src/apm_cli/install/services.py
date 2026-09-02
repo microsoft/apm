@@ -434,6 +434,7 @@ def integrate_package_primitives(  # noqa: C901, PLR0913
             targets,
             package_info,
             project_root,
+            source_plan,
         )
 
     # Aggregate per-primitive across targets so we emit ONE line per kind

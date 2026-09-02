@@ -4,7 +4,7 @@ Tests the full install/uninstall/deps workflow using local path dependencies.
 These tests create real file structures and invoke CLI commands via subprocess.
 """
 
-import os  # noqa: F401
+import os
 import subprocess
 import sys  # noqa: F401
 import tempfile  # noqa: F401
@@ -265,6 +265,153 @@ print("ordinary Markdown")
         assert scope_marker in rendered
         assert "# Scoped rule" in rendered
         assert "----" not in rendered
+
+    def test_install_multi_target_consumes_all_preflight_plans(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """One preflight prepares every selected converted target."""
+        consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        source.write_text(
+            "----\napplyTo: src/**\n----\n# Scoped rule\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "claude,cursor,windsurf,kiro,antigravity",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        expected_paths = [
+            ".claude/rules/test-skill.md",
+            ".cursor/rules/test-skill.mdc",
+            ".windsurf/rules/test-skill.md",
+            ".kiro/steering/test-skill.md",
+            ".agents/rules/test-skill.md",
+        ]
+        for path in expected_paths:
+            rendered = (consumer / path).read_text(encoding="utf-8")
+            assert "# Scoped rule" in rendered
+
+    def test_install_ignores_unplanned_root_instruction_during_preflight(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Only instructions authorized by the deployment plan affect preflight."""
+        consumer = temp_workspace / "consumer"
+        package = temp_workspace / "packages" / "local-skills"
+        (package / "ignored.instructions.md").write_text(
+            "---\napplyTo: [\n---\n# Excluded rule\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "cursor",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (consumer / ".cursor/rules/test-skill.mdc").exists()
+        assert not (consumer / ".cursor/rules/ignored.mdc").exists()
+
+    def test_install_copilot_rejects_frontmatter_before_project_writes(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Copilot identity deployment validates instructions before prompts write."""
+        consumer = temp_workspace / "consumer"
+        package = temp_workspace / "packages" / "local-skills"
+        source = package / ".apm/instructions/test-skill.instructions.md"
+        source.write_text("---\napplyTo: [\n---\n# Invalid rule\n", encoding="utf-8")
+        prompt = package / ".apm/prompts/good.prompt.md"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("# Good prompt\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "copilot",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not (consumer / ".github/prompts/good.prompt.md").exists()
+        assert not (consumer / ".github/instructions/test-skill.instructions.md").exists()
+
+    def test_install_copilot_user_rejects_frontmatter_before_global_writes(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Copilot user deployment validates instructions before prompts write."""
+        consumer = temp_workspace / "consumer"
+        package = temp_workspace / "packages" / "local-skills"
+        source = package / ".apm/instructions/test-skill.instructions.md"
+        source.write_text("---\napplyTo: [\n---\n# Invalid rule\n", encoding="utf-8")
+        prompt = package / ".apm/prompts/good.prompt.md"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("# Good prompt\n", encoding="utf-8")
+        fake_home = temp_workspace / "home"
+        fake_home.mkdir()
+        env = os.environ.copy()
+        env["HOME"] = str(fake_home)
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                str(package.resolve()),
+                "--target",
+                "copilot",
+                "--global",
+            ],
+            cwd=consumer,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not (fake_home / ".copilot/prompts/good.prompt.md").exists()
+        assert not (fake_home / ".copilot/copilot-instructions.md").exists()
 
     def test_install_rejects_bounded_frontmatter_bomb(
         self,
