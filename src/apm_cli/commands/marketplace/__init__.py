@@ -339,6 +339,7 @@ def add(source, name, ref, branch, host, verbose):
         from ...marketplace.client import _auto_detect_path, fetch_marketplace
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
+        from ...marketplace.source_identity import parse_marketplace_source
 
         source_arg, fragment_ref = _split_source_fragment_ref(source)
 
@@ -391,7 +392,7 @@ def add(source, name, ref, branch, host, verbose):
             host is not None
             and host.strip().lower() != (resolved_host or "").lower()
             and kind in ("git", "github", "gitlab")
-            and (source_arg.lower().startswith(("https://", "ssh://", "git@", "file://")))
+            and parse_marketplace_source(url).transport in {"https", "ssh", "scp"}
         ):
             logger.warning(
                 "--host is ignored when SOURCE is a full URL.",

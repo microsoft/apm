@@ -33,6 +33,7 @@ def test_ssh_marketplace_process_preserves_port_without_http_credentials(
         "APM_REGISTRY_USER_CORP": "registry-user",
         "APM_REGISTRY_PASS_CORP": "registry-password",
         "PROXY_REGISTRY_TOKEN": "proxy-token",
+        "ARTIFACTORY_APM_TOKEN": "legacy-proxy-token",
     }
     for name, value in secrets.items():
         monkeypatch.setenv(name, value)

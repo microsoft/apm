@@ -23,6 +23,7 @@ on the next ``apm marketplace update``.
 from __future__ import annotations
 
 import contextlib
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
@@ -65,6 +66,7 @@ class TestLsRemoteHardening:
 
         argvs = _all_cmd_argvs(mock_run)
         assert argvs, "ls-remote subprocess.run was not invoked"
+        assert all(call.kwargs["stdin"] is subprocess.DEVNULL for call in mock_run.call_args_list)
         argv = argvs[0]
         assert "ls-remote" in argv
         assert "core.hooksPath=/dev/null" in argv

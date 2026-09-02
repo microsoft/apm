@@ -78,20 +78,6 @@ def _dict_source_error(source_type: str, repo: object, url: object) -> str | Non
     return None
 
 
-def _extract_host_from_url(url: str) -> str:
-    """Best-effort host extraction from any URL/path; empty for local paths."""
-    if not url or _looks_like_local_path(url):
-        return ""
-    scp = _SCP_LIKE_RE.match(url)
-    if scp:
-        return scp.group("host")
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
-        return ""
-    return parsed.hostname or ""
-
-
 def url_names_remote_manifest(url: str) -> bool:
     """Return True when *url* is a direct hosted ``marketplace.json`` document.
 
