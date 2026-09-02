@@ -53,7 +53,7 @@ def _git_exec_path(git: Path) -> str:
     ).stdout.strip()
 
 
-def _write_credential_helper(home: Path, log_path: Path) -> Path:
+def _write_credential_helper(git: Path, home: Path, log_path: Path) -> Path:
     """Create a real helper that records only sentinel names, never values."""
     helper = home / "credential-helper.py"
     helper.write_text(
@@ -71,7 +71,15 @@ def _write_credential_helper(home: Path, log_path: Path) -> Path:
     )
     helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
     subprocess.run(
-        ("git", "config", "--file", str(home / ".gitconfig"), "credential.helper", f"!{helper}"),
+        (
+            str(git),
+            "config",
+            "--file",
+            str(home / ".gitconfig"),
+            "--add",
+            "credential.helper",
+            f"!{helper}",
+        ),
         check=True,
         capture_output=True,
         text=True,
@@ -174,8 +182,23 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
 ) -> None:
     """Add and list one generic HTTPS source through a real Git helper."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=os.environ)
+    real_git = _real_git()
     helper_log = isolated.root / "credential-helper.json"
-    _write_credential_helper(isolated.home, helper_log)
+    helper = _write_credential_helper(real_git, isolated.home, helper_log)
+    configured_helpers = subprocess.run(
+        (
+            str(real_git),
+            "config",
+            "--file",
+            str(isolated.home / ".gitconfig"),
+            "--get-all",
+            "credential.helper",
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert configured_helpers == ["", f"!{helper}"]
     environment = isolated.subprocess_env()
     environment.update(
         {
@@ -197,7 +220,6 @@ def test_generic_https_marketplace_add_uses_native_credential_helper(
             "no_proxy": "",
         }
     )
-    real_git = _real_git()
     environment["GIT_EXEC_PATH"] = _git_exec_path(real_git)
     repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
     repository = repositories.create("generic-marketplace")
