@@ -24,6 +24,7 @@ from apm_cli.marketplace.source_identity import parse_marketplace_source
     [
         "/srv/marketplaces/agent-forge",
         "./relative/path",
+        ".github/plugin/marketplace.json",
         "../up/path",
         "~/code/marketplace",
         "~",

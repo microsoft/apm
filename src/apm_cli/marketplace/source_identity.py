@@ -250,7 +250,11 @@ def _looks_like_local_marketplace_source(raw: str) -> bool:
     """Return whether *raw* is a local filesystem source."""
     if raw.lower().startswith("file://"):
         return True
-    if raw.startswith(("/", "./", "../", "~/", ".\\", "..\\", "~\\")) or raw == "~":
+    if (
+        raw.startswith(("/", "./", "../", "~/", ".\\", "..\\", "~\\"))
+        or raw == "~"
+        or (raw.startswith(".") and ("/" in raw or "\\" in raw))
+    ):
         return True
     return len(raw) >= 3 and raw[0].isalpha() and raw[1] == ":" and raw[2] in ("\\", "/")
 
