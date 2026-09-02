@@ -36,7 +36,10 @@ def test_frontmatter_bom_decoding_has_single_owner() -> None:
         owner for owner in registry.owners if owner.id == "frontmatter-bom-bounded-yaml"
     )
     rule = _RULES_BY_ID["contracts-tooling-frontmatter-yaml"]
+    report = run_selected_rules(root, ("contracts-tooling-frontmatter-yaml",))
 
+    assert report.violations == ()
+    assert report.failures == ()
     assert 'def load_frontmatter(fd: Any, encoding: str = "utf-8-sig")' in owner
     assert 'text.removeprefix("\\ufeff")' in owner
     assert (
