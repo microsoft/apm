@@ -127,7 +127,7 @@ def _cache_key(source: MarketplaceSource) -> str:
         # Generic git / ADO: include host so a.com/o/r vs b.com/o/r never
         # collapse, and prefix by kind so the same host on the two paths keeps
         # distinct sidecar files.
-        host = _host_from_url(source.url) or source.host or "unknown"
+        host = source.host or "unknown"
         return f"{kind}__{_sanitize_cache_name(host)}__{_sanitize_cache_name(source.name)}"
     normalized_host = (source.host or "github.com").lower()
     if normalized_host == "github.com":
@@ -1106,26 +1106,10 @@ def _fetch_file(
     elif kind in ("git", "ado"):
         # For ADO and generic git, classify the host extracted from the URL so
         # each gets a correctly-typed auth context (ADO PAT/bearer routing).
-        host = _host_from_url(source.url)
+        host = source.host
         host_info = AuthResolver.classify_host(host, port=source.port) if host else None
 
     return fetcher(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
-
-
-def _host_from_url(url: str) -> str:
-    """Extract host from a URL (handles SCP-like SSH URLs too)."""
-    if not url:
-        return ""
-    # SCP-like: git@host:path
-    if "@" in url and not url.startswith(("http", "git://", "ssh://", "file://")):
-        try:
-            return url.split("@", 1)[1].split(":", 1)[0]
-        except (IndexError, ValueError):
-            return ""
-    try:
-        return urlsplit(url).hostname or ""
-    except ValueError:
-        return ""
 
 
 def _auto_detect_path(

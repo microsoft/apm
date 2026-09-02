@@ -9,6 +9,13 @@
       "guards": ["marketplace-integrations-tag-pattern"]
     },
     {
+      "id": "marketplace-source-admission",
+      "decision": "Marketplace source admission and transport identity",
+      "owner": "marketplace/source_identity.py (parse_marketplace_source)",
+      "selectors": ["src/apm_cli/marketplace/source_identity.py"],
+      "guards": ["marketplace-integrations-source-admission"]
+    },
+    {
       "id": "local-marketplace-version-precedence",
       "decision": "Local marketplace package-version manifest precedence",
       "owner": "marketplace/version_check.py (_read_local_version)",

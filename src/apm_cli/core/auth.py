@@ -127,6 +127,7 @@ _PORT_CREDENTIAL_DOCS_URL = (
 _GIT_CHILD_TOKEN_ENV_NAMES = frozenset(
     {
         "ADO_APM_PAT",
+        "ARTIFACTORY_APM_TOKEN",
         "COPILOT_GITHUB_TOKEN",
         "GH_ENTERPRISE_TOKEN",
         "GH_TOKEN",
@@ -138,9 +139,15 @@ _GIT_CHILD_TOKEN_ENV_NAMES = frozenset(
         "GITHUB_TOKEN",
         "GITLAB_APM_PAT",
         "GITLAB_TOKEN",
+        "PROXY_REGISTRY_TOKEN",
     }
 )
-_GIT_CHILD_TOKEN_ENV_PREFIXES = ("GITHUB_APM_PAT_",)
+_GIT_CHILD_TOKEN_ENV_PREFIXES = (
+    "APM_REGISTRY_PASS_",
+    "APM_REGISTRY_TOKEN_",
+    "APM_REGISTRY_USER_",
+    "GITHUB_APM_PAT_",
+)
 
 # Git localises its diagnostics through gettext, but APM classifies clone
 # failures by matching English signal strings (see

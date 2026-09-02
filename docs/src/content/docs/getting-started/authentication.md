@@ -585,13 +585,13 @@ This reproduces exactly what APM sends to the credential helper. If the returned
 When APM clones over SSH (because the dependency is an SSH URL, the user
 passed `--ssh`, `git config url.<base>.insteadOf` rewrites to SSH, or
 `--allow-protocol-fallback` is in effect), firewalls that silently drop SSH
-packets (port 22) can make `apm install` appear to hang. APM sets
-`GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within 30
-seconds.
+packets (port 22) can make `apm install` appear to hang. APM forces
+`BatchMode=yes`, disables askpass and HTTP credential channels, and sets a
+30-second connection timeout so SSH attempts fail without prompting.
 
 If you already set `GIT_SSH_COMMAND` (e.g., for a custom key), APM appends
-`-o ConnectTimeout=30` unless `ConnectTimeout` is already present in your
-value.
+`-o BatchMode=yes` and appends `-o ConnectTimeout=30` unless
+`ConnectTimeout` is already present in your value.
 
 If SSH is unreachable from your network, force HTTPS:
 

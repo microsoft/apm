@@ -43,7 +43,6 @@ from ...marketplace.yml_schema import load_marketplace_yml
 from ...utils.console import STATUS_SYMBOLS
 from ...utils.path_security import (
     PathTraversalError,
-    decode_url_path_segments,
     validate_path_segments,
 )
 from .._helpers import _get_console, _is_interactive
@@ -250,203 +249,15 @@ def _check_gitignore_for_marketplace_json(logger):
 
 
 def _parse_marketplace_source(source: str, host_flag: str | None) -> tuple[str, str, str | None]:
-    """Parse a marketplace source argument into ``(url, kind, embedded_host)``.
+    """Compatibility adapter for the canonical marketplace source owner."""
+    from ...marketplace.source_identity import parse_marketplace_source
 
-    Accepted forms (auto-detected, in order of test):
-
-      * Local filesystem path -- absolute (``/...``), relative (``./...``,
-        ``../...``), home (``~/...``), or Windows drive letter
-        (``C:\\repos\\foo``). Returns ``kind="local"``, ``url`` is the
-        ``file://`` URI form, ``embedded_host=None``.
-      * ``file://`` URI -- same shape as a local path but explicit.
-      * SCP-like SSH (``git@host:org/repo.git``). Returns ``kind`` derived
-        from the host via ``AuthResolver.classify_host``, ``url`` rewritten
-        to the SCP form (subprocess git understands it natively),
-        ``embedded_host=<host>``.
-      * Full HTTPS URL. Returns the URL untouched, ``embedded_host``
-        extracted, ``kind`` classified by host. Hosts that ``AuthResolver``
-        does not recognise as github/gitlab fall through as ``kind="git"``
-        (subprocess git path).
-      * ``OWNER/REPO`` or ``HOST/OWNER/.../REPO`` shorthand. The HOST
-        segment is detected via ``is_valid_fqdn``. Returns a synthesised
-        ``https://`` URL plus the resolved host.
-
-    Raises ``ValueError`` on malformed input (single-segment, HTTP, empty,
-    or path-traversal sequences in any segment).
-    """
-    from urllib.parse import urlparse
-
-    from ...core.auth import AuthResolver
-    from ...utils.github_host import is_valid_fqdn
-
-    raw = (source or "").strip()
-    if not raw:
-        raise ValueError("Empty source argument")
-    if any(ord(c) < 32 for c in raw):
-        raise ValueError("Source argument contains invalid control characters")
-
-    # --- Local path detection ---------------------------------------------
-    # Catches absolute (/, ~), relative (./, ../), file:// URIs, and
-    # Windows drive letters (C:\, C:/). Done BEFORE URL parsing so a path
-    # like '/srv/foo' is not misread as a relative HTTP URL.
-    if _looks_like_local_marketplace_source(raw):
-        url = raw if raw.lower().startswith("file://") else f"file://{_expand_local_path(raw)}"
-        return url, "local", None
-
-    lowered = raw.lower()
-    if lowered.startswith("http://"):
-        raise ValueError(
-            f"Insecure HTTP URL rejected: '{raw}'. Use HTTPS for marketplace registration."
-        )
-
-    # --- SCP-like SSH (git@host:org/repo.git) -----------------------------
-    scp_match = _SCP_LIKE_RE.match(raw)
-    if scp_match:
-        host = scp_match.group("host").lower()
-        path = scp_match.group("path")
-        # Validate the path component does not carry traversal markers.
-        for seg in (s for s in path.split("/") if s):
-            validate_path_segments(seg, context="marketplace SSH path", reject_empty=True)
-        host_info = AuthResolver.classify_host(host)
-        kind = _host_kind_to_fetcher_kind(host_info.kind)
-        return raw, kind, host
-
-    # --- HTTPS URL --------------------------------------------------------
-    if lowered.startswith("https://"):
-        parsed = urlparse(raw)
-        embedded_host = (parsed.hostname or "").strip().lower()
-        if not embedded_host:
-            raise ValueError(f"HTTPS URL is missing a host: '{raw}'")
-        path_segments = decode_url_path_segments(parsed.path, context="marketplace URL path")
-        if not path_segments:
-            raise ValueError(f"HTTPS URL is missing a repo path: '{raw}'")
-        host_info = AuthResolver.classify_host(embedded_host)
-        kind = _host_kind_to_fetcher_kind(host_info.kind)
-        if kind in ("github", "gitlab") and len(path_segments) < 2:
-            # GitHub / GitLab URLs are owner/repo-shaped; a single
-            # path segment is ambiguous (no owner). Generic git URLs
-            # (kind == "git") MAY legitimately have a single segment
-            # (e.g. self-hosted ``https://gitea.example.com/repo``).
-            raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO' in the URL path.")
-        if host_flag and host_flag.strip().lower() != embedded_host:
-            import shlex as _shlex
-
-            raise ValueError(
-                f"Conflicting host: --host '{host_flag}' does not match "
-                f"'{embedded_host}' in '{raw}'.\n"
-                f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
-            )
-        return raw, kind, embedded_host
-
-    # --- Shorthand (OWNER/REPO or HOST/OWNER/.../REPO) --------------------
-    raw_segments = raw.split("/")
-    segments = list(decode_url_path_segments(raw, context="marketplace source path"))
-    if len(segments) < 2:
-        raise ValueError(
-            f"Invalid format: '{raw}'. "
-            f"Expected 'OWNER/REPO', 'HOST/OWNER/REPO', a full HTTPS URL, "
-            f"a local path, or an SSH URL."
-        )
-
-    embedded_host: str | None = None
-    if is_valid_fqdn(segments[0]):
-        if len(segments) < 3:
-            raise ValueError(
-                f"Invalid format: '{raw}'. When the first segment is a host FQDN, "
-                f"at least 'HOST/OWNER/REPO' is required."
-            )
-        embedded_host = segments[0].lower()
-        segments = segments[1:]
-        raw_segments = raw_segments[1:]
-
-    repo_name = segments[-1]
-    owner_segments = segments[:-1]
-    if not owner_segments or not repo_name:
-        raise ValueError(f"Invalid format: '{raw}'. Expected 'OWNER/REPO'.")
-
-    raw_owner_path = "/".join(raw_segments[: len(owner_segments)])
-    raw_repo_name = raw_segments[len(owner_segments)]
-
-    if embedded_host and host_flag and host_flag.strip().lower() != embedded_host:
-        import shlex as _shlex
-
-        raise ValueError(
-            f"Conflicting host: --host '{host_flag}' does not match "
-            f"'{embedded_host}' in '{raw}'.\n"
-            f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
-        )
-
-    from ...utils.github_host import default_host
-
-    resolved_host = (host_flag or "").strip().lower() or embedded_host or default_host()
-    host_info = AuthResolver.classify_host(resolved_host)
-    kind = _host_kind_to_fetcher_kind(host_info.kind)
-    url = f"https://{resolved_host}/{raw_owner_path}/{raw_repo_name}"
-    return url, kind, resolved_host
+    identity = parse_marketplace_source(source, host_flag)
+    return identity.url, identity.kind, identity.host
 
 
 # Backward-compat alias for any external callers.
 _parse_marketplace_repo = _parse_marketplace_source
-
-
-def _host_kind_to_fetcher_kind(host_kind: str) -> str:
-    """Map ``AuthResolver.classify_host`` kinds to fetcher-table kinds.
-
-    ``github`` / ``ghe_cloud`` / ``ghes`` -> ``"github"`` (Contents API)
-    ``gitlab``                            -> ``"gitlab"`` (REST v4 raw)
-    Everything else (``ado``, ``generic``) -> ``"git"`` (subprocess + GitCache)
-    """
-    if host_kind in ("github", "ghe_cloud", "ghes"):
-        return "github"
-    if host_kind == "gitlab":
-        return "gitlab"
-    return "git"
-
-
-# SCP-like SSH form: ``user@host:path``. The path component does not need
-# to start with a slash (that is what makes it SCP-like). Reuses the
-# canonical regex from ``apm_cli.cache.url_normalize`` so SCP parsing here
-# stays consistent with ``DependencyReference`` and policy discovery.
-from apm_cli.cache.url_normalize import SCP_LIKE_RE as _SCP_LIKE_RE  # noqa: E402
-
-
-def _looks_like_local_marketplace_source(raw: str) -> bool:
-    """Heuristic match for local-path marketplace sources.
-
-    Matches: absolute paths (``/...``), explicit relative (``./...``,
-    ``../...``), home (``~``, ``~/...``), ``file://`` URIs, and Windows
-    drive letters (``C:\\`` or ``C:/``). The leading-slash check is
-    POSIX-only; on Windows, absolute paths arrive as drive-letter form.
-    """
-    if not raw:
-        return False
-    if raw.lower().startswith("file://"):
-        return True
-    if raw.startswith(("/", "./", "../", "~/", ".\\", "..\\", "~\\")) or raw == "~":
-        return True
-    # Windows drive letter: C:\foo or C:/foo
-    return len(raw) >= 3 and raw[0].isalpha() and raw[1] == ":" and raw[2] in ("\\", "/")
-
-
-def _expand_local_path(raw: str) -> str:
-    """Expand ``~`` and normalise to an absolute filesystem path string.
-
-    Used when synthesising the ``file://`` URL stored in ``marketplaces.json``
-    for local-kind entries. The result is *not* resolved (no symlink follow)
-    because the fetcher does its own ``ensure_path_within`` guard against
-    the post-``resolve`` location.
-    """
-    import os.path as _osp
-
-    return _osp.abspath(_osp.expanduser(raw))
-
-
-# Host-trust classification is owned by AuthResolver.classify_host (see
-# core/auth.py). The marketplace command layer routes through it so that the
-# credential-leakage guard at registration time uses the same single source of
-# truth as the fetch-time guard in marketplace/client.py. Adding a second
-# implementation here would create silent drift on a security-critical path.
-_TRUSTED_MARKETPLACE_HOST_KINDS = ("github", "ghe_cloud", "ghes", "gitlab")
 
 
 def _marketplace_add_unsupported_host_error(
@@ -492,6 +303,7 @@ Examples:
   apm marketplace add https://gitlab.com/group/repo
   apm marketplace add https://dev.azure.com/org/proj/_git/repo --name apm-mkt
   apm marketplace add git@gitea.example.com:org/repo.git --name custom
+  apm marketplace add ssh://git@gitea.example.com:2222/org/repo.git --name custom
   apm marketplace add /srv/marketplaces/agent-forge --name agent-forge
 """
 
@@ -518,7 +330,8 @@ def add(source, name, ref, branch, host, verbose):
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
     HTTPS git URL with optional ``#ref`` (GitHub, GitLab, Azure DevOps,
     Gitea, Bitbucket Server, or any self-hosted git server), a hosted
-    ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git``),
+    ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git`` or
+    ``ssh://git@host:2222/org/repo.git``),
     a local filesystem path, or a ``file://`` URI.
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
@@ -526,7 +339,7 @@ def add(source, name, ref, branch, host, verbose):
         from ...marketplace.client import _auto_detect_path, fetch_marketplace
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
-        from ...utils.github_host import is_valid_fqdn
+        from ...marketplace.source_identity import parse_marketplace_source
 
         source_arg, fragment_ref = _split_source_fragment_ref(source)
 
@@ -560,13 +373,6 @@ def add(source, name, ref, branch, host, verbose):
             logger.error(str(exc))
             sys.exit(1)
 
-        if host is not None and not is_valid_fqdn(host.strip().lower()):
-            logger.error(
-                f"Invalid host: '{host}'. Expected a valid host FQDN (for example, 'github.com').",
-                symbol="error",
-            )
-            sys.exit(1)
-
         # --host is meaningful only for shorthand OWNER/REPO inputs. For URL
         # / SSH / local-path inputs the host is already embedded; warn that
         # --host is being ignored rather than silently overriding.
@@ -586,35 +392,12 @@ def add(source, name, ref, branch, host, verbose):
             host is not None
             and host.strip().lower() != (resolved_host or "").lower()
             and kind in ("git", "github", "gitlab")
-            and (source_arg.startswith(("https://", "git@", "file://")))
+            and parse_marketplace_source(url).transport in {"https", "ssh", "scp"}
         ):
             logger.warning(
                 "--host is ignored when SOURCE is a full URL.",
                 symbol="warning",
             )
-
-        # Trust gate is now scoped to kinds that would forward an APM token
-        # via header injection. The subprocess git path (kind == "git")
-        # never forwards GITHUB_APM_PAT / GITLAB_APM_PAT -- AuthResolver
-        # only emits credentials matching the classified host. Local-kind
-        # fetches use no credentials at all.
-        if kind in ("github", "gitlab"):
-            from ...core.auth import AuthResolver
-
-            host_info = AuthResolver.classify_host(resolved_host or "")
-            if host_info.kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
-                # Should not happen because _host_kind_to_fetcher_kind already
-                # mapped non-trusted kinds to "git", but defend in depth.
-                import shlex as _shlex
-
-                quoted_repo = _shlex.quote(source)
-                quoted_host = _shlex.quote(resolved_host or "")
-                logger.error(
-                    _marketplace_add_unsupported_host_error(
-                        resolved_host or "", quoted_repo, quoted_host, host_info.kind
-                    )
-                )
-                sys.exit(1)
 
         if name is not None and not _is_valid_alias(name):
             logger.error(
@@ -634,11 +417,18 @@ def add(source, name, ref, branch, host, verbose):
         if _should_warn_unpinned_git_url(
             source_arg, kind, is_direct_url, fragment_ref, explicit_ref
         ):
-            logger.warning(
-                "Pin this git marketplace with a #ref (for example, "
-                f"{source_arg}#v1.0.0) or --ref to avoid mutable branch updates.",
-                symbol="warning",
-            )
+            from ...marketplace.source_identity import parse_marketplace_source
+
+            if parse_marketplace_source(url).transport in {"ssh", "scp"}:
+                warning = (
+                    "Pin this git marketplace with --ref v1.0.0 to avoid mutable branch updates."
+                )
+            else:
+                warning = (
+                    "Pin this git marketplace with a #ref (for example, "
+                    f"{source_arg}#v1.0.0) or --ref to avoid mutable branch updates."
+                )
+            logger.warning(warning, symbol="warning")
 
         # Probe for marketplace.json location. The probe source's name is a
         # placeholder -- _auto_detect_path only consults url/ref/path/kind.
@@ -748,6 +538,8 @@ def add(source, name, ref, branch, host, verbose):
 def _split_source_fragment_ref(source: str) -> tuple[str, str]:
     """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
     raw = (source or "").strip()
+    if raw.lower().startswith("ssh://") and "#" in raw:
+        raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
     if not raw.lower().startswith("https://"):
         return raw, ""
     parsed = urlsplit(raw)
@@ -778,7 +570,11 @@ def _should_warn_unpinned_git_url(
     """Return True when a git URL source uses the implicit mutable default ref."""
     if is_direct_url or fragment_ref or explicit_ref:
         return False
-    return source.lower().startswith("https://") and kind in {"github", "gitlab", "git"}
+    if kind not in {"github", "gitlab", "git", "ado"}:
+        return False
+    from ...marketplace.source_identity import parse_marketplace_source
+
+    return parse_marketplace_source(source).transport in {"https", "ssh", "scp"}
 
 
 def _local_source_points_to_file(source: MarketplaceSource) -> bool:
