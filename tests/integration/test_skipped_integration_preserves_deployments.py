@@ -22,6 +22,9 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
 ) -> None:
     """Keep real deployed skills and their lock claims when integration skips."""
     dep_key = "owner/package"
+    prior_commit = "a" * 40
+    current_commit = "b" * 40
+    current_content_hash = "sha256:new-package"
     deployed_files = [f".agents/skills/skill-{index:02d}/SKILL.md" for index in range(24)]
     deployed_hashes = {}
     for relative in deployed_files:
@@ -34,12 +37,14 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
     previous.add_dependency(
         LockedDependency(
             repo_url=dep_key,
+            resolved_commit=prior_commit,
+            content_hash="sha256:prior-package",
             deployed_files=deployed_files,
             deployed_file_hashes=deployed_hashes,
         )
     )
     current = LockFile()
-    current.add_dependency(LockedDependency(repo_url=dep_key))
+    current.add_dependency(LockedDependency(repo_url=dep_key, resolved_commit=current_commit))
     diagnostics = DiagnosticCollector()
     ctx = SimpleNamespace(
         existing_lockfile=previous,
@@ -48,6 +53,7 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
         package_deployed_files={},
         orphan_cleanup_retained={},
         package_cleanup_retained={},
+        package_hashes={dep_key: current_content_hash},
         project_root=tmp_path,
         targets=[],
         diagnostics=diagnostics,
@@ -55,6 +61,7 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
         scope=InstallScope.PROJECT,
         skill_subset_from_cli=False,
         skill_subset=None,
+        update_refs=True,
     )
     source = SimpleNamespace(
         ctx=ctx,
@@ -72,9 +79,14 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
         ),
     )
     cleanup.run(ctx)
-    LockfileBuilder(ctx)._attach_deployed_files(current)
+    builder = LockfileBuilder(ctx)
+    builder._attach_deployed_files(current)
+    builder._attach_content_hashes(current)
 
     assert ctx.package_deployed_files == {}
     assert all((tmp_path / relative).is_file() for relative in deployed_files)
-    assert current.get_dependency(dep_key).deployed_files == deployed_files
-    assert current.get_dependency(dep_key).deployed_file_hashes == deployed_hashes
+    locked = current.get_dependency(dep_key)
+    assert locked.resolved_commit == current_commit
+    assert locked.content_hash == current_content_hash
+    assert locked.deployed_files == deployed_files
+    assert locked.deployed_file_hashes == deployed_hashes
