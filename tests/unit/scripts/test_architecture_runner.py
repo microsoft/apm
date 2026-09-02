@@ -661,6 +661,7 @@ marketplace-integrations-producer-admission
 marketplace-integrations-projection-boundary
 marketplace-integrations-raw-diagnostics
 marketplace-integrations-removed-plugin-lifecycle
+marketplace-integrations-source-admission
 marketplace-integrations-source-parsing
 marketplace-integrations-tag-pattern
 marketplace-integrations-version-precedence

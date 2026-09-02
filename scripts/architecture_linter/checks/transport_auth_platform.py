@@ -136,7 +136,10 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             ("probe_env = auth_resolver.git_env_for_context(", "key = (host, dep.port, org)"),
         ),
         ("src/apm_cli/install/helpers/ref_reuse.py", ("hardened_git_env_for_context",)),
-        ("src/apm_cli/marketplace/client.py", ("hardened_git_env_for_context",)),
+        (
+            "src/apm_cli/marketplace/client.py",
+            ("resolve_for_remote", "git_env_for_remote"),
+        ),
         ("src/apm_cli/marketplace/builder.py", ("hardened_git_env_for_context",)),
         ("src/apm_cli/marketplace/auth_helpers.py", ('ctx.token or ctx.host_info.kind == "ado"',)),
         ("src/apm_cli/commands/marketplace/check.py", ("hardened_git_env_for_context",)),
@@ -495,9 +498,9 @@ def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inv,
             _RID_URL_PATH,
-            "src/apm_cli/commands/marketplace/__init__.py",
-            ('decode_url_path_segments(parsed.path, context="marketplace URL path")',),
-            "marketplace command must decode URL paths through path_security",
+            "src/apm_cli/marketplace/source_identity.py",
+            ("decode_url_path_segments(path, context=context)",),
+            "marketplace source owner must decode URL paths through path_security",
         )
     )
     findings.extend(

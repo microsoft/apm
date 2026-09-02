@@ -23,8 +23,10 @@ on the next ``apm marketplace update``.
 from __future__ import annotations
 
 import contextlib
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlsplit
 
 from apm_cli.cache.git_cache import GitCache, _safe_git_args
 
@@ -64,10 +66,32 @@ class TestLsRemoteHardening:
 
         argvs = _all_cmd_argvs(mock_run)
         assert argvs, "ls-remote subprocess.run was not invoked"
+        assert all(call.kwargs["stdin"] is subprocess.DEVNULL for call in mock_run.call_args_list)
         argv = argvs[0]
         assert "ls-remote" in argv
         assert "core.hooksPath=/dev/null" in argv
         assert "submodule.recurse=false" in argv
+
+
+class TestCacheHitDiagnostics:
+    def test_cache_hit_log_omits_ssh_userinfo(self, caplog, tmp_path: Path) -> None:
+        cache = GitCache(tmp_path)
+        sha = "a" * 40
+        shard = "cache-shard"
+        checkout = cache._checkouts_root / shard / sha / "full"
+        checkout.mkdir(parents=True)
+
+        with (
+            patch.object(cache, "_resolve_sha", return_value=sha),
+            patch("apm_cli.cache.git_cache.cache_shard_key", return_value=shard),
+            patch("apm_cli.cache.git_cache.verify_checkout_sha", return_value=True),
+            caplog.at_level("DEBUG", logger="apm_cli.cache.git_cache"),
+        ):
+            cache.get_checkout("ssh://sensitive-user@example.com/org/repo.git", "main")
+
+        logged_url = urlsplit(caplog.records[-1].getMessage().split()[2])
+        assert logged_url.username is None
+        assert logged_url.hostname == "example.com"
 
 
 class TestCloneHardening:

@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.cache.git_cache import GitCache
 
 
@@ -270,13 +272,15 @@ class TestCheckoutWriteDedup:
     and return immediately without doing any clone work themselves.
     """
 
-    def test_short_circuits_when_final_exists_under_lock(self, tmp_path: Path) -> None:
+    def test_short_circuits_when_final_exists_under_lock(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """If final_dir is already populated when the lock is acquired,
         no git subprocess is invoked."""
         from apm_cli.cache.url_normalize import cache_shard_key
 
         cache = GitCache(tmp_path)
-        url = "https://github.com/owner/repo"
+        url = "https://user:pass@github.com/owner/repo?access_token=SECRET123#main"
         sha = "1" * 40
         shard = cache_shard_key(url)
 
@@ -293,10 +297,13 @@ class TestCheckoutWriteDedup:
                 return_value=True,
             ) as mock_verify,
         ):
-            result = cache._create_checkout(url, shard, sha)
+            with caplog.at_level("DEBUG"):
+                result = cache._create_checkout(url, shard, sha)
             mock_run.assert_not_called()
             mock_verify.assert_called_with(final_dir, sha)
         assert result == final_dir
+        assert "SECRET123" not in caplog.text
+        assert "user:pass" not in caplog.text
 
     def test_proceeds_with_clone_when_final_missing(self, tmp_path: Path) -> None:
         """If final_dir does not exist on lock entry, clone happens."""

@@ -446,6 +446,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Raw structural diagnostics stop originating empty in the model owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-source-admission",
+        rule_id="marketplace-integrations-source-admission",
+        path="src/apm_cli/marketplace/client.py",
+        old=("        host = source.host\n        host_info = AuthResolver.classify_host"),
+        new=(
+            "        host = _host_from_url(source.url)\n"
+            "        host_info = AuthResolver.classify_host"
+        ),
+        intent="Marketplace client reintroduces source-host parsing outside the owner.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-tag-pattern",
         rule_id="marketplace-integrations-tag-pattern",
         path="src/apm_cli/marketplace/tag_pattern.py",
