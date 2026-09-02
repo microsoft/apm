@@ -52,12 +52,21 @@ apm install
 ```
 
 `apm install` reads this repo's [`apm.yml`](apm.yml) (`includes: auto`),
-picks up everything under `.apm/`, and deploys it into the harness
-directories your coding agent already watches -- `.github/skills/`,
-`.github/agents/`, `.claude/skills/`, `.cursor/`, etc. -- depending on
-which targets are detected on your machine. Once that is done, your
-harness (Claude Code, GitHub Copilot CLI, Cursor, OpenCode, Codex,
-Gemini, ...) can discover and invoke the skills by name.
+picks up everything under `.apm/`, and deploys it into `.github/` and
+`.agents/skills/` -- the tree this repo commits. `apm.yml` pins the
+`copilot` target, so every contributor gets that same tree regardless of
+which harness their own machine signals.
+
+Working in a different harness? Opt in to its deploy root as well:
+
+```bash
+apm install --target claude   # or cursor, codex, gemini, opencode, ...
+```
+
+`.gitignore` keeps that output untracked. It does add the deploy paths to
+`apm.lock.yaml`; leave that change uncommitted. Either way, your harness
+(Claude Code, GitHub Copilot CLI, Cursor, OpenCode, Codex, Gemini, ...)
+can then discover and invoke the skills by name.
 
 For most PRs, two of those skills carry most of the weight:
 
