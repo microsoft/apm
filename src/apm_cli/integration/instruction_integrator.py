@@ -139,7 +139,13 @@ class InstructionIntegrator(BaseIntegrator):
             force=force,
         )
         if verdict.has_findings and diagnostics is not None:
-            SecurityGate.report(verdict, diagnostics, package=package_name, force=force)
+            SecurityGate.report(
+                verdict,
+                diagnostics,
+                package=package_name,
+                force=force,
+                force_action="Allowed by preflight",
+            )
         if verdict.should_block:
             raise yaml.YAMLError(
                 f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"

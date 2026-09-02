@@ -99,6 +99,7 @@ def test_frontmatter_bom_guard_rejects_caller_owned_encoding(tmp_path: Path) -> 
         "identity-adoption-reread",
         "decoded-security-bypass",
         "decoded-force-bypass",
+        "surrogate-normalization-bypass",
     ],
 )
 def test_frontmatter_authority_guard_rejects_split_owners(
@@ -169,12 +170,22 @@ def test_frontmatter_authority_guard_rejects_split_owners(
             ),
             encoding="utf-8",
         )
-    else:
+    elif mutation == "decoded-force-bypass":
         integrator = sandbox / "src/apm_cli/integration/instruction_integrator.py"
         integrator.write_text(
             integrator.read_text(encoding="utf-8").replace(
                 "            force=force,\n",
                 "            force=False,\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    else:
+        scanner = sandbox / "src/apm_cli/security/content_scanner.py"
+        scanner.write_text(
+            scanner.read_text(encoding="utf-8").replace(
+                "        content = _combine_surrogate_pairs(content)\n",
+                "",
                 1,
             ),
             encoding="utf-8",

@@ -215,6 +215,7 @@ class SecurityGate:
         *,
         package: str = "",
         force: bool = False,
+        force_action: str = "Deployed",
     ) -> None:
         """Record findings into a DiagnosticCollector with consistent messaging."""
         if not verdict.has_findings:
@@ -223,7 +224,7 @@ class SecurityGate:
         if verdict.has_critical and not verdict.should_block and force:
             # --force: deployed despite critical
             diagnostics.security(
-                message=("Deployed with --force despite critical hidden characters"),
+                message=(f"{force_action} with --force despite critical hidden characters"),
                 package=package,
                 detail=(
                     f"{verdict.critical_count} critical finding(s) — "

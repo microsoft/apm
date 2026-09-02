@@ -37,6 +37,21 @@ class TestScanText:
         assert findings[0].codepoint == "U+E0001"
         assert findings[0].file == "test.md"
 
+    def test_utf16_surrogate_pair_is_scanned_as_unicode_scalar(self):
+        findings = ContentScanner.scan_text("\udb40\udc01", filename="decoded.yml")
+
+        assert len(findings) == 1
+        assert findings[0].severity == "critical"
+        assert findings[0].category == "tag-character"
+        assert findings[0].codepoint == "U+E0001"
+
+    def test_unpaired_utf16_surrogate_is_critical(self):
+        findings = ContentScanner.scan_text("\udb40", filename="decoded.yml")
+
+        assert len(findings) == 1
+        assert findings[0].severity == "critical"
+        assert findings[0].category == "invalid-surrogate"
+
     def test_multiple_tag_characters(self):
         """Full range of tag chars embedded in text."""
         # Embed a few tag characters that map to invisible ASCII

@@ -413,17 +413,23 @@ print("ordinary Markdown")
         assert not (fake_home / ".copilot/prompts/good.prompt.md").exists()
         assert not (fake_home / ".copilot/copilot-instructions.md").exists()
 
+    @pytest.mark.parametrize(
+        "escaped_hidden_unicode",
+        [r"\u202e", r"\uDB40\uDC01"],
+        ids=["bidi-override", "surrogate-pair-tag"],
+    )
     def test_install_rejects_yaml_escaped_hidden_unicode_before_writes(
         self,
         temp_workspace,
         apm_binary_path,
+        escaped_hidden_unicode,
     ):
         """Decoded frontmatter metadata crosses the same security gate as source."""
         consumer = temp_workspace / "consumer"
         package = temp_workspace / "packages" / "local-skills"
         source = package / ".apm/instructions/test-skill.instructions.md"
         source.write_text(
-            '---\napplyTo: src/**\ndescription: "\\u202ehidden"\n---\n# Rule\n',
+            f'---\napplyTo: src/**\ndescription: "{escaped_hidden_unicode}hidden"\n---\n# Rule\n',
             encoding="utf-8",
         )
         prompt = package / ".apm/prompts/good.prompt.md"
@@ -458,6 +464,8 @@ print("ordinary Markdown")
         )
 
         assert forced.returncode == 0, forced.stdout + forced.stderr
+        assert "hidden characters detected" in forced.stdout + forced.stderr
+        assert "Deployed with --force" not in forced.stdout + forced.stderr
         assert (consumer / ".cursor/rules/test-skill.mdc").exists()
 
     def test_install_rejects_bounded_frontmatter_bomb(

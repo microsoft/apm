@@ -149,6 +149,36 @@ class TestInstructionIntegrator:
 
         assert not (self.project_root / ".github/instructions").exists()
 
+    def test_preflight_force_report_does_not_claim_deployment(self):
+        """Preflight labels a force override without claiming files were written."""
+        from unittest.mock import patch
+
+        from apm_cli.security.gate import SecurityGate
+
+        source = self.project_root / "forced.instructions.md"
+        source.write_text("# Rule\n", encoding="utf-8")
+        diagnostics = Mock()
+        verdict = Mock(has_findings=True, should_block=False)
+
+        with (
+            patch.object(SecurityGate, "scan_text", return_value=verdict),
+            patch.object(SecurityGate, "report") as report,
+        ):
+            self.integrator._prepare_instruction(
+                source,
+                force=True,
+                diagnostics=diagnostics,
+                package_name="pkg",
+            )
+
+        report.assert_called_once_with(
+            verdict,
+            diagnostics,
+            package="pkg",
+            force=True,
+            force_action="Allowed by preflight",
+        )
+
     def test_identity_target_materializes_preflight_validated_content(self):
         """Identity deployment writes the bytes validated during preflight."""
         from unittest.mock import patch

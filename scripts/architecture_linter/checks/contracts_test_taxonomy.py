@@ -592,6 +592,7 @@ def check_apply_to_placement(provider: FactsProvider) -> tuple[Violation, ...]:
 
 _FRONTMATTER_OWNER = "src/apm_cli/utils/yaml_io.py"
 _INSTRUCTION_INTEGRATOR = "src/apm_cli/integration/instruction_integrator.py"
+_CONTENT_SCANNER = "src/apm_cli/security/content_scanner.py"
 _FRONTMATTER_METHODS = frozenset({"load", "loads", "parse"})
 
 
@@ -721,6 +722,20 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                 rule_id,
                 _FRONTMATTER_OWNER,
                 "Frontmatter BOM decoding must route through utils/yaml_io.py",
+            )
+        )
+    scanner, scanner_fail = _facts_for(provider, _CONTENT_SCANNER, rule_id)
+    findings.extend(scanner_fail)
+    if not scanner_fail and (
+        not _present(scanner, "content = _combine_surrogate_pairs(content)")
+        or not _present(scanner, "0xD800,")
+        or not _present(scanner, "0xDFFF,")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _CONTENT_SCANNER,
+                "decoded frontmatter scanning must normalize and reject UTF-16 surrogates",
             )
         )
 
