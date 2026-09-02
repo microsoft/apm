@@ -593,6 +593,7 @@ def check_apply_to_placement(provider: FactsProvider) -> tuple[Violation, ...]:
 _FRONTMATTER_OWNER = "src/apm_cli/utils/yaml_io.py"
 _INSTRUCTION_INTEGRATOR = "src/apm_cli/integration/instruction_integrator.py"
 _CONTENT_SCANNER = "src/apm_cli/security/content_scanner.py"
+_INSTALL_SERVICES = "src/apm_cli/install/services.py"
 _FRONTMATTER_METHODS = frozenset({"load", "loads", "parse"})
 
 
@@ -686,6 +687,33 @@ def _self_method_call(node: ast.Call, method: str) -> bool:
     )
 
 
+def _inside_matching_if(tree, node: ast.AST, predicate) -> bool:
+    """Return whether *node* is nested in an if whose test matches."""
+    parent = tree.parent(node)
+    while parent is not None:
+        if isinstance(parent, ast.If) and predicate(parent.test):
+            return True
+        parent = tree.parent(parent)
+    return False
+
+
+def _is_no_targets_test(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, ast.Not)
+        and isinstance(node.operand, ast.Name)
+        and node.operand.id == "targets"
+    )
+
+
+def _is_native_plugin_test(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "admits_native_plugin"
+    )
+
+
 def _prepared_identity_content(node: ast.AST) -> bool:
     candidate = node.value if isinstance(node, ast.Attribute) and node.attr == "content" else node
     return (
@@ -738,6 +766,55 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                 "decoded frontmatter scanning must normalize and reject UTF-16 surrogates",
             )
         )
+    services, services_fail = _facts_for(provider, _INSTALL_SERVICES, rule_id)
+    findings.extend(services_fail)
+    if not services_fail and services.tree_index is not None:
+        service_tree = services.tree_index
+        integration = service_tree.function("integrate_package_primitives")
+        service_scope = service_tree.own_scope(integration) if integration is not None else ()
+        preflight_calls = [
+            node
+            for node in service_scope
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "preflight_instructions_for_targets"
+        ]
+        reconcile_calls = [
+            node
+            for node in service_scope
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_reconcile_excluded_targets"
+        ]
+        no_target_calls = [
+            node
+            for node in reconcile_calls
+            if _inside_matching_if(service_tree, node, _is_no_targets_test)
+        ]
+        native_calls = [
+            node
+            for node in reconcile_calls
+            if _inside_matching_if(service_tree, node, _is_native_plugin_test)
+        ]
+        post_preflight_calls = [
+            node
+            for node in reconcile_calls
+            if node not in no_target_calls and node not in native_calls
+        ]
+        if (
+            len(preflight_calls) != 1
+            or len(no_target_calls) != 1
+            or len(native_calls) != 1
+            or len(post_preflight_calls) != 1
+            or post_preflight_calls[0].lineno <= preflight_calls[0].lineno
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    _INSTALL_SERVICES,
+                    "instruction preflight must precede non-empty target reconciliation",
+                )
+            )
 
     tree = owner.tree_index
     loads_function = tree.function("loads_frontmatter") if tree is not None else None

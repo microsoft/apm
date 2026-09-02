@@ -100,6 +100,9 @@ def test_frontmatter_bom_guard_rejects_caller_owned_encoding(tmp_path: Path) -> 
         "decoded-security-bypass",
         "decoded-force-bypass",
         "surrogate-normalization-bypass",
+        "reconcile-before-preflight",
+        "native-reconcile-missing",
+        "no-target-reconcile-escapes",
     ],
 )
 def test_frontmatter_authority_guard_rejects_split_owners(
@@ -180,12 +183,48 @@ def test_frontmatter_authority_guard_rejects_split_owners(
             ),
             encoding="utf-8",
         )
-    else:
+    elif mutation == "surrogate-normalization-bypass":
         scanner = sandbox / "src/apm_cli/security/content_scanner.py"
         scanner.write_text(
             scanner.read_text(encoding="utf-8").replace(
                 "        content = _combine_surrogate_pairs(content)\n",
                 "",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "reconcile-before-preflight":
+        services = sandbox / "src/apm_cli/install/services.py"
+        source = services.read_text(encoding="utf-8")
+        post_call = "\n    _reconcile_excluded_targets()\n\n    # Aggregate per-primitive"
+        assert post_call in source
+        services.write_text(
+            source.replace(post_call, "\n\n    # Aggregate per-primitive", 1).replace(
+                "    if integrators.instruction is not None:\n",
+                "    _reconcile_excluded_targets()\n    if integrators.instruction is not None:\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "native-reconcile-missing":
+        services = sandbox / "src/apm_cli/install/services.py"
+        services.write_text(
+            services.read_text(encoding="utf-8").replace(
+                "    if admits_native_plugin(package_info):\n"
+                "        _reconcile_excluded_targets()\n",
+                "    if admits_native_plugin(package_info):\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+    else:
+        services = sandbox / "src/apm_cli/install/services.py"
+        services.write_text(
+            services.read_text(encoding="utf-8").replace(
+                "    if not targets:\n"
+                "        _reconcile_excluded_targets()\n"
+                "        return result\n",
+                "    _reconcile_excluded_targets()\n    if not targets:\n        return result\n",
                 1,
             ),
             encoding="utf-8",

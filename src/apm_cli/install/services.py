@@ -307,14 +307,18 @@ def integrate_package_primitives(  # noqa: PLR0913
         "reconcile_package_target_restriction",
         None,
     )
-    if target_selection.excluded_targets and callable(reconcile_package_targets):
-        reconcile_stats = reconcile_package_targets(
-            package_info,
-            project_root,
-            target_selection.excluded_targets,
-        )
-        _warn_target_reconcile_failure(diagnostics, package_name, reconcile_stats)
+
+    def _reconcile_excluded_targets() -> None:
+        if target_selection.excluded_targets and callable(reconcile_package_targets):
+            reconcile_stats = reconcile_package_targets(
+                package_info,
+                project_root,
+                target_selection.excluded_targets,
+            )
+            _warn_target_reconcile_failure(diagnostics, package_name, reconcile_stats)
+
     if not targets:
+        _reconcile_excluded_targets()
         return result
 
     # Executable approval gate (npm v12-style default-deny); all five verdicts feed the gates.
@@ -373,6 +377,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     from apm_cli.install.native_plugin_admission import finalize_native_plugin
 
     if admits_native_plugin(package_info):
+        _reconcile_excluded_targets()
         return finalize_native_plugin(
             result,
             package_info,
@@ -427,6 +432,8 @@ def integrate_package_primitives(  # noqa: PLR0913
             force=force,
             diagnostics=diagnostics,
         )
+
+    _reconcile_excluded_targets()
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
