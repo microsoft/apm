@@ -262,7 +262,7 @@ def test_materialization_without_package_metadata_preserves_no_target_noop(tmp_p
     deltas = run_integration_template(source)
 
     assert deltas == {"installed": 0}
-    assert ctx.package_deployed_files == {"owner/package": []}
+    assert ctx.package_deployed_files == {}
     assert diagnostics.error_count == 0
 
 
