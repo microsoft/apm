@@ -606,6 +606,9 @@ contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
 contracts-tooling-lockfile-read
+contracts-tooling-lockfile-timestamp
+contracts-tooling-lockfile-timestamp-constructor
+contracts-tooling-lockfile-timestamp-fallback
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
