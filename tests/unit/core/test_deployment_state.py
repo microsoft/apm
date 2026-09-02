@@ -555,6 +555,13 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
     assert rebuilt.is_semantically_equivalent(lockfile)
 
 
+def test_legacy_shared_agents_path_has_unattributable_target() -> None:
+    """A shared .agents root must not be attributed to the deprecated alias."""
+    locator = DeploymentLedgerCodec._legacy_locator(".agents/skills/demo/SKILL.md")
+
+    assert locator.target == "legacy"
+
+
 def test_legacy_owner_update_preserves_canonical_shared_root_locator() -> None:
     """A compatibility projection must not demote a concrete shared-root target."""
     path = ".agents/skills/demo/SKILL.md"
