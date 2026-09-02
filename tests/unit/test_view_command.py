@@ -807,6 +807,53 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
 
         assert result.exit_code == 0
 
+    def test_marketplace_ref_shows_resolved_reference(self):
+        """``apm view plugin@mkt`` renders the resolved canonical reference.
+
+        Regression: ``_display_marketplace_plugin`` used to pass the plugin row
+        as a third positional argument to ``resolve_marketplace_plugin``, which
+        only accepts two positionals.  The resulting ``TypeError`` was swallowed
+        by the surrounding ``except Exception: pass``, so the ``Resolved:`` line
+        silently disappeared instead of failing loudly.  ``autospec=True`` makes
+        the patched callable enforce the real signature, so this test fails if
+        the call site drifts from it again.
+        """
+        from apm_cli.marketplace.models import (
+            MarketplaceManifest,
+            MarketplacePlugin,
+            MarketplaceSource,
+        )
+
+        plugin = MarketplacePlugin(
+            name="my-plugin",
+            source={"type": "github", "repo": "acme/plugin", "ref": "main"},
+            version="2.0.0",
+        )
+        manifest = MarketplaceManifest(name="acme-tools", plugins=(plugin,))
+        source = MarketplaceSource(name="acme-tools", owner="acme", repo="marketplace")
+
+        with (
+            patch(
+                "apm_cli.marketplace.registry.get_marketplace_by_name",
+                return_value=source,
+            ),
+            patch(
+                "apm_cli.marketplace.client.fetch_or_cache",
+                return_value=manifest,
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+                autospec=True,
+                return_value=("acme/plugin@main", plugin),
+            ) as mock_resolve,
+            _force_rich_fallback(),
+        ):
+            result = self.runner.invoke(cli, ["view", "my-plugin@acme-tools"])
+
+        assert result.exit_code == 0
+        mock_resolve.assert_called_once_with("my-plugin", "acme-tools")
+        assert "acme/plugin@main" in result.output
+
     def test_non_marketplace_ref_still_uses_local_path(self):
         """``apm view org/repo`` still falls through to local metadata lookup."""
         with self._chdir_tmp() as tmp:

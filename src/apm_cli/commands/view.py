@@ -272,7 +272,6 @@ def _display_marketplace_plugin(
         canonical_str, _resolved = resolve_marketplace_plugin(
             plugin_name,
             marketplace_name,
-            plugin,
         )
         resolved_display = canonical_str
     except Exception:
