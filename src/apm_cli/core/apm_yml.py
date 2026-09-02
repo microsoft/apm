@@ -176,25 +176,36 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
 def read_declared_target_names(root: Path) -> list[str]:
     """Return the canonical target names ``root/apm.yml`` declares, else ``[]``.
 
-    Returns ``[]`` when there is nothing to read a declaration from: no
-    manifest, an unreadable one, or one that is empty or not a mapping. Callers
-    then fall through to their own default.
+    Returns ``[]`` only when there is genuinely nothing to read a declaration
+    from -- no manifest, an unreadable one, or an empty one -- so callers fall
+    through to their own default.
 
-    A manifest that exists and parses to a mapping is authoritative, so its
-    failures propagate rather than degrading to ``[]``: malformed YAML raises
-    ``yaml.YAMLError`` out of :func:`~apm_cli.utils.yaml_io.load_yaml`, and an
-    invalid ``targets:`` value raises out of :func:`parse_targets_field`.
-    Reporting "nothing declared" for either would silently widen a caller's
-    target set on a typo, which is the failure mode callers use this to avoid.
+    A manifest that exists is otherwise authoritative and its failures
+    propagate, because reporting "nothing declared" for a broken manifest would
+    silently widen a caller's target set on a typo, which is the failure mode
+    callers use this to avoid. Malformed YAML (including undecodable bytes)
+    arrives as ``yaml.YAMLError`` from :func:`~apm_cli.utils.yaml_io.load_yaml`,
+    an invalid ``targets:`` value raises out of :func:`parse_targets_field`, and
+    a document that is not a mapping is rejected the same way
+    :meth:`~apm_cli.models.apm_package.APMPackage.from_apm_yml` rejects it.
 
     Names are returned as written, so ``vscode`` comes back as ``vscode``.
     Callers mapping them onto target profiles must first normalize through
     :func:`~apm_cli.core.target_catalog.normalize_target_name`.
     """
+    import yaml
+
     from apm_cli.utils.yaml_io import load_yaml
 
     try:
         data = load_yaml(root / "apm.yml")
     except OSError:
         return []
-    return parse_targets_field(data) if isinstance(data, dict) else []
+    if data is None:
+        return []
+    if not isinstance(data, dict):
+        # Raised as YAMLError, not ValueError, so callers keep the single
+        # fail-closed ``except yaml.YAMLError`` that _bounded_load already
+        # normalizes its own non-parse failures into.
+        raise yaml.YAMLError(f"apm.yml must contain a YAML object, got {type(data)}")
+    return parse_targets_field(data)

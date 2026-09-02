@@ -590,3 +590,72 @@ class TestGlobalCompileHonorsDeclaredTargets:
             _handle_global_flag(dry_run=False, logger=MagicMock())
 
         compile_mock.assert_not_called()
+
+    def test_non_mapping_manifest_fails_closed_without_compiling(self, tmp_path):
+        """A YAML sequence parses cleanly but is not a usable manifest."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, "- claude\n- codex\n")
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "must contain a yaml object" in str(logger.error.call_args).lower()
+
+    def test_scalar_manifest_fails_closed_without_compiling(self, tmp_path):
+        """A bare scalar document is rejected the same way a sequence is."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, "just-a-string\n")
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=MagicMock())
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+
+    def test_empty_manifest_still_compiles_every_known_target(self, tmp_path):
+        """An empty manifest declares nothing; it is not a broken manifest."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        source_root = self._prepare(tmp_path, "")
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert sorted(names) == sorted(p.name for p in KNOWN_TARGETS.values())
+
+    def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path):
+        """Invalid UTF-8 reaches the handler as a YAMLError, not a raw decode error.
+
+        ``load_yaml`` opens the manifest as UTF-8, so bad bytes raise
+        ``UnicodeDecodeError``; ``_bounded_load`` normalizes that ``ValueError``
+        into ``yaml.YAMLError``. This pins that normalization, because without it
+        the decode failure would escape the handler uncaught.
+        """
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, None)
+        (source_root / "apm.yml").write_bytes(b"\xff\xfename: h\n")
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "unicodedecodeerror" in str(logger.error.call_args).lower()
