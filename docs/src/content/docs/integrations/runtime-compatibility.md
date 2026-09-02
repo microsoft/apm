@@ -315,13 +315,13 @@ APM's runtime system is designed to be extensible. To add support for a new runt
 APM's runtime system consists of three main components:
 
 1. **Runtime Adapter** (`src/apm_cli/runtime/`) - Python interface for executing prompts
-2. **Setup Script** (`scripts/runtime/`) - Shell script for installation and configuration  
+2. **Setup Script** (`src/apm_cli/runtime/scripts/runtime/`) - Shell script for installation and configuration
 3. **Runtime Manager** (`src/apm_cli/runtime/manager.py`) - Orchestrates installation and discovery
 
 ### Adding a New Runtime
 
 1. **Create Runtime Adapter** - Extend `RuntimeAdapter` in `src/apm_cli/runtime/your_runtime.py`
-2. **Create Setup Script** - Add installation script in `scripts/runtime/setup-your-runtime.sh`
+2. **Create Setup Script** - Add installation script in `src/apm_cli/runtime/scripts/runtime/setup-your-runtime.sh`
 3. **Register Runtime** - Add entry to `supported_runtimes` in `RuntimeManager`
 4. **Update CLI** - Add runtime to command choices in `cli.py`
 5. **Update Factory** - Add runtime to `RuntimeFactory`
