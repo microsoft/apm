@@ -4,7 +4,7 @@ APM supports lifecycle scripts that fire at key moments during install,
 update, and uninstall operations.  Scripts are configured in well-known
 locations discovered from three tiers:
 
-1. Policy  -- /etc/apm/policy.d/*.json (admin-owned, JSON drop-ins, unchanged)
+1. Policy  -- platform-specific admin directory (JSON drop-ins, unchanged)
 2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
 3. Project -- apm.yml lifecycle: key (repo root)
 
@@ -38,7 +38,7 @@ import platform
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -314,9 +314,9 @@ def parse_apm_yml_lifecycle_with_fingerprint(
 def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
     """Parse a single JSON script file into a list of ScriptEntry.
 
-    Used for JSON-backed sources such as the admin policy tier
-    (/etc/apm/policy.d/*.json). Returns an empty list if the file is
-    malformed or uses an unsupported version.
+    Used for JSON-backed sources such as the platform-specific admin policy
+    tier. Returns an empty list if the file is malformed or uses an unsupported
+    version.
     """
     try:
         with open(path, encoding="utf-8") as f:
@@ -344,10 +344,17 @@ def parse_project_script_file(path: Path) -> list[ScriptEntry]:
 
 
 def _get_policy_scripts_dir() -> Path:
-    """Return the platform-specific policy scripts directory."""
+    """Return the platform-specific policy scripts directory.
+
+    Windows normally supplies an absolute ``ProgramData`` environment value.
+    Fall back to its historical default when that value is missing or unsafe.
+    """
     system = platform.system()
     if system == "Windows":
-        return Path(r"C:\ProgramData\APM\policy.d")
+        program_data = os.environ.get("PROGRAMDATA")
+        if not program_data or not PureWindowsPath(program_data).is_absolute():
+            program_data = r"C:\ProgramData"
+        return Path(program_data) / "APM" / "policy.d"
     return Path("/etc/apm/policy.d")
 
 
@@ -385,7 +392,7 @@ def discover_scripts(
     """Discover and merge scripts from all three sources.
 
     Load order (all additive, policy first):
-      1. Policy  -- /etc/apm/policy.d/*.json (directory, JSON)
+      1. Policy  -- platform-specific admin directory (JSON)
       2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
       3. Project -- apm.yml lifecycle: key (repo root)
     """

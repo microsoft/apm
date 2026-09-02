@@ -1,9 +1,9 @@
-"""End-to-end regression guard for #1152: Copilot CLI's mcp-config.json
+"""End-to-end regression guard for #1152: Copilot CLI's project mcp.json
 must contain ``${VAR}`` runtime placeholders for env-var references in
 apm.yml -- never the literal value resolved at install time.
 
 This exercises the full pipeline:
-    apm.yml  ->  apm install --runtime copilot  ->  ~/.copilot/mcp-config.json
+    apm.yml  ->  apm install --runtime copilot  ->  .github/mcp.json
 
 The unit tests in tests/unit/test_copilot_adapter.py cover translation in
 isolation; this test pins the integration boundary so plaintext secrets
@@ -46,7 +46,7 @@ def _write_apm_yml(project_dir, mcp_servers):
 
 
 class TestMcpEnvVarHeadersCopilot:
-    """#1152 regression: Copilot mcp-config.json must contain ``${VAR}``
+    """#1152 regression: Copilot project mcp.json must contain ``${VAR}``
     runtime placeholders for env-var references in apm.yml. The literal
     values from the installer's environment must NEVER appear on disk.
     """
@@ -55,7 +55,7 @@ class TestMcpEnvVarHeadersCopilot:
         self, tmp_path, apm_binary_path
     ):
         """``${VAR}`` and ``${env:VAR}`` syntaxes in apm.yml headers must
-        land in mcp-config.json as ``${VAR}`` (Copilot CLI's native runtime
+        land in .github/mcp.json as ``${VAR}`` (Copilot CLI's native runtime
         substitution syntax). No host env values may leak into the file.
         """
         project_dir = tmp_path / "project"
@@ -64,9 +64,7 @@ class TestMcpEnvVarHeadersCopilot:
         # copilot/vscode runtime detection chain.
         (project_dir / ".github").mkdir()
 
-        # Isolated HOME so we don't touch the developer's real
-        # ~/.copilot/mcp-config.json. The Copilot adapter uses
-        # ``Path.home() / ".copilot"``.
+        # Isolated HOME guards against accidental writes outside project scope.
         fake_home = tmp_path / "home"
         fake_home.mkdir()
 
@@ -109,17 +107,15 @@ class TestMcpEnvVarHeadersCopilot:
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
-        mcp_config = fake_home / ".copilot" / "mcp-config.json"
+        mcp_config = project_dir / ".github" / "mcp.json"
         assert mcp_config.exists(), (
-            f"Expected ~/.copilot/mcp-config.json to exist after install.\n"
+            f"Expected .github/mcp.json to exist after install.\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
         config = json.loads(mcp_config.read_text(encoding="utf-8"))
         servers = config.get("mcpServers") or {}
-        assert len(servers) == 1, (
-            f"Expected 1 server in mcp-config.json, got: {list(servers.keys())}"
-        )
+        assert len(servers) == 1, f"Expected 1 server in mcp.json, got: {list(servers.keys())}"
         server = next(iter(servers.values()))
         headers = server.get("headers") or {}
 
@@ -135,7 +131,7 @@ class TestMcpEnvVarHeadersCopilot:
         # CRITICAL: no plaintext secret may appear anywhere in the file.
         full_text = mcp_config.read_text(encoding="utf-8")
         assert "should-not-appear-in-copilot-json" not in full_text, (
-            "Copilot mcp-config.json leaked the literal env value -- "
+            "Copilot mcp.json leaked the literal env value -- "
             "the install-time translation regressed and secrets are now "
             "baked to disk.\n"
             f"File contents:\n{full_text}"
@@ -143,7 +139,7 @@ class TestMcpEnvVarHeadersCopilot:
 
     def test_self_defined_stdio_server_translates_env_vars_in_args(self, tmp_path, apm_binary_path):
         """Self-defined stdio server with env-var placeholders in BOTH the
-        ``env`` block and ``args`` list must land in mcp-config.json with
+        ``env`` block and ``args`` list must land in .github/mcp.json with
         ``${VAR}`` runtime placeholders. Closes the integration-tier gap
         flagged by test-coverage review for the ``_raw_stdio`` branch of
         ``_format_server_config`` and the supply-chain regression where
@@ -198,17 +194,15 @@ class TestMcpEnvVarHeadersCopilot:
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
-        mcp_config = fake_home / ".copilot" / "mcp-config.json"
+        mcp_config = project_dir / ".github" / "mcp.json"
         assert mcp_config.exists(), (
-            f"Expected ~/.copilot/mcp-config.json to exist after install.\n"
+            f"Expected .github/mcp.json to exist after install.\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
         config = json.loads(mcp_config.read_text(encoding="utf-8"))
         servers = config.get("mcpServers") or {}
-        assert len(servers) == 1, (
-            f"Expected 1 server in mcp-config.json, got: {list(servers.keys())}"
-        )
+        assert len(servers) == 1, f"Expected 1 server in mcp.json, got: {list(servers.keys())}"
         server = next(iter(servers.values()))
 
         # env block: all three syntaxes translate to ${VAR}.

@@ -1,6 +1,6 @@
 """Tests for the APM lock file module."""
 
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -11,6 +11,7 @@ from apm_cli.deps.lockfile import (
     LockFile,
     get_lockfile_path,
     migrate_lockfile_if_needed,
+    resolve_lockfile_path_for_read,
 )
 from apm_cli.models.apm_package import DependencyReference
 
@@ -409,6 +410,46 @@ class TestGetLockfilePath:
     def test_get_lockfile_path(self, tmp_path):
         path = get_lockfile_path(tmp_path)
         assert path == tmp_path / "apm.lock.yaml"
+
+
+class TestResolveLockfilePathForRead:
+    def test_read_only_returns_legacy_path_without_migrating(self, tmp_path: Path) -> None:
+        legacy = tmp_path / "apm.lock"
+        legacy.write_text("legacy", encoding="utf-8")
+
+        path = resolve_lockfile_path_for_read(tmp_path, read_only=True)
+
+        assert path == legacy
+        assert legacy.read_text(encoding="utf-8") == "legacy"
+        assert not (tmp_path / "apm.lock.yaml").exists()
+
+    def test_read_only_prefers_canonical_path_when_both_exist(self, tmp_path: Path) -> None:
+        canonical = tmp_path / "apm.lock.yaml"
+        canonical.write_text("canonical", encoding="utf-8")
+        legacy = tmp_path / "apm.lock"
+        legacy.write_text("legacy", encoding="utf-8")
+
+        path = resolve_lockfile_path_for_read(tmp_path, read_only=True)
+
+        assert path == canonical
+        assert canonical.read_text(encoding="utf-8") == "canonical"
+        assert legacy.read_text(encoding="utf-8") == "legacy"
+
+    def test_read_only_returns_canonical_path_when_neither_exists(self, tmp_path: Path) -> None:
+        path = resolve_lockfile_path_for_read(tmp_path, read_only=True)
+
+        assert path == tmp_path / "apm.lock.yaml"
+        assert list(tmp_path.iterdir()) == []
+
+    def test_writable_read_migrates_legacy_path(self, tmp_path: Path) -> None:
+        legacy = tmp_path / "apm.lock"
+        legacy.write_text("legacy", encoding="utf-8")
+
+        path = resolve_lockfile_path_for_read(tmp_path, read_only=False)
+
+        assert path == tmp_path / "apm.lock.yaml"
+        assert path.read_text(encoding="utf-8") == "legacy"
+        assert not legacy.exists()
 
 
 class TestMigrateLockfileIfNeeded:

@@ -180,6 +180,7 @@ class LocalDependencySource(DependencySource):
         from apm_cli.bundle.local_bundle import route_agent_plugin_package
         from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.core.scope import InstallScope
+        from apm_cli.deps._shared import materialize_marketplace_manifest
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.install.phases.local_content import _copy_local_package
         from apm_cli.models.apm_package import (
@@ -266,6 +267,7 @@ class LocalDependencySource(DependencySource):
         if logger:
             logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
+        materialize_marketplace_manifest(dep_ref, install_path)
         validation = validate_apm_package(
             install_path,
             source_path=original_src,

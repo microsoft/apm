@@ -900,7 +900,7 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
         "[req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),\n"
-        "[req-tg-012](#req-tg-012), [req-sc-001](#req-sc-001),",
+        "[req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),",
     )
 
 
@@ -1035,30 +1035,26 @@ def test_project_scoped_native_hook_command_is_portably_anchored() -> None:
 
 
 @pytest.mark.req("req-tg-011")
-def test_agent_plugin_undeployable_without_native_lifecycle() -> None:
-    """A schema-bearing Agent Plugin dependency fails closed, tree unchanged."""
+def test_agent_plugin_target_exclusion_stays_opaque_after_materialization() -> None:
+    """Target exclusion permits acquisition and lock state but no deployment."""
     assert_spec_contains(
-        "MUST treat a\nschema-bearing Agent Plugins v1 dependency as undeployable",
-        "MUST refuse deployment with one actionable diagnostic",
-        "MUST leave the project tree byte-identical to its pre-install state",
-        "MUST NOT fall back to\nlegacy primitive projection",
+        "opaque at the deployment\nboundary",
+        "materialization beneath the resolved dependency root, and lock\nidentity recording MAY",
+        "MUST NOT create target-native registration, settings,\ncatalog, or ownership state",
+        "ordinary dependencies in the same install MUST remain\neligible",
     )
 
 
 @pytest.mark.req("req-tg-011")
-def test_agent_plugin_deployment_boundary_precedes_all_mutation(tmp_path) -> None:
-    """Bind the real install-boundary contract: no target/integrator mutation runs."""
-    from tests.unit.install.test_agent_plugin_deployment_boundary import (
-        test_services_gate_precedes_all_target_and_integrator_mutation as _run_boundary_contract,
+def test_agent_plugin_target_exclusion_materializes_without_projection(
+    tmp_path, monkeypatch
+) -> None:
+    """Bind req-tg-011 to the real excluded-target install lifecycle."""
+    from tests.unit.copilot_plugins.test_install_lifecycle import (
+        test_non_copilot_target_skips_the_plugin_without_aborting as _run_boundary_contract,
     )
 
-    _run_boundary_contract(
-        tmp_path,
-        force=False,
-        trust_bin=None,
-        skill_subset=None,
-        dry_run=False,
-    )
+    _run_boundary_contract(tmp_path, monkeypatch)
 
 
 @pytest.mark.req("req-tg-012")

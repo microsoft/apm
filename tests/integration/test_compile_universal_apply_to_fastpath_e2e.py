@@ -13,6 +13,7 @@ from apm_cli.compilation.inventory import CompileInventory
 
 UNIVERSAL_SENTINEL = "Universal fast path sentinel."
 EXPLICIT_SENTINEL = "Explicit all files sentinel."
+BOM_SCOPED_SENTINEL = "BOM scoped sentinel."
 
 
 def _write_project_file(project_root: Path, relative_path: str, content: str = "x\n") -> None:
@@ -172,6 +173,52 @@ def test_compile_agents_universal_apply_to_fast_path_preserves_match_set(
     agents_content = agents_md.read_text(encoding="utf-8")
     assert UNIVERSAL_SENTINEL in agents_content
     assert EXPLICIT_SENTINEL in agents_content
+
+
+def test_compile_agents_bom_frontmatter_preserves_apply_to(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Compile must preserve scope from BOM-prefixed instruction frontmatter."""
+    project_root = tmp_path
+    (project_root / "apm.yml").write_text(
+        "name: bom-frontmatter-e2e\nversion: 0.1.0\ntarget: agents\n",
+        encoding="utf-8",
+    )
+    instruction = project_root / ".apm/instructions/scoped.instructions.md"
+    instruction.parent.mkdir(parents=True)
+    instruction.write_bytes(
+        (
+            "---\n"
+            "description: BOM-scoped rule\n"
+            'applyTo: "src/**/*.py"\n'
+            "---\n\n"
+            f"{BOM_SCOPED_SENTINEL}\n"
+        ).encode("utf-8-sig")
+    )
+    _write_project_file(project_root, "src/pkg/app.py")
+    _write_project_file(project_root, "docs/readme.md")
+
+    monkeypatch.chdir(project_root)
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--target", "agents"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    compiled_files = sorted(project_root.rglob("AGENTS.md"))
+    compiled_content = {
+        path.relative_to(project_root).as_posix(): path.read_text(encoding="utf-8")
+        for path in compiled_files
+    }
+    sentinel_locations = {
+        path for path, content in compiled_content.items() if BOM_SCOPED_SENTINEL in content
+    }
+    assert sentinel_locations
+    assert all(path == "src/AGENTS.md" or path.startswith("src/") for path in sentinel_locations)
+    assert all("---" not in content for content in compiled_content.values())
+    assert all("applyTo:" not in content for content in compiled_content.values())
 
 
 def test_compile_literal_roots_preserve_generated_artifacts_against_full_fallback(

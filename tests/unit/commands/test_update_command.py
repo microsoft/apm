@@ -26,6 +26,7 @@ from apm_cli.commands.update import _handle_service_only_update, _module_cache_n
 from apm_cli.core.scope import InstallScope
 from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.revision_pins import RevisionPinResolutionResult
 from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.install.plan import PlanEntry, UpdatePlan
 
@@ -55,6 +56,11 @@ def _make_apm_yml(project_dir: Path) -> None:
     (project_dir / "apm.yml").write_text(
         "name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - microsoft/apm\n"
     )
+
+
+def _revision_pin_result(*updates, skips=()) -> RevisionPinResolutionResult:
+    """Build the resolver's typed result for command-level tests."""
+    return RevisionPinResolutionResult(updates=tuple(updates), skips=tuple(skips))
 
 
 def test_service_only_required_failure_renders_before_exit(tmp_path: Path) -> None:
@@ -149,9 +155,9 @@ class TestUpdateDryRun:
             with (
                 patch(
                     "apm_cli.commands.update.resolve_revision_pin_updates",
-                    return_value=[
+                    return_value=_revision_pin_result(
                         RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
-                    ],
+                    ),
                 ),
                 patch(
                     "apm_cli.commands.install._install_apm_dependencies",
@@ -170,6 +176,108 @@ class TestUpdateDryRun:
             assert "# v2.0.0" not in result.output
             assert captured["proceeded"] is False
             assert manifest.read_text(encoding="utf-8") == original
+
+    def test_dry_run_warns_for_retained_pin_and_plans_unrelated_update(
+        self, runner, tmp_path
+    ) -> None:
+        """Skipped pins remain immutable while another dependency's plan is shown."""
+        retained_sha = "a" * 40
+        old_sha = "b" * 40
+        new_sha = "c" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            manifest = Path.cwd() / "apm.yml"
+            manifest.write_text(
+                "name: test\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                f"    - org/no-release#{retained_sha}\n"
+                f"    - org/released#{old_sha}\n",
+                encoding="utf-8",
+            )
+            original = manifest.read_text(encoding="utf-8")
+
+            from apm_cli.models.dependency.reference import DependencyReference
+            from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+            from apm_cli.models.results import InstallResult
+
+            class MixedTagDownloader:
+                def list_remote_tag_refs(self, dep_ref: DependencyReference) -> list[RemoteRef]:
+                    if dep_ref.repo_url == "org/no-release":
+                        return []
+                    return [RemoteRef("v2.0.0", GitReferenceType.TAG, new_sha, annotated=True)]
+
+            captured: dict[str, list[str] | bool] = {}
+            lock_path = Path.cwd() / "apm.lock.yaml"
+            LockFile().save(lock_path)
+            original_lock = lock_path.read_bytes()
+
+            def fake_install(apm_package, **kwargs):
+                captured["references"] = [
+                    dep.reference for dep in apm_package.get_apm_dependencies()
+                ]
+                captured["proceeded"] = kwargs["plan_callback"](_stub_plan_with_changes())
+                return InstallResult()
+
+            with (
+                patch(
+                    "apm_cli.commands.update._build_revision_pin_downloader",
+                    return_value=MixedTagDownloader(),
+                ),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.commands.update._annotate_lockfile_revision_tags") as annotate,
+            ):
+                result = runner.invoke(cli, ["update", "--dry-run"])
+
+            assert result.exit_code == 0, result.output
+            assert "Retained 1 revision pin" in result.output
+            assert "Keeping the current SHA" in result.output
+            assert "Revision pin updates" in result.output
+            assert "Update plan" in result.output
+            assert captured["references"] == [retained_sha, new_sha]
+            assert captured["proceeded"] is False
+            assert manifest.read_text(encoding="utf-8") == original
+            assert lock_path.read_bytes() == original_lock
+            annotate.assert_not_called()
+
+    def test_dry_run_retained_only_does_not_claim_latest_refs(self, runner, tmp_path) -> None:
+        retained_sha = "a" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            Path("apm.yml").write_text(
+                "name: test\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                f"    - org/no-release#{retained_sha}\n",
+                encoding="utf-8",
+            )
+            from apm_cli.deps.revision_pins import RevisionPinSkip
+            from apm_cli.models.results import InstallResult
+
+            def fake_install(_apm, **kwargs):
+                assert kwargs["plan_callback"](UpdatePlan(entries=())) is False
+                return InstallResult()
+
+            with (
+                patch(
+                    "apm_cli.commands.update.resolve_revision_pin_updates",
+                    return_value=_revision_pin_result(
+                        skips=(RevisionPinSkip("org/no-release", retained_sha, "org/no-release"),)
+                    ),
+                ),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+            ):
+                result = runner.invoke(cli, ["update", "--dry-run"])
+
+            assert result.exit_code == 0, result.output
+            assert "No dependencies updated; retained 1 revision pin" in result.output
+            assert "already at their latest matching refs" not in result.output
 
 
 class TestUpdateAssumeYes:
@@ -216,9 +324,9 @@ class TestUpdateAssumeYes:
             with (
                 patch(
                     "apm_cli.commands.update.resolve_revision_pin_updates",
-                    return_value=[
+                    return_value=_revision_pin_result(
                         RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
-                    ],
+                    ),
                 ),
                 patch(
                     "apm_cli.commands.install._install_apm_dependencies",
@@ -254,9 +362,9 @@ class TestUpdateAssumeYes:
             with (
                 patch(
                     "apm_cli.commands.update.resolve_revision_pin_updates",
-                    return_value=[
+                    return_value=_revision_pin_result(
                         RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
-                    ],
+                    ),
                 ),
                 patch(
                     "apm_cli.commands.install._install_apm_dependencies",
@@ -268,6 +376,54 @@ class TestUpdateAssumeYes:
 
             assert result.exit_code == 0, result.output
             assert "Updated 1 revision pin in apm.yml." in result.output
+
+    def test_yes_updates_resolved_pin_and_retains_skipped_sha(self, runner, tmp_path) -> None:
+        """Only resolver-provided updates are written or passed to lock annotation."""
+        retained_sha = "a" * 40
+        old_sha = "b" * 40
+        new_sha = "c" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            manifest = Path.cwd() / "apm.yml"
+            manifest.write_text(
+                "name: test\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                f"    - org/no-release#{retained_sha}\n"
+                f"    - org/released#{old_sha}\n",
+                encoding="utf-8",
+            )
+
+            from apm_cli.deps.revision_pins import RevisionPinSkip, RevisionPinUpdate
+            from apm_cli.models.results import InstallResult
+
+            update = RevisionPinUpdate("org/released", old_sha, new_sha, "v2.0.0", "org/released")
+
+            def fake_install(_apm, **kwargs):
+                assert kwargs["plan_callback"](UpdatePlan(entries=())) is True
+                return InstallResult()
+
+            with (
+                patch(
+                    "apm_cli.commands.update.resolve_revision_pin_updates",
+                    return_value=_revision_pin_result(
+                        update,
+                        skips=(RevisionPinSkip("org/no-release", retained_sha, "org/no-release"),),
+                    ),
+                ),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.commands.update._annotate_lockfile_revision_tags") as annotate,
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+
+            assert result.exit_code == 0, result.output
+            manifest_text = manifest.read_text(encoding="utf-8")
+            assert f"org/no-release#{retained_sha}" in manifest_text
+            assert f"org/released#{new_sha} # v2.0.0" in manifest_text
+            annotate.assert_called_once_with(Path.cwd(), (update,))
 
     def test_revision_pin_decline_keeps_manifest_unchanged(self, runner, tmp_path):
         old_sha = "a" * 40
@@ -293,9 +449,9 @@ class TestUpdateAssumeYes:
             with (
                 patch(
                     "apm_cli.commands.update.resolve_revision_pin_updates",
-                    return_value=[
+                    return_value=_revision_pin_result(
                         RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
-                    ],
+                    ),
                 ),
                 patch(
                     "apm_cli.commands.install._install_apm_dependencies",
@@ -388,9 +544,9 @@ class TestUpdateNonTty:
             with (
                 patch(
                     "apm_cli.commands.update.resolve_revision_pin_updates",
-                    return_value=[
+                    return_value=_revision_pin_result(
                         RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
-                    ],
+                    ),
                 ),
                 patch(
                     "apm_cli.commands.install._install_apm_dependencies",
@@ -927,12 +1083,36 @@ class TestRevisionPinResolutionErrors:
             _make_apm_yml(Path.cwd())
             with _patch(
                 "apm_cli.commands.update.resolve_revision_pin_updates",
-                side_effect=RevisionPinResolutionError("No annotated tag found"),
+                side_effect=RevisionPinResolutionError("Remote returned an invalid SHA"),
             ):
                 result = runner.invoke(cli, ["update"])
 
         assert result.exit_code == 1
-        assert "No annotated tag found" in result.output
+        assert "Remote returned an invalid SHA" in result.output
+
+    def test_revision_pin_parse_error_has_verbose_context_without_stale_hint(
+        self,
+        runner,
+        tmp_path,
+    ) -> None:
+        from apm_cli.deps.git_remote_ops import RemoteRefParseError
+        from apm_cli.deps.revision_pins import RevisionPinResolutionError
+
+        parse_error = RemoteRefParseError("Malformed git ls-remote tag output.")
+        resolution_error = RevisionPinResolutionError("Malformed remote tag data for org/pkg")
+        resolution_error.__cause__ = parse_error
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.update.resolve_revision_pin_updates",
+                side_effect=resolution_error,
+            ):
+                result = runner.invoke(cli, ["update", "--verbose"])
+
+        assert result.exit_code == 1
+        assert "Parser cause: Malformed git ls-remote tag output." in result.output
+        assert "report the upstream response" in result.output
+        assert "Run with --verbose" not in result.output
 
     def test_revision_pin_git_error_exits_1_with_verbose_hint(self, runner, tmp_path) -> None:
         from git.exc import GitCommandError

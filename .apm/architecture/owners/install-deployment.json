@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "owners": [
+    {
+      "id": "effective-package-target-authorization",
+      "decision": "Effective package target authorization",
+      "owner": "install/target_filter.py (resolve_effective_package_targets)",
+      "selectors": ["src/apm_cli/install/target_filter.py"],
+      "guards": ["install-deployment-package-target-authorization"]
+    },
+    {
+      "id": "legacy-mcp-ownership-key-migration",
+      "decision": "Legacy MCP runtime ownership-key migration",
+      "owner": "install/mcp/ownership.py (migrate_legacy_project_target_servers)",
+      "selectors": ["src/apm_cli/install/mcp/ownership.py"],
+      "guards": ["install-deployment-mcp-ownership-migration"]
+    },
+    {
+      "id": "deployment-provenance-state",
+      "decision": "Deployment provenance / state",
+      "owner": "deployment_ledger.py",
+      "selectors": ["src/apm_cli/core/deployment_ledger.py"],
+      "guards": ["install-deployment-provenance-state"]
+    },
+    {
+      "id": "target-scoped-deployed-file-contraction",
+      "decision": "Target-scoped deployed-file contraction",
+      "owner": "install/manifest_reconcile.py (reconcile_target_deployed_files)",
+      "selectors": ["src/apm_cli/install/manifest_reconcile.py"],
+      "guards": ["install-deployment-target-file-contraction"]
+    },
+    {
+      "id": "install-outcome",
+      "decision": "Install success / failure outcome",
+      "owner": "the canonical install-outcome path",
+      "selectors": ["src/apm_cli/install/outcome.py"],
+      "guards": ["install-deployment-outcome"]
+    },
+    {
+      "id": "resolution-replacement-activation",
+      "decision": "Resolution replacement activation",
+      "owner": "install/resolution_staging.py (ResolutionStagingSession)",
+      "selectors": ["src/apm_cli/install/resolution_staging.py"],
+      "guards": ["install-deployment-resolution-replacement"]
+    },
+    {
+      "id": "frozen-install-mutation-eligibility",
+      "decision": "Frozen install mutation eligibility",
+      "owner": "install/service.py (InstallService)",
+      "selectors": ["src/apm_cli/install/service.py"],
+      "guards": ["install-deployment-frozen-mutation-eligibility"]
+    },
+    {
+      "id": "prospective-dry-run-install-plan",
+      "decision": "Prospective dry-run install plan",
+      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan)",
+      "selectors": ["src/apm_cli/install/dry_run_plan.py"],
+      "guards": ["install-deployment-prospective-dry-run-plan"]
+    },
+    {
+      "id": "authorized-deployable-source-paths",
+      "decision": "Authorized deployable source paths",
+      "owner": "install/deployable_source_plan.py (DeployableSourcePlan)",
+      "selectors": ["src/apm_cli/install/deployable_source_plan.py"],
+      "guards": ["install-deployment-source-plan"]
+    },
+    {
+      "id": "install-invocation-option-defaults",
+      "decision": "Install invocation option defaults",
+      "owner": "install/request.py (InstallRequest)",
+      "selectors": [
+        "src/apm_cli/install/request.py",
+        "src/apm_cli/commands/install.py"
+      ],
+      "guards": ["install-deployment-request-defaults"]
+    },
+    {
+      "id": "file-level-deploy-sync-cleanup",
+      "decision": "File-level deploy / sync / cleanup",
+      "owner": "BaseIntegrator (see integrators.instructions.md)",
+      "selectors": ["src/apm_cli/integration/base_integrator.py"],
+      "guards": ["install-deployment-base-integrator"]
+    },
+    {
+      "id": "post-uninstall-dependency-reachability",
+      "decision": "Post-uninstall dependency reachability",
+      "owner": "deps/reachability.py (compute_forward_reachable_keys)",
+      "selectors": ["src/apm_cli/deps/reachability.py"],
+      "guards": ["install-deployment-uninstall-reachability"]
+    },
+    {
+      "id": "ci-audit-scratch-materialization",
+      "decision": "CI audit scratch materialization",
+      "owner": "install/audit_replay.py (prepare_ci_audit_replay)",
+      "selectors": ["src/apm_cli/install/audit_replay.py"],
+      "guards": ["install-deployment-audit-replay"]
+    },
+    {
+      "id": "dependency-cli-selection",
+      "decision": "Dependency CLI identifier parsing + uninstall selection",
+      "owner": "models/dependency/selection.py (via DependencyReference)",
+      "selectors": ["src/apm_cli/models/dependency/selection.py"],
+      "guards": ["install-deployment-uninstall-selection"]
+    }
+  ]
+}

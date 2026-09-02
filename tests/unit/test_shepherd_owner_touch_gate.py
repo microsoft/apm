@@ -24,6 +24,8 @@ pytestmark = pytest.mark.windows_compat
 ROOT = Path(__file__).parents[2]
 GATE = ROOT / "packages/shepherd-driver/scripts/owner_touch_gate.py"
 OWNER_TABLE = ".apm/instructions/architecture.instructions.md"
+REGISTRY_ROOT = ".apm/architecture/owners"
+REGISTRY_INDEX = f"{REGISTRY_ROOT}/index.json"
 DECISION = "Fixture durable fact"
 OWNER_PATH = "src/apm_cli/fixture_owner.py"
 
@@ -64,6 +66,8 @@ def _git(repo: Path, *args: str) -> str:
 def _table(
     *,
     header: str = "Owner path selectors",
+    decision: str = DECISION,
+    owner: str = OWNER_PATH,
     selector: str = OWNER_PATH,
     delimiter: str = "---",
 ) -> str:
@@ -73,9 +77,51 @@ def _table(
         "<!-- canonical-owner-table:v1 -->\n"
         f"| Decision / fact | Canonical owner | {header} |\n"
         f"|{delimiter}|{delimiter}|{delimiter}|\n"
-        f"| {DECISION} | `{OWNER_PATH}` | `{selector}` |\n"
+        f"| {decision} | `{owner}` | `{selector}` |\n"
         "<!-- /canonical-owner-table -->\n"
     )
+
+
+def _registry_owner(
+    *,
+    owner_id: str = "fixture-durable-fact",
+    decision: str = DECISION,
+    selector: str = OWNER_PATH,
+) -> dict[str, Any]:
+    """Return one valid version-1 registry owner."""
+    return {
+        "id": owner_id,
+        "decision": decision,
+        "owner": f"`{selector}`",
+        "selectors": [selector],
+        "guards": [f"registry-delegation-{owner_id}"],
+    }
+
+
+def _write_registry(
+    repo: Path,
+    *,
+    owners: list[dict[str, Any]] | None = None,
+    shards: list[str] | None = None,
+    indent: int | None = 2,
+) -> None:
+    """Write a fixture registry index and its default listed shard."""
+    shard_names = shards or ["core-runtime.json"]
+    _write(
+        repo,
+        REGISTRY_INDEX,
+        json.dumps({"version": 1, "shards": shard_names}, indent=indent) + "\n",
+    )
+    if "core-runtime.json" in shard_names:
+        _write(
+            repo,
+            f"{REGISTRY_ROOT}/core-runtime.json",
+            json.dumps(
+                {"version": 1, "owners": owners or [_registry_owner()]},
+                indent=indent,
+            )
+            + "\n",
+        )
 
 
 def _write(repo: Path, relative_path: str, content: str) -> None:
@@ -396,6 +442,43 @@ def test_rename_away_keeps_old_owner_endpoint(
     assert report["touched_owners"][0]["matched_files"] == [OWNER_PATH]
 
 
+def test_copy_away_keeps_unchanged_owner_source_endpoint(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Copy detection includes an unchanged owner source outside the destination tree."""
+    repo, _ = owner_repo
+    _write(repo, OWNER_TABLE, _table(selector="src/apm_cli/*.py"))
+    base = _commit(repo, "broaden owner selector")
+    copied = repo / "archive/fixture_owner.py"
+    copied.parent.mkdir()
+    copied.write_bytes((repo / OWNER_PATH).read_bytes())
+    head = _commit(repo, "copy owner away")
+
+    report = _detect(repo, base, head)
+
+    assert report["changed_files"] == ["archive/fixture_owner.py", OWNER_PATH]
+    assert report["touched_owners"][0]["matched_files"] == [OWNER_PATH]
+
+
+def test_copy_into_owner_scope_preserves_both_copy_endpoints(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """A copied destination is matched while the unchanged source stays in the diff."""
+    repo, _ = owner_repo
+    source_path = "archive/source.py"
+    destination_path = "src/apm_cli/copied.py"
+    _write(repo, OWNER_TABLE, _table(selector="src/apm_cli/*.py"))
+    _write(repo, source_path, 'FACT = "copy source"\n')
+    base = _commit(repo, "add copy source")
+    (repo / destination_path).write_bytes((repo / source_path).read_bytes())
+    head = _commit(repo, "copy into owner scope")
+
+    report = _detect(repo, base, head)
+
+    assert report["changed_files"] == [source_path, destination_path]
+    assert report["touched_owners"][0]["matched_files"] == [destination_path]
+
+
 def test_removed_owner_row_still_detects_base_selector(
     owner_repo: tuple[Path, str],
 ) -> None:
@@ -420,7 +503,541 @@ def test_removed_owner_row_still_detects_base_selector(
     report = _detect(repo, base, head)
 
     assert report["touched_owners"][0]["decision"] == DECISION
+    assert report["touched_owners"][0]["matched_files"] == [OWNER_TABLE, OWNER_PATH]
+
+
+def test_legacy_owner_row_removal_alone_touches_prior_owner_source(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Removing only legacy metadata attributes the touch to the Markdown table."""
+    repo, _ = owner_repo
+    other_path = "src/apm_cli/other.py"
+    second_row = f"| Other fact | `{other_path}` | `{other_path}` |\n"
+    table = _table().replace(
+        "<!-- /canonical-owner-table -->",
+        second_row + "<!-- /canonical-owner-table -->",
+    )
+    _write(repo, OWNER_TABLE, table)
+    _write(repo, other_path, 'FACT = "other"\n')
+    base = _commit(repo, "add second legacy owner")
+    _write(
+        repo,
+        OWNER_TABLE,
+        table.replace(f"| {DECISION} | `{OWNER_PATH}` | `{OWNER_PATH}` |\n", ""),
+    )
+    head = _commit(repo, "remove legacy owner metadata only")
+
+    report = _detect(repo, base, head)
+    removed = next(item for item in report["touched_owners"] if item["decision"] == DECISION)
+
+    assert removed["matched_files"] == [OWNER_TABLE]
+
+
+@pytest.mark.parametrize("field", ["decision", "owner", "selector"])
+def test_legacy_owner_metadata_change_alone_touches_exact_table_source(
+    owner_repo: tuple[Path, str],
+    field: str,
+) -> None:
+    """Rewording or reassigning a legacy row cannot evade owner-touch evidence."""
+    repo, base = owner_repo
+    new_decision = "Reworded fixture durable fact"
+    new_owner = "src/apm_cli/reassigned_owner.py"
+    new_selector = "src/apm_cli/reassigned_selector.py"
+    if field == "selector":
+        _write(repo, new_selector, 'FACT = "selector target"\n')
+        base = _commit(repo, "add future selector target")
+
+    _write(
+        repo,
+        OWNER_TABLE,
+        _table(
+            decision=new_decision if field == "decision" else DECISION,
+            owner=new_owner if field == "owner" else OWNER_PATH,
+            selector=new_selector if field == "selector" else OWNER_PATH,
+        ),
+    )
+    head = _commit(repo, f"change legacy owner {field}")
+
+    report = _detect(repo, base, head)
+
+    assert report["touched_owners"]
+    assert all(item["matched_files"] == [OWNER_TABLE] for item in report["touched_owners"])
+    if field == "decision":
+        assert {item["decision"] for item in report["touched_owners"]} == {
+            DECISION,
+            new_decision,
+        }
+    else:
+        assert len(report["touched_owners"]) == 1
+        touched = report["touched_owners"][0]
+        assert touched["owner"] == (f"`{new_owner}`" if field == "owner" else f"`{OWNER_PATH}`")
+        if field == "selector":
+            assert touched["selectors"] == sorted([OWNER_PATH, new_selector])
+
+
+def test_legacy_base_and_json_head_use_exact_revision_sources(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """A registry introduction upgrades only the head ownership source."""
+    repo, base = owner_repo
+    _write_registry(repo)
+    _write(repo, OWNER_PATH, 'FACT = "json head"\n')
+    head = _commit(repo, "introduce registry")
+
+    report = _detect(repo, base, head)
+
+    assert set(report) == {
+        "version",
+        "owner_table",
+        "owner_table_sha256",
+        "base_sha",
+        "head_sha",
+        "changed_files",
+        "touched_owners",
+    }
+    assert report["version"] == "1"
+    assert report["owner_table"] == OWNER_TABLE
+    assert report["touched_owners"][0]["decision"] == DECISION
+    assert len(report["owner_table_sha256"]) == 64
+
+
+def test_json_base_and_json_head_detect_owner_touch(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Both sides validate and use their own exact-revision JSON registries."""
+    repo, _ = owner_repo
+    _write_registry(repo)
+    base = _commit(repo, "registry base")
+    _write(repo, OWNER_PATH, 'FACT = "json changed"\n')
+    head = _commit(repo, "touch JSON owner")
+
+    report = _detect(repo, base, head)
+
     assert report["touched_owners"][0]["matched_files"] == [OWNER_PATH]
+
+
+def test_json_formatting_only_preserves_semantic_hash(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Whitespace and key formatting cannot stale completion evidence."""
+    repo, _ = owner_repo
+    _write_registry(repo, indent=2)
+    base = _commit(repo, "formatted registry")
+    before = _detect(repo, base, base)
+    _write_registry(repo, indent=None)
+    head = _commit(repo, "compact registry")
+    after = _detect(repo, base, head)
+
+    assert before["owner_table_sha256"] == after["owner_table_sha256"]
+    assert after["touched_owners"] == []
+
+
+def test_json_array_reordering_preserves_semantics(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Selector and guard order cannot create a false owner touch."""
+    repo, _ = owner_repo
+    other_path = "src/apm_cli/other.py"
+    _write(repo, other_path, 'FACT = "other"\n')
+    owner = _registry_owner()
+    owner["selectors"] = [OWNER_PATH, other_path]
+    owner["guards"] = [
+        "registry-delegation-fixture-durable-fact",
+        "registry-delegation-fixture-secondary",
+    ]
+    _write_registry(repo, owners=[owner])
+    base = _commit(repo, "ordered registry arrays")
+    before = _detect(repo, base, base)
+    owner["selectors"].reverse()
+    owner["guards"].reverse()
+    _write_registry(repo, owners=[owner])
+    head = _commit(repo, "reorder registry arrays")
+    after = _detect(repo, base, head)
+
+    assert after["owner_table_sha256"] == before["owner_table_sha256"]
+    assert after["touched_owners"] == []
+
+
+def test_json_base_and_removed_registry_head_fail_closed(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """A head cannot downgrade to legacy Markdown after adopting JSON."""
+    repo, _ = owner_repo
+    _write_registry(repo)
+    base = _commit(repo, "registry base")
+    (repo / REGISTRY_INDEX).unlink()
+    (repo / f"{REGISTRY_ROOT}/core-runtime.json").unlink()
+    head = _commit(repo, "remove registry")
+
+    result = _gate(repo, "detect", base, head)
+
+    assert result.returncode == 1
+    assert "removed the canonical owner registry" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("mutation", "diagnostic"),
+    [
+        ("malformed", "malformed JSON"),
+        ("missing", "missing registry shards"),
+        ("unlisted", "unlisted registry shards"),
+    ],
+)
+def test_invalid_registry_shape_fails_closed(
+    owner_repo: tuple[Path, str],
+    mutation: str,
+    diagnostic: str,
+) -> None:
+    """Malformed, missing, and unlisted exact-revision shards never fall back."""
+    repo, base = owner_repo
+    if mutation == "malformed":
+        _write(repo, REGISTRY_INDEX, "{not-json\n")
+    elif mutation == "missing":
+        _write_registry(repo, shards=["missing.json"])
+    else:
+        _write_registry(repo)
+        _write(
+            repo,
+            f"{REGISTRY_ROOT}/unlisted.json",
+            json.dumps({"version": 1, "owners": [_registry_owner()]}) + "\n",
+        )
+    head = _commit(repo, f"{mutation} registry")
+
+    result = _gate(repo, "detect", base, head)
+
+    assert result.returncode == 1
+    assert diagnostic in result.stderr
+
+
+def test_json_selector_mismatch_fails_closed(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Every JSON selector must match the head's own tracked inventory."""
+    repo, base = owner_repo
+    _write_registry(
+        repo,
+        owners=[_registry_owner(selector="src/apm_cli/missing.py")],
+    )
+    head = _commit(repo, "stale JSON selector")
+
+    result = _gate(repo, "detect", base, head)
+
+    assert result.returncode == 1
+    assert "registry selector matches no exact-revision file" in result.stderr
+
+
+def test_removed_json_owner_still_detects_base_selector(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Removing a JSON owner and its file retains the base authority."""
+    repo, _ = owner_repo
+    other_path = "src/apm_cli/other.py"
+    _write(repo, other_path, 'FACT = "other"\n')
+    _write_registry(
+        repo,
+        owners=[
+            _registry_owner(),
+            _registry_owner(
+                owner_id="other-fact",
+                decision="Other fact",
+                selector=other_path,
+            ),
+        ],
+    )
+    base = _commit(repo, "two JSON owners")
+    _write_registry(
+        repo,
+        owners=[
+            _registry_owner(
+                owner_id="other-fact",
+                decision="Other fact",
+                selector=other_path,
+            )
+        ],
+    )
+    (repo / OWNER_PATH).unlink()
+    head = _commit(repo, "remove JSON owner")
+
+    report = _detect(repo, base, head)
+    removed = next(item for item in report["touched_owners"] if item["decision"] == DECISION)
+
+    assert removed["matched_files"] == [
+        f"{REGISTRY_ROOT}/core-runtime.json",
+        OWNER_PATH,
+    ]
+
+
+def test_removed_json_owner_without_source_deletion_requires_evidence(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Removing registry metadata alone still touches the removed owner."""
+    repo, _ = owner_repo
+    other_path = "src/apm_cli/other.py"
+    _write(repo, other_path, 'FACT = "other"\n')
+    other_owner = _registry_owner(
+        owner_id="other-fact",
+        decision="Other fact",
+        selector=other_path,
+    )
+    _write_registry(repo, owners=[_registry_owner(), other_owner])
+    base = _commit(repo, "two registry owners")
+    _write_registry(repo, owners=[other_owner])
+    head = _commit(repo, "remove owner metadata")
+
+    report = _detect(repo, base, head)
+    removed = next(item for item in report["touched_owners"] if item["decision"] == DECISION)
+
+    assert removed["matched_files"] == [f"{REGISTRY_ROOT}/core-runtime.json"]
+
+
+def test_selector_reassignment_requires_evidence_for_both_owners(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Moving selectors between stable IDs touches both durable owners."""
+    repo, _ = owner_repo
+    other_path = "src/apm_cli/other.py"
+    other_decision = "Other fact"
+    _write(repo, other_path, 'FACT = "other"\n')
+    _write_registry(
+        repo,
+        owners=[
+            _registry_owner(),
+            _registry_owner(
+                owner_id="other-fact",
+                decision=other_decision,
+                selector=other_path,
+            ),
+        ],
+    )
+    base = _commit(repo, "assign registry selectors")
+    _write_registry(
+        repo,
+        owners=[
+            _registry_owner(selector=other_path),
+            _registry_owner(
+                owner_id="other-fact",
+                decision=other_decision,
+                selector=OWNER_PATH,
+            ),
+        ],
+    )
+    head = _commit(repo, "reassign registry selectors")
+
+    report = _detect(repo, base, head)
+    touched = {item["decision"]: item for item in report["touched_owners"]}
+
+    assert set(touched) == {DECISION, other_decision}
+    assert touched[DECISION]["matched_files"] == [f"{REGISTRY_ROOT}/core-runtime.json"]
+    assert touched[other_decision]["matched_files"] == [f"{REGISTRY_ROOT}/core-runtime.json"]
+
+
+def test_stable_owner_id_change_requires_evidence(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Replacing a stable ID cannot look like a formatting-only registry edit."""
+    repo, _ = owner_repo
+    _write_registry(repo)
+    base = _commit(repo, "stable registry ID")
+    _write_registry(
+        repo,
+        owners=[_registry_owner(owner_id="replacement-durable-fact")],
+    )
+    head = _commit(repo, "replace stable registry ID")
+
+    report = _detect(repo, base, head)
+
+    assert len(report["touched_owners"]) == 1
+    assert report["touched_owners"][0]["decision"] == DECISION
+    assert report["touched_owners"][0]["matched_files"] == [f"{REGISTRY_ROOT}/core-runtime.json"]
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "expected_decision"),
+    [
+        ("decision", "Reworded fixture durable fact", "Reworded fixture durable fact"),
+        ("owner", "`src/apm_cli/reassigned_owner.py`", DECISION),
+        ("guards", ["registry-delegation-replacement-guard"], DECISION),
+    ],
+)
+def test_registry_only_metadata_change_requires_evidence(
+    owner_repo: tuple[Path, str],
+    field: str,
+    replacement: Any,
+    expected_decision: str,
+) -> None:
+    """Mutable registry metadata cannot change without touching its stable owner."""
+    repo, _ = owner_repo
+    _write_registry(repo)
+    base = _commit(repo, "registry metadata base")
+    updated_owner = _registry_owner()
+    updated_owner[field] = replacement
+    _write_registry(repo, owners=[updated_owner])
+    head = _commit(repo, f"change owner {field}")
+
+    report = _detect(repo, base, head)
+
+    assert report["touched_owners"] == [
+        {
+            "decision": expected_decision,
+            "owner": updated_owner["owner"],
+            "selectors": [OWNER_PATH],
+            "matched_files": [f"{REGISTRY_ROOT}/core-runtime.json"],
+        }
+    ]
+
+
+def test_json_metadata_changes_attribute_each_owner_to_its_exact_shard(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Simultaneous shard edits do not smear every registry path onto every owner."""
+    repo, _ = owner_repo
+    other_path = "src/apm_cli/other.py"
+    other_owner = _registry_owner(
+        owner_id="other-fact",
+        decision="Other fact",
+        selector=other_path,
+    )
+    _write(repo, other_path, 'FACT = "other"\n')
+    _write_registry(
+        repo,
+        owners=[_registry_owner()],
+        shards=["core-runtime.json", "contracts-tooling.json"],
+    )
+    _write(
+        repo,
+        f"{REGISTRY_ROOT}/contracts-tooling.json",
+        json.dumps({"version": 1, "owners": [other_owner]}, indent=2) + "\n",
+    )
+    base = _commit(repo, "split owners across registry shards")
+
+    current_owner = _registry_owner(decision="Changed fixture fact")
+    changed_other = _registry_owner(
+        owner_id="other-fact",
+        decision="Changed other fact",
+        selector=other_path,
+    )
+    _write(
+        repo,
+        f"{REGISTRY_ROOT}/core-runtime.json",
+        json.dumps({"version": 1, "owners": [current_owner]}, indent=2) + "\n",
+    )
+    _write(
+        repo,
+        f"{REGISTRY_ROOT}/contracts-tooling.json",
+        json.dumps({"version": 1, "owners": [changed_other]}, indent=2) + "\n",
+    )
+    head = _commit(repo, "change metadata in both owner shards")
+
+    report = _detect(repo, base, head)
+    touched = {item["decision"]: item for item in report["touched_owners"]}
+
+    assert touched["Changed fixture fact"]["matched_files"] == [
+        f"{REGISTRY_ROOT}/core-runtime.json"
+    ]
+    assert touched["Changed other fact"]["matched_files"] == [
+        f"{REGISTRY_ROOT}/contracts-tooling.json"
+    ]
+
+
+def test_partial_registry_without_index_fails_closed(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """A tracked owner shard cannot silently trigger legacy fallback."""
+    repo, base = owner_repo
+    _write(
+        repo,
+        f"{REGISTRY_ROOT}/core-runtime.json",
+        json.dumps({"version": 1, "owners": [_registry_owner()]}) + "\n",
+    )
+    head = _commit(repo, "partial owner registry")
+
+    result = _gate(repo, "detect", base, head)
+
+    assert result.returncode == 1
+    assert "registry artifacts exist without" in result.stderr
+
+
+def test_unlisted_case_variant_json_fails_closed(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """Unexpected JSON-like files are detected case-insensitively."""
+    repo, base = owner_repo
+    _write_registry(repo)
+    _write(
+        repo,
+        f"{REGISTRY_ROOT}/hidden.JSON",
+        json.dumps({"version": 1, "owners": [_registry_owner()]}) + "\n",
+    )
+    head = _commit(repo, "add uppercase unlisted registry file")
+
+    result = _gate(repo, "detect", base, head)
+
+    assert result.returncode == 1
+    assert "unlisted registry shards" in result.stderr
+
+
+def test_duplicate_guard_id_across_shards_fails_closed(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """The standalone parser also enforces one owner per guard ID."""
+    repo, base = owner_repo
+    other_path = "src/apm_cli/other.py"
+    _write(repo, other_path, 'FACT = "other"\n')
+    _write_registry(repo, shards=["core-runtime.json", "contracts-tooling.json"])
+    other_owner = _registry_owner(
+        owner_id="other-fact",
+        decision="Other fact",
+        selector=other_path,
+    )
+    other_owner["guards"] = ["registry-delegation-fixture-durable-fact"]
+    _write(
+        repo,
+        f"{REGISTRY_ROOT}/contracts-tooling.json",
+        json.dumps({"version": 1, "owners": [other_owner]}) + "\n",
+    )
+    head = _commit(repo, "duplicate owner guard")
+
+    result = _gate(repo, "detect", base, head)
+
+    assert result.returncode == 1
+    assert "guard ID assigned to multiple owners" in result.stderr
+
+
+def test_cross_shard_selector_overlap_fails_closed(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """A tracked file cannot match selectors from owners in separate shards."""
+    repo, base = owner_repo
+    other_path = "src/apm_cli/other.py"
+    _write(repo, other_path, 'FACT = "other"\n')
+    _write_registry(
+        repo,
+        owners=[_registry_owner(selector="src/apm_cli/*.py")],
+        shards=["core-runtime.json", "contracts-tooling.json"],
+    )
+    _write(
+        repo,
+        f"{REGISTRY_ROOT}/contracts-tooling.json",
+        json.dumps(
+            {
+                "version": 1,
+                "owners": [
+                    _registry_owner(
+                        owner_id="other-fact",
+                        decision="Other fact",
+                        selector=other_path,
+                    )
+                ],
+            }
+        )
+        + "\n",
+    )
+    head = _commit(repo, "overlap owner selectors")
+
+    result = _gate(repo, "detect", base, head)
+
+    assert result.returncode == 1
+    assert "matches selectors from multiple owners" in result.stderr
 
 
 def test_unknown_completion_status_fails_closed(
@@ -522,6 +1139,23 @@ def test_gate_git_helper_never_uses_bare_argv() -> None:
     source = GATE.read_text(encoding="utf-8")
     assert '["git"' not in source
     assert "['git'" not in source
+
+
+def test_replacement_refs_cannot_substitute_exact_revision_content(
+    owner_repo: tuple[Path, str],
+) -> None:
+    """A local replacement object cannot hide a changed owner behind the original SHA."""
+    repo, base = owner_repo
+    _write(repo, OWNER_PATH, 'FACT = "head"\n')
+    head = _commit(repo, "change owner")
+    _git(repo, "replace", base, head)
+
+    report = _detect(repo, base, head)
+
+    assert report["base_sha"] == base
+    assert report["head_sha"] == head
+    assert report["changed_files"] == [OWNER_PATH]
+    assert report["touched_owners"][0]["matched_files"] == [OWNER_PATH]
 
 
 def test_gate_git_executable_is_cached_and_resolved(monkeypatch: pytest.MonkeyPatch) -> None:

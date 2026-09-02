@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "owners": [
+    {
+      "id": "accepted-target-vocabulary",
+      "decision": "Accepted target vocabulary",
+      "owner": "core/target_catalog.py",
+      "selectors": ["src/apm_cli/core/target_catalog.py"],
+      "guards": ["registry-delegation-target-vocabulary"]
+    },
+    {
+      "id": "effective-install-target-selection",
+      "decision": "Effective install target selection",
+      "owner": "core/target_detection.py (EffectiveTargetDecision)",
+      "selectors": ["src/apm_cli/core/target_detection.py"],
+      "guards": ["registry-delegation-install-target-selection"]
+    },
+    {
+      "id": "behavioral-test-taxonomy-classification",
+      "decision": "Behavioral test taxonomy classification",
+      "owner": "module-level pytestmark (taxonomy inventory verifies)",
+      "selectors": [
+        "tests/quality/taxonomy_inventory_plugin.py",
+        "tests/quality/test_test_taxonomy.py"
+      ],
+      "guards": ["contracts-tests-taxonomy-classification"]
+    },
+    {
+      "id": "runtime-descriptors",
+      "decision": "Runtime descriptors",
+      "owner": "runtime/registry.py",
+      "selectors": ["src/apm_cli/runtime/registry.py"],
+      "guards": ["registry-delegation-runtime-descriptors"]
+    },
+    {
+      "id": "user-facing-output-diagnostics",
+      "decision": "User-facing output / diagnostics",
+      "owner": "CommandLogger / console owner",
+      "selectors": [
+        "src/apm_cli/core/command_logger.py",
+        "src/apm_cli/utils/console.py"
+      ],
+      "guards": ["registry-delegation-output-diagnostics"]
+    },
+    {
+      "id": "compiled-output-writes",
+      "decision": "Compiled-output writes (atomic)",
+      "owner": "CompiledOutputWriter",
+      "selectors": ["src/apm_cli/compilation/output_writer.py"],
+      "guards": ["registry-delegation-compiled-output-writes"]
+    },
+    {
+      "id": "distributed-agents-output-preparation",
+      "decision": "Distributed AGENTS.md output eligibility and content preparation",
+      "owner": "compilation/agents_compiler.py (_prepare_distributed_file)",
+      "selectors": ["src/apm_cli/compilation/agents_compiler.py"],
+      "guards": ["contracts-tooling-distributed-agents-output"]
+    },
+    {
+      "id": "compile-nested-git-boundary",
+      "decision": "Compile traversal and nested Git repository boundary",
+      "owner": "compilation/inventory.py (CompileInventory)",
+      "selectors": ["src/apm_cli/compilation/inventory.py"],
+      "guards": ["contracts-tooling-compile-inventory"]
+    },
+    {
+      "id": "bootstrap-project-name",
+      "decision": "Bootstrap project-name validation and fallback",
+      "owner": "core/project_name.py (resolve_bootstrap_project_name)",
+      "selectors": ["src/apm_cli/core/project_name.py"],
+      "guards": ["registry-delegation-bootstrap-project-name"]
+    }
+  ]
+}

@@ -49,6 +49,9 @@ Markdown-based primitive types use a markdown file (or directory containing a pr
 When a Markdown primitive has frontmatter, its opening fence of at least three hyphens (for example, `---`) must start at the first character of line 1. Without that opening fence, APM treats the document as body content and later `---` lines remain Markdown horizontal rules. If an instruction has an opening fence but its YAML is invalid, `apm install` stops that package before any primitive is deployed to the selected targets.
 :::
 
+Encode primitive Markdown as UTF-8. APM accepts files with or without a
+leading UTF-8 BOM and strips the BOM before parsing frontmatter.
+
 ## Recommended reading order
 
 1. [Skills](./skills/) -- the densest primitive type and the one most newcomers hit first.

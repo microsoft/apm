@@ -7,22 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Changed
 
-- `apm install --frozen` no longer fails on a cold cache when git-sourced
-  `apm_package` dependencies declare MCP servers; frozen hydration now
-  succeeds as expected before any packages are fetched. (closes #2456)
-- `apm install` now accepts `--trust-bin` / `--no-trust-bin` for per-invocation
-  consent over marketplace-plugin `bin/` executable deployment. `--trust-bin`
-  approves deployment silently; `--no-trust-bin` skips `bin/` even when policy
-  permits it. The `allowExecutables` policy gate still takes precedence. (closes #1620)
-- `apm pack --format agent-plugin` and
-  `apm plugin init --format agent-plugin` now emit strict, portable Agent
-  Plugins 1.0 bundles. The existing no-flag default and `--format plugin` alias
-  both remain Claude-compatible; exact-schema Agent Plugins are admitted as
-  whole units and blocked before deployment until a native client lifecycle
-  qualifies, never projected as legacy primitives. (by @sergio-sisternes-epam;
-  closes #2522) (#2654)
+- Architecture ownership guards now use a sharded JSON registry and a
+  single-process Python linter while preserving exact-revision compatibility
+  and reducing warm median lint time by 75%. (#2739)
 
 ### Fixed
 
@@ -98,24 +87,183 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path now run with `LC_ALL=C` and `LANGUAGE=C`. (by @Naofel-eal, closes #2533)
 - Codex MCP configuration now accepts plain HTTP for loopback endpoints while
   retaining HTTPS for every non-loopback host. (by @normandev92, #2468)
+- `apm pack` now reports unavailable remote package metadata, exposes
+  certifiability in JSON, prevents `--check-clean` from certifying degraded
+  regeneration, and lets `--strict-metadata` fail before writes. (closes #2524)
+- `apm pack --check-clean` is now read-only and detects marketplace drift
+  without overwriting artifacts. Release pipelines that also produce artifacts
+  must run `apm pack` separately; see
+  [Releasing from any CI](docs/src/content/docs/producer/releasing-from-any-ci.md#the-canonical-sequence).
+  (by @danielmeppiel, closes #2727, #2730)
+- `apm update` now retains full-SHA pins without an eligible stable annotated
+  semver tag while continuing unrelated updates; malformed remote tag records
+  still fail before writes. The contract is recorded in `openapm-v0.1.md`.
+  (#2667)
+- Distributed `apm compile` now reconciles existing managed-section
+  `AGENTS.md` files without overwriting hand-authored content, generates new
+  placements safely, and never discovers, writes, or cleans content across
+  nested Git repository or linked-worktree boundaries. (by @aryansk; fixes
+  #2560 and #2713) (#2578)
+- Windows admin lifecycle policies now resolve from `%ProgramData%` instead of
+  assuming `C:\ProgramData`, while retaining the historical fallback.
+  (by @lukiod; closes #2684) (#2686)
+- Marketplace installs now materialize catalog-only LSP and MCP metadata
+  without requiring a package manifest in the downloaded source
+  (by @lkshrk, #2709).
+- Private `github.com` subdirectory packages now populate the persistent Git
+- Private `github.com` packages now populate the persistent Git
+  cache through repository-scoped credential fallback without storing
+  credentials in cache keys or remote URLs. (#2722)
+- Plugin refreshes now keep the existing package and its registered hooks live
+  while replacement content downloads and validates. Failed refreshes retain
+  the prior package instead of accepting stale content. (#2723)
+- Successful installs now remove inactive resolution staging directories left
+  by interrupted earlier runs while preserving active and unrelated entries.
+  (closes #2716)
+- Successful installs now safely clean up temporary backups left by interrupted
+  lock-aware runs without disturbing active installs or unrelated files. Legacy
+  lockless backups are preserved with manual recovery guidance. (#2720)
+- `apm doctor` now reports malformed project `executables` configuration as an
+  actionable informational warning instead of omitting the check. (#2719)
+- `apm doctor` now reports malformed project `executables` or deprecated
+  `allowExecutables` configuration as an actionable informational warning
+  instead of omitting the check. (#2719)
+- `apm doctor` now reports malformed project executable-trust configuration
+  under either `executables` or the deprecated `allowExecutables` key as an
+  actionable informational warning instead of omitting the check. (#2719)
+
+- Git subdirectory dependencies with symlinks to files elsewhere in the same
+  repository now install successfully where Git materializes symlinks; APM
+  widens the checkout only when needed. On Windows, Git defaults to
+  `core.symlinks=false` and checks these entries out as plain files, which is
+  outside #2707's scope. (by @MohammedAlkindi, closes #2707, #2710)
+
+## [0.29.0] - 2026-08-30
+
+### Added
+
+- `apm install --target copilot` now registers portable Agent Plugins 1.0
+  packages natively while keeping each plugin intact under `apm_modules/`.
+  Copilot CLI `1.0.81` or newer can load the installed plugin without copies or
+  `--plugin-dir`. (closes #2703, #2705)
+- `apm install` now accepts `--trust-bin` and `--no-trust-bin` for
+  per-invocation consent over marketplace-plugin executables. Non-interactive
+  installs default to no deployment unless consent or policy permits it.
+  (closes #1620, #2508)
+- `apm pack --format agent-plugin` and
+  `apm plugin init --format agent-plugin` now emit strict, portable Agent
+  Plugins 1.0 bundles while preserving the existing Claude-compatible default.
+  (closes #2522, #2654)
+- The lifecycle scripts guide now documents the Windows admin-tier policy path
+  alongside the Linux and macOS path. (by @WilliamK112, closes #2621, #2640)
 
 ### Changed
 
 - **BREAKING:** A plugin `skills` declaration now exclusively controls which
-  skills deploy. Declare every intended skill (or its immediate container), or
-  remove the key to retain conventional `skills/` discovery; undeclared
-  siblings no longer deploy. An explicit `"skills": []` deploys no skills and
-  reports one actionable migration diagnostic when it shadows root skills.
-  (closes #2537)
-- `apm install` now emits a trust-posture warning (via `[!]`) when a marketplace
-  plugin deploys executables to Claude Code's PATH without an explicit `--trust-bin`
-  flag. In non-interactive (non-TTY) contexts the default is `--no-trust-bin`.
-  Pass `--trust-bin` to suppress the warning and deploy, or `apm approve` for
-  persistent per-package approval.
+  skills deploy. Declare every intended skill or remove the key to retain
+  conventional `skills/` discovery; conventional containers deploy at the
+  expected depth, while `"skills": []` deploys no skills.
+  (by @edenfunf, closes #2530, #2537, #2540)
+
 ### Fixed
 
+- Agent Plugin inventory on Windows now compares physical file bytes without
+  CRLF translation, preventing valid assets from being rejected as changed
+  during inventory. (#2694)
+- GitLab organization-policy discovery now uses the valid `apm-policy` project
+  convention and treats a missing policy project as no policy. (#2662)
+- `apm audit` now compares only APM-owned entries in shared native hook configs,
+  preserving user-authored hooks while still detecting altered APM hooks.
+  (closes #2641, #2682)
+- `apm install` and surviving-package reintegration now scan only deployable
+  package content, preventing false-positive security blocks from source-only
+  files. (by @aryansk, #2598)
+- Root-declared plugin components no longer copy a plugin into its own staging
+  tree, preventing recursive writes during `apm install`.
+  (by @YoraiLevi, closes #2556, #2557)
+- OpenCode global installs now deploy user-scope skills to its native config
+  root, and `apm compile -g` retains scoped package instructions in the user
+  `AGENTS.md`. (by @aryansk, #2596)
+- Marketplace `sourceBase` and full HTTPS repository paths now preserve safe
+  percent-encoded segments, enabling Azure DevOps project names such as
+  `My%20Projects`. (by @aryansk, fixes #2554, #2584)
+- `apm install --frozen` now hydrates git-sourced `apm_package` dependencies
+  that declare MCP servers on a cold cache. (by @sergio-sisternes-epam,
+  closes #2456, #2502)
+- `apm install` now resolves virtual-subdirectory git semver ranges before
+  literal-ref preflight while preserving registry version validation.
+  (by @aryansk, closes #2514, #2590)
+- `apm lock export --timestamp` now rejects malformed or timezone-naive values
+  before they enter CycloneDX or SPDX metadata. (by @manideep-malyala, fixes
+  #2659, #2660)
+- Generated bundle and plugin metadata now uses deterministic LF line endings,
+  keeping generated metadata byte-stable across operating systems.
+  (by @WilliamK112, #2638)
+- Lockfiles generated on Windows for marketplace-plugin / skill-subset git
+  dependencies now pass `apm install --frozen` on Linux, and vice versa, by
+  hashing synthetic manifests with deterministic LF line endings.
+  (by @McNultyyy, closes #2619, #2620)
 - Codex MCP configuration now accepts plain HTTP for loopback endpoints while
-  retaining HTTPS for every non-loopback host. (by @normandev92, #2468)
+  retaining HTTPS for every non-loopback host.
+  (by @normandev92, #2468)
+- Azure DevOps organization-policy discovery now reads repository `_apm` from
+  project `apm`, keeping direct and inherited policy coordinates consistent.
+  (closes #2429, #2450)
+- Hook commands such as `"${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py` now rewrite to
+  `"${CLAUDE_PLUGIN_ROOT}/hooks/probe.py"` and warn when a supported plugin-root
+  placeholder remains unresolved instead of silently deploying a dead hook.
+  (by @MohammedAlkindi, closes #2639, #2645)
+- `apm audit --ci` now accepts valid local Claude-skill dependencies without an
+  `apm.yml` while retaining strict package-shape validation.
+  (by @lukiod, closes #2611, #2643)
+- Copilot CLI and VS Code MCP configurations now route through separate adapter
+  paths, preventing one target's configuration from being written for the
+  other. (#2669)
+- Private-repository installs no longer skip credential retry when Git emits
+  localized diagnostics. (by @Naofel-eal, closes #2533, #2534)
+- `compilation.source_attribution: false` now suppresses cosmetic annotations
+  on distributed `AGENTS.md` targets as it already did for `CLAUDE.md`.
+  (by @MohammedAlkindi, closes #2634, #2646)
+- `apm uninstall --global` now cleans removed-only target files before deleting
+  their ownership state while preserving files owned by surviving packages.
+  (#2658)
+- `apm pack --dry-run` now honors the same existing `plugin.json` overwrite
+  policy as a real non-force pack, avoiding misleading write previews.
+  (by @aryansk, #2583)
+- `apm marketplace validate` now reports malformed plugin structure by JSON path
+  and exits 1 instead of emitting misleading success output. (#2474)
+- CLI help for compile, dependency updates, and MCP install now follows the
+  target catalog and exposes the forwarded target and trust options.
+  (by @sergio-sisternes-epam, #2499)
+- `deployed-files-present` no longer false-positives on gitignored deploy
+  paths (e.g. `.agents/`), enabling `apm audit --ci` to pass on a fresh
+  checkout when deployed outputs are intentionally not committed.
+  (by @sergio-sisternes-epam, closes #2452, #2496)
+- YAML expansion guard no longer rejects large anchor-free lockfiles (150K+
+  entries) with a false-positive "billion-laughs" error.
+  (#2518)
+- SSH-based installs now fail promptly with a useful error when a key needs an
+  unavailable passphrase instead of hanging until timeout.
+  (by @sergio-sisternes-epam, fixes #1976, #2360)
+
+### Performance
+
+- The contributor dashboard now refreshes GitHub every 15 minutes by default,
+  backs off for at least one hour after rate limits, and caches unchanged PR
+  enrichment, reducing scheduled GraphQL list traffic from 240 to 8 queries per
+  hour. (by @sergio-sisternes-epam, #2679)
+- `apm compile` now scopes literal `applyTo` walks to their roots, reducing
+  matching work in large repositories without changing placement.
+  (by @aryansk, #2595)
+- Multi-target `apm compile` now reuses project placement analysis across
+  targets, scaling like a single-target run without changing generated output.
+  (closes #2482, #2486)
+
+### Security
+
+- Windows release binaries are now Authenticode-signed, preventing the Windows
+  Defender false positive caused by unsigned PyInstaller bundles.
+  (by @sergio-sisternes-epam, closes #2435, #2497)
 
 ### Removed
 

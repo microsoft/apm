@@ -42,6 +42,7 @@ from ..utils.github_host import (
     is_ado_auth_failure_signal,
     is_github_hostname,
 )
+from .git_remote_ops import validate_ls_remote_tag_output
 from .github_rate_limit import raise_for_github_throttle
 
 if TYPE_CHECKING:
@@ -306,6 +307,8 @@ class GitReferenceResolver:
             ado_bearer_also_failed = False
 
         if outcome[0] == "ok":
+            if not include_heads:
+                validate_ls_remote_tag_output(outcome[1])
             refs = host._parse_ls_remote_output(outcome[1])
             return host._sort_remote_refs(refs)
 

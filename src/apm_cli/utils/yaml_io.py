@@ -437,6 +437,10 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     ``apm install`` / ``apm audit``.
     """
 
+    def split(self, text: str) -> tuple[str, str]:
+        """Strip one leading UTF-8 BOM before locating the front matter."""
+        return super().split(text.removeprefix("\ufeff"))
+
     def load(self, fm: str, **kwargs: Any) -> Any:
         kwargs["Loader"] = _BoundedSafeLoader
         try:
@@ -481,7 +485,7 @@ def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
     return post
 
 
-def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
+def load_frontmatter(fd: Any, encoding: str = "utf-8-sig") -> Any:
     """Parse Markdown front matter with the bounded YAML loader.
 
     Drop-in for ``frontmatter.load(fd)``: accepts a path string or an open
@@ -492,6 +496,11 @@ def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
     the same ``frontmatter.Post`` (``.metadata`` / ``.content``) as the stock
     call; raises ``yaml.YAMLError`` on malformed or over-budget front matter,
     which every existing caller already treats as fail-closed.
+
+    ``utf-8-sig`` strips a leading BOM from path inputs, while the bounded
+    handler strips it from already-open streams. A BOM'd instruction file
+    (written by PowerShell's ``Out-File``, ``>``, or Notepad) therefore cannot
+    hide the ``---`` fence and silently drop its ``applyTo`` scope (apm#2683).
     """
     text = ""
     if isinstance(fd, (str, Path)):

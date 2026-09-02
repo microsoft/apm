@@ -31,7 +31,7 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 |---|---|---|
 | `--update` | off | Re-resolve dependencies to the latest version or Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. Mutable Git refs must resolve against upstream; APM does not fall back to stale refs from the local bare Git cache. Mutually exclusive with `--frozen`. For interactive use with a confirmation prompt, use [`apm update`](../update/) instead. |
 | `--frozen` | off | Lockfile-only install: refuse to resolve anything new and fail before any project, config, deployment, or cache write if `apm.lock.yaml` is missing or out of sync with `apm.yml`, including MCP state. Mirrors `npm ci`. Mutually exclusive with `--update`, positional package additions, and `--mcp`. |
-| `--dry-run` | off | Print the install plan without deployment writes. If a positional package bootstraps a project, the new `apm.yml` and any explicit `--target` selection are kept for the next run. |
+| `--dry-run` | off | Print the install plan without deployment writes. Positional packages and ref changes appear in the preview after validation but do not change an existing `apm.yml`; auto-bootstrap still keeps its new manifest and any explicit `--target` selection for the next run. |
 | `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Does **not** suppress general install errors (any reported error still exits `1`, matching npm / pip / cargo) or select ref freshness. Add `--update` or `--refresh` to resolve mutable refs upstream; [`apm update`](../update/) does so with or without `--force`. Use only after independent verification. |
 | `--verbose`, `-v` | off | Show per-file paths and full error context in the diagnostic summary. |
 | `--dev` | off | Add new packages to `devDependencies`. Dev deps install locally but are excluded from `apm pack` output. |
@@ -57,6 +57,11 @@ File primitives resolve targets in this order: `--target`, manifest
 `targets:`, `apm config set target ...`, then auto-detection. MCP resolves
 `--runtime` / `--target`, then manifest targets, saved config, then
 auto-detection only when `apm.yml` declares no targets.
+
+Native [Agent Plugin registration](../../../consumer/copilot-agent-plugins/#requirements)
+does not discover or execute the Copilot CLI. APM owns deterministic
+materialization and settings projection; you provide a supported runtime when
+you use the generated registration.
 
 ### Policy and trust
 
@@ -116,6 +121,10 @@ in `apm.yml`, then run `apm install` again.
 - **One effective target.** Package primitives, MCP servers, and LSP servers consume one target decision per invocation: `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. A saved target therefore applies to `apm install`, `apm install --mcp`, and later `apm update` runs without another flag.
 - **Required service writes fail loudly.** If MCP or LSP work is declared but no target can be resolved, install exits non-zero before changing the manifest, package deployment, or native service config. A native MCP/LSP config write failure also exits non-zero with the failed target and a permissions/path next step. A successful direct `--mcp` add never reports `Install interrupted`.
 - **Diff-aware.** Packages whose ref or version changed in `apm.yml` are re-downloaded automatically. MCP servers with matching config are skipped (`already configured`); changed config is re-applied (`updated`).
+- **Transactional replacement.** `--update` and `--refresh` download package
+  replacements to isolated staging paths and validate them before publication.
+  If download, validation, or activation fails, APM keeps the previous package
+  and lockfile active and exits non-zero with retry guidance.
 - **MCP-only lock state.** A normal project install creates or updates `apm.lock.yaml` when `apm.yml` declares only MCP dependencies, records the resolved MCP configs and targets, and migrates a legacy `apm.lock` first. Repeating the same install leaves the lockfile and target configs byte-identical. If initial lock creation fails, install exits nonzero and warns with writable-directory and rerun guidance.
 - **Lockfile replay and Git ref freshness.** Plain and `--frozen` installs may trust `apm.lock.yaml` and the local Git cache, reusing the locked commit for unchanged Git dependencies across the full resolved graph. In contrast, `apm install --update`, `apm install --refresh`, [`apm update`](../update/) with or without `--force`, [`apm lock --update`](../lock/), and [`apm outdated`](../outdated/) establish mutable Git refs from upstream instead of accepting stale refs from a local bare Git cache. APM picks up upstream changes to a transitive package's `apm.yml` only when you regenerate the graph -- run `apm update` or `apm lock --update`. See the [lockfile specification](../../lockfile-spec/) for the replay contract.
 - **Semver ranges on git deps.** `ref:` accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`) for git-source deps, including positional virtual-subdirectory references. APM runs `git ls-remote` against the dep, picks the highest tag matching the range, and pins the resolved tag plus commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `--update` (or change the manifest constraint) to re-resolve. See [manage dependencies](../../../consumer/manage-dependencies/#pin-a-semver-range) for the supported syntax.
@@ -128,6 +137,7 @@ in `apm.yml`, then run `apm install` again.
   `~/.config/opencode/AGENTS.md`, including scoped instruction sections.
 - **Project-scope root context hint.** After `apm install`, targets that require [post-install instruction compilation](../../targets-matrix/#post-install-instruction-compilation) print a one-line `[i]` hint when dependency instructions require `apm compile`. The hint names only the root context files that compile will update.
 - **Stale-file cleanup.** Files a still-present package previously deployed but no longer produces are removed from the workspace, gated by per-file content hashes recorded in the lockfile (user-edited files are kept with a warning).
+- **Interrupted-install recovery.** After a successful install, APM removes inactive resolution backup directories left by interrupted lock-aware runs. Active install backups and entries that do not match APM's staging name format are preserved. Lockless backups from older APM versions are retained because they may belong to a running install; inactive orphaned activity-lock files are reported for manual cleanup. Stop other APM installs, rerun with `--verbose`, then manually delete the reported paths.
 - **Enterprise marketplace gate.** When installing from a `*.ghe.com` marketplace, bare cross-repo `repo:` fields (e.g. `repo: owner/repo`) are refused before any network request runs, preventing dependency-confusion attacks. Host-qualify the field to proceed: `repo: corp.ghe.com/owner/repo` for an enterprise dep, or `repo: github.com/owner/repo` for a declared cross-host dep.
 - **Security scan.** After target, subset, and executable authorization, APM scans
   exactly the source files it can deploy for hidden Unicode, tag-character, and
@@ -211,12 +221,13 @@ apm install ./my-bundle.zip --as custom-name
 apm install ./my-bundle --target opencode
 ```
 
-:::note[Planned]
-This deploys Claude plugin bundles (the default `apm pack` output). A bundle
-produced with `apm pack --format agent-plugin` (portable Agent Plugins v1) is not
-deployable yet -- `apm install` fails closed and points you to a
-Claude-compatible package instead. See
-[Package Types](../../package-types/#agent-plugin-pluginjson-with-an-agent-plugins-schema).
+:::note[Claude bundles only]
+This imperative route deploys Claude plugin bundles (the default `apm pack`
+output). A portable Agent Plugins v1 package installs declaratively instead:
+declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
+whole and registers it without locating or executing Copilot. Stable Copilot
+CLI 1.0.81 or newer is required when loading the projection. See
+[Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
 :::
 
 ### Install only a subset of skills from a bundle

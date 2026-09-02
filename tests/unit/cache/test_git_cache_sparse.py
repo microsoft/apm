@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache, _variant_key
+from apm_cli.cache.git_cache import (
+    GitCache,
+    _partial_clone_fallback_warning,
+    _partial_clone_filter_unsupported,
+    _variant_key,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +49,30 @@ class TestVariantKey:
         v1 = _variant_key(["plugins/x", "tools/y"])
         v2 = _variant_key(["tools/y", "plugins/x"])
         assert v1 == v2
+
+
+def test_partial_clone_warning_redacts_url_credentials() -> None:
+    """A completed filter fallback warning never exposes URL credentials."""
+    warning = _partial_clone_fallback_warning(
+        "https://alice:" + "example-token" + "@github.com/acme/private"
+    )
+    rendered_url = next(token.rstrip(";") for token in warning.split() if "://" in token)
+    parsed = urlparse(rendered_url)
+
+    assert parsed.hostname == "github.com"
+    assert parsed.username == "alice"
+    assert parsed.password == "***"
+
+
+def test_auth_failure_is_not_classified_as_filter_rejection() -> None:
+    """An authentication failure must reach the outer AuthResolver immediately."""
+    failure = subprocess.CalledProcessError(
+        128,
+        ("git", "clone"),
+        stderr="fatal: Authentication failed",
+    )
+
+    assert _partial_clone_filter_unsupported(failure) is False
 
 
 def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:
@@ -289,6 +320,7 @@ class TestPartialBareFlavor:
         real_run = subprocess.run
         rejected: list[list[str]] = []
         retried: list[list[str]] = []
+        warnings: list[str] = []
 
         def fake_run(cmd, *args, **kwargs):
             if isinstance(cmd, list) and "--filter=blob:none" in cmd:
@@ -306,6 +338,10 @@ class TestPartialBareFlavor:
             return real_run(cmd, *args, **kwargs)
 
         monkeypatch.setattr(git_cache_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            "apm_cli.utils.console._rich_warning",
+            warnings.append,
+        )
 
         url = bare.as_uri()
         result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
@@ -313,4 +349,143 @@ class TestPartialBareFlavor:
         assert rejected, "partial clone (with --filter) should have been attempted"
         assert retried, "fallback retry (without --filter) should have been issued"
         assert all("--filter=blob:none" not in c for c in retried)
+        assert len(warnings) == 1
+        assert "Partial clone unavailable" in warnings[0]
+        assert "cached a full bare clone instead" in warnings[0]
         assert (result / "alpha" / "file.txt").is_file()
+
+    def test_partial_clone_auth_failure_does_not_retry_full_clone(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """Auth failure exits after one negotiation so AuthResolver can retry."""
+        cache = GitCache(tmp_path / "cache")
+        clone_commands: list[list[str]] = []
+
+        def reject_auth(cmd, *args, **kwargs):
+            argv = list(cmd)
+            if "clone" in argv and "--bare" in argv:
+                clone_commands.append(argv)
+                raise subprocess.CalledProcessError(
+                    128,
+                    argv,
+                    stderr="fatal: Authentication failed",
+                )
+            raise AssertionError(f"unexpected subprocess: {argv}")
+
+        import apm_cli.cache.git_cache as git_cache_mod
+
+        monkeypatch.setattr(git_cache_mod.subprocess, "run", reject_auth)
+
+        with pytest.raises(RuntimeError, match="Failed to clone"):
+            cache.get_checkout(
+                "https://github.com/acme/private",
+                "a" * 40,
+                locked_sha="a" * 40,
+                sparse_paths=["alpha"],
+            )
+
+        assert len(clone_commands) == 1
+        assert "--filter=blob:none" in clone_commands[0]
+
+
+def _build_repo_with_out_of_cone_symlink_target(tmp_path: Path) -> tuple[Path, str]:
+    """Repro shape for #2707: a symlink inside the cone, target outside it."""
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.email", "t@e"], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.name", "t"], check=True)
+
+    cone_dir = work / "alpha" / "skill"
+    cone_dir.mkdir(parents=True)
+    (cone_dir / "ref.md").write_text("stand-in for a symlink entry\n")
+
+    shared_dir = work / "shared"
+    shared_dir.mkdir()
+    (shared_dir / "ref.md").write_text("the real target content\n")
+
+    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-q", "-m", "test: init fixture repo"], check=True
+    )
+    sha = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    bare = tmp_path / "bare-symlink.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(work), str(bare)], check=True)
+    return bare, sha
+
+
+class TestDanglingSymlinkRepair:
+    """#2707: GitCache's sparse-cone checkout must not ship a dangling symlink."""
+
+    def test_dangling_symlink_in_cone_is_repaired(self, tmp_path: Path, monkeypatch):
+        """A symlink whose target sits outside the requested cone must
+        still resolve after ``get_checkout`` returns.
+
+        This box can't create a real symlink (WinError 1314) and a real
+        checkout here writes a mode-120000 entry as a plain file
+        (``core.symlinks`` defaults to false on this filesystem), so the
+        ``ref.md`` stand-in is monkeypatched to LOOK dangling the way a
+        real symlink pointing at ``../../shared/ref.md`` would on a
+        filesystem that honors ``core.symlinks`` -- same technique as
+        tests/unit/utils/test_git_sparse.py and
+        tests/unit/deps/test_bare_cache_sparse.py.
+        """
+        bare, sha = _build_repo_with_out_of_cone_symlink_target(tmp_path)
+        cache_root = tmp_path / "cache"
+        cache = GitCache(cache_root)
+
+        checkout_dir = cache_root / "git" / "checkouts_v1"
+        url = bare.as_uri()
+
+        # The variant shard path isn't known until after get_checkout
+        # resolves the sha/variant key, but the fake symlink's parent
+        # (alpha/skill/ref.md) is deterministic once we know the shard
+        # root, so match on the relative suffix instead.
+        real_islink = os.path.islink
+        rel_suffix = Path("alpha") / "skill" / "ref.md"
+
+        def fake_islink(path):
+            p = Path(path)
+            return True if p.parts[-3:] == rel_suffix.parts else real_islink(path)
+
+        def fake_exists(path):
+            p = Path(path)
+            if p.parts[-3:] == rel_suffix.parts:
+                return (p.parents[2] / "shared" / "ref.md").exists()
+            return os.path.lexists(path)
+
+        monkeypatch.setattr(os.path, "islink", fake_islink)
+        monkeypatch.setattr(os.path, "exists", fake_exists)
+        monkeypatch.setattr(
+            "apm_cli.utils.git_sparse._tracked_symlinks",
+            lambda *args, **kwargs: [Path(args[1]) / "alpha" / "skill" / "ref.md"],
+        )
+
+        result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha/skill"])
+
+        assert checkout_dir in result.parents
+        # The repair must have actually widened the tree: the previously
+        # cone-excluded sibling holding the symlink's target now exists.
+        assert (result / "shared" / "ref.md").is_file()
+        assert (result / "shared" / "ref.md").read_text() == "the real target content\n"
+
+    def test_no_dangling_symlink_cone_stays_narrow(self, tmp_path: Path):
+        bare, sha = _build_repo_with_out_of_cone_symlink_target(tmp_path)
+        cache_root = tmp_path / "cache"
+        cache = GitCache(cache_root)
+
+        url = bare.as_uri()
+        result = cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha/skill"])
+
+        assert (result / "alpha" / "skill" / "ref.md").is_file()
+        # No dangling symlink was ever reported (the stand-in is a plain
+        # file), so the cone must stay narrow -- no repair should fire.
+        assert not (result / "shared").exists()

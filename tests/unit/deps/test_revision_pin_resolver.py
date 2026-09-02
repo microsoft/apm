@@ -8,13 +8,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from git.exc import GitCommandError
 
-from apm_cli.deps.git_remote_ops import parse_ls_remote_output
+from apm_cli.deps.git_remote_ops import RemoteRefParseError, parse_ls_remote_output
 from apm_cli.deps.revision_pins import (
     RevisionPinResolutionError,
+    RevisionPinResolutionResult,
+    RevisionPinSkip,
     RevisionPinUpdate,
     apply_revision_pin_updates,
     find_latest_annotated_tag,
+    package_name,
     resolve_revision_pin_updates,
 )
 from apm_cli.models.dependency.reference import DependencyReference
@@ -77,6 +81,24 @@ def test_latest_revision_pin_tag_ignores_prereleases_by_default() -> None:
 
     assert candidate.tag == "v1.5.0"
     assert candidate.commit_sha == OLD_SHA
+
+
+def test_latest_revision_pin_tag_breaks_equal_precedence_ties_by_tag_name() -> None:
+    refs = [
+        RemoteRef("v2.0.0+alpha", GitReferenceType.TAG, "b" * 40, annotated=True),
+        RemoteRef("v2.0.0+zeta", GitReferenceType.TAG, "c" * 40, annotated=True),
+    ]
+
+    latest = find_latest_annotated_tag(refs, package_name="pkg")
+
+    assert latest.tag == "v2.0.0+zeta"
+    assert latest.commit_sha == "c" * 40
+
+
+def test_revision_pin_package_name_strips_git_suffix() -> None:
+    dependency = DependencyReference(repo_url="org/pkg.git")
+
+    assert package_name(dependency) == "pkg"
 
 
 def test_apply_revision_pin_updates_annotates_manifest_atomically(tmp_path: Path) -> None:
@@ -196,12 +218,74 @@ def test_resolve_revision_pin_updates_uses_tags_only_fetch() -> None:
         def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
             return [RemoteRef("v2.0.0", GitReferenceType.TAG, NEW_SHA, annotated=True)]
 
-    updates = resolve_revision_pin_updates(
+    result = resolve_revision_pin_updates(
         [DependencyReference(repo_url="org/pkg", reference=OLD_SHA)],
         TagsOnlyDownloader(),
     )
 
-    assert updates == [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")]
+    assert result == RevisionPinResolutionResult(
+        updates=(RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg"),)
+    )
+
+
+def test_resolve_revision_pin_updates_skips_only_missing_annotated_tags() -> None:
+    """A missing tag leaves its SHA in place without blocking another pin."""
+
+    class MixedTagDownloader:
+        def list_remote_tag_refs(self, dep_ref: DependencyReference) -> list[RemoteRef]:
+            if dep_ref.repo_url == "org/no-release":
+                return []
+            return [RemoteRef("v2.0.0", GitReferenceType.TAG, NEW_SHA, annotated=True)]
+
+    retained = DependencyReference(repo_url="org/no-release", reference=OLD_SHA)
+    updated = DependencyReference(repo_url="org/released", reference=OLD_SHA)
+
+    result = resolve_revision_pin_updates(
+        [retained, updated],
+        MixedTagDownloader(),
+        max_workers=1,
+    )
+
+    assert result.updates == (
+        RevisionPinUpdate("org/released", OLD_SHA, NEW_SHA, "v2.0.0", "org/released"),
+    )
+    assert result.skips == (RevisionPinSkip("org/no-release", OLD_SHA, "org/no-release"),)
+
+
+@pytest.mark.parametrize("max_workers", [1, 4])
+def test_resolve_revision_pin_updates_propagates_transport_failures(max_workers: int) -> None:
+    """Transport failures remain fatal in both serial and concurrent resolution."""
+
+    class FailingDownloader:
+        def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            raise GitCommandError("ls-remote", 128, stderr="network down")
+
+    with pytest.raises(GitCommandError, match="network down"):
+        resolve_revision_pin_updates(
+            [
+                DependencyReference(repo_url="org/a", reference=OLD_SHA),
+                DependencyReference(repo_url="org/b", reference=OLD_SHA),
+            ],
+            FailingDownloader(),
+            max_workers=max_workers,
+        )
+
+
+def test_resolve_revision_pin_updates_propagates_malformed_remote_output() -> None:
+    """Malformed remote output cannot be converted into a retained-pin skip."""
+
+    class MalformedOutputDownloader:
+        def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            raise RemoteRefParseError("Malformed git ls-remote tag output.")
+
+    with pytest.raises(
+        RevisionPinResolutionError,
+        match="Malformed remote tag data for org/pkg",
+    ):
+        resolve_revision_pin_updates(
+            [DependencyReference(repo_url="org/pkg", reference=OLD_SHA)],
+            MalformedOutputDownloader(),
+        )
 
 
 def test_resolve_revision_pin_updates_rejects_invalid_remote_sha() -> None:

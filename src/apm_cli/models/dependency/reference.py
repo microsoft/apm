@@ -120,6 +120,7 @@ class DependencyReference(ProviderCoordinateMixin):
     marketplace_name: str | None = None
     marketplace_plugin_name: str | None = None
     marketplace_version_spec: str | None = None
+    marketplace_manifest: dict[str, object] | None = None
 
     @property
     def canonical_repo_url(self) -> str:

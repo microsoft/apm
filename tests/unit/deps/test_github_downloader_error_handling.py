@@ -903,6 +903,7 @@ class TestDownloadSubdirectoryPackageErrors:
             patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.path_security.ensure_path_within"),
+            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
             patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
             patch("apm_cli.deps.package_validator.stamp_plugin_version"),
             patch("apm_cli.utils.file_ops.robust_copytree"),

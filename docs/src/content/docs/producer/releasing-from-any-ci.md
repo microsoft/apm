@@ -7,8 +7,8 @@ sidebar:
 
 A marketplace release is three steps the CLI gives you primitives
 for: build with release gates, produce checksums, publish a tagged
-release. Every CI system runs the same three commands. The wrappers
-below differ only in syntax.
+release. Every CI system runs the same sequence. The wrappers below
+differ only in syntax.
 
 ## The canonical sequence
 
@@ -19,7 +19,8 @@ shell-script translation of these lines.
 set -euo pipefail
 VERSION="${VERSION:?VERSION must be set, e.g. v1.2.3}"
 
-apm pack --check-versions --check-clean --json > pack-report.json
+apm pack --check-versions --check-clean --json > gate-report.json
+apm pack --check-versions --strict-metadata --json > pack-report.json
 
 for f in build/*.zip .claude-plugin/marketplace.json; do
   [ -f "$f" ] || continue
@@ -37,17 +38,28 @@ gh release create "$VERSION" \
 
 What each command does:
 
-- `apm pack --check-versions --check-clean --json` runs the pack with
-  the release gates enabled. `--check-versions` fails if per-package
+- `apm pack --check-versions --check-clean --json` runs the read-only
+  release gates. `--check-versions` fails if per-package
   versions disagree with `marketplace.versioning.strategy`.
   `--check-clean` fails if the on-disk `marketplace.json` does not
-  match what a fresh pack would produce. `--json` writes a
-  machine-readable summary to stdout; human logs go to stderr.
+  match what a fresh pack would produce, or if remote Claude package metadata
+  could not be fetched to certify that regeneration -- see
+  [Marketplace artifacts](../../reference/cli/pack/#marketplace-artifacts)
+  for the failure modes. `apm pack --check-versions --strict-metadata`
+  generates the release artifacts only after remote metadata is certifiable.
+  `--json` writes a machine-readable summary to stdout; human logs go to stderr.
 - `sha256sum` produces one sidecar per artifact. Consumers verify
   with `sha256sum -c <file>.sha256`.
 - `gh release create` uploads the bundle, the marketplace artifact,
   and the sidecars under one tag. Use whichever release API your
   forge exposes; the file set is what matters.
+
+:::caution[Upgrading an existing release pipeline?]
+`--check-clean` is now always read-only. If an older pipeline relied on one
+`apm pack --check-clean` call to both validate and produce artifacts, split it
+into the gate and pack calls shown above. Install one pinned apm-cli version
+for the job so both calls use identical generation logic.
+:::
 
 Authenticate `gh` with a token that has `contents: write` on the
 repo. Substitute the equivalent verb for non-GitHub forges
@@ -75,12 +87,10 @@ jobs:
 ```
 
 [`microsoft/apm-action@v1`](https://github.com/microsoft/apm-action)
-with `mode: release` is a convenience wrapper for the canonical
-sequence above. It installs the CLI, runs `apm pack
---check-versions --check-clean --json`, generates the sidecars, and
-calls `gh release create` against the pushed tag. Use it when you
-want one less script to maintain; use the raw `run:` form below when
-you need to customise any step.
+with `mode: release` is a convenience for the basic release flow. It does not
+currently enforce `--strict-metadata` before artifact generation. Use the raw
+`run:` form below when remote metadata must be certified, or when you need to
+customize another step.
 
 > **Reference deployment.** [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config)
 > runs this exact pipeline. The
@@ -88,7 +98,9 @@ you need to customise any step.
 > attaches 7 per-plugin bundles + their `.sha256` companions +
 > `marketplace-6.1.2.json` (15 assets total) via the workflow in
 > [`.github/workflows/release.yml`](https://github.com/DevExpGbb/zava-agent-config/blob/main/.github/workflows/release.yml).
-> APM `0.16.0` and apm-action `v1.9.1` or newer required.
+> APM `0.16.0` or newer is required. apm-action `v1.10.0` provides the
+> read-only split flow; use the raw CLI block above when strict metadata
+> certification is required.
 
 :::caution[Migrating release workflows from `.tar.gz`?]
 The examples below assume the new `.zip` default from `apm pack --archive`.
@@ -102,7 +114,8 @@ artifact format.
         with: { python-version: "3.12" }
       - run: pip install apm-cli
       - run: |
-          apm pack --check-versions --check-clean --json > pack-report.json
+          apm pack --check-versions --check-clean --json > gate-report.json
+          apm pack --check-versions --strict-metadata --json > pack-report.json
           for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
@@ -125,7 +138,8 @@ release:
     - if: '$CI_COMMIT_TAG =~ /^v/'
   script:
     - pip install apm-cli
-    - apm pack --check-versions --check-clean --json > pack-report.json
+    - apm pack --check-versions --check-clean --json > gate-report.json
+    - apm pack --check-versions --strict-metadata --json > pack-report.json
     - |
       for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
@@ -149,7 +163,8 @@ pipeline {
       steps {
         sh '''
           pip install apm-cli
-          apm pack --check-versions --check-clean --json > pack-report.json
+          apm pack --check-versions --check-clean --json > gate-report.json
+          apm pack --check-versions --strict-metadata --json > pack-report.json
           for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
@@ -176,7 +191,8 @@ steps:
   - task: UsePythonVersion@0
     inputs: { versionSpec: "3.12" }
   - script: pip install apm-cli
-  - script: apm pack --check-versions --check-clean --json > pack-report.json
+  - script: apm pack --check-versions --check-clean --json > gate-report.json
+  - script: apm pack --check-versions --strict-metadata --json > pack-report.json
   - script: |
       for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
@@ -201,11 +217,16 @@ steps:
 | 1    | runtime           | Build or network error. Inspect the JSON report; rerun.                                          |
 | 2    | schema            | `apm.yml` is invalid. Fix the manifest before tagging.                                           |
 | 3    | `--check-versions`| Per-package versions disagree with `marketplace.versioning.strategy`. See [Versioning strategies](../versioning-strategies/). |
-| 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack. Run `apm pack` locally, commit the diff (or `git commit --amend --no-edit` to fold into the current commit), then re-tag and push the updated tag (`git tag -f vX.Y.Z && git push --force-with-lease origin vX.Y.Z`). |
+| 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack, or remote Claude package metadata was unfetchable. For drift, run `apm pack` locally, commit the diff, then re-tag. For metadata unavailability, restore the remote source or CI credentials and rerun; committing a regenerated file cannot certify unavailable metadata. |
+| 5    | `--strict-metadata`| Remote Claude package metadata could not be fetched, so `apm pack` refused to write. Retry with network access, or omit `--strict-metadata` when the default warning is acceptable. |
 
-The gates never write to disk -- they only refuse to release.
-Recover by running the same `apm pack` locally without `--check-*`,
-inspecting the diff, and pushing a clean tag.
+`--check-clean` is always read-only. `--check-versions` does not suppress normal
+pack writes by itself; pair it with `--dry-run` or `--check-clean` for a
+validation-only invocation. `--strict-metadata` certifies metadata before the
+subsequent pack writes artifacts. Recover drift by running `apm pack` locally
+without `--check-*`, inspecting the diff, and pushing a clean tag. For metadata
+unavailability, restore the remote source or CI credentials instead;
+regenerating a file cannot certify missing metadata.
 
 :::note
 `microsoft/apm-action@v1` is a thin convenience wrapper, not a new
