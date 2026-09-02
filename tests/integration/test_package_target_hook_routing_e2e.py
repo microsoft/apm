@@ -134,12 +134,23 @@ def _publish(
 def _restrict_published_package_to_claude(
     scenario: _Scenario,
     published: _PublishedPackage,
+    *,
+    malformed_instruction: bool = False,
 ) -> _PublishedPackage:
     """Advance a universal package manifest to a Claude-only release."""
     manifest_path = published.repository.worktree / "apm.yml"
     manifest = load_yaml(manifest_path)
     manifest["targets"] = ["claude"]
     dump_yaml(manifest, manifest_path)
+    if malformed_instruction:
+        instruction = (
+            published.repository.worktree / ".apm" / "instructions" / "broken.instructions.md"
+        )
+        instruction.parent.mkdir(parents=True, exist_ok=True)
+        instruction.write_text(
+            "---\napplyTo: [\n---\n# Invalid instruction\n",
+            encoding="utf-8",
+        )
     commit = scenario.repositories.commit(
         published.repository,
         message=f"restrict {published.name} to claude",
@@ -455,3 +466,43 @@ def test_package_target_transition_repairs_cursor_and_uninstall_preserves_user_h
         environment=claude_only.environment,
         scenario_id="target-transition-uninstalled-audit",
     )
+
+
+def test_failed_restricted_update_preserves_existing_hook_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Malformed instruction preflight precedes excluded-target hook cleanup."""
+    scenario = _new_scenario(tmp_path / "failed-target-transition", apm_binary_path)
+    universal = _publish(scenario, "failed-transition-hooks", targets=())
+    consumer = _consumer(scenario, "failed-transition-consumer", universal.dependency)
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=universal.environment,
+        scenario_id="failed-transition-universal-install",
+    )
+    claude_only = _restrict_published_package_to_claude(
+        scenario,
+        universal,
+        malformed_instruction=True,
+    )
+    scenario.consumers.replace_apm_dependencies(consumer, (claude_only.dependency,))
+    before = _snapshot(consumer)
+    assert set(_cursor_commands(before)) == set(_EVENT_COMMANDS.values())
+    assert before.file(".cursor/apm-hooks.json").kind == "file"
+
+    result = scenario.runner.run(
+        (*_INSTALL_ARGS, "--update"),
+        scenario_id="failed-transition-restrict-update",
+        cwd=consumer.root,
+        env=claude_only.environment,
+    )
+
+    assert result.returncode != 0, (
+        f"command={result.command!r}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
+    )
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "Rejected frontmatter in broken.instructions.md" in output
+    assert _snapshot(consumer) == before

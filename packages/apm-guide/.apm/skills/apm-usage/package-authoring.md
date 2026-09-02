@@ -304,8 +304,11 @@ primitive type. When frontmatter is present, its opening fence of at least
 three hyphens (for example, `---`) must be the first content on line 1; an
 optional UTF-8 BOM may precede it and is stripped before parsing. Without that
 opening fence, APM treats the whole document as body content, and later `---`
-lines stay Markdown horizontal rules. Invalid or unsafe instruction
-frontmatter stops the package before any primitive is deployed.
+lines stay Markdown horizontal rules. Malformed instruction frontmatter stops
+the package before any primitive is deployed. Critical hidden characters
+decoded from metadata also prevent installation by default; `--force`
+overrides only that critical finding, while warning-level findings do not
+prevent installation.
 
 ## The 7 primitive types
 

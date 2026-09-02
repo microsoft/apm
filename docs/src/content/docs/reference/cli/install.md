@@ -125,10 +125,11 @@ in `apm.yml`, then run `apm install` again.
   replacements to isolated staging paths and validate them before publication.
   If download, validation, or activation fails, APM keeps the previous package
   and lockfile active and exits non-zero with retry guidance.
-- **Instruction frontmatter preflight.** Invalid YAML or unsafe decoded metadata
-  rejects the package before any of its primitives are deployed. Fix the
-  frontmatter and rerun install. `--force` permits hidden-character findings but
-  never bypasses malformed YAML. See [Author primitives](../../../producer/author-primitives/)
+- **Instruction frontmatter preflight.** Malformed YAML always rejects the
+  package before any of its primitives are deployed. Critical hidden characters
+  decoded from metadata also prevent installation by default; `--force`
+  overrides only that critical finding. Warning-level findings do not prevent
+  installation. See [Author primitives](../../../producer/author-primitives/)
   for fence and UTF-8 BOM syntax.
 - **MCP-only lock state.** A normal project install creates or updates `apm.lock.yaml` when `apm.yml` declares only MCP dependencies, records the resolved MCP configs and targets, and migrates a legacy `apm.lock` first. Repeating the same install leaves the lockfile and target configs byte-identical. If initial lock creation fails, install exits nonzero and warns with writable-directory and rerun guidance.
 - **Lockfile replay and Git ref freshness.** Plain and `--frozen` installs may trust `apm.lock.yaml` and the local Git cache, reusing the locked commit for unchanged Git dependencies across the full resolved graph. In contrast, `apm install --update`, `apm install --refresh`, [`apm update`](../update/) with or without `--force`, [`apm lock --update`](../lock/), and [`apm outdated`](../outdated/) establish mutable Git refs from upstream instead of accepting stale refs from a local bare Git cache. APM picks up upstream changes to a transitive package's `apm.yml` only when you regenerate the graph -- run `apm update` or `apm lock --update`. See the [lockfile specification](../../lockfile-spec/) for the replay contract.
