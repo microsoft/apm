@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm uninstall` now removes MCP servers only from recorded owning runtimes,
   accepts JetBrains Copilot JSONC, and reports target cleanup failures after
   attempting every owner. (by @aryansk, fixes #2551) (#2591)
+- Claude project LSP servers now load from a discoverable APM-managed plugin
+  manifest instead of a path Claude Code ignored. Upgrade users can rerun
+  `apm install --target claude`; legacy
+  project-root `.lsp.json` files remain unchanged for manual review, and target
+  changes, package uninstall, and later executable denial remove only LSP
+  entries that APM created. (#2733)
 - `apm install` now preserves previously deployed skills when package
   integration is skipped instead of treating them as stale cleanup candidates.
   (#2758)

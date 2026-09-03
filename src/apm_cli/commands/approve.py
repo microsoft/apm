@@ -516,12 +516,13 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             name = locked.name or package_dir.name
             version = str(locked.version or "")
             package_manifest = package_dir / "apm.yml"
+            manifest_data = None
             if package_manifest.is_file():
                 try:
-                    data = load_yaml(package_manifest)
-                    if isinstance(data, dict):
-                        name = data.get("name", name)
-                        version = str(data.get("version", version))
+                    manifest_data = load_yaml(package_manifest)
+                    if isinstance(manifest_data, dict):
+                        name = manifest_data.get("name", name)
+                        version = str(manifest_data.get("version", version))
                 except Exception:
                     pass
             declaration = scan_package_executables(
@@ -529,6 +530,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 name,
                 version,
                 approval_identity=locked.get_unique_key(),
+                manifest_data=manifest_data,
             )
             if declaration.has_executables:
                 results.append(declaration)

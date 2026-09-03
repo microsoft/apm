@@ -457,6 +457,15 @@ def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     return tuple(dict.fromkeys((identity, versioned)))
 
 
+def local_bundle_approval_key(package_id: str, version: str, source_dir: Path) -> str:
+    """Bind local-bundle executable consent to its exact content digest."""
+    from ..utils.content_hash import compute_package_hash
+
+    artifact_version = version or "local"
+    digest = compute_package_hash(source_dir)
+    return f"{package_id}#{artifact_version}@{digest}"
+
+
 # -------------------------------------------------------------------
 # Package scanning
 # -------------------------------------------------------------------
@@ -468,6 +477,7 @@ def scan_package_executables(
     package_version: str,
     *,
     approval_identity: str | None = None,
+    manifest_data: dict[str, Any] | None = None,
     is_transitive: bool = False,
     parent_name: str | None = None,
 ) -> ExecutableDeclaration:
@@ -522,32 +532,33 @@ def scan_package_executables(
     lsp_count = 0
     lsp_details: list[str] = []
     apm_yml = install_path / "apm.yml"
-    if apm_yml.is_file():
+    data = manifest_data
+    if data is None and apm_yml.is_file():
         try:
             from ..utils.yaml_io import load_yaml
 
             data = load_yaml(apm_yml)
-            if isinstance(data, dict):
-                deps = data.get("dependencies", {})
-                if isinstance(deps, dict):
-                    mcp_list = deps.get("mcp", [])
-                    if isinstance(mcp_list, list):
-                        mcp_count = len(mcp_list)
-                        for entry in mcp_list:
-                            if isinstance(entry, str):
-                                mcp_details.append(entry)
-                            elif isinstance(entry, dict):
-                                mcp_details.append(entry.get("name", str(entry)))
-                    lsp_list = deps.get("lsp", [])
-                    if isinstance(lsp_list, list):
-                        lsp_count = len(lsp_list)
-                        for entry in lsp_list:
-                            if isinstance(entry, str):
-                                lsp_details.append(entry)
-                            elif isinstance(entry, dict):
-                                lsp_details.append(entry.get("name", str(entry)))
         except Exception:
-            pass  # Non-fatal: if we cannot parse, treat as zero MCP
+            data = None
+    if isinstance(data, dict):
+        deps = data.get("dependencies", {})
+        if isinstance(deps, dict):
+            mcp_list = deps.get("mcp", [])
+            if isinstance(mcp_list, list):
+                mcp_count = len(mcp_list)
+                for entry in mcp_list:
+                    if isinstance(entry, str):
+                        mcp_details.append(entry)
+                    elif isinstance(entry, dict):
+                        mcp_details.append(entry.get("name", str(entry)))
+            lsp_list = deps.get("lsp", [])
+            if isinstance(lsp_list, list):
+                lsp_count = len(lsp_list)
+                for entry in lsp_list:
+                    if isinstance(entry, str):
+                        lsp_details.append(entry)
+                    elif isinstance(entry, dict):
+                        lsp_details.append(entry.get("name", str(entry)))
 
     # 4. Canvas extensions: .apm/extensions/<name>/extension.mjs
     #    Mirrors CanvasIntegrator.find_canvas_bundles marker detection.

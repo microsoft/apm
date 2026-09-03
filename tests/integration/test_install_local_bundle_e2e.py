@@ -1231,6 +1231,146 @@ class TestInstallLocalBundleLsp:
         )
         return _make_plugin_bundle(tmp_path, files={"lsp.json": lsp_json})
 
+    @staticmethod
+    def _approve_exact_bundle(project: Path, bundle: Path) -> str:
+        from apm_cli.bundle.local_bundle import detect_local_bundle
+        from apm_cli.security.executables import local_bundle_approval_key
+
+        bundle_info = detect_local_bundle(bundle)
+        assert bundle_info is not None
+        approval_key = local_bundle_approval_key(
+            bundle_info.package_id,
+            str(bundle_info.plugin_json.get("version") or ""),
+            bundle_info.source_dir,
+        )
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {approval_key: {"lsp": True}}}
+        manifest_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+        return approval_key
+
+    def test_generic_identity_cannot_approve_changed_bundle_content(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {"test-plugin": {"lsp": True}}}
+        manifest_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        normalized_output = " ".join(result.output.split())
+        assert "approve this exact local bundle" in normalized_output
+        assert "test-plugin#local@sha256:" in normalized_output
+        assert not (
+            project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+
+    def test_exact_bundle_digest_approval_enables_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        approval_key = self._approve_exact_bundle(project, bundle)
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert approval_key not in result.output
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        assert "bundle-lsp" in json.loads(plugin_path.read_text())["lspServers"]
+
+    def test_org_deny_overrides_exact_bundle_lsp_approval(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.policy.discovery import PolicyFetchResult
+        from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
+
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        self._approve_exact_bundle(project, bundle)
+        policy = ApmPolicy(executables=ExecutablesPolicy(deny=("test-plugin",)))
+        policy_fetch = PolicyFetchResult(policy=policy, source="test", outcome="found")
+
+        with (
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain",
+                return_value=policy_fetch,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=policy_fetch,
+            ),
+        ):
+            result = _invoke_install(
+                project,
+                str(bundle),
+                "--target",
+                "claude",
+                monkeypatch=monkeypatch,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Skipped 1 bundle LSP executable" in result.output
+        assert not (
+            project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+
+    def test_copilot_aliases_are_normalized_for_bundle_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lsp_json = json.dumps(
+            {
+                "lspServers": {
+                    "bundle-lsp": {
+                        "command": "bundle-language-server",
+                        "fileExtensions": {".bundle": "bundle"},
+                        "warmupTimeoutMs": 1234,
+                    }
+                }
+            }
+        )
+        bundle = _make_plugin_bundle(
+            tmp_path / "source",
+            files={"lsp.json": lsp_json},
+        )
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        server = json.loads(plugin_path.read_text())["lspServers"]["bundle-lsp"]
+        assert server["extensionToLanguage"] == {".bundle": "bundle"}
+        assert server["startupTimeout"] == 1234
+
     def test_lsp_collision_force_reconciles(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1301,7 +1441,7 @@ class TestInstallLocalBundleLsp:
         )
 
         assert denied.exit_code == 0, denied.output
-        assert json.loads(plugin_path.read_text())["lspServers"] == {}
+        assert not plugin_path.exists()
 
 
 # ---------------------------------------------------------------------------

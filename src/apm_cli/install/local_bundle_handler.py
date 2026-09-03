@@ -149,22 +149,33 @@ def install_local_bundle(
             if bundle_mcp_declared and bundle_info.source_dir is not None
             else []
         )
-        bundle_mcp_deps = _filter_bundle_executables(
-            bundle_mcp_deps,
-            bundle_info=bundle_info,
-            allow_executables=allow_executables,
-            exec_type="mcp",
-            logger=logger,
-        )
         bundle_lsp_deps = (
             _parse_bundle_lsp_servers(bundle_info.source_dir)
             if bundle_info.source_dir is not None
             else []
         )
+        bundle_approval_key = None
+        if allow_executables is not None and (bundle_mcp_deps or bundle_lsp_deps):
+            from ..security.executables import local_bundle_approval_key
+
+            bundle_approval_key = local_bundle_approval_key(
+                bundle_info.package_id,
+                str(bundle_info.plugin_json.get("version") or ""),
+                bundle_info.source_dir,
+            )
+        bundle_mcp_deps = _filter_bundle_executables(
+            bundle_mcp_deps,
+            bundle_info=bundle_info,
+            allow_executables=allow_executables,
+            approval_key=bundle_approval_key,
+            exec_type="mcp",
+            logger=logger,
+        )
         bundle_lsp_deps = _filter_bundle_executables(
             bundle_lsp_deps,
             bundle_info=bundle_info,
             allow_executables=allow_executables,
+            approval_key=bundle_approval_key,
             exec_type="lsp",
             logger=logger,
         )
@@ -483,23 +494,27 @@ def _filter_bundle_executables(
     *,
     bundle_info,
     allow_executables: dict[str, dict[str, bool]] | None,
+    approval_key: str | None,
     exec_type: str,
     logger,
 ) -> list[Any]:
-    """Apply executable trust to a bundle identity, never to server names."""
+    """Apply executable trust to the exact bundle artifact, never its claimed name."""
     if not dependencies or allow_executables is None:
         return dependencies
-    from ..security.executables import build_approval_key, is_package_approved
+    from ..security.executables import is_package_approved
 
-    version = str(bundle_info.plugin_json.get("version") or "")
-    package_key = build_approval_key(bundle_info.package_id, version)
-    candidate_keys = (package_key, bundle_info.package_id)
-    if any(is_package_approved(allow_executables, key, exec_type) for key in candidate_keys):
+    if approval_key is None:
+        raise ValueError("Local bundle executable approval requires an artifact digest")
+    if is_package_approved(allow_executables, approval_key, exec_type):
         return dependencies
     logger.warning(
         f"Skipped {len(dependencies)} bundle {exec_type.upper()} executable(s) from "
-        f"{package_key}: approve the bundle identity under allowExecutables.{exec_type} "
-        "to enable them."
+        f"{bundle_info.package_id}. To approve this exact local bundle, add:\n"
+        "executables:\n"
+        "  allow:\n"
+        f'    "{approval_key}":\n'
+        f"      {exec_type}: true\n"
+        "Then rerun the install."
     )
     return []
 
@@ -588,8 +603,6 @@ def _parse_bundle_lsp_servers(
     bundle_dir: Path,
 ):
     """Parse ``<bundle>/lsp.json`` or ``<bundle>/com.microsoft.apm/lsp.json`` into LSP deps."""
-    from apm_cli.models.dependency.lsp import LSPDependency
-
     lsp_path: Path | None = None
     for entry in bundle_dir.iterdir() if bundle_dir.is_dir() else []:
         if (
@@ -619,17 +632,13 @@ def _parse_bundle_lsp_servers(
     if not isinstance(servers, dict):
         return []
 
-    out: list[LSPDependency] = []
-    for name, cfg in servers.items():
-        if not isinstance(name, str) or not isinstance(cfg, dict):
-            continue
-        spec = dict(cfg)
-        spec["name"] = name
-        try:
-            out.append(LSPDependency.from_dict(spec))
-        except (ValueError, TypeError):
-            continue
-    return out
+    from apm_cli.deps.plugin_parser import lsp_servers_to_apm_deps
+    from apm_cli.models.dependency.lsp import LSPDependency
+
+    return [
+        LSPDependency.from_dict(spec)
+        for spec in lsp_servers_to_apm_deps(servers, lsp_path, warn_on_invalid=False)
+    ]
 
 
 def _wire_bundle_lsp_servers(

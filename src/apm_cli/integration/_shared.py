@@ -57,12 +57,17 @@ def resolve_locked_apm_yml_sources(
             locked_sources = {}
             for dep in lockfile.get_package_dependencies():
                 if dep.repo_url:
-                    yml = (
-                        apm_modules_dir / dep.repo_url / dep.virtual_path / "apm.yml"
-                        if dep.virtual_path
-                        else apm_modules_dir / dep.repo_url / "apm.yml"
-                    )
+                    package_root = dep.to_dependency_ref().get_install_path(apm_modules_dir)
+                    yml = package_root / "apm.yml"
+                    if yml.is_symlink():
+                        raise ValueError(f"Locked package manifest must not be a symlink: {yml}")
                     resolved_yml = yml.resolve()
+                    try:
+                        resolved_yml.relative_to(package_root.resolve())
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Locked package manifest escapes its package root: {yml}"
+                        ) from exc
                     locked_sources[resolved_yml] = dep
                     if dep.depth == 1:
                         direct_paths.add(resolved_yml)

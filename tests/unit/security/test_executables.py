@@ -295,6 +295,21 @@ class TestScanPackageExecutables:
             assert EXEC_TYPE_LSP in decl.exec_types
             assert decl.lsp_details == ["pyright", "typescript-language-server"]
 
+    def test_preparsed_manifest_avoids_a_second_yaml_read(self, tmp_path) -> None:
+        manifest_data = {
+            "dependencies": {"lsp": [{"name": "pyright", "command": "pyright-langserver"}]}
+        }
+        with patch("apm_cli.utils.yaml_io.load_yaml") as load_yaml:
+            decl = scan_package_executables(
+                tmp_path,
+                "lsp-pkg",
+                "1.0",
+                manifest_data=manifest_data,
+            )
+
+        load_yaml.assert_not_called()
+        assert decl.lsp_count == 1
+
     def test_transitive_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             decl = scan_package_executables(

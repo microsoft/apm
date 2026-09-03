@@ -454,8 +454,10 @@ first-match-wins ladder:
 Personal consent can never widen past an org deny, and the default (rung 7) is
 **gated pending approval** -- a package with executables and no opinion anywhere
 is parked until approved, not hard-denied. This release ships no `enforce`
-mandate runtime, no signing, and no content-hash binding; an org
-`executables.enforce` rung degrades to `recommend`.
+mandate runtime or package signing; an org `executables.enforce` rung degrades
+to `recommend`. Local bundle executable approvals are narrower: APM prints an
+exact `executables.allow` key containing the bundle's SHA-256 content digest, so
+another bundle that claims the same package name cannot inherit that consent.
 
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, or `absent`).

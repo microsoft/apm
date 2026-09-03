@@ -570,7 +570,18 @@ class LSPIntegrator:
         if removed:
             if servers_key is not None:
                 config[servers_key] = servers
-            write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
+            owned_keys = {key for key, _value in spec.config_defaults(user_scope=user_scope)}
+            if servers_key is not None:
+                owned_keys.add(servers_key)
+            if not servers and owned_keys and set(config) <= owned_keys:
+                config_path.unlink()
+                for directory in (config_path.parent, config_path.parent.parent):
+                    try:
+                        directory.rmdir()
+                    except OSError:
+                        break
+            else:
+                write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
         return removed
 
     # ------------------------------------------------------------------
@@ -608,7 +619,7 @@ class LSPIntegrator:
                     fail_on_write_error=fail_on_write_error,
                 )
                 for name in removed:
-                    logger.progress(
+                    logger.info(
                         f"Removed stale LSP server '{name}' from {spec.label(user_scope=user_scope)}"
                     )
             except Exception as exc:

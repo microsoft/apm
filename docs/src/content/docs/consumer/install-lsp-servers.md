@@ -23,6 +23,10 @@ for runtime-specific config details.
 
 Declare an LSP server in `apm.yml` and run `apm install`:
 
+Install the language-server executable separately first, and make sure its
+command is available on `PATH`; APM configures the runtime but does not install
+the executable.
+
 ```yaml
 dependencies:
   lsp:
@@ -44,8 +48,12 @@ Claude Code discovers LSP servers from the APM-managed plugin manifest at
 `~/.copilot/lsp-config.json`. This generated shape matches each runtime's
 documented discovery contract.
 
-**After install:** restart Claude Code or run `/reload-plugins` so the current
-session loads the newly generated plugin.
+For project installs, accept Claude Code's workspace-trust prompt and start
+Claude from the repository root so its primary working directory contains
+`.claude/skills/`. After install, restart Claude Code or run `/reload-plugins`
+(use `/reload-plugins --force` when Claude requests it). Open a file matching a
+configured extension and confirm its LSP-backed diagnostics or navigation work
+before relying on the integration.
 
 If an earlier APM version created a project-root `.lsp.json`, APM leaves it
 unchanged because it may contain user-owned entries. Claude Code does not use

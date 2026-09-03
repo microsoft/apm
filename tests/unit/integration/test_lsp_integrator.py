@@ -543,6 +543,18 @@ class TestRemoveStale:
         assert "keep" in data["lspServers"]
         assert "stale" not in data["lspServers"]
 
+    def test_removing_last_server_deletes_owned_project_plugin(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps({"name": "apm-lsp", "lspServers": {"stale": {"command": "y"}}})
+        )
+
+        LSPIntegrator.remove_stale({"stale"}, project_root=tmp_path)
+
+        assert not plugin_json.exists()
+        assert not plugin_json.parent.parent.exists()
+
     def test_removes_stale_from_user_claude_json(self, tmp_path):
         claude_json = tmp_path / ".claude.json"
         claude_json.write_text(
@@ -736,6 +748,27 @@ class TestCollectTransitive:
             dep.get_unique_key(),
             f"{dep.get_unique_key()}#1.0.0",
         }
+
+    def test_rejects_symlinked_locked_package_manifest(self, tmp_path):
+        modules_dir = tmp_path / "apm_modules"
+        package_dir = modules_dir / "owner" / "repo"
+        package_dir.mkdir(parents=True)
+        outside = tmp_path / "outside-apm.yml"
+        outside.write_text("name: escaped\n", encoding="utf-8")
+        try:
+            (package_dir / "apm.yml").symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"file symlinks unavailable: {exc}")
+
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock = LockFile()
+        lock.add_dependency(LockedDependency(repo_url="owner/repo", version="1.0.0"))
+        lock.save(lock_path)
+
+        with pytest.raises(ValueError, match="manifest must not be a symlink"):
+            LSPIntegrator.collect_transitive(modules_dir, lock_path)
 
     def test_unlocked_fallback_does_not_invent_approval_keys(self, tmp_path):
         pkg_dir = tmp_path / "apm_modules" / "ghe.example" / "owner" / "repo"

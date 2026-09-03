@@ -55,6 +55,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
             _EXECUTABLES: (
                 "def exec_trust_context_for_project(",
                 "def locked_dependency_approval_keys(",
+                "def local_bundle_approval_key(",
                 'owner = getattr(dependency, "resolved_by", None)',
                 'approval_keys = getattr(dependency, "approval_keys", ())',
             ),
@@ -65,6 +66,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 "effective_allow_executables = effective_exec_map_for_project(",
                 "if not effective_allow_resolved:",
             ),
+            _LOCAL_BUNDLE: ("bundle_approval_key = local_bundle_approval_key(",),
         },
     )
 
