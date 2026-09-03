@@ -157,7 +157,13 @@ def run_mcp_install(  # noqa: PLR0913
                     logger=logger,
                 )
             except Exception as exc:
-                logger.verbose_detail(f"MCP registry validation error: {exc}")
+                detail = str(exc)
+                if detail.startswith("Could not reach MCP registry"):
+                    logger.error(f"{detail} No state was changed.")
+                    raise click.ClickException(
+                        f"MCP registry validation failed for '{mcp_name}'"
+                    ) from None
+                logger.verbose_detail(f"MCP registry validation error: {detail}")
                 raise click.ClickException(
                     f"MCP registry validation failed for '{mcp_name}'. Check the server "
                     "name and registry reachability/configuration, then retry; "
