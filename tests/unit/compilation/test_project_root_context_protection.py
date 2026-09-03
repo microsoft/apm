@@ -308,6 +308,35 @@ def test_case_variant_generated_agents_remains_replaceable_on_insensitive_filesy
     assert AGENTS_MD_GENERATED_MARKER in canonical.read_text(encoding="utf-8")
 
 
+def test_case_variant_custom_symlink_remains_replaceable_on_sensitive_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lowercase custom output is not a canonical root file on sensitive filesystems."""
+    _seed_project(tmp_path)
+    case_variant = tmp_path / "agents.md"
+    if case_variant.exists():
+        pytest.skip("fixture filesystem is case-insensitive")
+    target = tmp_path / "custom-output.md"
+    target.write_text("Custom linked output.\n", encoding="utf-8")
+    try:
+        case_variant.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--single-agents", "--output", "agents.md"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not case_variant.is_symlink()
+    assert "Protected agents.md" not in result.output
+    assert target.read_text(encoding="utf-8") == "Custom linked output.\n"
+
+
 @pytest.mark.parametrize("dangling", [False, True])
 def test_full_file_compile_retains_root_agents_symlink(
     tmp_path: Path,

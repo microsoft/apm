@@ -1837,17 +1837,39 @@ class AgentsCompiler:
         resolved_path: Path | None = None,
     ) -> bool:
         """Return whether an existing project-root file must be retained."""
-        canonical_name = next(
-            (
-                name
-                for name in ("AGENTS.md", "CLAUDE.md")
-                if path.name.casefold() == name.casefold()
-            ),
-            None,
-        )
+        canonical_name = None
+        normalized_path = Path(os.path.abspath(path))
         lexical_root = Path(os.path.abspath(path.parent)) == self._resolved_base_dir
+        canonical_paths = (
+            self._resolved_base_dir / "AGENTS.md",
+            self._resolved_base_dir / "CLAUDE.md",
+        )
+        if lexical_root:
+            for candidate in canonical_paths:
+                if normalized_path == candidate:
+                    canonical_name = candidate.name
+                    break
+                try:
+                    if os.path.samestat(path.lstat(), candidate.lstat()):
+                        canonical_name = candidate.name
+                        break
+                except OSError:
+                    continue
         if canonical_name is None:
-            return False
+            if not path.is_file():
+                return False
+            try:
+                resolved = resolved_path or ensure_path_within(path, self.base_dir)
+                if resolved.parent != self._resolved_base_dir:
+                    return False
+                for candidate in canonical_paths:
+                    if candidate.is_file() and path.samefile(candidate):
+                        canonical_name = candidate.name
+                        break
+            except (OSError, PathTraversalError):
+                return False
+            if canonical_name is None:
+                return False
         rel_path = portable_relpath(path, self.base_dir)
         if lexical_root and path.is_symlink():
             self._protected_root_context_paths.add(path)
@@ -1859,17 +1881,8 @@ class AgentsCompiler:
         if not path.is_file():
             return False
         try:
-            resolved = resolved_path or ensure_path_within(path, self.base_dir)
-            if not lexical_root and resolved.parent != self._resolved_base_dir:
-                return False
-            canonical_paths = (
-                self._resolved_base_dir / "AGENTS.md",
-                self._resolved_base_dir / "CLAUDE.md",
-            )
-            if not any(
-                candidate.is_file() and path.samefile(candidate) for candidate in canonical_paths
-            ):
-                return False
+            if resolved_path is None:
+                ensure_path_within(path, self.base_dir)
             with path.open("rb") as handle:
                 prefix = handle.read(4096).decode("utf-8")
         except (OSError, PathTraversalError, UnicodeDecodeError) as exc:
