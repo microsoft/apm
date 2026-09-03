@@ -23,9 +23,9 @@ for runtime-specific config details.
 
 Declare an LSP server in `apm.yml` and run `apm install`:
 
-Install the language-server executable separately first, and make sure its
-command is available on `PATH`; APM configures the runtime but does not install
-the executable.
+For this root-manifest example, install `gopls` separately and make sure it is
+available on `PATH`; APM configures the runtime but does not install external
+language-server executables.
 
 ```yaml
 dependencies:
@@ -50,8 +50,9 @@ documented discovery contract.
 
 For project installs, accept Claude Code's workspace-trust prompt and start
 Claude from the repository root so its primary working directory contains
-`.claude/skills/`. After install, restart Claude Code or run `/reload-plugins`
-(use `/reload-plugins --force` when Claude requests it). Open a file matching a
+`.claude/skills/`. After APM reports that it configured or removed Claude LSP
+servers, restart Claude Code or run `/reload-plugins` (use
+`/reload-plugins --force` when Claude requests it). Open a file matching a
 configured extension and confirm its LSP-backed diagnostics or navigation work
 before relying on the integration.
 
@@ -137,7 +138,7 @@ Two fields are required for every LSP server definition (object form):
 
 | Field | Type | Description |
 |---|---|---|
-| `command` | `string` | Binary to execute. Must be on `$PATH` or a relative path. |
+| `command` | `string` | Binary to execute. Must resolve from `$PATH` or use an absolute or relative path. |
 | `extensionToLanguage` | `map<string, string>` | Maps file extensions to LSP language identifiers (e.g. `".go": "go"`). |
 
 Optional fields give you finer control:
@@ -176,7 +177,9 @@ content.
 When a previously installed LSP server is no longer declared by
 any dependency, APM removes it from the target runtime configs it manages.
 The lockfile tracks which servers APM manages, so hand-added servers are
-never touched.
+never touched. When cleanup removes the last managed server from an otherwise
+empty APM-owned Claude project plugin, APM deletes the plugin and its empty
+`apm-lsp` directory.
 
 ## Lockfile
 
@@ -188,10 +191,11 @@ field definitions.
 
 ## Plugin extraction
 
-When APM installs a plugin that contains `lspServers` in `plugin.json`
-or a `.lsp.json` file, the LSP servers are automatically extracted and
-wired into the install pipeline. Plugin `.lsp.json` files may use either
-a flat server map or a `{ "lspServers": { ... } }` envelope. The
+When APM installs a plugin, it extracts LSP servers from an inline or
+file-valued `lspServers` entry in `plugin.json`, or auto-discovers
+`com.microsoft.apm/lsp.json`, `lsp.json`, or `.lsp.json`. The servers are
+then wired into the install pipeline. Plugin LSP files may use either a flat
+server map or a `{ "lspServers": { ... } }` envelope. The
 `${CLAUDE_PLUGIN_ROOT}` placeholder in server configs is replaced with
 the absolute plugin path for legacy Claude Code plugin compatibility.
 These are source files shipped by a dependency package, distinct from the

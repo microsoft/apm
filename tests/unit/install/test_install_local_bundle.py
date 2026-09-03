@@ -874,6 +874,9 @@ class TestLocalBundleCanvasTrust:
         assert generic.exit_code == 0, generic.output
         assert not (project / ".github" / "extensions" / "widget").exists()
         assert approval_key in "".join(generic.output.split())
+        assert "executables:" in generic.output
+        assert "allow:" in generic.output
+        assert "canvas: true" in generic.output
 
         manifest["executables"] = {"allow": {approval_key: {"canvas": True}}}
         manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")

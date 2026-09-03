@@ -13,13 +13,14 @@ pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_claude_lsp_plugin_owner_rules_pass() -> None:
+def test_lsp_owner_rules_pass() -> None:
     """The live source must satisfy both registered LSP ownership rules."""
     report = run_selected_rules(
         ROOT,
         (
             "install-deployment-executable-trust-context",
-            "install-deployment-claude-lsp-plugin",
+            "install-deployment-lsp-target-contract",
+            "install-deployment-lsp-lifecycle",
         ),
     )
 
@@ -38,12 +39,14 @@ def test_claude_lsp_plugin_path_bypass_is_rejected() -> None:
 
     report = run_selected_rules(
         ROOT,
-        ("install-deployment-claude-lsp-plugin",),
+        ("install-deployment-lsp-target-contract",),
         source_overrides={path: mutated},
     )
 
     assert report.exit_code == 2
-    assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}
+    assert {item.rule_id for item in report.violations} == {
+        "install-deployment-lsp-target-contract"
+    }
 
 
 def test_user_lsp_config_path_bypass_is_rejected() -> None:
@@ -56,12 +59,14 @@ def test_user_lsp_config_path_bypass_is_rejected() -> None:
 
     report = run_selected_rules(
         ROOT,
-        ("install-deployment-claude-lsp-plugin",),
+        ("install-deployment-lsp-target-contract",),
         source_overrides={path: mutated},
     )
 
     assert report.exit_code == 2
-    assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}
+    assert {item.rule_id for item in report.violations} == {
+        "install-deployment-lsp-target-contract"
+    }
 
 
 def test_lsp_target_ownership_bypass_is_rejected() -> None:
@@ -74,12 +79,12 @@ def test_lsp_target_ownership_bypass_is_rejected() -> None:
 
     report = run_selected_rules(
         ROOT,
-        ("install-deployment-claude-lsp-plugin",),
+        ("install-deployment-lsp-lifecycle",),
         source_overrides={path: mutated},
     )
 
     assert report.exit_code == 2
-    assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}
+    assert {item.rule_id for item in report.violations} == {"install-deployment-lsp-lifecycle"}
 
 
 def test_claude_lsp_approval_alias_bypass_is_rejected() -> None:
@@ -92,12 +97,14 @@ def test_claude_lsp_approval_alias_bypass_is_rejected() -> None:
 
     report = run_selected_rules(
         ROOT,
-        ("install-deployment-claude-lsp-plugin",),
+        ("install-deployment-lsp-target-contract",),
         source_overrides={path: mutated},
     )
 
     assert report.exit_code == 2
-    assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}
+    assert {item.rule_id for item in report.violations} == {
+        "install-deployment-lsp-target-contract"
+    }
 
 
 def test_local_bundle_content_approval_bypass_is_rejected() -> None:
@@ -152,9 +159,11 @@ def test_multitarget_lsp_preflight_bypass_is_rejected() -> None:
 
     report = run_selected_rules(
         ROOT,
-        ("install-deployment-claude-lsp-plugin",),
+        ("install-deployment-lsp-target-contract",),
         source_overrides={path: mutated},
     )
 
     assert report.exit_code == 2
-    assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}
+    assert {item.rule_id for item in report.violations} == {
+        "install-deployment-lsp-target-contract"
+    }

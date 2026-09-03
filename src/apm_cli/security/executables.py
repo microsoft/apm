@@ -290,6 +290,11 @@ def _strip_version(package_key: str) -> str:
     return package_key.split("#", 1)[0]
 
 
+def _is_content_bound_key(package_key: str) -> bool:
+    """Return whether an approval key identifies one exact content digest."""
+    return "@sha256:" in package_key
+
+
 def normalize_bin_deploy_deny_key(value: object) -> str:
     """Normalize package identity for ``bin_deploy.deny`` storage and lookup."""
     raw = str(value or "").strip()
@@ -311,9 +316,8 @@ def _map_grants(
 ) -> bool:
     """Return True if *grant_map* grants *exec_type* for *package_key*.
 
-    Matches the exact key, the version-blind name, or any stored key that
-    shares the same version-blind name -- so approving ``owner/repo``
-    covers ``owner/repo#v1`` and vice-versa.
+    Ordinary package grants are version-blind. Content-bound local-bundle
+    grants match only the exact digest key.
     """
     if not grant_map:
         return False
@@ -321,9 +325,13 @@ def _map_grants(
     for stored_key, entry in grant_map.items():
         if not isinstance(entry, dict):
             continue
-        if (stored_key in (package_key, name) or _strip_version(stored_key) == name) and bool(
-            entry.get(exec_type, False)
-        ):
+        content_bound = _is_content_bound_key(package_key) or _is_content_bound_key(stored_key)
+        matches = (
+            stored_key == package_key
+            if content_bound
+            else stored_key in (package_key, name) or _strip_version(stored_key) == name
+        )
+        if matches and bool(entry.get(exec_type, False)):
             return True
     return False
 
@@ -490,11 +498,13 @@ def local_bundle_approval_key(
             files.append((rel_path, item))
         for rel_path, item in sorted(files):
             encoded_path = rel_path.encode("utf-8")
-            content = item.read_bytes()
+            content_length = item.stat().st_size
             hasher.update(len(encoded_path).to_bytes(8, "big"))
             hasher.update(encoded_path)
-            hasher.update(len(content).to_bytes(8, "big"))
-            hasher.update(content)
+            hasher.update(content_length.to_bytes(8, "big"))
+            with item.open("rb") as handle:
+                while chunk := handle.read(1024 * 1024):
+                    hasher.update(chunk)
     artifact_version = version or "local"
     digest = f"sha256:{hasher.hexdigest()}"
     return f"{package_id}#{artifact_version}@{digest}"
@@ -842,7 +852,7 @@ def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | 
                 continue
             result.setdefault(key, {})[exec_type] = True
             name = _strip_version(key)
-            if name != key:
+            if name != key and not _is_content_bound_key(key):
                 result.setdefault(name, {})[exec_type] = True
     return result
 

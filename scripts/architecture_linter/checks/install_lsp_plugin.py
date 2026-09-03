@@ -11,7 +11,8 @@ from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.models import Violation
 
 GUARD_EXECUTABLE_TRUST = "install-deployment-executable-trust-context"
-GUARD_CLAUDE_LSP_PLUGIN = "install-deployment-claude-lsp-plugin"
+GUARD_LSP_TARGET_CONTRACT = "install-deployment-lsp-target-contract"
+GUARD_LSP_LIFECYCLE = "install-deployment-lsp-lifecycle"
 
 _EXECUTABLES = "src/apm_cli/security/executables.py"
 _APPROVE_COMMAND = "src/apm_cli/commands/approve.py"
@@ -78,25 +79,35 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
     )
 
 
-def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Claude plugin writes and cleanup must route through the LSP owner."""
+def check_lsp_target_contract(provider: FactsProvider) -> tuple[Violation, ...]:
+    """LSP target shape and deployment paths must route through LSPIntegrator."""
+    return _missing_tokens(
+        provider,
+        GUARD_LSP_TARGET_CONTRACT,
+        {
+            _LSP_INTEGRATOR: (
+                "def reserved_project_skill_names(",
+                "def _prepare_target_config(",
+                "prepared_targets.append((runtime, spec, prepared))",
+                "BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
+                "allowed_prefixes=(relative_path,)",
+                "locked_dependency_approval_keys(locked_dependency)",
+                "approval_keys=approval_keys",
+            ),
+            _SKILL_SUPPORT: (
+                "LSPIntegrator.reserved_project_skill_names(skills_dir, project_root)",
+            ),
+        },
+    )
+
+
+def check_lsp_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
+    """LSP collection and reconciliation must route through the pipeline owner."""
     findings = list(
         _missing_tokens(
             provider,
-            GUARD_CLAUDE_LSP_PLUGIN,
+            GUARD_LSP_LIFECYCLE,
             {
-                _LSP_INTEGRATOR: (
-                    "def reserved_project_skill_names(",
-                    "def _prepare_target_config(",
-                    "prepared_targets.append((runtime, spec, prepared))",
-                    "BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
-                    "allowed_prefixes=(relative_path,)",
-                    "locked_dependency_approval_keys(locked_dependency)",
-                    "approval_keys=approval_keys",
-                ),
-                _SKILL_SUPPORT: (
-                    "LSPIntegrator.reserved_project_skill_names(skills_dir, project_root)",
-                ),
                 _LSP_PIPELINE: (
                     "transitive_lsp = filter_lsp_by_allow_executables(",
                     "lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)",
@@ -113,7 +124,7 @@ def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
             },
         )
     )
-    pipeline, failures = _facts_for(provider, _LSP_PIPELINE, GUARD_CLAUDE_LSP_PLUGIN)
+    pipeline, failures = _facts_for(provider, _LSP_PIPELINE, GUARD_LSP_LIFECYCLE)
     if failures:
         return tuple([*findings, *failures])
     lines = getattr(pipeline, "lines", ())
@@ -136,7 +147,7 @@ def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
     if filter_line is not None and dedup_line is not None and filter_line >= dedup_line:
         findings.append(
             _summary(
-                GUARD_CLAUDE_LSP_PLUGIN,
+                GUARD_LSP_LIFECYCLE,
                 _LSP_PIPELINE,
                 "Transitive LSP trust filtering must run before first-wins deduplication",
             )

@@ -517,14 +517,16 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             version = str(locked.version or "")
             package_manifest = package_dir / "apm.yml"
             manifest_data = None
-            if package_manifest.is_file():
+            if package_manifest.is_symlink():
+                manifest_data = {}
+            elif package_manifest.is_file():
                 try:
                     manifest_data = load_yaml(package_manifest)
                     if isinstance(manifest_data, dict):
                         name = manifest_data.get("name", name)
                         version = str(manifest_data.get("version", version))
                 except Exception:
-                    pass
+                    manifest_data = {}
             declaration = scan_package_executables(
                 package_dir,
                 name,
@@ -547,18 +549,26 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             pkg_yml = pkg_dir / "apm.yml"
             name = pkg_dir.name
             version = ""
-            if pkg_yml.is_file():
+            manifest_data = None
+            if pkg_yml.is_symlink():
+                manifest_data = {}
+            elif pkg_yml.is_file():
                 try:
                     from ..utils.yaml_io import load_yaml
 
-                    data = load_yaml(pkg_yml)
-                    if isinstance(data, dict):
-                        name = data.get("name", name)
-                        version = str(data.get("version", ""))
+                    manifest_data = load_yaml(pkg_yml)
+                    if isinstance(manifest_data, dict):
+                        name = manifest_data.get("name", name)
+                        version = str(manifest_data.get("version", ""))
                 except Exception:
-                    pass
+                    manifest_data = {}
 
-            decl = scan_package_executables(pkg_dir, name, version)
+            decl = scan_package_executables(
+                pkg_dir,
+                name,
+                version,
+                manifest_data=manifest_data,
+            )
             if decl.has_executables:
                 results.append(decl)
 

@@ -826,11 +826,6 @@ def integrate_local_bundle(
         alias: Slug override from ``--as``.
         allow_executables: Effective executable approvals, or ``None`` when disabled.
         approval_key: Exact local-bundle content identity for executable approval.
-        allow_executables: The ``allowExecutables`` block from the consuming
-            project's ``apm.yml``.  When ``None`` (no enforcement), all
-            executable primitives including canvas are allowed.  When
-            provided, canvas extensions from the bundle are only deployed if
-            the bundle slug is approved for the ``canvas`` exec type.
 
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
@@ -945,9 +940,12 @@ def integrate_local_bundle(
                 _msg = (
                     f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
                     f"'{slug}': canvas extensions are executable extension.mjs code "
-                    "and are not approved for this exact bundle content. "
-                    f'Add executables.allow."{approval_key}".canvas: true to apm.yml, '
-                    "then rerun the install."
+                    "and are not approved for this exact bundle content. Add:\n"
+                    "executables:\n"
+                    "  allow:\n"
+                    f'    "{approval_key}":\n'
+                    "      canvas: true\n"
+                    "Then rerun the install."
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message=_msg, package=str(slug))

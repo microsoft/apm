@@ -617,7 +617,6 @@ install-deployment-audit-policy-discovery
 install-deployment-audit-replay
 install-deployment-base-integrator
 install-deployment-cached-claude-skill-metadata
-install-deployment-claude-lsp-plugin
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-executable-trust-context
@@ -630,6 +629,8 @@ install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
 install-deployment-locked-skill-subset-reconstruction
+install-deployment-lsp-lifecycle
+install-deployment-lsp-target-contract
 install-deployment-manifest-inheritance-includes
 install-deployment-marketplace-mutation-lock
 install-deployment-mcp-ownership-migration

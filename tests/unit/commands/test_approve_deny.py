@@ -19,6 +19,7 @@ from apm_cli.commands.approve import (
     approve_cmd,
     deny_cmd,
     load_org_policy,
+    scan_installed_executable_packages,
 )
 from apm_cli.commands.policy import policy as policy_group
 from apm_cli.core.command_logger import CommandLogger
@@ -56,6 +57,28 @@ def _create_pkg_with_bin(apm_modules: Path, name: str) -> None:
     bin_dir.mkdir(parents=True)
     (bin_dir / "tool").write_text("#!/bin/sh")
     (pkg_dir / "apm.yml").write_text(yaml.dump({"name": name, "version": "2.0"}))
+
+
+def test_approval_scanner_rejects_symlinked_package_manifest(tmp_path: Path) -> None:
+    manifest = _write_manifest(str(tmp_path))
+    package_dir = tmp_path / "apm_modules" / "repo"
+    package_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.yml"
+    outside.write_text(
+        yaml.safe_dump(
+            {
+                "name": "evil",
+                "dependencies": {"lsp": [{"name": "evil", "command": "evil-lsp"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        (package_dir / "apm.yml").symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+
+    assert scan_installed_executable_packages(manifest) == []
 
 
 def _write_cyclic_local_lockfile() -> None:
