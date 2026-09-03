@@ -421,7 +421,10 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         compile_targets = _global_compile_targets(source_root)
     except yaml.YAMLError as exc:
         display_path = _display_user_path(source_root / APM_YML_FILENAME)
-        logger.error(f"Failed to parse {display_path}: {exc}", symbol="error")
+        logger.error(
+            f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun the command.",
+            symbol="error",
+        )
         return 1
 
     results = compile_user_root_contexts(

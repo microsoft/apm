@@ -570,7 +570,9 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "failed to parse" in str(logger.error.call_args).lower()
+        error = str(logger.error.call_args).lower()
+        assert "failed to parse" in error
+        assert "fix the manifest and rerun the command" in error
 
     def test_invalid_target_name_surfaces_as_usage_error(self, tmp_path):
         """An unknown token raises rather than silently compiling everything."""

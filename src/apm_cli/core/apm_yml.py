@@ -174,7 +174,7 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
 
 
 def read_declared_target_names(root: Path) -> list[str]:
-    """Return the canonical target names ``root/apm.yml`` declares, else ``[]``.
+    """Return the target names ``root/apm.yml`` declares, else ``[]``.
 
     Returns ``[]`` only when there is genuinely nothing to read a declaration
     from -- no manifest, an unreadable one, or an empty one -- so callers fall
