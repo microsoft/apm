@@ -183,6 +183,7 @@ class TestInstructionIntegrator:
             ),
         )
 
+    @pytest.mark.windows_compat
     def test_identity_target_materializes_preflight_validated_content(self):
         """Identity deployment writes the bytes validated during preflight."""
         from unittest.mock import patch
@@ -210,7 +211,7 @@ class TestInstructionIntegrator:
         source.write_text(changed, encoding="utf-8")
         deployed = self.project_root / ".github/instructions/python.instructions.md"
         deployed.parent.mkdir(parents=True)
-        deployed.write_text("# Resolved link\n", encoding="utf-8")
+        deployed.write_bytes(b"# Resolved link\n")
 
         def resolve_prepared(content, _source, _target):
             assert content == "# Validated content\n"

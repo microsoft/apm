@@ -1384,13 +1384,38 @@ class TestEmbeddedSubpathInGitUrl:
             "ssh://git@github.com/org/repo/collections/core.git",
             "https://gitlab.com/ai/platform/core.git/collections/security",
             "git@gitlab.com:ai/platform/core.git/nested/collections/security",
-            "https://github.com/org/repo/%2563ollections/core.git",
-            "https://gitlab.com/ai/platform/core.git/%2563ollections/security",
+            "https://github.com/org/repo/%63ollections/core.git",
         ),
     )
     def test_explicit_primitive_tail_raises_for_fixed_or_git_boundary(self, url) -> None:
         """A known repository boundary must never permit an embedded primitive tail."""
         with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
+            DependencyReference.parse(url)
+
+    @pytest.mark.parametrize(
+        ("url", "error"),
+        (
+            (
+                "https://github.com/org/repo/%2563ollections/core.git",
+                r"residual percent-encoding",
+            ),
+            (
+                "https://gitlab.com/ai/platform/core.git/%2563ollections/security",
+                r"residual percent-encoding",
+            ),
+            (
+                "https://github.com/org/repo/%2Fcollections/core.git",
+                r"must not decode to a path separator",
+            ),
+        ),
+    )
+    def test_encoded_path_structure_attacks_fail_strict_validation(
+        self,
+        url: str,
+        error: str,
+    ) -> None:
+        """Encoded separators and residual encodings fail before boundary classification."""
+        with pytest.raises(ValueError, match=error):
             DependencyReference.parse(url)
 
     # ------------------------------------------------------------------

@@ -715,6 +715,7 @@ def test_private_github_clone_resolves_one_path_scoped_fallback() -> None:
     )
 
 
+@pytest.mark.windows_compat
 def test_private_github_subdirectory_cache_retries_with_scoped_credential(
     tmp_path: Path,
 ) -> None:
@@ -799,6 +800,11 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
     downloader.persistent_git_cache = persistent_cache
     resolved = MagicMock(resolved_commit="a" * 40)
     validation = MagicMock(is_valid=True, package=MagicMock(), package_type=MagicMock())
+    process_environment = {
+        name: os.environ[name]
+        for name in ("PATH", "PATHEXT", "SystemRoot", "ComSpec")
+        if name in os.environ
+    }
 
     with (
         patch.dict(
@@ -806,6 +812,7 @@ def test_private_github_subdirectory_cache_retries_with_scoped_credential(
             {"GIT_HTTP_EXTRAHEADER": "Authorization: Bearer ambient-must-not-leak"},
             clear=True,
         ),
+        patch.dict(os.environ, process_environment),
         patch.object(sys, "frozen", True, create=True),
         patch.object(downloader, "resolve_git_reference", return_value=resolved),
         patch.object(

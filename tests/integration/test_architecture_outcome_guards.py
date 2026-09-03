@@ -75,13 +75,14 @@ def test_missing_declared_plugin_component_fails_before_commit(
     monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
 
     result = CliRunner().invoke(cli, ["install"])
+    normalized_output = " ".join(result.output.split())
 
     assert result.exit_code != 0, result.output
     assert "missing-components" in result.output
     assert "agents" in result.output
     assert "./agents/does-not-exist.agent.md" in result.output
-    assert "plugin root" in result.output
-    assert "remove the declaration" in result.output
+    assert "plugin root" in normalized_output
+    assert "remove the declaration" in normalized_output
     assert not (consumer / "apm.lock.yaml").exists()
     assert not (consumer / ".claude" / "agents").exists()
     assert plugin.is_dir()

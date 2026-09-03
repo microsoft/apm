@@ -156,6 +156,7 @@ def test_http_transport_never_receives_resolved_credentials(kind: str, remote_ur
     assert env["GIT_CONFIG_VALUE_0"] == ""
 
 
+@pytest.mark.windows_compat
 def test_http_transport_replaces_caller_global_config() -> None:
     """Plaintext HTTP never retains a config file that can inject headers."""
 
@@ -168,7 +169,13 @@ def test_http_transport_replaces_caller_global_config() -> None:
         "http://gitea.example.test/org/repo.git",
     )
 
-    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    global_config = Path(env["GIT_CONFIG_GLOBAL"])
+    if os.name == "nt":
+        assert global_config != Path(os.devnull)
+        assert global_config.is_file()
+        assert global_config.read_bytes() == b""
+    else:
+        assert global_config == Path(os.devnull)
 
 
 def test_https_to_http_url_rewrite_is_rejected_before_git_runs(

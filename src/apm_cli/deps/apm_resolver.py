@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
-from ..models.validation import validate_apm_package
+from ..models.validation import PackageType, detect_package_type, validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from ..utils.paths import portable_relpath
 from ._shared import MarketplaceManifestMaterializationError, materialize_marketplace_manifest
@@ -1216,6 +1216,34 @@ class APMDependencyResolver:
                     downloaded_candidate,
                     dep_ref,
                     f"Agent Plugin validation produced no package metadata: {install_path}",
+                    had_existing_install,
+                )
+            if not validation.package.source:
+                validation.package.source = dep_ref.repo_url
+            return self._activate_validated_package(
+                validation.package,
+                downloaded_candidate,
+                had_existing_install,
+            )
+
+        package_type, _ = detect_package_type(install_path)
+        if package_type is PackageType.MARKETPLACE_PLUGIN:
+            validation = validate_apm_package(
+                install_path,
+                source_path=dep_source_path,
+            )
+            if not validation.is_valid:
+                self._raise_downloaded_package_error(
+                    downloaded_candidate,
+                    dep_ref,
+                    "; ".join(validation.errors),
+                    had_existing_install,
+                )
+            if validation.package is None:
+                self._raise_downloaded_package_error(
+                    downloaded_candidate,
+                    dep_ref,
+                    f"Marketplace Plugin validation produced no package metadata: {install_path}",
                     had_existing_install,
                 )
             if not validation.package.source:

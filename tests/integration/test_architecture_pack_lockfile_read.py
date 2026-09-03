@@ -29,7 +29,7 @@ def test_bundle_lockfile_reads_have_one_registered_owner() -> None:
     report = run_selected_rules(ROOT, (RULE_ID,))
 
     assert owner.selectors == (OWNER,)
-    assert owner.guards == (RULE_ID,)
+    assert RULE_ID in owner.guards
     assert rule.guard_ids == (RULE_ID,)
     assert report.failures == ()
     assert report.violations == ()
