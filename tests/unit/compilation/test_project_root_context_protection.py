@@ -221,6 +221,30 @@ def test_compile_root_preserves_hand_authored_context(
     assert "Protected CLAUDE.md" in result.output
 
 
+def test_compile_root_preserves_hand_authored_agents_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A redirected compile root must also protect hand-authored AGENTS.md."""
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    _seed_project(source)
+    (destination / "AGENTS.md").write_text(_MANUAL_AGENTS, encoding="utf-8")
+    monkeypatch.chdir(source)
+
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--target", "codex", "--root", str(destination)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (destination / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
+    assert "Protected AGENTS.md" in result.output
+
+
 def test_single_file_managed_section_updates_hand_authored_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
