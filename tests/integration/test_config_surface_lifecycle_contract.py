@@ -1342,6 +1342,8 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
     )
     claude_mcp = fixture.project_root / ".mcp.json"
     claude_lsp = fixture.project_root / _CLAUDE_LSP_PLUGIN
+    claude_lsp_plugin_dir = claude_lsp.parent
+    claude_lsp_dir = claude_lsp_plugin_dir.parent
     claude_instruction = (
         fixture.project_root / ".claude" / "rules" / "saved-target-source-instruction.md"
     )
@@ -1401,6 +1403,10 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
     assert claude_instruction.is_file()
     assert server_name in json.loads(claude_mcp.read_text(encoding="utf-8"))["mcpServers"]
     assert lsp_name in json.loads(claude_lsp.read_text(encoding="utf-8"))["lspServers"]
+    unrelated_claude_skill = fixture.project_root / ".claude" / "skills" / "local-skill"
+    unrelated_claude_skill.mkdir(parents=True)
+    unrelated_skill_file = unrelated_claude_skill / "README.md"
+    unrelated_skill_file.write_text("local Claude skill\n", encoding="utf-8")
     runner.run_sequence(
         (install, ("audit", "--ci")),
         expected_returncodes=(0, 0),
@@ -1421,6 +1427,9 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
     assert not claude_lsp.exists(), (
         post_uninstall_lock.lsp_config_provenance if post_uninstall_lock is not None else None
     )
+    assert not claude_lsp_plugin_dir.exists()
+    assert not claude_lsp_dir.exists()
+    assert unrelated_skill_file.read_text(encoding="utf-8") == "local Claude skill\n"
 
     runner.run_sequence(
         (
