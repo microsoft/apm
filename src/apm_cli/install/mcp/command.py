@@ -158,7 +158,9 @@ def run_mcp_install(  # noqa: PLR0913
             except Exception as exc:
                 logger.verbose_detail(f"MCP registry validation error: {exc}")
                 raise click.ClickException(
-                    f"MCP registry validation failed for '{mcp_name}'; no state was changed"
+                    f"MCP registry validation failed for '{mcp_name}'. Check the server "
+                    "name and registry reachability/configuration, then retry; "
+                    "no state was changed"
                 ) from None
 
     if initial_manifest_config is not None:

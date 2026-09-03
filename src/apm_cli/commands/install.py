@@ -814,9 +814,11 @@ def _handle_mcp_install(  # noqa: PLR0913
                     f"All selected MCP runtimes were removed by --exclude {exclude}; "
                     "choose another target or remove the exclusion"
                 )
+            rendered_targets = ", ".join(sorted(scoped_runtime_targets or skipped_runtimes))
             raise click.UsageError(
-                "Selected targets are unavailable for user-scope MCP installation; "
-                "enable selected experimental targets, choose copilot, or omit --global"
+                "Selected targets are unavailable for user-scope MCP installation "
+                f"({rendered_targets}; source: {target_decision.source}); enable selected "
+                "experimental targets, retry with --target copilot, or omit --global"
             )
         target_decision = EffectiveTargetDecision(supported_runtimes, target_decision.source)
     _run_mcp_policy_preflight(

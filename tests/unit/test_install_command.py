@@ -2274,6 +2274,8 @@ class TestInstallMcpFlag:
 
         assert result.exit_code == 2, (result.output, result.exception)
         assert "enable selected experimental targets" in result.output
+        assert "vscode; source: --target flag" in result.output
+        assert "--target copilot" in result.output
         assert "Skipped workspace-only runtimes" not in result.output
         assert not user_manifest.exists()
 
@@ -2307,6 +2309,8 @@ class TestInstallMcpFlag:
 
         assert result.exit_code == 2
         assert "enable selected experimental targets" in result.output
+        assert "vscode; source: apm config target" in result.output
+        assert "--target copilot" in result.output
         assert "Skipped workspace-only runtimes" not in result.output
         assert not user_manifest.exists()
 
