@@ -257,6 +257,99 @@ def _hook_commands(settings_path: Path) -> list[str]:
     return commands
 
 
+def test_required_hybrid_manifest_installs_as_apm_package_through_cli_state_machine(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    scenario = _new_scenario(tmp_path / "hybrid-precedence", apm_binary_path)
+    source = _publish(
+        scenario,
+        "hybrid-apm-kit",
+        instruction="authoritative",
+    )
+    (source.repository.worktree / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+                "name": "hybrid.agent.plugin",
+                "version": "1.0.0",
+                "description": "Competing Agent Plugin fixture",
+                "author": {"name": "APM Test"},
+                "license": "MIT",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (source.repository.worktree / ".claude-plugin").mkdir()
+    source_commit = scenario.repositories.commit(
+        source.repository,
+        message="add competing plugin surfaces",
+    )
+    dependency = dict(source.dependency)
+    dependency["ref"] = source_commit.sha
+    consumer = scenario.consumers.create(
+        "hybrid-precedence-consumer",
+        dependencies=(dependency,),
+        targets=("copilot",),
+    )
+    deployed_instruction = ".github/instructions/authoritative.instructions.md"
+    capture_args = {
+        "targets": ("copilot",),
+        "config_paths": (PurePosixPath(deployed_instruction),),
+    }
+    before_install = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+
+    install_result = _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="hybrid-precedence-install",
+    )
+    after_install = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    _lockfile, locked_dep = _single_locked_dependency(consumer.root)
+
+    assert install_result.command == (str(apm_binary_path), *_INSTALL_ARGS)
+    assert before_install.file(deployed_instruction).kind == "missing"
+    assert (
+        after_install.file(deployed_instruction).content == _instruction("authoritative").encode()
+    )
+    assert deployed_instruction in _deployment_paths(after_install)
+    assert locked_dep.package_type == "apm_package"
+    assert locked_dep.resolved_commit == source_commit.sha
+    assert locked_dep.name == "hybrid-apm-kit"
+    assert deployed_instruction in locked_dep.deployed_files
+    assert deployed_instruction in locked_dep.deployed_file_hashes
+    assert locked_dep.marketplace_plugin_name is None
+    assert locked_dep.discovered_via is None
+    assert locked_dep.source_url is None
+    assert locked_dep.source_digest is None
+
+    _run_success(
+        scenario,
+        consumer,
+        ("uninstall", f"{_OWNER}/hybrid-apm-kit"),
+        environment=scenario.environment,
+        scenario_id="hybrid-precedence-uninstall",
+    )
+    after_uninstall = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    _, audit = _audit(
+        scenario,
+        consumer,
+        environment=scenario.environment,
+        scenario_id="hybrid-precedence-audit",
+    )
+    after_audit = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+
+    assert after_uninstall.file(deployed_instruction).kind == "missing"
+    assert after_uninstall.lockfile_bytes is None
+    assert not after_uninstall.deployment_records
+    assert audit["passed"] is True
+    assert audit["summary"]["failed"] == 0
+    _assert_same_state(after_uninstall, after_audit)
+
+
 def test_required_pack_install_compile_audit_closes_regular_package_state(
     tmp_path: Path,
     apm_binary_path: Path,
