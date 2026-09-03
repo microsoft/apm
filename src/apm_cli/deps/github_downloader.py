@@ -1127,6 +1127,15 @@ class GitHubPackageDownloader:
         apm_yml_path = target_path / "apm.yml"
         atomic_write_text(apm_yml_path, apm_yml_content)
 
+        # Uniform invariant: every apm.yml rewrite inside a package tree
+        # drops stale from_apm_yml cache entries (virtual manifests are
+        # deterministic so a stale hit is currently harmless, but keeping
+        # the invariant unconditional prevents a silent divergence if the
+        # synthesized content ever gains run-dependent fields).
+        from ..models.apm_package import invalidate_apm_yml_cache_entry
+
+        invalidate_apm_yml_cache_entry(apm_yml_path)
+
         # Create APMPackage object
         package = APMPackage(
             name=package_name,
@@ -1946,6 +1955,9 @@ class GitHubPackageDownloader:
                     package = validation_result.package
                     package.source = dep_ref.to_github_url()
                     package.resolved_commit = resolved_ref.resolved_commit
+                    # Single stamping implementation (shared with the clone
+                    # paths): also invalidates the from_apm_yml cache entry
+                    # after rewriting apm.yml (apm#2619 migration fallout).
                     from .package_validator import stamp_plugin_version
 
                     stamp_plugin_version(
