@@ -675,8 +675,9 @@ class LSPIntegrator:
                 )
                 if removed:
                     noun = "server" if len(removed) == 1 else "servers"
-                    logger.info(
-                        f"Removed {len(removed)} stale LSP {noun} from "
+                    removed_names = ", ".join(sorted(removed))
+                    logger.progress(
+                        f"Removed {len(removed)} stale LSP {noun} ({removed_names}) from "
                         f"{spec.label(user_scope=user_scope)}"
                     )
                     for name in removed:

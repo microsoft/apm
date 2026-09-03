@@ -1218,7 +1218,7 @@ class TestInstallLocalBundleLsp:
     """Local-bundle LSP writes must preserve consent and owner lifecycle."""
 
     @staticmethod
-    def _bundle(tmp_path: Path) -> Path:
+    def _bundle(tmp_path: Path, *, include_skill: bool = False) -> Path:
         lsp_json = json.dumps(
             {
                 "lspServers": {
@@ -1229,7 +1229,10 @@ class TestInstallLocalBundleLsp:
                 }
             }
         )
-        return _make_plugin_bundle(tmp_path, files={"lsp.json": lsp_json})
+        files = {"lsp.json": lsp_json}
+        if include_skill:
+            files["skills/coding/SKILL.md"] = "# Coding Skill\n"
+        return _make_plugin_bundle(tmp_path, files=files)
 
     @staticmethod
     def _approve_exact_bundle(project: Path, bundle: Path) -> str:
@@ -1305,7 +1308,7 @@ class TestInstallLocalBundleLsp:
     def test_unsupported_target_refuses_bundle_lsp(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        bundle = self._bundle(tmp_path / "source")
+        bundle = self._bundle(tmp_path / "source", include_skill=True)
         project = _make_project(tmp_path / "consumer", targets=["cursor"])
 
         result = _invoke_install(
@@ -1322,6 +1325,7 @@ class TestInstallLocalBundleLsp:
         assert not (
             project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
         ).exists()
+        assert not (project / ".agents" / "skills" / "coding" / "SKILL.md").exists()
         lockfile = LockFile.read(project / "apm.lock.yaml")
         assert lockfile is None or "cursor" not in lockfile.lsp_target_servers
 

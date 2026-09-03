@@ -233,6 +233,17 @@ def install_local_bundle(
         if warning:
             logger.warning(warning)
 
+        if bundle_lsp_deps:
+            from apm_cli.install.errors import RequiredIntegrationError
+            from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+            target_names = [resolved.name for resolved in targets]
+            if not LSPIntegrator.supported_target_runtimes(target_names):
+                raise RequiredIntegrationError(
+                    "Bundle lsp.json cannot be configured because the resolved target set has "
+                    "no LSP-compatible runtime. Select --target claude or --target copilot."
+                )
+
         result = integrate_local_bundle(
             bundle_info,
             project_root,

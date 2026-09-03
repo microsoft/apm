@@ -561,7 +561,7 @@ class TestRemoveStale:
         data = json.loads(plugin_json.read_text())
         assert "keep" in data["lspServers"]
         assert "stale" not in data["lspServers"]
-        logger.progress.assert_called_once_with(
+        logger.progress.assert_any_call(
             "  |-- run /reload-plugins or restart Claude Code to activate"
         )
 

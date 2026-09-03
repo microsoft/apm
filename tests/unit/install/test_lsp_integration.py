@@ -83,6 +83,7 @@ class TestOwnedLspIntegration:
         mock_integrator.install.return_value = 1
         mock_integrator.get_server_names.return_value = {"new"}
         mock_integrator.get_server_configs.return_value = {"new": dependency.to_lsp_json_entry()}
+        mock_integrator.supported_target_runtimes.return_value = ["copilot"]
 
         count = run_owned_lsp_integration(
             dependencies=[dependency],
