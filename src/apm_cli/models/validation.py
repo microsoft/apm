@@ -270,7 +270,8 @@ def detect_package_type(
     2. ``AGENT_PLUGIN`` -- root ``plugin.json`` with the Agent Plugins schema.
     3. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
        OR ``.claude-plugin/`` directory.
-    4. ``HYBRID`` -- root ``SKILL.md`` AND metadata-only ``apm.yml``.
+    4. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` (eligible or
+       metadata-only).
     5. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
     6. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
        ``apm.yml`` optional; no ``.apm/`` required.

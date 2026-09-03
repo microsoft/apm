@@ -1256,6 +1256,28 @@ class TestDetectPackageType:
         pkg_type, _ = detect_package_type(tmp_path)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
 
+    @pytest.mark.parametrize(
+        "manifest_setup",
+        [
+            pytest.param("apm-dir", id="apm-directory"),
+            pytest.param("dependencies", id="declared-dependencies"),
+        ],
+    )
+    def test_eligible_apm_yml_wins_over_plugin_selection(self, tmp_path, manifest_setup):
+        """An eligible apm.yml remains authoritative over plugin.json."""
+        manifest = "name: test"
+        if manifest_setup == "apm-dir":
+            (tmp_path / ".apm").mkdir()
+        else:
+            manifest += "\ndependencies:\n  apm:\n    - owner/package"
+        (tmp_path / "apm.yml").write_text(manifest)
+        (tmp_path / "plugin.json").write_text('{"name": "test"}')
+
+        pkg_type, plugin_path = detect_package_type(tmp_path)
+
+        assert pkg_type == PackageType.APM_PACKAGE
+        assert plugin_path is None
+
     def test_hook_package_apm_yml_precedence(self, tmp_path):
         """apm.yml + hooks/ but no .apm/ -> INVALID (needs .apm/ for APM_PACKAGE)."""
         (tmp_path / "apm.yml").write_text("name: test")

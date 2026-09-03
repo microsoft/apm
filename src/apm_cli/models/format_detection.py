@@ -406,7 +406,8 @@ class NormalizationPlanner:
        schema family.
     3. ``MARKETPLACE_PLUGIN`` -- Claude plugin detector found a manifest
        (``plugin.json`` or ``.claude-plugin/``).
-    4. ``HYBRID`` -- root ``SKILL.md`` AND metadata-only ``apm.yml``.
+    4. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` (eligible or
+       metadata-only).
     5. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
     6. ``SKILL_BUNDLE`` -- nested ``skills/<name>/SKILL.md`` found.
     7. ``HOOK_PACKAGE`` -- hooks JSON found, nothing else.
