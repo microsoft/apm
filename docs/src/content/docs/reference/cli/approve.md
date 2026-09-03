@@ -144,7 +144,7 @@ Ordinary dependency grant keys are package-scoped in v1: a bare `owner/repo`
 key and an `owner/repo#1.2.0` key both match the package name regardless of the
 installed version. Use that versioned form for audit readability, not as a
 per-release trust boundary. Local bundle grants are different: copy the full
-`name#version@sha256:digest` key from the install diagnostic. A changed local
+`name#version@sha256:<digest>` key from the install diagnostic. A changed local
 bundle does not inherit the prior grant.
 
 ## Examples

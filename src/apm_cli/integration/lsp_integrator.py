@@ -52,6 +52,7 @@ class _LSPTargetSpec:
     user_label: str
     project_config_defaults: tuple[tuple[str, str], ...] = ()
     user_config_defaults: tuple[tuple[str, str], ...] = ()
+    cleanup_empty_relative_dirs: tuple[tuple[str, ...], ...] = ()
 
     def path(self, project_root: Path, *, user_scope: bool) -> Path:
         """Return the config path for this target and scope."""
@@ -70,6 +71,12 @@ class _LSPTargetSpec:
     def config_defaults(self, *, user_scope: bool) -> tuple[tuple[str, str], ...]:
         """Return required top-level defaults for this target and scope."""
         return self.user_config_defaults if user_scope else self.project_config_defaults
+
+    def cleanup_empty_dirs(self, project_root: Path, *, user_scope: bool) -> tuple[Path, ...]:
+        """Return APM-owned directories this target may remove when empty."""
+        if user_scope:
+            return ()
+        return tuple(project_root.joinpath(*parts) for parts in self.cleanup_empty_relative_dirs)
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,10 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
         project_label=".claude/skills/apm-lsp/.claude-plugin/plugin.json",
         user_label="~/.claude.json",
         project_config_defaults=(("name", "apm-lsp"),),
+        cleanup_empty_relative_dirs=(
+            (".claude", "skills", "apm-lsp", ".claude-plugin"),
+            (".claude", "skills", "apm-lsp"),
+        ),
     ),
     "copilot": _LSPTargetSpec(
         runtime="copilot",
@@ -388,6 +399,12 @@ class LSPIntegrator:
 
         return [target for target in _LSP_TARGET_ORDER if target in target_runtimes]
 
+    @staticmethod
+    def supported_target_runtimes(target_runtimes: list[str]) -> list[str]:
+        """Return requested runtimes that have an LSP target adapter."""
+        requested = set(target_runtimes)
+        return [target for target in _LSP_TARGET_ORDER if target in requested]
+
     # ------------------------------------------------------------------
     # JSON write helpers
     # ------------------------------------------------------------------
@@ -613,7 +630,7 @@ class LSPIntegrator:
                 owned_keys.add(servers_key)
             if not servers and owned_keys and set(config) <= owned_keys:
                 config_path.unlink()
-                for directory in (config_path.parent, config_path.parent.parent):
+                for directory in spec.cleanup_empty_dirs(project_root, user_scope=user_scope):
                     try:
                         directory.rmdir()
                     except OSError:

@@ -577,6 +577,19 @@ class TestRemoveStale:
         assert not plugin_json.exists()
         assert not plugin_json.parent.parent.exists()
 
+    def test_removing_last_user_claude_server_keeps_home_directory(self, tmp_path):
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(
+            json.dumps({"lspServers": {"stale": {"command": "y"}}}),
+            encoding="utf-8",
+        )
+
+        with patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path):
+            LSPIntegrator.remove_stale({"stale"}, user_scope=True)
+
+        assert tmp_path.exists()
+        assert not claude_json.exists()
+
     def test_removes_stale_from_user_claude_json(self, tmp_path):
         claude_json = tmp_path / ".claude.json"
         claude_json.write_text(

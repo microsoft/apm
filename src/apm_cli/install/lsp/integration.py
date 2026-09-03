@@ -131,7 +131,15 @@ def run_owned_lsp_integration(
     new_targets = {runtime: set(names) for runtime, names in old_targets.items()}
     for names in new_targets.values():
         names.difference_update(old_owned)
-    for runtime in target_runtimes:
+    supported_target_runtimes = LSPIntegrator.supported_target_runtimes(target_runtimes)
+    if dependencies and not supported_target_runtimes:
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        raise RequiredIntegrationError(
+            "Bundle lsp.json cannot be configured because the resolved target set has "
+            "no LSP-compatible runtime. Select --target claude or --target copilot."
+        )
+    for runtime in supported_target_runtimes:
         new_targets.setdefault(runtime, set()).update(new_names)
 
     count = 0
@@ -141,7 +149,7 @@ def run_owned_lsp_integration(
             project_root=project_root,
             user_scope=user_scope,
             logger=logger,
-            target_runtimes=target_runtimes,
+            target_runtimes=supported_target_runtimes,
             fail_on_write_error=fail_on_write_error,
             managed_target_servers=old_targets,
             force=force,

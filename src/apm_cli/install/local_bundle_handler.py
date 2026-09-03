@@ -659,8 +659,10 @@ def _wire_bundle_lsp_servers(
     """Wire bundle LSP servers through the canonical owned lifecycle."""
     from apm_cli.deps.lockfile import get_lockfile_path
     from apm_cli.install.lsp.integration import run_owned_lsp_integration
+    from apm_cli.integration.lsp_integrator import LSPIntegrator
 
     target_names = [t.name for t in targets]
+    lsp_target_names = LSPIntegrator.supported_target_runtimes(target_names)
     count = run_owned_lsp_integration(
         dependencies=deps,
         owner=owner,
@@ -668,17 +670,17 @@ def _wire_bundle_lsp_servers(
         project_root=project_root,
         user_scope=user_scope,
         logger=logger,
-        target_runtimes=target_names,
+        target_runtimes=lsp_target_names,
         fail_on_write_error=True,
         force=force,
     )
 
     if count:
         logger.success(
-            f"Wired {count} LSP server(s) from bundle lsp.json (target(s): {', '.join(target_names)})"
+            f"Wired {count} LSP server(s) from bundle lsp.json (target(s): {', '.join(lsp_target_names)})"
         )
     elif deps:
         logger.info(
-            f"Bundle lsp.json declared {len(deps)} server(s); no new LSP config changes for target(s): {', '.join(target_names)}"
+            f"Bundle lsp.json declared {len(deps)} server(s); no new LSP config changes for target(s): {', '.join(lsp_target_names)}"
         )
     return count

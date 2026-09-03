@@ -1302,6 +1302,79 @@ class TestInstallLocalBundleLsp:
         plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
         assert "bundle-lsp" in json.loads(plugin_path.read_text())["lspServers"]
 
+    def test_unsupported_target_refuses_bundle_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["cursor"])
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "cursor",
+            "--no-policy",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "no LSP-compatible runtime" in result.output
+        assert not (
+            project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+        lockfile = LockFile.read(project / "apm.lock.yaml")
+        assert lockfile is None or "cursor" not in lockfile.lsp_target_servers
+
+    def test_all_targets_record_only_lsp_compatible_bundle_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["all"])
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "all",
+            "--no-policy",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        lockfile = LockFile.read(project / "apm.lock.yaml")
+        assert lockfile is not None
+        assert set(lockfile.lsp_target_servers) <= {"claude", "copilot"}
+        assert "bundle-lsp" in lockfile.lsp_servers
+
+    def test_root_install_reads_source_policy_for_bundle_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {}}
+        manifest_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--root",
+            "out",
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Skipped 1 bundle LSP executable" in result.output
+        assert not (
+            project / "out" / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+
     def test_symlinked_lsp_metadata_directory_is_ignored(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

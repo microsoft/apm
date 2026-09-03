@@ -1269,12 +1269,13 @@ def install(  # noqa: C901, PLR0913
                 raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
                 enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)
+                from ..core.scope import InstallScope, get_source_root
                 from ..install.local_bundle_handler import (
                     effective_bundle_allow_map as _effective_bundle_allow_map,
                 )
                 from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
-                _bundle_project_root = Path(root or ".")
+                _bundle_project_root = get_source_root(InstallScope.PROJECT)
                 _allow_execs_for_bundle = _effective_bundle_allow_map(
                     _bundle_project_root,
                     no_policy=no_policy,
