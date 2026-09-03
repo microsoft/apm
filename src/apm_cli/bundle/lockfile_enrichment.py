@@ -63,6 +63,9 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "hermes": {
         ".github/skills/": ".agents/skills/",
     },
+    "ai-assist": {
+        ".github/skills/": ".agents/skills/",
+    },
 }
 
 

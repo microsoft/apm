@@ -42,14 +42,14 @@ instructions, prompts, agents, and hooks use `.github/`, while skills use
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
 desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
-runtime), and `hermes` are gated behind experimental flags and not listed
-above. See [Experimental](../experimental/).
+runtime), `hermes`, and `ai-assist` are gated behind experimental flags
+and not listed above. See [Experimental](../experimental/).
 
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
 separate root-context compile for `codex`, `gemini`, and `opencode`, plus
-experimental `hermes` when enabled. It emits the
+experimental `hermes` and `ai-assist` when enabled. It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
@@ -100,8 +100,9 @@ auto-detection. Both are available with `--target` and can be listed in a
 project's `apm.yml` `targets:` field so contributors running plain `apm
 install` pick them up automatically.
 
-`copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are
-experimental targets that require `apm experimental enable <name>` before use.
+`copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, `hermes`, and
+`ai-assist` are experimental targets that require
+`apm experimental enable <name>` before use.
 They are selected with `--target` only and cannot be listed in `apm.yml` (the
 canonical targets validator will reject them).
 

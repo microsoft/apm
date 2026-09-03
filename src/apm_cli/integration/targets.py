@@ -420,11 +420,15 @@ class TargetProfile:
         # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
         # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
         # `apm install -g` lands where the tool reads.
-        if self.name in ("claude", "hermes"):
+        if self.name in ("claude", "hermes", "ai-assist"):
             import os
             from pathlib import Path
 
-            env_var = "CLAUDE_CONFIG_DIR" if self.name == "claude" else "HERMES_HOME"
+            env_var = {
+                "claude": "CLAUDE_CONFIG_DIR",
+                "hermes": "HERMES_HOME",
+                "ai-assist": "AI_ASSIST_CONFIG_DIR",
+            }[self.name]
             env = os.environ.get(env_var, "").strip()
             if env:
                 # ``resolve`` collapses ``..`` so traversal segments cannot
@@ -893,6 +897,27 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_dir=".hermes",
     ),
+    # ai-assist agent -- experimental.  ai-assist natively reads the
+    # agentskills.io SKILL.md format and the AGENTS.md context-file
+    # standard.  Skills land in .agents/skills/ at project scope and
+    # <config_dir>/skills/ at user scope.  MCP servers are written
+    # separately by AiAssistClientAdapter to <config_dir>/mcp_servers.yaml.
+    # $AI_ASSIST_CONFIG_DIR overrides the user-scope root (handled in for_scope).
+    "ai-assist": TargetProfile(
+        capability=TARGET_CAPABILITIES["ai-assist"],
+        root_dir=".agents",
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".ai-assist",
+    ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via
@@ -1097,6 +1122,23 @@ def resolve_hermes_root() -> Path:
     if env:
         return Path(env).expanduser().resolve(strict=False)
     return (Path.home() / ".hermes").resolve(strict=False)
+
+
+def resolve_ai_assist_root() -> Path:
+    """Resolve the ai-assist config directory.
+
+    Honors ``$AI_ASSIST_CONFIG_DIR`` (default ``~/.ai-assist``).  Returns an
+    expanded, normalized ``Path`` (``..`` segments collapsed via ``resolve``)
+    so traversal in ``$AI_ASSIST_CONFIG_DIR`` cannot create unintended
+    intermediate directories during ``mkdir(parents=True)``.
+    """
+    import os
+    from pathlib import Path
+
+    env = os.environ.get("AI_ASSIST_CONFIG_DIR", "").strip()
+    if env:
+        return Path(env).expanduser().resolve(strict=False)
+    return (Path.home() / ".ai-assist").resolve(strict=False)
 
 
 def _flag_gated(profile: TargetProfile) -> bool:

@@ -181,6 +181,7 @@ class TestTargetProfileUserScope:
             "agent-skills",
             "openclaw",
             "hermes",
+            "ai-assist",
         }
         assert set(KNOWN_TARGETS.keys()) == expected
 

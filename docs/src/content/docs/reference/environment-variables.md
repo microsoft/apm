@@ -84,6 +84,7 @@ APM verifies HTTPS against the operating-system trust store by default. For the 
 | `COPILOT_HOME` | Override the GitHub Copilot CLI home used by Copilot target detection and user-scope writes. | platform auto-detect | Read by the Copilot integration target. |
 | `CODEX_HOME` | Override the Codex home used by Codex target detection and user-scope writes. | platform auto-detect | Read by the Codex integration target. |
 | `HERMES_HOME` | Override the Hermes home used by Hermes target detection and user-scope writes. | platform auto-detect | Requires the `hermes` experimental flag for Hermes deployment. |
+| `AI_ASSIST_CONFIG_DIR` | Override the ai-assist config directory used by ai-assist target detection and user-scope writes. | `~/.ai-assist` | Requires the `ai_assist` experimental flag for ai-assist deployment. |
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |

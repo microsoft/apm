@@ -47,7 +47,7 @@ for what those files are) even though compile does not itself *deploy* hooks.
 `.github/instructions/*.instructions.md` (with their `applyTo:`
 frontmatter) that `apm install` already deploys. Compile is
 **recommended for every other context-producing target** (`claude`, `cursor`, `codex`,
-`gemini`, `grok-build`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `intellij`), which load instructions through a
+`gemini`, `grok-build`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `ai-assist`, `intellij`), which load instructions through a
 root context file or harness-specific rules folder that compile
 generates.
 
@@ -300,6 +300,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `windsurf` | `AGENTS.md` |
 | `kiro` | `AGENTS.md` |
 | `hermes` | `AGENTS.md` |
+| `ai-assist` | `AGENTS.md` |
 | `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
 | `grok-cloud` | none |

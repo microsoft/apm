@@ -203,6 +203,13 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="agents",
         ),
         _capability(
+            "ai-assist",
+            "ai-assist native skills and MCP configuration",
+            experimental_flag="ai_assist",
+            primitive_profile="ai-assist",
+            compile_family="agents",
+        ),
+        _capability(
             "copilot-cowork",
             "Microsoft 365 Copilot Cowork native skills configuration",
             experimental_flag="copilot_cowork",

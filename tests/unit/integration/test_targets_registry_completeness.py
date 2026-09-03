@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 
+from apm_cli.adapters.client.ai_assist import AiAssistClientAdapter
 from apm_cli.adapters.client.antigravity import AntigravityClientAdapter
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.claude import ClaudeClientAdapter
@@ -63,6 +64,7 @@ _ADAPTER_CLASSES = (
     VSCodeClientAdapter,
     WindsurfClientAdapter,
     HermesClientAdapter,
+    AiAssistClientAdapter,
 )
 
 

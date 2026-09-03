@@ -316,6 +316,25 @@ def _hermes_runtime_opted_in() -> bool:
         return False
 
 
+def _ai_assist_runtime_opted_in() -> bool:
+    """Return ``True`` when ai-assist MCP writes are opted into.
+
+    Gate: the ``ai_assist`` experimental flag is enabled AND ai-assist is
+    actually present on the host (its config dir exists, or the ``ai-assist``
+    binary is on PATH).  Prevents surprise writes to ``~/.ai-assist/`` on
+    hosts where ai-assist was never installed.
+    """
+    try:
+        from apm_cli.core.experimental import is_enabled
+        from apm_cli.integration.targets import resolve_ai_assist_root
+
+        if not is_enabled("ai_assist"):
+            return False
+        return resolve_ai_assist_root().is_dir() or find_runtime_binary("ai-assist") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list[str]:
     """Detect which MCP-capable runtimes are installed on the host.
 
@@ -353,6 +372,7 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
             "claude",
             "intellij",
             "hermes",
+            "ai-assist",
         ]:
             try:
                 if not _runtime_is_present(
@@ -398,6 +418,8 @@ def _runtime_is_present(
         return _intellij_config_dir().is_dir()
     if runtime_name == "hermes":
         return _hermes_runtime_opted_in()
+    if runtime_name == "ai-assist":
+        return _ai_assist_runtime_opted_in()
     return manager.is_runtime_available(runtime_name)
 
 
@@ -433,6 +455,8 @@ def _discover_installed_runtimes_fallback(
     # Hermes: experimental flag enabled AND home-dir/binary present.
     if _hermes_runtime_opted_in():
         installed_runtimes.append("hermes")
+    if _ai_assist_runtime_opted_in():
+        installed_runtimes.append("ai-assist")
     return installed_runtimes
 
 

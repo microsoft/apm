@@ -145,6 +145,16 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "home at ~/.hermes/ (skills + MCP servers in config.yaml)."
         ),
     ),
+    "ai_assist": ExperimentalFlag(
+        name="ai_assist",
+        description="Deploy skills and MCP servers to the ai-assist agent.",
+        default=False,
+        hint=(
+            "Use '--target ai-assist --global' to deploy skills and "
+            "MCP servers to your ai-assist config at "
+            "~/.ai-assist/ (or $AI_ASSIST_CONFIG_DIR)."
+        ),
+    ),
 }
 
 
