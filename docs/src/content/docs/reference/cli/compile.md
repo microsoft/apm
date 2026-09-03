@@ -272,6 +272,8 @@ re-runs compilation automatically.
 - Press Ctrl+C to stop.
 - Combine with `--dry-run` to validate placement on every save without
   writing.
+- When root files are retained, each recompile reports both the retained count
+  and any other outputs generated (or planned in dry-run mode).
 
 ```bash
 apm compile --watch
@@ -321,7 +323,8 @@ There is no `--strategy` flag. Compilation runs in one of two modes:
   opt out.
 - **Single-file (`--single-agents`)** -- writes one combined file at
   `--output` (default `AGENTS.md`). Use when a harness or workflow
-  requires a single context file.
+  requires a single context file. With multiple targets, target-specific root
+  content remains separate and is not appended to `AGENTS.md`.
 
 ### Distributed layout example
 

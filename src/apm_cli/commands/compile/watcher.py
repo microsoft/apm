@@ -65,32 +65,45 @@ def _report_retained_watch_outputs(
     dry_run: bool,
 ) -> bool:
     """Render protected root outcomes and returned warnings in watch mode."""
-    for warning in result.warnings:
+    for warning in getattr(result, "warnings", ()):
         logger.warning(warning)
     if not result.success:
         return False
-    protected_count = int(result.stats.get("root_context_files_protected", 0) or 0)
+    stats = getattr(result, "stats", {}) or {}
+    protected_count = int(stats.get("root_context_files_protected", 0) or 0)
     if not protected_count:
         return False
     noun = "file" if protected_count == 1 else "files"
-    if dry_run:
-        logger.progress(
-            f"Would retain {protected_count} hand-authored root {noun}; no files written.",
-            symbol="info",
+    agents_generated = int(
+        stats.get(
+            "agents_files_generated",
+            stats.get("agents_files_written", 0),
         )
-        return True
-    files_written = sum(
-        int(result.stats.get(key, 0) or 0)
+        or 0
+    )
+    generated_count = agents_generated + sum(
+        int(stats.get(key, 0) or 0)
         for key in (
-            "agents_files_written",
             "claude_files_written",
             "gemini_files_written",
             "copilot_root_instructions_written",
         )
     )
-    output_noun = "file" if files_written == 1 else "files"
+    output_noun = "file" if generated_count == 1 else "files"
+    if dry_run:
+        generated_note = (
+            f"Would generate {generated_count} other output {output_noun} and "
+            if generated_count
+            else "Would "
+        )
+        logger.progress(
+            f"{generated_note}retain {protected_count} hand-authored root {noun}; "
+            "no files written.",
+            symbol="info",
+        )
+        return True
     generated_note = (
-        f" generated {files_written} other output {output_noun};" if files_written else ""
+        f" generated {generated_count} other output {output_noun};" if generated_count else ""
     )
     logger.progress(
         f"Compilation completed;{generated_note} retained {protected_count} "

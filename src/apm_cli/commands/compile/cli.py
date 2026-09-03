@@ -908,7 +908,10 @@ def _run_compilation(
                 dry_run=True,
                 strategy="single-file",
             )
-            intermediate_result = compiler.compile(intermediate_config)
+            intermediate_result = compiler.compile(
+                intermediate_config,
+                root_outputs=frozenset({"agents"}),
+            )
 
             if intermediate_result.success:
                 agents_write_blocked = bool(

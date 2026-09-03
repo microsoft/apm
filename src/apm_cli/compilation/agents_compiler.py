@@ -399,6 +399,7 @@ class AgentsCompiler:
         config: CompilationConfig,
         primitives: PrimitiveCollection | None = None,
         logger=None,
+        root_outputs: frozenset[str] | None = None,
     ) -> CompilationResult:
         """Compile AGENTS.md and/or CLAUDE.md based on target configuration.
 
@@ -410,6 +411,8 @@ class AgentsCompiler:
         Args:
             config (CompilationConfig): Compilation configuration.
             primitives (Optional[PrimitiveCollection]): Primitives to use, or None to discover.
+            logger: Optional command logger for progress output.
+            root_outputs: Root artifact families to return. Defaults to all routed families.
 
         Returns:
             CompilationResult: Result of the compilation.
@@ -495,14 +498,17 @@ class AgentsCompiler:
                     )
 
             results: list[CompilationResult] = []
+            requested_outputs = (
+                frozenset({"agents", "claude", "gemini"}) if root_outputs is None else root_outputs
+            )
 
-            if should_compile_agents_md(routing_target):
+            if "agents" in requested_outputs and should_compile_agents_md(routing_target):
                 results.append(self._compile_agents_md(config, primitives))
 
-            if should_compile_claude_md(routing_target):
+            if "claude" in requested_outputs and should_compile_claude_md(routing_target):
                 results.append(self._compile_claude_md(config, primitives))
 
-            if should_compile_gemini_md(routing_target):
+            if "gemini" in requested_outputs and should_compile_gemini_md(routing_target):
                 results.append(self._compile_gemini_md(config, primitives))
 
             # Some targets (e.g. agent-skills) use only the data-driven

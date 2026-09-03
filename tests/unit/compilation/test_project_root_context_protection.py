@@ -101,7 +101,7 @@ def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
     result = Mock(
         warnings=["Protected AGENTS.md: hand-authored file will not be overwritten."],
         stats={
-            "agents_files_written": 1,
+            "agents_files_generated": 1,
             "root_context_files_protected": 1,
         },
     )
@@ -112,6 +112,25 @@ def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
     logger.warning.assert_called_once()
     assert "retained 1 hand-authored root file" in logger.progress.call_args.args[0]
     assert "generated 1 other output file" in logger.progress.call_args.args[0]
+
+
+def test_watch_dry_run_reports_generated_and_retained_outputs() -> None:
+    """Watch dry-run reporting must describe every planned output outcome."""
+    logger = Mock()
+    result = Mock(
+        warnings=[],
+        stats={
+            "agents_files_generated": 2,
+            "root_context_files_protected": 1,
+        },
+    )
+
+    retained = _report_retained_watch_outputs(logger, result, dry_run=True)
+
+    assert retained
+    message = logger.progress.call_args.args[0]
+    assert "Would generate 2 other output files" in message
+    assert "retain 1 hand-authored root file" in message
 
 
 def test_watch_recompile_retains_hand_authored_root_context(
@@ -137,6 +156,7 @@ def test_watch_recompile_retains_hand_authored_root_context(
     assert "Protected AGENTS.md" in warning_text
     progress_text = " ".join(call.args[0] for call in logger.progress.call_args_list)
     assert "retained" in progress_text
+    assert "generated 2 other output files" in progress_text
 
 
 def test_mixed_outcome_reports_retained_and_nested_skipped_outputs() -> None:
@@ -578,6 +598,28 @@ def test_blocked_single_file_does_not_report_constitution_as_applied(
     assert result.exit_code == 0, result.output
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
     assert "NOT APPLIED" in result.output
+
+
+def test_mixed_target_single_agents_excludes_claude_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single AGENTS output must not concatenate another root-context artifact."""
+    _seed_project(tmp_path)
+    (tmp_path / "AGENTS.md").unlink()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--single-agents", "--target", "claude,codex"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    content = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert AGENTS_MD_GENERATED_MARKER in content
+    assert "CLAUDE.md Preview:" not in content
+    assert "CLAUDE.md Compilation Summary" not in content
 
 
 def test_marker_mentioned_in_body_does_not_grant_write_ownership(
