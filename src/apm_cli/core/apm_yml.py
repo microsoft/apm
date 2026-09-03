@@ -180,6 +180,8 @@ def parse_targets_field(
             raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
         # CSV sugar: "claude,copilot" -> ['claude', 'copilot']
         tokens = [t.strip() for t in raw_str.split(",") if t.strip()]
+        if not tokens and not allow_empty_singular:
+            raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
         return _validate_and_fold_legacy_all(tokens)
 
     # Neither key present

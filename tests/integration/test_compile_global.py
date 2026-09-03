@@ -154,6 +154,7 @@ def test_compile_global_honors_user_manifest_targets(
         ("target: []\n", "'targets:' in apm.yml is empty"),
         ("target: ''\n", "'targets:' in apm.yml is empty"),
         ("target: ['']\n", "'targets:' in apm.yml is empty"),
+        ("target: ',,,'\n", "'targets:' in apm.yml is empty"),
     ],
 )
 def test_compile_global_broken_user_manifest_fails_closed(
