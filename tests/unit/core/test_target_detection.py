@@ -105,6 +105,16 @@ class TestDetectTarget:
         assert target == "kiro"
         assert reason == "explicit --target flag"
 
+    def test_explicit_target_kimi_wins(self, tmp_path):
+        """Explicit --target kimi always wins."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="kimi",
+        )
+
+        assert target == "kimi"
+        assert reason == "explicit --target flag"
+
     def test_config_target_copilot(self, tmp_path):
         """Config target copilot maps to vscode."""
         target, reason = detect_target(
@@ -147,6 +157,17 @@ class TestDetectTarget:
         )
 
         assert target == "claude"
+        assert reason == "apm.yml target"
+
+    def test_config_target_kimi(self, tmp_path):
+        """Config target kimi is used when no explicit target."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target="kimi",
+        )
+
+        assert target == "kimi"
         assert reason == "apm.yml target"
 
     def test_config_target_all(self, tmp_path):
@@ -213,6 +234,19 @@ class TestDetectTarget:
         assert target == "kiro"
         assert "detected .kiro/ folder" in reason
 
+    def test_auto_detect_kimi_only(self, tmp_path):
+        """Auto-detect kimi when only .kimi-code/ exists."""
+        (tmp_path / ".kimi-code").mkdir()
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "kimi"
+        assert "detected .kimi-code/ folder" in reason
+
     def test_auto_detect_neither_folder(self, tmp_path):
         """Auto-detect minimal when neither folder exists."""
         target, reason = detect_target(
@@ -251,6 +285,10 @@ class TestShouldCompileAgentsMd:
     def test_kiro_target(self):
         """AGENTS.md compiled for kiro as a cross-harness fallback."""
         assert should_compile_agents_md("kiro") is True
+
+    def test_kimi_target(self):
+        """AGENTS.md compiled for kimi as its root instruction format."""
+        assert should_compile_agents_md("kimi") is True
 
 
 class TestShouldCompileClaudeMd:

@@ -629,6 +629,21 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_dir=".kiro",
     ),
+    # Kimi Code -- project and user scope both use .kimi-code/.
+    # Root instructions compile to AGENTS.md; agents use Kimi-compatible
+    # Markdown/YAML and skills use the open Agent Skills layout.
+    "kimi": TargetProfile(
+        capability=TARGET_CAPABILITIES["kimi"],
+        root_dir=".kimi-code",
+        primitives={
+            "agents": PrimitiveMapping("agents", ".md", "claude_agent"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".kimi-code",
+    ),
     # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
     # and commands.  OpenCode has no hooks concept, so "hooks" is excluded.
     "opencode": TargetProfile(

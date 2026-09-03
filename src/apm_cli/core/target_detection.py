@@ -72,6 +72,7 @@ TargetType = Literal[
     "antigravity",
     "windsurf",
     "kiro",
+    "kimi",
     "agent-skills",
     "all",
     "minimal",
@@ -114,6 +115,7 @@ UserTargetType = Literal[
     "grok-build",
     "windsurf",
     "kiro",
+    "kimi",
     "agent-skills",
     "all",
     "minimal",
@@ -160,6 +162,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "explicit --target flag"
         elif explicit_target == "kiro":
             return "kiro", "explicit --target flag"
+        elif explicit_target == "kimi":
+            return "kimi", "explicit --target flag"
         elif explicit_target == "grok-build":
             return "grok-build", "explicit --target flag"
         elif explicit_target == "agent-skills":
@@ -187,6 +191,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "apm.yml target"
         elif config_target == "kiro":
             return "kiro", "apm.yml target"
+        elif config_target == "kimi":
+            return "kimi", "apm.yml target"
         elif config_target == "grok-build":
             return "grok-build", "apm.yml target"
         elif config_target == "agent-skills":
@@ -203,6 +209,7 @@ def detect_target(  # noqa: PLR0911
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
     kiro_exists = (project_root / ".kiro").is_dir()
+    kimi_exists = (project_root / ".kimi-code").is_dir()
     grok_exists = (project_root / ".grok").is_dir()
     detected = []
     if github_exists:
@@ -221,6 +228,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".windsurf/")
     if kiro_exists:
         detected.append(".kiro/")
+    if kimi_exists:
+        detected.append(".kimi-code/")
     if grok_exists:
         detected.append(".grok/")
 
@@ -242,6 +251,8 @@ def detect_target(  # noqa: PLR0911
         return "windsurf", "detected .windsurf/ folder"
     elif kiro_exists:
         return "kiro", "detected .kiro/ folder"
+    elif kimi_exists:
+        return "kimi", "detected .kimi-code/ folder"
     elif grok_exists:
         return "grok-build", "detected .grok/ folder"
     else:
@@ -252,7 +263,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
     AGENTS.md is generated for vscode, cursor, opencode, codex, gemini,
-    windsurf, kiro, antigravity, grok-build, hermes, all, and minimal targets.
+    windsurf, kiro, kimi, antigravity, grok-build, hermes, all, and minimal targets.
     Gemini needs it because GEMINI.md imports AGENTS.md.
 
     Args:
@@ -274,6 +285,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "grok-build",
         "windsurf",
         "kiro",
+        "kimi",
         "hermes",
         "all",
         "minimal",
@@ -412,10 +424,11 @@ def get_target_description(target: UserTargetType) -> str:
         "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
+        "kimi": "AGENTS.md + .kimi-code/agents/ + .kimi-code/skills/",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .kimi-code/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")

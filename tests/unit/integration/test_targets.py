@@ -79,6 +79,11 @@ class TestActiveTargets:
         targets = active_targets(self.root)
         assert [t.name for t in targets] == ["opencode"]
 
+    def test_only_kimi_returns_kimi(self):
+        (self.root / ".kimi-code").mkdir()
+        targets = active_targets(self.root)
+        assert [t.name for t in targets] == ["kimi"]
+
     def test_github_and_claude_returns_both(self):
         (self.root / ".github").mkdir()
         (self.root / ".claude").mkdir()
@@ -109,6 +114,10 @@ class TestActiveTargets:
     def test_explicit_claude(self):
         targets = active_targets(self.root, explicit_target="claude")
         assert [t.name for t in targets] == ["claude"]
+
+    def test_explicit_kimi(self):
+        targets = active_targets(self.root, explicit_target="kimi")
+        assert [t.name for t in targets] == ["kimi"]
 
     def test_explicit_all_returns_every_known_target(self):
         from apm_cli.core.target_catalog import normalize_target_name

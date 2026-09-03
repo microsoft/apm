@@ -134,6 +134,13 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="agents",
         ),
         _capability(
+            "kimi",
+            "Kimi Code native .kimi-code configuration",
+            in_all=True,
+            primitive_profile="kimi",
+            compile_family="agents",
+        ),
+        _capability(
             "opencode",
             "OpenCode native .opencode configuration",
             in_all=True,

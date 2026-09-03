@@ -29,12 +29,13 @@ see [Primitive types](../primitive-types/).
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
+| kimi            | `.kimi-code/`          |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
-below). Claude, Grok Build, and Kiro keep target-native skill directories.
+below). Claude, Grok Build, Kiro, and Kimi keep target-native skill directories.
 
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
@@ -88,6 +89,7 @@ runtime-specific configuration while compile only generates project output. Use
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
+| kimi     | `.kimi-code/` directory                       |
 | intellij | Global `github-copilot/intellij/` config directory (MCP runtime discovery only) |
 
 IntelliJ-specific integration is MCP-only and writes JetBrains Copilot's
