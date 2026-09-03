@@ -1,6 +1,9 @@
 ---
 name: Triage Panel
 description: Auto-invoke the apm-triage-panel skill on a daily sweep of untriaged issues plus an opt-in fast path for explicit re-triage. Posts one synthesized verdict per issue and applies the panel-decided labels and milestone, with explicit "agentic proposal pending human ratification" framing.
+engine:
+  id: copilot
+  version: 1.0.80
 
 # Trigger model -- two paths plus manual dispatch:
 #
