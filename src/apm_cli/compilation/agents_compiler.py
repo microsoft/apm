@@ -403,15 +403,9 @@ class AgentsCompiler:
     ) -> CompilationResult:
         """Compile AGENTS.md and/or CLAUDE.md based on target configuration.
 
-        Routes compilation to appropriate targets based on config.target:
-        - "vscode" or "agents": Generate AGENTS.md + .github/ structure
-        - "claude": Generate CLAUDE.md + .claude/ structure
-        - "all": Generate both targets
-
         Args:
             config (CompilationConfig): Compilation configuration.
             primitives (Optional[PrimitiveCollection]): Primitives to use, or None to discover.
-            logger: Optional command logger for progress output.
             root_outputs: Root artifact families to return. Defaults to all routed families.
 
         Returns:
@@ -433,17 +427,14 @@ class AgentsCompiler:
             else CompileInventory.collect(self.base_dir)
         )
         try:
-            # Use provided primitives or discover them (with dependency support)
             if primitives is None:
                 if config.local_only:
-                    # Use basic discovery for local-only mode
                     primitives = discover_primitives(
                         str(self.source_dir),
                         exclude_patterns=config.exclude,
                         inventory=self._source_inventory,
                     )
                 else:
-                    # Use enhanced discovery with dependencies (Task 4 integration)
                     from ..primitives.discovery import discover_primitives_with_dependencies
 
                     primitives = discover_primitives_with_dependencies(
@@ -452,15 +443,7 @@ class AgentsCompiler:
                         inventory=self._source_inventory,
                     )
 
-            # Route to targets based on config.target.
-            # Use target_detection helpers as the single source of truth so
-            # new targets (codex, opencode, cursor, minimal, ...) route
-            # correctly without touching this method again.
             if isinstance(config.target, frozenset):
-                # Multi-target lists are normalized by _resolve_compile_target()
-                # into compiler families only. Validate defensively for direct
-                # API callers so invalid families do not silently produce
-                # partial output or a successful no-op.
                 invalid_families = config.target - _KNOWN_COMPILE_FAMILIES
                 if invalid_families:
                     self.errors.append(
