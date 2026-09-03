@@ -101,7 +101,7 @@
     },
     {
       "id": "lsp-lifecycle",
-      "decision": "LSP collection, trust filtering, and lifecycle reconciliation",
+      "decision": "LSP lifecycle orchestration and reconciliation",
       "owner": "install/lsp/integration.py",
       "selectors": ["src/apm_cli/install/lsp/integration.py"],
       "guards": ["install-deployment-lsp-lifecycle"]

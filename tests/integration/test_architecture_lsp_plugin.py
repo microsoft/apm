@@ -87,6 +87,20 @@ def test_lsp_target_ownership_bypass_is_rejected() -> None:
     assert {item.rule_id for item in report.violations} == {"install-deployment-lsp-lifecycle"}
 
 
+def test_lsp_lifecycle_direct_call_bypass_is_rejected() -> None:
+    path = "src/apm_cli/install/services.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source + "\nLSPIntegrator.install([])\n"
+
+    report = run_selected_rules(
+        ROOT,
+        ("install-deployment-lsp-lifecycle",),
+        source_overrides={path: mutated},
+    )
+
+    assert {item.rule_id for item in report.violations} == {"install-deployment-lsp-lifecycle"}
+
+
 def test_claude_lsp_approval_alias_bypass_is_rejected() -> None:
     """The LSP rule must reject local approval-key derivation."""
     path = "src/apm_cli/integration/lsp_integrator.py"

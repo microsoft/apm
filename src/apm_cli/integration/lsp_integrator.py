@@ -1,8 +1,7 @@
-"""Standalone LSP lifecycle orchestrator.
+"""Runtime target adapter for LSP configuration.
 
-Owns LSP dependency resolution, installation, stale cleanup, and lockfile
-persistence logic. LSP config is written through runtime targets so vendor
-specific path and field differences stay isolated behind a neutral interface.
+Owns target paths, shapes, file writes, and cleanup mechanics. The install LSP
+pipeline owns collection, trust filtering, and lifecycle reconciliation.
 """
 
 from __future__ import annotations
@@ -116,7 +115,7 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
 
 
 class LSPIntegrator:
-    """LSP lifecycle orchestrator: dependency resolution, installation, and cleanup.
+    """Adapt runtime-neutral LSP declarations to target configuration files.
 
     All methods are static: the class is a logical namespace, not a stateful
     object.
@@ -665,6 +664,10 @@ class LSPIntegrator:
                     )
                     for name in removed:
                         logger.verbose_detail(f"Removed stale LSP server: {name}")
+                    if runtime == "claude" and not user_scope:
+                        logger.progress(
+                            "  |-- run /reload-plugins or restart Claude Code to activate"
+                        )
             except Exception as exc:
                 _log.debug(
                     "Failed to clean stale LSP servers from %s",
@@ -737,7 +740,7 @@ class LSPIntegrator:
                 ) from exc
 
     # ------------------------------------------------------------------
-    # Main orchestrator
+    # Target deployment
     # ------------------------------------------------------------------
 
     @staticmethod

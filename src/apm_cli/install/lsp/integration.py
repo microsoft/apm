@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 _PROJECT_LSP_OWNER = "project:."
 _PACKAGE_LSP_OWNER_PREFIX = "package:"
 _BUNDLE_LSP_OWNER_PREFIX = "bundle:"
+_RESERVED_LSP_OWNER_PREFIXES = (
+    _PROJECT_LSP_OWNER.split(".", 1)[0],
+    _PACKAGE_LSP_OWNER_PREFIX,
+    _BUNDLE_LSP_OWNER_PREFIX,
+)
 
 
 def _target_server_sets(lockfile: "LockFile") -> dict[str, set[str]]:
@@ -41,6 +46,14 @@ def _dependency_provenance(dependencies: list["LSPDependency"]) -> dict[str, str
 def _is_regular_owner(owner: str) -> bool:
     """Return whether an LSP owner belongs to the replayable install graph."""
     return owner == _PROJECT_LSP_OWNER or owner.startswith(_PACKAGE_LSP_OWNER_PREFIX)
+
+
+def _bundle_owner_aliases(owner: str) -> frozenset[str]:
+    """Return canonical and safe legacy provenance tokens for one bundle."""
+    canonical = f"{_BUNDLE_LSP_OWNER_PREFIX}{owner}"
+    if owner.startswith(_RESERVED_LSP_OWNER_PREFIXES):
+        return frozenset({canonical})
+    return frozenset({canonical, owner})
 
 
 def _clean_target_differences(
@@ -86,10 +99,11 @@ def run_owned_lsp_integration(
 
     lockfile = LockFile.read(lock_path) or LockFile()
     owner_token = f"{_BUNDLE_LSP_OWNER_PREFIX}{owner}"
+    owner_aliases = _bundle_owner_aliases(owner)
     old_owned = {
         name
         for name, recorded_owner in lockfile.lsp_config_provenance.items()
-        if recorded_owner in {owner, owner_token}
+        if recorded_owner in owner_aliases
     }
     new_names = LSPIntegrator.get_server_names(dependencies)
     conflicts = {
@@ -97,7 +111,7 @@ def run_owned_lsp_integration(
         for name in new_names
         if name in lockfile.lsp_servers
         and name not in old_owned
-        and lockfile.lsp_config_provenance.get(name) not in {owner, owner_token}
+        and lockfile.lsp_config_provenance.get(name) not in owner_aliases
     }
     if conflicts:
         conflict_details = ", ".join(

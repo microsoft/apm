@@ -5,6 +5,7 @@ from __future__ import annotations
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _facts_for,
     _present,
+    _python_paths,
     _summary,
 )
 from scripts.architecture_linter.facts import FactsProvider
@@ -152,4 +153,28 @@ def check_lsp_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Transitive LSP trust filtering must run before first-wins deduplication",
             )
         )
+    lifecycle_calls = (
+        "LSPIntegrator.collect_transitive(",
+        "LSPIntegrator.resolve_target_runtimes(",
+        "LSPIntegrator.install(",
+        "LSPIntegrator.remove_stale(",
+        "LSPIntegrator.update_lockfile(",
+    )
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path in {_LSP_INTEGRATOR, _LSP_PIPELINE}:
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_LSP_LIFECYCLE)
+        if failures:
+            findings.extend(failures)
+            continue
+        direct_calls = [token for token in lifecycle_calls if _present(facts, token)]
+        if direct_calls:
+            findings.append(
+                _summary(
+                    GUARD_LSP_LIFECYCLE,
+                    path,
+                    "LSP lifecycle calls must route through install/lsp/integration.py: "
+                    + ", ".join(direct_calls),
+                )
+            )
     return tuple(findings)

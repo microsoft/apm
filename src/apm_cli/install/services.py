@@ -940,7 +940,8 @@ def integrate_local_bundle(
                 _msg = (
                     f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
                     f"'{slug}': canvas extensions are executable extension.mjs code "
-                    "and are not approved for this exact bundle content. Add:\n"
+                    "and are not approved for this exact bundle content. "
+                    "Add this to apm.yml:\n"
                     "executables:\n"
                     "  allow:\n"
                     f'    "{approval_key}":\n'

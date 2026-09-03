@@ -556,10 +556,14 @@ class TestRemoveStale:
             )
         )
 
-        LSPIntegrator.remove_stale({"stale"}, project_root=tmp_path)
+        logger = MagicMock()
+        LSPIntegrator.remove_stale({"stale"}, project_root=tmp_path, logger=logger)
         data = json.loads(plugin_json.read_text())
         assert "keep" in data["lspServers"]
         assert "stale" not in data["lspServers"]
+        logger.progress.assert_called_once_with(
+            "  |-- run /reload-plugins or restart Claude Code to activate"
+        )
 
     def test_removing_last_server_deletes_owned_project_plugin(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN

@@ -152,6 +152,35 @@ class TestOwnedLspIntegration:
 
         mock_integrator.remove_stale.assert_not_called()
 
+    @patch(_PATCH_TARGET)
+    def test_bundle_id_cannot_impersonate_project_owner(self, mock_integrator, tmp_path) -> None:
+        lock_path = tmp_path / "apm.lock.yaml"
+        LockFile(
+            lsp_servers=["project"],
+            lsp_configs={"project": {"command": "project-lsp"}},
+            lsp_config_provenance={"project": "project:."},
+            lsp_target_servers={"claude": ["project"]},
+            _lsp_target_servers_present=True,
+        ).write(lock_path)
+        mock_integrator.get_server_names.return_value = set()
+
+        count = run_owned_lsp_integration(
+            dependencies=[],
+            owner="project:.",
+            lock_path=lock_path,
+            project_root=tmp_path,
+            user_scope=False,
+            target_runtimes=["claude"],
+            logger=_mock_logger(),
+        )
+
+        assert count == 0
+        mock_integrator.remove_stale.assert_not_called()
+        lockfile = LockFile.read(lock_path)
+        assert lockfile is not None
+        assert lockfile.lsp_servers == ["project"]
+        assert lockfile.lsp_config_provenance == {"project": "project:."}
+
     def test_local_bundle_force_reaches_owned_lsp_writer(self, tmp_path) -> None:
         from types import SimpleNamespace
 
