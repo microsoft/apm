@@ -660,14 +660,14 @@ class DependencyReference(ProviderCoordinateMixin):
             return  # bare shorthand or other form -- not in scope
 
         path_part = path_part.split("#")[0].split("?")[0]
-        if "%" in path_part:
+        try:
             _, decoded_segments = parse_url_path_segments(
                 path_part,
-                context="repository URL path",
+                context="dependency URL path",
             )
-            segments = list(decoded_segments)
-        else:
-            segments = [s for s in path_part.replace("\\", "/").split("/") if s]
+        except PathTraversalError:
+            return
+        segments = [s for s in decoded_segments if s]
         if len(segments) < 3:
             return  # too few segments to contain an interior primitive name
 
