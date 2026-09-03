@@ -101,7 +101,7 @@ destinations selected with `--root`. If an existing root file has no
 APM-generated marker, full-file compilation retains it and prints a warning.
 Delete or rename that file before compiling if generated output should replace
 it. For section-scoped `AGENTS.md` updates, see
-[`compilation.agents_md`](../manifest-schema/#62-compilationagents_md).
+[`compilation.agents_md`](../../manifest-schema/#62-compilationagents_md).
 
 If a constitution or dependency imports still require `CLAUDE.md`, `--clean`
 regenerates/overwrites that file instead of removing it.
