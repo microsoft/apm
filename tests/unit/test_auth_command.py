@@ -331,6 +331,30 @@ class TestAuthFlow:
         assert "erase" in result.output  # advice for the user to run
 
 
+class TestDocumentedResolutionChain:
+    """The resolution chain is stated in three places; they must agree.
+
+    `GH_TOKEN` was missing from all three -- the docs table, the module
+    docstring, and the --help epilog -- while `_resolve_token` has read it all
+    along via TOKEN_PRECEDENCE["modules"]. A user with only GH_TOKEN exported
+    reads any of them as "not used" and mints a PAT they do not need.
+    """
+
+    def test_help_epilog_names_every_github_env_var_apm_reads(self):
+        from apm_cli.commands.auth import _EPILOG
+        from apm_cli.core.token_manager import GitHubTokenManager
+
+        for var in GitHubTokenManager.TOKEN_PRECEDENCE["modules"]:
+            assert var in _EPILOG, f"{var} is read by APM but absent from --help"
+
+    def test_module_docstring_names_every_github_env_var_apm_reads(self):
+        import apm_cli.commands.auth as auth_mod
+        from apm_cli.core.token_manager import GitHubTokenManager
+
+        for var in GitHubTokenManager.TOKEN_PRECEDENCE["modules"]:
+            assert var in auth_mod.__doc__, f"{var} is read by APM but absent from the docstring"
+
+
 class TestExportMode:
     """`eval "$(apm auth <host> --export)"` requires a clean stdout."""
 
