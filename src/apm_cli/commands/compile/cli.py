@@ -844,8 +844,11 @@ def _run_compilation(
                     with_constitution=config.with_constitution,
                     output_path=output_path,
                 )
+                agents_write_blocked = bool(
+                    intermediate_result.stats.get("agents_root_context_write_blocked", 0)
+                )
 
-                if not dry_run:
+                if not dry_run and not agents_write_blocked:
                     # Only rewrite when content materially changes (creation, update, missing constitution case)
                     if c_status in ("CREATED", "UPDATED", "MISSING"):
                         # Defense-in-depth: scan compiled output before writing
@@ -884,7 +887,12 @@ def _run_compilation(
                         )
 
                 # Report success at the top
-                if dry_run:
+                if agents_write_blocked:
+                    logger.progress(
+                        "AGENTS.md not generated -- protected hand-authored root file retained",
+                        symbol="info",
+                    )
+                elif dry_run:
                     logger.success(
                         "Context compilation completed successfully (dry run)",
                         symbol="check",

@@ -163,6 +163,30 @@ _COMPILE_INVENTORY_PATHS: tuple[str, ...] = (
     _COMPILE_AGENTS,
 )
 
+_ROOT_CONTEXT_OWNER = "src/apm_cli/compilation/agents_compiler.py"
+
+_ROOT_CONTEXT_CLI = "src/apm_cli/commands/compile/cli.py"
+
+_ROOT_CONTEXT_PATHS = (_ROOT_CONTEXT_OWNER, _ROOT_CONTEXT_CLI)
+
+_ROOT_CONTEXT_OWNER_FRAGMENTS = (
+    "def _hand_authored_root_context_blocks_write(",
+    "if self._hand_authored_root_context_blocks_write(path, CLAUDE_HEADER)",
+    "write_blocked = self._hand_authored_root_context_blocks_write(",
+    "if self._hand_authored_root_context_blocks_write(\n"
+    "                    agents_path, AGENTS_MD_GENERATED_MARKER",
+)
+
+_ROOT_CONTEXT_CLI_FRAGMENTS = (
+    'intermediate_result.stats.get("agents_root_context_write_blocked", 0)',
+    "if not dry_run and not agents_write_blocked:",
+)
+
+_ROOT_CONTEXT_DUPLICATE_PATTERN = (
+    r"^\s*def\s+\w*(?:hand_authored.*root_context|root_context.*hand_authored)"
+    r"\w*\([^)]*\)\s*(?:->[^:]+)?:"
+)
+
 
 _LOCKFILE_OWNER = "src/apm_cli/deps/lockfile.py"
 
@@ -356,6 +380,50 @@ def _check_compile_inventory_authority(provider: FactsProvider) -> Iterable[Viol
             + "; ".join(defects),
         ),
     )
+
+
+def _check_root_context_write_eligibility(provider: FactsProvider) -> Iterable[Violation]:
+    """Project root overwrite decisions must route through the compiler owner."""
+    rule_id = "contracts-tooling-root-context-write-eligibility"
+    facts_by_path, failures = _read_required(provider, rule_id, _ROOT_CONTEXT_PATHS)
+    if failures:
+        return failures
+
+    owner_text = source_text(facts_by_path[_ROOT_CONTEXT_OWNER])
+    cli_text = source_text(facts_by_path[_ROOT_CONTEXT_CLI])
+    defects: list[str] = []
+    if owner_text.count("def _hand_authored_root_context_blocks_write(") != 1:
+        defects.append(f"{_ROOT_CONTEXT_OWNER} must define the eligibility owner exactly once")
+    for fragment in _ROOT_CONTEXT_OWNER_FRAGMENTS:
+        if fragment not in owner_text:
+            defects.append(f"{_ROOT_CONTEXT_OWNER} is missing {fragment!r}")
+    for fragment in _ROOT_CONTEXT_CLI_FRAGMENTS:
+        if fragment not in cli_text:
+            defects.append(f"{_ROOT_CONTEXT_CLI} is missing {fragment!r}")
+
+    findings = list(
+        line_pattern_violations(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_ROOT_CONTEXT_OWNER,)),
+            pattern=_ROOT_CONTEXT_DUPLICATE_PATTERN,
+            message=(
+                "hand-authored project root write eligibility belongs in "
+                "AgentsCompiler._hand_authored_root_context_blocks_write"
+            ),
+            exempt_marker=None,
+        )
+    )
+    if defects:
+        findings.append(
+            violation(
+                rule_id,
+                _ROOT_CONTEXT_OWNER,
+                "project root context write eligibility must route through its canonical owner; "
+                + "; ".join(defects),
+            )
+        )
+    return findings
 
 
 def _check_agents_source_attribution(provider: FactsProvider) -> Iterable[Violation]:
@@ -579,6 +647,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(),
         description="AGENTS.md cosmetics must use the canonical source_attribution boolean.",
         check=_check_agents_source_attribution,
+    ),
+    Rule(
+        id="contracts-tooling-root-context-write-eligibility",
+        group=GROUP,
+        guard_ids=("contracts-tooling-root-context-write-eligibility",),
+        description=("Project root context overwrite decisions must route through AgentsCompiler."),
+        check=_check_root_context_write_eligibility,
     ),
     Rule(
         id="registry_delegation.lockfile_version_authority",

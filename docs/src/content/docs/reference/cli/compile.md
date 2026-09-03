@@ -142,6 +142,12 @@ one-line hint pointing at `apm compile -g`. Run it manually after adding or
 removing global packages. Hand-authored files (files that do not carry the
 APM-generated marker) are never overwritten.
 
+Project compilation applies the same protection to root `AGENTS.md` and
+`CLAUDE.md` files, including destinations selected with `--root`. If an
+existing root file has no APM-generated marker, compile skips it and prints a
+warning. Delete or rename that file before compiling if generated output should
+replace it.
+
 For OpenCode, `apm compile -g` writes
 `~/.config/opencode/AGENTS.md` and retains scoped `applyTo` sections.
 

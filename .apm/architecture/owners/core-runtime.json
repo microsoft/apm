@@ -51,10 +51,13 @@
     },
     {
       "id": "distributed-agents-output-preparation",
-      "decision": "Distributed AGENTS.md output eligibility and content preparation",
-      "owner": "compilation/agents_compiler.py (_prepare_distributed_file)",
+      "decision": "Agent root-context output eligibility and content preparation",
+      "owner": "compilation/agents_compiler.py (_prepare_distributed_file and _hand_authored_root_context_blocks_write)",
       "selectors": ["src/apm_cli/compilation/agents_compiler.py"],
-      "guards": ["contracts-tooling-distributed-agents-output"]
+      "guards": [
+        "contracts-tooling-distributed-agents-output",
+        "contracts-tooling-root-context-write-eligibility"
+      ]
     },
     {
       "id": "compile-nested-git-boundary",

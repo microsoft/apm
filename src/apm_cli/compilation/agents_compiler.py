@@ -828,12 +828,17 @@ class AgentsCompiler:
         content = self.generate_output(template_data, config)
 
         # Write output file (constitution injection handled externally in CLI)
-        output_path = str(self.base_dir / config.output_path)
-        if not config.dry_run:
+        output_file = self.base_dir / config.output_path
+        output_path = str(output_file)
+        write_blocked = self._hand_authored_root_context_blocks_write(
+            output_file, _COPILOT_ROOT_GENERATED_MARKER
+        )
+        if not config.dry_run and not write_blocked:
             self._write_output_file_with_config(output_path, content, config)
 
         # Compile statistics
         stats = self._compile_stats(primitives, template_data)
+        stats["agents_root_context_write_blocked"] = int(write_blocked)
 
         return CompilationResult(
             success=len(self.errors) == 0,
@@ -962,6 +967,26 @@ class AgentsCompiler:
         claude_result = claude_formatter.format_distributed(
             primitives, placement_map, claude_config
         )
+
+        protected_claude_paths = {
+            path
+            for path in claude_result.content_map
+            if self._hand_authored_root_context_blocks_write(path, CLAUDE_HEADER)
+        }
+        if protected_claude_paths:
+            claude_result.content_map = {
+                path: content
+                for path, content in claude_result.content_map.items()
+                if path not in protected_claude_paths
+            }
+            claude_result.placements = [
+                placement
+                for placement in claude_result.placements
+                if placement.claude_path not in protected_claude_paths
+            ]
+            claude_result.stats = claude_formatter._compile_stats(
+                claude_result.placements, primitives
+            )
 
         # NOTE: Claude commands are now generated at install time via CommandIntegrator,
         # not at compile time. This keeps behavior consistent with VSCode prompt integration.
@@ -1097,7 +1122,11 @@ class AgentsCompiler:
         )
 
         if would_emit_no_claude_md:
-            if skip_instructions:
+            if protected_claude_paths:
+                no_output_message = (
+                    "CLAUDE.md not generated -- protected hand-authored root file retained"
+                )
+            elif skip_instructions:
                 no_output_message = (
                     "CLAUDE.md not generated -- Claude Code reads .claude/rules/"
                     " directly, no further action needed"
@@ -1112,7 +1141,7 @@ class AgentsCompiler:
             # only reached when NOT in dry-run; no config.dry_run guard is needed.
             # Gate on clean_orphaned so plain `apm compile` (no --clean) does NO
             # extra disk I/O and emits NO stale-file warnings (non-destructive by design).
-            if config.clean_orphaned:
+            if config.clean_orphaned and not protected_claude_paths:
                 det = self._detect_stale_claude_md()
                 if det.exists:
                     if det.read_error is not None:
@@ -1730,6 +1759,14 @@ class AgentsCompiler:
                 )
                 return None
 
+            if config.agents_md_mode != "managed_section":
+                from .distributed_compiler import AGENTS_MD_GENERATED_MARKER
+
+                if self._hand_authored_root_context_blocks_write(
+                    agents_path, AGENTS_MD_GENERATED_MARKER
+                ):
+                    return None
+
             # Handle constitution injection for distributed files
             final_content = content
 
@@ -1755,6 +1792,29 @@ class AgentsCompiler:
 
         except OSError as e:
             raise OSError(f"Failed to prepare distributed AGENTS.md file {agents_path}: {e!s}")  # noqa: B904
+
+    def _hand_authored_root_context_blocks_write(self, path: Path, marker: str) -> bool:
+        """Return whether an existing project-root file must be retained."""
+        if path.parent != self.base_dir or not path.is_file():
+            return False
+        rel_path = portable_relpath(path, self.base_dir)
+        try:
+            ensure_path_within(path, self.base_dir)
+            with path.open("rb") as handle:
+                prefix = handle.read(4096).decode("utf-8")
+        except (OSError, PathTraversalError, UnicodeDecodeError) as exc:
+            self.warnings.append(
+                f"Skipped {rel_path}: could not verify the APM-generated marker; "
+                f"file will not be overwritten ({exc!s})."
+            )
+            return True
+        if marker in prefix:
+            return False
+        self.warnings.append(
+            f"Skipped {rel_path}: hand-authored file will not be overwritten. "
+            "To regenerate it, delete or rename the file, then re-run 'apm compile'."
+        )
+        return True
 
     @staticmethod
     def _new_managed_section_content(content: str, config: CompilationConfig) -> str:

@@ -144,6 +144,12 @@ When `apm install` has already deployed instructions to `.claude/rules/`, `apm c
 
 **Dry-run preview.** Use `--dry-run` with `--clean` to preview what would be removed without touching any files. If a hand-authored `CLAUDE.md` would block deletion, the preview surfaces that outcome as well.
 
+**Root file protection.** Project compiles never overwrite a root `AGENTS.md`
+or `CLAUDE.md` that lacks the APM-generated marker, including destinations
+selected with `--root`. Compile skips the hand-authored file and prints a
+warning. Delete or rename it before compiling if generated output should
+replace it.
+
 **Nested Git boundaries.** Compile does not discover, write, or clean content
 inside nested Git repositories or linked worktrees below its root. This also
 applies to `includes: auto`. Run `apm compile` from the nested checkout when you
