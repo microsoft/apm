@@ -2426,6 +2426,69 @@ class TestInstallMcpFlag:
         assert "would add MCP server" in result.output
         assert not (fake_home / ".apm" / "apm.yml").exists()
 
+    def test_mcp_dry_run_env_prevalidation_uses_parsed_pairs(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "--target",
+            "claude",
+            "--mcp",
+            "probe",
+            "--env",
+            "FOO=bar",
+            "--dry-run",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 0, result.output
+        assert "would add MCP server" in result.output
+        assert "dictionary update sequence" not in result.output
+        assert not (project / "apm.yml").exists()
+
+    def test_mcp_dry_run_header_prevalidation_uses_parsed_pairs(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "--target",
+            "claude",
+            "--mcp",
+            "probe",
+            "--url",
+            "https://example.com/mcp",
+            "--header",
+            "X-Test=1",
+            "--dry-run",
+            "--no-policy",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 0, result.output
+        assert "would add MCP server" in result.output
+        assert "dictionary update sequence" not in result.output
+        assert not (project / "apm.yml").exists()
+
     def test_global_registry_mcp_dry_run_prevalidates_before_preview(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
         project = tmp_path / "project"

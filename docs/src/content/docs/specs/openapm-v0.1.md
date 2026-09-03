@@ -2722,12 +2722,13 @@ without that declared capability as unsupported.
 
 When the consumer installs an MCP server into a user scope, it MUST resolve the
 effective target selection from the first applicable source in this order: an
-explicit target selection; a non-empty user-scope manifest restriction, with
-`all` expanded as defined in [Section 4.2.1](#421-target); a configured user
+explicit target selection; a non-empty user-scope manifest restriction that
+does not contain the literal no-restriction sentinel `all`; a configured user
 default; then user-scope runtime discovery. Once a source selects one or more
 targets, the consumer MUST NOT consult a lower-precedence source. Project-scoped
 target-detection signals outside the user scope MUST NOT constrain the discovery
-step.
+step. A manifest `all` token is treated as no restriction and therefore does
+not suppress lower-precedence user-scope defaults or discovery.
 
 Before creating or modifying the user-scope manifest, lockfile, or target
 configuration for the attempted MCP entry, the consumer MUST partition the

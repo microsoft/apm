@@ -407,13 +407,41 @@ class SimpleRegistryClient:
         Raises:
             requests.RequestException: If the request fails.
         """
+        servers, _next_cursor = self._search_servers_page(query)
+        return servers
+
+    def _search_servers_page(
+        self, query: str, cursor: str | None = None
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Return one page from the spec search endpoint."""
         url = f"{self.registry_url}{_V0_1_PREFIX}/servers"
         params = {"search": query}
+        if cursor is not None:
+            params["cursor"] = cursor
 
         data, _hdrs = self._cached_get_json(url, params=params)
         data = data or {}
+        metadata = data.get("metadata", {})
 
-        return self._unwrap_server_list(data)
+        return self._unwrap_server_list(data), metadata.get("nextCursor")
+
+    def _search_servers_all_pages(self, query: str) -> list[dict[str, Any]]:
+        """Search all pages so bare-name uniqueness is checked globally."""
+        all_servers: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            servers, next_cursor = self._search_servers_page(query, cursor)
+            all_servers.extend(servers)
+            if not next_cursor:
+                return all_servers
+            if next_cursor in seen_cursors:
+                raise requests.RequestException(
+                    "MCP registry returned a repeated search cursor; "
+                    "cannot prove bare server-name uniqueness"
+                )
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
 
     @staticmethod
     def _unwrap_server_list(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -604,8 +632,10 @@ class SimpleRegistryClient:
         Raises:
             requests.RequestException: If the registry API request fails.
         """
-        # Use search API to find by name
-        search_results = self.search_servers(reference)
+        # Use search API to find by name. Fetch every page before applying
+        # the bare-slug uniqueness guard; selecting from only page one would
+        # make dependency-confusion possible when another match sits later.
+        search_results = self._search_servers_all_pages(reference)
 
         # Pass 1: exact full-name match (prevents slug collisions)
         for server in search_results:

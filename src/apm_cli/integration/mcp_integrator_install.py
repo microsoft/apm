@@ -57,7 +57,10 @@ def _validate_registry_servers(
             server_info_cache=server_info_cache,
         )
     else:
-        valid_servers, invalid_servers = operations.validate_servers_exist(server_names)
+        valid_servers, invalid_servers = operations.validate_servers_exist(
+            server_names,
+            server_info_cache=server_info_cache,
+        )
     if invalid_servers:
         logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
         logger.progress("Run 'apm mcp search <query>' to find available servers")
@@ -132,6 +135,7 @@ def _install_registry_group(  # noqa: PLR0913
 
     configured_count = 0
     failed_installations: list[str] = []
+    registry_server_cache: dict[str, dict] = prevalidated_servers or {}
 
     if prevalidated_servers is not None and set(group_dep_names) <= prevalidated_servers.keys():
         valid_servers = group_dep_names
@@ -142,6 +146,7 @@ def _install_registry_group(  # noqa: PLR0913
             dependency_count=len(group_deps),
             verbose=verbose,
             logger=logger,
+            server_info_cache=registry_server_cache,
         )
 
     if valid_servers:
@@ -150,7 +155,7 @@ def _install_registry_group(  # noqa: PLR0913
             valid_servers,
             project_root=project_root,
             user_scope=user_scope,
-            server_info_cache=prevalidated_servers,
+            server_info_cache=registry_server_cache,
         )
         already_configured_candidates = [
             dep for dep in valid_servers if dep not in servers_to_install
@@ -199,9 +204,9 @@ def _install_registry_group(  # noqa: PLR0913
             if verbose:
                 logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
             server_info_cache = {
-                name: prevalidated_servers[name]
+                name: registry_server_cache[name]
                 for name in servers_to_install
-                if prevalidated_servers is not None and name in prevalidated_servers
+                if name in registry_server_cache
             }
             unresolved_servers = [
                 name for name in servers_to_install if name not in server_info_cache

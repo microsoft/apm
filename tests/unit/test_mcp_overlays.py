@@ -1,7 +1,7 @@
 """Tests for MCP overlay functionality: MCPDependency model, self-defined server
 info building, overlay application, and install flow integration."""
 
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import ANY, MagicMock, patch  # noqa: F401
 
 import pytest
 
@@ -847,7 +847,7 @@ class TestInstallMCPDepsWithOverlays:
         count = MCPIntegrator.install([dep], runtime="vscode", explicit_target="vscode")
 
         mock_ops.validate_servers_exist.assert_called_once_with(
-            ["io.github.github/github-mcp-server"]
+            ["io.github.github/github-mcp-server"], server_info_cache=ANY
         )
         assert count == 1
 
@@ -878,7 +878,7 @@ class TestInstallMCPDepsWithOverlays:
 
         # Registry dep goes through validation
         mock_ops.validate_servers_exist.assert_called_once_with(
-            ["io.github.github/github-mcp-server"]
+            ["io.github.github/github-mcp-server"], server_info_cache=ANY
         )
         # Both deps result in _install_for_runtime calls (1 registry + 1 self-defined)
         assert mock_install_runtime.call_count == 2

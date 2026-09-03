@@ -172,9 +172,9 @@ def run_mcp_install(  # noqa: PLR0913
                 detail = str(exc)
                 if detail.startswith("Could not reach MCP registry"):
                     logger.error(f"{detail} No state was changed.")
-                    raise click.ClickException(
-                        f"MCP registry validation failed for '{mcp_name}'"
-                    ) from None
+                    raise InstallFailureAlreadyRendered(detail) from None
+                if detail.startswith("Cannot install ") and "missing server" in detail:
+                    raise InstallFailureAlreadyRendered(detail) from None
                 logger.verbose_detail(f"MCP registry validation error: {detail}")
                 raise click.ClickException(
                     f"MCP registry validation failed for '{mcp_name}'. Check the server "

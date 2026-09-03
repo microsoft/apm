@@ -91,6 +91,9 @@ apm install --mcp linear --transport http --url https://mcp.linear.app/sse
 
 # Global stdio install (writes user APM + runtime config only)
 apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/server-fetch
+
+# Global registry install (requires one unique registry match)
+apm install -g --target claude --mcp io.github.github/github-mcp-server
 ```
 
 `apm mcp install NAME ...` is an alias that forwards to the same code

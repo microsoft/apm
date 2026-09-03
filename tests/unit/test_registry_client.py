@@ -347,19 +347,23 @@ class TestSimpleRegistryClient(unittest.TestCase):
 
         self.assertNotIn(secret, str(raised.exception))
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    def test_find_server_by_reference_uuid_input_returns_none(self, mock_search_servers):
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
+    def test_find_server_by_reference_uuid_input_returns_none(self, mock_search_servers_all_pages):
         """The legacy UUID strategy is removed; UUID-shaped refs route to search and miss."""
-        mock_search_servers.return_value = []
+        mock_search_servers_all_pages.return_value = []
         result = self.client.find_server_by_reference("123e4567-e89b-12d3-a456-426614174000")
         self.assertIsNone(result)
-        mock_search_servers.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
+        mock_search_servers_all_pages.assert_called_once_with(
+            "123e4567-e89b-12d3-a456-426614174000"
+        )
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    def test_find_server_by_reference_name_match(self, mock_search_servers, mock_get_server):
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
+    def test_find_server_by_reference_name_match(
+        self, mock_search_servers_all_pages, mock_get_server
+    ):
         """Test finding a server by exact name match (v0.1 shape)."""
-        mock_search_servers.return_value = [
+        mock_search_servers_all_pages.return_value = [
             {"name": "io.github.owner/repo-name"},
             {"name": "other-server"},
         ]
@@ -369,13 +373,13 @@ class TestSimpleRegistryClient(unittest.TestCase):
         result = self.client.find_server_by_reference("io.github.owner/repo-name")
 
         self.assertEqual(result, server_data)
-        mock_search_servers.assert_called_once_with("io.github.owner/repo-name")
+        mock_search_servers_all_pages.assert_called_once_with("io.github.owner/repo-name")
         mock_get_server.assert_called_once_with("io.github.owner/repo-name")
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    def test_find_server_by_reference_name_not_found(self, mock_search_servers):
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
+    def test_find_server_by_reference_name_not_found(self, mock_search_servers_all_pages):
         """Test finding a server by name that doesn't exist in registry."""
-        mock_search_servers.return_value = [
+        mock_search_servers_all_pages.return_value = [
             {"name": "io.github.owner/different-repo"},
             {"name": "other-server"},
         ]
@@ -383,38 +387,38 @@ class TestSimpleRegistryClient(unittest.TestCase):
         result = self.client.find_server_by_reference("ghcr.io/github/github-mcp-server")
 
         self.assertIsNone(result)
-        mock_search_servers.assert_called_once_with("ghcr.io/github/github-mcp-server")
+        mock_search_servers_all_pages.assert_called_once_with("ghcr.io/github/github-mcp-server")
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
     def test_find_server_by_reference_name_match_get_server_fails(
-        self, mock_search_servers, mock_get_server
+        self, mock_search_servers_all_pages, mock_get_server
     ):
         """When get_server raises ValueError (e.g. ServerNotFoundError), return None."""
-        mock_search_servers.return_value = [{"name": "test-server"}]
+        mock_search_servers_all_pages.return_value = [{"name": "test-server"}]
         mock_get_server.side_effect = ValueError("Server not found")
 
         result = self.client.find_server_by_reference("test-server")
 
         self.assertIsNone(result)
-        mock_search_servers.assert_called_once_with("test-server")
+        mock_search_servers_all_pages.assert_called_once_with("test-server")
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
     def test_find_server_by_reference_name_match_network_error_propagates(
-        self, mock_search_servers, mock_get_server
+        self, mock_search_servers_all_pages, mock_get_server
     ):
         """Test that network errors in get_server propagate to the caller."""
-        mock_search_servers.return_value = [{"name": "test-server"}]
+        mock_search_servers_all_pages.return_value = [{"name": "test-server"}]
         mock_get_server.side_effect = requests.ConnectionError("Network error")
 
         with self.assertRaises(requests.ConnectionError):
             self.client.find_server_by_reference("test-server")
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    def test_find_server_by_reference_invalid_format(self, mock_search_servers):
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
+    def test_find_server_by_reference_invalid_format(self, mock_search_servers_all_pages):
         """Test finding a server with various invalid/edge case formats."""
-        mock_search_servers.return_value = []
+        mock_search_servers_all_pages.return_value = []
 
         test_cases = [
             "",
@@ -430,10 +434,12 @@ class TestSimpleRegistryClient(unittest.TestCase):
                 self.assertIsNone(result)
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    def test_find_server_by_reference_no_slug_collision(self, mock_search_servers, mock_get_server):
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
+    def test_find_server_by_reference_no_slug_collision(
+        self, mock_search_servers_all_pages, mock_get_server
+    ):
         """Test that qualified names don't collide on shared slugs (bug #165)."""
-        mock_search_servers.return_value = [
+        mock_search_servers_all_pages.return_value = [
             {"name": "com.supabase/mcp"},
             {"name": "microsoftdocs/mcp"},
         ]
@@ -446,12 +452,12 @@ class TestSimpleRegistryClient(unittest.TestCase):
         mock_get_server.assert_called_once_with("microsoftdocs/mcp")
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
     def test_find_server_by_reference_rejects_ambiguous_slug(
-        self, mock_search_servers, mock_get_server
+        self, mock_search_servers_all_pages, mock_get_server
     ):
         """An unqualified slug must not select the registry's first match."""
-        mock_search_servers.return_value = [
+        mock_search_servers_all_pages.return_value = [
             {"name": "com.attacker/tool"},
             {"name": "org.trusted/tool"},
         ]
@@ -461,6 +467,37 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.assertIsNone(result)
         mock_get_server.assert_not_called()
 
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
+    def test_find_server_by_reference_rejects_ambiguous_slug_across_pages(self, mock_get_server):
+        """An unqualified slug must inspect all search pages before selection."""
+        self.client._cached_get_json = mock.Mock(
+            side_effect=[
+                (
+                    {
+                        "servers": [{"server": {"name": "com.attacker/tool"}}],
+                        "metadata": {"nextCursor": "page-2"},
+                    },
+                    {},
+                ),
+                (
+                    {
+                        "servers": [{"server": {"name": "org.trusted/tool"}}],
+                        "metadata": {},
+                    },
+                    {},
+                ),
+            ]
+        )
+
+        result = self.client.find_server_by_reference("tool")
+
+        self.assertIsNone(result)
+        mock_get_server.assert_not_called()
+        self.assertEqual(
+            [call.kwargs["params"] for call in self.client._cached_get_json.call_args_list],
+            [{"search": "tool"}, {"search": "tool", "cursor": "page-2"}],
+        )
+
     def test_constructor_rejects_registry_url_with_embedded_credentials(self):
         credential = ":".join(("registry-user", "registry-password"))
         registry_url = f"https://{credential}@registry.example.com"
@@ -469,12 +506,12 @@ class TestSimpleRegistryClient(unittest.TestCase):
             SimpleRegistryClient(registry_url)
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient._search_servers_all_pages")
     def test_find_server_by_reference_qualified_no_match(
-        self, mock_search_servers, mock_get_server
+        self, mock_search_servers_all_pages, mock_get_server
     ):
         """Test that a qualified name with no exact match returns None."""
-        mock_search_servers.return_value = [
+        mock_search_servers_all_pages.return_value = [
             {"name": "com.supabase/mcp"},
         ]
 

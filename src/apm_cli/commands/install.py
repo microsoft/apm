@@ -119,6 +119,8 @@ from ..core.project_name import (
 )
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
+from ..install.mcp.args import parse_env_pairs as _parse_mcp_env_pairs
+from ..install.mcp.args import parse_header_pairs as _parse_mcp_header_pairs
 
 # MCP --mcp helpers (module-level re-exports for test patches); must stay at
 # import time per comments in the original mid-file block.
@@ -836,8 +838,8 @@ def _handle_mcp_install(  # noqa: PLR0913
             mcp_name,
             transport=transport,
             url=url,
-            env=env_pairs,
-            headers=header_pairs,
+            env=_parse_mcp_env_pairs(env_pairs),
+            headers=_parse_mcp_header_pairs(header_pairs),
             version=mcp_version,
             command_argv=command_argv,
             registry_url=resolved_registry_url,
