@@ -17,7 +17,11 @@ from ..output.models import CompilationResults
 from ..primitives.models import Instruction, PrimitiveCollection
 from ..utils.paths import portable_relpath, resolve_base_and_source_dirs
 from ..version import get_version
-from .constants import BUILD_ID_PLACEHOLDER, DISTRIBUTED_AGENTS_MD_GENERATED_MARKER
+from .constants import (
+    BUILD_ID_PLACEHOLDER,
+    DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
+    has_generated_marker_header,
+)
 from .constitution import find_constitution
 from .context_optimizer import ContextOptimizer
 from .footer import build_generation_footer
@@ -844,7 +848,7 @@ class DistributedAgentsCompiler:
 
     @staticmethod
     def _file_has_apm_marker(path: Path) -> bool:
-        """Return True if *path* contains the APM-generated marker within its first 4096 bytes.
+        """Return whether *path* has the APM marker as an exact header line.
 
         Reads only a bounded prefix of the file to avoid loading large AGENTS.md
         files entirely into memory.  Returns False on any OSError (the caller
@@ -853,7 +857,7 @@ class DistributedAgentsCompiler:
         try:
             with path.open("rb") as fh:
                 prefix = fh.read(4096).decode("utf-8", errors="replace")
-            return AGENTS_MD_GENERATED_MARKER in prefix
+            return has_generated_marker_header(prefix, (AGENTS_MD_GENERATED_MARKER,))
         except OSError:
             return False
 

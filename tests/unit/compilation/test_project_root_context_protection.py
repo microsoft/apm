@@ -6,6 +6,12 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.compilation.agents_compiler import AgentsCompiler
+from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
+from apm_cli.compilation.distributed_compiler import (
+    AGENTS_MD_GENERATED_MARKER as DISTRIBUTED_AGENTS_MARKER,
+)
+from apm_cli.compilation.distributed_compiler import DistributedAgentsCompiler
 
 pytestmark = pytest.mark.component
 
@@ -62,6 +68,24 @@ def test_compile_preserves_hand_authored_project_root_context(
     assert "produced no output files" not in result.output
     if dry_run and single_agents:
         assert "would be retained" in " ".join(result.output.split())
+        assert "Generated Content Preview" not in result.output
+    if dry_run and not single_agents:
+        assert "Would retain 2 hand-authored root files" in " ".join(result.output.split())
+
+
+def test_partial_compile_reports_generated_and_retained_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live distributed output must lead with both generated and retained counts."""
+    _seed_project(tmp_path)
+    (tmp_path / "CLAUDE.md").unlink()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["compile"])
+
+    assert result.exit_code == 0, result.output
+    assert "retained 1 hand-authored root file" in " ".join(result.output.split())
 
 
 def test_compile_root_preserves_hand_authored_context(
@@ -207,6 +231,25 @@ def test_marker_mentioned_in_body_does_not_grant_write_ownership(
     assert result.exit_code == 0, result.output
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == manual
     assert "Protected AGENTS.md" in result.output
+
+
+def test_cleanup_marker_detection_requires_exact_header_lines(tmp_path: Path) -> None:
+    """Cleanup must not treat prose that mentions a marker as generated ownership."""
+    _seed_project(tmp_path)
+    agents_path = tmp_path / "AGENTS.md"
+    agents_path.write_text(
+        "# AGENTS.md\n\nThe generated marker is "
+        f"{DISTRIBUTED_AGENTS_MARKER} when APM owns this file.\n",
+        encoding="utf-8",
+    )
+    claude_path = tmp_path / "CLAUDE.md"
+    claude_path.write_text(
+        f"# CLAUDE.md\n\nAPM-generated files contain {CLAUDE_HEADER} near the top.\n",
+        encoding="utf-8",
+    )
+
+    assert not DistributedAgentsCompiler(tmp_path)._file_has_apm_marker(agents_path)
+    assert not AgentsCompiler(str(tmp_path))._detect_stale_claude_md().has_marker
 
 
 def test_managed_section_rejects_external_agents_symlink(

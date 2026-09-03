@@ -841,11 +841,11 @@ compilation:
 
 ### 6.2. `compilation.agents_md`
 
-Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIONAL; omitting the entire sub-object keeps the default full-overwrite behaviour. Use `managed_section` mode when an existing `AGENTS.md` contains hand-written content you want to preserve across recompiles. In distributed compile mode, this behavior applies to every generated `AGENTS.md` outside nested Git repositories.
+Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIONAL; omitting the entire sub-object keeps full-file replacement for APM-generated files and non-root placements. An unmarked project-root `AGENTS.md` is retained with a warning. Use `managed_section` mode to update an APM-owned block inside that hand-authored root file. In distributed compile mode, managed-section behavior applies to every generated `AGENTS.md` outside nested Git repositories.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
-| `mode` | `enum<string>` | `full` | `full`, `managed_section` | `full` overwrites the entire file on every compile. `managed_section` replaces only the block between `start_marker` and `end_marker`, leaving surrounding content untouched. New distributed placements are created with a managed block for later recompiles. |
+| `mode` | `enum<string>` | `full` | `full`, `managed_section` | `full` replaces the entire APM-generated file on every compile but retains unmarked project-root files. `managed_section` replaces only the block between `start_marker` and `end_marker`, leaving surrounding content untouched. New distributed placements are created with a managed block for later recompiles. |
 | `start_marker` | `string` | `<!-- apm:start -->` | Non-empty, distinct from `end_marker` | Opening HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
 | `end_marker` | `string` | `<!-- apm:end -->` | Non-empty, distinct from `start_marker` | Closing HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
 

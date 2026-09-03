@@ -624,6 +624,43 @@ def _report_distributed_dry_run_protection(
     )
 
 
+def _report_distributed_live_success(
+    logger: CommandLogger,
+    stats: dict[str, object],
+    warnings: list[str],
+    files_written: int,
+    agents_generated: int,
+) -> None:
+    """Report generated, retained, and skipped distributed outputs."""
+    nested_skips = max(
+        int(stats.get("nested_git_placements_skipped", 0) or 0),
+        sum(
+            "Skipping AGENTS.md at " in warning and ": nested Git repository " in warning
+            for warning in warnings
+        ),
+    )
+    protected_count = int(stats.get("root_context_files_protected", 0) or 0)
+    output_noun = "file" if files_written == 1 else "files"
+    if nested_skips:
+        generated_noun = "file" if agents_generated == 1 else "files"
+        skipped_noun = "placement" if nested_skips == 1 else "placements"
+        logger.success(
+            f"Compiled {files_written} output {output_noun} "
+            f"({agents_generated} AGENTS.md {generated_noun}); "
+            f"skipped {nested_skips} nested Git repository {skipped_noun}.",
+            symbol="check",
+        )
+    elif protected_count:
+        protected_noun = "file" if protected_count == 1 else "files"
+        logger.success(
+            f"Generated {files_written} output {output_noun}; "
+            f"retained {protected_count} hand-authored root {protected_noun}.",
+            symbol="check",
+        )
+    else:
+        logger.success("Compilation completed successfully!", symbol="check")
+
+
 def _run_compilation(
     logger: CommandLogger,
     target: str | list[str] | None,
@@ -806,29 +843,13 @@ def _run_compilation(
                     )
                 )
                 if _files_written > 0:
-                    nested_skips = max(
-                        int(result.stats.get("nested_git_placements_skipped", 0) or 0),
-                        sum(
-                            "Skipping AGENTS.md at " in warning
-                            and ": nested Git repository " in warning
-                            for warning in result.warnings
-                        ),
+                    _report_distributed_live_success(
+                        logger,
+                        result.stats,
+                        result.warnings,
+                        _files_written,
+                        agents_generated,
                     )
-                    if nested_skips:
-                        output_noun = "file" if _files_written == 1 else "files"
-                        generated_noun = "file" if agents_generated == 1 else "files"
-                        skipped_noun = "placement" if nested_skips == 1 else "placements"
-                        logger.success(
-                            f"Compiled {_files_written} output {output_noun} "
-                            f"({agents_generated} AGENTS.md {generated_noun}); "
-                            f"skipped {nested_skips} nested Git repository {skipped_noun}.",
-                            symbol="check",
-                        )
-                    else:
-                        logger.success(
-                            "Compilation completed successfully!",
-                            symbol="check",
-                        )
                 elif result.stats.get("root_context_files_protected"):
                     protected_count = int(result.stats["root_context_files_protected"])
                     noun = "file" if protected_count == 1 else "files"

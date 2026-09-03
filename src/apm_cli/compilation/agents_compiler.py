@@ -30,6 +30,7 @@ from .constants import (
     AGENTS_MD_GENERATED_MARKER,
     BUILD_ID_PLACEHOLDER,
     DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
+    has_generated_marker_header,
 )
 from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
 from .inventory import CompileInventory
@@ -62,6 +63,8 @@ _AGENTS_ROOT_GENERATED_MARKERS = (
     AGENTS_MD_GENERATED_MARKER,
     DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
 )
+# Compatibility alias for callers that imported the former module constant.
+_COPILOT_ROOT_GENERATED_MARKER = AGENTS_MD_GENERATED_MARKER
 
 
 def _detect_deployed_instructions(
@@ -894,7 +897,13 @@ class AgentsCompiler:
             return StaleClaudeDetection(
                 root_claude_md, rel, True, False, f"Could not read {rel}: {exc!s}"
             )
-        return StaleClaudeDetection(root_claude_md, rel, True, CLAUDE_HEADER in content, None)
+        return StaleClaudeDetection(
+            root_claude_md,
+            rel,
+            True,
+            has_generated_marker_header(content, (CLAUDE_HEADER,)),
+            None,
+        )
 
     def _compile_claude_md(
         self, config: CompilationConfig, primitives: PrimitiveCollection
@@ -1086,13 +1095,15 @@ class AgentsCompiler:
                         # result.content -- issue #1729 fix).
                         self._log("progress", hand_authored_preview, symbol="info")
 
+            stats = claude_result.stats.copy()
+            stats["root_context_files_protected"] = len(protected_claude_paths)
             return CompilationResult(
                 success=len(all_errors) == 0,
                 output_path="Preview mode - CLAUDE.md",
                 content="\n".join(preview_lines),
                 warnings=all_warnings,
                 errors=all_errors,
-                stats=claude_result.stats,
+                stats=stats,
             )
 
         # Write CLAUDE.md files
@@ -1831,8 +1842,7 @@ class AgentsCompiler:
             )
             return True
         accepted_markers = _AGENTS_ROOT_GENERATED_MARKERS if path.name == "AGENTS.md" else (marker,)
-        header_lines = {line.strip() for line in prefix.splitlines()[:5]}
-        if any(candidate in header_lines for candidate in accepted_markers):
+        if has_generated_marker_header(prefix, accepted_markers):
             return False
         self._protected_root_context_paths.add(path)
         self.warnings.append(

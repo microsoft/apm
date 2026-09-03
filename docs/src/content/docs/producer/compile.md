@@ -210,10 +210,10 @@ This flag affects both the Claude and Copilot deduplication paths (see
 
 ## Managed-section mode
 
-By default `apm compile` overwrites `AGENTS.md` entirely. If your team
-keeps hand-written content in `AGENTS.md` alongside APM-managed rules,
-use **managed-section mode** to update only the APM-owned block while
-leaving everything else untouched.
+By default `apm compile` replaces an APM-generated `AGENTS.md` entirely and
+retains an unmarked project-root file. If your team keeps hand-written content
+in root `AGENTS.md` alongside APM-managed rules, use **managed-section mode** to
+update only the APM-owned block while leaving everything else untouched.
 
 For the full `apm.yml` key reference for `compilation.agents_md`, see
 [the `compilation.agents_md` section in the manifest schema](../../reference/manifest-schema/#62-compilationagents_md).
