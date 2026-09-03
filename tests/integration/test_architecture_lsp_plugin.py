@@ -118,3 +118,43 @@ def test_local_bundle_content_approval_bypass_is_rejected() -> None:
     assert {item.rule_id for item in report.violations} == {
         "install-deployment-executable-trust-context"
     }
+
+
+def test_local_bundle_canvas_approval_bypass_is_rejected() -> None:
+    path = "src/apm_cli/install/services.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    old = "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)"
+    assert old in source
+    mutated = source.replace(
+        old,
+        "is_package_approved(allow_executables, slug, EXEC_TYPE_CANVAS)",
+        1,
+    )
+
+    report = run_selected_rules(
+        ROOT,
+        ("install-deployment-executable-trust-context",),
+        source_overrides={path: mutated},
+    )
+
+    assert report.exit_code == 2
+    assert {item.rule_id for item in report.violations} == {
+        "install-deployment-executable-trust-context"
+    }
+
+
+def test_multitarget_lsp_preflight_bypass_is_rejected() -> None:
+    path = "src/apm_cli/integration/lsp_integrator.py"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    old = "prepared_targets.append((runtime, spec, prepared))"
+    assert old in source
+    mutated = source.replace(old, "pass  # removed multi-target preflight", 1)
+
+    report = run_selected_rules(
+        ROOT,
+        ("install-deployment-claude-lsp-plugin",),
+        source_overrides={path: mutated},
+    )
+
+    assert report.exit_code == 2
+    assert {item.rule_id for item in report.violations} == {"install-deployment-claude-lsp-plugin"}

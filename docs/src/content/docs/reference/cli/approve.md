@@ -66,9 +66,10 @@ pending approval**, not a hard deny: a package with executables and no opinion
 anywhere is parked until you approve it, and `apm install` still succeeds (see
 [`apm install`](../install/)).
 
-There is no `enforce` mandate runtime, no cryptographic signing, and no
-content-hash binding in this release. An org `executables.enforce` rung
-degrades to `recommend` (allowed but still overridable by a deny).
+There is no `enforce` mandate runtime or cryptographic signing in this release.
+An org `executables.enforce` rung degrades to `recommend` (allowed but still
+overridable by a deny). Local bundle MCP, LSP, and canvas approvals are bound to
+the exact SHA-256 content key printed by `apm install`.
 
 ### The gate opt-in
 
@@ -139,10 +140,12 @@ The personal store uses the same shape under `executables` in
 **removed**; its contents are migrated into `~/.apm/config.json` automatically
 on first read.
 
-Grant keys are package-scoped in v1: a bare `owner/repo` key and a
-`owner/repo#1.2.0` key both match the package name regardless of the installed
-version. Use the versioned form for audit readability, not as a per-release
-trust boundary.
+Ordinary dependency grant keys are package-scoped in v1: a bare `owner/repo`
+key and an `owner/repo#1.2.0` key both match the package name regardless of the
+installed version. Use that versioned form for audit readability, not as a
+per-release trust boundary. Local bundle grants are different: copy the full
+`name#version@sha256:digest` key from the install diagnostic. A changed local
+bundle does not inherit the prior grant.
 
 ## Examples
 

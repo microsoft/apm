@@ -155,13 +155,14 @@ def install_local_bundle(
             else []
         )
         bundle_approval_key = None
-        if allow_executables is not None and (bundle_mcp_deps or bundle_lsp_deps):
+        if allow_executables is not None:
             from ..security.executables import local_bundle_approval_key
 
             bundle_approval_key = local_bundle_approval_key(
                 bundle_info.package_id,
                 str(bundle_info.plugin_json.get("version") or ""),
                 bundle_info.source_dir,
+                bundle_info.lockfile,
             )
         bundle_mcp_deps = _filter_bundle_executables(
             bundle_mcp_deps,
@@ -242,6 +243,7 @@ def install_local_bundle(
             scope=scope,
             alias=alias,
             allow_executables=allow_executables,
+            approval_key=bundle_approval_key,
         )
 
         deployed = result.get("deployed_files", [])
@@ -507,8 +509,9 @@ def _filter_bundle_executables(
         raise ValueError("Local bundle executable approval requires an artifact digest")
     if is_package_approved(allow_executables, approval_key, exec_type):
         return dependencies
+    noun = "executable" if len(dependencies) == 1 else "executables"
     logger.warning(
-        f"Skipped {len(dependencies)} bundle {exec_type.upper()} executable(s) from "
+        f"Skipped {len(dependencies)} bundle {exec_type.upper()} {noun} from "
         f"{bundle_info.package_id}. To approve this exact local bundle, add:\n"
         "executables:\n"
         "  allow:\n"

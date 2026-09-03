@@ -20,6 +20,7 @@ _INSTALL_TEMPLATE = "src/apm_cli/install/template.py"
 _LSP_INTEGRATOR = "src/apm_cli/integration/lsp_integrator.py"
 _LSP_PIPELINE = "src/apm_cli/install/lsp/integration.py"
 _LOCAL_BUNDLE = "src/apm_cli/install/local_bundle_handler.py"
+_INSTALL_SERVICES = "src/apm_cli/install/services.py"
 _SKILL_SUPPORT = "src/apm_cli/integration/skill_support.py"
 
 
@@ -66,7 +67,13 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 "effective_allow_executables = effective_exec_map_for_project(",
                 "if not effective_allow_resolved:",
             ),
-            _LOCAL_BUNDLE: ("bundle_approval_key = local_bundle_approval_key(",),
+            _LOCAL_BUNDLE: (
+                "bundle_approval_key = local_bundle_approval_key(",
+                "approval_key=bundle_approval_key,",
+            ),
+            _INSTALL_SERVICES: (
+                "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
+            ),
         },
     )
 
@@ -80,6 +87,8 @@ def check_claude_lsp_plugin(provider: FactsProvider) -> tuple[Violation, ...]:
             {
                 _LSP_INTEGRATOR: (
                     "def reserved_project_skill_names(",
+                    "def _prepare_target_config(",
+                    "prepared_targets.append((runtime, spec, prepared))",
                     "BaseIntegrator.resolve_deploy_path(relative_path, project_root)",
                     "allowed_prefixes=(relative_path,)",
                     "locked_dependency_approval_keys(locked_dependency)",

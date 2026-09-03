@@ -231,10 +231,10 @@ executables are untrusted (denied or gated).
 
 There is no `enforce` mandate runtime or package signing in this release: an org
 `executables.enforce` rung is accepted but fail-safe degrades to `recommend`
-(allowed, still overridable by a deny). Local bundle approvals use a narrower
-content-bound key: when an LSP or MCP command is skipped, APM prints an exact
-`executables.allow` entry containing that bundle's SHA-256 digest. A different
-bundle that claims the same package name cannot inherit the grant. Inspect the
+(allowed, still overridable by a deny). Local bundle LSP, MCP, and canvas
+approvals use a narrower content-bound key: when one is skipped, APM prints an
+exact `executables.allow` entry containing that bundle's SHA-256 digest. A
+different bundle that claims the same package name cannot inherit the grant. Inspect the
 deciding layer for one package with `apm policy explain <pkg>`, and surface
 fleet-wide layer conflicts (packages allowed locally but denied by org policy)
 with `apm doctor`. The same doctor row reports a malformed project

@@ -18,6 +18,7 @@ See also: ``apm approve`` / ``apm deny`` CLI commands.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 import sys
 from dataclasses import dataclass, field
@@ -457,12 +458,45 @@ def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     return tuple(dict.fromkeys((identity, versioned)))
 
 
-def local_bundle_approval_key(package_id: str, version: str, source_dir: Path) -> str:
-    """Bind local-bundle executable consent to its exact content digest."""
-    from ..utils.content_hash import compute_package_hash
-
+def local_bundle_approval_key(
+    package_id: str,
+    version: str,
+    source_dir: Path,
+    lockfile: dict[str, Any] | None = None,
+) -> str:
+    """Bind local-bundle executable consent to every deployable content byte."""
+    hasher = hashlib.sha256()
+    pack = lockfile.get("pack") if isinstance(lockfile, dict) else None
+    bundle_files = pack.get("bundle_files") if isinstance(pack, dict) else None
+    if isinstance(bundle_files, dict):
+        for rel_path in sorted(bundle_files, key=str):
+            digest = bundle_files[rel_path]
+            encoded_path = str(rel_path).encode("utf-8")
+            encoded_digest = str(digest).encode("utf-8")
+            hasher.update(len(encoded_path).to_bytes(8, "big"))
+            hasher.update(encoded_path)
+            hasher.update(len(encoded_digest).to_bytes(8, "big"))
+            hasher.update(encoded_digest)
+    else:
+        files: list[tuple[str, Path]] = []
+        for item in source_dir.rglob("*"):
+            rel_path = item.relative_to(source_dir).as_posix()
+            if item.is_symlink():
+                raise ValueError(f"Local bundle contains a symlink: {rel_path}")
+            if item.is_dir():
+                continue
+            if not item.is_file():
+                raise ValueError(f"Local bundle contains a special file: {rel_path}")
+            files.append((rel_path, item))
+        for rel_path, item in sorted(files):
+            encoded_path = rel_path.encode("utf-8")
+            content = item.read_bytes()
+            hasher.update(len(encoded_path).to_bytes(8, "big"))
+            hasher.update(encoded_path)
+            hasher.update(len(content).to_bytes(8, "big"))
+            hasher.update(content)
     artifact_version = version or "local"
-    digest = compute_package_hash(source_dir)
+    digest = f"sha256:{hasher.hexdigest()}"
     return f"{package_id}#{artifact_version}@{digest}"
 
 

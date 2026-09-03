@@ -39,6 +39,7 @@ from apm_cli.security.executables import (
     filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
+    local_bundle_approval_key,
     more_severe_exec_status,
     parse_allow_executables,
     prompt_executable_approval,
@@ -202,6 +203,39 @@ class TestBuildApprovalKey:
 
     def test_marketplace_format(self) -> None:
         assert build_approval_key("ci-hooks@acme", "1.2.0") == "ci-hooks@acme#1.2.0"
+
+
+class TestLocalBundleApprovalKey:
+    def test_hash_includes_normally_excluded_directories(self, tmp_path: Path) -> None:
+        payload = tmp_path / "__pycache__" / "server.py"
+        payload.parent.mkdir()
+        payload.write_text("first", encoding="utf-8")
+        first = local_bundle_approval_key("demo", "", tmp_path)
+
+        payload.write_text("second", encoding="utf-8")
+
+        assert local_bundle_approval_key("demo", "", tmp_path) != first
+
+    def test_hash_rejects_symlinks(self, tmp_path: Path) -> None:
+        target = tmp_path / "target"
+        target.write_text("payload", encoding="utf-8")
+        link = tmp_path / "link"
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"file symlinks unavailable: {exc}")
+
+        with pytest.raises(ValueError, match="contains a symlink"):
+            local_bundle_approval_key("demo", "", tmp_path)
+
+    def test_locked_hash_uses_manifest_without_reading_payloads(self, tmp_path: Path) -> None:
+        lockfile = {"pack": {"bundle_files": {"extension.mjs": "a" * 64}}}
+
+        with patch.object(Path, "read_bytes") as read_bytes:
+            key = local_bundle_approval_key("demo", "1", tmp_path, lockfile)
+
+        read_bytes.assert_not_called()
+        assert key.startswith("demo#1@sha256:")
 
 
 # ---------------------------------------------------------------------------

@@ -1242,6 +1242,7 @@ class TestInstallLocalBundleLsp:
             bundle_info.package_id,
             str(bundle_info.plugin_json.get("version") or ""),
             bundle_info.source_dir,
+            bundle_info.lockfile,
         )
         manifest_path = project / "apm.yml"
         manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))

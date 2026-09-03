@@ -73,6 +73,15 @@ class _LSPTargetSpec:
         return self.user_config_defaults if user_scope else self.project_config_defaults
 
 
+@dataclass(frozen=True)
+class _PreparedTargetConfig:
+    """Validated target config ready for one atomic file write."""
+
+    path: Path
+    content: str
+    changed: builtins.set
+
+
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
     "claude": _LSPTargetSpec(
         runtime="claude",
@@ -433,7 +442,7 @@ class LSPIntegrator:
         return {}
 
     @staticmethod
-    def _write_target_config(
+    def _prepare_target_config(
         spec: _LSPTargetSpec,
         servers: dict[str, dict],
         *,
@@ -441,8 +450,8 @@ class LSPIntegrator:
         user_scope: bool,
         managed_server_names: builtins.set | None = None,
         force: bool = False,
-    ) -> builtins.set:
-        """Merge servers into one target config and return changed server names."""
+    ) -> _PreparedTargetConfig:
+        """Validate and render one target config without writing it."""
         config_path = LSPIntegrator._target_config_path(
             spec,
             project_root,
@@ -528,9 +537,39 @@ class LSPIntegrator:
                 changed.add(name)
             existing[name] = server_config
 
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
-        return changed
+        return _PreparedTargetConfig(
+            path=config_path,
+            content=json.dumps(config, indent=2) + "\n",
+            changed=changed,
+        )
+
+    @staticmethod
+    def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
+        """Write one config after every target in the install has validated."""
+        prepared.path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_lf(prepared.path, prepared.content)
+        return prepared.changed
+
+    @staticmethod
+    def _write_target_config(
+        spec: _LSPTargetSpec,
+        servers: dict[str, dict],
+        *,
+        project_root: Path,
+        user_scope: bool,
+        managed_server_names: builtins.set | None = None,
+        force: bool = False,
+    ) -> builtins.set:
+        """Validate, merge, and write one target config."""
+        prepared = LSPIntegrator._prepare_target_config(
+            spec,
+            servers,
+            project_root=project_root,
+            user_scope=user_scope,
+            managed_server_names=managed_server_names,
+            force=force,
+        )
+        return LSPIntegrator._write_prepared_target_config(prepared)
 
     @staticmethod
     def _clean_target_config(
@@ -618,10 +657,14 @@ class LSPIntegrator:
                     user_scope=user_scope,
                     fail_on_write_error=fail_on_write_error,
                 )
-                for name in removed:
+                if removed:
+                    noun = "server" if len(removed) == 1 else "servers"
                     logger.info(
-                        f"Removed stale LSP server '{name}' from {spec.label(user_scope=user_scope)}"
+                        f"Removed {len(removed)} stale LSP {noun} from "
+                        f"{spec.label(user_scope=user_scope)}"
                     )
+                    for name in removed:
+                        logger.verbose_detail(f"Removed stale LSP server: {name}")
             except Exception as exc:
                 _log.debug(
                     "Failed to clean stale LSP servers from %s",
@@ -727,7 +770,7 @@ class LSPIntegrator:
         if not base_servers:
             return 0
 
-        changed_servers: builtins.set = builtins.set()
+        prepared_targets: list[tuple[str, _LSPTargetSpec, _PreparedTargetConfig]] = []
         for runtime in runtimes:
             spec = _LSP_TARGET_SPECS[runtime]
             servers = LSPIntegrator._servers_for_target(base_servers, spec)
@@ -735,7 +778,7 @@ class LSPIntegrator:
                 managed_names = managed_server_names
                 if managed_target_servers is not None:
                     managed_names = managed_target_servers.get(runtime, set())
-                changed = LSPIntegrator._write_target_config(
+                prepared = LSPIntegrator._prepare_target_config(
                     spec,
                     servers,
                     project_root=project_root_path,
@@ -743,6 +786,32 @@ class LSPIntegrator:
                     managed_server_names=managed_names,
                     force=force,
                 )
+                prepared_targets.append((runtime, spec, prepared))
+            except Exception as exc:
+                _log.debug(
+                    "Failed to write LSP config to %s",
+                    spec.label(user_scope=user_scope),
+                    exc_info=True,
+                )
+                if diagnostics:
+                    diagnostics.warn(
+                        f"Failed to write LSP config to {spec.path(project_root_path, user_scope=user_scope)}: "
+                        f"{exc}. Check file permissions or run with --verbose for details."
+                    )
+                if fail_on_write_error:
+                    from apm_cli.install.errors import RequiredIntegrationError
+
+                    raise RequiredIntegrationError(
+                        f"LSP configuration failed for target '{runtime}' at "
+                        f"{spec.label(user_scope=user_scope)}: {exc}. "
+                        "Review the path and permissions, then retry; use --force "
+                        "only for a reviewed ownership collision."
+                    ) from exc
+
+        changed_servers: builtins.set = builtins.set()
+        for runtime, spec, prepared in prepared_targets:
+            try:
+                changed = LSPIntegrator._write_prepared_target_config(prepared)
                 changed_servers.update(changed)
                 if changed:
                     noun = "server" if len(changed) == 1 else "servers"
@@ -774,7 +843,7 @@ class LSPIntegrator:
                 )
                 if diagnostics:
                     diagnostics.warn(
-                        f"Failed to write LSP config to {spec.path(project_root_path, user_scope=user_scope)}: "
+                        f"Failed to write LSP config to {prepared.path}: "
                         f"{exc}. Check file permissions or run with --verbose for details."
                     )
                 if fail_on_write_error:
@@ -783,8 +852,7 @@ class LSPIntegrator:
                     raise RequiredIntegrationError(
                         f"LSP configuration failed for target '{runtime}' at "
                         f"{spec.label(user_scope=user_scope)}: {exc}. "
-                        "Review the path and permissions, then retry; use --force "
-                        "only for a reviewed ownership collision."
+                        "Review the path and permissions, then retry."
                     ) from exc
 
         return len(changed_servers)

@@ -254,6 +254,24 @@ class TestInstallProjectScope:
         )
         assert set(json.loads(plugin_json.read_text())["lspServers"]) == {"existing-server"}
 
+    def test_multitarget_collision_is_validated_before_any_write(self, tmp_path):
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(json.dumps({"name": "foreign-plugin", "lspServers": {}}))
+
+        with pytest.raises(RequiredIntegrationError, match="target 'claude'"):
+            LSPIntegrator.install(
+                [_make_dep("new-server")],
+                project_root=tmp_path,
+                target_runtimes=["copilot", "claude"],
+                fail_on_write_error=True,
+            )
+
+        assert not (tmp_path / ".github" / "lsp.json").exists()
+        assert json.loads(plugin_json.read_text())["name"] == "foreign-plugin"
+
     def test_update_existing_server_counts_as_change(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
         plugin_json.parent.mkdir(parents=True)

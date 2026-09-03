@@ -1219,7 +1219,7 @@ def test_lsp_target_contraction_revokes_dropped_claude_plugin_entry(
 
     copilot_lsp = fixture.project_root / ".github" / "lsp.json"
     assert "target-contraction-lsp" in json.loads(copilot_lsp.read_text())["lspServers"]
-    assert "target-contraction-lsp" not in json.loads(claude_lsp.read_text())["lspServers"]
+    assert not claude_lsp.exists()
     lockfile = LockFile.read(fixture.project_root / "apm.lock.yaml")
     assert lockfile is not None
     assert lockfile.lsp_target_servers == {"copilot": ["target-contraction-lsp"]}
@@ -1418,7 +1418,7 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
     )
     assert not claude_instruction.exists()
     post_uninstall_lock = LockFile.read(fixture.project_root / "apm.lock.yaml")
-    assert lsp_name not in json.loads(claude_lsp.read_text(encoding="utf-8"))["lspServers"], (
+    assert not claude_lsp.exists(), (
         post_uninstall_lock.lsp_config_provenance if post_uninstall_lock is not None else None
     )
 
@@ -2203,12 +2203,7 @@ def test_saved_target_drives_declared_mcp_and_lsp_without_package(
         "saved-declared-mcp"
         not in json.loads((project.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
     )
-    assert (
-        "saved-declared-lsp"
-        not in json.loads((project.root / _CLAUDE_LSP_PLUGIN).read_text(encoding="utf-8"))[
-            "lspServers"
-        ]
-    )
+    assert not (project.root / _CLAUDE_LSP_PLUGIN).exists()
 
 
 def test_saved_copilot_target_projects_to_copilot_for_direct_mcp(
