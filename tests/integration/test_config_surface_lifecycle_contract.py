@@ -1493,9 +1493,22 @@ def test_saved_target_drives_user_scope_package_mcp_and_lsp(
         env=environment,
     )
     claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
+    claude_lsp_plugin = json.loads((isolated.home / _CLAUDE_LSP_PLUGIN).read_text(encoding="utf-8"))
     assert "saved-target-user-mcp" in claude_config["mcpServers"]
-    assert "saved-target-user-lsp" in claude_config["lspServers"]
+    assert "saved-target-user-lsp" in claude_lsp_plugin["lspServers"]
+    assert claude_lsp_plugin["name"] == "apm-lsp"
     assert (isolated.home / ".claude" / "rules" / "saved-target-user-instruction.md").is_file()
+
+    runner.run_sequence(
+        (("uninstall", "--global", str(package.root)),),
+        expected_returncodes=(0,),
+        scenario_id="saved-target-user-uninstall",
+        cwd=cwd,
+        env=environment,
+    )
+
+    assert not (isolated.home / _CLAUDE_LSP_PLUGIN).exists()
+    assert not (isolated.home / ".claude" / "skills" / "apm-lsp").exists()
 
 
 def test_saved_target_drives_direct_mcp_without_target_flag(

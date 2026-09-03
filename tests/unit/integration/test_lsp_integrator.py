@@ -415,36 +415,51 @@ class TestInstallProjectScope:
 
 
 class TestInstallUserScope:
-    def test_writes_to_claude_json(self, tmp_path):
-        claude_json = tmp_path / ".claude.json"
+    def test_writes_to_personal_claude_plugin_manifest(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
         with patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path):
             deps = [_make_dep("pyright")]
             count = LSPIntegrator.install(deps, user_scope=True)
             assert count == 1
 
-        data = json.loads(claude_json.read_text())
-        assert "lspServers" in data
+        assert not (tmp_path / ".claude.json").exists()
+        data = json.loads(plugin_json.read_text())
+        assert data["name"] == "apm-lsp"
         assert "pyright" in data["lspServers"]
+        assert "enabledPlugins" not in data
 
-    def test_merges_with_existing_claude_json(self, tmp_path):
-        claude_json = tmp_path / ".claude.json"
-        claude_json.write_text(json.dumps({"existingKey": True}))
+    def test_user_scope_reinstall_is_idempotent(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        dep = _make_dep("pyright")
+
+        with patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path):
+            assert LSPIntegrator.install([dep], user_scope=True) == 1
+            before = plugin_json.read_text(encoding="utf-8")
+            assert LSPIntegrator.install([dep], user_scope=True) == 0
+
+        assert plugin_json.read_text(encoding="utf-8") == before
+
+    def test_merges_with_existing_personal_claude_plugin_manifest(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(json.dumps({"name": "apm-lsp", "description": "keep"}))
 
         with patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path):
             LSPIntegrator.install([_make_dep("ruff")], user_scope=True)
 
-        data = json.loads(claude_json.read_text())
-        assert data["existingKey"] is True
+        data = json.loads(plugin_json.read_text())
+        assert data["name"] == "apm-lsp"
+        assert data["description"] == "keep"
         assert "ruff" in data["lspServers"]
 
-    def test_rejects_symlinked_user_config_before_writing(self, tmp_path):
-        outside = tmp_path / "outside.json"
-        outside.write_text('{"sentinel": true}\n', encoding="ascii")
-        claude_json = tmp_path / ".claude.json"
+    def test_rejects_symlinked_user_plugin_path_before_writing(self, tmp_path):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        claude_dir = tmp_path / ".claude"
         try:
-            claude_json.symlink_to(outside)
+            claude_dir.symlink_to(outside, target_is_directory=True)
         except OSError as exc:
-            pytest.skip(f"file symlinks unavailable: {exc}")
+            pytest.skip(f"directory symlinks unavailable: {exc}")
         from apm_cli.install.errors import RequiredIntegrationError
 
         with (
@@ -457,7 +472,7 @@ class TestInstallUserScope:
                 fail_on_write_error=True,
             )
 
-        assert json.loads(outside.read_text(encoding="ascii")) == {"sentinel": True}
+        assert not (outside / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json").exists()
 
 
 class TestInstallCopilotTarget:
@@ -577,10 +592,11 @@ class TestRemoveStale:
         assert not plugin_json.exists()
         assert not plugin_json.parent.parent.exists()
 
-    def test_removing_last_user_claude_server_keeps_home_directory(self, tmp_path):
-        claude_json = tmp_path / ".claude.json"
-        claude_json.write_text(
-            json.dumps({"lspServers": {"stale": {"command": "y"}}}),
+    def test_removing_last_user_claude_server_removes_plugin_directory(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
+            json.dumps({"name": "apm-lsp", "lspServers": {"stale": {"command": "y"}}}),
             encoding="utf-8",
         )
 
@@ -588,17 +604,20 @@ class TestRemoveStale:
             LSPIntegrator.remove_stale({"stale"}, user_scope=True)
 
         assert tmp_path.exists()
-        assert not claude_json.exists()
+        assert not plugin_json.exists()
+        assert not plugin_json.parent.parent.exists()
 
-    def test_removes_stale_from_user_claude_json(self, tmp_path):
-        claude_json = tmp_path / ".claude.json"
-        claude_json.write_text(
+    def test_removes_stale_from_user_claude_plugin_manifest(self, tmp_path):
+        plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        plugin_json.parent.mkdir(parents=True)
+        plugin_json.write_text(
             json.dumps(
                 {
+                    "name": "apm-lsp",
                     "lspServers": {
                         "keep": {"command": "x"},
                         "stale": {"command": "y"},
-                    }
+                    },
                 }
             )
         )
@@ -606,7 +625,8 @@ class TestRemoveStale:
         with patch("apm_cli.integration.lsp_integrator.Path.home", return_value=tmp_path):
             LSPIntegrator.remove_stale({"stale"}, user_scope=True)
 
-        data = json.loads(claude_json.read_text())
+        data = json.loads(plugin_json.read_text())
+        assert data["name"] == "apm-lsp"
         assert "keep" in data["lspServers"]
         assert "stale" not in data["lspServers"]
 

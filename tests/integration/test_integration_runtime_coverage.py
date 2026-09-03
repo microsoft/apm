@@ -375,6 +375,17 @@ class TestLSPTargetSpec:
         spec = _LSP_TARGET_SPECS["copilot"]
         assert spec.label(user_scope=True) != spec.label(user_scope=False)
 
+    def test_claude_user_scope_uses_personal_skills_plugin(self, tmp_path: Path) -> None:
+        """Claude user LSP config uses the documented personal skills plugin."""
+        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+        spec = _LSP_TARGET_SPECS["claude"]
+        assert spec.path(tmp_path, user_scope=True) == (
+            Path.home() / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        )
+        assert spec.label(user_scope=True) == "~/.claude/skills/apm-lsp/.claude-plugin/plugin.json"
+        assert ("name", "apm-lsp") in spec.config_defaults(user_scope=True)
+
     def test_servers_key_project_scope(self) -> None:
         """Claude project plugin manifest uses the lspServers wrapper key."""
         from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS

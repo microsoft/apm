@@ -44,17 +44,24 @@ apm install --target claude
 APM writes runtime-specific config for each detected target. At project scope,
 Claude Code discovers LSP servers from the APM-managed plugin manifest at
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; user-scope installs use
-`~/.claude.json`. Copilot CLI uses `.github/lsp.json` or
-`~/.copilot/lsp-config.json`. This generated shape matches each runtime's
-documented discovery contract.
+`~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. Copilot CLI uses
+`.github/lsp.json` or `~/.copilot/lsp-config.json`. This generated shape
+matches each runtime's documented discovery contract.
 
-For project installs, accept Claude Code's workspace-trust prompt and start
-Claude from the repository root so its primary working directory contains
-`.claude/skills/`. After APM reports that it configured or removed Claude LSP
-servers, restart Claude Code or run `/reload-plugins` (use
+Claude skills-directory plugin discovery requires Claude Code v2.1.157 or
+newer. For project installs, accept Claude Code's workspace-trust prompt; LSP
+servers start only after you trust the workspace. Start Claude from the
+repository root so its primary working directory contains `.claude/skills/`:
+project-scope skills-directory plugins do not walk up from a subdirectory to
+the repo root. Personal-scope plugins under your home directory have no
+workspace-trust gate. After APM reports that it configured or removed Claude
+LSP servers, restart Claude Code or run `/reload-plugins` (use
 `/reload-plugins --force` when Claude requests it). Open a file matching a
 configured extension and confirm its LSP-backed diagnostics or navigation work
-before relying on the integration.
+before relying on the integration. If another enabled Claude LSP server already
+claims the same file extension, Claude uses the first registered server for
+that extension and the others never start; for example, an APM-declared `.py`
+server can lose to an installed `pyright-lsp`.
 
 If an earlier APM version created a project-root `.lsp.json`, APM leaves it
 unchanged because it may contain user-owned entries. Claude Code does not use
@@ -93,7 +100,7 @@ The full field reference is in the
 
 | Runtime | Project file | User file (`-g`) | Language map key |
 |---|---|---|---|
-| Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` `lspServers` | `~/.claude.json` `lspServers` | `extensionToLanguage` |
+| Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` `lspServers` | `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json` `lspServers` | `extensionToLanguage` |
 | GitHub Copilot CLI | `.github/lsp.json` `lspServers` | `~/.copilot/lsp-config.json` `lspServers` | `fileExtensions` |
 
 **Claude Code project-scope plugin manifest example:**
@@ -130,7 +137,8 @@ The full field reference is in the
 ```
 
 User-scope files keep the same runtime-specific server shape under their
-`lspServers` section.
+`lspServers` section. Claude skills-directory plugins are auto-discovered, so
+APM does not write an `enabledPlugins` entry.
 
 ## Required and optional fields
 
@@ -199,7 +207,7 @@ server map or a `{ "lspServers": { ... } }` envelope. The
 `${CLAUDE_PLUGIN_ROOT}` placeholder in server configs is replaced with
 the absolute plugin path for legacy Claude Code plugin compatibility.
 These are source files shipped by a dependency package, distinct from the
-`.claude-plugin/plugin.json` that APM generates for Claude project discovery.
+`.claude-plugin/plugin.json` that APM generates for Claude discovery.
 Plugins authored for Copilot CLI may use `fileExtensions` instead of
 `extensionToLanguage` and `warmupTimeoutMs` instead of `startupTimeout`;
 APM normalizes those aliases before validation. A non-null canonical value
@@ -221,7 +229,7 @@ success.
 
 | Runtime | LSP support |
 |---|---|
-| Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` / `~/.claude.json` |
+| Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` / `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json` |
 | GitHub Copilot CLI | `.github/lsp.json` / `~/.copilot/lsp-config.json` |
 | Others | Not yet supported |
 

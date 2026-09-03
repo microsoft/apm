@@ -118,8 +118,9 @@ diagnostic.
 For project LSP installs, `apm install --target claude` writes the
 `lspServers` section in
 `.claude/skills/apm-lsp/.claude-plugin/plugin.json`, which Claude Code
-discovers as a skills-directory plugin. Global Claude installs continue to use
-`~/.claude.json`.
+discovers as a skills-directory plugin. Global Claude LSP installs use the
+same personal-scope plugin shape at
+`~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`.
 
 For MCP, `--target copilot` writes `.github/mcp.json` at project scope and
 `$COPILOT_HOME/mcp-config.json` with `--global` (or

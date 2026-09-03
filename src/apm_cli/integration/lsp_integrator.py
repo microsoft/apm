@@ -74,9 +74,8 @@ class _LSPTargetSpec:
 
     def cleanup_empty_dirs(self, project_root: Path, *, user_scope: bool) -> tuple[Path, ...]:
         """Return APM-owned directories this target may remove when empty."""
-        if user_scope:
-            return ()
-        return tuple(project_root.joinpath(*parts) for parts in self.cleanup_empty_relative_dirs)
+        root = Path.home() if user_scope else project_root
+        return tuple(root.joinpath(*parts) for parts in self.cleanup_empty_relative_dirs)
 
 
 @dataclass(frozen=True)
@@ -98,14 +97,21 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
             ".claude-plugin",
             "plugin.json",
         ),
-        user_relative_path=(".claude.json",),
+        user_relative_path=(
+            ".claude",
+            "skills",
+            "apm-lsp",
+            ".claude-plugin",
+            "plugin.json",
+        ),
         language_key=_CLAUDE_LANGUAGE_KEY,
         startup_timeout_key=_CLAUDE_STARTUP_TIMEOUT_KEY,
         project_servers_key=_LSP_SERVERS_KEY,
         user_servers_key=_LSP_SERVERS_KEY,
         project_label=".claude/skills/apm-lsp/.claude-plugin/plugin.json",
-        user_label="~/.claude.json",
+        user_label="~/.claude/skills/apm-lsp/.claude-plugin/plugin.json",
         project_config_defaults=(("name", "apm-lsp"),),
+        user_config_defaults=(("name", "apm-lsp"),),
         cleanup_empty_relative_dirs=(
             (".claude", "skills", "apm-lsp", ".claude-plugin"),
             (".claude", "skills", "apm-lsp"),
