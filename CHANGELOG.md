@@ -7,15 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Windows users no longer get repeated line-ending churn when APM rewrites
-  `apm.yml`: install, uninstall, dependency resolution, and revision-pin
-  updates now produce deterministic LF output. An `apm.yml` that already uses
-  CRLF line endings normalizes to LF on its next rewrite, causing a one-time
-  whole-file line-ending change. (closes #2624)
-
-## [0.29.0] - 2026-08-26
 ### Changed
 
 - Architecture ownership guards now use a sharded JSON registry and a
@@ -25,67 +16,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Windows users no longer get repeated line-ending churn when APM rewrites
+  `apm.yml`: install, uninstall, dependency resolution, and revision-pin
+  updates now produce deterministic LF output. An `apm.yml` that already uses
+  CRLF line endings normalizes to LF on its next rewrite, causing a one-time
+  whole-file line-ending change. (closes #2624) (#2675)
 - `apm compile` now preserves hand-authored root `AGENTS.md` and `CLAUDE.md`
   files, including `--root` destinations, instead of replacing them. (#2779)
+- `apm compile -g` now honors `target:` and `targets:` in `~/.apm/apm.yml`,
+  limiting output to declared harnesses and avoiding stray `$HOME` directories
+  when targets are configured. (by @tillig, #2772)
+- Distributed `apm compile` now reconciles existing managed-section
+  `AGENTS.md` files without overwriting hand-authored content, generates new
+  placements safely, and never discovers, writes, or cleans content across
+  nested Git repository or linked-worktree boundaries. (by @aryansk; fixes
+  #2560 and #2713) (#2578)
 - `apm uninstall` now removes MCP servers only from recorded owning runtimes,
   accepts JetBrains Copilot JSONC, and reports target cleanup failures after
   attempting every owner. (by @aryansk, fixes #2551) (#2591)
 - `apm install` now preserves previously deployed skills when package
   integration is skipped instead of treating them as stale cleanup candidates.
   (#2758)
-- `apm compile -g` now honors `target:` and `targets:` in `~/.apm/apm.yml`,
-  limiting output to declared harnesses and avoiding stray `$HOME` directories
-  when targets are configured. (by @tillig, #2772)
 - `apm install` no longer silently drops instruction Markdown whose
   unfenced bodies contain `---` horizontal rules. It now stops the whole package
   before deploying any primitive when instruction frontmatter is invalid YAML or
   decodes critical hidden characters. `--force` overrides only the critical
   character finding, never malformed YAML; warning-level findings do not block.
   (by @manideep-malyala, #2666)
-- OpenCode MCP generation now preserves safe passthrough fields while preventing
-  custom fields from injecting the modeled `environment` alias. (by @aryansk,
-  fixes #2510) (#2593)
-- Hook commands such as `"${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py` now rewrite to
-  `"${CLAUDE_PLUGIN_ROOT}/hooks/probe.py"` and warn when a supported plugin-root
-  placeholder remains unresolved instead of silently deploying a dead hook.
-  OpenAPM v0.1 (`docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012`) binds
-  the behavior.
-  (by @MohammedAlkindi; closes #2639) (#2645)
-- `apm uninstall --global` now cleans removed-only target files before deleting their ownership state, while preserving files owned by surviving packages. (#2658)
-- Generic marketplace Git now prevents platform tokens from reaching native
-  credential-helper subprocesses while preserving HTTPS helper access; HTTP and
-  HTTPS-to-HTTP rewrites suppress credentials, and SSH is token-free and
-  noninteractive. (by @aryansk, #2594)
-- Windows binary is now Authenticode-signed in the release workflow, eliminating
-  the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
-  PyInstaller bundles. (#2435)
-- Multi-target `apm compile` now avoids repeating expensive project analysis
-  for each target, making multi-target runs scale like single-target runs
-  without changing generated output. (closes #2482)
-- `deployed-files-present` no longer false-positives on gitignored deploy
-  paths (e.g. `.agents/`), enabling `apm audit --ci` to pass on a fresh
-  checkout when deployed outputs are intentionally not committed. (closes
-  #2452, thanks @sergio-sisternes-epam)
-- YAML expansion guard no longer rejects large anchor-free lockfiles (150K+
-  entries) with a false-positive "billion-laughs" error. APM-generated
-  lockfiles with no anchors or aliases now load without error. (#2389)
-- `apm install` no longer skips the credential retry on non-English machines.
-  Git localises its diagnostics through gettext, so a translated stderr made an
-  authentication failure unrecognisable and private-repo installs failed with
-  misleading network guidance. Git subprocesses in the authentication retry
-  path now run with `LC_ALL=C` and `LANGUAGE=C`. (by @Naofel-eal, closes #2533)
-- `apm pack` now reports unavailable remote package metadata, exposes
-  certifiability in JSON, prevents `--check-clean` from certifying degraded
-  regeneration, and lets `--strict-metadata` fail before writes. (closes #2524)
-- `apm pack --check-clean` is now read-only and detects marketplace drift
-  without overwriting artifacts. Release pipelines that also produce artifacts
-  must run `apm pack` separately; see
-  [Releasing from any CI](docs/src/content/docs/producer/releasing-from-any-ci.md#the-canonical-sequence).
-  (by @danielmeppiel, closes #2727, #2730)
-- `apm update` now retains full-SHA pins without an eligible stable annotated
-  semver tag while continuing unrelated updates; malformed remote tag records
-  still fail before writes. The contract is recorded in `openapm-v0.1.md`.
-  (#2667)
+- `apm install --frozen` no longer reports repo-root Claude skills as
+  lockfile drift in projects that also carry MCP state. APM
+  trusts the locked type before remote materialization and validates the skill
+  shape when present, for repository-root and subdirectory skills. (#2446)
 - `apm install -g --mcp NAME` now creates or updates the user manifest and
   deploys only to global-capable runtimes instead of rejecting `--global`.
   Registry identities are validated before user-state writes, fail closed when
@@ -94,56 +55,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment-provided HTTP endpoints require explicit opt-in.
   `openapm-v0.1.md` now codifies the user-scope target-selection and
   pre-mutation contract. (#2734)
-- Distributed `apm compile` now reconciles existing managed-section
-  `AGENTS.md` files without overwriting hand-authored content, generates new
-  placements safely, and never discovers, writes, or cleans content across
-  nested Git repository or linked-worktree boundaries. (by @aryansk; fixes
-  #2560 and #2713) (#2578)
-- Windows admin lifecycle policies now resolve from `%ProgramData%` instead of
-  assuming `C:\ProgramData`, while retaining the historical fallback.
-  (by @lukiod; closes #2684) (#2686)
-- Marketplace installs now materialize catalog-only LSP and MCP metadata
-  without requiring a package manifest in the downloaded source
-  (by @lkshrk, #2709).
-- Private `github.com` subdirectory packages now populate the persistent Git
-- Private `github.com` packages now populate the persistent Git
-  cache through repository-scoped credential fallback without storing
-  credentials in cache keys or remote URLs. (#2722)
-- Plugin refreshes now keep the existing package and its registered hooks live
-  while replacement content downloads and validates. Failed refreshes retain
-  the prior package instead of accepting stale content. (#2723)
-- Successful installs now remove inactive resolution staging directories left
-  by interrupted earlier runs while preserving active and unrelated entries.
-  (closes #2716)
-- Successful installs now safely clean up temporary backups left by interrupted
-  lock-aware runs without disturbing active installs or unrelated files. Legacy
-  lockless backups are preserved with manual recovery guidance. (#2720)
-- `apm doctor` now reports malformed project `executables` configuration as an
-  actionable informational warning instead of omitting the check. (#2719)
-- `apm doctor` now reports malformed project `executables` or deprecated
-  `allowExecutables` configuration as an actionable informational warning
-  instead of omitting the check. (#2719)
+- `apm update` now retains full-SHA pins without an eligible stable annotated
+  semver tag while continuing unrelated updates; malformed remote tag records
+  still fail before writes. The contract is recorded in `openapm-v0.1.md`.
+  (#2667)
+- `apm pack` now reports unavailable remote package metadata, exposes
+  certifiability in JSON, prevents `--check-clean` from certifying degraded
+  regeneration, and lets `--strict-metadata` fail before writes. (closes #2524)
+- `apm pack --check-clean` is now read-only and detects marketplace drift
+  without overwriting artifacts. Release pipelines that also produce artifacts
+  must run `apm pack` separately; see
+  [Releasing from any CI](docs/src/content/docs/producer/releasing-from-any-ci.md#the-canonical-sequence).
+  (by @danielmeppiel, closes #2727, #2730)
 - `apm doctor` now reports malformed project executable-trust configuration
   under either `executables` or the deprecated `allowExecutables` key as an
   actionable informational warning instead of omitting the check. (#2719)
-
+- Newly generated `apm.lock.yaml` files no longer include volatile
+  `generated_at` metadata, preventing timestamp-only merge conflicts. Existing
+  lockfiles preserve the legacy field on no-op writes and refresh it on
+  substantive writes; deleting it once prevents APM from restoring it.
+  `openapm-v0.1.md` requirement `req-lk-005`
+  defines these omission and opt-in semantics. Agent Plugin archive timestamps
+  remain byte-reproducible without the field by using `SOURCE_DATE_EPOCH` or a
+  fixed epoch. (by @lachieh; closes #2572) (#2616)
+- Marketplace installs now materialize catalog-only LSP and MCP metadata
+  without requiring a package manifest in the downloaded source
+  (by @lkshrk, #2709).
+- Generic marketplace Git now prevents platform tokens from reaching native
+  credential-helper subprocesses while preserving HTTPS helper access; HTTP and
+  HTTPS-to-HTTP rewrites suppress credentials, and SSH is token-free and
+  noninteractive. (by @aryansk, #2594)
+- Fully qualified `ssh://` marketplace URLs now retain their SSH username,
+  host, and custom port through registration and Git fetching. SCP-style SSH
+  sources now also fetch without forwarding HTTP credentials. (by @donglrd,
+  #2466)
+- Explicit GitLab URLs now accept deep repository namespaces whose names match
+  APM primitive directories, while an unambiguous `.git` repository boundary
+  followed by a primitive path still fails before lock, cache, or module writes.
+  (by @aryansk) (#2581)
+- OpenCode MCP generation now preserves safe passthrough fields while preventing
+  custom fields from injecting the modeled `environment` alias. (by @aryansk,
+  fixes #2510) (#2593)
+- Plugin `.lsp.json` intake now accepts Copilot-dialect `fileExtensions` and
+  `warmupTimeoutMs` aliases, preserving C# LSP setup from dotnet/skills.
+  (by @normandev92; closes #2509) (#2513)
+- Plugin refreshes now keep the existing package and its registered hooks live
+  while replacement content downloads and validates. Failed refreshes retain
+  the prior package instead of accepting stale content. (#2723)
+- Successful installs now garbage-collect inactive resolution staging
+  directories left by interrupted lock-aware runs while preserving active and
+  unrelated entries. Legacy lockless backups are retained with manual recovery
+  guidance. (closes #2716) (#2720)
+- Private `github.com` packages, including subdirectory packages, now populate
+  the persistent Git cache through repository-scoped credential fallback
+  without storing credentials in cache keys or remote URLs. (closes #2714)
+  (#2722)
 - Git subdirectory dependencies with symlinks to files elsewhere in the same
   repository now install successfully where Git materializes symlinks; APM
   widens the checkout only when needed. On Windows, Git defaults to
   `core.symlinks=false` and checks these entries out as plain files, which is
   outside #2707's scope. (by @MohammedAlkindi, closes #2707, #2710)
+- Windows admin lifecycle policies now resolve from `%ProgramData%` instead of
+  assuming `C:\ProgramData`, while retaining the historical fallback.
+  (by @lukiod; closes #2684) (#2686)
 
 ## [0.29.0] - 2026-08-30
-### Fixed
-
-- Project YAML writers now use deterministic LF line endings: rewriting
-  `apm.yml` (install, uninstall, dependency resolution) and the revision-pin
-  update path no longer flip-flops a Windows file's line endings between
-  consecutive commands, ending the resulting git diff churn. A Windows
-  `apm.yml` already in the CRLF domain has a one-time line-ending-only diff
-  on its next rewrite. (closes #2624; group 1 landed in #2638)
-
-## [0.29.0] - 2026-08-26
 
 ### Added
 
@@ -161,60 +137,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (closes #2522, #2654)
 - The lifecycle scripts guide now documents the Windows admin-tier policy path
   alongside the Linux and macOS path. (by @WilliamK112, closes #2621, #2640)
-- Windows binary is now Authenticode-signed in the release workflow, eliminating
-  the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
-  PyInstaller bundles. (#2435)
-- Plugin `.lsp.json` intake now accepts Copilot-dialect `fileExtensions` and
-  `warmupTimeoutMs` aliases, preserving C# LSP setup from dotnet/skills.
-  (closes #2509, #2513)
-  (by @normandev92; closes #2509) (#2513)
-- `apm install --skill <name>` now matches on plugins whose manifest declares
-  the conventional skills container (`"skills": ["./skills/"]`). The declared
-  container was normalized under its own name, burying every skill at
-  `.apm/skills/skills/<name>/` -- one level below the depth `--skill`
-  enumeration, deployment, the `bin/` security scan and primitive counting all
-  read, so selection reported `Available: (none)` even though a bare install
-  deployed those same skills. A declared entry that is itself a skill
-  (`"skills": "./skills/engineering/tdd"`) still lands under its own leaf name
-  instead of spilling a bare `SKILL.md` into the shared skills root.
-  (closes #2530)
-- Root-declared plugin components (Claude Code single-skill shape
-  `"skills": ["./"]`, and the same for agents/commands/hooks) no longer cause
-  infinite recursion or unbounded writes during `apm install`.
-  `docs/src/content/docs/specs/openapm-v0.1.md` now explicitly requires
-  containment of consumer-generated staging output. (closes #2556)
-- Explicit GitLab URLs now accept deep repository namespaces whose names match
-  APM primitive directories, while an unambiguous `.git` repository boundary
-  followed by a primitive path still fails before lock, cache, or module writes.
-  (by @aryansk) (#2581)
-- Hook commands such as `"${CLAUDE_PLUGIN_ROOT}"/hooks/probe.py` now rewrite to
-  `"${CLAUDE_PLUGIN_ROOT}/hooks/probe.py"` and warn when a supported plugin-root
-  placeholder remains unresolved instead of silently deploying a dead hook.
-  OpenAPM v0.1 (`docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012`) binds
-  the behavior.
-  (by @MohammedAlkindi; closes #2639) (#2645)
-- `apm uninstall --global` now cleans removed-only target files before deleting their ownership state, while preserving files owned by surviving packages. (#2658)
-- Generic HTTPS marketplace Git sources now preserve native credential helpers
-  without forwarding platform tokens; HTTP and HTTPS-to-HTTP rewrites suppress
-  credentials, and SSH is token-free and noninteractive. (by @aryansk, #2594)
-- Windows binary is now Authenticode-signed in the release workflow, eliminating
-  the `Trojan:Script/Wacatac.H!ml` Windows Defender false positive on unsigned
-  PyInstaller bundles. (#2435)
-- Multi-target `apm compile` now avoids repeating expensive project analysis
-  for each target, making multi-target runs scale like single-target runs
-  without changing generated output. (closes #2482)
-- `deployed-files-present` no longer false-positives on gitignored deploy
-  paths (e.g. `.agents/`), enabling `apm audit --ci` to pass on a fresh
-  checkout when deployed outputs are intentionally not committed. (closes
-  #2452, thanks @sergio-sisternes-epam)
-- YAML expansion guard no longer rejects large anchor-free lockfiles (150K+
-  entries) with a false-positive "billion-laughs" error. APM-generated
-  lockfiles with no anchors or aliases now load without error. (#2389)
-- `apm install` no longer skips the credential retry on non-English machines.
-  Git localises its diagnostics through gettext, so a translated stderr made an
-  authentication failure unrecognisable and private-repo installs failed with
-  misleading network guidance. Git subprocesses in the authentication retry
-  path now run with `LC_ALL=C` and `LANGUAGE=C`. (by @Naofel-eal, closes #2533)
 
 ### Changed
 
@@ -258,14 +180,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generated bundle and plugin metadata now uses deterministic LF line endings,
   keeping generated metadata byte-stable across operating systems.
   (by @WilliamK112, #2638)
-- Newly generated `apm.lock.yaml` files no longer include volatile
-  `generated_at` metadata, preventing timestamp-only merge conflicts. Existing
-  lockfiles preserve the legacy field on no-op writes and refresh it on
-  substantive writes; deleting it once prevents APM from restoring it.
-  `openapm-v0.1.md` requirement `req-lk-005`
-  defines these omission and opt-in semantics. Agent Plugin archive timestamps
-  remain byte-reproducible without the field by using `SOURCE_DATE_EPOCH` or a
-  fixed epoch. (by @lachieh; closes #2572) (#2616)
 - Lockfiles generated on Windows for marketplace-plugin / skill-subset git
   dependencies now pass `apm install --frozen` on Linux, and vice versa, by
   hashing synthetic manifests with deterministic LF line endings.
@@ -381,10 +295,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (closes #2431, #2458)
 - `apm compile --clean` preserves APM-generated `AGENTS.md` files tracked by
   nested Git worktrees. (#2473)
-- Fully qualified `ssh://` marketplace URLs now retain their SSH username,
-  host, and custom port through registration and Git fetching. SCP-style SSH
-  sources now also fetch without forwarding HTTP credentials. (by @donglrd,
-  #2466)
 - Required MCP runtime defaults are now overrideable prompts, while secret
   defaults remain hidden and VS Code OCI launchers resolve every runtime
   placeholder without writing secret values to `mcp.json`. (#2455)
@@ -414,10 +324,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrites and transport policy across anonymous and authenticated retries;
   policy cache metadata and diagnostics also omit credentials embedded in
   direct policy URLs. (#2422)
-- `apm install --frozen` no longer reports repo-root Claude skills as
-  lockfile drift in projects that also carry MCP state. APM
-  trusts the locked type before remote materialization and validates the skill
-  shape when present, for repository-root and subdirectory skills. (#2446)
 
 ### Performance
 
