@@ -218,7 +218,7 @@ class MCPServerOperations:
             except requests.RequestException:
                 if fail_closed or getattr(self.registry_client, "_is_custom_url", False):
                     if getattr(self.registry_client, "_is_custom_url", False):
-                        recovery = "verify the configured registry URL and reachability"
+                        recovery = "verify MCP_REGISTRY_URL and registry reachability"
                     else:
                         recovery = "verify network connectivity and registry reachability"
                     raise RuntimeError(  # noqa: B904
