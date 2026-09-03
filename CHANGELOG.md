@@ -61,7 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#2667)
 - `apm pack` now reports unavailable remote package metadata, exposes
   certifiability in JSON, prevents `--check-clean` from certifying degraded
-  regeneration, and lets `--strict-metadata` fail before writes. (closes #2524)
+  regeneration, and lets `--strict-metadata` fail before writes.
+  (closes #2524) (#2693)
 - `apm pack --check-clean` is now read-only and detects marketplace drift
   without overwriting artifacts. Release pipelines that also produce artifacts
   must run `apm pack` separately; see
@@ -88,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fully qualified `ssh://` marketplace URLs now retain their SSH username,
   host, and custom port through registration and Git fetching. SCP-style SSH
   sources now also fetch without forwarding HTTP credentials. (by @donglrd,
-  #2466)
+  #2466) (#2760)
 - Explicit GitLab URLs now accept deep repository namespaces whose names match
   APM primitive directories, while an unambiguous `.git` repository boundary
   followed by a primitive path still fails before lock, cache, or module writes.
