@@ -103,6 +103,7 @@ def _safe_registry_url_for_display(value: str) -> str:
     """Return a credential-free registry URL for diagnostics."""
     try:
         parsed = urlparse(value)
+        _ = parsed.port
         netloc = parsed.netloc
         if "@" in netloc:
             netloc = parsed.hostname or ""
@@ -170,7 +171,7 @@ def _resolve_timeout() -> tuple:
 class SimpleRegistryClient:
     """Simple client for querying MCP registries for server discovery."""
 
-    def __init__(self, registry_url: str | None = None):
+    def __init__(self, registry_url: str | None = None, registry_source: str | None = None):
         """Initialize the registry client.
 
         Args:
@@ -232,6 +233,17 @@ class SimpleRegistryClient:
         # True when the URL came from an explicit caller arg or MCP_REGISTRY_URL env var.
         # Consumed by validate_servers_exist() to fail-closed on overrides.
         self._is_custom_url = registry_url is not None or env_override is not None
+        source_override = os.environ.get("APM_MCP_REGISTRY_SOURCE")
+        if registry_source in {"flag", "env", "config"}:
+            self.registry_source = registry_source
+        elif registry_url is not None:
+            self.registry_source = "argument"
+        elif env_override is not None and source_override in {"flag", "env", "config"}:
+            self.registry_source = source_override
+        elif env_override is not None:
+            self.registry_source = "env"
+        else:
+            self.registry_source = "default"
         self.session = requests.Session()
         self._timeout = _resolve_timeout()
         self._http_cache = self._init_http_cache()

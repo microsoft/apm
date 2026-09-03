@@ -487,10 +487,11 @@ For Codex remote transport requirements, see
 `apm install -g --mcp NAME` can use an MCP registry endpoint to update
 account-wide runtime configuration. APM requires HTTPS for registry URLs from
 the environment or saved config unless `MCP_REGISTRY_ALLOW_HTTP=1` is set, and
-rejects embedded credentials, query strings, and fragments. The validated
-registry URL is saved for reproducible replay, but registry metadata is not
-signed or content-hash verified. Treat a custom registry as a trusted source
-with access to every global runtime selected for the install.
+rejects embedded credentials, query strings, and fragments. When a non-default
+registry supplies the entry, APM saves that registry URL for reproducible
+replay, but registry metadata is not signed or content-hash verified. Treat a
+custom registry as a trusted source with access to every global runtime selected
+for the install.
 
 ### Direct dependencies
 

@@ -2426,6 +2426,46 @@ class TestInstallMcpFlag:
         assert "would add MCP server" in result.output
         assert not (fake_home / ".apm" / "apm.yml").exists()
 
+    def test_global_registry_mcp_dry_run_prevalidates_before_preview(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "-g",
+            "--target",
+            "claude",
+            "--mcp",
+            "io.github.test/srv",
+            "--registry",
+            "https://custom.test",
+            "--dry-run",
+            "--no-policy",
+        ]
+        failure = (
+            "Could not reach MCP registry at https://custom.test while validating "
+            "server 'io.github.test/srv'; verify the --registry URL and registry reachability."
+        )
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+            patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", True),
+            patch(
+                "apm_cli.install.mcp.command.MCPIntegrator.prevalidate_registry_dependencies",
+                side_effect=RuntimeError(failure),
+            ),
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 1, result.output
+        assert "Could not reach MCP registry" in result.output
+        assert "verify the --registry URL" in result.output
+        assert "would add MCP server" not in result.output
+        assert not (fake_home / ".apm" / "apm.yml").exists()
+
     def test_e3_mcp_with_only_apm(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(

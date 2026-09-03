@@ -88,6 +88,9 @@ apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /
 
 # Remote
 apm install --mcp linear --transport http --url https://mcp.linear.app/sse
+
+# Global stdio install (writes user APM + runtime config only)
+apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/server-fetch
 ```
 
 `apm mcp install NAME ...` is an alias that forwards to the same code

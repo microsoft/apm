@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -634,6 +635,10 @@ class TestRunMcpInstall:
                 "apm_cli.install.mcp.command.MCPIntegrator.install",
                 return_value=0,
             ) as install_mcp,
+            patch(
+                "apm_cli.install.mcp.command.MCPIntegrator.prevalidate_registry_dependencies",
+                return_value={"my-server": {"id": "my-server-id"}},
+            ),
             patch("apm_cli.install.mcp.command.MCPIntegrator.update_lockfile"),
         ):
             run_mcp_install(
@@ -674,30 +679,31 @@ class TestRunMcpInstall:
             patch(
                 "apm_cli.install.mcp.command.add_mcp_to_apm_yml",
                 return_value=("added", None),
-            ),
+            ) as add_mcp,
             patch("apm_cli.install.mcp.command.warn_ssrf_url"),
             patch("apm_cli.install.mcp.command.warn_shell_metachars"),
             patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", False),
         ):
-            run_mcp_install(
-                mcp_name="registry-server",
-                transport=None,
-                url=None,
-                env_pairs=None,
-                header_pairs=None,
-                mcp_version=None,
-                command_argv=None,
-                dev=False,
-                force=False,
-                runtime=None,
-                exclude=None,
-                logger=logger,
-                apm_dir=tmp_path,
-                scope=None,
-            )
+            with pytest.raises(click.ClickException, match="validation is unavailable"):
+                run_mcp_install(
+                    mcp_name="registry-server",
+                    transport=None,
+                    url=None,
+                    env_pairs=None,
+                    header_pairs=None,
+                    mcp_version=None,
+                    command_argv=None,
+                    dev=False,
+                    force=False,
+                    runtime=None,
+                    exclude=None,
+                    logger=logger,
+                    apm_dir=tmp_path,
+                    scope=None,
+                )
 
-        logger.success.assert_called_once()
-        assert "Added" in logger.success.call_args[0][0]
+        add_mcp.assert_not_called()
+        logger.success.assert_not_called()
 
     def test_replaced_dict_entry_no_deps_available(self, tmp_path: Path) -> None:
         from apm_cli.install.mcp.command import run_mcp_install

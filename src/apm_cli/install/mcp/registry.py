@@ -240,7 +240,8 @@ def _maybe_warn_local_host(url: str, logger) -> None:
         )
 
 
-_REGISTRY_ENV_KEYS = ("MCP_REGISTRY_URL", "MCP_REGISTRY_ALLOW_HTTP")
+_REGISTRY_SOURCE_ENV_KEY = "APM_MCP_REGISTRY_SOURCE"
+_REGISTRY_ENV_KEYS = ("MCP_REGISTRY_URL", "MCP_REGISTRY_ALLOW_HTTP", _REGISTRY_SOURCE_ENV_KEY)
 
 
 @contextlib.contextmanager
@@ -248,6 +249,7 @@ def registry_env_override(
     registry_url: str | None,
     *,
     allow_http: bool = True,
+    source: str | None = None,
 ) -> Iterator[None]:
     """Temporarily export ``MCP_REGISTRY_URL`` for the duration of a call.
 
@@ -272,6 +274,8 @@ def registry_env_override(
     saved = {k: os.environ.get(k) for k in _REGISTRY_ENV_KEYS}
     try:
         os.environ["MCP_REGISTRY_URL"] = registry_url
+        if source in {"flag", "env", "config"}:
+            os.environ[_REGISTRY_SOURCE_ENV_KEY] = source
         if allow_http and urlparse(registry_url).scheme.lower() == "http":
             os.environ["MCP_REGISTRY_ALLOW_HTTP"] = "1"
         yield

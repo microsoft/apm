@@ -19,6 +19,7 @@ import click
 from ..errors import InstallFailureAlreadyRendered
 
 if TYPE_CHECKING:
+    from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import EffectiveTargetDecision
 
 from .args import parse_env_pairs, parse_header_pairs
@@ -97,11 +98,12 @@ def run_mcp_install(  # noqa: PLR0913
     exclude: str | None,
     logger,
     apm_dir: Path,
-    scope: str | None,
+    scope: InstallScope | None,
     target: str | list[str] | None = None,
     target_decision: EffectiveTargetDecision | None = None,
     registry_url: str | None = None,
     registry_allow_http: bool = True,
+    registry_source: str | None = None,
     initial_manifest_config: dict | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
@@ -147,12 +149,22 @@ def run_mcp_install(  # noqa: PLR0913
         dep = MCPDependency.from_dict(entry)
 
     prevalidated_registry_servers = None
-    if APM_DEPS_AVAILABLE and not is_self_defined:
-        with registry_env_override(registry_url, allow_http=registry_allow_http):
+    if not is_self_defined:
+        if not APM_DEPS_AVAILABLE:
+            raise click.ClickException(
+                f"MCP registry validation is unavailable for '{mcp_name}'. "
+                "Install the package dependencies and retry; no state was changed"
+            )
+        with registry_env_override(
+            registry_url,
+            allow_http=registry_allow_http,
+            source=registry_source,
+        ):
             try:
                 prevalidated_registry_servers = MCPIntegrator.prevalidate_registry_dependencies(
                     [dep],
                     registry_url=registry_url,
+                    registry_source=registry_source,
                     verbose=verbose,
                     logger=logger,
                 )
@@ -169,6 +181,10 @@ def run_mcp_install(  # noqa: PLR0913
                     "name and registry reachability/configuration, then retry; "
                     "no state was changed"
                 ) from None
+
+    if getattr(logger, "dry_run", False) is True:
+        logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {manifest_path}")
+        return
 
     if initial_manifest_config is not None:
         from ...commands._helpers import _create_minimal_apm_yml
@@ -198,7 +214,11 @@ def run_mcp_install(  # noqa: PLR0913
         if target is not None and logger:
             rendered_target = target if isinstance(target, str) else ", ".join(target)
             logger.verbose_detail(f"Target: {rendered_target}")
-        with registry_env_override(registry_url, allow_http=registry_allow_http):
+        with registry_env_override(
+            registry_url,
+            allow_http=registry_allow_http,
+            source=registry_source,
+        ):
             try:
                 # Migrate before creating apm.lock.yaml so legacy state is not shadowed.
                 migrate_lockfile_if_needed(apm_dir)

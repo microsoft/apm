@@ -13,16 +13,29 @@ from .client import SimpleRegistryClient
 logger = logging.getLogger(__name__)
 
 
+def _registry_recovery_hint(registry_client: SimpleRegistryClient) -> str:
+    """Return source-specific recovery guidance for custom registry failures."""
+    source = getattr(registry_client, "registry_source", None)
+    if source == "flag":
+        return "verify the --registry URL and registry reachability"
+    if source == "env":
+        return "verify MCP_REGISTRY_URL and registry reachability"
+    if source == "config":
+        return "verify the configured registry URL and registry reachability"
+    return "verify MCP_REGISTRY_URL or the configured registry URL and registry reachability"
+
+
 class MCPServerOperations:
     """Handles MCP server operations like conflict detection and installation status."""
 
-    def __init__(self, registry_url: str | None = None):
+    def __init__(self, registry_url: str | None = None, registry_source: str | None = None):
         """Initialize MCP server operations.
 
         Args:
-            registry_url: Optional registry URL override
+            registry_url: Optional registry URL override.
+            registry_source: Optional source label for recovery text.
         """
-        self.registry_client = SimpleRegistryClient(registry_url)
+        self.registry_client = SimpleRegistryClient(registry_url, registry_source=registry_source)
 
     def check_servers_needing_installation(
         self,
@@ -31,6 +44,7 @@ class MCPServerOperations:
         project_root: Path | str | None = None,
         user_scope: bool = False,
         max_workers: int = 4,
+        server_info_cache: dict[str, dict] | None = None,
     ) -> list[str]:
         """Check which MCP servers actually need installation across target runtimes.
 
@@ -67,7 +81,11 @@ class MCPServerOperations:
         def _check_one(server_ref: str) -> tuple[str, bool]:
             """Return (server_ref, needs_install)."""
             try:
-                server_info = self.registry_client.find_server_by_reference(server_ref)
+                server_info = None
+                if server_info_cache is not None:
+                    server_info = server_info_cache.get(server_ref)
+                if server_info is None:
+                    server_info = self.registry_client.find_server_by_reference(server_ref)
                 if not server_info:
                     return (server_ref, True)
                 server_id = server_info.get("id")
@@ -205,7 +223,7 @@ class MCPServerOperations:
         Returns:
             Tuple of (valid_servers, invalid_servers)
         """
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         valid_servers: list[str] = []
         invalid_servers: list[str] = []
@@ -218,7 +236,7 @@ class MCPServerOperations:
             except requests.RequestException:
                 if fail_closed or getattr(self.registry_client, "_is_custom_url", False):
                     if getattr(self.registry_client, "_is_custom_url", False):
-                        recovery = "verify MCP_REGISTRY_URL and registry reachability"
+                        recovery = _registry_recovery_hint(self.registry_client)
                     else:
                         recovery = "verify network connectivity and registry reachability"
                     raise RuntimeError(  # noqa: B904
@@ -234,8 +252,24 @@ class MCPServerOperations:
                 return (server_ref, True, None)
 
         workers = min(max_workers, len(server_references)) if server_references else 1
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-validate") as executor:
-            for ref, is_valid, server_info in executor.map(_validate_one, server_references):
+        results: dict[str, tuple[bool, dict | None]] = {}
+        executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-validate")
+        futures = {executor.submit(_validate_one, ref): ref for ref in server_references}
+        try:
+            for future in as_completed(futures):
+                ref, is_valid, server_info = future.result()
+                results[ref] = (is_valid, server_info)
+        except Exception:
+            for future in futures:
+                future.cancel()
+            executor.shutdown(wait=True, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
+
+        for ref in server_references:
+            if ref in results:
+                is_valid, server_info = results[ref]
                 if is_valid:
                     valid_servers.append(ref)
                     if server_info_cache is not None and server_info is not None:

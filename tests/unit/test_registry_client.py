@@ -340,6 +340,13 @@ class TestSimpleRegistryClient(unittest.TestCase):
 
         self.assertNotIn(secret, str(raised.exception))
 
+    def test_malformed_port_is_rejected_without_leaking_netloc(self):
+        secret = "PORT_SECRET_SENTINEL"
+        with self.assertRaises(ValueError) as raised:
+            SimpleRegistryClient(f"https://registry.example.com:{secret}")
+
+        self.assertNotIn(secret, str(raised.exception))
+
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     def test_find_server_by_reference_uuid_input_returns_none(self, mock_search_servers):
         """The legacy UUID strategy is removed; UUID-shaped refs route to search and miss."""
@@ -589,6 +596,7 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
         c = SimpleRegistryClient()
         self.assertEqual(c.registry_url, "https://internal.example.com")
         self.assertTrue(c._is_custom_url)
+        self.assertEqual(c.registry_source, "env")
 
     def test_env_var_invalid_rejected(self):
         os.environ["MCP_REGISTRY_URL"] = "not-a-url"

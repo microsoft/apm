@@ -842,8 +842,7 @@ def _handle_mcp_install(  # noqa: PLR0913
             command_argv=command_argv,
             registry_url=resolved_registry_url,
         )
-        logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {mcp_manifest_path}")
-        return
+
     initial_manifest_config = None
     if is_user_scope(scope) and not mcp_manifest_path.exists():
         project_name = _resolve_bootstrap_project_name(Path.home().name)
@@ -869,6 +868,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         scope=scope,
         registry_url=integration_registry_url,
         registry_allow_http=registry_source == "flag",
+        registry_source=registry_source,
         initial_manifest_config=initial_manifest_config,
     )
 

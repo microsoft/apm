@@ -110,6 +110,20 @@ class TestCheckServersNeedingInstallation:
         result = ops.check_servers_needing_installation(["copilot"], ["server-x"])
         assert "server-x" in result
 
+    def test_prevalidated_server_cache_avoids_registry_lookup(self) -> None:
+        ops = _make_ops()
+        ops._get_installed_server_ids = MagicMock(return_value=set())
+        ops.registry_client.find_server_by_reference = MagicMock()
+
+        result = ops.check_servers_needing_installation(
+            ["copilot"],
+            ["server-a"],
+            server_info_cache={"server-a": {"id": "uuid-a"}},
+        )
+
+        assert result == ["server-a"]
+        ops.registry_client.find_server_by_reference.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # MCPServerOperations._get_installed_server_ids
@@ -263,10 +277,11 @@ class TestValidateServersExist:
         monkeypatch.setenv("MCP_REGISTRY_ALLOW_HTTP", "1")
         ops = _make_ops("http://custom.test")
         ops.registry_client._is_custom_url = True
+        ops.registry_client.registry_source = "flag"
         ops.registry_client.find_server_by_reference = MagicMock(
             side_effect=requests.RequestException("timeout")
         )
-        with pytest.raises(RuntimeError, match="MCP_REGISTRY_URL"):
+        with pytest.raises(RuntimeError, match="--registry URL"):
             ops.validate_servers_exist(["server-a"])
 
     def test_empty_list_returns_empty(self) -> None:

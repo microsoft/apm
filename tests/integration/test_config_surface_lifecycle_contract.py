@@ -1451,7 +1451,7 @@ def test_unreachable_global_registry_changes_no_user_state(
     assert result.returncode == 1, (result.stdout, result.stderr)
     output = result.stdout + result.stderr
     assert "Could not reach MCP registry" in output
-    assert "verify the configured registry URL" in output
+    assert "verify the --registry URL" in output
     assert "reachability" in output
     assert "No state was changed." in output
     assert not (isolated.home / ".apm" / "apm.yml").exists()

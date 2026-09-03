@@ -286,7 +286,7 @@ To build the marketplace, run `apm pack` (it reads `apm.yml` and writes `.claude
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm mcp install NAME [-- CMD...]` | Add an MCP server (alias for `apm install --mcp`) | `--transport`, `--url`, `--env`, `--header`, `--mcp-version`, `--registry URL`, `--dev`, `--force`, `--dry-run` |
+| `apm mcp install NAME [-- CMD...]` | Add an MCP server (alias for `apm install --mcp`) | `-g`/`--global`, `--target`, `--transport`, `--url`, `--env`, `--header`, `--mcp-version`, `--registry URL`, `--dev`, `--force`, `--dry-run` |
 | `apm mcp list` | List MCP servers in project | `--limit N` |
 | `apm mcp search QUERY` | Search MCP registry | `--limit N` |
 | `apm mcp show SERVER` | Show server details | -- |

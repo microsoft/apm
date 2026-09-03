@@ -71,12 +71,13 @@ def prevalidate_registry_dependencies(
     registry_url: str | None,
     verbose: bool,
     logger: Any,
+    registry_source: str | None = None,
 ) -> dict[str, dict]:
     """Resolve direct-install registry identities before persistent writes."""
     from apm_cli.registry.operations import MCPServerOperations
 
     server_names = [dep.name if hasattr(dep, "name") else dep for dep in mcp_deps]
-    operations = MCPServerOperations(registry_url=registry_url)
+    operations = MCPServerOperations(registry_url=registry_url, registry_source=registry_source)
     server_info_cache: dict[str, dict] = {}
     valid_servers = _validate_registry_servers(
         operations,
@@ -149,6 +150,7 @@ def _install_registry_group(  # noqa: PLR0913
             valid_servers,
             project_root=project_root,
             user_scope=user_scope,
+            server_info_cache=prevalidated_servers,
         )
         already_configured_candidates = [
             dep for dep in valid_servers if dep not in servers_to_install
