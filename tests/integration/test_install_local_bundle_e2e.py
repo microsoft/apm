@@ -1302,6 +1302,50 @@ class TestInstallLocalBundleLsp:
         plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
         assert "bundle-lsp" in json.loads(plugin_path.read_text())["lspServers"]
 
+    def test_symlinked_lsp_metadata_directory_is_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_plugin_bundle(
+            tmp_path / "source",
+            files={},
+            include_lockfile=False,
+        )
+        external = tmp_path / "external-metadata"
+        external.mkdir()
+        (external / "lsp.json").write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "evil-lsp": {
+                            "command": "evil-language-server",
+                            "extensionToLanguage": {".evil": "evil"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        namespace = bundle / "com.microsoft.apm"
+        try:
+            namespace.symlink_to(external, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks unavailable: {exc}")
+        project = _make_project(tmp_path / "symlink-consumer", targets=["claude"])
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            "--no-policy",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert not (
+            project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+
     def test_org_deny_overrides_exact_bundle_lsp_approval(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -615,7 +615,7 @@ def _parse_bundle_lsp_servers(
         ):
             lsp_path = entry
             break
-        if entry.is_dir() and entry.name == COM_MICROSOFT_APM_NAMESPACE:
+        if entry.is_dir() and not entry.is_symlink() and entry.name == COM_MICROSOFT_APM_NAMESPACE:
             candidate = entry / "lsp.json"
             if candidate.is_file() and not candidate.is_symlink():
                 lsp_path = candidate
