@@ -1248,7 +1248,6 @@ def install(  # noqa: C901, PLR0913
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _root_redirect.__enter__()
     try:
-        # Construct the logger early so exception handlers can always use it.
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
         # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
@@ -1257,7 +1256,6 @@ def install(  # noqa: C901, PLR0913
 
             legacy_skill_paths = should_use_legacy_skill_paths()
 
-        # Local bundles bypass dependency resolution and do not mutate apm.yml.
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
 

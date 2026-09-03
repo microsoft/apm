@@ -79,6 +79,18 @@ def _cleanup_stale_lsp(
         return False, cleanup_error
 
 
+def _abort_if_retained_target_cleanup_paths(retained_cleanup_paths: set[Any], logger: Any) -> None:
+    """Stop uninstall before package state mutates when owned target files remain."""
+    if retained_cleanup_paths:
+        logger.error(
+            "Uninstall could not remove tracked target files; package state was preserved."
+        )
+        for path in sorted(retained_cleanup_paths):
+            logger.error(f"  - {path}")
+        logger.error("Resolve or remove the listed files, then retry uninstall.")
+        sys.exit(1)
+
+
 @click.command(
     help="Remove packages using manifest entries or direct locked keys from 'apm deps list'"
 )
@@ -326,14 +338,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 user_scope=scope is InstallScope.USER,
                 logger=logger,
             )
-            if retained_cleanup_paths:
-                logger.error(
-                    "Uninstall could not remove tracked target files; package state was preserved."
-                )
-                for path in sorted(retained_cleanup_paths):
-                    logger.error(f"  - {path}")
-                logger.error("Resolve or remove the listed files, then retry uninstall.")
-                sys.exit(1)
+            _abort_if_retained_target_cleanup_paths(retained_cleanup_paths, logger)
 
         # Step 4: Remove from apm.yml
         for package in packages_to_remove:
