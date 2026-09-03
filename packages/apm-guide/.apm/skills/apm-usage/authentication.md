@@ -4,7 +4,7 @@
 
 For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, overrides authorization headers and credential helpers with empty values, and preserves caller-supplied global/system Git config such as CA settings, URL rewrites, and `credential.interactive=never`.
 
-Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Private-repository fallback is cached per repository path for the process, so later phases reuse it without applying that credential to a different repository.
+Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Private-repository fallback is cached per repository path for the process, so persistent Git cache population and later phases reuse it without applying that credential to a different repository. APM never writes the credential into persistent cache keys or stored remote URLs.
 
 When fallback is required, APM checks these sources in order:
 
@@ -39,6 +39,11 @@ For in-repository plugins from GitLab and generic git marketplaces, an SSH
 registration stays SSH when APM generates the concrete `git:` and `path:`
 dependency. Existing SSH keys keep working instead of the dependency being
 rewritten to HTTPS.
+
+Generic marketplace HTTPS sources may use the native Git credential helper from
+your Git configuration. Generic HTTP fetches suppress credential channels, HTTPS-
+to-HTTP rewrites are rejected, and generic SSH stays token-free. See the
+[full transport policy](https://microsoft.github.io/apm/getting-started/authentication/#generic-marketplace-git-transport).
 
 ## GitLab hosts
 
@@ -362,12 +367,10 @@ credential under a fully qualified `https://<host>:<port>/` URL.
 
 ### SSH connection hangs on corporate/VPN networks
 
-APM tries SSH as a fallback when HTTPS auth is not available. On networks
-that silently drop SSH traffic (port 22), this can appear to hang. APM sets
-`GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within
-30 seconds and the fallback chain continues to plain HTTPS with git
-credential helpers.
+APM tries SSH as a fallback when HTTPS auth is not available. It forces
+`BatchMode=yes`, disables askpass and HTTP credential channels, and uses a
+30-second connection timeout so SSH attempts fail without prompting.
 
 To override the SSH command (e.g., custom key path), set `GIT_SSH_COMMAND`
-in your environment. APM appends `-o ConnectTimeout=30` unless it finds
-`ConnectTimeout` already present in your value.
+in your environment. APM forces `BatchMode=yes` and appends
+`-o ConnectTimeout=30` unless it finds `ConnectTimeout` already present.

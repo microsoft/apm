@@ -265,6 +265,82 @@ def test_valid_manifestless_virtual_skill_audits_clean(
     assert config_check["message"] == "No MCP configs to check"
 
 
+def test_manifestless_repo_root_skill_with_mcp_survives_frozen_replay(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A real repo-root skill and MCP state survive frozen replay (#2443)."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "repo-root-skill-frozen",
+        base_env=dict(os.environ),
+    )
+    environment = isolated.subprocess_env()
+    source_root = isolated.package_root / "repo-root-skill"
+    source_root.mkdir(parents=True)
+    (source_root / "SKILL.md").write_text(
+        "---\nname: repo-root-skill\ndescription: Frozen replay fixture\n---\n# Repo root skill\n",
+        encoding="utf-8",
+    )
+    assert not (source_root / "apm.yml").exists()
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root,
+        env=environment,
+    )
+    repository = repositories.create("repo-root-skill", source_tree=source_root)
+    commit = repositories.commit(repository, message="seed repo-root skill")
+    remote_url = "https://github.com/apm-fixture-org/repo-root-skill"
+    environment = repositories.url_rewrite_subprocess_env(repository, remote_url)
+    project = LocalPackageFactory(isolated.work_root).create(
+        "repo-root-skill-consumer",
+        dependencies=({"git": remote_url, "ref": commit.sha},),
+        mcp_dependencies=(
+            {
+                "name": "fixture-mcp",
+                "registry": False,
+                "transport": "stdio",
+                "command": "fixture-mcp",
+            },
+        ),
+        targets=("copilot",),
+    )
+    runner = ApmLifecycleRunner(
+        (str(apm_binary_path),),
+        timeout_seconds=120,
+        scenario_timeout_seconds=300,
+    )
+    install = runner.run_sequence(
+        (("install", "--target", "copilot", "--no-policy"),),
+        expected_returncodes=(0,),
+        scenario_id="repo-root-skill-install",
+        cwd=project.root,
+        env=environment,
+    )[0]
+    assert install.stdout
+    lock_path = project.root / "apm.lock.yaml"
+    lock_before = lock_path.read_bytes()
+    locked_data = load_yaml(lock_path)["dependencies"][0]
+    assert locked_data["package_type"] == "claude_skill"
+    assert locked_data.get("is_virtual", False) is False
+    module_root = (
+        LockedDependency.from_dict(locked_data)
+        .to_dependency_ref()
+        .get_install_path(project.root / "apm_modules")
+    )
+    assert (module_root / "SKILL.md").is_file()
+    assert not (module_root / "apm.yml").exists()
+
+    frozen = runner.run_sequence(
+        (("install", "--target", "copilot", "--no-policy", "--frozen"),),
+        expected_returncodes=(0,),
+        scenario_id="repo-root-skill-frozen-replay",
+        cwd=project.root,
+        env=environment,
+    )[0]
+
+    assert frozen.stdout
+    assert lock_path.read_bytes() == lock_before
+
+
 def test_manifestless_local_skill_installs_and_audits_without_state_drift(
     tmp_path: Path,
     apm_binary_path: Path,

@@ -1,24 +1,4 @@
-"""Auto-discover and fetch org-level apm-policy.yml files.
-Discovery flow:
-1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
-2. Determine host profile (default or ado) to select candidate repos
-3. Try candidate repos in precedence order (.github-private > .github > .apm > _apm)
-4. Fetch apm-policy.yml via GitHub Contents API or ADO Items API
-5. Resolve inheritance chain via resolve_policy_chain
-6. Cache the **merged effective policy** with chain metadata
-7. Parse and return ApmPolicy
-Candidate repo precedence:
-- .github-private -- private org-wide config (preferred; skipped on ADO)
-- .github  -- GitHub convention (skipped on ADO)
-- .apm     -- cross-platform convention (skipped on ADO)
-- _apm     -- universal fallback (valid on every git host)
-Supports:
-- GitHub.com and GitHub Enterprise (*.ghe.com)
-- Azure DevOps (dev.azure.com, *.visualstudio.com)
-- Manual override via --policy <path|url>
-- Cache with TTL (default 1 hour), stale fallback up to MAX_STALE_TTL
-- Atomic cache writes (temp file + os.replace)
-"""
+"""Discover, resolve, and cache org-level policy from GitHub, ADO, or GitLab."""
 
 from __future__ import annotations
 
@@ -41,11 +21,13 @@ from ..cache.url_normalize import SCP_LIKE_RE
 from ..utils.github_host import (
     build_ado_api_url,
     is_azure_devops_hostname,
+    is_gitlab_hostname,
     is_visualstudio_legacy_hostname,
     parse_ado_repo_url,
 )
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.yaml_io import load_yaml_str
+from . import _gitlab
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
     _DEFAULT_HASH_ALGORITHM,
@@ -81,13 +63,11 @@ _LEGACY_ADO_POLICY_WARNING = (
 
 
 def _policy_repo_candidates(host: str) -> tuple[str, ...]:
-    """Return candidate policy repo names for *host* in precedence order.
-
-    ADO hosts cannot have repo names starting with ``.`` or ``_``, so only
-    ``apm-policy`` is valid. All other hosts try the full cascade.
-    """
+    """Return host-specific policy candidates."""
     if is_azure_devops_hostname(host):
         return _ADO_POLICY_REPOS
+    if is_gitlab_hostname(host):
+        return _gitlab._gitlab_policy_repo_candidates()
     return _DEFAULT_POLICY_REPOS
 
 
@@ -376,51 +356,37 @@ def _redact_policy_ref(ref: str) -> str:
     return f"{prefix}{safe_url}"
 
 
-def _derive_leaf_host(source: str, project_root: Path) -> str | None:
-    """Derive the origin host of the leaf policy.
-
-    The leaf host pins which host an ``extends:`` reference may resolve
-    against (Security Finding F1 -- prevents credential leakage to
-    attacker-controlled hosts via cross-host extends chains).
-
-    Returns the host in lowercase, or None if it cannot be determined.
-
-    Source forms:
-    * ``url:https://<host>/...`` -> ``<host>``
-    * ``org:<host>/<owner>/<repo>`` (3+ slash-segments) -> ``<host>``
-    * ``org:<owner>/<repo>`` (2 slash-segments) -> ``github.com`` (default)
-    * ``file:<path>`` -> fall back to git remote of *project_root*
-    """
-    if not source:  # noqa: SIM108
-        bare = ""
-    else:
-        bare = _strip_source_prefix(source)
-
-    if source.startswith("url:") or bare.startswith("https://") or bare.startswith("http://"):
+def _derive_leaf_identity(source: str, project_root: Path) -> tuple[str | None, int | None]:
+    """Return the credential-pinned leaf host and optional port."""
+    bare = _strip_source_prefix(source) if source else ""
+    if source.startswith("url:") or bare.startswith(("https://", "http://")):
         try:
             parsed = urlparse(bare)
-            if parsed.hostname:
-                return parsed.hostname.lower()
+            return (parsed.hostname.lower(), parsed.port) if parsed.hostname else (None, None)
         except Exception:
-            return None
-        return None
-
-    if source.startswith("org:") or (bare and "://" not in bare and bare.count("/") >= 1):
+            return None, None
+    if source.startswith("org:") or (bare and "://" not in bare and "/" in bare):
         parts = bare.split("/")
         if len(parts) >= 3:
-            return parts[0].lower()
+            try:
+                parsed = urlsplit(f"//{parts[0]}")
+                return (parsed.hostname.lower(), parsed.port) if parsed.hostname else (None, None)
+            except ValueError:
+                return None, None
         if len(parts) == 2:
-            # owner/repo shorthand defaults to github.com (matches
-            # _fetch_github_contents convention).
-            return "github.com"
-
-    # File source (or unrecognized): fall back to project's git remote.
+            return "github.com", None
     org_and_host = _extract_org_from_git_remote(project_root)
-    if org_and_host is not None:
-        _, host = org_and_host
-        if host:
-            return host.lower()
-    return None
+    if org_and_host is None:
+        return None, None
+    _, host = org_and_host
+    identity = _extract_org_host_port_from_git_remote(project_root)
+    port = identity[2] if identity is not None and identity[1].lower() == host.lower() else None
+    return host.lower(), port
+
+
+def _derive_leaf_host(source: str, project_root: Path) -> str | None:
+    """Derive the credential-pinned host of the leaf policy."""
+    return _derive_leaf_identity(source, project_root)[0]
 
 
 def _extract_extends_host(ref: str) -> str | None:
@@ -445,7 +411,10 @@ def _extract_extends_host(ref: str) -> str | None:
         return None
     parts = ref.split("/")
     if len(parts) >= 3:
-        return parts[0].lower()
+        try:
+            return (urlsplit(f"//{parts[0]}").hostname or "").lower() or None
+        except ValueError:
+            return None
     return None
 
 
@@ -531,15 +500,9 @@ def _fetch_chain_parent(
     project_root: Path,
     no_cache: bool,
     cache_only: bool = False,
+    leaf_port: int | None = None,
 ) -> PolicyFetchResult:
-    """Fetch one parent without losing the leaf's host or backend.
-
-    GitHub-style ``owner/repo`` refs are qualified with a non-default leaf
-    host. On ADO, ``project/repo`` means a repo in the current ancestor's org,
-    while explicit refs use ``host/org/project/repo`` on ``dev.azure.com`` or
-    ``host/project/repo`` on legacy ``*.visualstudio.com`` hosts. URLs and
-    local-file refs continue through the public single-policy owner.
-    """
+    """Fetch one parent through the leaf host's policy backend."""
     cache_kwargs = {"cache_only": True} if cache_only else {}
     if parent_ref.startswith(("http://", "https://")) or Path(parent_ref).is_file():
         return discover_policy(
@@ -548,7 +511,6 @@ def _fetch_chain_parent(
             no_cache=no_cache,
             **cache_kwargs,
         )
-
     if leaf_host and is_azure_devops_hostname(leaf_host):
         resolved = _resolve_ado_parent_ref(parent_ref, current_source, leaf_host)
         if resolved is None:
@@ -574,6 +536,16 @@ def _fetch_chain_parent(
             project_root=project_root,
             no_cache=no_cache,
             **cache_kwargs,
+        )
+    if leaf_host and is_gitlab_hostname(leaf_host):
+        return _gitlab._fetch_gitlab_chain_parent(
+            parent_ref,
+            current_source=current_source,
+            leaf_host=leaf_host,
+            port=leaf_port,
+            project_root=project_root,
+            no_cache=no_cache,
+            cache_only=cache_only,
         )
 
     normalized_ref = parent_ref
@@ -616,10 +588,7 @@ def _resolve_and_persist_chain(
     leaf_source = fetch_result.source
     leaf_cache_ref = fetch_result.cache_ref or _strip_source_prefix(leaf_source)
 
-    # Host pin: extends: refs may only resolve against the leaf's origin
-    # host. Prevents credential leakage to attacker-controlled hosts via
-    # cross-host extends chains (Security Finding F1).
-    leaf_host = _derive_leaf_host(leaf_source, project_root)
+    leaf_host, leaf_port = _derive_leaf_identity(leaf_source, project_root)
 
     # Ordered ancestors collected as we walk parents.  Built leaf-first
     # for traversal convenience; reversed before merging.
@@ -666,6 +635,7 @@ def _resolve_and_persist_chain(
             next_ref,
             current_source=chain_sources[-1],
             leaf_host=leaf_host,
+            leaf_port=leaf_port,
             project_root=project_root,
             no_cache=no_cache,
             cache_only=cache_only,
@@ -883,7 +853,10 @@ def _auto_discover(
         )
 
     org, host, port = identity
-    candidates = _policy_repo_candidates(host)
+    try:
+        candidates = _policy_repo_candidates(host)
+    except ValueError as exc:
+        return PolicyFetchResult(error=str(exc), outcome="cache_miss_fetch_fail")
     is_ado = is_azure_devops_hostname(host)
 
     for candidate_repo in candidates:
@@ -891,6 +864,17 @@ def _auto_discover(
         if is_ado:
             result = _fetch_ado_org_policy(
                 org=org,
+                host=host,
+                port=port,
+                project_root=project_root,
+                no_cache=no_cache,
+                expected_hash=expected_hash,
+                cache_only=cache_only,
+            )
+        elif is_gitlab_hostname(host):
+            result = _gitlab._fetch_from_gitlab_repo(
+                org=org,
+                repo=candidate_repo,
                 host=host,
                 port=port,
                 project_root=project_root,
@@ -1537,6 +1521,11 @@ def _fetch_ado_contents(
         return None, f"{exc}: Access denied to {repo_ref}{remediation}"
     except Exception as e:
         return None, f"Error fetching policy from {repo_ref}: {e}"
+
+
+# ---------------------------------------------------------------------------
+# GitLab policy fetch
+# ---------------------------------------------------------------------------
 
 
 def _is_github_host(host: str) -> bool:

@@ -136,17 +136,32 @@ def merge_hook_config_paths(targets: list[TargetProfile]) -> set[str]:
     ``integration/_hook_dropped_targets.py`` was split out; the registry stays
     the single source of truth for the filenames.
     """
+    paths = merge_hook_config_projection_specs(targets)
+    return set(paths) | {sidecar_path for sidecar_path, _ in paths.values()}
+
+
+def merge_hook_config_projection_specs(
+    targets: list[TargetProfile],
+) -> dict[str, tuple[str, str]]:
+    """Return native merge-config paths with sidecar and container metadata.
+
+    The HookIntegrator registry remains the canonical target-path vocabulary.
+    Drift uses these specs to select the APM-owned structural projection rather
+    than comparing a user-shared native config as a whole.
+    """
     from apm_cli.integration import hook_integrator as _hi
 
-    paths: set[str] = set()
+    specs: dict[str, tuple[str, str]] = {}
     for target in targets or []:
         config = _hi._MERGE_HOOK_TARGETS.get(getattr(target, "name", ""))
         root = str(getattr(target, "root_dir", "") or "").rstrip("/")
         if config is None or not root:
             continue
-        paths.add(f"{root}/{config.config_filename}")
-        paths.add(f"{root}/{_hi._APM_HOOKS_SIDECAR}")
-    return paths
+        specs[f"{root}/{config.config_filename}"] = (
+            f"{root}/{_hi._APM_HOOKS_SIDECAR}",
+            config.event_container_key,
+        )
+    return specs
 
 
 def union_preserving(

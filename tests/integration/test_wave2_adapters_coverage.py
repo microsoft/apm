@@ -3023,26 +3023,6 @@ class TestMarketplaceClientFetchPaths:
         path = _auto_detect_path(source)
         assert path is None
 
-    def test_host_from_url_http_url(self) -> None:
-        """_host_from_url extracts host from HTTP URL."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        host = _host_from_url("https://gitea.example.com/org/repo")
-        assert host == "gitea.example.com"
-
-    def test_host_from_url_scp_like(self) -> None:
-        """_host_from_url handles SCP-like git URLs."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        host = _host_from_url("git@github.com:org/repo.git")
-        assert host == "github.com"
-
-    def test_host_from_url_empty_returns_empty(self) -> None:
-        """_host_from_url returns empty string for empty input."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        assert _host_from_url("") == ""
-
     def test_fetch_file_local_kind_dispatches(self, tmp_path: Path) -> None:
         """_fetch_file dispatches local kind to _fetch_local."""
         from apm_cli.marketplace.client import _fetch_file

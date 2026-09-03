@@ -182,7 +182,7 @@ supported for backward compatibility and accepts legacy CLI aliases such as
 | `claude` | Emits `CLAUDE.md` at the project root. |
 | `grok-build` | Emits `AGENTS.md` and deploys to `.grok/rules/`, `.grok/agents/`, `.grok/commands/`, `.grok/skills/`. |
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`. |
-| `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`. |
+| `opencode` | Emits `AGENTS.md`, `.opencode/agents/`, `.opencode/commands/`, and `.agents/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
 | `antigravity` | Emits `AGENTS.md` and deploys rules, skills, hooks, and MCP config under `.agents/`. |
@@ -283,6 +283,10 @@ For plugin packing, `includes:` is allow-list only. There is no `exclude:`
 form. To keep maintainer-only primitives out of shipped artifacts, author them
 outside the selected source layout and reference them via a local-path
 devDependency. See [Dev-only Primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
+
+Compile discovery independently stops at nested Git repositories and linked
+worktrees. This active-checkout boundary applies whether `includes` is `auto`,
+an explicit list, or omitted.
 
 When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
 
@@ -606,7 +610,7 @@ Any additional keys not listed above are preserved as **extra passthrough fields
 
 Two guardrails apply:
 
-- **Reserved keys are rejected.** A passthrough key whose name collides with a modeled field above -- `name`, `transport`/`type`, `command`, `url`, `headers`, `env`, `args`, `tools`, `version`, `registry`, `package` (and the Codex `http_headers` alias) -- is dropped with a warning. This prevents a passthrough value from shadowing or redirecting a modeled field. Extra keys also never overwrite a value the target adapter set itself.
+- **Reserved keys are rejected.** A passthrough key whose name collides with a modeled field above -- `name`, `transport`/`type`, `command`, `url`, `headers`, `env`, `args`, `tools`, `version`, `registry`, `package` -- or with an adapter-owned field (`http_headers`, `enabled`, `environment`, `id`) is dropped with a warning. This prevents a passthrough value from shadowing or redirecting a modeled field. Extra keys also never overwrite a value the target adapter set itself.
 - **Extra keys broadcast to every target.** Passthrough keys are written uniformly into the generated config for **all** installed harnesses, not just the one that understands them. A Claude Code `oauth` block (`clientId`/`callbackPort`), for example, is emitted into every target's server entry; harnesses that do not recognise the key ignore it. Per-harness scoping is tracked as a future enhancement (see issue #1806).
 
 > A future release may require passthrough keys to be nested under an explicit `extra:` block and stop auto-capturing bare top-level keys (fail-closed), via a deprecation path. See issue #1806.
@@ -837,15 +841,15 @@ compilation:
 
 ### 6.2. `compilation.agents_md`
 
-Controls how `apm compile` writes the root `AGENTS.md` output file. All fields are OPTIONAL; omitting the entire sub-object keeps the default full-overwrite behaviour. Use `managed_section` mode when your root `AGENTS.md` contains hand-written content you want to preserve across recompiles. In distributed compile mode, subdirectory `AGENTS.md` files remain fully APM-owned and are overwritten on each run.
+Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIONAL; omitting the entire sub-object keeps full-file replacement for APM-generated files and non-root placements. An unmarked project-root `AGENTS.md` is retained with a warning. Use `managed_section` mode to update an APM-owned block inside that hand-authored root file. In distributed compile mode, managed-section behavior applies to every generated `AGENTS.md` outside nested Git repositories.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
-| `mode` | `enum<string>` | `full` | `full`, `managed_section` | `full` overwrites the entire file on every compile. `managed_section` replaces only the root `AGENTS.md` block between `start_marker` and `end_marker`, leaving surrounding content untouched. |
+| `mode` | `enum<string>` | `full` | `full`, `managed_section` | `full` replaces the entire APM-generated file on every compile but retains unmarked project-root files. `managed_section` replaces only the block between `start_marker` and `end_marker`, leaving surrounding content untouched. New distributed placements are created with a managed block for later recompiles. |
 | `start_marker` | `string` | `<!-- apm:start -->` | Non-empty, distinct from `end_marker` | Opening HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
 | `end_marker` | `string` | `<!-- apm:end -->` | Non-empty, distinct from `start_marker` | Closing HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
 
-Both markers must appear **exactly once** in the file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content.
+Both markers must appear **exactly once** in every existing managed target file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content. Compile excludes primitives and distributed placements in a nested Git repository (a `.git` directory or gitfile), including descendants of that repository. Use `apm compile --dry-run` to preview the same eligible placement set before writing files.
 
 See [Managed-section mode](../../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
 
@@ -949,7 +953,7 @@ When `sourceBase` is set, relative package sources compose onto that base. For e
 
 A relative `source` may use arbitrary path depth. A value whose leading segments form a host-prefixed shape (`<host.tld>/<owner>/<repo>`) or a full `https://` URL is always treated as a per-entry override and ignores `sourceBase`. A value that looks like it is trying to name a host (a dotted, FQDN-like first segment) but does **not** form a valid override shape is rejected at parse time rather than silently composed onto the base -- this avoids a confused-deputy footgun. To target a different host, use an explicit host-prefixed override or a full `https://` URL instead of a relative source.
 
-`sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
+`sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Path segments may percent-encode UTF-8 bytes, such as `My%20Projects`. Empty, `.`, `..`, malformed escapes, encoded separators, and recursive encodings are refused. Full HTTPS `packages[].source` paths follow the same safe percent-encoding rules. APM keeps the encoded URL in generated output while using decoded ADO coordinates for repository and authentication lookup.
 
 Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps
 -- authenticate via the standard APM token chain -- see the

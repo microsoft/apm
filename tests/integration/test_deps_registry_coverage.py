@@ -49,6 +49,7 @@ from apm_cli.deps.registry.resolver import (
     _split_owner_repo,
 )
 from apm_cli.deps.revision_pins import (
+    RevisionPinResolutionResult,
     RevisionPinUpdate,
     abbreviate_sha,
     apply_revision_pin_updates,
@@ -1151,10 +1152,11 @@ class TestResolveRevisionPinUpdates:
         downloader = MagicMock()
         downloader.list_remote_tag_refs.return_value = refs
 
-        updates = resolve_revision_pin_updates([dep], downloader)
-        assert len(updates) == 1
-        assert updates[0].new_sha == new_sha.lower()
-        assert updates[0].tag == "my-tool-v2.0.0"
+        result = resolve_revision_pin_updates([dep], downloader)
+        assert len(result.updates) == 1
+        assert result.updates[0].new_sha == new_sha.lower()
+        assert result.updates[0].tag == "my-tool-v2.0.0"
+        assert result.skips == ()
 
     def test_already_up_to_date_returns_empty(self) -> None:
         """No update when the remote SHA matches the pinned SHA."""
@@ -1171,8 +1173,7 @@ class TestResolveRevisionPinUpdates:
         downloader = MagicMock()
         downloader.list_remote_tag_refs.return_value = refs
 
-        updates = resolve_revision_pin_updates([dep], downloader)
-        assert updates == []
+        assert resolve_revision_pin_updates([dep], downloader) == RevisionPinResolutionResult()
 
     def test_registry_dep_skipped(self) -> None:
         """Registry-sourced deps are not eligible for revision-pin updates."""
@@ -1183,8 +1184,7 @@ class TestResolveRevisionPinUpdates:
             reference=_FAKE_SHA,
         )
         downloader = MagicMock()
-        updates = resolve_revision_pin_updates([dep], downloader)
-        assert updates == []
+        assert resolve_revision_pin_updates([dep], downloader) == RevisionPinResolutionResult()
         downloader.list_remote_tag_refs.assert_not_called()
 
     def test_local_dep_skipped(self) -> None:
@@ -1197,8 +1197,7 @@ class TestResolveRevisionPinUpdates:
             local_path="./local-tool",
         )
         downloader = MagicMock()
-        updates = resolve_revision_pin_updates([dep], downloader)
-        assert updates == []
+        assert resolve_revision_pin_updates([dep], downloader) == RevisionPinResolutionResult()
 
 
 class TestApplyRevisionPinUpdates:

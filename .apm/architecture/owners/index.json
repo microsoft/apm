@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "shards": [
+    "core-runtime.json",
+    "install-deployment.json",
+    "hooks-integrations.json",
+    "transport-auth-platform.json",
+    "marketplace-plugins.json",
+    "contracts-tooling.json"
+  ]
+}

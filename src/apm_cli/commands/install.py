@@ -16,11 +16,13 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginError,
     enforce_agent_plugin_deployment_boundary,
 )
+from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
 )
 from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
+from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.install.errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -268,6 +270,8 @@ def _resolve_package_references(
     skill_subset=None,
     skill_subset_from_cli=False,
     default_registry=None,
+    dry_run=False,
+    updated_packages_out=None,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -277,9 +281,7 @@ def _resolve_package_references(
     *existing_identities* is mutated (new identities are added to prevent
     duplicates within the same batch).
 
-    Returns:
-        Tuple of ``(valid_outcomes, invalid_outcomes, validated_packages,
-        marketplace_provenance, apm_yml_entries, dependencies_changed)``.
+    Returns the validation outcomes, manifest entries, and change state.
     """
     from ..install.registry_wiring import should_skip_github_probe_for_dep, validate_registry_ref
 
@@ -487,11 +489,13 @@ def _resolve_package_references(
                 continue
             valid_outcomes.append((canonical, already_in_deps))
             if logger:
-                logger.validation_pass(canonical, already_in_deps, updates_existing_entry)
+                logger.validation_pass(canonical, already_in_deps, updates_existing_entry, dry_run)
             if not already_in_deps:
                 validated_packages.append(canonical)
                 existing_identities.add(identity)
             dependencies_changed = dependencies_changed or updates_existing_entry
+            if updates_existing_entry and updated_packages_out is not None:
+                updated_packages_out.append(canonical)
             if marketplace_provenance:
                 _marketplace_provenance[identity] = marketplace_provenance
         else:
@@ -633,6 +637,7 @@ def _validate_and_add_packages_to_apm_yml(
     existing_identities = _check_package_conflicts(current_deps)
 
     # Validate and canonicalize all package references
+    updated_packages = []
     (
         valid_outcomes,
         invalid_outcomes,
@@ -651,15 +656,32 @@ def _validate_and_add_packages_to_apm_yml(
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         default_registry=_default_registry_for_cli,
+        dry_run=dry_run,
+        updated_packages_out=updated_packages,
     )
+
+    prospective_package = None
+    if dry_run and valid_outcomes:
+        prospective_dependencies = list(current_deps)
+        prospective_dependencies.extend(
+            _apm_yml_entries.get(package, package) for package in validated_packages
+        )
+        data[dep_section]["apm"] = prospective_dependencies
+        prospective_package = APMPackage.from_mapping(
+            data,
+            package_path=apm_yml_path.parent,
+            source_path=apm_yml_path.parent,
+            manifest_path=apm_yml_path,
+        )
 
     outcome = _ValidationOutcome(
         valid=valid_outcomes,
         invalid=invalid_outcomes,
         marketplace_provenance=_marketplace_provenance or None,
+        prospective_package=prospective_package,
+        updated_packages=tuple(updated_packages),
     )
 
-    # Let the logger emit a summary and decide whether to continue
     if logger:
         should_continue = logger.validation_summary(outcome)
         if not should_continue:
@@ -668,19 +690,23 @@ def _validate_and_add_packages_to_apm_yml(
     if not validated_packages:
         if dry_run:
             if logger:
-                logger.progress("No new packages to add")
-        # If all packages already exist in apm.yml, that's OK - we'll reinstall them
-        persist_dependency_list_if_changed(
-            dependencies_changed=dependencies_changed,
-            data=data,
-            dep_section=dep_section,
-            current_deps=current_deps,
-            apm_yml_path=apm_yml_path,
-            apm_yml_filename=APM_YML_FILENAME,
-            logger=logger,
-            rich_error=_rich_error,
-            sys_exit=sys.exit,
-        )
+                if dependencies_changed:
+                    logger.progress("Dry run: Would update dependency entries in apm.yml")
+                else:
+                    logger.progress("No new packages to add")
+        # If all packages already exist in apm.yml, that's OK - we'll reinstall them.
+        if not dry_run:
+            persist_dependency_list_if_changed(
+                dependencies_changed=dependencies_changed,
+                data=data,
+                dep_section=dep_section,
+                current_deps=current_deps,
+                apm_yml_path=apm_yml_path,
+                apm_yml_filename=APM_YML_FILENAME,
+                logger=logger,
+                rich_error=_rich_error,
+                sys_exit=sys.exit,
+            )
         return [], outcome
 
     if dry_run:
@@ -1672,11 +1698,6 @@ def install(  # noqa: C901, PLR0913
         ctx.exit(command_result.exit_code)
 
 
-# ---------------------------------------------------------------------------
-# install() decomposition: APM pipeline + post-install summary
-# ---------------------------------------------------------------------------
-
-
 def _frozen_install_tip(error: FrozenInstallError) -> str:
     """Return recovery guidance tailored to package or MCP lock drift."""
     has_mcp_drift = any("MCP server" in reason for reason in error.reasons)
@@ -1710,11 +1731,13 @@ def _install_apm_packages(ctx, outcome):
     logger.resolution_start(
         to_install_count=len(ctx.only_packages or []) if ctx.packages else 0,
         lockfile_count=0,  # Refined later inside _install_apm_dependencies
+        update_count=len(outcome.updated_packages) if outcome is not None else 0,
     )
 
-    # Parse apm.yml to get both APM and MCP dependencies
     try:
         apm_package = APMPackage.from_apm_yml(ctx.manifest_path)
+        if ctx.dry_run and outcome is not None and outcome.prospective_package is not None:
+            apm_package = outcome.prospective_package
     except click.UsageError:
         raise
     except Exception as e:
@@ -1740,7 +1763,6 @@ def _install_apm_packages(ctx, outcome):
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
 
     all_apm_deps = list(apm_deps) + list(dev_apm_deps)
-    _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
 
     if ctx.frozen is True:
         from apm_cli.install.request import InstallRequest
@@ -1759,24 +1781,34 @@ def _install_apm_packages(ctx, outcome):
     should_install_apm = ctx.install_mode != InstallMode.MCP
     should_install_mcp = ctx.install_mode != InstallMode.APM
 
-    # Show what will be installed if dry run
     if ctx.dry_run:
+        prospective_plan = ProspectiveInstallPlan.from_apm_package(
+            apm_package,
+            should_install_apm=should_install_apm,
+            should_install_mcp=should_install_mcp,
+            only_packages=ctx.only_packages,
+            updated_packages=outcome.updated_packages if outcome is not None else (),
+        )
+        logger.record_dry_run_apm_updates(len(prospective_plan.updated_apm_identities))
+        _check_insecure_dependencies(
+            prospective_plan.selected_apm_dependencies,
+            ctx.allow_insecure,
+            logger,
+        )
         from apm_cli.install.template import preflight_agent_plugin_dry_run
 
         if should_install_apm:
-            preflight_agent_plugin_dry_run(ctx, all_apm_deps)
-        # -- W2-dry-run (#827): policy preflight in preview mode --
-        # Runs discovery + checks against direct manifest deps, not transitives.
-        # Block-severity violations render as "Would be blocked by
-        # policy" without raising.  Documented limitation: transitive
-        # deps are NOT evaluated since the resolver does not run.
+            preflight_agent_plugin_dry_run(
+                ctx,
+                list(prospective_plan.selected_apm_dependencies),
+                apm_package=apm_package,
+            )
         from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
 
-        _dr_apm_deps = builtins.list(apm_deps) + builtins.list(dev_apm_deps)
         _dr_preflight(
             project_root=ctx.project_root,
-            apm_deps=_dr_apm_deps,
-            mcp_deps=mcp_deps if should_install_mcp else None,
+            apm_deps=list(prospective_plan.selected_apm_dependencies),
+            mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None,
             no_policy=ctx.no_policy,
             logger=logger,
             dry_run=True,
@@ -1786,16 +1818,13 @@ def _install_apm_packages(ctx, outcome):
 
         render_and_exit(
             logger=logger,
-            should_install_apm=should_install_apm,
-            apm_deps=apm_deps,
-            mcp_deps=mcp_deps,
-            dev_apm_deps=dev_apm_deps,
-            should_install_mcp=should_install_mcp,
+            plan=prospective_plan,
             update=ctx.update,
-            only_packages=ctx.only_packages,
             apm_dir=ctx.apm_dir,
         )
-        return 0, 0, 0, None  # render_and_exit exits; this line is defensive
+        return prospective_plan.apm_dependency_count, prospective_plan.mcp_dependency_count, 0, None
+
+    _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
 
     # Install APM dependencies first (if requested)
     apm_count = 0
@@ -1912,6 +1941,16 @@ def _install_apm_packages(ctx, outcome):
             raise
         except click.UsageError:
             raise
+        except CopilotSettingsCollisionError as e:
+            # Dependencies installed cleanly; only the Copilot settings merge
+            # collided. Surface the already-actionable message verbatim (no
+            # "Failed to install..." prefix) and keep the raw decoder detail,
+            # when present, behind --verbose.
+            logger.error(str(e))
+            detail = getattr(e, "detail", None)
+            if detail:
+                logger.verbose_detail(detail)
+            raise InstallFailureAlreadyRendered(str(e)) from e
         except Exception as e:
             # #832: surface PolicyViolationError verbatim (no double-nesting).
             msg = (

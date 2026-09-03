@@ -433,7 +433,12 @@ def validate_apm_package(
 
     # Handle Marketplace Plugins (no apm.yml) - synthesize apm.yml from plugin.json
     if result.package_type == PackageType.MARKETPLACE_PLUGIN:
-        return _validate_marketplace_plugin(package_path, plugin_json_path, result)
+        return _validate_marketplace_plugin(
+            package_path,
+            plugin_json_path,
+            result,
+            source_path=source_path,
+        )
 
     # Handle Skill Bundles (nested skills/<name>/SKILL.md)
     if result.package_type == PackageType.SKILL_BUNDLE:
@@ -774,7 +779,11 @@ def _validate_hybrid_package(
 
 
 def _validate_marketplace_plugin(
-    package_path: Path, plugin_json_path: Path | None, result: ValidationResult
+    package_path: Path,
+    plugin_json_path: Path | None,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
 ) -> ValidationResult:
     """Validate a Claude plugin and synthesize apm.yml.
 
@@ -786,6 +795,7 @@ def _validate_marketplace_plugin(
         package_path: Path to the package directory
         plugin_json_path: Path to plugin.json if found, or None
         result: ValidationResult to populate
+        source_path: Original source directory for resolving relative dependencies
 
     Returns:
         ValidationResult: Updated validation result with MARKETPLACE_PLUGIN type
@@ -798,7 +808,7 @@ def _validate_marketplace_plugin(
         apm_yml_path = normalize_plugin_directory(package_path, plugin_json_path)
 
         # Load the synthesized apm.yml
-        package = APMPackage.from_apm_yml(apm_yml_path)
+        package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
         result.package = package
         result.package_type = PackageType.MARKETPLACE_PLUGIN
 

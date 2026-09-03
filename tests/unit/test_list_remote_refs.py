@@ -1,11 +1,14 @@
 """Tests for GitHubPackageDownloader.list_remote_refs() and helpers."""
 
+import os
+from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 
 import pytest
 from git.exc import GitCommandError
 
 from apm_cli.core.auth import AuthResolver
+from apm_cli.deps.git_remote_ops import RemoteRefParseError
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
@@ -331,6 +334,7 @@ class TestListRemoteRefsGitHub:
         assert "GIT_CONFIG_NOSYSTEM" not in used_env
         assert used_env.get("GIT_TERMINAL_PROMPT") == "0"
 
+    @pytest.mark.windows_compat
     @patch("apm_cli.deps.github_downloader.git.cmd.Git")
     def test_insecure_http_host_no_token_suppresses_credential_helpers(self, MockGitCmd):
         """HTTP ls-remote must block credential helpers and preserve config isolation."""
@@ -353,7 +357,13 @@ class TestListRemoteRefsGitHub:
         call_kwargs = mock_git.ls_remote.call_args
         used_env = call_kwargs.kwargs.get("env")
         assert used_env.get("GIT_ASKPASS") == "echo"
-        assert used_env.get("GIT_CONFIG_GLOBAL") == "/dev/null"
+        global_config = Path(used_env["GIT_CONFIG_GLOBAL"])
+        if os.name == "nt":
+            assert global_config != Path(os.devnull)
+            assert global_config.is_file()
+            assert global_config.read_bytes() == b""
+        else:
+            assert global_config == Path(os.devnull)
         assert used_env.get("GIT_CONFIG_NOSYSTEM") == "1"
         assert used_env.get("GIT_CONFIG_COUNT") == "1"
         assert used_env.get("GIT_CONFIG_KEY_0") == "credential.helper"
@@ -395,6 +405,32 @@ class TestListRemoteRefsGitHub:
         tag_map = {r.name: r.commit_sha for r in result if r.ref_type == GitReferenceType.TAG}
         assert tag_map["v1.0.0"] == "com1111111111111111111111111111111111111"
         assert tag_map["v2.0.0"] == "com2222222222222222222222222222222222222"
+
+    @patch("apm_cli.deps.github_downloader.git.cmd.Git")
+    def test_malformed_tag_output_is_fatal(self, MockGitCmd):
+        """A tag-only response cannot downgrade malformed transport output to no tags."""
+        dl = _build_downloader()
+        dep = _make_dep_ref(host="github.com")
+        dl._resolve_dep_token = MagicMock(return_value="tok")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
+        dl._build_repo_url = MagicMock(return_value="https://github.com/owner/repo.git")
+        MockGitCmd.return_value.ls_remote.return_value = "not a git ref"
+
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            dl.list_remote_tag_refs(dep)
+
+    @patch("apm_cli.deps.github_downloader.git.cmd.Git")
+    def test_unsupported_tag_sha_width_is_fatal_before_tag_selection(self, MockGitCmd):
+        """Unsupported remote hashes cannot become a nonfatal no-tag outcome."""
+        dl = _build_downloader()
+        dep = _make_dep_ref(host="github.com")
+        dl._resolve_dep_token = MagicMock(return_value="tok")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
+        dl._build_repo_url = MagicMock(return_value="https://github.com/owner/repo.git")
+        MockGitCmd.return_value.ls_remote.return_value = f"{'a' * 64}\trefs/tags/not-a-release"
+
+        with pytest.raises(RemoteRefParseError, match="Malformed git ls-remote tag output"):
+            dl.list_remote_tag_refs(dep)
 
 
 # ---------------------------------------------------------------------------

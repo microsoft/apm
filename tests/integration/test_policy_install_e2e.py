@@ -248,7 +248,11 @@ class TestI1BlockDeniedDirectDep:
         _write_apm_yml(project_dir / "apm.yml", deps=["test-blocked/forbidden-package"])
 
         policy = _load_fixture_policy("apm-policy-deny.yml")
-        fetch = _make_fetch_result("found", policy=policy)
+        fetch = _make_fetch_result(
+            "found",
+            policy=policy,
+            source="org:gitlab.com/test-org/apm-policy",
+        )
         mock_gate.return_value = fetch
         mock_preflight.return_value = fetch
 
@@ -637,6 +641,43 @@ class TestI10DryRunDenied:
         # No filesystem mutation
         assert not (project_dir / "apm.lock.yaml").exists(), "Dry-run should NOT create lockfile"
         assert not (project_dir / "apm_modules").exists(), "Dry-run should NOT create apm_modules/"
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_VALIDATE_PKG, return_value=True)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    def test_positional_dry_run_excludes_unrequested_denied_manifest_dependency(
+        self,
+        mock_gate,
+        mock_preflight,
+        _mock_validate,
+        _mock_updates,
+        project,
+    ):
+        """Policy checks receive only the dependency selected for preview."""
+        project_dir, runner = project
+        manifest_path = project_dir / "apm.yml"
+        _write_apm_yml(
+            manifest_path,
+            deps=["test-blocked/evil-pkg"],
+        )
+        requested = project_dir / "requested-package"
+        requested.mkdir()
+        _write_apm_yml(requested / "apm.yml", name="requested-package")
+        manifest_before = manifest_path.read_bytes()
+        fetch = _make_fetch_result(
+            "found",
+            policy=_load_fixture_policy("apm-policy-deny.yml"),
+        )
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        result = _invoke_install(runner, ["./requested-package", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert "would be blocked" not in result.output.lower()
+        assert "test-blocked" not in result.output
+        assert manifest_path.read_bytes() == manifest_before
 
 
 # =====================================================================

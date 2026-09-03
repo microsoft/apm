@@ -356,6 +356,8 @@ class DiagnosticCollector:
                 bold=True,
             )
             _rich_info("    Run 'apm audit' for full details")
+            for detail in dict.fromkeys(d.detail for d in critical if d.detail):
+                _rich_info(f"    {detail}")
             if self.verbose:
                 by_pkg = _group_by_package(critical)
                 for pkg, diags in by_pkg.items():

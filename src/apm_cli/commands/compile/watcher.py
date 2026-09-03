@@ -58,6 +58,61 @@ def _format_target_label(
     return f"Compiling for {get_target_description(effective_target)}"
 
 
+def _report_retained_watch_outputs(
+    logger: CommandLogger,
+    result: Any,
+    *,
+    dry_run: bool,
+) -> bool:
+    """Render protected root outcomes and returned warnings in watch mode."""
+    for warning in getattr(result, "warnings", ()):
+        logger.warning(warning)
+    if not result.success:
+        return False
+    stats = getattr(result, "stats", {}) or {}
+    protected_count = int(stats.get("root_context_files_protected", 0) or 0)
+    if not protected_count:
+        return False
+    noun = "file" if protected_count == 1 else "files"
+    agents_generated = int(
+        stats.get(
+            "agents_files_generated",
+            stats.get("agents_files_written", 0),
+        )
+        or 0
+    )
+    generated_count = agents_generated + sum(
+        int(stats.get(key, 0) or 0)
+        for key in (
+            "claude_files_written",
+            "gemini_files_written",
+            "copilot_root_instructions_written",
+        )
+    )
+    output_noun = "file" if generated_count == 1 else "files"
+    if dry_run:
+        generated_note = (
+            f"Would generate {generated_count} other output {output_noun} and "
+            if generated_count
+            else "Would "
+        )
+        logger.progress(
+            f"{generated_note}retain {protected_count} hand-authored root {noun}; "
+            "no files written.",
+            symbol="info",
+        )
+        return True
+    generated_note = (
+        f" generated {generated_count} other output {output_noun};" if generated_count else ""
+    )
+    logger.progress(
+        f"Compilation completed;{generated_note} retained {protected_count} "
+        f"hand-authored root {noun}.",
+        symbol="info",
+    )
+    return True
+
+
 class APMFileHandler:
     """Watchdog file-system handler that recompiles APM context on edits.
 
@@ -157,9 +212,16 @@ class APMFileHandler:
 
             compiler = AgentsCompiler(".")
             result = compiler.compile(config, logger=self.logger)
+            retained_outputs = _report_retained_watch_outputs(
+                self.logger,
+                result,
+                dry_run=self.dry_run,
+            )
 
             if result.success:
-                if self.dry_run:
+                if retained_outputs:
+                    pass
+                elif self.dry_run:
                     self.logger.success("Recompilation successful (dry run)", symbol="sparkles")
                 else:
                     self.logger.success(f"Recompiled to {result.output_path}", symbol="sparkles")
@@ -272,13 +334,16 @@ def _watch_mode(
 
         compiler = AgentsCompiler(".")
         result = compiler.compile(config)
+        retained_outputs = _report_retained_watch_outputs(logger, result, dry_run=dry_run)
 
         # NOTE: render_summary moved to the Ctrl+C teardown below so the
         # watch session emits ONE aggregate perf block at exit instead of
         # spamming a 5-6 line block after every recompile.
 
         if result.success:
-            if dry_run:
+            if retained_outputs:
+                pass
+            elif dry_run:
                 logger.success("Initial compilation successful (dry run)", symbol="sparkles")
             else:
                 logger.success(

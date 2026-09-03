@@ -116,7 +116,8 @@ GitHub Copilot (CLI and IDE).
   - instructions: `.github/instructions/<name>.instructions.md`
   - prompts: `.github/prompts/<name>.prompt.md`
   - agents: `.github/agents/<name>.agent.md`
-  - skills: `.agents/skills/<name>/SKILL.md`
+  - skills: `.agents/skills/<name>/SKILL.md` at project scope and
+    `~/.agents/skills/<name>/SKILL.md` at user scope
   - hooks: `.github/hooks/<name>.json`
   - generated: `.github/copilot-instructions.md` (compile output)
 - **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`;
@@ -156,7 +157,8 @@ Cursor.
   - instructions: `.cursor/rules/<name>.mdc`
   - agents: `.cursor/agents/<name>.md`
   - commands: `.cursor/commands/<name>.md`
-  - skills: `.agents/skills/<name>/SKILL.md`
+  - skills: `.agents/skills/<name>/SKILL.md` (project) or
+    `~/.agents/skills/<name>/SKILL.md` (user)
   - hooks: `.cursor/hooks.json`
 - **User scope.** Partial. `instructions` is excluded at user scope; Cursor reads global rules from its Settings UI rather than from disk.
 - **Global compile.** `apm compile -g` can render global instructions to
@@ -214,10 +216,12 @@ OpenCode.
 - **File conventions.**
   - agents: `.opencode/agents/<name>.md`
   - commands: `.opencode/commands/<name>.md`
-  - skills: `.agents/skills/<name>/SKILL.md`
+  - skills: `.agents/skills/<name>/SKILL.md` (project) or
+    `~/.config/opencode/skills/<name>/SKILL.md` (user)
 - **Caveat.** OpenCode has no hooks concept; the `hooks` primitive is silently skipped for this target.
 - **Global compile.** `apm compile -g` writes
-  `~/.config/opencode/AGENTS.md` from global instructions.
+  `~/.config/opencode/AGENTS.md`. OpenCode also retains `applyTo` sections
+  in that generated file; other user-root targets compile only global instructions.
 
 ## windsurf
 

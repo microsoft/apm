@@ -1052,6 +1052,13 @@ def build_artifactory_archive_url(
     # project sits inside a subgroup (e.g. ``group/sub/pkg`` becomes
     # ``pkg-{ref}.zip``).  ``rsplit`` keeps the flat case unchanged.
     repo_basename = repo.rsplit("/", 1)[-1]
+    if is_full_commit_sha(ref):
+        return (
+            f"{base}/archive/{ref}.zip",
+            f"{base}/-/archive/{ref}/{repo_basename}-{ref}.zip",
+            f"{base}/zip/{ref}",
+        )
+
     return (
         # GitHub-style: /archive/refs/heads/{ref}.zip
         f"{base}/archive/refs/heads/{ref}.zip",
@@ -1069,6 +1076,11 @@ def build_artifactory_archive_url(
         f"{base}/zip/refs/heads/{ref}",
         f"{base}/zip/refs/tags/{ref}",
     )
+
+
+def is_full_commit_sha(ref: str | None) -> bool:
+    """Return whether *ref* is a complete hexadecimal commit SHA."""
+    return bool(ref and re.fullmatch(r"[0-9a-fA-F]{40}", ref))
 
 
 def is_valid_fqdn(hostname: str) -> bool:

@@ -26,12 +26,19 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
+from .deployed_paths import format_target_collapse as _format_target_collapse
 from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
+from .exec_gate import check_executable_approval
+from .exec_gate import plugin_bin_deployable as _plugin_bin_deployable
+from .exec_gate import resolve_bin_skip as _resolve_bin_skip
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
+from .target_filter import (
+    log_package_target_restriction as _log_package_target_restriction,
+)
 from .target_filter import resolve_effective_package_targets
 
 if TYPE_CHECKING:
@@ -127,26 +134,6 @@ def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None
         log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
 
 
-def _check_executable_approval(
-    package_name: str,
-    package_info: Any,
-    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
-    *,
-    ctx: InstallContext | None = None,
-) -> tuple[bool, bool, bool, bool, bool]:
-    """Delegate to ``exec_gate.check_executable_approval``."""
-    from apm_cli.install.exec_gate import check_executable_approval
-
-    return check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
-
-
-def _resolve_package_key(package_info: Any, package_name: str) -> str:
-    """Delegate to ``exec_gate.resolve_package_key``."""
-    from apm_cli.install.exec_gate import resolve_package_key
-
-    return resolve_package_key(package_info, package_name)
-
-
 def _log_hooks_skip(
     package_name: str, package_info: Any, targets: Any, logger: InstallLogger | None
 ) -> None:
@@ -216,30 +203,6 @@ def _warn_target_reconcile_failure(
     )
 
 
-def _resolve_bin_skip(
-    bin_approved: bool,
-    trust_bin: bool | None,
-    *,
-    non_interactive: bool = False,
-) -> tuple[bool, str | None]:
-    """Combine the ``allowExecutables`` gate with the ``--trust-bin`` flag.
-
-    Returns ``(skip_bin, bin_skip_reason_override)`` for
-    ``integrate_package_skill``.
-
-    When *non_interactive* is ``True`` (stdout is not a TTY) and *trust_bin*
-    is ``None`` (no explicit flag), bin/ deployment is skipped to preserve
-    the fail-closed posture in CI and piped contexts.
-    """
-    if not bin_approved:
-        return True, "not_approved"
-    if trust_bin is False:
-        return True, "not_trusted"
-    if trust_bin is None and non_interactive:
-        return True, "not_trusted"
-    return False, None
-
-
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -260,6 +223,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
     dep_target_subset: list[str] | None = None,
     trust_bin: bool | None = None,
+    bin_skip_reason_override: str | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -311,6 +275,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         "canvases": 0,
         "links_resolved": 0,
         "deployed_files": [],
+        "native_plugin": False,
     }
 
     deployed = result["deployed_files"]
@@ -335,41 +300,98 @@ def integrate_package_primitives(  # noqa: PLR0913
     targets = list(target_selection.targets)
     allowed_dep_targets = set(target_selection.consumer_allowed_targets)
     dep_targets_active = target_selection.consumer_restriction_active
-    if logger is not None and target_selection.package_restriction_active:
-        declared = (
-            ", ".join(target_selection.package_declared_targets)
-            if target_selection.package_declared_targets
-            else "unrestricted"
-        )
-        effective = ", ".join(target.name for target in target_selection.targets) or "none"
-        logger.verbose_detail(
-            f"Package target restriction: [{declared}]; effective targets: [{effective}]"
-        )
+    _log_package_target_restriction(logger, target_selection)
 
     reconcile_package_targets = getattr(
         integrators.hook,
         "reconcile_package_target_restriction",
         None,
     )
-    if target_selection.excluded_targets and callable(reconcile_package_targets):
-        reconcile_stats = reconcile_package_targets(
-            package_info,
-            project_root,
-            target_selection.excluded_targets,
-        )
-        _warn_target_reconcile_failure(diagnostics, package_name, reconcile_stats)
+
+    def _reconcile_excluded_targets() -> None:
+        if target_selection.excluded_targets and callable(reconcile_package_targets):
+            reconcile_stats = reconcile_package_targets(
+                package_info,
+                project_root,
+                target_selection.excluded_targets,
+            )
+            _warn_target_reconcile_failure(diagnostics, package_name, reconcile_stats)
+
     if not targets:
+        _reconcile_excluded_targets()
         return result
 
-    # Executable approval gate (npm v12-style default-deny). hooks/bin gate
-    # below (~424, ~585); mcp/canvas unused (mcp filtered upstream, canvas re-derived ~433).
+    # Executable approval gate (npm v12-style default-deny); all five verdicts feed the gates.
     (
         _hooks_approved,
         _bin_approved,
         _mcp_approved,
         _canvas_approved,
         _lsp_approved,
-    ) = _check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
+    ) = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
+    import sys
+
+    _skip_bin, _bin_skip_reason_override = _resolve_bin_skip(
+        _bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
+    )
+    _bin_skip_reason_override = (
+        bin_skip_reason_override
+        if _skip_bin and bin_skip_reason_override is not None
+        else _bin_skip_reason_override
+    )
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
+
+    source_plan = DeployableSourcePlan.create(
+        package_info,
+        targets,
+        skill_subset=skill_subset,
+        hooks_approved=_hooks_approved,
+        canvas_approved=_canvas_approved or is_first_party,
+        skip_bin=_skip_bin,
+        plugin_bin_deployable=_plugin_bin_deployable(
+            package_info,
+            targets,
+            project_root=project_root,
+            scope=scope,
+            policy=policy,
+            skip_bin=_skip_bin,
+        ),
+    )
+    if not _pre_deploy_security_scan(
+        source_plan,
+        diagnostics,
+        package_name=package_name,
+        force=force,
+        logger=logger,
+    ):
+        return result
+
+    # A natively registered Agent Plugin stays opaque: Copilot loads the whole
+    # unit live from apm_modules, so decomposing its skills or MCP servers here
+    # would double-load them. The registrar owns this package instead. The
+    # short-circuit fires only AFTER target narrowing (so a dependency that
+    # excludes copilot is not registered) and AFTER the executable trust gate
+    # (so an Agent Plugin's MCP servers / bin cannot bypass a default-deny).
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
+    from apm_cli.install.native_plugin_admission import finalize_native_plugin
+
+    if admits_native_plugin(package_info):
+        _reconcile_excluded_targets()
+        return finalize_native_plugin(
+            result,
+            package_info,
+            package_name,
+            targets,
+            hooks_approved=_hooks_approved,
+            mcp_approved=_mcp_approved,
+            bin_approved=_bin_approved,
+            canvas_approved=_canvas_approved,
+            lsp_approved=_lsp_approved,
+            ctx=ctx,
+            diagnostics=diagnostics,
+            logger=logger,
+        )
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 
@@ -386,37 +408,6 @@ def integrate_package_primitives(  # noqa: PLR0913
         if logger:
             logger.tree_item(msg)
 
-    def _format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
-        """Apply the 1/2/3+ multi-target collapse rule.
-
-        Returns a tuple ``(suffix, expansion_lines)``:
-
-        * ``suffix`` -- the text appended after ``-> `` on the aggregate line.
-        * ``expansion_lines`` -- extra ``  |     -> <path>`` lines emitted
-          AFTER the aggregate line when ``verbose`` is True. Empty list when
-          collapsed.
-
-        The rule:
-          1 target  -> ``<path1>``
-          2 targets -> ``<path1>, <path2>``
-          3+        -> ``N targets`` (verbose forces full enumeration)
-        """
-        deduped: list[str] = []
-        seen: set = builtins.set()
-        for p in paths:
-            if p not in seen:
-                seen.add(p)
-                deduped.append(p)
-        if verbose and len(deduped) >= 2:
-            return "", [f"  |     -> {p}" for p in deduped]
-        if len(deduped) == 0:
-            return "", []
-        if len(deduped) == 1:
-            return deduped[0], []
-        if len(deduped) == 2:
-            return f"{deduped[0]}, {deduped[1]}", []
-        return f"{len(deduped)} targets", []
-
     _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
 
     _INTEGRATOR_KWARGS = {
@@ -428,6 +419,21 @@ def integrate_package_primitives(  # noqa: PLR0913
         "canvas": integrators.canvas,
         "skills": integrators.skill,
     }
+
+    # Validate every converted instruction target before any primitive kind can
+    # write. A rejected instruction must not leave prompts, agents, commands,
+    # or identity-target instructions from the same package active.
+    if integrators.instruction is not None:
+        integrators.instruction.preflight_instructions_for_targets(
+            targets,
+            package_info,
+            project_root,
+            source_plan,
+            force=force,
+            diagnostics=diagnostics,
+        )
+
+    _reconcile_excluded_targets()
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
@@ -481,6 +487,7 @@ def integrate_package_primitives(  # noqa: PLR0913
                 "managed_files": managed_files,
                 "diagnostics": diagnostics,
                 "scope": scope,
+                "source_plan": source_plan,
             }
             # Hook integrator alone needs the scope signal: project-scope
             # deploys keep ``command`` paths repo-relative (#1394), user-scope
@@ -591,15 +598,6 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
-    # Determine effective bin/ skip and reason. The ``allowExecutables``
-    # gate and ``--trust-bin`` / ``--no-trust-bin`` are independent gates.
-    # In non-interactive contexts (piped output, CI) deny bin/ by default.
-    import sys
-
-    _skip_bin, _bin_skip_reason_override = _resolve_bin_skip(
-        _bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
-    )
-
     skill_result = integrators.skill.integrate_package_skill(
         package_info,
         project_root,
@@ -613,6 +611,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         skip_bin=_skip_bin,
         bin_skip_reason_override=_bin_skip_reason_override,
         trust_bin=trust_bin,
+        source_plan=source_plan,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:

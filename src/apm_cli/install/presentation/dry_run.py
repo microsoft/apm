@@ -6,9 +6,9 @@ original block that lived at lines 525-581.
 
 from __future__ import annotations
 
-import builtins
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,13 +19,8 @@ if TYPE_CHECKING:
 def render_and_exit(
     *,
     logger: InstallLogger,
-    should_install_apm: bool,
-    apm_deps: Sequence[Any],
-    mcp_deps: Sequence[Any],
-    dev_apm_deps: Sequence[Any],
-    should_install_mcp: bool,
+    plan: ProspectiveInstallPlan,
     update: bool,
-    only_packages: Sequence[str] | None = None,
     apm_dir: Path,
 ) -> None:
     """Render the dry-run preview to the user.
@@ -38,18 +33,22 @@ def render_and_exit(
 
     logger.progress("Dry run mode - showing what would be installed:")
 
-    if should_install_apm and apm_deps:
-        logger.progress(f"APM dependencies ({len(apm_deps)}):")
-        for dep in apm_deps:
-            action = "update" if update else "install"
-            logger.progress(f"  - {dep.repo_url}#{dep.reference or 'main'} -> {action}")
+    if plan.should_install_apm and plan.selected_apm_dependencies:
+        logger.progress(f"APM dependencies ({plan.apm_dependency_count}):")
+        for dep in plan.selected_apm_dependencies:
+            action = (
+                "update"
+                if update or dep.get_identity() in plan.updated_apm_identities
+                else "install"
+            )
+            logger.progress(f"  - {dep.to_display_reference()} -> {action}")
 
-    if should_install_mcp and mcp_deps:
-        logger.progress(f"MCP dependencies ({len(mcp_deps)}):")
-        for dep in mcp_deps:
+    if plan.selected_mcp_dependencies:
+        logger.progress(f"MCP dependencies ({plan.mcp_dependency_count}):")
+        for dep in plan.selected_mcp_dependencies:
             logger.progress(f"  - {dep}")
 
-    if not apm_deps and not dev_apm_deps and not mcp_deps:
+    if not plan.selected_apm_dependencies and not plan.selected_mcp_dependencies:
         logger.progress("No dependencies found in apm.yml")
 
     # Orphan preview: lockfile + manifest difference -- no integration
@@ -59,18 +58,10 @@ def render_and_exit(
     except Exception:
         _dryrun_lock = None
     if _dryrun_lock:
-        # builtins.set used for safety -- matches the original extraction
-        # site where ``set`` may be shadowed in the enclosing scope.
-        _intended_keys = builtins.set()
-        for _dep in (apm_deps or []) + (dev_apm_deps or []):
-            try:  # noqa: SIM105
-                _intended_keys.add(_dep.get_unique_key())
-            except Exception:
-                pass
         _orphan_preview = detect_orphans(
             _dryrun_lock,
-            _intended_keys,
-            only_packages=only_packages,
+            plan.intended_dependency_keys,
+            only_packages=list(plan.only_packages) if plan.only_packages is not None else None,
         )
         if _orphan_preview:
             logger.progress(
@@ -82,11 +73,9 @@ def render_and_exit(
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
 
-    if apm_deps or dev_apm_deps:
+    if plan.selected_apm_dependencies:
         logger.dry_run_notice(
             "Per-package stale-file cleanup (renames within a package) is "
             "not previewed -- it requires running integration. Run without "
             "--dry-run to apply."
         )
-
-    logger.success("Dry run complete - no changes made")

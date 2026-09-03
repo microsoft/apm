@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
@@ -470,8 +471,223 @@ class TestPluginHeroScenarios:
             f"Uninstall failed:\n{uninstall.stdout}\n{uninstall.stderr}"
         )
         combined = uninstall.stdout + uninstall.stderr
-        assert "Cleaned up 1 integrated agents" in combined
+        assert "Uninstall complete" in combined
         assert all(not path.exists() for path in deployed_paths)
+
+    @pytest.mark.requires_apm_binary
+    def test_copilot_dialect_plugin_lsp_survives_install_reinstall_and_audit(
+        self,
+        apm_binary_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        """A plugin's Copilot-dialect LSP config reaches canonical lock and runtime state."""
+        plugin_dir = tmp_path / "copilot-lsp-plugin"
+        plugin_dir.mkdir()
+        manifest_dir = plugin_dir / ".github" / "plugin"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "plugin.json").write_text(
+            json.dumps({"name": "copilot-lsp-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        (plugin_dir / ".lsp.json").write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "csharp": {
+                            "command": "dnx",
+                            "args": ["roslyn-language-server", "--stdio"],
+                            "cwd": "${PLUGIN_ROOT}",
+                            "fileExtensions": {".cs": "csharp"},
+                            "warmupTimeoutMs": 120000,
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        normalized = validate_apm_package(plugin_dir)
+        assert normalized.is_valid, normalized.errors
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: copilot-lsp-lifecycle\nversion: 1.0.0\ndependencies:\n  apm: []\n",
+            encoding="utf-8",
+        )
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text(
+            "# Test project\n",
+            encoding="utf-8",
+        )
+
+        initial_install = _run_apm_command(
+            str(apm_binary_path),
+            ["install", str(plugin_dir), "--target", "copilot", "--no-policy"],
+            project,
+        )
+        assert initial_install.returncode == 0, initial_install.stdout + initial_install.stderr
+        install_output = initial_install.stdout + initial_install.stderr
+        assert install_output.count("uses unsupported 'cwd'") == 1
+        assert "consumer runtime chooses the working directory" in install_output
+        assert "[!] LSP server 'csharp'" in install_output
+
+        lock = LockFile.read(project / "apm.lock.yaml")
+        assert lock is not None
+        assert lock.lsp_servers == ["csharp"]
+        assert lock.lsp_configs["csharp"] == {
+            "args": ["roslyn-language-server", "--stdio"],
+            "command": "dnx",
+            "extensionToLanguage": {".cs": "csharp"},
+            "name": "csharp",
+            "startupTimeout": 120000,
+        }
+
+        runtime_path = project / ".github" / "lsp.json"
+        runtime_config = json.loads(runtime_path.read_text(encoding="utf-8"))
+        assert runtime_config["lspServers"]["csharp"] == {
+            "args": ["roslyn-language-server", "--stdio"],
+            "command": "dnx",
+            "fileExtensions": {".cs": "csharp"},
+            "warmupTimeoutMs": 120000,
+        }
+        initial_lock_bytes = (project / "apm.lock.yaml").read_bytes()
+        initial_runtime_bytes = runtime_path.read_bytes()
+
+        reinstall = _run_apm_command(
+            str(apm_binary_path),
+            ["install", "--target", "copilot", "--no-policy"],
+            project,
+        )
+        assert reinstall.returncode == 0, reinstall.stdout + reinstall.stderr
+        assert (project / "apm.lock.yaml").read_bytes() == initial_lock_bytes
+        assert runtime_path.read_bytes() == initial_runtime_bytes
+
+        audit = _run_apm_command(
+            str(apm_binary_path),
+            ["audit", "--ci", "--no-policy", "--format", "json"],
+            project,
+        )
+        assert audit.returncode == 0, audit.stdout + audit.stderr
+        assert json.loads(audit.stdout)["passed"] is True
+        assert (project / "apm.lock.yaml").read_bytes() == initial_lock_bytes
+        assert runtime_path.read_bytes() == initial_runtime_bytes
+
+    @pytest.mark.requires_apm_binary
+    def test_root_declared_skill_lifecycle_is_bounded(self, apm_binary_path, tmp_path):
+        """A root-declared plugin skill installs, reinstalls, and uninstalls cleanly."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        plugin_dir = workspace / "root-skill-plugin"
+        (plugin_dir / ".claude-plugin").mkdir(parents=True)
+        (plugin_dir / "SKILL.md").write_text(
+            "---\nname: root-frontmatter-skill\ndescription: Root skill.\n---\n\n# Root skill\n"
+        )
+        (plugin_dir / ".apm-pin").write_text("internal cache marker\n")
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "root-skill-plugin",
+                    "version": "1.0.0",
+                    "skills": ["./"],
+                }
+            )
+        )
+
+        project = workspace / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: root-declared-skill-test\nversion: 1.0.0\ndependencies:\n  apm: []\n"
+        )
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text("# test\n")
+
+        dry_run = _run_apm_command(
+            apm_binary_path,
+            ["install", "--dry-run", str(plugin_dir)],
+            project,
+        )
+        assert dry_run.returncode == 0, f"Root skill dry run failed:\n{dry_run.stderr}"
+        assert not (project / "apm.lock.yaml").exists()
+        assert not (project / ".agents" / "skills").exists()
+        assert not (project / ".claude" / "skills").exists()
+        assert not (plugin_dir / ".apm").exists()
+
+        first_install = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
+        assert first_install.returncode == 0, (
+            f"Root skill install failed:\n{first_install.stdout}\n{first_install.stderr}"
+        )
+
+        deployed_skills = [
+            skill
+            for skills_root in (project / ".agents" / "skills", project / ".claude" / "skills")
+            if skills_root.exists()
+            for skill in skills_root.rglob("SKILL.md")
+        ]
+        assert len(deployed_skills) == 1
+        deployed_skill = deployed_skills[0]
+        assert "name: root-frontmatter-skill" in deployed_skill.read_text()
+        assert not list(deployed_skill.parent.rglob(".apm"))
+        assert not list(deployed_skill.parent.rglob(".apm-pin"))
+        tree_after_install = {
+            path.relative_to(deployed_skill.parent): path.read_text()
+            for path in deployed_skill.parent.rglob("*")
+            if path.is_file()
+        }
+        assert set(tree_after_install) == {
+            Path("SKILL.md"),
+            Path(".claude-plugin/plugin.json"),
+        }
+
+        reinstall = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
+        assert reinstall.returncode == 0, f"Root skill reinstall failed:\n{reinstall.stderr}"
+        tree_after_reinstall = {
+            path.relative_to(deployed_skill.parent): path.read_text()
+            for path in deployed_skill.parent.rglob("*")
+            if path.is_file()
+        }
+        assert tree_after_reinstall == tree_after_install
+
+        uninstall = _run_apm_command(apm_binary_path, ["uninstall", str(plugin_dir)], project)
+        assert uninstall.returncode == 0, f"Root skill uninstall failed:\n{uninstall.stderr}"
+        assert not deployed_skill.exists()
+
+    @pytest.mark.requires_apm_binary
+    def test_prepositioned_command_source_deploys_through_local_install(
+        self, apm_binary_path, tmp_path
+    ):
+        """A declared command source under .apm remains usable package input."""
+        workspace = tmp_path / "workspace"
+        plugin_dir = workspace / "prepositioned-commands-plugin"
+        command_dir = plugin_dir / ".apm" / "custom-commands"
+        command_dir.mkdir(parents=True)
+        (command_dir / "run.md").write_text("# Run\n", encoding="utf-8")
+        (plugin_dir / ".claude-plugin").mkdir()
+        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "prepositioned-commands-plugin",
+                    "version": "1.0.0",
+                    "commands": [".apm/custom-commands"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        project = workspace / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: prepositioned-commands-test\nversion: 1.0.0\ndependencies:\n  apm: []\n",
+            encoding="utf-8",
+        )
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text("# test\n", encoding="utf-8")
+
+        install = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
+
+        assert install.returncode == 0, f"Command plugin install failed:\n{install.stderr}"
+        assert (project / ".github" / "prompts" / "run.prompt.md").read_text(
+            encoding="utf-8"
+        ) == "# Run\n"
 
 
 # ===========================================================================
@@ -575,15 +791,21 @@ def temp_project(tmp_path):
 class TestPluginNetworkE2E:
     """Network E2E tests — real CLI installs from GitHub."""
 
-    PLUGIN_REF = "github/awesome-copilot/plugins/context-engineering#marketplace"
-    # On-disk / logical key form: the ``#marketplace`` ref suffix is stripped
-    # from the install path (see DependencyReference.get_install_path).
-    PLUGIN_PATH = "github/awesome-copilot/plugins/context-engineering"
+    FIXTURE_COMMIT = "f87b37a4db167fb26d62232edebf14fcca7b47fe"
+    PLUGIN_REF = f"microsoft/apm/tests/fixtures/mock-marketplace-plugin#{FIXTURE_COMMIT}"
+    PLUGIN_PATH = "microsoft/apm/tests/fixtures/mock-marketplace-plugin"
+    SKILL_REF = (
+        f"microsoft/apm/tests/fixtures/mock-marketplace-plugin/skills/test-skill#{FIXTURE_COMMIT}"
+    )
+    SKILL_PATH = "microsoft/apm/tests/fixtures/mock-marketplace-plugin/skills/test-skill"
+    MIXED_SKILL_REF = f"microsoft/apm/.apm/skills/devx-ux#{FIXTURE_COMMIT}"
+    MIXED_SKILL_PATH = "microsoft/apm/.apm/skills/devx-ux"
+    NATIVE_PLUGIN_REF = (
+        "github/awesome-copilot/plugins/context-engineering#"
+        "71f7c9b1dc5044287b62fc700efc034da4065f87"
+    )
 
-    # ---- Test 1: install real plugin ------------------------------------
-
-    def test_install_real_plugin(self, apm_binary_path, temp_project):
-        """Install a real plugin from GitHub, verify artifacts on disk."""
+    def _install_successfully(self, apm_binary_path, temp_project):
         result = subprocess.run(
             [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
             capture_output=True,
@@ -595,6 +817,13 @@ class TestPluginNetworkE2E:
             f"apm install failed (rc={result.returncode}):\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
+        return result
+
+    # ---- Test 1: install real plugin ------------------------------------
+
+    def test_install_real_plugin(self, apm_binary_path, temp_project):
+        """Install a real plugin from GitHub, verify artifacts on disk."""
+        self._install_successfully(apm_binary_path, temp_project)
 
         # Installed directory exists
         pkg_path = temp_project / "apm_modules" / self.PLUGIN_PATH
@@ -612,18 +841,42 @@ class TestPluginNetworkE2E:
             skill_dirs = [d for d in skills_dir.iterdir() if d.is_dir()]
             assert len(skill_dirs) > 0, "At least one skill should be scattered"
 
-    # ---- Test 2: deps list — no false orphans ---------------------------
+    def test_native_agent_plugin_installs_when_target_is_copilot_regardless_of_binary(
+        self, apm_binary_path, temp_project
+    ):
+        """A native Agent Plugin materializes for the 'copilot' target.
 
-    def test_deps_list_no_false_orphans(self, apm_binary_path, temp_project):
-        """After install, deps list should show the plugin without orphan warnings."""
-        # Install first
-        subprocess.run(
-            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
+        Admission is a pure function of the resolved target set -- ``temp_project``
+        has a ``.github/`` directory so ``copilot`` is an active target -- and
+        never depends on whether a Copilot binary exists on this host or which
+        version it reports. So this install must succeed even though the test
+        runner has no Copilot CLI installed.
+        """
+        result = subprocess.run(
+            [apm_binary_path, "install", self.NATIVE_PLUGIN_REF, "--verbose"],
             capture_output=True,
             text=True,
             cwd=str(temp_project),
             timeout=300,
         )
+        assert result.returncode == 0, (
+            f"apm install failed (rc={result.returncode}):\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+        combined = result.stdout + result.stderr
+        assert "no native harness is binary-qualified" not in combined
+        assert "does not include 'copilot'" not in combined
+        settings_path = temp_project / ".github" / "copilot" / "settings.local.json"
+        assert settings_path.exists(), (
+            f"Expected native Copilot marketplace registration at {settings_path}"
+        )
+
+    # ---- Test 2: deps list — no false orphans ---------------------------
+
+    def test_deps_list_no_false_orphans(self, apm_binary_path, temp_project):
+        """After install, deps list should show the plugin without orphan warnings."""
+        # Install first
+        self._install_successfully(apm_binary_path, temp_project)
 
         result = subprocess.run(
             [apm_binary_path, "deps", "list"],
@@ -645,13 +898,7 @@ class TestPluginNetworkE2E:
 
     def test_deps_tree_shows_plugin(self, apm_binary_path, temp_project):
         """deps tree output should contain the plugin reference."""
-        subprocess.run(
-            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True,
-            text=True,
-            cwd=str(temp_project),
-            timeout=300,
-        )
+        self._install_successfully(apm_binary_path, temp_project)
 
         result = subprocess.run(
             [apm_binary_path, "deps", "tree"],
@@ -665,7 +912,7 @@ class TestPluginNetworkE2E:
         )
 
         combined = result.stdout + result.stderr
-        assert "context-engineering" in combined, (
+        assert "mock-marketplace-plugin" in combined, (
             f"Plugin not found in deps tree output:\n{combined}"
         )
 
@@ -680,7 +927,7 @@ class TestPluginNetworkE2E:
             "dependencies:\n"
             "  apm:\n"
             f"    - {self.PLUGIN_REF}\n"
-            "    - github/awesome-copilot/skills/review-and-refactor\n"
+            f"    - {self.MIXED_SKILL_REF}\n"
         )
 
         result = subprocess.run(
@@ -697,19 +944,12 @@ class TestPluginNetworkE2E:
 
         # Both packages installed
         assert (temp_project / "apm_modules" / self.PLUGIN_PATH).is_dir()
-        review_path = (
-            temp_project
-            / "apm_modules"
-            / "github"
-            / "awesome-copilot"
-            / "skills"
-            / "review-and-refactor"
+        skill_path = temp_project / "apm_modules" / self.MIXED_SKILL_PATH
+        # The skill may be installed as a virtual subdir or flattened - check either.
+        skill_installed = skill_path.is_dir() or any(
+            (temp_project / "apm_modules" / "microsoft").rglob("devx-ux")
         )
-        # The skill may be installed as a virtual subdir or flattened — check either
-        skill_installed = review_path.is_dir() or any(
-            (temp_project / "apm_modules" / "github").rglob("review-and-refactor")
-        )
-        assert skill_installed, "review-and-refactor skill should be installed"
+        assert skill_installed, "devx-ux should be installed"
 
         # deps list — no orphans
         list_result = subprocess.run(
@@ -727,13 +967,7 @@ class TestPluginNetworkE2E:
     def test_uninstall_plugin(self, apm_binary_path, temp_project):
         """Uninstall a plugin — directory and scattered files cleaned up."""
         # Install first
-        subprocess.run(
-            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True,
-            text=True,
-            cwd=str(temp_project),
-            timeout=300,
-        )
+        self._install_successfully(apm_binary_path, temp_project)
         pkg_path = temp_project / "apm_modules" / self.PLUGIN_PATH
         assert pkg_path.is_dir(), "Plugin must be installed before uninstall test"
 
@@ -757,7 +991,7 @@ class TestPluginNetworkE2E:
 
     def test_lockfile_preserved_on_sequential_install(self, apm_binary_path, temp_project):
         """Installing packages one at a time must preserve previous lockfile entries."""
-        skill_ref = "github/awesome-copilot/skills/review-and-refactor"
+        skill_ref = self.SKILL_REF
 
         # Install plugin
         r1 = subprocess.run(
@@ -784,11 +1018,11 @@ class TestPluginNetworkE2E:
 
         lockfile = yaml.safe_load((temp_project / "apm.lock.yaml").read_text())
         dep_keys = {_locked_dependency_key(d) for d in lockfile["dependencies"]}
-        plugin_key = "github/awesome-copilot/plugins/context-engineering"
+        plugin_key = self.PLUGIN_PATH
         assert plugin_key in dep_keys, (
             f"Plugin missing from lockfile after sequential install. Keys: {dep_keys}"
         )
-        assert "github/awesome-copilot/skills/review-and-refactor" in dep_keys, (
+        assert self.SKILL_PATH in dep_keys, (
             f"Skill missing from lockfile after sequential install. Keys: {dep_keys}"
         )
         plugin_dep = _locked_dependency(lockfile, plugin_key)
@@ -804,12 +1038,10 @@ class TestPluginNetworkE2E:
             timeout=60,
         )
         combined = tree.stdout + tree.stderr
-        assert "context-engineering" in combined, "Plugin missing from deps tree"
-        assert "review-and-refactor" in combined, "Skill missing from deps tree"
+        assert "mock-marketplace-plugin" in combined, "Plugin missing from deps tree"
+        assert "test-skill" in combined, "Skill missing from deps tree"
 
-        # The live SAML-protected plugin can change which primitive types it ships.
-        # Verify cleanup for the files that were actually deployed instead of
-        # hard-coding that it must currently contain an agent primitive.
+        # Verify cleanup for the files that were actually deployed.
         r3 = subprocess.run(
             [apm_binary_path, "uninstall", self.PLUGIN_REF],
             capture_output=True,
@@ -831,14 +1063,7 @@ class TestPluginNetworkE2E:
     def test_compile_includes_plugin_primitives(self, apm_binary_path, temp_project):
         """apm compile should include primitives from a normalized plugin."""
         # Install the plugin
-        r = subprocess.run(
-            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True,
-            text=True,
-            cwd=str(temp_project),
-            timeout=300,
-        )
-        assert r.returncode == 0, f"Install failed:\n{r.stderr}"
+        self._install_successfully(apm_binary_path, temp_project)
 
         # Compile
         result = subprocess.run(
@@ -856,7 +1081,7 @@ class TestPluginNetworkE2E:
             content = agents_md.read_text()
             # Should reference the plugin as a source
             assert (
-                "context-engineering" in content.lower() or "awesome-copilot" in content.lower()
+                "mock marketplace plugin" in content.lower() or "microsoft/apm" in content.lower()
             ), f"AGENTS.md should reference the plugin source:\n{content[:500]}"
 
     # ---- Test 8: prune removes orphaned plugin --------------------------
@@ -864,14 +1089,7 @@ class TestPluginNetworkE2E:
     def test_prune_removes_orphaned_plugin(self, apm_binary_path, temp_project):
         """apm prune should remove a plugin no longer in apm.yml."""
         # Install the plugin
-        r = subprocess.run(
-            [apm_binary_path, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True,
-            text=True,
-            cwd=str(temp_project),
-            timeout=300,
-        )
-        assert r.returncode == 0, f"Install failed:\n{r.stderr}"
+        self._install_successfully(apm_binary_path, temp_project)
 
         pkg_path = temp_project / "apm_modules" / self.PLUGIN_PATH
         assert pkg_path.is_dir(), "Plugin must be installed before prune test"
@@ -943,7 +1161,7 @@ class TestPluginNetworkE2E:
             key = dep.get("repo_url", "")
             vpath = dep.get("virtual_path", "")
             full = f"{key}/{vpath}" if vpath else key
-            if "context-engineering" in full:
+            if "mock-marketplace-plugin" in full:
                 plugin_entry = dep
                 break
 

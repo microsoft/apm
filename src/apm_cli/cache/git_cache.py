@@ -33,7 +33,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from ..utils.git_sparse import apply_sparse_cone
+from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
 from .locking import atomic_land, cleanup_incomplete, shard_lock, stage_path
@@ -79,6 +79,34 @@ def _safe_git_args() -> list[str]:
 # scoped to the sparse cone. Full and partial bares coexist per URL
 # so legacy full-tree callers keep today's behavior unchanged.
 _PARTIAL_BARE_SUFFIX = "__p"
+
+
+def _partial_clone_filter_unsupported(exc: subprocess.CalledProcessError) -> bool:
+    """Return whether Git diagnosed an unsupported partial-clone filter."""
+    details: list[str] = []
+    for value in (exc.stderr, exc.stdout):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="replace")
+        if value:
+            details.append(str(value).lower())
+    diagnostic = " ".join(details)
+    return any(
+        signal in diagnostic
+        for signal in (
+            "does not support filter",
+            "filtering not recognized by server",
+            "filter capability",
+            "filter 'blob:none' not supported",
+        )
+    )
+
+
+def _partial_clone_fallback_warning(url: str) -> str:
+    """Build a sanitized warning for a completed full-clone fallback."""
+    return (
+        f"Partial clone unavailable for {_sanitize_url(url)}; "
+        "cached a full bare clone instead. Server may not support filter v2."
+    )
 
 
 def _variant_key(sparse_paths: list[str] | None) -> str:
@@ -163,8 +191,13 @@ class GitCache:
         # Cache hit path (skip if refresh requested)
         if not self._refresh and checkout_dir.is_dir():
             if verify_checkout_sha(checkout_dir, sha):
-                _log.debug("Cache HIT: %s @ %s [%s]", url, sha[:12], variant)
-                return checkout_dir
+                _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
+                with shard_lock(checkout_dir):
+                    return self._finalize_sparse_checkout(
+                        checkout_dir,
+                        sparse_paths,
+                        env=env,
+                    )
             else:
                 # Integrity failure -- evict
                 _log.warning(
@@ -189,6 +222,36 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _finalize_sparse_checkout(
+        self,
+        checkout_dir: Path,
+        sparse_paths: list[str] | None,
+        *,
+        env: dict[str, str] | None,
+    ) -> Path:
+        """Repair and validate a sparse checkout before any cache return."""
+        if not sparse_paths:
+            return checkout_dir
+        from ..utils.git_env import get_git_executable, git_subprocess_env
+
+        git_exe = get_git_executable()
+        subprocess_env = env if env is not None else git_subprocess_env()
+        dangling = repair_dangling_cone_symlinks(
+            git_exe,
+            checkout_dir,
+            list(sparse_paths),
+            env=subprocess_env,
+            extra_git_args=_safe_git_args(),
+        )
+        if dangling is not None:
+            _log.info(
+                "Sparse-cone checkout of %s left a dangling symlink at %s; "
+                "widened to a full checkout so it resolves (#2707).",
+                checkout_dir,
+                dangling,
+            )
+        return checkout_dir
 
     def _resolve_sha(
         self,
@@ -252,6 +315,7 @@ class GitCache:
                 text=True,
                 timeout=30,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise RuntimeError(
@@ -260,7 +324,8 @@ class GitCache:
 
         if result.returncode != 0:
             raise RuntimeError(
-                f"git ls-remote failed for {_sanitize_url(url)}: {result.stderr.strip()}"
+                f"git ls-remote failed for {_sanitize_url(url)}: "
+                f"{_sanitize_url(result.stderr.strip())}"
             )
 
         # Parse ls-remote output: first column is SHA
@@ -374,6 +439,7 @@ class GitCache:
                     text=True,
                     timeout=300,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
@@ -384,14 +450,11 @@ class GitCache:
                 # locally and skip lazy fetch (degrades to baseline,
                 # no behavior change for the user).
                 fallback_done = False
-                if partial and isinstance(exc, subprocess.CalledProcessError):
-                    from ..utils.console import _rich_warning
-
-                    _rich_warning(
-                        f"Partial clone (--filter=blob:none) failed for "
-                        f"{_sanitize_url(url)}; retrying with full bare clone. "
-                        f"Server may not support filter v2."
-                    )
+                if (
+                    partial
+                    and isinstance(exc, subprocess.CalledProcessError)
+                    and _partial_clone_filter_unsupported(exc)
+                ):
                     from ..utils.file_ops import robust_rmtree
 
                     robust_rmtree(staged, ignore_errors=True)
@@ -413,9 +476,13 @@ class GitCache:
                             text=True,
                             timeout=300,
                             env=subprocess_env,
+                            stdin=subprocess.DEVNULL,
                             check=True,
                         )
                         fallback_done = True
+                        from ..utils.console import _rich_warning
+
+                        _rich_warning(_partial_clone_fallback_warning(url))
                     except (
                         subprocess.CalledProcessError,
                         subprocess.TimeoutExpired,
@@ -520,11 +587,15 @@ class GitCache:
             if final_dir.is_dir() and verify_checkout_sha(final_dir, sha):
                 _log.debug(
                     "Write-dedup HIT under lock: %s @ %s [%s]",
-                    url,
+                    _sanitize_url(url),
                     sha[:12],
                     variant,
                 )
-                return final_dir
+                return self._finalize_sparse_checkout(
+                    final_dir,
+                    sparse_paths,
+                    env=env,
+                )
 
             staged = stage_path(final_dir)
             ensure_path_within(staged, self._checkouts_root)
@@ -567,6 +638,7 @@ class GitCache:
                     text=True,
                     timeout=60,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
                 if promisor_url:
@@ -587,6 +659,7 @@ class GitCache:
                         text=True,
                         timeout=10,
                         env=subprocess_env,
+                        stdin=subprocess.DEVNULL,
                         check=True,
                     )
                 if sparse_paths:
@@ -615,8 +688,25 @@ class GitCache:
                     text=True,
                     timeout=60,
                     env=subprocess_env,
+                    stdin=subprocess.DEVNULL,
                     check=True,
                 )
+                if sparse_paths:
+                    # Correctness repair, not a failure fallback (#2707):
+                    # if the cone left a dangling symlink (target outside
+                    # the requested paths), widen to a full checkout so
+                    # it resolves. Only fires when the narrow cone would
+                    # otherwise ship a broken checkout.
+                    self._finalize_sparse_checkout(
+                        staged,
+                        sparse_paths,
+                        env=env,
+                    )
+            except (RuntimeError, ValueError):
+                from ..utils.file_ops import robust_rmtree
+
+                robust_rmtree(staged, ignore_errors=True)
+                raise
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
                 from ..utils.file_ops import robust_rmtree
 
@@ -652,6 +742,7 @@ class GitCache:
                 text=True,
                 timeout=10,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
             )
             return result.returncode == 0 and "commit" in result.stdout.strip()
         except (subprocess.TimeoutExpired, OSError):
@@ -700,6 +791,7 @@ class GitCache:
                 text=True,
                 timeout=120,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
                 check=True,
             )
         except subprocess.CalledProcessError:
@@ -710,6 +802,7 @@ class GitCache:
                 text=True,
                 timeout=120,
                 env=subprocess_env,
+                stdin=subprocess.DEVNULL,
                 check=True,
             )
 
@@ -817,20 +910,23 @@ def _dir_size(path: Path) -> int:
     return total
 
 
-def _sanitize_url(url: str) -> str:
-    """Strip credentials from URL for safe logging."""
+_DIAGNOSTIC_URL_RE = re.compile(r"(?i)\b(?:https?|ssh|git)://[^\s'\"<>]+")
+
+
+def _sanitize_url(value: str) -> str:
+    """Remove URL userinfo, query, and fragment data from diagnostics."""
     import urllib.parse
 
-    try:
-        parsed = urllib.parse.urlparse(url)
-        if parsed.password:
-            # Replace password with ***
-            netloc = parsed.hostname or ""
-            if parsed.username:
-                netloc = f"{parsed.username}:***@{netloc}"
-            if parsed.port:
-                netloc = f"{netloc}:{parsed.port}"
-            return urllib.parse.urlunparse(parsed._replace(netloc=netloc))
-    except Exception:
-        pass
-    return url
+    def _redact(match: re.Match[str]) -> str:
+        try:
+            parsed = urllib.parse.urlparse(match.group(0))
+            host = parsed.hostname or ""
+            if ":" in host:
+                host = f"[{host}]"
+            if parsed.port is not None:
+                host = f"{host}:{parsed.port}"
+            return urllib.parse.urlunparse(parsed._replace(netloc=host, query="", fragment=""))
+        except Exception:
+            return "<redacted git URL>"
+
+    return _DIAGNOSTIC_URL_RE.sub(_redact, value)

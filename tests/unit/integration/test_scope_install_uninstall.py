@@ -848,7 +848,7 @@ class TestSkillInstallUninstallCycle:
             assert not (self.project_root / p).exists()
 
     def test_opencode_user_scope(self):
-        """Skill deploys to .agents/skills/ at user scope (convergence)."""
+        """Skill deploys to OpenCode's native user-scope skill directory."""
         target = KNOWN_TARGETS["opencode"].for_scope(user_scope=True)
         assert target is not None
 
@@ -870,10 +870,11 @@ class TestSkillInstallUninstallCycle:
         assert len(result.target_paths) >= 1
 
         deployed = _posix_relpaths(self.project_root, result.target_paths)
-        assert any(p.startswith(".agents/skills/") for p in deployed)
+        assert any(p.startswith(".config/opencode/skills/") for p in deployed)
 
-        # .opencode/ and .config/opencode/ must NOT be touched
+        # The project-specific .opencode/ and shared .agents/ roots are untouched.
         assert not (self.project_root / ".opencode").exists()
+        assert not (self.project_root / ".agents" / "skills" / "test-skill").exists()
 
         for p in deployed:
             assert (self.project_root / p).exists()

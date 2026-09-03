@@ -95,14 +95,17 @@ if [ -z "$RAW_DIFF" ]; then
   exit 0
 fi
 
-ADDED="$(printf '%s\n' "$RAW_DIFF" \
-  | grep -E '^\+[^+]' \
-  | grep -vE '^\+\s*$' \
-  | grep -vE '^\+\s*(#|"""|'\'')' \
-  | grep -vE '^\+\s*(from |import )' \
-  | grep -vE '^\+\s*@' \
-  | grep -vE '^\+\s*[a-zA-Z_][a-zA-Z0-9_]*\s*:\s*[A-Za-z_][A-Za-z0-9_\[\], |\.]*\s*(=.*)?$' \
-  | wc -l | tr -d ' ')"
+ADDED="$(printf '%s\n' "$RAW_DIFF" | awk '
+  /^\+[^+]/ &&
+  !/^\+[[:space:]]*$/ &&
+  !/^\+[[:space:]]*(#|"""|'\'')/ &&
+  !/^\+[[:space:]]*(from |import )/ &&
+  !/^\+[[:space:]]*@/ &&
+  !/^\+[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*:[[:space:]]*[A-Za-z_][A-Za-z0-9_\[\], |.]*[[:space:]]*(=.*)?$/ {
+    count++
+  }
+  END { print count + 0 }
+')"
 
 if [ "$ADDED" -lt "$THRESHOLD" ]; then
   echo "[+] mode_b: ${ADDED} substantive added lines (< ${THRESHOLD}); OK"

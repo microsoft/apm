@@ -22,7 +22,7 @@ from ...core.target_catalog import (
     target_all_exclusion_help,
     target_help_fragment,
 )
-from ...core.target_detection import TargetParamType
+from ...core.target_detection import TargetParamType, should_compile_agents_md
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
 from ...utils.console import (
@@ -38,7 +38,9 @@ from .._helpers import (
 from .watcher import _watch_mode
 
 
-def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
+def _display_single_file_summary(
+    stats, c_status, c_hash, output_path, dry_run, write_blocked=False
+):
     """Display compilation summary table for single-file mode."""
     try:
         console = _get_console()
@@ -88,7 +90,13 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
         except Exception:
             output_details = f"{output_path.name}"
 
-        table.add_row("Output", "* SUCCESS", output_details)
+        if write_blocked and dry_run:
+            output_status = "* WOULD RETAIN"
+        elif write_blocked:
+            output_status = "* RETAINED"
+        else:
+            output_status = "* SUCCESS"
+        table.add_row("Output", output_status, output_details)
         console.print(table)
     except Exception:
         _rich_info(f"Processed {stats.get('primitives_found', 0)} primitives:")
@@ -600,6 +608,89 @@ def _run_watch_mode(
     )
 
 
+def _report_distributed_dry_run_protection(
+    logger: CommandLogger,
+    stats: dict[str, object],
+) -> None:
+    """Report root files retained by a distributed dry run."""
+    protected_count = int(stats.get("root_context_files_protected", 0))
+    if not protected_count:
+        return
+    noun = "file" if protected_count == 1 else "files"
+    logger.progress(
+        f"Would retain {protected_count} hand-authored root {noun}; "
+        "no protected files would be generated.",
+        symbol="info",
+    )
+
+
+def _report_distributed_live_success(
+    logger: CommandLogger,
+    stats: dict[str, object],
+    warnings: list[str],
+    files_written: int,
+    agents_generated: int,
+) -> None:
+    """Report generated, retained, and skipped distributed outputs."""
+    nested_skips = max(
+        int(stats.get("nested_git_placements_skipped", 0) or 0),
+        sum(
+            "Skipping AGENTS.md at " in warning and ": nested Git repository " in warning
+            for warning in warnings
+        ),
+    )
+    protected_count = int(stats.get("root_context_files_protected", 0) or 0)
+    output_noun = "file" if files_written == 1 else "files"
+    if nested_skips:
+        generated_noun = "file" if agents_generated == 1 else "files"
+        skipped_noun = "placement" if nested_skips == 1 else "placements"
+        protected_note = ""
+        if protected_count:
+            protected_noun = "file" if protected_count == 1 else "files"
+            protected_note = f"; retained {protected_count} hand-authored root {protected_noun}"
+        logger.success(
+            f"Compiled {files_written} output {output_noun} "
+            f"({agents_generated} AGENTS.md {generated_noun}){protected_note}; "
+            f"skipped {nested_skips} nested Git repository {skipped_noun}.",
+            symbol="check",
+        )
+    elif protected_count:
+        protected_noun = "file" if protected_count == 1 else "files"
+        logger.success(
+            f"Generated {files_written} output {output_noun}; "
+            f"retained {protected_count} hand-authored root {protected_noun}.",
+            symbol="check",
+        )
+    else:
+        logger.success("Compilation completed successfully!", symbol="check")
+
+
+def _report_protected_no_write(
+    logger: CommandLogger,
+    stats: dict[str, object],
+    warnings: list[str],
+) -> None:
+    """Report a distributed run where every root output was retained."""
+    protected_count = int(stats["root_context_files_protected"])
+    protected_noun = "file" if protected_count == 1 else "files"
+    nested_skips = max(
+        int(stats.get("nested_git_placements_skipped", 0) or 0),
+        sum(
+            "Skipping AGENTS.md at " in warning and ": nested Git repository " in warning
+            for warning in warnings
+        ),
+    )
+    skipped_note = ""
+    if nested_skips:
+        skipped_noun = "placement" if nested_skips == 1 else "placements"
+        skipped_note = f" skipped {nested_skips} nested Git repository {skipped_noun};"
+    logger.progress(
+        f"Retained {protected_count} hand-authored root {protected_noun};"
+        f"{skipped_note} no files generated.",
+        symbol="info",
+    )
+
+
 def _run_compilation(
     logger: CommandLogger,
     target: str | list[str] | None,
@@ -711,7 +802,6 @@ def _run_compilation(
             else:
                 _target_label = "multi-target"
             from ...core.target_detection import (
-                should_compile_agents_md,
                 should_compile_claude_md,
                 should_compile_gemini_md,
             )
@@ -754,12 +844,13 @@ def _run_compilation(
 
     if result.success:
         # Handle different compilation modes
-        if config.strategy == "distributed" and not single_agents:
+        if (config.strategy == "distributed" and not single_agents) or not should_compile_agents_md(
+            effective_target
+        ):
             # Distributed compilation results - output already shown by professional formatter
             # Just show final success message
             if dry_run:
-                # Success message for dry run already included in formatter output
-                pass
+                _report_distributed_dry_run_protection(logger, result.stats)
             else:
                 # Defense-in-depth (#820): don't claim "completed
                 # successfully" when zero files were emitted.  With
@@ -767,20 +858,31 @@ def _run_compilation(
                 # unreachable in normal flow, but silent zero-effect
                 # success is the worst-case package-manager DX.
                 #
-                # Pattern-based stat scan (instead of a hardcoded key
-                # list) so new compile-time targets pick up the guard
-                # automatically: any stat ending in ``_files_written``
-                # or ``_files_generated`` contributes to the total.
-                _files_written = sum(
-                    int(v or 0)
-                    for k, v in result.stats.items()
-                    if k.endswith(("_files_written", "_files_generated"))
+                agents_generated = int(
+                    result.stats.get(
+                        "agents_files_generated",
+                        result.stats.get("agents_files_written", 0),
+                    )
+                    or 0
+                )
+                _files_written = agents_generated + sum(
+                    int(result.stats.get(key, 0) or 0)
+                    for key in (
+                        "claude_files_written",
+                        "gemini_files_written",
+                        "copilot_root_instructions_written",
+                    )
                 )
                 if _files_written > 0:
-                    logger.success(
-                        "Compilation completed successfully!",
-                        symbol="check",
+                    _report_distributed_live_success(
+                        logger,
+                        result.stats,
+                        result.warnings,
+                        _files_written,
+                        agents_generated,
                     )
+                elif result.stats.get("root_context_files_protected"):
+                    _report_protected_no_write(logger, result.stats, result.warnings)
                 elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
                     # The compiler already reported the expected cleanup outcome.
                     pass
@@ -806,21 +908,31 @@ def _run_compilation(
                 dry_run=True,
                 strategy="single-file",
             )
-            intermediate_result = compiler.compile(intermediate_config)
+            intermediate_result = compiler.compile(
+                intermediate_config,
+                root_outputs=frozenset({"agents"}),
+            )
 
             if intermediate_result.success:
-                # Perform constitution injection / preservation
-                from ...compilation.injector import ConstitutionInjector
-
-                injector = ConstitutionInjector(base_dir=".")
-                output_path = Path(config.output_path)
-                final_content, c_status, c_hash = injector.inject(
-                    intermediate_result.content,
-                    with_constitution=config.with_constitution,
-                    output_path=output_path,
+                agents_write_blocked = bool(
+                    intermediate_result.stats.get("agents_root_context_write_blocked", 0)
                 )
+                # Perform constitution injection / preservation
+                output_path = Path(config.output_path)
+                if agents_write_blocked:
+                    final_content = intermediate_result.content
+                    c_status, c_hash = "NOT APPLIED", None
+                else:
+                    from ...compilation.injector import ConstitutionInjector
 
-                if not dry_run:
+                    injector = ConstitutionInjector(base_dir=".")
+                    final_content, c_status, c_hash = injector.inject(
+                        intermediate_result.content,
+                        with_constitution=config.with_constitution,
+                        output_path=output_path,
+                    )
+
+                if not dry_run and not agents_write_blocked:
                     # Only rewrite when content materially changes (creation, update, missing constitution case)
                     if c_status in ("CREATED", "UPDATED", "MISSING"):
                         # Defense-in-depth: scan compiled output before writing
@@ -859,7 +971,13 @@ def _run_compilation(
                         )
 
                 # Report success at the top
-                if dry_run:
+                if agents_write_blocked:
+                    action = "would be retained" if dry_run else "retained"
+                    logger.progress(
+                        f"AGENTS.md not generated -- protected hand-authored root file {action}",
+                        symbol="info",
+                    )
+                elif dry_run:
                     logger.success(
                         "Context compilation completed successfully (dry run)",
                         symbol="check",
@@ -876,12 +994,19 @@ def _run_compilation(
                 # Add spacing before summary table
                 _rich_blank_line()
 
-                _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run)
+                _display_single_file_summary(
+                    stats,
+                    c_status,
+                    c_hash,
+                    output_path,
+                    dry_run,
+                    write_blocked=agents_write_blocked,
+                )
 
-                if dry_run:
+                if dry_run and not agents_write_blocked:
                     preview = final_content[:500] + ("..." if len(final_content) > 500 else "")
                     _rich_panel(preview, title=" Generated Content Preview", style="cyan")
-                else:
+                elif not agents_write_blocked:
                     _display_next_steps(output)
 
     # Display warnings for all compilation modes

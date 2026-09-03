@@ -91,6 +91,10 @@ apm update
 ## Behavior
 
 - **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
+- **Refreshes preserve the active package.** Replacement content downloads and
+  passes package validation in an isolated transaction path before publication.
+  A failed download, validation, or activation keeps the previous package and
+  lockfile active; fix the reported cause and rerun `apm update`.
 - **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
 - **Registry deps.** Registry semver deps are re-resolved against their configured registry. Deps already at the latest version satisfying their constraint appear as **unchanged** in the plan.
 - **Structured plan.** Output is grouped into four sections:
@@ -105,6 +109,13 @@ apm update
 - **One target decision covers services.** The effective target used for package deployment is reused for MCP and LSP reconciliation. Saved config targets are not re-detected or dropped after package updates. Required native config failures exit non-zero.
 - **No-op and service-only repair.** An accepted update with no dependency ref changes still reconciles missing MCP/LSP config. A manifest with only MCP/LSP dependencies also uses `apm update` as a configuration repair pass; `--dry-run` previews this without writing.
 - **Empty caches are restored.** If the lockfile expects dependencies but `apm_modules/` has no materialized packages, an otherwise unchanged update restores the cache from the same refs and reports `Restored dependency cache without changing refs.` No confirmation is required because dependency refs do not move.
+
+### Missing annotated revision-pin tags
+
+When a revision-pinned dependency has no eligible stable annotated semver tag,
+APM emits one summary warning and retains its current SHA while continuing with
+unrelated updates. Use `--verbose` to list each retained pin. Transport failures
+and malformed or ambiguous tag records still fail the update before writes.
 
 ## Back-compat: `apm update` used to be the self-updater
 

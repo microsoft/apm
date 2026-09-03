@@ -438,6 +438,14 @@ class APMPackage:
             ValueError: If interpreted manifest fields are invalid.
         """
         data = dict(manifest_data)
+        from apm_cli.deps.plugin_parser import resolve_plugin_root_placeholders
+
+        for dependency_key in ("dependencies", "devDependencies"):
+            if dependency_key in data:
+                data[dependency_key] = resolve_plugin_root_placeholders(
+                    data[dependency_key],
+                    package_path,
+                )
         source_manifest = manifest_path or package_path / "apm.yml"
         resolved_source = source_path.resolve() if source_path is not None else None
 

@@ -148,6 +148,7 @@ requirements:
     keyword: MUST
     section: "5.5"
     conformance_class: consumer
+    notes: "generated_at is optional advisory metadata; consumers omit it from new lockfiles by default and preserve an existing omission unless explicitly configured otherwise"
   - id: req-lk-006
     keyword: MUST
     section: "5.5"
@@ -356,6 +357,11 @@ requirements:
     section: "7.2"
     conformance_class: consumer
     notes: "minimum repository identity binds every cache layer; distinct identities must not share source material"
+  - id: req-rs-017
+    keyword: MUST
+    section: "7.7"
+    conformance_class: consumer
+    notes: "full-SHA update extensions deterministically select the highest eligible non-prerelease annotated tag, retain pins with no eligible tag, persist git-literal provenance, and stop before writes on malformed or failed remote resolution"
   - id: req-pr-001
     keyword: MUST
     section: "8.2"
@@ -421,17 +427,27 @@ requirements:
     keyword: MUST
     section: "8.5.5"
     conformance_class: consumer
-    notes: "a schema-bearing Agent Plugins v1 dependency is undeployable until a native lifecycle is machine-verifiable; the consumer fails closed with one diagnostic and an unchanged tree, uniformly across solo, mixed-batch, and dry-run installs"
+    notes: "a schema-bearing Agent Plugins v1 dependency stays opaque to legacy projection at deployment; target exclusion may retain materialization and lock state but creates no native registration or primitive projection, remains nonfatal to ordinary mixed-batch dependencies, and is reported consistently by dry-run"
   - id: req-tg-012
     keyword: MUST
     section: "8.5.6"
     conformance_class: consumer
     notes: "implementation-defined plugin-root placeholders preserve balanced expandable double quoting across split-quote forward- or backslash path spelling and unresolved placeholders emit a default-visible diagnostic"
+  - id: req-tg-013
+    keyword: MUST
+    section: "8.5.7"
+    conformance_class: consumer
+    notes: "schema, effective-target, integrity, security, and executable admission drives one in-place aggregate registration opaque to legacy projection without lifecycle host-binary probing; only admitted dependencies participate in claimant selection and registration, direct dependencies win plugin-name collisions over transitive dependencies, equal-precedence collisions fail during admission, advisory cleanup omits ambiguous or changed-owner entries, and ledger-primary ownership permits exact-entry recovery of a reserved namespace while rejecting foreign collisions and invalid JSON, preserving unrelated JSON semantics, and rolling back catalog, ledger, and settings together"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"
     conformance_class: consumer
     notes: "legacy plugin skills declarations replace discovery; invalid, escaping, symlinked, and duplicate-derived entries fail closed"
+  - id: req-pr-007
+    keyword: MUST
+    section: "8.1"
+    conformance_class: consumer
+    notes: "declared Plugin component copying canonicalizes its non-symlink source root and prunes the current operation's materialization subtree"
   - id: req-sc-001
     keyword: MUST
     section: "10.4"
@@ -490,6 +506,12 @@ requirements:
     section: "10.15"
     conformance_class: consumer
     notes: "per-invocation consent for bin/ deployment defaults to deny when stdout is not a TTY; explicit opt-in overrides; allowExecutables policy gate evaluated first"
+  - id: req-sc-015
+    keyword: MUST
+    section: "10.16"
+    conformance_class: consumer
+    oracle: tests/fixtures/spec-conformance/source-plan/req-sc-015.json
+    notes: "one post-authorization source-file set drives every install and uninstall re-integration scan and primitive materialization; source-only files and symlink entries are excluded"
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

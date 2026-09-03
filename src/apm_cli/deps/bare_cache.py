@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 from git import Repo
 
-from ..utils.git_sparse import apply_sparse_cone
+from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
 
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
@@ -579,6 +579,11 @@ def materialize_from_bare(
       - Sparse-checkout failures are RAISED (not silently fallen back)
         because a silent fallback would re-introduce the 78 MB bloat
         this parameter exists to avoid.
+      - After checkout, if the cone left a dangling symlink (target
+        outside the requested paths -- #2707), falls back to
+        ``git sparse-checkout disable`` so the target resolves. This is
+        a correctness repair, not a failure fallback: it only fires
+        when the narrow cone would otherwise ship a broken checkout.
 
     Returns:
         The resolved commit SHA. Caller threads this into
@@ -657,6 +662,16 @@ def materialize_from_bare(
         env=env,
         check=True,
     )
+    if sparse_paths:
+        dangling = repair_dangling_cone_symlinks(git_exe, consumer_dir, list(sparse_paths), env=env)
+        if dangling is not None:
+            _log.info(
+                "Sparse-cone checkout of %s left a dangling symlink at %s "
+                "(target outside the requested cone); widened to a full "
+                "checkout so it resolves (#2707).",
+                consumer_dir,
+                dangling,
+            )
     return resolved_sha
 
 

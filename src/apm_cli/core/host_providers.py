@@ -20,6 +20,17 @@ HostMatcher = Callable[[str], bool]
 
 
 @dataclass(frozen=True)
+class GitTransportPolicy:
+    """Describe the Git credential posture for one resolved remote."""
+
+    use_resolved_credentials: bool
+    allow_native_credential_lookup: bool = True
+    preserve_config_isolation: bool = False
+    suppress_credential_helpers: bool = False
+    reject_https_downgrade: bool = False
+
+
+@dataclass(frozen=True)
 class HostProviderDescriptor:
     """Describe host classification, credentials, and API capabilities."""
 
@@ -156,6 +167,47 @@ def host_provider_descriptors() -> tuple[HostProviderDescriptor, ...]:
 def accepted_host_types() -> tuple[str, ...]:
     """Return manifest host-type hints accepted by the registry."""
     return tuple(host_type for provider in _HOST_PROVIDERS for host_type in provider.manifest_types)
+
+
+def git_transport_policy(host_kind: str, remote_url: str) -> GitTransportPolicy:
+    """Return the canonical credential policy for a host and Git transport.
+
+    Recognized providers retain APM-managed hardened credentials. Generic HTTPS
+    delegates only to native Git credential helpers, while plaintext HTTP
+    suppresses every credential channel. Generic SSH is token-free and lets
+    AuthResolver preserve its noninteractive SSH command.
+    """
+    scheme = urllib.parse.urlsplit(remote_url).scheme.lower()
+    if scheme == "http":
+        return GitTransportPolicy(
+            use_resolved_credentials=False,
+            allow_native_credential_lookup=False,
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+        )
+    if host_kind != "generic" and scheme == "https":
+        return GitTransportPolicy(
+            use_resolved_credentials=True,
+            reject_https_downgrade=True,
+        )
+    if scheme == "https":
+        return GitTransportPolicy(
+            use_resolved_credentials=False,
+            allow_native_credential_lookup=False,
+            reject_https_downgrade=True,
+        )
+    return GitTransportPolicy(
+        use_resolved_credentials=False,
+        allow_native_credential_lookup=False,
+    )
+
+
+def git_transport_cache_key(remote_url: str | None) -> str:
+    """Return the transport discriminator used by AuthResolver's cache."""
+    if remote_url is None:
+        return ""
+    scheme = urllib.parse.urlsplit(remote_url).scheme.lower()
+    return scheme or "ssh"
 
 
 def classify_host_provider(

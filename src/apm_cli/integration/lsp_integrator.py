@@ -28,6 +28,8 @@ _log = logging.getLogger(__name__)
 _LSP_SERVERS_KEY = "lspServers"
 _CLAUDE_LANGUAGE_KEY = "extensionToLanguage"
 _COPILOT_LANGUAGE_KEY = "fileExtensions"
+_CLAUDE_STARTUP_TIMEOUT_KEY = "startupTimeout"
+_COPILOT_STARTUP_TIMEOUT_KEY = "warmupTimeoutMs"
 _LEGACY_DEFAULT_TARGETS = ("claude",)
 _LSP_TARGET_ORDER = ("copilot", "claude")
 
@@ -40,6 +42,7 @@ class _LSPTargetSpec:
     project_relative_path: tuple[str, ...]
     user_relative_path: tuple[str, ...]
     language_key: str
+    startup_timeout_key: str
     project_servers_key: str | None
     user_servers_key: str | None
     project_label: str
@@ -66,6 +69,7 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
         project_relative_path=(".lsp.json",),
         user_relative_path=(".claude.json",),
         language_key=_CLAUDE_LANGUAGE_KEY,
+        startup_timeout_key=_CLAUDE_STARTUP_TIMEOUT_KEY,
         project_servers_key=None,
         user_servers_key=_LSP_SERVERS_KEY,
         project_label=".lsp.json",
@@ -76,6 +80,7 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
         project_relative_path=(".github", "lsp.json"),
         user_relative_path=(".copilot", "lsp-config.json"),
         language_key=_COPILOT_LANGUAGE_KEY,
+        startup_timeout_key=_COPILOT_STARTUP_TIMEOUT_KEY,
         project_servers_key=_LSP_SERVERS_KEY,
         user_servers_key=_LSP_SERVERS_KEY,
         project_label=".github/lsp.json",
@@ -203,6 +208,11 @@ class LSPIntegrator:
         language_map = extension_to_language or file_extensions or snake_case_extensions
         if language_map is not None:
             out[spec.language_key] = language_map
+        startup_timeout = out.pop(_CLAUDE_STARTUP_TIMEOUT_KEY, None)
+        warmup_timeout = out.pop(_COPILOT_STARTUP_TIMEOUT_KEY, None)
+        timeout = startup_timeout if startup_timeout is not None else warmup_timeout
+        if timeout is not None:
+            out[spec.startup_timeout_key] = timeout
         if spec.language_key == _COPILOT_LANGUAGE_KEY and "args" not in out:
             out["args"] = []
         return out

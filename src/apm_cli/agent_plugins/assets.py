@@ -173,7 +173,12 @@ class AssetInventory:
                 f"component assets exceed the {MAX_COMPONENT_ASSET_BYTES}-byte package budget"
             )
 
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
         try:
             descriptor = os.open(path, flags)
         except OSError as exc:
@@ -214,8 +219,9 @@ class AssetInventory:
         if (
             not stat.S_ISREG(current.st_mode)
             or bytes_read != initial.st_size
-            or (current.st_dev, current.st_ino, current.st_size, current.st_mode)
-            != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mode)
+            or (current.st_dev, current.st_ino, current.st_size)
+            != (initial.st_dev, initial.st_ino, initial.st_size)
+            or current.st_mode & 0o111 != initial.st_mode & 0o111
         ):
             raise AssetInventoryError(f"asset {relative} changed during inventory")
 
@@ -321,7 +327,12 @@ def _open_verified_asset(
         raise AssetInventoryError(f"asset {expected.path} cannot be verified: {exc}") from exc
     if stat.S_ISLNK(initial.st_mode) or not stat.S_ISREG(initial.st_mode):
         raise AssetInventoryError(f"asset {expected.path} is not a regular file")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
@@ -333,7 +344,6 @@ def _open_verified_asset(
         opened = os.fstat(descriptor)
         if (
             not stat.S_ISREG(opened.st_mode)
-            or (initial.st_dev, initial.st_ino) != (opened.st_dev, opened.st_ino)
             or opened.st_size != expected.size
             or opened.st_mode & 0o111 != expected.executable_mode
         ):

@@ -17,6 +17,7 @@ import threading
 import time
 import weakref
 import zipfile
+from functools import partial
 from pathlib import Path
 from urllib.parse import quote
 
@@ -36,6 +37,7 @@ from ..utils.github_host import (
     set_authorization_header_git_env,
 )
 from ..utils.path_security import PathTraversalError
+from .artifactory_entry import _NoNetrcSession
 from .git_file_transport import (
     GitFileFetchResult,
     GitFileTransportError,
@@ -131,6 +133,7 @@ class DownloadDelegate:
         *,
         stream: bool = False,
         retry_throttles: bool = True,
+        allow_netrc: bool = True,
     ) -> requests.Response:
         """HTTP GET with selectable retries for transient HTTP failures.
 
@@ -143,6 +146,7 @@ class DownloadDelegate:
             retry_throttles: Whether general callers retry a classified
                 throttle. Virtual-file download callers disable this so they
                 can select sparse Git without a retry or sleep.
+            allow_netrc: Whether Requests may use ambient netrc credentials.
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -154,7 +158,21 @@ class DownloadDelegate:
         last_response = None
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=headers, timeout=timeout, stream=stream)
+                if allow_netrc:
+                    response = requests.get(
+                        url,
+                        headers=headers,
+                        timeout=timeout,
+                        stream=stream,
+                    )
+                else:
+                    with _NoNetrcSession() as session:
+                        response = session.get(
+                            url,
+                            headers=headers,
+                            timeout=timeout,
+                            stream=stream,
+                        )
 
                 throttle = github_throttle_error(response, "GitHub API")
                 if throttle is not None:
@@ -423,7 +441,13 @@ class DownloadDelegate:
             _debug(f"Trying Artifactory archive: {url}")
             resp = None
             try:
-                resp = self._host._resilient_get(url, headers=headers, timeout=60, stream=True)
+                resp = self._host._resilient_get(
+                    url,
+                    headers=headers,
+                    timeout=60,
+                    stream=True,
+                    allow_netrc=False,
+                )
                 if resp.status_code == 200:
                     target_path.mkdir(parents=True, exist_ok=True)
                     with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
@@ -477,6 +501,7 @@ class DownloadDelegate:
         error.
         """
         # Fast path: use the RegistryClient interface for entry download
+        artifactory_get = partial(self._host._resilient_get, allow_netrc=False)
         cfg = self._host.registry_config
         if cfg is not None and cfg.host == host:
             client = cfg.get_client()
@@ -485,7 +510,7 @@ class DownloadDelegate:
                 repo,
                 file_path,
                 ref,
-                resilient_get=self._host._resilient_get,
+                resilient_get=artifactory_get,
             )
         else:
             # No RegistryConfig or host mismatch (explicit FQDN mode) --
@@ -501,7 +526,7 @@ class DownloadDelegate:
                 ref,
                 scheme=scheme,
                 headers=self.get_artifactory_headers(),
-                resilient_get=self._host._resilient_get,
+                resilient_get=artifactory_get,
             )
         if content is not None:
             return content
@@ -515,7 +540,12 @@ class DownloadDelegate:
 
         for url in archive_urls:
             try:
-                resp = self._host._resilient_get(url, headers=headers, timeout=60)
+                resp = self._host._resilient_get(
+                    url,
+                    headers=headers,
+                    timeout=60,
+                    allow_netrc=False,
+                )
                 if resp.status_code != 200:
                     continue
                 with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:

@@ -490,14 +490,14 @@ class TestSanitizeUrl:
         url = "https://github.com/org/repo.git"
         assert _sanitize_url(url) == url
 
-    def test_password_replaced(self):
+    def test_userinfo_removed(self):
         from apm_cli.cache.git_cache import _sanitize_url
 
         url = "https://user:secret@github.com/org/repo.git"
         result = _sanitize_url(url)
         assert "secret" not in result
-        assert "***" in result
-        assert "user" in result
+        assert "user" not in result
+        assert result == "https://github.com/org/repo.git"
 
     def test_bad_url_returns_original(self):
         from apm_cli.cache.git_cache import _sanitize_url

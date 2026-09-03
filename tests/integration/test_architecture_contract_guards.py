@@ -7,6 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from scripts.architecture_linter.runner import registered_rules
+
+_RULES_BY_ID = {rule.id: rule for rule in registered_rules()}
+
 
 def _write_portable_hook_package(tmp_path: Path) -> object:
     """Create one package carrying the flat portable hook shape."""
@@ -169,7 +173,7 @@ def test_plugin_root_hook_command_vocabulary_has_one_owner() -> None:
     root = Path(__file__).parents[2]
     owner = (root / "src/apm_cli/integration/hook_command_paths.py").read_text(encoding="utf-8")
     consumer = (root / "src/apm_cli/integration/hook_integrator.py").read_text(encoding="utf-8")
-    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text(encoding="utf-8")
+    rule = _RULES_BY_ID["mutation_writes.neutral_hook_contract"]
 
     for name in (
         "CLAUDE_PLUGIN_ROOT",
@@ -179,8 +183,7 @@ def test_plugin_root_hook_command_vocabulary_has_one_owner() -> None:
     ):
         assert owner.count(f'"{name}"') == 1
         assert f'"{name}"' not in consumer
-    assert "AC15d: plugin-root hook command parsing authority" in guard
-    assert "must route through hook_command_paths.py" in guard
+    assert "drift projection" in rule.description
 
 
 def test_neutral_hook_walker_preserves_tolerant_integrator_inspection() -> None:

@@ -179,6 +179,16 @@ class TargetProfile:
     (``~/.copilot/copilot-instructions.md``).
     """
 
+    include_scoped_in_user_root_context: bool = False
+    """Whether user-root compilation preserves ``applyTo`` instructions.
+
+    Root-context targets normally compile only global instructions because
+    their user configuration has no scoped representation.  Set this only for
+    targets whose root context supports explicit file-pattern sections.
+    Consumers must read this scope-resolved policy instead of branching on a
+    target name.
+    """
+
     user_root_resolver: Callable[[], Path | None] | None = None
     """Optional callable that resolves the deploy root at runtime.
 
@@ -639,6 +649,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".config/opencode",
         unsupported_user_primitives=("hooks",),
+        user_primitive_overrides={
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        include_scoped_in_user_root_context=True,
     ),
     # Gemini CLI -- ~/.gemini/ is the documented user-level config directory.
     # Instructions are compile-only (GEMINI.md) -- Gemini CLI does not read
