@@ -61,7 +61,7 @@ To deploy to a different harness for one install, first exclude that
 harness's generated root locally, then override the pinned target:
 
 ```bash
-# For another harness, replace "claude" in both commands.
+# Claude Code example:
 printf '.claude/\n' >> "$(git rev-parse --git-path info/exclude)"
 apm install --target claude
 ```
@@ -70,7 +70,10 @@ The local exclusion keeps generated files out of `git status` without hiding
 harness configuration from every contributor. The explicit-target install
 still adds its deploy paths to `apm.lock.yaml`; leave that change uncommitted.
 Your harness (Claude Code, GitHub Copilot CLI, Cursor, OpenCode, Codex,
-Gemini, ...) can then discover and invoke the skills by name.
+Gemini, ...) can then discover and invoke the skills by name. For another
+target, check its output directory in the
+[target catalogue](docs/src/content/docs/concepts/primitives-and-targets.md#target-catalogue);
+some targets write to more than one root.
 
 For most PRs, two of those skills carry most of the weight:
 
