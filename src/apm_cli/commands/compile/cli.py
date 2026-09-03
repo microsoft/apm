@@ -665,6 +665,32 @@ def _report_distributed_live_success(
         logger.success("Compilation completed successfully!", symbol="check")
 
 
+def _report_protected_no_write(
+    logger: CommandLogger,
+    stats: dict[str, object],
+    warnings: list[str],
+) -> None:
+    """Report a distributed run where every root output was retained."""
+    protected_count = int(stats["root_context_files_protected"])
+    protected_noun = "file" if protected_count == 1 else "files"
+    nested_skips = max(
+        int(stats.get("nested_git_placements_skipped", 0) or 0),
+        sum(
+            "Skipping AGENTS.md at " in warning and ": nested Git repository " in warning
+            for warning in warnings
+        ),
+    )
+    skipped_note = ""
+    if nested_skips:
+        skipped_noun = "placement" if nested_skips == 1 else "placements"
+        skipped_note = f" skipped {nested_skips} nested Git repository {skipped_noun};"
+    logger.progress(
+        f"Retained {protected_count} hand-authored root {protected_noun};"
+        f"{skipped_note} no files generated.",
+        symbol="info",
+    )
+
+
 def _run_compilation(
     logger: CommandLogger,
     target: str | list[str] | None,
@@ -855,13 +881,7 @@ def _run_compilation(
                         agents_generated,
                     )
                 elif result.stats.get("root_context_files_protected"):
-                    protected_count = int(result.stats["root_context_files_protected"])
-                    noun = "file" if protected_count == 1 else "files"
-                    logger.progress(
-                        f"Retained {protected_count} hand-authored root {noun}; "
-                        "no files generated.",
-                        symbol="info",
-                    )
+                    _report_protected_no_write(logger, result.stats, result.warnings)
                 elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
                     # The compiler already reported the expected cleanup outcome.
                     pass

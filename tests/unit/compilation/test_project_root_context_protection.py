@@ -7,9 +7,13 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.commands.compile.cli import _report_distributed_live_success
+from apm_cli.commands.compile.cli import (
+    _report_distributed_live_success,
+    _report_protected_no_write,
+)
 from apm_cli.compilation.agents_compiler import AgentsCompiler
 from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
+from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
 from apm_cli.compilation.distributed_compiler import (
     AGENTS_MD_GENERATED_MARKER as DISTRIBUTED_AGENTS_MARKER,
 )
@@ -107,6 +111,24 @@ def test_mixed_outcome_reports_retained_and_nested_skipped_outputs() -> None:
 
     message = logger.success.call_args.args[0]
     assert "retained 1 hand-authored root file" in message
+    assert "skipped 1 nested Git repository placement" in message
+
+
+def test_no_write_outcome_reports_retained_and_nested_skipped_outputs() -> None:
+    """A zero-write summary must retain all skip information."""
+    logger = Mock()
+
+    _report_protected_no_write(
+        logger,
+        {
+            "nested_git_placements_skipped": 1,
+            "root_context_files_protected": 2,
+        },
+        [],
+    )
+
+    message = logger.progress.call_args.args[0]
+    assert "Retained 2 hand-authored root files" in message
     assert "skipped 1 nested Git repository placement" in message
 
 
@@ -257,6 +279,99 @@ def test_case_variant_output_preserves_root_agents_on_insensitive_filesystem(
     assert result.exit_code == 0, result.output
     assert canonical.read_text(encoding="utf-8") == _MANUAL_AGENTS
     assert "Protected agents.md" in result.output
+
+
+def test_case_variant_generated_agents_remains_replaceable_on_insensitive_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Canonical identity must select both accepted AGENTS.md marker formats."""
+    _seed_project(tmp_path)
+    canonical = tmp_path / "AGENTS.md"
+    canonical.write_text(
+        f"# AGENTS.md\n{DISTRIBUTED_AGENTS_MARKER}\nGenerated content.\n",
+        encoding="utf-8",
+    )
+    case_variant = tmp_path / "agents.md"
+    if not case_variant.exists() or not case_variant.samefile(canonical):
+        pytest.skip("fixture filesystem is case-sensitive")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--single-agents", "--output", "agents.md"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Protected agents.md" not in result.output
+    assert AGENTS_MD_GENERATED_MARKER in canonical.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_full_file_compile_retains_root_agents_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dangling: bool,
+) -> None:
+    """Full-file compilation must never replace a root context symlink."""
+    _seed_project(tmp_path)
+    target = tmp_path / "notes" / "guidance.md"
+    target.parent.mkdir()
+    if not dangling:
+        target.write_text("Hand-authored linked guidance.\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").unlink()
+    try:
+        (tmp_path / "AGENTS.md").symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["compile", "--single-agents"])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "AGENTS.md").is_symlink()
+    assert "root context symlinks are not overwritten" in result.output
+    if not dangling:
+        assert target.read_text(encoding="utf-8") == "Hand-authored linked guidance.\n"
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_managed_section_rejects_root_agents_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dangling: bool,
+) -> None:
+    """Managed-section compilation must fail closed on root context symlinks."""
+    _seed_project(tmp_path)
+    target = tmp_path / "notes" / "guidance.md"
+    target.parent.mkdir()
+    if not dangling:
+        target.write_text(
+            "<!-- apm:start -->\nHand-authored linked guidance.\n<!-- apm:end -->\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "AGENTS.md").unlink()
+    try:
+        (tmp_path / "AGENTS.md").symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+    with (tmp_path / "apm.yml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            "compilation:\n"
+            "  agents_md:\n"
+            "    mode: managed_section\n"
+            '    start_marker: "<!-- apm:start -->"\n'
+            '    end_marker: "<!-- apm:end -->"\n'
+        )
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["compile", "--single-agents"])
+
+    assert result.exit_code == 1
+    assert (tmp_path / "AGENTS.md").is_symlink()
+    if not dangling:
+        assert "Hand-authored linked guidance." in target.read_text(encoding="utf-8")
 
 
 def test_marker_mentioned_in_body_does_not_grant_write_ownership(

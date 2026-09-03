@@ -106,7 +106,8 @@ file before compiling if generated output should replace it. For section-scoped
 [`compilation.agents_md`](../manifest-schema/#62-compilationagents_md).
 
 If a constitution or dependency imports still require `CLAUDE.md`, `--clean`
-regenerates/overwrites that file instead of removing it.
+regenerates an APM-generated file instead of removing it. An unmarked,
+hand-authored root `CLAUDE.md` remains unchanged.
 
 `--clean` is a file-deleting operation. Before running it live, pass `--dry-run` to preview exactly what would be removed without touching the filesystem:
 

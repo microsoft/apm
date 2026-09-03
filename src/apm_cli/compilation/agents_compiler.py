@@ -7,6 +7,7 @@ primitives & constitution are unchanged.
 
 import hashlib
 import logging
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
@@ -1716,6 +1717,10 @@ class AgentsCompiler:
 
         if config.agents_md_mode == "managed_section":
             target = Path(output_path)
+            if target.is_symlink():
+                raise ManagedSectionError(
+                    f"{target} is a symlink. Managed-section output must be a regular file."
+                )
             ensure_path_within(target, self.base_dir)
             if not target.is_file():
                 raise ManagedSectionError(
@@ -1832,12 +1837,30 @@ class AgentsCompiler:
         resolved_path: Path | None = None,
     ) -> bool:
         """Return whether an existing project-root file must be retained."""
-        if not path.is_file():
+        canonical_name = next(
+            (
+                name
+                for name in ("AGENTS.md", "CLAUDE.md")
+                if path.name.casefold() == name.casefold()
+            ),
+            None,
+        )
+        lexical_root = Path(os.path.abspath(path.parent)) == self._resolved_base_dir
+        if canonical_name is None:
             return False
         rel_path = portable_relpath(path, self.base_dir)
+        if lexical_root and path.is_symlink():
+            self._protected_root_context_paths.add(path)
+            self.warnings.append(
+                f"Protected {rel_path}: root context symlinks are not overwritten. "
+                "Replace the symlink with a regular generated file before rerunning."
+            )
+            return True
+        if not path.is_file():
+            return False
         try:
             resolved = resolved_path or ensure_path_within(path, self.base_dir)
-            if resolved.parent != self._resolved_base_dir:
+            if not lexical_root and resolved.parent != self._resolved_base_dir:
                 return False
             canonical_paths = (
                 self._resolved_base_dir / "AGENTS.md",
@@ -1853,10 +1876,13 @@ class AgentsCompiler:
             self._protected_root_context_paths.add(path)
             self.warnings.append(
                 f"Skipped {rel_path}: could not verify the APM-generated marker; "
-                f"file will not be overwritten ({type(exc).__name__})."
+                f"file will not be overwritten ({type(exc).__name__}). "
+                "Fix file access, UTF-8 encoding, or path containment, then rerun."
             )
             return True
-        accepted_markers = _AGENTS_ROOT_GENERATED_MARKERS if path.name == "AGENTS.md" else (marker,)
+        accepted_markers = (
+            _AGENTS_ROOT_GENERATED_MARKERS if canonical_name == "AGENTS.md" else (marker,)
+        )
         if has_generated_marker_header(prefix, accepted_markers):
             return False
         self._protected_root_context_paths.add(path)
