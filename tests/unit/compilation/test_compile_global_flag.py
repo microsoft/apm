@@ -18,7 +18,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
@@ -574,24 +573,58 @@ class TestGlobalCompileHonorsDeclaredTargets:
         assert "failed to parse" in error
         assert "fix the manifest and rerun the command" in error
 
-    def test_invalid_target_name_surfaces_as_usage_error(self, tmp_path):
-        """An unknown token raises rather than silently compiling everything."""
+    def test_invalid_target_name_has_global_manifest_recovery(self, tmp_path):
+        """An unknown token identifies the manifest and global command."""
         from apm_cli.commands.compile.cli import _handle_global_flag
-        from apm_cli.core.errors import UnknownTargetError
 
         source_root = self._prepare(
             tmp_path,
             "name: h\nversion: 1.0.0\ntargets: [not-a-harness]\n",
         )
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
 
         with (
             patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
-            patch("apm_cli.compilation.compile_user_root_contexts") as compile_mock,
-            pytest.raises(UnknownTargetError),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
         ):
-            _handle_global_flag(dry_run=False, logger=MagicMock())
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
+        assert rc == 1
         compile_mock.assert_not_called()
+        error = str(logger.error.call_args).lower()
+        assert "unknown target 'not-a-harness'" in error
+        assert str(source_root / "apm.yml").lower() in error
+        assert "rerun 'apm compile -g'" in error
+        assert "apm install" not in error
+
+    def test_unreadable_manifest_fails_closed_without_compiling(self, tmp_path):
+        """A manifest read error must not expand to every known target."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [claude]\n",
+        )
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+            patch(
+                "apm_cli.utils.yaml_io.load_yaml",
+                side_effect=PermissionError("permission denied"),
+            ),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        error = str(logger.error.call_args).lower()
+        assert "failed to read" in error
+        assert "permission denied" in error
+        assert "check the file permissions and rerun the command" in error
 
     def test_non_mapping_manifest_fails_closed_without_compiling(self, tmp_path):
         """A YAML sequence parses cleanly but is not a usable manifest."""
@@ -627,15 +660,23 @@ class TestGlobalCompileHonorsDeclaredTargets:
         assert rc == 1
         compile_mock.assert_not_called()
 
-    def test_empty_manifest_still_compiles_every_known_target(self, tmp_path):
-        """An empty manifest declares nothing; it is not a broken manifest."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
+    def test_empty_manifest_fails_closed_without_compiling(self, tmp_path):
+        """An empty existing manifest is invalid and must not widen output."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
 
         source_root = self._prepare(tmp_path, "")
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
 
-        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
-        assert sorted(names) == sorted(p.name for p in KNOWN_TARGETS.values())
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "empty document" in str(logger.error.call_args).lower()
 
     def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path):
         """Invalid UTF-8 reaches the handler as a YAMLError, not a raw decode error.

@@ -401,6 +401,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     import yaml
 
     from ...compilation import compile_user_root_contexts
+    from ...core.errors import TargetResolutionError
     from ...core.scope import InstallScope, get_apm_dir
 
     source_root = get_apm_dir(InstallScope.USER)
@@ -419,10 +420,26 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     # "nothing declared" and compiling every harness.
     try:
         compile_targets = _global_compile_targets(source_root)
+    except TargetResolutionError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
+        logger.error(
+            f"{summary}\n\nFix {display_path} and rerun 'apm compile -g'.",
+            symbol="",
+        )
+        return 1
     except yaml.YAMLError as exc:
         display_path = _display_user_path(source_root / APM_YML_FILENAME)
         logger.error(
             f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun the command.",
+            symbol="error",
+        )
+        return 1
+    except OSError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        logger.error(
+            f"Failed to read {display_path}: {exc}. "
+            "Check the file permissions and rerun the command.",
             symbol="error",
         )
         return 1
@@ -1116,9 +1133,10 @@ def _run_compilation(
     default=False,
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
-        "from ~/.apm/apm_modules. Cannot be combined with project-scoped output "
-        "flags such as --target, --all, --watch, --root, or --output; use with "
-        "--dry-run to preview changes."
+        "from ~/.apm/apm_modules, using target(s) from ~/.apm/apm.yml or every "
+        "supported target when undeclared. Cannot be combined with project-scoped "
+        "output flags such as --target, --all, --watch, --root, or --output; "
+        "use with --dry-run to preview changes."
     ),
 )
 @click.pass_context

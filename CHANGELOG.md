@@ -18,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now preserves previously deployed skills when package
   integration is skipped instead of treating them as stale cleanup candidates.
   (#2758)
-- `apm compile -g` now honors `targets:` in `~/.apm/apm.yml` instead of writing
-  a root context file for every user-scope-capable harness, so it no longer
-  creates `$HOME` directories for uninstalled tools. (#2772)
+- `apm compile -g` now honors `target:` and `targets:` in `~/.apm/apm.yml`,
+  limiting output to declared harnesses and avoiding stray `$HOME` directories
+  when targets are configured. (#2772)
 - `apm install` no longer silently drops instruction Markdown whose
   unfenced bodies contain `---` horizontal rules. It now stops the whole package
   before deploying any primitive when instruction frontmatter is invalid YAML or

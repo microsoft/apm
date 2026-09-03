@@ -93,7 +93,7 @@ def _warn_legacy_all_once() -> None:
     _rich_warning(
         "'all' in apm.yml targets is deprecated and will become a hard "
         "error in a future release. APM is treating the field as omitted "
-        "for this install so --target / auto-detect decide. If you "
+        "so the current command's default target selection applies. If you "
         "maintain this package, remove 'all' from the manifest.",
         symbol="warning",
     )
@@ -176,9 +176,8 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
 def read_declared_target_names(root: Path) -> list[str]:
     """Return the target names ``root/apm.yml`` declares, else ``[]``.
 
-    Returns ``[]`` only when there is genuinely nothing to read a declaration
-    from -- no manifest, an unreadable one, or an empty one -- so callers fall
-    through to their own default.
+    Returns ``[]`` only when the manifest is absent or its mapping contains no
+    target declaration, so callers fall through to their own default.
 
     A manifest that exists is otherwise authoritative and its failures
     propagate, because reporting "nothing declared" for a broken manifest would
@@ -199,10 +198,10 @@ def read_declared_target_names(root: Path) -> list[str]:
 
     try:
         data = load_yaml(root / "apm.yml")
-    except OSError:
+    except FileNotFoundError:
         return []
     if data is None:
-        return []
+        raise yaml.YAMLError("apm.yml must contain a YAML object, got an empty document")
     if not isinstance(data, dict):
         # Raised as YAMLError, not ValueError, so callers keep the single
         # fail-closed ``except yaml.YAMLError`` that _bounded_load already

@@ -173,8 +173,8 @@ When a list is specified, only those targets are compiled, installed, and packed
 A plural `targets:` form is also accepted; use a YAML list in new manifests.
 A scalar remains accepted as a one-item compatibility input. Declaring both
 fields is a parse error. Prefer `targets:` in new manifests; `target:` remains
-supported for backward compatibility and accepts legacy CLI aliases such as
-`vscode`. The canonical `targets:` form requires canonical names.
+supported for backward compatibility. The `vscode` alias is accepted in either
+form and normalized to `copilot`; `agents` remains a CLI-only alias.
 
 | Value | Effect |
 |---|---|
