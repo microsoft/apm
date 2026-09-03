@@ -34,11 +34,11 @@ def test_triage_panel_lock_manifest_matches_runtime_setup_pin() -> None:
     assert manifest_setup["version"] == canonical_setup["version"]
     assert manifest_setup["sha"] == canonical_setup["sha"]
 
-    runtime_setup_shas = set(
+    runtime_setup_refs = set(
         re.findall(
-            r"^\s+uses: github/gh-aw-actions/setup@([0-9a-f]+)(?: # v[0-9.]+)?$",
+            r"^\s+uses: github/gh-aw-actions/setup@([^\s#]+)(?: # v[0-9.]+)?$",
             lock_text,
             re.MULTILINE,
         )
     )
-    assert runtime_setup_shas == {manifest_setup["sha"]}
+    assert runtime_setup_refs == {manifest_setup["sha"]}
