@@ -899,8 +899,9 @@ def _run_compilation(
 
                 # Report success at the top
                 if agents_write_blocked:
+                    action = "would be retained" if dry_run else "retained"
                     logger.progress(
-                        "AGENTS.md not generated -- protected hand-authored root file retained",
+                        f"AGENTS.md not generated -- protected hand-authored root file {action}",
                         symbol="info",
                     )
                 elif dry_run:

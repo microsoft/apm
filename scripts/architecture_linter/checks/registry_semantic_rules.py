@@ -184,7 +184,7 @@ _ROOT_CONTEXT_CLI_FRAGMENTS = (
 
 _ROOT_CONTEXT_DUPLICATE_PATTERN = (
     r"^\s*def\s+\w*(?:hand_authored.*root_context|root_context.*hand_authored)"
-    r"\w*\([^)]*\)\s*(?:->[^:]+)?:"
+    r"\w*\s*\("
 )
 
 

@@ -179,7 +179,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/commands/compile/cli.py",
         old="def _run_compilation(",
         new=(
-            "def _hand_authored_root_context_blocks_write():\n"
+            "def _hand_authored_root_context_blocks_write(\n"
+            "    path,\n"
+            "):\n"
             "    return True\n\n\n"
             "def _run_compilation("
         ),

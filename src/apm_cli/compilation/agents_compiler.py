@@ -1826,11 +1826,12 @@ class AgentsCompiler:
             self._protected_root_context_paths.add(path)
             self.warnings.append(
                 f"Skipped {rel_path}: could not verify the APM-generated marker; "
-                f"file will not be overwritten ({exc!s})."
+                f"file will not be overwritten ({type(exc).__name__})."
             )
             return True
         accepted_markers = _AGENTS_ROOT_GENERATED_MARKERS if path.name == "AGENTS.md" else (marker,)
-        if any(candidate in prefix for candidate in accepted_markers):
+        header_lines = {line.strip() for line in prefix.splitlines()[:5]}
+        if any(candidate in header_lines for candidate in accepted_markers):
             return False
         self._protected_root_context_paths.add(path)
         self.warnings.append(
