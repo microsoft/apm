@@ -2279,6 +2279,34 @@ class TestInstallMcpFlag:
         assert "Skipped workspace-only runtimes" not in result.output
         assert not user_manifest.exists()
 
+    def test_global_mcp_names_disabled_experimental_target(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        argv = [
+            "apm",
+            "install",
+            "-g",
+            "--target",
+            "hermes",
+            "--mcp",
+            "probe",
+            "--no-policy",
+            "--",
+            "echo",
+            "ready",
+        ]
+
+        with (
+            patch.object(Path, "home", return_value=fake_home),
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
+        ):
+            result = self.runner.invoke(cli, argv[1:])
+
+        assert result.exit_code == 2, (result.output, result.exception)
+        assert "hermes; source: --target flag" in result.output
+
     def test_global_mcp_rejects_unsupported_saved_target_without_fallback(
         self, tmp_path, monkeypatch
     ):

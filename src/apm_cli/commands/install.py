@@ -814,7 +814,9 @@ def _handle_mcp_install(  # noqa: PLR0913
                     f"All selected MCP runtimes were removed by --exclude {exclude}; "
                     "choose another target or remove the exclusion"
                 )
-            rendered_targets = ", ".join(sorted(scoped_runtime_targets or skipped_runtimes))
+            rendered_targets = ", ".join(
+                sorted(target_decision.runtime_targets or skipped_runtimes)
+            )
             raise click.UsageError(
                 "Selected targets are unavailable for user-scope MCP installation "
                 f"({rendered_targets}; source: {target_decision.source}); enable selected "
@@ -1719,12 +1721,10 @@ def _install_apm_packages(ctx, outcome):
 
     Parses ``apm.yml``, installs APM dependencies, collects and installs
     transitive MCP servers, and handles lockfile updates.
-
     Args:
         ctx: :class:`InstallContext` with configuration and environment.
         outcome: ``_ValidationOutcome`` from package validation (may be
             ``None`` when no explicit packages were passed).
-
     Returns:
         Tuple of ``(apm_count, mcp_count, lsp_count, apm_diagnostics)``.
     """

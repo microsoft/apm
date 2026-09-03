@@ -1396,7 +1396,10 @@ def test_unknown_global_registry_server_changes_no_user_state(
         )
 
     assert result.returncode == 1, (result.stdout, result.stderr)
-    assert "no state was changed" in result.stdout + result.stderr
+    output = result.stdout + result.stderr
+    assert "Check the server name" in output
+    assert "then retry" in output
+    assert "no state was changed" in output
     assert not (isolated.home / ".apm" / "apm.yml").exists()
     assert not (isolated.home / ".apm" / "apm.lock.yaml").exists()
     assert not (isolated.home / ".claude.json").exists()

@@ -148,6 +148,57 @@ class TestRunMcpInstallSingleRuntime:
             )
         assert result >= 0
 
+    def test_prevalidated_server_is_not_validated_twice(self, tmp_path):
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+        dep = self._make_reg_dep("my-server")
+        logger = MagicMock()
+        mock_ops = MagicMock()
+        mock_ops.check_servers_needing_installation.return_value = []
+
+        with (
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations",
+                return_value=mock_ops,
+            ),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
+                side_effect=lambda runtimes, **_kwargs: runtimes,
+            ),
+        ):
+            run_mcp_install(
+                mcp_deps=[dep],
+                runtime="copilot",
+                project_root=tmp_path,
+                logger=logger,
+                prevalidated_registry_servers={"my-server"},
+            )
+
+        mock_ops.validate_servers_exist.assert_not_called()
+
+
+def test_direct_registry_prevalidation_fails_closed():
+    from apm_cli.integration.mcp_integrator_install import prevalidate_registry_dependencies
+
+    dep = MagicMock()
+    dep.name = "my-server"
+    operations = MagicMock()
+    operations.validate_servers_exist.return_value = (["my-server"], [])
+
+    with patch(
+        "apm_cli.registry.operations.MCPServerOperations",
+        return_value=operations,
+    ):
+        result = prevalidate_registry_dependencies(
+            [dep],
+            registry_url=None,
+            verbose=False,
+            logger=MagicMock(),
+        )
+
+    operations.validate_servers_exist.assert_called_once_with(["my-server"], fail_closed=True)
+    assert result == {"my-server"}
+
 
 # ---------------------------------------------------------------------------
 # run_mcp_install -- auto-detection with ImportError fallback

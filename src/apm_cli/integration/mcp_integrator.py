@@ -246,13 +246,13 @@ class MCPIntegrator:
         registry_url: str | None,
         verbose: bool,
         logger,
-    ) -> None:
+    ) -> builtins.set[str]:
         """Validate direct-install registry identities before any write."""
         from apm_cli.integration.mcp_integrator_install import (
             prevalidate_registry_dependencies,
         )
 
-        prevalidate_registry_dependencies(
+        return prevalidate_registry_dependencies(
             mcp_deps,
             registry_url=registry_url,
             verbose=verbose,
@@ -1274,7 +1274,7 @@ class MCPIntegrator:
         return out
 
     @staticmethod
-    def install(
+    def install(  # noqa: PLR0913
         mcp_deps: list,
         runtime: str = None,  # noqa: RUF013
         exclude: str = None,  # noqa: RUF013
@@ -1289,6 +1289,7 @@ class MCPIntegrator:
         diagnostics=None,
         scope=None,
         managed_target_servers: builtins.dict | None = None,
+        prevalidated_registry_servers: builtins.set[str] | None = None,
         fail_on_write_error: bool = False,
     ) -> int:
         """Install MCP dependencies.
@@ -1334,5 +1335,6 @@ class MCPIntegrator:
             diagnostics=diagnostics,
             scope=scope,
             managed_target_servers=managed_target_servers,
+            prevalidated_registry_servers=prevalidated_registry_servers,
             fail_on_write_error=fail_on_write_error,
         )

@@ -43,12 +43,18 @@ def _validate_registry_servers(
     dependency_count: int,
     verbose: bool,
     logger: Any,
+    fail_closed: bool = False,
 ) -> list[str]:
     """Validate registry identities and raise before any target write."""
     logger.mcp_lookup_heartbeat(len(server_names))
     if verbose:
         logger.verbose_detail(f"Validating {dependency_count} registry servers...")
-    valid_servers, invalid_servers = operations.validate_servers_exist(server_names)
+    if fail_closed:
+        valid_servers, invalid_servers = operations.validate_servers_exist(
+            server_names, fail_closed=True
+        )
+    else:
+        valid_servers, invalid_servers = operations.validate_servers_exist(server_names)
     if invalid_servers:
         logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
         logger.progress("Run 'apm mcp search <query>' to find available servers")
@@ -62,19 +68,21 @@ def prevalidate_registry_dependencies(
     registry_url: str | None,
     verbose: bool,
     logger: Any,
-) -> None:
+) -> set[str]:
     """Resolve direct-install registry identities before persistent writes."""
     from apm_cli.registry.operations import MCPServerOperations
 
     server_names = [dep.name if hasattr(dep, "name") else dep for dep in mcp_deps]
     operations = MCPServerOperations(registry_url=registry_url)
-    _validate_registry_servers(
+    valid_servers = _validate_registry_servers(
         operations,
         server_names,
         dependency_count=len(mcp_deps),
         verbose=verbose,
         logger=logger,
+        fail_closed=True,
     )
+    return set(valid_servers)
 
 
 class _TargetSelectionSource(StrEnum):
@@ -88,7 +96,7 @@ class _TargetSelectionSource(StrEnum):
     INVALID_MANIFEST = "invalid-manifest"
 
 
-def _install_registry_group(
+def _install_registry_group(  # noqa: PLR0913
     operations: Any,
     group_dep_names: list,
     group_dep_map: dict,
@@ -103,6 +111,7 @@ def _install_registry_group(
     console: Any,
     logger: Any,
     managed_target_servers: dict[str, set[str]] | None,
+    prevalidated_servers: set[str] | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Process one group of registry deps through a single ``MCPServerOperations`` instance.
@@ -118,13 +127,16 @@ def _install_registry_group(
     configured_count = 0
     failed_installations: list[str] = []
 
-    valid_servers = _validate_registry_servers(
-        operations,
-        group_dep_names,
-        dependency_count=len(group_deps),
-        verbose=verbose,
-        logger=logger,
-    )
+    if prevalidated_servers is not None and set(group_dep_names) <= prevalidated_servers:
+        valid_servers = group_dep_names
+    else:
+        valid_servers = _validate_registry_servers(
+            operations,
+            group_dep_names,
+            dependency_count=len(group_deps),
+            verbose=verbose,
+            logger=logger,
+        )
 
     if valid_servers:
         servers_to_install = operations.check_servers_needing_installation(
@@ -978,7 +990,7 @@ def _print_mcp_summary(
         console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
 
 
-def run_mcp_install(
+def run_mcp_install(  # noqa: PLR0913
     mcp_deps: list,
     runtime: str | None = None,
     exclude: str | None = None,
@@ -993,6 +1005,7 @@ def run_mcp_install(
     diagnostics=None,
     scope: InstallScope | None = None,
     managed_target_servers: dict[str, set[str]] | None = None,
+    prevalidated_registry_servers: set[str] | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Install MCP dependencies.
@@ -1170,6 +1183,7 @@ def run_mcp_install(
                     console=console,
                     logger=logger,
                     managed_target_servers=managed_target_servers,
+                    prevalidated_servers=prevalidated_registry_servers,
                     fail_on_write_error=fail_on_write_error,
                 )
 

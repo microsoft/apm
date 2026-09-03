@@ -604,14 +604,17 @@ class SimpleRegistryClient:
                 except ValueError:
                     continue
 
-        # Pass 2: fuzzy slug match (only when reference has no namespace)
-        for server in search_results:
-            server_name = server.get("name", "")
-            if self._is_server_match(reference, server_name):
-                try:
-                    return self.get_server(server_name)
-                except ValueError:
-                    continue
+        # Pass 2: an unqualified slug is safe only when it has one match.
+        slug_matches = [
+            server.get("name", "")
+            for server in search_results
+            if self._is_server_match(reference, server.get("name", ""))
+        ]
+        if len(slug_matches) == 1:
+            try:
+                return self.get_server(slug_matches[0])
+            except ValueError:
+                pass
 
         # If not found by name, server is not in registry
         return None

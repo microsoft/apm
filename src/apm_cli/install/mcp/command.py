@@ -146,10 +146,11 @@ def run_mcp_install(  # noqa: PLR0913
     else:
         dep = MCPDependency.from_dict(entry)
 
+    prevalidated_registry_servers = None
     if APM_DEPS_AVAILABLE and not is_self_defined:
         with registry_env_override(registry_url, allow_http=registry_allow_http):
             try:
-                MCPIntegrator.prevalidate_registry_dependencies(
+                prevalidated_registry_servers = MCPIntegrator.prevalidate_registry_dependencies(
                     [dep],
                     registry_url=registry_url,
                     verbose=verbose,
@@ -245,6 +246,7 @@ def run_mcp_install(  # noqa: PLR0913
                     project_root=apm_dir,
                     user_scope=user_scope,
                     managed_target_servers=requested_target_servers,
+                    prevalidated_registry_servers=prevalidated_registry_servers,
                 )
                 new_names = MCPIntegrator.get_server_names([dep])
                 new_configs = MCPIntegrator.get_server_configs([dep])

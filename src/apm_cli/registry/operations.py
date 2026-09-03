@@ -177,7 +177,11 @@ class MCPServerOperations:
         return installed_ids
 
     def validate_servers_exist(
-        self, server_references: list[str], max_workers: int = 4
+        self,
+        server_references: list[str],
+        max_workers: int = 4,
+        *,
+        fail_closed: bool = False,
     ) -> tuple[list[str], list[str]]:
         """Validate that all servers exist in the registry before attempting installation.
 
@@ -192,6 +196,8 @@ class MCPServerOperations:
         Args:
             server_references: List of MCP server references to validate
             max_workers: Max parallel HTTP lookups (default 4).
+            fail_closed: Raise on registry network errors instead of assuming
+                the reference is valid.
 
         Returns:
             Tuple of (valid_servers, invalid_servers)
@@ -207,7 +213,7 @@ class MCPServerOperations:
                 server_info = self.registry_client.find_server_by_reference(server_ref)
                 return (server_ref, server_info is not None)
             except requests.RequestException:
-                if getattr(self.registry_client, "_is_custom_url", False):
+                if fail_closed or getattr(self.registry_client, "_is_custom_url", False):
                     raise RuntimeError(  # noqa: B904
                         f"Could not reach MCP registry at "
                         f"{self.registry_client.registry_url} while validating "

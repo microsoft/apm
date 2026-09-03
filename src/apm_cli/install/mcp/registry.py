@@ -37,10 +37,9 @@ _MAX_REGISTRY_URL_LENGTH = 2048
 def _redact_url_credentials(url: str) -> str:
     """Redact URL userinfo, query, and fragment data before logging.
 
-    Registry URLs may legitimately carry credentials for private mirrors
-    (``https://user:token@registry.internal/``); we accept them at the
-    environment layer but never echo them back to the terminal where they could
-    leak via shell history, CI logs, or screenshots.
+    Potentially credential-bearing input is redacted before diagnostics.
+    Embedded credentials are rejected during validation and never echoed to the
+    terminal where they could leak via shell history, CI logs, or screenshots.
 
     Falls back to the original string on any parse error so a misformed
     URL still surfaces in the error message rather than being swallowed.

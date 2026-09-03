@@ -116,8 +116,8 @@ list):
 | `MCP_REGISTRY_URL` | Override the registry endpoint used by `list`, `search`, `show`, and `install`. When set, every command prints a one-line `Registry: <url>` diagnostic so the override is visible. Unset: the public default registry is used silently. |
 
 Network failures against an overridden registry surface an explicit
-hint pointing at `MCP_REGISTRY_URL` so misconfigurations are easy to
-spot in CI logs.
+hint pointing at `MCP_REGISTRY_URL`. Direct `apm install --mcp` lookup
+also fails closed against the public default before writing user state.
 
 Registry URL resolution order (first set value wins):
 

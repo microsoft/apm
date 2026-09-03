@@ -440,6 +440,22 @@ class TestSimpleRegistryClient(unittest.TestCase):
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
+    def test_find_server_by_reference_rejects_ambiguous_slug(
+        self, mock_search_servers, mock_get_server
+    ):
+        """An unqualified slug must not select the registry's first match."""
+        mock_search_servers.return_value = [
+            {"name": "com.attacker/tool"},
+            {"name": "org.trusted/tool"},
+        ]
+
+        result = self.client.find_server_by_reference("tool")
+
+        self.assertIsNone(result)
+        mock_get_server.assert_not_called()
+
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     def test_find_server_by_reference_qualified_no_match(
         self, mock_search_servers, mock_get_server
     ):
