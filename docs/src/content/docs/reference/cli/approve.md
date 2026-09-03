@@ -22,14 +22,14 @@ one noun, `executables`, across three layers:
 | Layer | Store | Who manages it | Committed? | Authority |
 |-------|-------|----------------|------------|-----------|
 | Project | `apm.yml` `executables.{allow,deny}` | Maintainer / CI setup (`apm approve`/`apm deny`) | Yes | Admin (shared) |
-| User | `~/.apm/config.json` `executables.{allow,deny}` | `apm approve --user` / `apm deny --user` | No | Lowest; can only narrow |
+| User | `~/.apm/config.json` `executables.{allow,deny}` | `apm approve --user` / `apm deny --user` | No | Lowest; below org/project deny |
 | Org | `apm-policy.yml` `executables:` | Org admin | Yes (policy repo) | Ceiling on deny |
 
 `apm approve` adds a grant; [`apm deny`](../deny/) adds a block. By default,
 both commands write the **project** `apm.yml` (committed, so the whole team
 inherits the decision). `--user` writes your personal
-`~/.apm/config.json` instead -- a machine-local override that can only narrow
-trust, never widen past an org or project deny.
+`~/.apm/config.json` instead -- a machine-local grant with lower authority than
+org or project denies. Use `apm deny --user` to narrow trust on one machine.
 
 Text primitives (skills, agents, instructions) are never gated. Local project
 content (the root `.apm/` directory) is always trusted.

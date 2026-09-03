@@ -292,8 +292,10 @@ Because a canvas from a dependency is arbitrary executable code, APM blocks
 dependency-provided canvases when the project opts in to the executable gate:
 the project must add an `executables:` block to `apm.yml` and run
 `apm approve <pkg>` to deploy it. A first-party canvas in the root package being
-installed deploys once the flag is on; dependency canvases always require
-explicit approval.
+installed deploys once the flag is on. With `--global`, dependency-provided
+canvases always require explicit approval. Local bundle canvases use the exact
+`name#version@sha256:<digest>` key printed by `apm install`, so changed bundle
+bytes require renewed consent.
 
 By default `apm approve` records the grant in the project `apm.yml`
 `executables.allow` block (committed, shared with the team); `apm approve --user`
