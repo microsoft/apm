@@ -1,8 +1,8 @@
 """Package-construction, projection, skill-membership, and registration
 marketplace analyzers.
 
-Ports five of the twelve canonical owner decisions recorded in
-``.apm/architecture/owners/marketplace-plugins.json``.
+Ports marketplace-package decisions plus the local-bundle layout lowering
+guard recorded in ``.apm/architecture/owners/install-deployment.json``.
 """
 
 from __future__ import annotations
@@ -265,49 +265,65 @@ def _check_legacy_skill_membership(provider: FactsProvider) -> tuple[Violation, 
     return tuple(findings)
 
 
-_RID_COMMAND_PROMPT = "marketplace-integrations-command-prompt-normalization"
+_RID_BUNDLE_LAYOUT = "install-deployment-bundle-native-layout"
 
 
 _PLUGIN_LAYOUT = "src/apm_cli/bundle/plugin_layout.py"
+_LOCAL_BUNDLE_PATHS = "src/apm_cli/install/local_bundle_paths.py"
+_INSTALL_SERVICES = "src/apm_cli/install/services.py"
+_TARGET_NAME_COMPARISON = re.compile(r"\btarget\.name\s*(?:==|!=)|(?:==|!=)\s*target\.name\b")
 
 
-def _check_command_prompt_normalization(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Plugin command filename consumers must route through plugin_layout."""
+def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Local-bundle layout lowering must stay target-profile driven."""
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
-    owner_definition = re.compile(r"^def plugin_command_prompt_name\(")
-    count = _count_across(
-        provider,
-        inv,
-        _RID_COMMAND_PROMPT,
-        _src_python(provider),
-        owner_definition,
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _PLUGIN_LAYOUT,
+            (
+                "class PluginDirSpec:",
+                "PLUGIN_LAYOUT: dict[str, PluginDirSpec]",
+                '"commands": PluginDirSpec(',
+                '("commands", "prompts")',
+                "plugin_command_prompt_name",
+            ),
+            "plugin_layout must own plugin-native directory and filename lowering data",
+        )
     )
-    if count != 1:
-        findings.append(
-            violation(
-                _RID_COMMAND_PROMPT,
-                _PLUGIN_LAYOUT,
-                f"plugin_command_prompt_name must be defined exactly once, found {count}",
-            )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _LOCAL_BUNDLE_PATHS,
+            (
+                "def _lower_to_target(",
+                "PLUGIN_LAYOUT.get(head)",
+                "for primitive_kind in spec.primitive_kinds:",
+                "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
+            ),
+            "local bundle deployment must route through PLUGIN_LAYOUT and TargetProfile.primitives",
         )
-    for path, call in (
-        (_PLUGIN_PARSER, "plugin_command_prompt_name(source_file.name)"),
-        (
-            "src/apm_cli/install/local_bundle_paths.py",
-            "plugin_command_prompt_name(command_parts[-1])",
-        ),
-    ):
-        findings.extend(
-            _require_subs(
-                provider,
-                inv,
-                _RID_COMMAND_PROMPT,
-                path,
-                (call,),
-                "Plugin command filename consumers must route through plugin_layout",
-            )
-        )
+    )
+    for path in (_LOCAL_BUNDLE_PATHS, _INSTALL_SERVICES):
+        facts, failures = checked_facts(provider, path, _RID_BUNDLE_LAYOUT, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        for number, line in enumerate(facts.lines, start=1):
+            if _TARGET_NAME_COMPARISON.search(line):
+                findings.append(
+                    violation(
+                        _RID_BUNDLE_LAYOUT,
+                        path,
+                        "Local bundle lowering must not branch on target.name; use TargetProfile.primitives",
+                        line=number,
+                    )
+                )
     return tuple(findings)
 
 
@@ -435,11 +451,11 @@ RULES: tuple[Rule, ...] = (
         check=_check_legacy_skill_membership,
     ),
     Rule(
-        id=_RID_COMMAND_PROMPT,
+        id=_RID_BUNDLE_LAYOUT,
         group=GROUP,
-        guard_ids=(_RID_COMMAND_PROMPT,),
-        description="Plugin command filename normalization stays owned by bundle/plugin_layout.py.",
-        check=_check_command_prompt_normalization,
+        guard_ids=(_RID_BUNDLE_LAYOUT,),
+        description="Local bundle layout lowering stays owned by bundle/plugin_layout.py.",
+        check=_check_bundle_native_layout,
     ),
     Rule(
         id=_RID_NATIVE,

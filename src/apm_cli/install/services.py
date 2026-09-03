@@ -32,6 +32,7 @@ from .exec_gate import check_executable_approval
 from .exec_gate import plugin_bin_deployable as _plugin_bin_deployable
 from .exec_gate import resolve_bin_skip as _resolve_bin_skip
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
+from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
@@ -1018,6 +1019,17 @@ def integrate_local_bundle(
                 target=target,
             )
             if _deploy_rel is None:
+                if _skip_warning := _bundle_skip_warning(
+                    _rel_norm,
+                    _allowed_deploy_prefixes,
+                    _known_deploy_prefixes,
+                    target=target,
+                ):
+                    if diagnostics is not None:
+                        diagnostics.warn(message=_skip_warning, package=str(slug))
+                    elif logger is not None:
+                        logger.warning(_skip_warning)
+                    skipped += 1
                 continue
             _first_seg = _deploy_rel.split("/", 1)[0] if "/" in _deploy_rel else ""
             if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
@@ -1052,14 +1064,6 @@ def integrate_local_bundle(
                 dest = stage_root / _rel_under_instructions
                 deploy_root = stage_root
             else:
-                # Canvas extensions are Copilot-only.  A plugin bundle is
-                # target-agnostic, so guard against depositing an
-                # ``extensions/`` tree into a non-Copilot client root
-                # (e.g. ``.claude/extensions/``).  Skip silently for other
-                # targets; the trust filter above already removed these
-                # entries entirely when canvas was not trusted.
-                if _first_seg.lower() == "extensions" and target.name != "copilot":
-                    continue
                 # Route the file to the correct deploy root.  If the first
                 # path segment matches a primitive with an explicit
                 # ``deploy_root`` (e.g. ``skills/`` -> ``.agents/``), use

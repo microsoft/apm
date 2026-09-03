@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
-from ..bundle.plugin_layout import plugin_command_prompt_name
 from ..utils.path_security import PathTraversalError, validate_path_segments
 
 if TYPE_CHECKING:
     from ..bundle.local_bundle import LocalBundleInfo
     from ..integration.targets import TargetProfile
+
+_APM_PRIMITIVE_SUFFIXES = (
+    ".instructions.md",
+    ".prompt.md",
+    ".agent.md",
+    ".mdc",
+    ".toml",
+    ".json",
+    ".md",
+)
+
+_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})
 
 
 def bundle_pack_files(bundle_info: LocalBundleInfo) -> dict[str, str]:
@@ -83,6 +95,44 @@ def bundle_deploy_relative_path(
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root."""
     validate_path_segments(rel_path, context="bundle deploy path")
+    deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
+    if deploy_rel is None:
+        return None
+    return _lower_to_target(deploy_rel, target)
+
+
+def bundle_deploy_skip_warning(
+    rel_path: str,
+    allowed_prefixes: frozenset[str],
+    known_deploy_prefixes: frozenset[str],
+    *,
+    target: TargetProfile | None = None,
+) -> str | None:
+    """Return an explicit warning for a deliberately skipped bundle path."""
+    validate_path_segments(rel_path, context="bundle deploy path")
+    deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
+    if deploy_rel is None:
+        return None
+    route = _plugin_layout_route(deploy_rel, target)
+    if route is None:
+        return None
+    _head, _primitive_kind, _spec, mapping = route
+    if mapping.format_id not in _UNSUPPORTED_PLUGIN_FORMAT_IDS:
+        return None
+    return (
+        f"Skipped packed bundle path {deploy_rel!r} for target {target.name}: "
+        f"local bundle install cannot convert plugin-native files to "
+        f"{mapping.format_id} ({mapping.extension}) yet. Repack for that "
+        "target or install from source."
+    )
+
+
+def _deploy_relative_candidate(
+    rel_path: str,
+    allowed_prefixes: frozenset[str],
+    known_deploy_prefixes: frozenset[str],
+) -> str | None:
+    """Strip any target deploy root prefix from a bundle path."""
     namespace_prefix = f"{COM_MICROSOFT_APM_NAMESPACE}/"
     if rel_path.startswith(namespace_prefix):
         rel_path = rel_path.removeprefix(namespace_prefix)
@@ -93,21 +143,64 @@ def bundle_deploy_relative_path(
     if matched_prefixes and not allowed_matches:
         return None
     matched_prefix = max(allowed_matches, key=len, default="")
-    deploy_rel = rel_path[len(matched_prefix) :] if matched_prefix else rel_path
-    return _retarget_copilot_command(deploy_rel, target)
+    return rel_path[len(matched_prefix) :] if matched_prefix else rel_path
 
 
-def _retarget_copilot_command(rel_path: str, target: TargetProfile | None) -> str:
-    """Map Claude plugin commands to Copilot prompt paths."""
-    if target is None or target.name != "copilot" or not rel_path.startswith("commands/"):
+def _lower_to_target(rel_path: str, target: TargetProfile | None) -> str | None:
+    """Lower a plugin-native bundle path into one target's deploy layout."""
+    if target is None or "/" not in rel_path:
         return rel_path
-    prompt_mapping = target.primitives.get("prompts")
-    if prompt_mapping is None:
-        return rel_path
-    command_path = rel_path.removeprefix("commands/")
-    command_parts = command_path.split("/")
-    prompt_name = plugin_command_prompt_name(command_parts[-1])
-    if prompt_name == command_parts[-1] and not prompt_name.endswith(prompt_mapping.extension):
-        return rel_path
-    command_parts[-1] = prompt_name
-    return f"{prompt_mapping.subdir}/{'/'.join(command_parts)}"
+    route = _plugin_layout_route(rel_path, target)
+    if route is None:
+        from ..bundle.plugin_layout import PLUGIN_LAYOUT
+
+        head = rel_path.split("/", 1)[0]
+        if head not in PLUGIN_LAYOUT:
+            return rel_path
+        if head == "instructions" and target.compile_family:
+            return rel_path
+        return None
+    _head, _primitive_kind, spec, mapping = route
+    if mapping.format_id in _UNSUPPORTED_PLUGIN_FORMAT_IDS:
+        return None
+    parts = rel_path.split("/", 1)[1].split("/")
+    parts[-1] = _retarget_basename(parts[-1], mapping, spec.apm_basename_fn)
+    lowered_tail = "/".join(parts)
+    if not mapping.subdir:
+        return lowered_tail
+    return f"{mapping.subdir}/{lowered_tail}"
+
+
+def _plugin_layout_route(
+    rel_path: str, target: TargetProfile | None
+) -> tuple[str, str, Any, Any] | None:
+    """Return the plugin layout spec and target mapping for a bundle path."""
+    if target is None or "/" not in rel_path:
+        return None
+    from ..bundle.plugin_layout import PLUGIN_LAYOUT
+
+    head = rel_path.split("/", 1)[0]
+    spec = PLUGIN_LAYOUT.get(head)
+    if spec is None:
+        return None
+    for primitive_kind in spec.primitive_kinds:
+        mapping = target.primitives.get(primitive_kind)
+        if mapping is not None:
+            return head, primitive_kind, spec, mapping
+    return None
+
+
+def _retarget_basename(name: str, mapping: Any, apm_basename_fn: Callable[[str], str]) -> str:
+    """Retarget a plugin-native file basename through a PrimitiveMapping."""
+    extension = mapping.extension
+    if not extension or extension.startswith("/"):
+        return name
+    if not extension.startswith("."):
+        return extension
+    apm_name = apm_basename_fn(name)
+    base_name = apm_name
+    for suffix in _APM_PRIMITIVE_SUFFIXES:
+        if base_name.endswith(suffix):
+            base_name = base_name[: -len(suffix)]
+            break
+    return f"{base_name}{extension}"

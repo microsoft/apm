@@ -1,6 +1,23 @@
 """Plugin-native source-layout conventions."""
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+
+
+def _identity(name: str) -> str:
+    """Return *name* unchanged."""
+    return name
+
+
+@dataclass(frozen=True)
+class PluginDirSpec:
+    """How one plugin-native root lowers into APM primitive space."""
+
+    plugin_dir: str
+    primitive_kinds: tuple[str, ...]
+    apm_basename_fn: Callable[[str], str]
+
 
 PLUGIN_ROOT_DIRS = (
     "agents",
@@ -31,3 +48,13 @@ def plugin_command_prompt_name(name: str) -> str:
     if name.endswith(".md"):
         return f"{name[: -len('.md')]}.prompt.md"
     return name
+
+
+PLUGIN_LAYOUT: dict[str, PluginDirSpec] = {
+    "agents": PluginDirSpec("agents", ("agents",), _identity),
+    "skills": PluginDirSpec("skills", ("skills",), _identity),
+    "commands": PluginDirSpec("commands", ("commands", "prompts"), plugin_command_prompt_name),
+    "instructions": PluginDirSpec("instructions", ("instructions",), _identity),
+    "extensions": PluginDirSpec("extensions", ("canvas",), _identity),
+    "hooks": PluginDirSpec("hooks", ("hooks",), _identity),
+}

@@ -65,6 +65,16 @@
       "guards": ["install-deployment-source-plan"]
     },
     {
+      "id": "bundle-native-layout-lowering",
+      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout",
+      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name) consumed by install/local_bundle_paths.py (_lower_to_target)",
+      "selectors": [
+        "src/apm_cli/bundle/plugin_layout.py",
+        "src/apm_cli/install/local_bundle_paths.py"
+      ],
+      "guards": ["install-deployment-bundle-native-layout"]
+    },
+    {
       "id": "install-invocation-option-defaults",
       "decision": "Install invocation option defaults",
       "owner": "install/request.py (InstallRequest)",

@@ -237,8 +237,8 @@ class TestInstallLocalBundleE2E:
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         # copilot project-scope root_dir is ".github"; skills route to ".agents"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
-        assert (project / ".github" / "agents" / "reviewer.md").is_file()
-        assert (project / ".github" / "instructions" / "style.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.agent.md").is_file()
+        assert (project / ".github" / "instructions" / "style.instructions.md").is_file()
 
     def test_install_packed_claude_commands_to_copilot_prompts(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -275,7 +275,7 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
-        assert (project / ".github" / "agents" / "reviewer.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.agent.md").is_file()
 
     def test_install_local_bundle_from_zip(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -295,8 +295,8 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
-        assert (project / ".github" / "agents" / "reviewer.md").is_file()
-        assert (project / ".github" / "instructions" / "style.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.agent.md").is_file()
+        assert (project / ".github" / "instructions" / "style.instructions.md").is_file()
 
     def test_install_local_bundle_from_pack_tar_gz(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -395,7 +395,7 @@ class TestInstallLocalBundleE2E:
         # copilot routes skills to ".agents" ; claude root_dir = ".claude"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
         assert (project / ".claude" / "skills" / "coding" / "SKILL.md").is_file()
-        assert (project / ".github" / "agents" / "reviewer.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.agent.md").is_file()
         assert (project / ".claude" / "agents" / "reviewer.md").is_file()
 
     def test_install_local_bundle_auto_detect_target(
@@ -436,11 +436,12 @@ class TestInstallLocalBundleE2E:
         )
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        deployed_paths = {
+            "skills/coding/SKILL.md": project / ".agents" / "skills" / "coding" / "SKILL.md",
+            "agents/reviewer.md": project / ".github" / "agents" / "reviewer.agent.md",
+        }
         for rel, expected_content in files.items():
-            # copilot routes ``skills/`` to ``.agents/``; other primitives
-            # stay under ``.github/``.
-            root = ".agents" if rel.startswith("skills/") else ".github"
-            deployed = project / root / rel
+            deployed = deployed_paths[rel]
             assert deployed.is_file(), f"missing {deployed}"
             assert deployed.read_text(encoding="utf-8") == expected_content
 
@@ -1099,8 +1100,8 @@ class TestInstallLocalBundleIssue1207:
                 "copilot",
                 [
                     ".agents/skills/coding/SKILL.md",
-                    ".github/agents/reviewer.md",
-                    ".github/instructions/style.md",
+                    ".github/agents/reviewer.agent.md",
+                    ".github/instructions/style.instructions.md",
                 ],
             ),
             (
@@ -1108,7 +1109,7 @@ class TestInstallLocalBundleIssue1207:
                 [
                     ".claude/skills/coding/SKILL.md",
                     ".claude/agents/reviewer.md",
-                    ".claude/instructions/style.md",
+                    ".claude/rules/style.md",
                 ],
             ),
             (
@@ -1116,7 +1117,7 @@ class TestInstallLocalBundleIssue1207:
                 [
                     ".agents/skills/coding/SKILL.md",
                     ".cursor/agents/reviewer.md",
-                    ".cursor/instructions/style.md",
+                    ".cursor/rules/style.mdc",
                 ],
             ),
             (
@@ -1131,7 +1132,7 @@ class TestInstallLocalBundleIssue1207:
                 "codex",
                 [
                     ".agents/skills/coding/SKILL.md",
-                    ".codex/agents/reviewer.md",
+                    ".codex/agents/reviewer.toml",
                     "apm_modules/test-plugin/.apm/instructions/style.md",
                 ],
             ),
@@ -1220,8 +1221,8 @@ class TestInstallLocalBundleIssue1207:
         result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
 
         assert result.exit_code == 0, f"stdout={result.output!r}"
-        # copilot side: instructions deploy verbatim to .github/instructions.
-        assert (project / ".github" / "instructions" / "style.md").is_file()
+        # copilot side: instructions deploy to the target's native suffix.
+        assert (project / ".github" / "instructions" / "style.instructions.md").is_file()
         # opencode side: instructions staged for apm compile.
         assert (
             project / "apm_modules" / "test-plugin" / ".apm" / "instructions" / "style.md"
