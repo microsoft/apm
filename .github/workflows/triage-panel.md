@@ -60,9 +60,11 @@ on:
         description: "Optional: specific issue number to triage (overrides sweep). Leave blank to run the daily sweep on demand."
         required: false
         type: string
+  labels: [status/needs-triage]
   roles: [admin, maintainer, write]
 
-# Label-name + issue-state gate for the `issues.labeled` fast path.
+# Author + issue-state gate for the `issues.labeled` fast path.
+# `on.labels` rejects unrelated label events before a runner starts.
 # gh-aw propagates this top-level `if:` to BOTH `pre_activation` and
 # `activation`, so unmatched events render as a clean gray Skipped
 # status (no failed CI check, no runner cold-start). schedule and
@@ -71,14 +73,10 @@ on:
 #
 # Previously this gate lived in an `on.steps:` step that called `exit 1`
 # on every non-matching label change, which marked each unrelated
-# `issues.labeled` event as a Failed run on the CI dashboard. Replace
-# with `on.labels: [status/needs-triage]` once gh-aw releases a version
-# that supports it on `issues` (see github/gh-aw ADR-28737, currently
-# unreleased post-v0.71.1).
+# `issues.labeled` event as a Failed run on the CI dashboard.
 if: >-
   ${{ github.event_name != 'issues'
-      || (github.event.label.name == 'status/needs-triage'
-          && github.event.issue.user.type != 'Bot'
+      || (github.event.issue.user.type != 'Bot'
           && github.event.issue.locked != true
           && github.event.issue.state == 'open') }}
 
