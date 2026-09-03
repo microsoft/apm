@@ -57,16 +57,19 @@ picks up everything under `.apm/`, and deploys it into `.github/` and
 `copilot` target, so every contributor gets that same tree regardless of
 which harness their own machine signals.
 
-Working in a different harness? Opt in to its deploy root as well:
+To deploy to a different harness for one install, first exclude that
+harness's generated root locally, then override the pinned target:
 
 ```bash
+printf '.claude/\n' >> "$(git rev-parse --git-path info/exclude)"
 apm install --target claude   # or cursor, codex, gemini, opencode, ...
 ```
 
-`.gitignore` keeps that output untracked. It does add the deploy paths to
-`apm.lock.yaml`; leave that change uncommitted. Either way, your harness
-(Claude Code, GitHub Copilot CLI, Cursor, OpenCode, Codex, Gemini, ...)
-can then discover and invoke the skills by name.
+The local exclusion keeps generated files out of `git status` without hiding
+harness configuration from every contributor. The explicit-target install
+still adds its deploy paths to `apm.lock.yaml`; leave that change uncommitted.
+Your harness (Claude Code, GitHub Copilot CLI, Cursor, OpenCode, Codex,
+Gemini, ...) can then discover and invoke the skills by name.
 
 For most PRs, two of those skills carry most of the weight:
 
