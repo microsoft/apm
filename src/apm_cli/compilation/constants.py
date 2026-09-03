@@ -5,6 +5,8 @@ avoid timestamps in generated artifacts to guarantee byte-level idempotency; a
 deterministic Build ID (content hash) is substituted post-generation.
 """
 
+import codecs
+
 # Constitution injection markers
 CONSTITUTION_MARKER_BEGIN = "<!-- SPEC-KIT CONSTITUTION: BEGIN -->"
 CONSTITUTION_MARKER_END = "<!-- SPEC-KIT CONSTITUTION: END -->"
@@ -28,3 +30,9 @@ def has_generated_marker_header(content: str, markers: tuple[str, ...]) -> bool:
     """Return whether an accepted ownership marker is an exact header line."""
     header_lines = {line.strip() for line in content.splitlines()[:5]}
     return any(marker in header_lines for marker in markers)
+
+
+def decode_utf8_prefix(content: bytes) -> str:
+    """Decode a prefix strictly while buffering an incomplete final codepoint."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    return decoder.decode(content, final=False)

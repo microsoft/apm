@@ -31,11 +31,13 @@ from .constants import (
     AGENTS_MD_GENERATED_MARKER,
     BUILD_ID_PLACEHOLDER,
     DISTRIBUTED_AGENTS_MD_GENERATED_MARKER,
+    decode_utf8_prefix,
     has_generated_marker_header,
 )
 from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
 from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
+from .managed_section import ManagedSectionError
 from .template_builder import (
     TemplateData,
     build_conditional_sections,
@@ -886,13 +888,19 @@ class AgentsCompiler:
         rel = portable_relpath(root_claude_md, self.base_dir)
         if not root_claude_md.exists():
             return StaleClaudeDetection(root_claude_md, rel, False, False, None)
+        if root_claude_md.is_symlink():
+            return StaleClaudeDetection(
+                root_claude_md,
+                rel,
+                True,
+                False,
+                f"Retained {rel}: root context symlinks are not removed by --clean.",
+            )
         try:
             ensure_path_within(root_claude_md, self.base_dir)
             with root_claude_md.open("rb") as fh:
                 # CLAUDE_HEADER is emitted on the first line; 4 KiB is ample.
-                content = fh.read(4096).decode(
-                    "utf-8"
-                )  # strict; raises UnicodeDecodeError on invalid bytes
+                content = decode_utf8_prefix(fh.read(4096))
         except (OSError, PathTraversalError, UnicodeDecodeError) as exc:
             return StaleClaudeDetection(
                 root_claude_md, rel, True, False, f"Could not read {rel}: {exc!s}"
@@ -992,11 +1000,13 @@ class AgentsCompiler:
             primitives, placement_map, claude_config
         )
 
-        protected_claude_paths = {
-            path
-            for path in claude_result.content_map
-            if self._hand_authored_root_context_blocks_write(path)
-        }
+        root_claude_path = self.base_dir / "CLAUDE.md"
+        protected_claude_paths = (
+            {root_claude_path}
+            if root_claude_path in claude_result.content_map
+            and self._hand_authored_root_context_blocks_write(root_claude_path)
+            else set()
+        )
         if protected_claude_paths:
             claude_result.content_map = {
                 path: content
@@ -1777,11 +1787,17 @@ class AgentsCompiler:
             content (str): Content to write.
             config (CompilationConfig): Compilation configuration.
         """
+        root_agents_path = self.base_dir / "AGENTS.md"
         if (
             config.agents_md_mode != "managed_section"
+            and agents_path == root_agents_path
             and self._hand_authored_root_context_blocks_write(agents_path)
         ):
             return None
+        if config.agents_md_mode == "managed_section" and agents_path.is_symlink():
+            raise ManagedSectionError(
+                f"{agents_path} is a symlink. Managed-section output must be a regular file."
+            )
         try:
             ensure_path_within(agents_path, self.base_dir)
             deploy_inventory = self._deploy_inventory or CompileInventory.collect(self.base_dir)
@@ -1873,7 +1889,7 @@ class AgentsCompiler:
         try:
             ensure_path_within(path, self.base_dir)
             with path.open("rb") as handle:
-                prefix = handle.read(4096).decode("utf-8")
+                prefix = decode_utf8_prefix(handle.read(4096))
         except (OSError, PathTraversalError, UnicodeDecodeError) as exc:
             self._protected_root_context_paths.add(path)
             self.warnings.append(

@@ -854,6 +854,8 @@ class DistributedAgentsCompiler:
         files entirely into memory.  Returns False on any OSError (the caller
         should skip the file).
         """
+        if path.is_symlink():
+            return False
         try:
             with path.open("rb") as fh:
                 prefix = fh.read(4096).decode("utf-8", errors="replace")

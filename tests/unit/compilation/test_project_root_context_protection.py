@@ -11,7 +11,7 @@ from apm_cli.commands.compile.cli import (
     _report_distributed_live_success,
     _report_protected_no_write,
 )
-from apm_cli.commands.compile.watcher import _report_retained_watch_outputs
+from apm_cli.commands.compile.watcher import APMFileHandler, _report_retained_watch_outputs
 from apm_cli.compilation.agents_compiler import AgentsCompiler
 from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
 from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
@@ -100,14 +100,43 @@ def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
     logger = Mock()
     result = Mock(
         warnings=["Protected AGENTS.md: hand-authored file will not be overwritten."],
-        stats={"root_context_files_protected": 1},
+        stats={
+            "agents_files_written": 1,
+            "root_context_files_protected": 1,
+        },
     )
 
-    retained = _report_retained_watch_outputs(logger, result)
+    retained = _report_retained_watch_outputs(logger, result, dry_run=False)
 
     assert retained
     logger.warning.assert_called_once()
     assert "retained 1 hand-authored root file" in logger.progress.call_args.args[0]
+    assert "generated 1 other output file" in logger.progress.call_args.args[0]
+
+
+def test_watch_recompile_retains_hand_authored_root_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real watcher-to-compiler path must surface retained roots."""
+    _seed_project(tmp_path)
+    logger = Mock()
+    monkeypatch.chdir(tmp_path)
+    handler = APMFileHandler(
+        output="AGENTS.md",
+        chatmode=None,
+        no_links=False,
+        dry_run=False,
+        logger=logger,
+    )
+
+    handler._recompile(str(tmp_path / ".apm" / "instructions" / "standards.instructions.md"))
+
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
+    warning_text = " ".join(call.args[0] for call in logger.warning.call_args_list)
+    assert "Protected AGENTS.md" in warning_text
+    progress_text = " ".join(call.args[0] for call in logger.progress.call_args_list)
+    assert "retained" in progress_text
 
 
 def test_mixed_outcome_reports_retained_and_nested_skipped_outputs() -> None:
@@ -352,6 +381,24 @@ def test_generated_claude_root_remains_replaceable_as_explicit_output(
     assert AGENTS_MD_GENERATED_MARKER in claude_path.read_text(encoding="utf-8")
 
 
+def test_claude_only_single_file_compile_does_not_finalize_agents_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Claude-only target must not route its preview through AGENTS.md finalization."""
+    _seed_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--target", "claude", "--single-agents"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
+
+
 def test_case_variant_custom_symlink_remains_replaceable_on_sensitive_filesystem(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -433,10 +480,12 @@ def test_distributed_compile_retains_external_root_agents_symlink(
 
 
 @pytest.mark.parametrize("dangling", [False, True])
+@pytest.mark.parametrize("single_agents", [False, True])
 def test_managed_section_rejects_root_agents_symlink(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     dangling: bool,
+    single_agents: bool,
 ) -> None:
     """Managed-section compilation must fail closed on root context symlinks."""
     _seed_project(tmp_path)
@@ -462,7 +511,10 @@ def test_managed_section_rejects_root_agents_symlink(
         )
     monkeypatch.chdir(tmp_path)
 
-    result = CliRunner().invoke(cli, ["compile", "--single-agents"])
+    args = ["compile"]
+    if single_agents:
+        args.append("--single-agents")
+    result = CliRunner().invoke(cli, args)
 
     assert result.exit_code == 1
     assert (tmp_path / "AGENTS.md").is_symlink()
@@ -487,6 +539,23 @@ def test_compile_retains_undecodable_root_context_and_explains_recovery(
     assert agents_path.read_bytes() == original
     assert "could not verify the APM-generated marker" in result.output
     assert "Fix file access, UTF-8 encoding, or path containment" in " ".join(result.output.split())
+
+
+def test_generated_marker_survives_multibyte_prefix_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid trailing codepoint split at byte 4096 must not hide ownership."""
+    _seed_project(tmp_path)
+    agents_path = tmp_path / "AGENTS.md"
+    header = f"# AGENTS.md\n{AGENTS_MD_GENERATED_MARKER}\n".encode()
+    agents_path.write_bytes(header + b"a" * (4095 - len(header)) + b"\xc3\xa9\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["compile", "--single-agents"])
+
+    assert result.exit_code == 0, result.output
+    assert "Protected AGENTS.md" not in result.output
 
 
 def test_blocked_single_file_does_not_report_constitution_as_applied(
@@ -547,6 +616,30 @@ def test_cleanup_marker_detection_requires_exact_header_lines(tmp_path: Path) ->
 
     assert not DistributedAgentsCompiler(tmp_path)._file_has_apm_marker(agents_path)
     assert not AgentsCompiler(str(tmp_path))._detect_stale_claude_md().has_marker
+
+
+def test_cleanup_retains_root_context_symlinks(tmp_path: Path) -> None:
+    """Cleanup marker detection must fail closed for root context symlinks."""
+    _seed_project(tmp_path)
+    agents_target = tmp_path / "generated-agents-target.md"
+    agents_target.write_text(
+        f"{DISTRIBUTED_AGENTS_MARKER}\nGenerated content.\n",
+        encoding="utf-8",
+    )
+    claude_target = tmp_path / "generated-claude-target.md"
+    claude_target.write_text(f"{CLAUDE_HEADER}\nGenerated content.\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").unlink()
+    (tmp_path / "CLAUDE.md").unlink()
+    try:
+        (tmp_path / "AGENTS.md").symlink_to(agents_target)
+        (tmp_path / "CLAUDE.md").symlink_to(claude_target)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+
+    assert not DistributedAgentsCompiler(tmp_path)._file_has_apm_marker(tmp_path / "AGENTS.md")
+    detection = AgentsCompiler(str(tmp_path))._detect_stale_claude_md()
+    assert not detection.has_marker
+    assert detection.read_error is not None
 
 
 def test_managed_section_rejects_external_agents_symlink(

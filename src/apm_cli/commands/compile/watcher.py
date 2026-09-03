@@ -58,16 +58,43 @@ def _format_target_label(
     return f"Compiling for {get_target_description(effective_target)}"
 
 
-def _report_retained_watch_outputs(logger: CommandLogger, result: Any) -> bool:
+def _report_retained_watch_outputs(
+    logger: CommandLogger,
+    result: Any,
+    *,
+    dry_run: bool,
+) -> bool:
     """Render protected root outcomes and returned warnings in watch mode."""
     for warning in result.warnings:
         logger.warning(warning)
+    if not result.success:
+        return False
     protected_count = int(result.stats.get("root_context_files_protected", 0) or 0)
     if not protected_count:
         return False
     noun = "file" if protected_count == 1 else "files"
+    if dry_run:
+        logger.progress(
+            f"Would retain {protected_count} hand-authored root {noun}; no files written.",
+            symbol="info",
+        )
+        return True
+    files_written = sum(
+        int(result.stats.get(key, 0) or 0)
+        for key in (
+            "agents_files_written",
+            "claude_files_written",
+            "gemini_files_written",
+            "copilot_root_instructions_written",
+        )
+    )
+    output_noun = "file" if files_written == 1 else "files"
+    generated_note = (
+        f" generated {files_written} other output {output_noun};" if files_written else ""
+    )
     logger.progress(
-        f"Compilation completed; retained {protected_count} hand-authored root {noun}.",
+        f"Compilation completed;{generated_note} retained {protected_count} "
+        f"hand-authored root {noun}.",
         symbol="info",
     )
     return True
@@ -172,7 +199,11 @@ class APMFileHandler:
 
             compiler = AgentsCompiler(".")
             result = compiler.compile(config, logger=self.logger)
-            retained_outputs = _report_retained_watch_outputs(self.logger, result)
+            retained_outputs = _report_retained_watch_outputs(
+                self.logger,
+                result,
+                dry_run=self.dry_run,
+            )
 
             if result.success:
                 if retained_outputs:
@@ -290,7 +321,7 @@ def _watch_mode(
 
         compiler = AgentsCompiler(".")
         result = compiler.compile(config)
-        retained_outputs = _report_retained_watch_outputs(logger, result)
+        retained_outputs = _report_retained_watch_outputs(logger, result, dry_run=dry_run)
 
         # NOTE: render_summary moved to the Ctrl+C teardown below so the
         # watch session emits ONE aggregate perf block at exit instead of

@@ -22,7 +22,7 @@ from ...core.target_catalog import (
     target_all_exclusion_help,
     target_help_fragment,
 )
-from ...core.target_detection import TargetParamType
+from ...core.target_detection import TargetParamType, should_compile_agents_md
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
 from ...utils.console import (
@@ -802,7 +802,6 @@ def _run_compilation(
             else:
                 _target_label = "multi-target"
             from ...core.target_detection import (
-                should_compile_agents_md,
                 should_compile_claude_md,
                 should_compile_gemini_md,
             )
@@ -845,7 +844,9 @@ def _run_compilation(
 
     if result.success:
         # Handle different compilation modes
-        if config.strategy == "distributed" and not single_agents:
+        if (config.strategy == "distributed" and not single_agents) or not should_compile_agents_md(
+            effective_target
+        ):
             # Distributed compilation results - output already shown by professional formatter
             # Just show final success message
             if dry_run:
