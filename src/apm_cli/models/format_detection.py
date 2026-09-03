@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from ..agent_plugins import AgentPluginDetection
     from .validation import PackageType
 
 from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
@@ -301,6 +302,13 @@ class AgentPluginDetector:
         from ..agent_plugins.loader import detect_agent_plugin
 
         detection = detect_agent_plugin(package_path)
+        return self.from_detection(detection)
+
+    @staticmethod
+    def from_detection(
+        detection: AgentPluginDetection | None,
+    ) -> AgentPluginFormatEvidence | None:
+        """Convert canonical Agent Plugin detection into planner evidence."""
         if detection is None:
             return None
         return AgentPluginFormatEvidence(
@@ -357,7 +365,12 @@ class PackageFormatRegistry:
     ) -> None:
         self._detectors = detectors if detectors is not None else _DEFAULT_DETECTORS
 
-    def detect(self, package_path: Path) -> DetectionReport:
+    def detect(
+        self,
+        package_path: Path,
+        *,
+        agent_plugin_detection: AgentPluginDetection | None = None,
+    ) -> DetectionReport:
         """Run all detectors against ``package_path`` and return the report."""
         apm_yml_ev: ApmYmlFormatEvidence | None = None
         skill_md_ev: SkillMdFormatEvidence | None = None
@@ -366,7 +379,10 @@ class PackageFormatRegistry:
         claude_plugin_ev: ClaudePluginFormatEvidence | None = None
 
         for detector in self._detectors:
-            result = detector.detect(package_path)
+            if isinstance(detector, AgentPluginDetector) and agent_plugin_detection is not None:
+                result = detector.from_detection(agent_plugin_detection)
+            else:
+                result = detector.detect(package_path)
             if isinstance(result, ApmYmlFormatEvidence):
                 apm_yml_ev = result
             elif isinstance(result, SkillMdFormatEvidence):

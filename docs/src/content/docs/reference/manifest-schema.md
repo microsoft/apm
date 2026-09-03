@@ -791,6 +791,11 @@ Created automatically by [`apm plugin init`](../cli/plugin/). Use [`apm install 
 apm install --dev owner/test-helpers
 ```
 
+Once this section contains an APM or MCP dependency, the root `apm.yml`
+becomes eligible and direct installs select the APM package layout over a
+co-located `plugin.json`. Keep the section empty when direct installs should
+select the plugin layout.
+
 Plain `apm install` (no flag) deploys both `dependencies` and
 `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation
 kicks in at `apm pack` (plugin format, the default). The local-content scanner

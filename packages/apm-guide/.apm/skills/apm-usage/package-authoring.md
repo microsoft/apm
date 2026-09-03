@@ -109,6 +109,9 @@ debug bridges, and other author-only servers in
 `devDependencies.mcp`. The root package receives both sections in its
 authoring environment; consumers of that package receive only
 `dependencies.mcp`, including when the package is nested transitively.
+Adding either kind of MCP dependency makes the root `apm.yml` eligible, so
+direct installs select the APM package layout over a co-located plugin
+manifest. Keep `apm.yml` metadata-only to preserve plugin selection.
 See [MCP dependency formats](dependencies.md#mcp-dependency-formats).
 
 ## Hook files

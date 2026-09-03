@@ -255,6 +255,8 @@ def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
 
 def detect_package_type(
     package_path: Path,
+    *,
+    agent_plugin_detection: AgentPluginDetection | None = None,
 ) -> tuple[PackageType, Path | None]:
     """Classify a package directory into a ``PackageType``.
 
@@ -285,7 +287,10 @@ def detect_package_type(
     """
     from .format_detection import NormalizationPlanner, PackageFormatRegistry
 
-    report = PackageFormatRegistry().detect(package_path)
+    report = PackageFormatRegistry().detect(
+        package_path,
+        agent_plugin_detection=agent_plugin_detection,
+    )
     pkg_type, plugin_json_path = NormalizationPlanner().plan(report)
     return pkg_type, plugin_json_path
 
@@ -374,13 +379,12 @@ def validate_apm_package(
     native_detection = agent_plugin_detection
     if native_detection is None:
         native_detection = detect_agent_plugin(package_path)
-    if native_detection is not None:
-        pkg_type = (
-            PackageType.AGENT_PLUGIN if native_detection.error is None else PackageType.INVALID
-        )
-        plugin_json_path = native_detection.manifest_path
-    else:
-        pkg_type, plugin_json_path = detect_package_type(package_path)
+    pkg_type, plugin_json_path = detect_package_type(
+        package_path,
+        agent_plugin_detection=native_detection,
+    )
+    if pkg_type not in {PackageType.AGENT_PLUGIN, PackageType.INVALID}:
+        native_detection = None
     result.package_type = pkg_type
 
     if pkg_type == PackageType.INVALID:

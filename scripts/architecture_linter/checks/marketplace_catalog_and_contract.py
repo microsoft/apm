@@ -476,10 +476,12 @@ def _check_component_ir(provider: FactsProvider, inv: frozenset[str]) -> tuple[V
             _VALIDATION,
             (
                 "agent_plugin_detection: AgentPluginDetection | None = None",
+                "pkg_type, plugin_json_path = detect_package_type(",
+                "agent_plugin_detection=native_detection",
                 "result.agent_plugin = plugin",
                 "detection.manifest_path.parent.resolve() != package_root",
             ),
-            "same-root detection reuse or cross-root rejection changed",
+            "validation must reuse detection while routing precedence through the planner",
         )
     )
     findings.extend(
@@ -518,7 +520,11 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             inv,
             _RID_CONTRACT,
             _LOCAL_BUNDLE,
-            ("if schema_id == PLUGIN_SCHEMA_ID:",),
+            (
+                "if schema_id == PLUGIN_SCHEMA_ID:",
+                "package_type, _ = detect_package_type(",
+                "if package_type != PackageType.AGENT_PLUGIN:",
+            ),
             "plugin schema routing must select exact schema IDs",
         )
     )

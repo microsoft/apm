@@ -100,9 +100,20 @@ def classify_plugin_manifest_schema(document: Mapping[str, Any]) -> PluginSchema
 def route_agent_plugin_package(package_root: Path) -> AgentPluginDetection | None:
     """Route one materialized package through canonical Agent Plugin admission."""
     from ..agent_plugins.loader import detect_agent_plugin
+    from ..models.validation import PackageType, detect_package_type
 
     detection = detect_agent_plugin(package_root)
-    if detection is not None and detection.error is not None:
+    if detection is None:
+        return None
+    package_type, _ = detect_package_type(
+        package_root,
+        agent_plugin_detection=detection,
+    )
+    if package_type != PackageType.AGENT_PLUGIN:
+        if package_type == PackageType.INVALID and detection.error is not None:
+            raise detection.error
+        return None
+    if detection.error is not None:
         raise detection.error
     return detection
 

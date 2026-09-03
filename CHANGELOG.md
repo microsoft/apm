@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project-root `.lsp.json` files remain unchanged for manual review, and target
   changes, package uninstall, and later executable denial remove only LSP
   entries that APM created. (#2733)
+- Repositories that publish plugin metadata alongside an eligible root
+  `apm.yml` now install as APM packages; metadata-only manifests continue to
+  select the plugin layout. (#2776)
 - `apm install` now preserves previously deployed skills when package
   integration is skipped instead of treating them as stale cleanup candidates.
   (#2758)

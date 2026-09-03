@@ -1278,6 +1278,21 @@ class TestDetectPackageType:
         assert pkg_type == PackageType.APM_PACKAGE
         assert plugin_path is None
 
+    def test_eligible_apm_yml_wins_during_agent_plugin_validation(self, tmp_path):
+        """Validation honors APM intent over a schema-bearing Agent Plugin."""
+        (tmp_path / ".apm").mkdir()
+        (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0")
+        (tmp_path / "plugin.json").write_text(
+            '{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",'
+            '"name":"test.plugin","version":"1.0.0"}'
+        )
+
+        result = validate_apm_package(tmp_path)
+
+        assert result.is_valid
+        assert result.package_type == PackageType.APM_PACKAGE
+        assert result.agent_plugin is None
+
     def test_hook_package_apm_yml_precedence(self, tmp_path):
         """apm.yml + hooks/ but no .apm/ -> INVALID (needs .apm/ for APM_PACKAGE)."""
         (tmp_path / "apm.yml").write_text("name: test")
