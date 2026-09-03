@@ -59,7 +59,7 @@ def install_local_bundle(
         check_target_mismatch,
         verify_bundle_integrity,
     )
-    from ..core.scope import InstallScope
+    from ..core.scope import InstallScope, get_source_root
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ..install.services import (
         enforce_agent_plugin_deployment_boundary,
@@ -87,6 +87,7 @@ def install_local_bundle(
 
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     project_root = Path.home() if global_ else Path.cwd()
+    source_root = get_source_root(scope)
 
     logger.start(f"Installing local bundle from {bundle_arg}")
 
@@ -183,7 +184,7 @@ def install_local_bundle(
         from ..policy.install_preflight import run_policy_preflight
 
         policy_fetch, _enforcement_active = run_policy_preflight(
-            project_root=project_root,
+            project_root=source_root,
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
             no_policy=no_policy,

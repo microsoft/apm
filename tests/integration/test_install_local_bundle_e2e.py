@@ -1375,6 +1375,42 @@ class TestInstallLocalBundleLsp:
             project / "out" / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
         ).exists()
 
+    def test_root_install_reads_source_policy_for_bundle_integrity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.policy.discovery import PolicyFetchResult
+        from apm_cli.policy.schema import ApmPolicy, IntegrityPolicy, SecurityPolicy
+
+        bundle = _make_plugin_bundle(
+            tmp_path / "source",
+            files={},
+            include_lockfile=False,
+        )
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        policy = ApmPolicy(security=SecurityPolicy(integrity=IntegrityPolicy(require_hashes=True)))
+
+        def discover_policy(project_root: Path, **_kwargs) -> PolicyFetchResult:
+            if project_root == project.resolve():
+                return PolicyFetchResult(policy=policy, source="test", outcome="found")
+            return PolicyFetchResult(policy=None, source="", outcome="absent")
+
+        with patch(
+            "apm_cli.policy.install_preflight.discover_policy_with_chain",
+            side_effect=discover_policy,
+        ):
+            result = _invoke_install(
+                project,
+                str(bundle),
+                "--root",
+                "out",
+                "--target",
+                "claude",
+                monkeypatch=monkeypatch,
+            )
+
+        assert result.exit_code == 1, result.output
+        assert "requires integrity hashes" in result.output
+
     def test_symlinked_lsp_metadata_directory_is_ignored(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

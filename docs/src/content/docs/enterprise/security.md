@@ -448,8 +448,8 @@ first-match-wins ladder:
 - **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
   shared with the team.
 - **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest
-  authority -- a machine-local override that can only narrow, never widen past
-  an org or project deny.
+  authority. `apm approve --user` can grant machine-local trust when no org or
+  project deny blocks it; `apm deny --user` narrows trust on one machine.
 
 Personal consent can never widen past an org deny, and the default (rung 7) is
 **gated pending approval** -- a package with executables and no opinion anywhere
