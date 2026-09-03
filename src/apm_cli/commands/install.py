@@ -1248,21 +1248,16 @@ def install(  # noqa: C901, PLR0913
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _root_redirect.__enter__()
     try:
-        # Create structured logger for install output early so exception
-        # handlers can always reference it (avoids UnboundLocalError if
-        # scope initialisation below throws).
+        # Construct the logger early so exception handlers can always use it.
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
-
         # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
         if not legacy_skill_paths:
             from ..integration.targets import should_use_legacy_skill_paths
 
             legacy_skill_paths = should_use_legacy_skill_paths()
 
-        # ----------------------------------------------------------------
         # Local bundles bypass dependency resolution and do not mutate apm.yml.
-        # ----------------------------------------------------------------
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
 
@@ -1359,11 +1354,9 @@ def install(  # noqa: C901, PLR0913
         if verbose:
             os.environ["APM_VERBOSE"] = "1"
 
-        # ----------------------------------------------------------------
         # --mcp branch (W3): when --mcp is set, route to the dedicated
         # MCP-add path.  We compute the post-`--` argv here BEFORE Click's
         # silent handling: see _split_argv_at_double_dash().
-        # ----------------------------------------------------------------
         _, command_argv = _split_argv_at_double_dash(_get_invocation_argv())
         # `packages` from Click already includes the post-`--` items; the
         # pre-`--` portion is what the user typed as positional packages.
