@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   select the plugin layout. (#2776)
 - Legacy lockfile synthesis now leaves shared `.agents/` deployment paths
   unattributed instead of assigning them to Copilot's `.github/` target. (#2774)
+- Packed Claude plugin commands now install as native Copilot
+  `.github/prompts/*.prompt.md` files instead of `.github/commands/*.md`.
+  (closes #2763) (#2778)
 - `apm install` now preserves previously deployed skills when package
   integration is skipped instead of treating them as stale cleanup candidates.
   (#2758)

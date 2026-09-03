@@ -240,6 +240,27 @@ class TestInstallLocalBundleE2E:
         assert (project / ".github" / "agents" / "reviewer.md").is_file()
         assert (project / ".github" / "instructions" / "style.md").is_file()
 
+    def test_install_packed_claude_commands_to_copilot_prompts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Install a packed Claude command as a native Copilot prompt."""
+        bundle = _make_plugin_bundle(
+            tmp_path / "src",
+            pack_target="claude",
+            files={"commands/test-command.md": "# Test Command\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_install(
+            project, str(bundle), "--target", "copilot", monkeypatch=monkeypatch
+        )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert (project / ".github/prompts/test-command.prompt.md").read_text(
+            encoding="utf-8"
+        ) == "# Test Command\n"
+        assert not (project / ".github/commands/test-command.md").exists()
+
     def test_install_local_bundle_from_tarball(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
