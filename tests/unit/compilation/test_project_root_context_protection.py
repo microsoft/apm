@@ -207,3 +207,36 @@ def test_marker_mentioned_in_body_does_not_grant_write_ownership(
     assert result.exit_code == 0, result.output
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == manual
     assert "Protected AGENTS.md" in result.output
+
+
+def test_managed_section_rejects_external_agents_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Managed-section reads must remain inside the compilation root."""
+    _seed_project(tmp_path)
+    external = tmp_path.parent / f"{tmp_path.name}-external-agents.md"
+    external.write_text(
+        "<!-- apm:start -->\nExternal content.\n<!-- apm:end -->\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").unlink()
+    try:
+        (tmp_path / "AGENTS.md").symlink_to(external)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+    with (tmp_path / "apm.yml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            "compilation:\n"
+            "  agents_md:\n"
+            "    mode: managed_section\n"
+            '    start_marker: "<!-- apm:start -->"\n'
+            '    end_marker: "<!-- apm:end -->"\n'
+        )
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["compile", "--single-agents"])
+
+    assert result.exit_code == 1
+    assert "Compilation failed with 1 errors" in result.output
+    assert external.read_text(encoding="utf-8").startswith("<!-- apm:start -->")

@@ -90,7 +90,12 @@ def _display_single_file_summary(
         except Exception:
             output_details = f"{output_path.name}"
 
-        output_status = "* RETAINED" if write_blocked else "* SUCCESS"
+        if write_blocked and dry_run:
+            output_status = "* WOULD RETAIN"
+        elif write_blocked:
+            output_status = "* RETAINED"
+        else:
+            output_status = "* SUCCESS"
         table.add_row("Output", output_status, output_details)
         console.print(table)
     except Exception:
@@ -603,6 +608,22 @@ def _run_watch_mode(
     )
 
 
+def _report_distributed_dry_run_protection(
+    logger: CommandLogger,
+    stats: dict[str, object],
+) -> None:
+    """Report root files retained by a distributed dry run."""
+    protected_count = int(stats.get("root_context_files_protected", 0))
+    if not protected_count:
+        return
+    noun = "file" if protected_count == 1 else "files"
+    logger.progress(
+        f"Would retain {protected_count} hand-authored root {noun}; "
+        "no protected files would be generated.",
+        symbol="info",
+    )
+
+
 def _run_compilation(
     logger: CommandLogger,
     target: str | list[str] | None,
@@ -761,8 +782,7 @@ def _run_compilation(
             # Distributed compilation results - output already shown by professional formatter
             # Just show final success message
             if dry_run:
-                # Success message for dry run already included in formatter output
-                pass
+                _report_distributed_dry_run_protection(logger, result.stats)
             else:
                 # Defense-in-depth (#820): don't claim "completed
                 # successfully" when zero files were emitted.  With
@@ -930,7 +950,7 @@ def _run_compilation(
                     write_blocked=agents_write_blocked,
                 )
 
-                if dry_run:
+                if dry_run and not agents_write_blocked:
                     preview = final_content[:500] + ("..." if len(final_content) > 500 else "")
                     _rich_panel(preview, title=" Generated Content Preview", style="cyan")
                 elif not agents_write_blocked:
