@@ -644,9 +644,13 @@ def _report_distributed_live_success(
     if nested_skips:
         generated_noun = "file" if agents_generated == 1 else "files"
         skipped_noun = "placement" if nested_skips == 1 else "placements"
+        protected_note = ""
+        if protected_count:
+            protected_noun = "file" if protected_count == 1 else "files"
+            protected_note = f"; retained {protected_count} hand-authored root {protected_noun}"
         logger.success(
             f"Compiled {files_written} output {output_noun} "
-            f"({agents_generated} AGENTS.md {generated_noun}); "
+            f"({agents_generated} AGENTS.md {generated_noun}){protected_note}; "
             f"skipped {nested_skips} nested Git repository {skipped_noun}.",
             symbol="check",
         )

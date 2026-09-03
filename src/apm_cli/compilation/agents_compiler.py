@@ -348,6 +348,7 @@ class AgentsCompiler:
                 ``$PWD``.
         """
         self.base_dir, self.source_dir = resolve_base_and_source_dirs(base_dir, source_dir)
+        self._resolved_base_dir = self.base_dir.resolve()
         self.warnings: list[str] = []
         self.errors: list[str] = []
         self._logger = None
@@ -1774,7 +1775,7 @@ class AgentsCompiler:
             config (CompilationConfig): Compilation configuration.
         """
         try:
-            ensure_path_within(agents_path, self.base_dir)
+            resolved_agents_path = ensure_path_within(agents_path, self.base_dir)
             deploy_inventory = self._deploy_inventory or CompileInventory.collect(self.base_dir)
             nested_root = deploy_inventory.nested_repository_root_for(agents_path.parent)
             if nested_root is not None:
@@ -1791,7 +1792,9 @@ class AgentsCompiler:
                 from .distributed_compiler import AGENTS_MD_GENERATED_MARKER
 
                 if self._hand_authored_root_context_blocks_write(
-                    agents_path, AGENTS_MD_GENERATED_MARKER
+                    agents_path,
+                    AGENTS_MD_GENERATED_MARKER,
+                    resolved_path=resolved_agents_path,
                 ):
                     return None
 
@@ -1821,17 +1824,29 @@ class AgentsCompiler:
         except OSError as e:
             raise OSError(f"Failed to prepare distributed AGENTS.md file {agents_path}: {e!s}")  # noqa: B904
 
-    def _hand_authored_root_context_blocks_write(self, path: Path, marker: str) -> bool:
+    def _hand_authored_root_context_blocks_write(
+        self,
+        path: Path,
+        marker: str,
+        *,
+        resolved_path: Path | None = None,
+    ) -> bool:
         """Return whether an existing project-root file must be retained."""
-        if (
-            path.parent.resolve() != self.base_dir.resolve()
-            or path.name not in {"AGENTS.md", "CLAUDE.md"}
-            or not path.is_file()
-        ):
+        if not path.is_file():
             return False
         rel_path = portable_relpath(path, self.base_dir)
         try:
-            ensure_path_within(path, self.base_dir)
+            resolved = resolved_path or ensure_path_within(path, self.base_dir)
+            if resolved.parent != self._resolved_base_dir:
+                return False
+            canonical_paths = (
+                self._resolved_base_dir / "AGENTS.md",
+                self._resolved_base_dir / "CLAUDE.md",
+            )
+            if not any(
+                candidate.is_file() and path.samefile(candidate) for candidate in canonical_paths
+            ):
+                return False
             with path.open("rb") as handle:
                 prefix = handle.read(4096).decode("utf-8")
         except (OSError, PathTraversalError, UnicodeDecodeError) as exc:

@@ -98,10 +98,11 @@ IntelliJ-specific integration remains MCP-only. Use `apm install` or
 
 Project compilation protects root `AGENTS.md` and `CLAUDE.md` files, including
 destinations selected with `--root`. If an existing root file has no
-APM-generated marker, full-file compilation retains it and prints a warning.
-Live compiles leave the file unchanged; dry runs report that it would be
-retained without writing it. Delete or rename that file before compiling if
-generated output should replace it. For section-scoped `AGENTS.md` updates, see
+exact APM-generated marker line among its first five lines, full-file compilation
+retains it and prints a warning. Live compiles leave the file unchanged; dry
+runs report that it would be retained without writing it. Delete or rename that
+file before compiling if generated output should replace it. For section-scoped
+`AGENTS.md` updates, see
 [`compilation.agents_md`](../manifest-schema/#62-compilationagents_md).
 
 If a constitution or dependency imports still require `CLAUDE.md`, `--clean`

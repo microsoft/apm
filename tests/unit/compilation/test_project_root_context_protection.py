@@ -1,11 +1,13 @@
 """Regression tests for hand-authored project root context files."""
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.commands.compile.cli import _report_distributed_live_success
 from apm_cli.compilation.agents_compiler import AgentsCompiler
 from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
 from apm_cli.compilation.distributed_compiler import (
@@ -86,6 +88,26 @@ def test_partial_compile_reports_generated_and_retained_outputs(
 
     assert result.exit_code == 0, result.output
     assert "retained 1 hand-authored root file" in " ".join(result.output.split())
+
+
+def test_mixed_outcome_reports_retained_and_nested_skipped_outputs() -> None:
+    """A mixed summary must not hide either non-write outcome."""
+    logger = Mock()
+
+    _report_distributed_live_success(
+        logger,
+        {
+            "nested_git_placements_skipped": 1,
+            "root_context_files_protected": 1,
+        },
+        [],
+        files_written=1,
+        agents_generated=1,
+    )
+
+    message = logger.success.call_args.args[0]
+    assert "retained 1 hand-authored root file" in message
+    assert "skipped 1 nested Git repository placement" in message
 
 
 def test_compile_root_preserves_hand_authored_context(
@@ -212,6 +234,29 @@ def test_aliased_output_path_preserves_hand_authored_root_agents(
     assert result.exit_code == 0, result.output
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
     assert "Protected" in result.output
+
+
+def test_case_variant_output_preserves_root_agents_on_insensitive_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filesystem aliases that differ only by case must not bypass protection."""
+    _seed_project(tmp_path)
+    canonical = tmp_path / "AGENTS.md"
+    case_variant = tmp_path / "agents.md"
+    if not case_variant.exists() or not case_variant.samefile(canonical):
+        pytest.skip("fixture filesystem is case-sensitive")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--single-agents", "--output", "agents.md"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert canonical.read_text(encoding="utf-8") == _MANUAL_AGENTS
+    assert "Protected agents.md" in result.output
 
 
 def test_marker_mentioned_in_body_does_not_grant_write_ownership(

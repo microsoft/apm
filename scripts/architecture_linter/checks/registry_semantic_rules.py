@@ -174,7 +174,8 @@ _ROOT_CONTEXT_OWNER_FRAGMENTS = (
     "if self._hand_authored_root_context_blocks_write(path, CLAUDE_HEADER)",
     "and self._hand_authored_root_context_blocks_write(",
     "if self._hand_authored_root_context_blocks_write(\n"
-    "                    agents_path, AGENTS_MD_GENERATED_MARKER",
+    "                    agents_path,\n"
+    "                    AGENTS_MD_GENERATED_MARKER,",
 )
 
 _ROOT_CONTEXT_CLI_FRAGMENTS = (
@@ -183,7 +184,8 @@ _ROOT_CONTEXT_CLI_FRAGMENTS = (
 )
 
 _ROOT_CONTEXT_DUPLICATE_PATTERN = (
-    r"^\s*def\s+\w*(?:hand_authored.*root_context|root_context.*hand_authored)"
+    r"^\s*def\s+\w*(?:hand_authored.*root_context|root_context.*hand_authored"
+    r"|(?:replace|overwrite).*root|root.*(?:replace|overwrite))"
     r"\w*\s*\("
 )
 
