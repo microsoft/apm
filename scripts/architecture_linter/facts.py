@@ -544,6 +544,11 @@ class FactsProvider:
             self._file_facts[relative_path] = facts
         return facts
 
+    def lexical_lines(self, relative_path: str) -> tuple[tuple[str, ...], str | None]:
+        """Return cached source lines without parsing Python syntax."""
+        text, error = self.source_cache.read(relative_path)
+        return (tuple(text.splitlines()) if text is not None else (), error)
+
     @staticmethod
     def _should_spill(relative_path: str, facts: FileFacts) -> bool:
         """Return whether facts belong to the cold, high-volume test corpus."""

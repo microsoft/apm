@@ -100,16 +100,11 @@ def line_pattern_violations(
     compiled = re.compile(pattern, flags) if isinstance(pattern, str) else pattern
     findings: list[Violation] = []
     for path in paths:
-        facts, failures = checked_facts(
-            provider,
-            path,
-            rule_id,
-            require_python=path.endswith(".py"),
-        )
-        findings.extend(failures)
-        if failures:
+        lines, read_error = provider.lexical_lines(path)
+        if read_error is not None:
+            findings.append(violation(rule_id, path, f"required source unavailable: {read_error}"))
             continue
-        for number, line in enumerate(facts.lines, start=1):
+        for number, line in enumerate(lines, start=1):
             if exempt_marker is not None and exempt_marker in line:
                 continue
             match = compiled.search(line)

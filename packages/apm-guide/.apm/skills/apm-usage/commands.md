@@ -148,7 +148,9 @@ When `apm install` has already deployed instructions to `.claude/rules/`, `apm c
 or `CLAUDE.md` that lacks the APM-generated marker, including destinations
 selected with `--root`. Compile skips the hand-authored file and prints a
 warning. Delete or rename it before compiling if generated output should
-replace it.
+replace it. In `managed_section` mode (AGENTS.md only), compile updates only
+the explicit APM-owned block. See the
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#62-compilationagents_md).
 
 **Nested Git boundaries.** Compile does not discover, write, or clean content
 inside nested Git repositories or linked worktrees below its root. This also

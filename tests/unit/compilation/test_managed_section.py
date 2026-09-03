@@ -544,8 +544,8 @@ class TestManagedSectionDistributed:
 
         assert external_agents.read_text(encoding="utf-8") == "External guidance.\n"
 
-    def test_distributed_root_agents_md_full_mode_overwrites(self, tmp_path):
-        """Root AGENTS.md is fully overwritten when mode is 'full' (default)."""
+    def test_distributed_root_agents_md_full_mode_preserves_hand_authored(self, tmp_path):
+        """Full mode preserves an unmarked hand-authored root AGENTS.md."""
         from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
 
         root_agents = tmp_path / "AGENTS.md"
@@ -560,8 +560,9 @@ class TestManagedSectionDistributed:
         compiler._write_distributed_file(root_agents, "Completely new content.", config)
 
         written = root_agents.read_text()
-        assert written == "Completely new content."
-        assert "Old content" not in written
+        assert written == "Old content that should be replaced.\n"
+        assert compiler.warnings
+        assert "hand-authored file will not be overwritten" in compiler.warnings[0]
 
 
 class TestManagedSectionSingleAgents:

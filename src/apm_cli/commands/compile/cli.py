@@ -38,7 +38,9 @@ from .._helpers import (
 from .watcher import _watch_mode
 
 
-def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
+def _display_single_file_summary(
+    stats, c_status, c_hash, output_path, dry_run, write_blocked=False
+):
     """Display compilation summary table for single-file mode."""
     try:
         console = _get_console()
@@ -88,7 +90,8 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
         except Exception:
             output_details = f"{output_path.name}"
 
-        table.add_row("Output", "* SUCCESS", output_details)
+        output_status = "* RETAINED" if write_blocked else "* SUCCESS"
+        table.add_row("Output", output_status, output_details)
         console.print(table)
     except Exception:
         _rich_info(f"Processed {stats.get('primitives_found', 0)} primitives:")
@@ -806,6 +809,14 @@ def _run_compilation(
                             "Compilation completed successfully!",
                             symbol="check",
                         )
+                elif result.stats.get("root_context_files_protected"):
+                    protected_count = int(result.stats["root_context_files_protected"])
+                    noun = "file" if protected_count == 1 else "files"
+                    logger.progress(
+                        f"Retained {protected_count} hand-authored root {noun}; "
+                        "no files generated.",
+                        symbol="info",
+                    )
                 elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
                     # The compiler already reported the expected cleanup outcome.
                     pass
@@ -909,12 +920,19 @@ def _run_compilation(
                 # Add spacing before summary table
                 _rich_blank_line()
 
-                _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run)
+                _display_single_file_summary(
+                    stats,
+                    c_status,
+                    c_hash,
+                    output_path,
+                    dry_run,
+                    write_blocked=agents_write_blocked,
+                )
 
                 if dry_run:
                     preview = final_content[:500] + ("..." if len(final_content) > 500 else "")
                     _rich_panel(preview, title=" Generated Content Preview", style="cyan")
-                else:
+                elif not agents_write_blocked:
                     _display_next_steps(output)
 
     # Display warnings for all compilation modes
