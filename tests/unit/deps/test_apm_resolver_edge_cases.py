@@ -612,7 +612,7 @@ class TestTryLoadDependencyPackage:
         assert pkg.agent_plugin is not None
         assert not (pkg_dir / "apm.yml").exists()
 
-    def test_native_agent_plugin_retains_projected_transitive_apm_dependencies(
+    def test_eligible_apm_manifest_wins_and_retains_transitive_dependencies(
         self, tmp_path: Path
     ) -> None:
         from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
@@ -631,7 +631,13 @@ class TestTryLoadDependencyPackage:
             encoding="utf-8",
         )
         (pkg_dir / "apm.yml").write_text(
-            yaml.safe_dump({"dependencies": {"apm": ["org/child#v1.0.0"]}}),
+            yaml.safe_dump(
+                {
+                    "name": "apm-native",
+                    "version": "3.0.0",
+                    "dependencies": {"apm": ["org/child#v1.0.0"]},
+                }
+            ),
             encoding="utf-8",
         )
         ref = _make_dep_ref("org/native")
@@ -640,6 +646,9 @@ class TestTryLoadDependencyPackage:
         pkg = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
 
         assert pkg is not None
+        assert pkg.name == "apm-native"
+        assert pkg.version == "3.0.0"
+        assert pkg.agent_plugin is None
         assert [dep.repo_url for dep in pkg.get_apm_dependencies()] == ["org/child"]
 
     def test_malformed_root_plugin_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
