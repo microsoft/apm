@@ -9,7 +9,6 @@ from typing import Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.core.deployment_state import MaterializationResult
-from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
@@ -17,6 +16,12 @@ from apm_cli.utils.path_security import (
     ensure_path_within,
     has_symlink_component,
 )
+
+
+def discover_primitives(*args: Any, **kwargs: Any) -> Any:
+    from apm_cli.primitives.discovery import discover_primitives as _discover_primitives
+
+    return _discover_primitives(*args, **kwargs)
 
 
 def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:

@@ -6,10 +6,10 @@ runner already proves the registry and the rule catalog agree *by name* and that
 every guard executes exactly once per run.  Names prove nothing about teeth: a
 rule whose body was gutted still registers its guard ID and still runs.
 
-This file supplies the missing half of that contract.  For each of the 58
-registered owner guards it pins one minimal, meaningful source mutation -- a
-surgical edit that kills a load-bearing sub-condition of the owning decision --
-and asserts the one rule that owns that guard reports a real `Violation`.
+This file supplies the missing half of that contract.  For each registered owner
+guard it pins one minimal, meaningful source mutation -- a surgical edit that
+kills a load-bearing sub-condition of the owning decision -- and asserts the one
+rule that owns that guard reports a real `Violation`.
 Coverage is a set equality against the live registry, so a new owner guard that
 lands without a mutation case fails here instead of shipping a toothless rule.
 
@@ -180,6 +180,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    atomic_write_text(\n",
         new="    write_text_lf(\n",
         intent="The atomic project YAML writer bypasses the canonical atomic writer.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-root-context-write-eligibility",
+        rule_id="contracts-tooling-root-context-write-eligibility",
+        path="src/apm_cli/compilation/agents_compiler.py",
+        old="def _hand_authored_root_context_blocks_write(",
+        new="def _hand_authored_root_context_blocks_write_disabled(",
+        intent="Root context writes lose the canonical hand-authored ownership gate.",
     ),
     MutationCase(
         guard_id="hooks-integrations-copilot-cli-mcp-paths",
