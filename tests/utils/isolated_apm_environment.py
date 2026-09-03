@@ -401,6 +401,10 @@ class IsolatedApmEnvironment:
             '[protocol "file"]\n\tallow = always\n',
             encoding="utf-8",
         )
+        (home / ".gitconfig").write_text(
+            "[credential]\n\thelper =\n",
+            encoding="utf-8",
+        )
         (guard_root / "sitecustomize.py").write_text(
             _NETWORK_GUARD,
             encoding="utf-8",

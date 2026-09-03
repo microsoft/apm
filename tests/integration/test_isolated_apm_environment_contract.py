@@ -177,6 +177,51 @@ def test_create_rejects_reused_root(tmp_path: Path) -> None:
         IsolatedApmEnvironment.create(empty_root, base_env=os.environ)
 
 
+def test_native_git_lookup_cannot_use_system_credential_helper(tmp_path: Path) -> None:
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "scenario",
+        base_env=os.environ,
+    )
+    credentials = tmp_path / "ambient-credentials"
+    credentials.write_text(
+        "https://ambient-user:ambient-password@example.invalid\n",
+        encoding="ascii",
+    )
+    system_config = tmp_path / "system-gitconfig"
+    subprocess.run(
+        (
+            "git",
+            "config",
+            "--file",
+            str(system_config),
+            "credential.helper",
+            f"store --file={credentials}",
+        ),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+    environment = isolated.subprocess_env()
+    environment.pop("GIT_CONFIG_GLOBAL")
+    environment.pop("GIT_CONFIG_NOSYSTEM")
+    environment["GIT_CONFIG_SYSTEM"] = str(system_config)
+
+    result = subprocess.run(
+        ("git", "credential", "fill"),
+        input="protocol=https\nhost=example.invalid\n\n",
+        cwd=isolated.work_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
 def test_environment_does_not_mutate_parent_process(tmp_path: Path) -> None:
     fresh_process_root = tmp_path / "fresh-process"
     script = """\

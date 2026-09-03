@@ -235,6 +235,7 @@ class TestValidateAndLoadPackage:
         assert package is not None
         assert package.get_apm_dependencies() == []
 
+    @pytest.mark.windows_compat
     def test_catalog_manifest_bytes_are_independent_of_checkout_root(self, tmp_path: Path) -> None:
         targets = [tmp_path / root / "plugin" for root in ("first", "second")]
         manifest = {
@@ -246,7 +247,7 @@ class TestValidateAndLoadPackage:
                 }
             },
         }
-        loaded_commands = []
+        loaded_commands: list[Path] = []
         for target in targets:
             target.mkdir(parents=True)
             (target / "README.md").write_text("portable catalog package")
@@ -254,13 +255,15 @@ class TestValidateAndLoadPackage:
             dep_ref.marketplace_manifest = manifest
             assert materialize_marketplace_manifest(dep_ref, target)
             package = APMPackage.from_apm_yml(target / "apm.yml")
-            loaded_commands.append(package.get_mcp_dependencies()[0].command)
+            command = package.get_mcp_dependencies()[0].command
+            assert command is not None
+            loaded_commands.append(Path(command))
 
         assert (targets[0] / "apm.yml").read_bytes() == (targets[1] / "apm.yml").read_bytes()
         assert compute_package_hash(targets[0]) == compute_package_hash(targets[1])
         assert loaded_commands == [
-            str(targets[0].resolve() / "bin" / "server"),
-            str(targets[1].resolve() / "bin" / "server"),
+            targets[0].resolve() / "bin" / "server",
+            targets[1].resolve() / "bin" / "server",
         ]
 
     def test_cleanup_failure_cannot_leave_generated_manifest(self, tmp_path: Path) -> None:

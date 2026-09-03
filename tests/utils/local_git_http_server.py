@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import functools
 import ssl
 import subprocess
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -35,6 +37,25 @@ class _GitHttpServer(ThreadingHTTPServer):
     expected_authorization: str
     observations: list[GitHttpObservation]
     observations_lock: threading.Lock
+
+
+@contextlib.contextmanager
+def _stdlib_server_tls() -> Iterator[None]:
+    """Temporarily restore stdlib SSL while wrapping a listening server socket."""
+    try:
+        import truststore
+    except ImportError:
+        yield
+        return
+
+    injected = ssl.SSLContext is truststore.SSLContext
+    if injected:
+        truststore.extract_from_ssl()
+    try:
+        yield
+    finally:
+        if injected:
+            truststore.inject_into_ssl()
 
 
 class _GitHttpHandler(SimpleHTTPRequestHandler):
@@ -190,10 +211,11 @@ class LocalGitHttpServerFactory:
         if certfile is not None or keyfile is not None:
             if certfile is None or keyfile is None:
                 raise ValueError("TLS requires both certfile and keyfile")
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.minimum_version = ssl.TLSVersion.TLSv1_2
-            context.load_cert_chain(certfile=certfile, keyfile=keyfile)
-            server.socket = context.wrap_socket(server.socket, server_side=True)
+            with _stdlib_server_tls():
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+                server.socket = context.wrap_socket(server.socket, server_side=True)
             scheme = "https"
         thread = threading.Thread(
             target=server.serve_forever,
