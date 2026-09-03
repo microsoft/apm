@@ -171,11 +171,9 @@ _ROOT_CONTEXT_PATHS = (_ROOT_CONTEXT_OWNER, _ROOT_CONTEXT_CLI)
 
 _ROOT_CONTEXT_OWNER_FRAGMENTS = (
     "def _hand_authored_root_context_blocks_write(",
-    "if self._hand_authored_root_context_blocks_write(path, CLAUDE_HEADER)",
+    "if self._hand_authored_root_context_blocks_write(path)",
     "and self._hand_authored_root_context_blocks_write(",
-    "if self._hand_authored_root_context_blocks_write(\n"
-    "                    agents_path,\n"
-    "                    AGENTS_MD_GENERATED_MARKER,",
+    "and self._hand_authored_root_context_blocks_write(agents_path)",
 )
 
 _ROOT_CONTEXT_CLI_FRAGMENTS = (

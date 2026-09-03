@@ -58,6 +58,21 @@ def _format_target_label(
     return f"Compiling for {get_target_description(effective_target)}"
 
 
+def _report_retained_watch_outputs(logger: CommandLogger, result: Any) -> bool:
+    """Render protected root outcomes and returned warnings in watch mode."""
+    for warning in result.warnings:
+        logger.warning(warning)
+    protected_count = int(result.stats.get("root_context_files_protected", 0) or 0)
+    if not protected_count:
+        return False
+    noun = "file" if protected_count == 1 else "files"
+    logger.progress(
+        f"Compilation completed; retained {protected_count} hand-authored root {noun}.",
+        symbol="info",
+    )
+    return True
+
+
 class APMFileHandler:
     """Watchdog file-system handler that recompiles APM context on edits.
 
@@ -157,9 +172,12 @@ class APMFileHandler:
 
             compiler = AgentsCompiler(".")
             result = compiler.compile(config, logger=self.logger)
+            retained_outputs = _report_retained_watch_outputs(self.logger, result)
 
             if result.success:
-                if self.dry_run:
+                if retained_outputs:
+                    pass
+                elif self.dry_run:
                     self.logger.success("Recompilation successful (dry run)", symbol="sparkles")
                 else:
                     self.logger.success(f"Recompiled to {result.output_path}", symbol="sparkles")
@@ -272,13 +290,16 @@ def _watch_mode(
 
         compiler = AgentsCompiler(".")
         result = compiler.compile(config)
+        retained_outputs = _report_retained_watch_outputs(logger, result)
 
         # NOTE: render_summary moved to the Ctrl+C teardown below so the
         # watch session emits ONE aggregate perf block at exit instead of
         # spamming a 5-6 line block after every recompile.
 
         if result.success:
-            if dry_run:
+            if retained_outputs:
+                pass
+            elif dry_run:
                 logger.success("Initial compilation successful (dry run)", symbol="sparkles")
             else:
                 logger.success(

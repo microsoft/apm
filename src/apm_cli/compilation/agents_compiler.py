@@ -848,9 +848,7 @@ class AgentsCompiler:
         output_path = str(output_file)
         write_blocked = (
             config.agents_md_mode != "managed_section"
-            and self._hand_authored_root_context_blocks_write(
-                output_file, AGENTS_MD_GENERATED_MARKER
-            )
+            and self._hand_authored_root_context_blocks_write(output_file)
         )
         if not config.dry_run and not write_blocked:
             self._write_output_file_with_config(output_path, content, config)
@@ -997,7 +995,7 @@ class AgentsCompiler:
         protected_claude_paths = {
             path
             for path in claude_result.content_map
-            if self._hand_authored_root_context_blocks_write(path, CLAUDE_HEADER)
+            if self._hand_authored_root_context_blocks_write(path)
         }
         if protected_claude_paths:
             claude_result.content_map = {
@@ -1779,8 +1777,13 @@ class AgentsCompiler:
             content (str): Content to write.
             config (CompilationConfig): Compilation configuration.
         """
+        if (
+            config.agents_md_mode != "managed_section"
+            and self._hand_authored_root_context_blocks_write(agents_path)
+        ):
+            return None
         try:
-            resolved_agents_path = ensure_path_within(agents_path, self.base_dir)
+            ensure_path_within(agents_path, self.base_dir)
             deploy_inventory = self._deploy_inventory or CompileInventory.collect(self.base_dir)
             nested_root = deploy_inventory.nested_repository_root_for(agents_path.parent)
             if nested_root is not None:
@@ -1792,16 +1795,6 @@ class AgentsCompiler:
                     f"Run apm compile from {nested_root} to compile it separately"
                 )
                 return None
-
-            if config.agents_md_mode != "managed_section":
-                from .distributed_compiler import AGENTS_MD_GENERATED_MARKER
-
-                if self._hand_authored_root_context_blocks_write(
-                    agents_path,
-                    AGENTS_MD_GENERATED_MARKER,
-                    resolved_path=resolved_agents_path,
-                ):
-                    return None
 
             # Handle constitution injection for distributed files
             final_content = content
@@ -1832,9 +1825,6 @@ class AgentsCompiler:
     def _hand_authored_root_context_blocks_write(
         self,
         path: Path,
-        marker: str,
-        *,
-        resolved_path: Path | None = None,
     ) -> bool:
         """Return whether an existing project-root file must be retained."""
         canonical_name = None
@@ -1859,7 +1849,7 @@ class AgentsCompiler:
             if not path.is_file():
                 return False
             try:
-                resolved = resolved_path or ensure_path_within(path, self.base_dir)
+                resolved = ensure_path_within(path, self.base_dir)
                 if resolved.parent != self._resolved_base_dir:
                     return False
                 for candidate in canonical_paths:
@@ -1881,8 +1871,7 @@ class AgentsCompiler:
         if not path.is_file():
             return False
         try:
-            if resolved_path is None:
-                ensure_path_within(path, self.base_dir)
+            ensure_path_within(path, self.base_dir)
             with path.open("rb") as handle:
                 prefix = handle.read(4096).decode("utf-8")
         except (OSError, PathTraversalError, UnicodeDecodeError) as exc:
@@ -1894,7 +1883,7 @@ class AgentsCompiler:
             )
             return True
         accepted_markers = (
-            _AGENTS_ROOT_GENERATED_MARKERS if canonical_name == "AGENTS.md" else (marker,)
+            _AGENTS_ROOT_GENERATED_MARKERS if canonical_name == "AGENTS.md" else (CLAUDE_HEADER,)
         )
         if has_generated_marker_header(prefix, accepted_markers):
             return False

@@ -910,19 +910,23 @@ def _run_compilation(
             intermediate_result = compiler.compile(intermediate_config)
 
             if intermediate_result.success:
-                # Perform constitution injection / preservation
-                from ...compilation.injector import ConstitutionInjector
-
-                injector = ConstitutionInjector(base_dir=".")
-                output_path = Path(config.output_path)
-                final_content, c_status, c_hash = injector.inject(
-                    intermediate_result.content,
-                    with_constitution=config.with_constitution,
-                    output_path=output_path,
-                )
                 agents_write_blocked = bool(
                     intermediate_result.stats.get("agents_root_context_write_blocked", 0)
                 )
+                # Perform constitution injection / preservation
+                output_path = Path(config.output_path)
+                if agents_write_blocked:
+                    final_content = intermediate_result.content
+                    c_status, c_hash = "NOT APPLIED", None
+                else:
+                    from ...compilation.injector import ConstitutionInjector
+
+                    injector = ConstitutionInjector(base_dir=".")
+                    final_content, c_status, c_hash = injector.inject(
+                        intermediate_result.content,
+                        with_constitution=config.with_constitution,
+                        output_path=output_path,
+                    )
 
                 if not dry_run and not agents_write_blocked:
                     # Only rewrite when content materially changes (creation, update, missing constitution case)

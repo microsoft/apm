@@ -11,6 +11,7 @@ from apm_cli.commands.compile.cli import (
     _report_distributed_live_success,
     _report_protected_no_write,
 )
+from apm_cli.commands.compile.watcher import _report_retained_watch_outputs
 from apm_cli.compilation.agents_compiler import AgentsCompiler
 from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
 from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
@@ -92,6 +93,21 @@ def test_partial_compile_reports_generated_and_retained_outputs(
 
     assert result.exit_code == 0, result.output
     assert "retained 1 hand-authored root file" in " ".join(result.output.split())
+
+
+def test_watch_reporting_surfaces_retained_outputs_and_warnings() -> None:
+    """Watch mode must not hide a protected-root result."""
+    logger = Mock()
+    result = Mock(
+        warnings=["Protected AGENTS.md: hand-authored file will not be overwritten."],
+        stats={"root_context_files_protected": 1},
+    )
+
+    retained = _report_retained_watch_outputs(logger, result)
+
+    assert retained
+    logger.warning.assert_called_once()
+    assert "retained 1 hand-authored root file" in logger.progress.call_args.args[0]
 
 
 def test_mixed_outcome_reports_retained_and_nested_skipped_outputs() -> None:
@@ -308,6 +324,34 @@ def test_case_variant_generated_agents_remains_replaceable_on_insensitive_filesy
     assert AGENTS_MD_GENERATED_MARKER in canonical.read_text(encoding="utf-8")
 
 
+def test_generated_claude_root_remains_replaceable_as_explicit_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Canonical CLAUDE identity must select its own ownership marker."""
+    _seed_project(tmp_path)
+    claude_path = tmp_path / "CLAUDE.md"
+    claude_path.write_text(f"{CLAUDE_HEADER}\nGenerated content.\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "compile",
+            "--target",
+            "codex",
+            "--single-agents",
+            "--output",
+            "CLAUDE.md",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Protected CLAUDE.md" not in result.output
+    assert AGENTS_MD_GENERATED_MARKER in claude_path.read_text(encoding="utf-8")
+
+
 def test_case_variant_custom_symlink_remains_replaceable_on_sensitive_filesystem(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -365,6 +409,29 @@ def test_full_file_compile_retains_root_agents_symlink(
         assert target.read_text(encoding="utf-8") == "Hand-authored linked guidance.\n"
 
 
+def test_distributed_compile_retains_external_root_agents_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Distributed full mode must retain a root symlink before containment checks."""
+    _seed_project(tmp_path)
+    external = tmp_path.parent / f"{tmp_path.name}-external-full-agents.md"
+    external.write_text("External hand-authored guidance.\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").unlink()
+    try:
+        (tmp_path / "AGENTS.md").symlink_to(external)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["compile"])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "AGENTS.md").is_symlink()
+    assert external.read_text(encoding="utf-8") == "External hand-authored guidance.\n"
+    assert "root context symlinks are not overwritten" in " ".join(result.output.split())
+
+
 @pytest.mark.parametrize("dangling", [False, True])
 def test_managed_section_rejects_root_agents_symlink(
     tmp_path: Path,
@@ -401,6 +468,47 @@ def test_managed_section_rejects_root_agents_symlink(
     assert (tmp_path / "AGENTS.md").is_symlink()
     if not dangling:
         assert "Hand-authored linked guidance." in target.read_text(encoding="utf-8")
+
+
+def test_compile_retains_undecodable_root_context_and_explains_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unverifiable ownership must fail closed with actionable guidance."""
+    _seed_project(tmp_path)
+    agents_path = tmp_path / "AGENTS.md"
+    original = b"# AGENTS.md\n\xff\xfe\n"
+    agents_path.write_bytes(original)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["compile", "--single-agents"])
+
+    assert result.exit_code == 0, result.output
+    assert agents_path.read_bytes() == original
+    assert "could not verify the APM-generated marker" in result.output
+    assert "Fix file access, UTF-8 encoding, or path containment" in " ".join(result.output.split())
+
+
+def test_blocked_single_file_does_not_report_constitution_as_applied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retained AGENTS.md must bypass constitution inspection and reporting."""
+    _seed_project(tmp_path)
+    constitution = tmp_path / ".specify" / "memory" / "constitution.md"
+    constitution.parent.mkdir(parents=True)
+    constitution.write_text("# Constitution\n\nDo no harm.\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--single-agents", "--with-constitution"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
+    assert "NOT APPLIED" in result.output
 
 
 def test_marker_mentioned_in_body_does_not_grant_write_ownership(
