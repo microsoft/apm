@@ -19,18 +19,18 @@ see [Primitive types](../primitive-types/).
 
 | Target          | Deploy root            | instructions | prompts | agents | skills | commands | hooks | mcp |
 |-----------------|------------------------|:------------:|:-------:|:------:|:------:|:--------:|:-----:|:---:|
-| copilot         | `.github/`             |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
-| claude          | `.claude/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
-| grok-build      | `.grok/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [ ] |
-| cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
-| codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
-| gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
-| antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
-| opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
-| windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
-| kiro            | `.kiro/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
-| intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
-| agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
+| copilot         | `.github/`             |     ✅      |   ✅   |  ✅   |  ✅   |   ❌    |  ✅  | ✅ |
+| claude          | `.claude/`             |     ✅      |   ❌   |  ✅   |  ✅   |   ✅    |  ✅  | ✅ |
+| grok-build      | `.grok/`               |     ✅      |   ❌   |  ✅   |  ✅   |   ✅    |  ❌  | ❌ |
+| cursor          | `.cursor/`             |     ✅      |   ❌   |  ✅   |  ✅   |   ✅    |  ✅  | ✅ |
+| codex           | `.codex/` + `.agents/` |     ❌      |   ❌   |  ✅   |  ✅   |   ❌    |  ✅  | ✅ |
+| gemini          | `.gemini/`             |     ❌      |   ❌   |  ❌   |  ✅   |   ✅    |  ✅  | ✅ |
+| antigravity     | `.agents/`             |     ✅      |   ❌   |  ❌   |  ✅   |   ❌    |  ✅  | ✅ |
+| opencode        | `.opencode/`           |     ❌      |   ❌   |  ✅   |  ✅   |   ✅    |  ❌  | ✅ |
+| windsurf        | `.windsurf/` + `.agents/` |     ✅      |   ❌   |  ❌   |  ✅   |   ✅    |  ✅  | ✅ |
+| kiro            | `.kiro/`               |     ✅      |   ❌   |  ✅   |  ✅   |   ❌    |  ✅  | ✅ |
+| intellij        | user MCP config; files via Copilot |    ✅ (*)   | ✅ (*) | ✅ (*) | ✅ (*) |   ❌    | ✅ (*) | ✅ |
+| agent-skills    | `.agents/`             |     ❌      |   ❌   |  ❌   |  ✅   |   ❌    |  ❌  | ❌ |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
