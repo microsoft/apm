@@ -151,7 +151,7 @@ Controls which output targets are generated during compilation, installation, an
 
 **Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently; `all` will become a hard parse error in a future release.
 
-When both fields are omitted, APM auto-detects from the
+For project-scope commands, when both fields are omitted, APM auto-detects from the
 [documented filesystem signals](../cli/targets/#detection-signals).
 Once set, the field is authoritative.
 

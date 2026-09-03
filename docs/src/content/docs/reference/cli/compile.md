@@ -147,10 +147,11 @@ Because `--target` is rejected alongside `--global`, `target:` or `targets:` in
 set, `apm compile -g` writes only those targets. If you install with an explicit
 `apm install -g --target`, update the manifest declaration before compiling;
 the explicit install flag does not replace it. Declare nothing and every
-supported user-scope target is written.
-Malformed or unreadable YAML, a non-mapping document, or an invalid target
-declaration stops compilation before any target output is written; fix the
-reported manifest problem and rerun the command.
+applicable user-scope root context file is written.
+The manifest must be a regular, non-symlink file. Malformed or unreadable YAML,
+a non-mapping document, or an invalid target declaration stops compilation
+before any target output is written; fix the reported manifest problem and
+rerun the command.
 
 ```yaml
 # ~/.apm/apm.yml
