@@ -40,12 +40,10 @@ engine:
 #     triage on a specific issue apply `status/needs-triage` (fast
 #     path) -- one click, instant.
 #
-# Front-gates for the labeled fast path (enforced via the top-level
-# `if:` field below, not via `on.steps:` -- see comment block on `if:`):
-#   - Triggering label must be `status/needs-triage`. Any other label
-#     change is dropped at zero cost (no runner, no agent).
-#   - Issue author must not be a Bot.
-#   - Issue must be open and unlocked.
+# Front-gates for the labeled fast path:
+#   - `on.labels` drops unrelated label changes before runner allocation.
+#   - The top-level `if:` requires a non-Bot author and an open,
+#     unlocked issue.
 on:
   issues:
     types: [labeled]
