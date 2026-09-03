@@ -727,6 +727,30 @@ class TestGlobalCompileHonorsDeclaredTargets:
         compile_mock.assert_not_called()
         assert "failed to read" in str(logger.error.call_args).lower()
 
+    def test_valid_manifest_symlink_fails_closed_without_compiling(self, tmp_path):
+        """A manifest link is rejected instead of following its target."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, None)
+        external_manifest = tmp_path / "external-apm.yml"
+        external_manifest.write_text("targets: [claude]\n", encoding="utf-8")
+        try:
+            (source_root / "apm.yml").symlink_to(external_manifest)
+        except OSError:
+            pytest.skip("symbolic links are unavailable")
+        compile_mock = MagicMock(return_value=[])
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "regular, non-symlink file" in str(logger.error.call_args).lower()
+
     def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path):
         """Invalid UTF-8 reaches the handler as a YAMLError, not a raw decode error.
 

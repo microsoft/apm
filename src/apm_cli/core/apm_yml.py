@@ -213,8 +213,12 @@ def read_declared_target_names(root: Path) -> list[str] | None:
     from apm_cli.utils.yaml_io import load_yaml
 
     manifest_path = root / "apm.yml"
-    if not manifest_path.exists() and not manifest_path.is_symlink():
+    if manifest_path.is_symlink():
+        raise OSError("apm.yml must be a regular, non-symlink file")
+    if not manifest_path.exists():
         return None
+    if not manifest_path.is_file():
+        raise OSError("apm.yml must be a regular, non-symlink file")
     data = load_yaml(manifest_path)
     if data is None:
         raise yaml.YAMLError("apm.yml must contain a YAML object, got an empty document")
