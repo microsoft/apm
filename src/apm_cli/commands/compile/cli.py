@@ -367,10 +367,10 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
-def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], bool]:
+def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], list[str] | None]:
     """Return the target profiles ``apm compile -g`` should write.
 
-    The boolean indicates whether the manifest selected the target set.
+    The optional names preserve the manifest spelling for diagnostics.
 
     ``--target`` is rejected alongside ``--global``, so the user manifest's
     ``targets:`` is the only way to narrow user-scope output. Honoring it keeps
@@ -388,10 +388,10 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], boo
 
     declared = read_declared_target_names(source_root)
     if declared is None or not declared:
-        return list(KNOWN_TARGETS.values()), declared is not None
+        return list(KNOWN_TARGETS.values()), None
     canonical = dict.fromkeys(normalize_target_name(name) for name in declared)
     profiles = (KNOWN_TARGETS.get(name) for name in canonical)
-    return [profile for profile in profiles if profile is not None], True
+    return [profile for profile in profiles if profile is not None], declared
 
 
 def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
@@ -421,7 +421,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     # with the same framing 'apm install -g' uses rather than degrading to
     # "nothing declared" and compiling every harness.
     try:
-        compile_targets, manifest_selected = _global_compile_targets(source_root)
+        compile_targets, declared_targets = _global_compile_targets(source_root)
     except TargetResolutionError as exc:
         display_path = _display_user_path(source_root / APM_YML_FILENAME)
         summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
@@ -433,7 +433,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     except yaml.YAMLError as exc:
         display_path = _display_user_path(source_root / APM_YML_FILENAME)
         logger.error(
-            f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun the command.",
+            f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun 'apm compile -g'.",
             symbol="error",
         )
         return 1
@@ -447,8 +447,18 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         return 1
 
     target_names = ", ".join(profile.name for profile in compile_targets)
-    selection_source = "user manifest" if manifest_selected else "global default"
-    logger.verbose_detail(f"Global targets from {selection_source}: {target_names}")
+    if declared_targets is None:
+        provenance = target_names
+        selection_source = "global default"
+    else:
+        declared_names = ", ".join(declared_targets)
+        provenance = (
+            declared_names
+            if declared_names == target_names
+            else f"{declared_names} -> {target_names}"
+        )
+        selection_source = "~/.apm/apm.yml"
+    logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
 
     results = compile_user_root_contexts(
         compile_targets,
@@ -458,8 +468,11 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     )
 
     if not results:
-        if manifest_selected:
-            message = "Declared global targets produce no user-scope root context output."
+        if declared_targets is not None:
+            message = (
+                f"Declared global targets ({target_names}) produce no user-scope "
+                "root context output. No files changed."
+            )
         else:
             message = (
                 "No user-scope targets produced output -- run 'apm install -g <package>' "

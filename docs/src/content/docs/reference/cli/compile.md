@@ -148,8 +148,9 @@ set, `apm compile -g` writes only those targets. If you install with an explicit
 `apm install -g --target`, update the manifest declaration before compiling;
 the explicit install flag does not replace it. Declare nothing and every
 supported user-scope target is written.
-An invalid or unreadable user manifest stops compilation before any target
-output is written; fix the reported manifest problem and rerun the command.
+Malformed or unreadable YAML, a non-mapping document, or an invalid target
+declaration stops compilation before any target output is written; fix the
+reported manifest problem and rerun the command.
 
 ```yaml
 # ~/.apm/apm.yml

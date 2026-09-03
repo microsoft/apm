@@ -131,9 +131,10 @@ Then run `apm install -g --target opencode` to deploy skills to
 `apm compile -g` rejects `--target`, so `target:` or `targets:` in
 `~/.apm/apm.yml` selects
 which user-scope root context files it writes. Without that field it writes one
-for every supported user-scope target. An invalid or unreadable user manifest
-stops compilation before any target output is written; fix the reported
-manifest problem and rerun the command.
+for every supported user-scope target. Malformed or unreadable YAML, a
+non-mapping document, or an invalid target declaration stops compilation before
+any target output is written; fix the reported manifest problem and rerun the
+command.
 
 An explicit `apm install -g --target` does not replace the manifest declaration.
 Update `~/.apm/apm.yml` before compiling when the install flag selected a

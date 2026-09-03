@@ -486,7 +486,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert sorted(names) == ["claude", "codex"]
         logger.verbose_detail.assert_called_once_with(
-            "Global targets from user manifest: claude, codex"
+            "Global targets from ~/.apm/apm.yml: claude, codex"
         )
 
     def test_declared_target_without_root_output_has_accurate_message(self, tmp_path):
@@ -500,7 +500,8 @@ class TestGlobalCompileHonorsDeclaredTargets:
         self._run(source_root, logger)
 
         logger.info.assert_called_once_with(
-            "Declared global targets produce no user-scope root context output.",
+            "Declared global targets (agent-skills) produce no user-scope "
+            "root context output. No files changed.",
             symbol="info",
         )
 
@@ -555,9 +556,13 @@ class TestGlobalCompileHonorsDeclaredTargets:
             "name: h\nversion: 1.0.0\ntargets: [vscode]\n",
         )
 
-        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+        logger = MagicMock()
+        names = self._compiled_target_names(self._run(source_root, logger))
 
         assert names == ["copilot"]
+        logger.verbose_detail.assert_called_once_with(
+            "Global targets from ~/.apm/apm.yml: vscode -> copilot"
+        )
 
     def test_alias_and_canonical_name_collapse_to_one_profile(self, tmp_path):
         """vscode and copilot name the same target, so it is compiled once."""
@@ -589,9 +594,9 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        error = str(logger.error.call_args).lower()
+        error = logger.error.call_args.args[0].lower()
         assert "failed to parse" in error
-        assert "fix the manifest and rerun the command" in error
+        assert "fix the manifest and rerun 'apm compile -g'" in error
 
     def test_invalid_target_name_has_global_manifest_recovery(self, tmp_path):
         """An unknown token identifies the manifest and global command."""
