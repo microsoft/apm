@@ -64,6 +64,16 @@
       "guards": ["marketplace-integrations-agent-plugin-contract"]
     },
     {
+      "id": "package-format-precedence",
+      "decision": "Package format precedence",
+      "owner": "models/format_detection.py (NormalizationPlanner)",
+      "selectors": [
+        "src/apm_cli/bundle/local_bundle.py",
+        "src/apm_cli/models/format_detection.py"
+      ],
+      "guards": ["marketplace-integrations-package-format-precedence"]
+    },
+    {
       "id": "agent-plugin-producer-admission",
       "decision": "Agent Plugin producer portable-surface admission",
       "owner": "bundle/agent_plugin_exporter.py (_require_portable_agent_plugin)",

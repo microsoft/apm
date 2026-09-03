@@ -7,7 +7,7 @@ from pathlib import Path
 from scripts.architecture_linter.runner import run_selected_rules
 
 ROOT = Path(__file__).resolve().parents[2]
-RULE_ID = "marketplace-integrations-agent-plugin-contract"
+RULE_ID = "marketplace-integrations-package-format-precedence"
 
 
 def test_agent_plugin_ingress_routes_through_package_format_precedence() -> None:

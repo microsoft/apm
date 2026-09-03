@@ -470,6 +470,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="from_apm_yml stops routing interpreted construction through from_mapping.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-package-format-precedence",
+        rule_id="marketplace-integrations-package-format-precedence",
+        path="src/apm_cli/bundle/local_bundle.py",
+        old="package_type, _ = detect_package_type(",
+        new="package_type, _ = bypass_package_type_precedence(",
+        intent="Agent Plugin ingress bypasses the package-format precedence owner.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-package-projection",
         rule_id="marketplace-integrations-package-projection",
         path="src/apm_cli/agent_plugins/projection.py",
