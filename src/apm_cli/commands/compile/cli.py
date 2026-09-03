@@ -367,8 +367,10 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
-def _global_compile_targets(source_root: Path) -> list[TargetProfile]:
+def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], bool]:
     """Return the target profiles ``apm compile -g`` should write.
+
+    The boolean indicates whether the manifest selected the target set.
 
     ``--target`` is rejected alongside ``--global``, so the user manifest's
     ``targets:`` is the only way to narrow user-scope output. Honoring it keeps
@@ -385,11 +387,11 @@ def _global_compile_targets(source_root: Path) -> list[TargetProfile]:
     from ...integration.targets import KNOWN_TARGETS
 
     declared = read_declared_target_names(source_root)
-    if not declared:
-        return list(KNOWN_TARGETS.values())
+    if declared is None or not declared:
+        return list(KNOWN_TARGETS.values()), declared is not None
     canonical = dict.fromkeys(normalize_target_name(name) for name in declared)
     profiles = (KNOWN_TARGETS.get(name) for name in canonical)
-    return [profile for profile in profiles if profile is not None]
+    return [profile for profile in profiles if profile is not None], True
 
 
 def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
@@ -419,7 +421,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     # with the same framing 'apm install -g' uses rather than degrading to
     # "nothing declared" and compiling every harness.
     try:
-        compile_targets = _global_compile_targets(source_root)
+        compile_targets, manifest_selected = _global_compile_targets(source_root)
     except TargetResolutionError as exc:
         display_path = _display_user_path(source_root / APM_YML_FILENAME)
         summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
@@ -439,10 +441,14 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         display_path = _display_user_path(source_root / APM_YML_FILENAME)
         logger.error(
             f"Failed to read {display_path}: {exc}. "
-            "Check the file permissions and rerun the command.",
+            "Ensure it is a readable YAML file and rerun 'apm compile -g'.",
             symbol="error",
         )
         return 1
+
+    target_names = ", ".join(profile.name for profile in compile_targets)
+    selection_source = "user manifest" if manifest_selected else "global default"
+    logger.verbose_detail(f"Global targets from {selection_source}: {target_names}")
 
     results = compile_user_root_contexts(
         compile_targets,
@@ -452,11 +458,14 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     )
 
     if not results:
-        logger.info(
-            "No user-scope targets produced output -- run 'apm install -g <package>' "
-            "to add global instructions.",
-            symbol="info",
-        )
+        if manifest_selected:
+            message = "Declared global targets produce no user-scope root context output."
+        else:
+            message = (
+                "No user-scope targets produced output -- run 'apm install -g <package>' "
+                "to add global instructions."
+            )
+        logger.info(message, symbol="info")
         return 0
 
     has_error = False

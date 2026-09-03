@@ -173,11 +173,12 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
     return []
 
 
-def read_declared_target_names(root: Path) -> list[str]:
-    """Return the target names ``root/apm.yml`` declares, else ``[]``.
+def read_declared_target_names(root: Path) -> list[str] | None:
+    """Return target names declared by ``root/apm.yml``, else ``None``.
 
-    Returns ``[]`` only when the manifest is absent or its mapping contains no
-    target declaration, so callers fall through to their own default.
+    Returns ``None`` only when the manifest is absent or its mapping contains
+    no target declaration, so callers can distinguish that fallback from a
+    present declaration.
 
     A manifest that exists is otherwise authoritative and its failures
     propagate, because reporting "nothing declared" for a broken manifest would
@@ -196,10 +197,10 @@ def read_declared_target_names(root: Path) -> list[str]:
 
     from apm_cli.utils.yaml_io import load_yaml
 
-    try:
-        data = load_yaml(root / "apm.yml")
-    except FileNotFoundError:
-        return []
+    manifest_path = root / "apm.yml"
+    if not manifest_path.exists() and not manifest_path.is_symlink():
+        return None
+    data = load_yaml(manifest_path)
     if data is None:
         raise yaml.YAMLError("apm.yml must contain a YAML object, got an empty document")
     if not isinstance(data, dict):
@@ -207,4 +208,15 @@ def read_declared_target_names(root: Path) -> list[str]:
         # fail-closed ``except yaml.YAMLError`` that _bounded_load already
         # normalizes its own non-parse failures into.
         raise yaml.YAMLError(f"apm.yml must contain a YAML object, got {type(data)}")
+    if "target" not in data and "targets" not in data:
+        return None
+    if "target" in data:
+        raw_target = data["target"]
+        if raw_target is None:
+            raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
+        if isinstance(raw_target, list):
+            if not any(str(token).strip() for token in raw_target):
+                raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
+        elif not str(raw_target).strip():
+            raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
     return parse_targets_field(data)

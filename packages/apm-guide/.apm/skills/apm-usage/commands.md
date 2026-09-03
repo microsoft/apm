@@ -135,6 +135,10 @@ for every supported user-scope target. An invalid or unreadable user manifest
 stops compilation before any target output is written; fix the reported
 manifest problem and rerun the command.
 
+An explicit `apm install -g --target` does not replace the manifest declaration.
+Update `~/.apm/apm.yml` before compiling when the install flag selected a
+different target set.
+
 After a project install stages dependency instructions for Gemini, Codex,
 OpenCode, or experimental Hermes, `apm install` prints an `[i]` hint naming
 `apm compile` and the root context files it will update. Targets such as Claude

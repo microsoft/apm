@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
@@ -480,9 +481,28 @@ class TestGlobalCompileHonorsDeclaredTargets:
             "name: h\nversion: 1.0.0\ntargets: [claude, codex]\n",
         )
 
-        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+        logger = MagicMock()
+        names = self._compiled_target_names(self._run(source_root, logger))
 
         assert sorted(names) == ["claude", "codex"]
+        logger.verbose_detail.assert_called_once_with(
+            "Global targets from user manifest: claude, codex"
+        )
+
+    def test_declared_target_without_root_output_has_accurate_message(self, tmp_path):
+        """A valid no-output target does not suggest reinstalling packages."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntarget: agent-skills\n",
+        )
+        logger = MagicMock()
+
+        self._run(source_root, logger)
+
+        logger.info.assert_called_once_with(
+            "Declared global targets produce no user-scope root context output.",
+            symbol="info",
+        )
 
     def test_declared_targets_exclude_explicit_only_and_gated_targets(self, tmp_path):
         """A narrow targets: must not drag in antigravity or gated harnesses."""
@@ -624,7 +644,8 @@ class TestGlobalCompileHonorsDeclaredTargets:
         error = str(logger.error.call_args).lower()
         assert "failed to read" in error
         assert "permission denied" in error
-        assert "check the file permissions and rerun the command" in error
+        assert "ensure it is a readable yaml file" in error
+        assert "rerun 'apm compile -g'" in error
 
     def test_non_mapping_manifest_fails_closed_without_compiling(self, tmp_path):
         """A YAML sequence parses cleanly but is not a usable manifest."""
@@ -677,6 +698,29 @@ class TestGlobalCompileHonorsDeclaredTargets:
         assert rc == 1
         compile_mock.assert_not_called()
         assert "empty document" in str(logger.error.call_args).lower()
+
+    def test_dangling_manifest_symlink_fails_closed_without_compiling(self, tmp_path):
+        """A present dangling manifest link is not mistaken for no manifest."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, None)
+        manifest_path = source_root / "apm.yml"
+        try:
+            manifest_path.symlink_to(source_root / "missing-apm.yml")
+        except OSError:
+            pytest.skip("symbolic links are unavailable")
+        compile_mock = MagicMock(return_value=[])
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "failed to read" in str(logger.error.call_args).lower()
 
     def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path):
         """Invalid UTF-8 reaches the handler as a YAMLError, not a raw decode error.

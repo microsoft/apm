@@ -144,10 +144,21 @@ APM-generated marker) are never overwritten.
 
 Because `--target` is rejected alongside `--global`, `target:` or `targets:` in
 `~/.apm/apm.yml` is how you narrow user-scope output. When it declares a target
-set, `apm compile -g` writes only those targets -- matching what `apm install
--g` deploys. Declare nothing and every supported user-scope target is written.
+set, `apm compile -g` writes only those targets. If you install with an explicit
+`apm install -g --target`, update the manifest declaration before compiling;
+the explicit install flag does not replace it. Declare nothing and every
+supported user-scope target is written.
 An invalid or unreadable user manifest stops compilation before any target
 output is written; fix the reported manifest problem and rerun the command.
+
+```yaml
+# ~/.apm/apm.yml
+targets: [claude, codex]
+```
+
+```bash
+apm compile -g --dry-run
+```
 
 For OpenCode, `apm compile -g` writes
 `~/.config/opencode/AGENTS.md` and retains scoped `applyTo` sections.

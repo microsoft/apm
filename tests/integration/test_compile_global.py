@@ -150,6 +150,10 @@ def test_compile_global_honors_user_manifest_targets(
         ("- claude\n- codex\n", "must contain a yaml object"),
         ("", "empty document"),
         ("targets: [not-a-harness]\n", "unknown target 'not-a-harness'"),
+        ("target:\n", "'targets:' in apm.yml is empty"),
+        ("target: []\n", "'targets:' in apm.yml is empty"),
+        ("target: ''\n", "'targets:' in apm.yml is empty"),
+        ("target: ['']\n", "'targets:' in apm.yml is empty"),
     ],
 )
 def test_compile_global_broken_user_manifest_fails_closed(
@@ -200,8 +204,8 @@ def test_compile_global_unreadable_user_manifest_fails_closed(
     clear_discovery_cache()
     assert result.exit_code == 1
     assert "failed to read" in result.output.lower()
-    assert "check the file" in result.output.lower()
-    assert "permissions and rerun the command" in result.output.lower()
+    assert "readable yaml file" in result.output.lower()
+    assert "rerun 'apm compile -g'" in result.output.lower()
     assert not (home / ".claude").exists()
     assert not (home / ".codex").exists()
     assert not (home / ".copilot").exists()
