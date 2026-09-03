@@ -103,7 +103,7 @@ retains it and prints a warning. Live compiles leave the file unchanged; dry
 runs report that it would be retained without writing it. Delete or rename that
 file before compiling if generated output should replace it. For section-scoped
 `AGENTS.md` updates, see
-[`compilation.agents_md`](../manifest-schema/#62-compilationagents_md).
+[`compilation.agents_md`](../../manifest-schema/#62-compilationagents_md).
 
 If a constitution or dependency imports still require `CLAUDE.md`, `--clean`
 regenerates an APM-generated file instead of removing it. An unmarked,
