@@ -119,7 +119,7 @@ in `apm.yml`, then run `apm install` again.
 - **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Its name comes from the current directory (or home directory for global installs) and falls back to `my-project` if that derived name is invalid. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
 - **Target persistence on bootstrap.** When `--target` maps to recognized manifest targets, those target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` redeploys to the same targets without re-specifying `--target`.
 - **One effective target.** Package primitives, MCP servers, and LSP servers consume one target decision per invocation: `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. A saved target therefore applies to `apm install`, `apm install --mcp`, and later `apm update` runs without another flag.
-- **Claude LSP discovery.** Project installs write the APM-owned plugin at
+- **Claude LSP discovery.** Project installs write the APM-managed plugin at
   `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs write
   `~/.claude.json`. Existing project-root `.lsp.json` files are preserved for
   manual review because they may contain user-owned entries. See

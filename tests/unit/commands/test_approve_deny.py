@@ -58,6 +58,30 @@ def _create_pkg_with_bin(apm_modules: Path, name: str) -> None:
     (pkg_dir / "apm.yml").write_text(yaml.dump({"name": name, "version": "2.0"}))
 
 
+def _write_cyclic_local_lockfile() -> None:
+    """Write a corrupt local dependency ancestry cycle."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="_local/a",
+            source="local",
+            local_path="../a",
+            resolved_by="_local/b",
+        )
+    )
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="_local/b",
+            source="local",
+            local_path="../b",
+            resolved_by="_local/a",
+        )
+    )
+    lockfile.write(Path("apm.lock.yaml"))
+
+
 def _isolated_config(tmp_path: Path):
     """Patch the user-config + legacy-approvals seams onto tmp_path."""
     cfg = tmp_path / "config.json"
@@ -330,6 +354,20 @@ class TestApproveCmd:
             result = runner.invoke(approve_cmd, ["nonexistent"])
             assert result.exit_code == 0
             assert "not found" in result.output
+
+    @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
+    def test_trust_command_reports_corrupt_local_dependency_ancestry(self, command) -> None:
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            Path("apm_modules").mkdir()
+            _write_cyclic_local_lockfile()
+
+            result = runner.invoke(command, ["package-a"])
+
+        assert result.exit_code == 1
+        assert "invalid local dependency ancestry" in result.output
+        assert "Run 'apm install'" in result.output
 
     def test_approve_uses_locked_identity_not_manifest_name(self) -> None:
         runner = CliRunner()

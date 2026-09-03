@@ -797,6 +797,24 @@ class TestFilterLspFailClosed:
         assert "LSP server 'pyright'" in logger.verbose[0]
         assert "LSP server 'ruff'" in logger.verbose[1]
 
+    def test_mixed_declarers_get_distinct_recovery_guidance(self) -> None:
+        dependencies = [
+            _FakeMcpDep(
+                "pyright",
+                resolved_by="owner/locked",
+                approval_keys=("owner/locked",),
+            ),
+            _FakeMcpDep("ruff", resolved_by="owner/unlocked"),
+        ]
+        logger = _RecordingLogger()
+
+        result = filter_lsp_by_allow_executables(dependencies, {}, logger)
+
+        assert result == []
+        warning = logger.warnings[0]
+        assert "policy explain owner/locked" in warning
+        assert "regenerate apm.lock.yaml" in warning
+
 
 @pytest.mark.parametrize(
     ("current", "candidate", "expected"),

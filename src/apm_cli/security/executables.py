@@ -1015,19 +1015,24 @@ def filter_lsp_by_allow_executables(
         skipped_count = len(lsp_deps) - len(filtered)
         noun = "server" if skipped_count == 1 else "servers"
         owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
-        if skipped and all(skipped.values()):
-            remediation = (
-                f" Run 'apm policy explain {next(iter(sorted(skipped)))}'; "
-                "approve it only if policy permits."
-                if len(skipped) == 1
-                else " Run 'apm policy explain <package>' for each listed package; "
-                "approve only packages policy permits."
+        known_owners = sorted(owner for owner, has_keys in skipped.items() if has_keys)
+        unlocked_owners = sorted(owner for owner, has_keys in skipped.items() if not has_keys)
+        remediation_parts = []
+        if known_owners:
+            remediation_parts.append(
+                (f"Run 'apm policy explain {known_owners[0]}'; approve it only if policy permits.")
+                if len(known_owners) == 1
+                else (
+                    "Run 'apm policy explain <package>' for each identified package; "
+                    "approve only packages policy permits."
+                )
             )
-        else:
-            package_noun = "the package" if len(skipped) == 1 else "each package"
-            remediation = (
-                f" Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
+        if unlocked_owners:
+            package_noun = "that package" if len(unlocked_owners) == 1 else "each package"
+            remediation_parts.append(
+                f"Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
             )
+        remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
         logger.warning(
             f"Filtered {skipped_count} LSP {noun} from {owners}: "

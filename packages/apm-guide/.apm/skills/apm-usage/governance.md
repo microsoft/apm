@@ -310,9 +310,9 @@ global canvas.
 The trust gate is enforced on every install path -- normal install and offline
 bundle install (`apm install <bundle>`) -- so a vendored bundle cannot smuggle
 an executable canvas past trust. Once an `executables:` block enables the
-default-deny gate, canvas trust is unified with hooks, bin, MCP, LSP, and canvas
-execution; approve once and all five executable types are governed
-consistently. The org `executables:` policy block governs canvas trust alongside
+default-deny gate, canvas trust is unified with hook, bin, MCP, and LSP
+execution; approve once and all five executable types are governed consistently.
+The org `executables:` policy block governs canvas trust alongside
 the other types (`deny_all`, `deny`, `require`, `recommend`); a canvas-only
 policy knob is not part of this experimental release.
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -152,6 +152,15 @@ class TestInstallProjectScope:
         assert data["name"] == "apm-lsp"
         assert data["lspServers"]["pyright"]["command"] == "pyright-langserver"
         assert "name" not in data["lspServers"]["pyright"]
+
+    def test_claude_plugin_install_prompts_runtime_reload(self, tmp_path):
+        logger = MagicMock()
+
+        LSPIntegrator.install([_make_dep("pyright")], project_root=tmp_path, logger=logger)
+
+        logger.progress.assert_any_call(
+            "  |-- run /reload-plugins or restart Claude Code to activate"
+        )
 
     def test_refuses_existing_foreign_claude_plugin_manifest(self, tmp_path):
         plugin_json = tmp_path / _CLAUDE_PROJECT_PLUGIN

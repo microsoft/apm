@@ -466,7 +466,11 @@ def effective_bundle_allow_map(
     if not no_policy:
         from ..policy.discovery import discover_policy_with_chain
 
-        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
+        policy = getattr(
+            discover_policy_with_chain(project_root, cache_only=True),
+            "policy",
+            None,
+        )
     return effective_exec_map_for_project(
         project_root,
         policy=policy,

@@ -491,10 +491,17 @@ def scan_installed_executable_packages(manifest: Path) -> list:
 
     lockfile = LockFile.read(get_lockfile_path(manifest.parent))
     if lockfile is not None:
-        from ..deps.path_anchoring import resolve_local_dep_dirs
+        from ..deps.path_anchoring import LocalResolutionError, resolve_local_dep_dirs
         from ..utils.yaml_io import load_yaml
 
-        local_dependency_dirs = resolve_local_dep_dirs(lockfile, manifest.parent)
+        try:
+            local_dependency_dirs = resolve_local_dep_dirs(lockfile, manifest.parent)
+        except LocalResolutionError as exc:
+            raise click.ClickException(
+                "Cannot inspect installed packages because apm.lock.yaml has "
+                f"invalid local dependency ancestry: {exc}. Run 'apm install' "
+                "to regenerate the lockfile, then retry."
+            ) from exc
         for locked in lockfile.get_package_dependencies():
             try:
                 package_dir = (

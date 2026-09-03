@@ -622,7 +622,7 @@ class LSPIntegrator:
 
                     raise RequiredIntegrationError(
                         f"LSP cleanup failed for target '{runtime}' at "
-                        f"{spec.label(user_scope=user_scope)}: {exc} "
+                        f"{spec.label(user_scope=user_scope)}: {exc}. "
                         "Review the path and permissions, then retry."
                     ) from exc
 
@@ -739,6 +739,10 @@ class LSPIntegrator:
                         f"Configured {len(changed)} LSP {noun} in "
                         f"{spec.label(user_scope=user_scope)}"
                     )
+                    if runtime == "claude" and not user_scope:
+                        logger.progress(
+                            "  |-- run /reload-plugins or restart Claude Code to activate"
+                        )
                 if runtime == "claude" and not user_scope:
                     legacy_path = project_root_path / ".lsp.json"
                     if legacy_path.exists():
@@ -767,7 +771,7 @@ class LSPIntegrator:
 
                     raise RequiredIntegrationError(
                         f"LSP configuration failed for target '{runtime}' at "
-                        f"{spec.label(user_scope=user_scope)}: {exc} "
+                        f"{spec.label(user_scope=user_scope)}: {exc}. "
                         "Review the path and permissions, then retry; use --force "
                         "only for a reviewed ownership collision."
                     ) from exc
