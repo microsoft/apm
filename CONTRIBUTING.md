@@ -61,8 +61,9 @@ To deploy to a different harness for one install, first exclude that
 harness's generated root locally, then override the pinned target:
 
 ```bash
+# For another harness, replace "claude" in both commands.
 printf '.claude/\n' >> "$(git rev-parse --git-path info/exclude)"
-apm install --target claude   # or cursor, codex, gemini, opencode, ...
+apm install --target claude
 ```
 
 The local exclusion keeps generated files out of `git status` without hiding
