@@ -2,7 +2,12 @@
 
 from unittest.mock import MagicMock, patch
 
-from apm_cli.core.command_logger import CommandLogger, InstallLogger, _ValidationOutcome
+from apm_cli.core.command_logger import (
+    CommandLogger,
+    InstallDisposition,
+    InstallLogger,
+    _ValidationOutcome,
+)
 
 
 class TestValidationOutcome:
@@ -341,6 +346,17 @@ class TestInstallLogger:
         logger.install_summary(apm_count=0, mcp_count=0, lsp_count=2)
         call_msg = mock_success.call_args[0][0]
         assert "2 LSP servers" in call_msg
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_dry_run_summary_configures_lsp(self, mock_info):
+        logger = InstallLogger()
+        logger.install_summary(
+            apm_count=0,
+            mcp_count=0,
+            lsp_count=1,
+            disposition=InstallDisposition.DRY_RUN,
+        )
+        assert "would configure 1 LSP server" in mock_info.call_args[0][0]
 
     @patch("apm_cli.core.command_logger._rich_warning")
     def test_install_summary_with_errors(self, mock_warning):

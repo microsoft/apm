@@ -721,3 +721,46 @@ def test_unchanged_lsp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> N
     assert second_lock.lsp_servers == first_lock.lsp_servers
     assert second_lock.lsp_configs == first_lock.lsp_configs
     assert second_bytes == first_bytes
+
+
+def test_explicit_empty_mcp_target_servers_survives_round_trip(tmp_path: Path) -> None:
+    """An explicit empty ownership map must not become legacy-absent."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    lockfile = LockFile()
+    lockfile._mcp_target_servers_present = True
+
+    lockfile.write(lock_path)
+
+    payload = load_yaml(lock_path)
+    assert payload["mcp_target_servers"] == {}
+    restored = LockFile.read(lock_path)
+    assert restored is not None
+    assert restored._mcp_target_servers_present is True
+    assert restored.mcp_target_servers == {}
+
+
+def test_canonical_update_persists_explicit_empty_ownership(tmp_path: Path) -> None:
+    """The no-write optimization must distinguish empty from legacy-absent."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    config = {
+        "managed-server": {
+            "name": "managed-server",
+            "registry": False,
+            "transport": "http",
+            "url": "https://example.invalid/mcp",
+        }
+    }
+    legacy = LockFile(mcp_servers=["managed-server"], mcp_configs=config)
+    legacy.write(lock_path)
+
+    MCPIntegrator.update_lockfile(
+        {"managed-server"},
+        lock_path,
+        mcp_configs=config,
+        mcp_target_servers={},
+    )
+
+    restored = LockFile.read(lock_path)
+    assert restored is not None
+    assert restored._mcp_target_servers_present is True
+    assert restored.mcp_target_servers == {}

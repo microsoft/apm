@@ -39,7 +39,13 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from apm_cli.core.command_logger import CommandLogger
-from apm_cli.deps.path_anchoring import resolve_local_dep_dir
+from apm_cli.deps.path_anchoring import build_local_parent_index, resolve_local_dep_dir
+from apm_cli.install.drift_render import (
+    _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
+)
+from apm_cli.install.drift_render import (
+    _inline_diff_for,
+)
 from apm_cli.install.drift_render import (
     render_drift as render_drift,
 )
@@ -264,6 +270,8 @@ def _materialize_install_path(
     cache_only: bool,
     *,
     lockfile: LockFile | None = None,
+    parent_index: dict[str, tuple[LockedDependency, ...]] | None = None,
+    resolved_cache: dict[str, Path] | None = None,
     live_modules_dir: Path | None = None,
     downloader: Any | None = None,
     registry_resolver: Any | None = None,
@@ -297,7 +305,13 @@ def _materialize_install_path(
     if lock_dep.source == "local":
         if not lock_dep.local_path:
             raise CacheMissError(f"local dep {lock_dep.repo_url!r} has no local_path in lockfile")
-        candidate = resolve_local_dep_dir(lock_dep, lockfile, project_root)
+        candidate = resolve_local_dep_dir(
+            lock_dep,
+            lockfile,
+            project_root,
+            parent_index=parent_index,
+            resolved_cache=resolved_cache,
+        )
         if not candidate.exists():
             raise CacheMissError(
                 f"local source missing for {lock_dep.local_path!r}: expected {candidate}"
@@ -624,6 +638,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     logger.replay_start()
     replayed_count = 0
+    local_parent_index = build_local_parent_index(lock)
+    local_resolved_cache: dict[str, Path] = {}
     try:
         with _ReadOnlyProjectGuard(project_root, protected_subpaths):
             for lock_dep in lock.get_all_dependencies():
@@ -638,6 +654,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         apm_modules_dir,
                         cache_only=config.cache_only,
                         lockfile=lock,
+                        parent_index=local_parent_index,
+                        resolved_cache=local_resolved_cache,
                         live_modules_dir=live_modules_dir,
                         downloader=downloader,
                         registry_resolver=registry_resolver,
@@ -703,11 +721,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     return scratch_root
 
 
-# ---------------------------------------------------------------------------
 # Diff engine
-# ---------------------------------------------------------------------------
-
-_INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
 
 
 def _governed_root_dirs(targets: list[TargetProfile]) -> set[str]:
@@ -798,18 +812,6 @@ def _collect_hashed_files(lockfile: LockFile) -> set[str]:
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     return set(DeploymentLedgerCodec.legacy_deployed_file_hash_paths(lockfile))
-
-
-def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
-    """Build an inline diff hint, capped to keep findings compact."""
-    try:
-        s_size = scratch_path.stat().st_size
-        p_size = project_path.stat().st_size
-    except OSError:
-        return ""
-    if s_size > _INLINE_DIFF_BYTE_CAP or p_size > _INLINE_DIFF_BYTE_CAP:
-        return "(file too large for inline diff; use 'git diff --no-index' to compare)"
-    return ""
 
 
 def _canvas_deploy_prefixes(targets) -> set[str]:

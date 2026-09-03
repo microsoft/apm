@@ -19,6 +19,7 @@ from apm_cli.commands.approve import (
     approve_cmd,
     deny_cmd,
     load_org_policy,
+    scan_installed_executable_packages,
 )
 from apm_cli.commands.policy import policy as policy_group
 from apm_cli.core.command_logger import CommandLogger
@@ -56,6 +57,52 @@ def _create_pkg_with_bin(apm_modules: Path, name: str) -> None:
     bin_dir.mkdir(parents=True)
     (bin_dir / "tool").write_text("#!/bin/sh")
     (pkg_dir / "apm.yml").write_text(yaml.dump({"name": name, "version": "2.0"}))
+
+
+def test_approval_scanner_rejects_symlinked_package_manifest(tmp_path: Path) -> None:
+    manifest = _write_manifest(str(tmp_path))
+    package_dir = tmp_path / "apm_modules" / "repo"
+    package_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.yml"
+    outside.write_text(
+        yaml.safe_dump(
+            {
+                "name": "evil",
+                "dependencies": {"lsp": [{"name": "evil", "command": "evil-lsp"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        (package_dir / "apm.yml").symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+
+    assert scan_installed_executable_packages(manifest) == []
+
+
+def _write_cyclic_local_lockfile() -> None:
+    """Write a corrupt local dependency ancestry cycle."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="_local/a",
+            source="local",
+            local_path="../a",
+            resolved_by="_local/b",
+        )
+    )
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="_local/b",
+            source="local",
+            local_path="../b",
+            resolved_by="_local/a",
+        )
+    )
+    lockfile.write(Path("apm.lock.yaml"))
 
 
 def _isolated_config(tmp_path: Path):
@@ -331,6 +378,48 @@ class TestApproveCmd:
             assert result.exit_code == 0
             assert "not found" in result.output
 
+    @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
+    def test_trust_command_reports_corrupt_local_dependency_ancestry(self, command) -> None:
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            Path("apm_modules").mkdir()
+            _write_cyclic_local_lockfile()
+
+            result = runner.invoke(command, ["package-a"])
+
+        assert result.exit_code == 1
+        assert "invalid local dependency ancestry" in result.output
+        assert "Run 'apm install'" in result.output
+
+    def test_approve_uses_locked_identity_not_manifest_name(self) -> None:
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            package_dir = Path("apm_modules/evil/repo")
+            _create_pkg_with_hooks(Path("apm_modules/evil"), "repo")
+            (package_dir / "apm.yml").write_text(
+                yaml.dump({"name": "trusted-name", "version": "1.0"})
+            )
+            from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+            locked = LockedDependency(
+                repo_url="evil/repo",
+                version="1.0",
+                name="trusted-name",
+            )
+            lockfile = LockFile()
+            lockfile.add_dependency(locked)
+            lockfile.write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["trusted-name"])
+
+            assert result.exit_code == 0, result.output
+            from apm_cli.utils.yaml_io import load_yaml
+
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"evil/repo#1.0"}
+
     def test_approve_recommended_bulk_accepts_org_set(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -398,6 +487,12 @@ class TestDenyCmd:
             result = runner.invoke(deny_cmd, ["owner/repo"])
             assert result.exit_code == 0
             assert "Denied" in result.output
+            from apm_cli.security.executables import ALL_EXEC_TYPES
+            from apm_cli.utils.yaml_io import load_yaml
+
+            stored = load_yaml(Path("apm.yml"))["executables"]["deny"]["owner/repo"]
+            assert set(stored) == set(ALL_EXEC_TYPES)
+            assert all(stored.values())
 
     def test_deny_user_scope_writes_config(self, tmp_path: Path) -> None:
         p_cfg, p_legacy, cfg = _isolated_config(tmp_path)

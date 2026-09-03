@@ -11,6 +11,7 @@ Covers:
 import typing
 from unittest.mock import MagicMock
 
+import click
 import pytest
 
 from apm_cli.install.mcp.registry import (
@@ -133,6 +134,25 @@ class TestResolveRegistryUrlConfigLayer:
         assert url == "https://flag.example.com"
         assert source == "flag"
 
+    def test_flag_dry_run_announces_selected_registry(self, monkeypatch):
+        """An explicit dry-run names the endpoint that would be queried."""
+        from urllib.parse import urlparse
+
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        logger = MagicMock()
+
+        url, source = resolve_registry_url(
+            "https://flag.example.com/private",
+            logger=logger,
+            announce=True,
+        )
+
+        assert (url, source) == ("https://flag.example.com/private", "flag")
+        message = " ".join(call.args[0] for call in logger.progress.call_args_list)
+        printed_url = next(token for token in message.split() if "://" in token)
+        assert urlparse(printed_url).hostname == "flag.example.com"
+        assert "from --registry" in message
+
     def test_config_layer_emits_diagnostic(self, monkeypatch):
         """Config layer emits a visible diagnostic naming the source."""
         from urllib.parse import urlparse
@@ -150,6 +170,25 @@ class TestResolveRegistryUrlConfigLayer:
         assert len(urls) == 1
         assert urlparse(urls[0]).hostname == "config.example.com"
         assert "apm config" in msg
+
+    def test_announce_false_suppresses_only_the_endpoint_line(self, monkeypatch):
+        """A real ``--mcp`` install lets the integrator name the endpoint.
+
+        Both layers announcing printed the same line twice; the local-host
+        warning still fires here because no later phase repeats it.
+        """
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url",
+            lambda: "http://127.0.0.1:8080",
+        )
+        logger = MagicMock()
+
+        url, source = resolve_registry_url(None, logger=logger, announce=False)
+
+        assert (url, source) == ("http://127.0.0.1:8080", "config")
+        assert not logger.progress.called
+        assert logger.warning.called
 
     def test_default_when_config_unset(self, monkeypatch):
         """Default source when all layers are absent."""
@@ -217,6 +256,14 @@ class TestRegistryEnvOverride:
             assert os.environ.get("MCP_REGISTRY_ALLOW_HTTP") == "1"
         assert "MCP_REGISTRY_ALLOW_HTTP" not in os.environ
 
+    def test_http_url_preserves_separate_opt_in_when_disabled(self, monkeypatch):
+        monkeypatch.delenv("MCP_REGISTRY_ALLOW_HTTP", raising=False)
+        import os
+
+        with registry_env_override("http://intranet.example.com", allow_http=False):
+            assert "MCP_REGISTRY_ALLOW_HTTP" not in os.environ
+        assert "MCP_REGISTRY_ALLOW_HTTP" not in os.environ
+
     def test_none_is_no_op(self, monkeypatch):
         monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
         import os
@@ -232,6 +279,21 @@ class TestValidateRegistryUrl:
     def test_https_accepted(self):
         validate_registry_url("https://mcp.example.com")
 
+    def test_credentials_rejected(self):
+        with pytest.raises(click.UsageError, match="embedded credentials are not supported"):
+            validate_registry_url("https://user:secret@mcp.example.com")
+
+    @pytest.mark.parametrize(
+        "url",
+        (
+            "https://mcp.example.com?token=secret",
+            "https://mcp.example.com#token=secret",
+        ),
+    )
+    def test_query_and_fragment_rejected(self, url):
+        with pytest.raises(click.UsageError, match="must not contain a query or fragment"):
+            validate_registry_url(url)
+
     def test_http_accepted(self):
         validate_registry_url("http://intranet.example.com")
 
@@ -246,6 +308,22 @@ class TestValidateRegistryUrl:
     def test_file_scheme_rejected(self):
         with pytest.raises(Exception):  # noqa: B017
             validate_registry_url("file:///etc/passwd")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://registry.example.com/path?token=query-value",
+            "https://registry.example.com/path#fragment-value",
+        ],
+    )
+    def test_query_and_fragment_rejected_without_echoing_values(self, url):
+        import click
+
+        with pytest.raises(click.UsageError, match="query strings and fragments") as exc_info:
+            validate_registry_url(url)
+        message = str(exc_info.value)
+        assert "query-value" not in message
+        assert "fragment-value" not in message
 
     def test_javascript_scheme_rejected(self):
         with pytest.raises(Exception):  # noqa: B017
@@ -269,6 +347,15 @@ class TestValidateRegistryUrl:
         msg = str(exc_info.value.message)
         assert "topsecret" not in msg
         assert "user:" not in msg
+
+    def test_path_credentials_redacted_in_invalid_url_message(self):
+        import click
+
+        with pytest.raises(click.UsageError) as exc_info:
+            validate_registry_url("https:///name:password-value@registry.example.com")
+        message = str(exc_info.value)
+        assert "name" not in message
+        assert "password-value" not in message
 
     def test_credentials_redacted_in_unsupported_scheme_message(self):
         """UsageError text for an unsupported scheme must not echo credentials."""
@@ -328,14 +415,49 @@ class TestRedactUrlCredentials:
         url = "https://registry.example.com/v0"
         assert _redact_url_credentials(url) == url
 
+    def test_strips_query_and_fragment_from_diagnostics(self):
+        from urllib.parse import urlparse
+
+        from apm_cli.install.mcp.registry import _redact_url_credentials
+
+        out = _redact_url_credentials("https://registry.example.com/v0?token=TOPSECRET#credential")
+        parsed = urlparse(out)
+        assert parsed.hostname == "registry.example.com"
+        assert parsed.path == "/v0"
+        assert parsed.query == ""
+        assert parsed.fragment == ""
+
     def test_diagnostic_does_not_leak_credentials(self, monkeypatch):
         """End-to-end: B3 env-source diagnostic must redact creds."""
         monkeypatch.setenv("MCP_REGISTRY_URL", "https://u:topsecret@x.example.com/")
         logger = MagicMock()
-        resolve_registry_url(None, logger=logger)
-        msg = logger.progress.call_args.args[0]
-        assert "topsecret" not in msg
-        assert "u:" not in msg
+        with pytest.raises(click.UsageError) as raised:
+            resolve_registry_url(None, logger=logger)
+        assert "topsecret" not in str(raised.value)
+        logger.progress.assert_not_called()
+
+    def test_malformed_ambient_value_is_redacted_from_override_diagnostic(self, monkeypatch):
+        secret = "REGISTRY_SECRET_SENTINEL"
+        monkeypatch.setenv("MCP_REGISTRY_URL", secret)
+        logger = MagicMock()
+
+        resolved, source = resolve_registry_url("https://registry.example.com", logger=logger)
+
+        assert resolved == "https://registry.example.com"
+        assert source == "flag"
+        message = logger.progress.call_args.args[0]
+        assert secret not in message
+        assert "<redacted-invalid-registry-url>" in message
+
+    def test_malformed_ambient_value_is_redacted_from_validation_error(self, monkeypatch):
+        secret = "REGISTRY_SECRET_SENTINEL"
+        monkeypatch.setenv("MCP_REGISTRY_URL", secret)
+
+        with pytest.raises(click.UsageError) as raised:
+            resolve_registry_url(None)
+
+        assert secret not in str(raised.value)
+        assert "<redacted-invalid-registry-url>" in str(raised.value)
 
 
 class TestSsrfWarning:

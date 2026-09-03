@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **120 normative statements** indexed in
+- OpenAPM v0.1 carries **121 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -218,8 +218,9 @@ type"), the definition section is cross-linked.
 
 | Term | Definition |
 |---|---|
-| **Manifest** | The `apm.yml` file at the root of a package. Defined in [Section 4](#4-manifest-format-apmyml). |
-| **Lockfile** | The `apm.lock.yaml` file at the root of a project. Defined in [Section 5](#5-lockfile-format-apmlockyaml). |
+| **Manifest** | The `apm.yml` file for one package or installation scope. Defined in [Section 4](#4-manifest-format-apmyml). |
+| **Lockfile** | The `apm.lock.yaml` file recording one installation scope's resolved state. Defined in [Section 5](#5-lockfile-format-apmlockyaml). |
+| **Installation scope** | The isolated manifest, lockfile, and target-configuration boundary for an install. A project scope is rooted at the consumer project. A user scope is independent of any project root and uses an implementation-defined user location disclosed by the consumer's conformance statement. |
 | **Policy** | An `apm-policy.yml` file evaluated by a Governance implementation. Defined in [Section 6](#6-policy-format-apm-policyyml). |
 | **Package** | A unit identified by a manifest (`apm.yml`) or by a recognised package layout (see [Section 8.1](#81-primitive-types)). |
 | **Primitive** | A typed unit of agent configuration (instruction, prompt, agent, skill, command, hook, or mcp server). Defined in [Section 8.1](#81-primitive-types). |
@@ -250,8 +251,9 @@ type"), the definition section is cross-linked.
 
 ### 4.1 Document structure and required fields
 
-The manifest is a single YAML 1.2 document located at the project root,
-filename `apm.yml`.
+The project-scope manifest is a single YAML 1.2 document located at the
+project root, filename `apm.yml`. A user-scope manifest, when supported,
+uses the user location declared under [req-tg-014](#req-tg-014).
 
 <a id="req-mf-001"></a>
 **[req-mf-001]** A conforming **producer** implementation MUST emit a
@@ -798,10 +800,12 @@ This section's normative statements are:
 
 ### 5.1 Top-level structure
 
-The lockfile is a single YAML 1.2 document at the project root,
-filename `apm.lock.yaml`. It records the pinned resolved state of
-every dependency the consumer has resolved from the manifest, plus
-the set of files the consumer itself contributes (the self-entry).
+The project-scope lockfile is a single YAML 1.2 document at the project
+root, filename `apm.lock.yaml`. A user-scope lockfile, when supported,
+uses the user location declared under [req-tg-014](#req-tg-014). A
+lockfile records the pinned resolved state of every dependency the
+consumer has resolved from the manifest, plus the set of files the
+consumer itself contributes (the self-entry).
 
 <a id="req-lk-001"></a>
 **[req-lk-001]** A conforming **consumer** implementation MUST emit a
@@ -2707,6 +2711,37 @@ suffix.
 > the materialized dependency directory; it does not copy package content into
 > the host's private plugin state.
 
+#### 8.5.8 User-scoped MCP target selection
+
+<a id="req-tg-014"></a>
+**[req-tg-014]** A conforming **consumer** implementation that supports a user
+installation scope MUST disclose in its conformance statement the user-scope
+manifest and lockfile locations and the versioned target-capability declaration
+it uses to determine user-scope MCP support. The consumer MUST treat a target
+without that declared capability as unsupported.
+
+When the consumer installs an MCP server into a user scope, it MUST resolve the
+effective target selection from the first applicable source in this order: an
+explicit target selection; a non-empty user-scope manifest restriction that
+does not contain the literal no-restriction sentinel `all`; a configured user
+default; then user-scope runtime discovery. Once a source selects one or more
+targets, the consumer MUST NOT consult a lower-precedence source. Project-scoped
+target-detection signals outside the user scope MUST NOT constrain the discovery
+step. A manifest `all` token is treated as no restriction and therefore does
+not suppress lower-precedence user-scope defaults or discovery.
+
+Before creating or modifying the user-scope manifest, lockfile, or target
+configuration for the attempted MCP entry, the consumer MUST partition the
+selected targets by the declared user-scope MCP capability. If no supported
+target remains, it MUST emit an actionable diagnostic and MUST NOT make a
+persistent mutation or fall back to discovery. For a mixed set, the supported
+subset MUST become the effective target set; the consumer MUST diagnose every
+unsupported target, MUST NOT write its target configuration, and MUST NOT fall
+back to discovery. If it persists an explicit mixed selection as a user-scope
+manifest restriction, it MUST serialize only the supported subset using target
+identifiers whose replay selects the same runtimes; it MUST NOT persist an
+unsupported member or remap one to a different supported runtime.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2724,7 +2759,8 @@ without a spec revision. The current matrix is in the companion
   [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
   [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
   [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
-  [req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007).
+  [req-tg-014](#req-tg-014), [req-pr-006](#req-pr-006),
+  [req-pr-007](#req-pr-007).
 
 ---
 
@@ -3333,6 +3369,7 @@ conformance statement identifying:
 [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
 [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
 [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
+[req-tg-014](#req-tg-014),
 [req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
@@ -3782,6 +3819,7 @@ renumbering of conformance classes.
 | [req-tg-011](#req-tg-011)                | MUST    | 8.5.5   | consumer    |
 | [req-tg-012](#req-tg-012)                | MUST    | 8.5.6   | consumer    |
 | [req-tg-013](#req-tg-013)                | MUST    | 8.5.7   | consumer    |
+| [req-tg-014](#req-tg-014)                | MUST    | 8.5.8   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3801,7 +3839,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 120** (115 MUST, 5 SHOULD).
+**Total normative statements: 121** (116 MUST, 5 SHOULD).
 
 ---
 
@@ -3849,6 +3887,7 @@ renumbering of conformance classes.
 | 0.1.36  | 2026-08-29 | Editorial and defensive alignment for [req-tg-011] and [req-tg-013]. Named the [req-tg-008] result as the effective target intersection; scoped aggregate registration and plugin-name claimant selection to dependencies that passed admission; required target contraction to retire consumer-owned native registration; required advisory uninstall, prune, and restore reconciliation to omit ambiguous or changed-owner plugin entries without blocking cleanup; restored exact removal boundaries; defined directory-marketplace entries; and added reserved namespace disclosure to Section 11.2. Added conformance coverage for direct-owner promotion, advisory collision cleanup, and transitive owner-repoint refusal. Statement count remains 119 (114 MUST, 5 SHOULD). |
 | 0.1.37  | 2026-09-01 | Spec-citation fold for safe full-SHA revision-pin updates (closes #2511 Mode-B silent-extension gate). Added [req-rs-017] (Section 7.7, consumer MUST): a consumer extension may replace a full commit pin only with the peeled commit of the highest eligible non-prerelease annotated tag, including 0.x; no eligible tag retains the current commit and allows unrelated updates to continue; malformed, ambiguous, or failed remote tag resolution stops before manifest or lockfile writes. Revised [req-rs-011], [req-rs-012], and [req-rs-015] for bounded manifest rewrite, scoped operation, advisory tag provenance, and network-free replay. Section 5.2, Section 5.6, Section 7.11, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 119 -> 120 (115 MUST, 5 SHOULD). |
 | 0.1.38  | 2026-09-01 | Defensive amendment of [req-lk-005] (no new normative statement; count remains 120 (115 MUST, 5 SHOULD)): `generated_at` is optional advisory metadata, new lockfiles omit it by default, and later writes preserve an existing omission unless explicitly configured otherwise. |
+| 0.1.39  | 2026-09-01 | Spec-citation fold for user-scoped direct MCP target selection (closes #2548 Mode-B silent-extension gate). Added [req-tg-014] (Section 8.5.8, consumer MUST): explicit selection, the user-scope manifest, configured user default, and user-scope runtime discovery form one precedence chain; project-only signals cannot constrain final discovery; and a selected set with no user-capable runtime fails before user manifest, lockfile, or target-config mutation. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 120 -> 121 (116 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

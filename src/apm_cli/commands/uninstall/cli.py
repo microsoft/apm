@@ -4,6 +4,7 @@ import builtins
 import contextlib
 import sys
 import traceback
+from typing import Any
 
 import click
 
@@ -11,6 +12,8 @@ from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...models.apm_package import APMPackage
 from .engine import (
+    IntegrationCleanupOutcome,
+    MCPUninstallCleanupError,
     _cleanup_staged_local_refreshes,
     _cleanup_stale_mcp,
     _cleanup_transitive_orphans,
@@ -24,6 +27,95 @@ from .engine import (
     _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
 )
+
+
+def _report_uninstall_outcome(
+    logger: CommandLogger,
+    summary_lines: list[str],
+    integration_cleanup: IntegrationCleanupOutcome,
+    integration_cleanup_error: Exception | None,
+    mcp_cleanup_error: Exception | None,
+    lsp_cleanup_error: Exception | None,
+    mcp_cleanup_fatal: bool,
+) -> bool:
+    """Render the final summary and return whether cleanup was incomplete."""
+    integration_incomplete = not integration_cleanup.complete
+    if not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
+        if integration_cleanup_error is None:
+            logger.success("Uninstall complete: " + ", ".join(summary_lines))
+        else:
+            logger.warning("Package removal finished, but integration cleanup is incomplete.")
+    elif integration_incomplete:
+        logger.warning("Package removal finished, but managed hook cleanup is incomplete.")
+    return (
+        mcp_cleanup_fatal
+        or lsp_cleanup_error is not None
+        or integration_incomplete
+        or integration_cleanup_error is not None
+    )
+
+
+def _collect_deployed_cleanup_state(
+    lockfile,
+    dependency_keys: set[str],
+) -> tuple[set[str], dict[str, str]]:
+    """Snapshot selected deployment paths and hashes before lockfile mutation."""
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...integration.base_integrator import BaseIntegrator
+
+    snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
+    return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
+
+
+def _sync_integrations_for_manifest(
+    *,
+    manifest_path,
+    deploy_root,
+    all_deployed_files,
+    logger,
+    user_scope: bool,
+    lockfile,
+    modules_dir,
+    deployed_file_hashes,
+    default_counts,
+) -> tuple[IntegrationCleanupOutcome, Exception | None]:
+    """Run post-uninstall integration cleanup when the manifest is parseable."""
+    default_outcome = IntegrationCleanupOutcome(
+        counts=default_counts,
+        deployed_files={},
+        failed_paths=[],
+        error_count=0,
+    )
+    try:
+        apm_package = APMPackage.from_apm_yml(manifest_path)
+    except Exception as manifest_err:
+        logger.warning("Integration cleanup did not finish.")
+        logger.warning("Run 'apm install' to resync remaining integrations.")
+        logger.verbose_detail(
+            f"Integration cleanup skipped: {type(manifest_err).__name__}: {manifest_err}"
+        )
+        return default_outcome, None
+
+    try:
+        return (
+            _sync_integrations_after_uninstall(
+                apm_package,
+                deploy_root,
+                all_deployed_files,
+                logger,
+                user_scope=user_scope,
+                lockfile=lockfile,
+                modules_dir=modules_dir,
+                deployed_file_hashes=deployed_file_hashes,
+            ),
+            None,
+        )
+    except Exception as sync_err:
+        logger.warning("Integration cleanup did not finish.")
+        logger.warning("Run 'apm install' to resync remaining integrations.")
+        logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
+        logger.verbose_detail(traceback.format_exc().rstrip())
+        return default_outcome, sync_err
 
 
 def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
@@ -40,6 +132,53 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
     prod_deps = data["dependencies"]["apm"] or []
     dev_deps = data["devDependencies"]["apm"] or []
     return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]
+
+
+def _cleanup_stale_lsp(
+    *,
+    apm_package: Any,
+    lockfile: Any,
+    lockfile_path: Any,
+    modules_dir: Any,
+    deploy_root: Any,
+    user_scope: bool,
+    logger: Any,
+) -> tuple[bool, Exception | None]:
+    """Reconcile LSP state after uninstall and render an actionable failure."""
+    try:
+        from ...install.lsp.integration import reconcile_lsp_after_uninstall
+
+        updated = reconcile_lsp_after_uninstall(
+            apm_package=apm_package,
+            lockfile=lockfile,
+            lock_path=lockfile_path,
+            modules_dir=modules_dir,
+            project_root=deploy_root,
+            user_scope=user_scope,
+            logger=logger,
+        )
+        return updated, None
+    except Exception as cleanup_error:
+        recovery_command = "apm install --global" if user_scope else "apm install"
+        logger.error(
+            "Uninstall incomplete: package removal completed, but LSP cleanup "
+            f"failed: {cleanup_error}. Fix the LSP config path, then run "
+            f"'{recovery_command}' to reconcile stale entries."
+        )
+        logger.verbose_detail(traceback.format_exc().rstrip())
+        return False, cleanup_error
+
+
+def _abort_if_retained_target_cleanup_paths(retained_cleanup_paths: set[Any], logger: Any) -> None:
+    """Stop uninstall before package state mutates when owned target files remain."""
+    if retained_cleanup_paths:
+        logger.error(
+            "Uninstall could not remove tracked target files; package state was preserved."
+        )
+        for path in sorted(retained_cleanup_paths):
+            logger.error(f"  - {path}")
+        logger.error("Resolve or remove the listed files, then retry uninstall.")
+        sys.exit(1)
 
 
 @click.command(
@@ -92,6 +231,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
     logger = CommandLogger("uninstall", verbose=verbose, dry_run=dry_run)
     staged_local_refreshes = {}
+    apm_package = None
     registration_token = _publish_native_registration(deploy_root, scope, manifest_path)
     try:
         # Check if apm.yml exists
@@ -288,14 +428,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 user_scope=scope is InstallScope.USER,
                 logger=logger,
             )
-            if retained_cleanup_paths:
-                logger.error(
-                    "Uninstall could not remove tracked target files; package state was preserved."
-                )
-                for path in sorted(retained_cleanup_paths):
-                    logger.error(f"  - {path}")
-                logger.error("Resolve or remove the listed files, then retry uninstall.")
-                sys.exit(1)
+            _abort_if_retained_target_cleanup_paths(retained_cleanup_paths, logger)
 
         # Step 4: Remove from apm.yml
         for package in packages_to_remove:
@@ -344,17 +477,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         removed_from_modules += orphan_removed
 
         # Step 8: Collect deployed files for removed packages (before lockfile mutation)
-        from ...integration.base_integrator import BaseIntegrator
-
         removed_keys.update(actual_orphans)
-        all_deployed_files = builtins.set()
         if lockfile:
-            for dep_key, dep in lockfile.dependencies.items():
-                if dep_key in removed_keys or dep_key in refreshed_survivor_keys:
-                    all_deployed_files.update(dep.deployed_files)
-        all_deployed_files = (
-            BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
-        )
+            all_deployed_files, all_deployed_file_hashes = _collect_deployed_cleanup_state(
+                lockfile,
+                removed_keys | refreshed_survivor_keys,
+            )
+        else:
+            all_deployed_files, all_deployed_file_hashes = set(), {}
 
         # Step 9: Mutate dependency state in memory. Persistence happens once
         # after survivor ownership, hashes, ledger, and MCP state agree.
@@ -384,30 +514,26 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             "instructions": 0,
         }
         surviving_deployed_files = {}
+        integration_cleanup = IntegrationCleanupOutcome(
+            counts=cleaned,
+            deployed_files=surviving_deployed_files,
+            failed_paths=[],
+            error_count=0,
+        )
+        integration_cleanup, integration_cleanup_error = _sync_integrations_for_manifest(
+            manifest_path=manifest_path,
+            deploy_root=deploy_root,
+            all_deployed_files=all_deployed_files,
+            logger=logger,
+            user_scope=scope is InstallScope.USER,
+            lockfile=lockfile,
+            modules_dir=modules_dir,
+            deployed_file_hashes=all_deployed_file_hashes,
+            default_counts=cleaned,
+        )
+        cleaned = integration_cleanup.counts
+        surviving_deployed_files = integration_cleanup.deployed_files
         lockfile_ready = True
-        try:
-            apm_package = APMPackage.from_apm_yml(manifest_path)
-            cleaned, surviving_deployed_files = _sync_integrations_after_uninstall(
-                apm_package,
-                deploy_root,
-                all_deployed_files,
-                logger,
-                user_scope=scope is InstallScope.USER,
-                lockfile=lockfile,
-                modules_dir=modules_dir,
-            )
-        except Exception as _sync_err:
-            # Surface why integration cleanup failed instead of swallowing
-            # silently. Previously a bare `except: pass` here masked
-            # Windows-only failures where the DB row was never deleted on
-            # `apm uninstall --target copilot-app`.
-            logger.warning(f"Integration cleanup failed: {type(_sync_err).__name__}: {_sync_err}")
-            # Preserve the traceback under verbose for diagnosing
-            # platform-specific failures without spamming default output.
-            logger.verbose_detail(traceback.format_exc().rstrip())
-            logger.verbose_detail(
-                "Some integrated files may remain. Run `apm install --force` to resync."
-            )
 
         if lockfile:
             try:
@@ -441,6 +567,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         from ...utils.path_security import PathTraversalError
 
         mcp_cleanup_error = None
+        mcp_cleanup_fatal = False
         try:
             apm_package = APMPackage.from_apm_yml(manifest_path)
             _cleanup_stale_mcp(
@@ -454,13 +581,23 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 scope=scope,
                 persist=False,
             )
-        except (IntelliJConfigError, PathTraversalError) as cleanup_error:
+        except (
+            IntelliJConfigError,
+            MCPUninstallCleanupError,
+            PathTraversalError,
+        ) as cleanup_error:
             mcp_cleanup_error = cleanup_error
+            mcp_cleanup_fatal = True
             recovery = ""
             if isinstance(cleanup_error, PathTraversalError):
                 recovery = (
                     " Fix the MCP config path, then run 'apm install' to reconcile "
                     "the stale entry; the package was already removed from apm.yml."
+                )
+            elif isinstance(cleanup_error, MCPUninstallCleanupError):
+                recovery = (
+                    " Fix the reported target configs, then run 'apm install' "
+                    "to reconcile stale MCP entries."
                 )
             logger.error(
                 "Uninstall incomplete: package removal completed, but MCP cleanup failed: "
@@ -474,6 +611,17 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 "to reconcile stale MCP entries."
             )
             logger.verbose_detail(traceback.format_exc().rstrip())
+
+        lsp_lock_updated, lsp_cleanup_error = _cleanup_stale_lsp(
+            apm_package=apm_package,
+            lockfile=lockfile,
+            lockfile_path=lockfile_path,
+            modules_dir=modules_dir,
+            deploy_root=deploy_root,
+            user_scope=scope is InstallScope.USER,
+            logger=logger,
+        )
+        lockfile_updated = lsp_lock_updated or lockfile_updated
 
         if lockfile and lockfile_updated and lockfile_ready:
             try:
@@ -502,8 +650,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]
         if removed_from_modules > 0:
             summary_lines.append(f"Removed {removed_from_modules} package(s) from apm_modules/")
-        if mcp_cleanup_error is None:
-            logger.success("Uninstall complete: " + ", ".join(summary_lines))
+        cleanup_incomplete = _report_uninstall_outcome(
+            logger,
+            summary_lines,
+            integration_cleanup,
+            integration_cleanup_error,
+            mcp_cleanup_error,
+            lsp_cleanup_error,
+            mcp_cleanup_fatal,
+        )
 
         # Fire post-uninstall lifecycle scripts
         _fire_uninstall_scripts(
@@ -515,7 +670,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             verbose=verbose,
             deploy_root=deploy_root,
         )
-        if mcp_cleanup_error is not None:
+        if cleanup_incomplete:
             sys.exit(1)
 
     except Exception as e:

@@ -872,8 +872,19 @@ class EffectiveTargetDecision:
 
     def runtime_targets_for_scope(self, *, user_scope: bool) -> tuple[str, ...] | None:
         """Return MCP runtime identifiers adjusted for project or user scope."""
-        del user_scope
-        return self.runtime_targets
+        targets = self.runtime_targets
+        if not user_scope or targets is None:
+            return targets
+
+        from apm_cli.core.experimental import is_enabled
+
+        eligible: list[str] = []
+        for runtime in targets:
+            capability = get_target_capability(runtime)
+            if capability.experimental_flag and not is_enabled(capability.experimental_flag):
+                continue
+            eligible.append(runtime)
+        return tuple(eligible)
 
     @cached_property
     def runtime_equivalents(self) -> tuple[str, ...] | None:
@@ -964,6 +975,7 @@ def resolve_manifest_target_decision(
     *,
     manifest_path: Path,
     explicit_target: str | list[str] | None,
+    user_scope: bool = False,
 ) -> EffectiveTargetDecision:
     """Resolve one effective target decision from an optional manifest path."""
     package = None
@@ -975,6 +987,7 @@ def resolve_manifest_target_decision(
         project_root,
         package=package,
         explicit_target=explicit_target,
+        user_scope=user_scope,
     )
 
 

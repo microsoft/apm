@@ -382,6 +382,8 @@ class TestCleanupStaleMcp:
         apm_package = MagicMock()
         apm_package.get_mcp_dependencies.return_value = []
         lockfile = MagicMock()
+        lockfile.mcp_target_servers = {"claude": ["stale-server"]}
+        lockfile._mcp_target_servers_present = True
         lockfile_path = tmp_path / "apm.lock.yaml"
         old_servers = {"stale-server"}
 
@@ -402,9 +404,11 @@ class TestCleanupStaleMcp:
 
         mock_mcp.remove_stale.assert_called_once_with(
             {"stale-server"},
+            runtime="claude",
             project_root=None,
             user_scope=False,
             scope=None,
+            fail_on_write_error=True,
         )
         mock_mcp.update_lockfile.assert_called_once()
 
@@ -438,6 +442,8 @@ class TestCleanupStaleMcp:
         apm_package = MagicMock()
         apm_package.get_mcp_dependencies.return_value = []
         lockfile = MagicMock()
+        lockfile.mcp_target_servers = {"claude": ["stale"]}
+        lockfile._mcp_target_servers_present = True
         lockfile_path = tmp_path / "apm.lock.yaml"
         old_servers = {"stale"}
 
@@ -458,9 +464,11 @@ class TestCleanupStaleMcp:
 
         mock_mcp.remove_stale.assert_called_once_with(
             {"stale"},
+            runtime="claude",
             project_root=None,
             user_scope=False,
             scope="user",
+            fail_on_write_error=True,
         )
 
     def test_get_mcp_dependencies_exception_handled(self, tmp_path):

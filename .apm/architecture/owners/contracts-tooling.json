@@ -37,6 +37,13 @@
       "guards": ["contracts-tooling-frontmatter-yaml"]
     },
     {
+      "id": "deterministic-atomic-text-writes",
+      "decision": "Deterministic UTF-8 text writes and atomic replacement",
+      "owner": "utils/atomic_io.py (write_text_lf, atomic_write_text)",
+      "selectors": ["src/apm_cli/utils/atomic_io.py"],
+      "guards": ["contracts-tooling-project-yaml-write-delegation"]
+    },
+    {
       "id": "read-only-lockfile-path",
       "decision": "Lockfile read path, timestamp emission, and reproducible fallback",
       "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp)",

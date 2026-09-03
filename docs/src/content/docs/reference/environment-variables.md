@@ -56,7 +56,7 @@ APM verifies HTTPS against the operating-system trust store by default. For the 
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `MCP_REGISTRY_URL` | Override the MCP registry endpoint used by `apm mcp` and `apm install --mcp NAME`. Must be `https://`. | public registry | When set, every `apm mcp` command prints `Registry: <url>`. See [`apm mcp`](../cli/mcp/). |
+| `MCP_REGISTRY_URL` | Override the MCP registry endpoint used by `apm mcp`, `apm install --mcp NAME`, and manifest-driven `dependencies.mcp` installs. HTTPS by default; HTTP requires `MCP_REGISTRY_ALLOW_HTTP=1`. | public registry | When set, registry commands print `Registry: <url> (from MCP_REGISTRY_URL)` and installs print `Using MCP registry: <url> (from MCP_REGISTRY_URL)`. See [`apm mcp`](../cli/mcp/). |
 | `MCP_REGISTRY_ALLOW_HTTP` | Set to `1` to permit a plaintext `http://` `MCP_REGISTRY_URL` (development only). | unset | Required to opt in to HTTP; production should always use HTTPS. |
 | `MCP_REGISTRY_CONNECT_TIMEOUT` | Connect timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
 | `MCP_REGISTRY_READ_TIMEOUT` | Read timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |

@@ -215,6 +215,7 @@ class TestRunMcpIntegrationEmptyDepsBranch:
                 mcp_deps=[],
                 old_mcp_servers={"io.github.acme/orphan"},
                 old_mcp_configs={"io.github.acme/orphan": {"name": "orphan"}},
+                old_mcp_target_servers={"copilot": {"io.github.acme/orphan"}},
             )
         )
 
@@ -238,12 +239,33 @@ class TestRunMcpIntegrationEmptyDepsBranch:
                 mcp_deps=[],
                 old_mcp_servers={"stale"},
                 old_mcp_configs={"stale": {"name": "stale"}},
+                old_mcp_target_servers={"claude": {"stale"}},
                 target_decision=EffectiveTargetDecision("claude", "apm config target"),
             )
         )
 
         assert mock_mcp.remove_stale.call_count == 1
         assert mock_mcp.remove_stale.call_args.args[1] == "claude"
+
+    @patch(_PATCH_TARGET)
+    def test_no_deps_with_explicit_empty_ownership_skips_cleanup(self, mock_mcp):
+        with patch(
+            "apm_cli.install.mcp.ownership.adopt_legacy_mcp_target_servers",
+            return_value={"copilot": {"same-name-user-entry"}},
+        ) as adopt:
+            run_mcp_integration(
+                **_base_kwargs(
+                    mcp_deps=[],
+                    old_mcp_servers={"same-name-user-entry"},
+                    old_mcp_configs={"same-name-user-entry": {"name": "same-name-user-entry"}},
+                    old_mcp_target_servers={},
+                    old_mcp_target_servers_present=True,
+                )
+            )
+
+        adopt.assert_not_called()
+        mock_mcp.remove_stale.assert_not_called()
+        mock_mcp.update_lockfile.assert_called_once()
 
 
 class TestRunMcpIntegrationRestoreBranch:

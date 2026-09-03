@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -11,6 +12,7 @@ from tests.spec_conformance.gen_statement import (
     CONFORMANCE_MD,
     GENERATOR,
     SPEC_VERSION,
+    USER_SCOPE_DISCLOSURE,
 )
 
 
@@ -60,3 +62,13 @@ def test_gen_statement_md_contains_honesty_phrase():
     assert "NO automated CI detector" in md, (
         "CONFORMANCE.md MUST carry the literal phrase 'NO automated CI detector' (honesty contract)"
     )
+
+
+def test_gen_statement_publishes_user_scope_disclosure():
+    """req-tg-014 locations and capability contract stay generated."""
+    _run_gen()
+    document = json.loads(CONFORMANCE_JSON.read_text(encoding="ascii"))
+    assert document["consumer_user_scope"] == USER_SCOPE_DISCLOSURE
+    markdown = CONFORMANCE_MD.read_text(encoding="ascii")
+    for value in USER_SCOPE_DISCLOSURE.values():
+        assert value in markdown

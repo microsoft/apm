@@ -212,6 +212,7 @@ class TestMCPServerOperationsValidation(unittest.TestCase):
         ops = self._make_ops()
         ops.registry_client._is_custom_url = True
         ops.registry_client.registry_url = "https://internal.example.com"
+        ops.registry_client.registry_url_source = "env"
         ops.registry_client.find_server_by_reference.side_effect = requests.ConnectionError("boom")
 
         with self.assertRaises(RuntimeError) as cm:
@@ -219,6 +220,23 @@ class TestMCPServerOperationsValidation(unittest.TestCase):
         msg = str(cm.exception)
         self.assertIn("internal.example.com", msg)
         self.assertIn("MCP_REGISTRY_URL", msg)
+
+    def test_config_network_error_redacts_url_and_names_config_key(self):
+        ops = self._make_ops()
+        ops.registry_client._is_custom_url = True
+        ops.registry_client.registry_url = (
+            "https://name:password-value@internal.example.com/path?token=query-value#fragment-value"
+        )
+        ops.registry_client.registry_url_source = "config"
+        ops.registry_client.find_server_by_reference.side_effect = requests.ConnectionError("boom")
+
+        with self.assertRaises(RuntimeError) as cm:
+            ops.validate_servers_exist(["io.github.test/srv"])
+        msg = str(cm.exception)
+        self.assertIn("apm config get mcp-registry-url", msg)
+        self.assertNotIn("password-value", msg)
+        self.assertNotIn("query-value", msg)
+        self.assertNotIn("fragment-value", msg)
 
     def test_mixed_results(self):
         """Mix of found, missing, and errored servers."""

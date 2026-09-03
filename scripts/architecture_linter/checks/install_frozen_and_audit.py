@@ -130,10 +130,15 @@ _MCP_OWNERSHIP_OWNER = "src/apm_cli/install/mcp/ownership.py"
 
 
 _MCP_INTEGRATOR = "src/apm_cli/integration/mcp_integrator_install.py"
+_MCP_OWNERSHIP_CONSUMERS = (
+    "src/apm_cli/install/mcp/integration.py",
+    "src/apm_cli/install/mcp/command.py",
+    "src/apm_cli/commands/uninstall/engine.py",
+)
 
 
 def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Legacy MCP target ownership migration must stay owned by install/mcp/ownership.py."""
+    """Legacy MCP ownership migration and adoption stay owned by one module."""
     rule_id = _GUARD_MCP_OWNERSHIP
     owner, owner_fail = _facts_for(provider, _MCP_OWNERSHIP_OWNER, rule_id)
     consumer, consumer_fail = _facts_for(provider, _MCP_INTEGRATOR, rule_id)
@@ -149,6 +154,15 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         message="Legacy MCP target ownership migration must stay owned by install/mcp/ownership.py",
         respect_exempt=False,
     )
+    duplicates += _duplicate_definition_lines(
+        provider,
+        rule_id=rule_id,
+        prefix=_SRC_PREFIX,
+        pattern=re.compile(r"^[ \t]*def resolve_mcp_target_servers\("),
+        owner=_MCP_OWNERSHIP_OWNER,
+        message="Legacy MCP target ownership adoption must stay owned by install/mcp/ownership.py",
+        respect_exempt=False,
+    )
     findings = list(duplicates)
     if not _present_re(
         owner, re.compile(r"^def migrate_legacy_project_target_servers\(")
@@ -160,6 +174,26 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                 "Legacy MCP target ownership migration must stay owned by install/mcp/ownership.py",
             )
         )
+    if not _present_re(owner, re.compile(r"^def resolve_mcp_target_servers\(")):
+        findings.append(
+            _summary(
+                rule_id,
+                _MCP_OWNERSHIP_OWNER,
+                "Legacy MCP target ownership adoption must stay owned by install/mcp/ownership.py",
+            )
+        )
+    for path in _MCP_OWNERSHIP_CONSUMERS:
+        consumer, consumer_fail = _facts_for(provider, path, rule_id)
+        if consumer_fail:
+            findings.extend(consumer_fail)
+        elif not _present(consumer, "resolve_mcp_target_servers("):
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    "MCP ownership consumers must route legacy adoption through install/mcp/ownership.py",
+                )
+            )
     return tuple(findings)
 
 

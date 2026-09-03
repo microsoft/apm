@@ -1741,6 +1741,7 @@ class TestMcpRegistryUrlCommand:
             )
         assert result.exit_code == 0
         mock_set.assert_called_once_with("http://internal.corp/mcp")
+        assert "MCP_REGISTRY_ALLOW_HTTP=1" in result.output
 
     def test_set_invalid_scheme_rejected(self):
         with patch(

@@ -657,6 +657,27 @@ class TestScopeResolvedPartition:
         assert ".copilot/agents/my-agent.md" in buckets.get("agents_github", set())
         assert ".agents/skills/my-skill/SKILL.md" in buckets.get("skills", set())
 
+    def test_partition_user_scope_copilot_hooks_not_shadowed(self):
+        """User-scope Copilot hook paths must not be swallowed by the
+        instructions catch-all root (``.copilot/``).
+
+        The user-scope instructions primitive uses an empty ``subdir``, making
+        ``.copilot/`` a shallow catch-all prefix. Hook paths under
+        ``.copilot/hooks/`` must still route to the ``hooks`` bucket so
+        uninstall can remove them.
+        """
+        copilot = KNOWN_TARGETS["copilot"]
+        resolved = copilot.for_scope(user_scope=True)
+        managed = {
+            ".copilot/hooks/hookpkg-notify.json",
+            ".copilot/prompts/test.prompt.md",
+            ".copilot/copilot-instructions.md",
+        }
+        buckets = BaseIntegrator.partition_managed_files(managed, targets=[resolved])
+        assert ".copilot/hooks/hookpkg-notify.json" in buckets.get("hooks", set())
+        assert ".copilot/prompts/test.prompt.md" in buckets.get("prompts", set())
+        assert ".copilot/copilot-instructions.md" in buckets.get("instructions", set())
+
     def test_partition_with_opencode_user_scope(self):
         """Partition routes .config/opencode/ paths correctly."""
         from dataclasses import replace

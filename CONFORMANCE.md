@@ -14,12 +14,18 @@ There is NO automated CI detector for spec-vs-behaviour drift beyond the four se
 
 All four conformance classes (Producer, Consumer, Registry, Governance) carry active coverage in this statement. The Registry class is exercised via the trust-anchor invariant test in `tests/spec_conformance/test_registry_reqs.py`, which hashes the committed Registry-archive fixture and asserts equality with the digest the paired lockfile advertises (sec.11.3.3, req-rg-001).
 
+## Consumer user-scope disclosure
+
+- Manifest: `~/.apm/apm.yml`
+- Lockfile: `~/.apm/apm.lock.yaml`
+- Target capability declaration: `MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)`
+
 ## Coverage summary
 
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 89 | 1 | 0 | 0 |
+| Consumer | 90 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 17 | 0 | 0 | 0 |
 
@@ -147,6 +153,7 @@ All four conformance classes (Producer, Consumer, Registry, Governance) carry ac
 | [req-tg-011](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-011) | MUST | 8.5.5 | consumer | active | 2 | - |
 | [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 1 | - |
 | [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 7 | - |
+| [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 1 | - |
 
 ## Waivers
 

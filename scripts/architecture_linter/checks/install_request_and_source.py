@@ -1,15 +1,18 @@
-"""Request-default, source-plan, and outcome-routing install analyzers.
+"""Request-default, scope-selection, source-plan, and outcome install analyzers.
 
-Ports three owner guards recorded in
+Ports four owner guards recorded in
 ``.apm/architecture/owners/install-deployment.json``:
-``install-deployment-request-defaults``, ``install-deployment-source-plan``,
-and ``install-deployment-outcome``. RULES assembly (with the guard-id
-constants and the ``_rule`` factory) lives in the thin catalog module
-:mod:`install_deployment_analyzers`, which imports each check function below.
+``install-deployment-request-defaults``,
+``install-deployment-install-scope-selection``,
+``install-deployment-source-plan``, and ``install-deployment-outcome``.
+RULES assembly (with the guard-id constants and the ``_rule`` factory) lives in
+the thin catalog module :mod:`install_deployment_analyzers`, which imports each
+check function below.
 """
 
 from __future__ import annotations
 
+import ast
 import re
 
 from scripts.architecture_linter.checks.install_deployment_shared import (
@@ -37,7 +40,11 @@ _GUARD_SOURCE_PLAN = "install-deployment-source-plan"
 _GUARD_REQUEST_DEFAULTS = "install-deployment-request-defaults"
 
 
+_GUARD_INSTALL_SCOPE = "install-deployment-install-scope-selection"
+
+
 _REQUEST_OWNER = "src/apm_cli/install/request.py"
+_MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
 
 
 _ALLOWED_WRAPPER_DEFAULTS = frozenset({"update_refs", "verbose", "only_packages"})
@@ -87,6 +94,221 @@ def check_request_defaults(provider: FactsProvider) -> tuple[Violation, ...]:
             detail = f"{message}; unexpected defaulted wrapper args: {', '.join(offending)}"
         return (_summary(rule_id, _INSTALL_ADAPTER, detail),)
     return ()
+
+
+_MCP_CONFLICTS = "src/apm_cli/install/mcp/conflicts.py"
+
+
+def _named_calls(nodes: tuple[ast.AST, ...], name: str) -> list[ast.Call]:
+    """Return direct name calls from one precomputed function scope."""
+    return [
+        node
+        for node in nodes
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+    ]
+
+
+def _attribute_calls(nodes: tuple[ast.AST, ...], name: str) -> list[ast.Call]:
+    """Return attribute calls with the requested method name."""
+    return [
+        node
+        for node in nodes
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == name
+    ]
+
+
+def _has_name_keyword(call: ast.Call, keyword: str, name: str) -> bool:
+    """Return whether a call forwards one keyword from the named local."""
+    return any(
+        item.arg == keyword and isinstance(item.value, ast.Name) and item.value.id == name
+        for item in call.keywords
+    )
+
+
+def _has_scope_projection_keyword(call: ast.Call, keyword: str) -> bool:
+    """Return whether a keyword projects user scope through the canonical helper."""
+    for item in call.keywords:
+        value = item.value
+        if (
+            item.arg == keyword
+            and isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "is_user_scope"
+            and len(value.args) == 1
+            and isinstance(value.args[0], ast.Name)
+            and value.args[0].id == "scope"
+        ):
+            return True
+    return False
+
+
+def _canonical_scope_assignment(node: ast.Assign) -> bool:
+    """Return whether an assignment owns the global-to-install-scope mapping."""
+    value = node.value
+    return (
+        len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "scope"
+        and isinstance(value, ast.IfExp)
+        and isinstance(value.test, ast.Name)
+        and value.test.id == "global_"
+        and isinstance(value.body, ast.Attribute)
+        and isinstance(value.body.value, ast.Name)
+        and value.body.value.id == "InstallScope"
+        and value.body.attr == "USER"
+        and isinstance(value.orelse, ast.Attribute)
+        and isinstance(value.orelse.value, ast.Name)
+        and value.orelse.value.id == "InstallScope"
+        and value.orelse.attr == "PROJECT"
+    )
+
+
+def _takes_argument(function: ast.FunctionDef | ast.AsyncFunctionDef, name: str) -> bool:
+    """Return whether a function declares the named positional or keyword argument."""
+    arguments = (
+        *function.args.posonlyargs,
+        *function.args.args,
+        *function.args.kwonlyargs,
+    )
+    return any(argument.arg == name for argument in arguments)
+
+
+def _takes_scope(call: ast.Call) -> bool:
+    """Return whether a scope helper consumes the canonical local value."""
+    return (
+        len(call.args) == 1
+        and isinstance(call.args[0], ast.Name)
+        and call.args[0].id == "scope"
+        and not call.keywords
+    )
+
+
+def _takes_deploy_root(call: ast.Call) -> bool:
+    """Return whether discovery consumes the canonical deploy-root projection."""
+    if len(call.args) != 1:
+        return False
+    value = call.args[0]
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "get_deploy_root"
+        and len(value.args) == 1
+        and isinstance(value.args[0], ast.Name)
+        and value.args[0].id == "scope"
+        and _has_name_keyword(call, "exclude", "exclude")
+    )
+
+
+def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Direct MCP installs must consume the install command's scope decision."""
+    rule_id = _GUARD_INSTALL_SCOPE
+    _adapter, adapter_fail = _facts_for(provider, _INSTALL_ADAPTER, rule_id)
+    _conflicts, conflicts_fail = _facts_for(provider, _MCP_CONFLICTS, rule_id)
+    _command, command_fail = _facts_for(provider, _MCP_COMMAND, rule_id)
+    failures = list(adapter_fail) + list(conflicts_fail) + list(command_fail)
+    if failures:
+        return tuple(failures)
+
+    adapter_index = provider.tree_index(_INSTALL_ADAPTER)
+    conflicts_index = provider.tree_index(_MCP_CONFLICTS)
+    command_index = provider.tree_index(_MCP_COMMAND)
+    if adapter_index is None or conflicts_index is None or command_index is None:
+        return (
+            _summary(
+                rule_id,
+                _INSTALL_ADAPTER,
+                "Direct MCP installs must consume the install command scope",
+            ),
+        )
+
+    install = adapter_index.function("install")
+    handler = adapter_index.function("_handle_mcp_install")
+    validator = conflicts_index.function("validate_mcp_conflicts")
+    command = command_index.function("run_mcp_install")
+    if (
+        not isinstance(install, (ast.FunctionDef, ast.AsyncFunctionDef))
+        or not isinstance(handler, (ast.FunctionDef, ast.AsyncFunctionDef))
+        or not isinstance(validator, (ast.FunctionDef, ast.AsyncFunctionDef))
+        or not isinstance(command, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        return (
+            _summary(
+                rule_id,
+                _INSTALL_ADAPTER,
+                "Direct MCP installs must consume the install command scope",
+            ),
+        )
+
+    install_nodes = adapter_index.own_scope(install)
+    handler_nodes = adapter_index.own_scope(handler)
+    command_nodes = command_index.own_scope(command)
+    assignments = [
+        node
+        for node in install_nodes
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "scope" for target in node.targets)
+    ]
+    handler_calls = _named_calls(install_nodes, "_handle_mcp_install")
+    run_calls = _named_calls(handler_nodes, "_run_mcp_install")
+    target_calls = _named_calls(handler_nodes, "resolve_manifest_target_decision")
+    scope_partition_calls = _named_calls(handler_nodes, "partition_user_scope_runtimes")
+    scope_discovery_calls = _named_calls(handler_nodes, "discover_user_scope_mcp_runtimes")
+    exclusion_calls = _named_calls(handler_nodes, "filter_excluded_mcp_runtimes")
+    dry_run_validation_calls = _named_calls(handler_nodes, "_validate_mcp_dry_run_entry")
+    registry_validation_calls = _attribute_calls(command_nodes, "prevalidate_registry_dependencies")
+    bootstrap_calls = _named_calls(command_nodes, "_create_minimal_apm_yml")
+    manifest_write_calls = _named_calls(command_nodes, "add_mcp_to_apm_yml")
+    manifest_calls = _named_calls(handler_nodes, "get_manifest_path")
+    apm_dir_calls = _named_calls(handler_nodes, "get_apm_dir")
+    validator_args = (
+        *validator.args.posonlyargs,
+        *validator.args.args,
+        *validator.args.kwonlyargs,
+    )
+
+    valid = (
+        len(assignments) == 1
+        and _canonical_scope_assignment(assignments[0])
+        and _takes_argument(handler, "scope")
+        and len(handler_calls) == 1
+        and _has_name_keyword(handler_calls[0], "scope", "scope")
+        and len(run_calls) == 1
+        and _has_name_keyword(run_calls[0], "scope", "scope")
+        and _has_name_keyword(run_calls[0], "initial_manifest_config", "initial_manifest_config")
+        and len(target_calls) == 1
+        and _has_scope_projection_keyword(target_calls[0], "user_scope")
+        and len(scope_partition_calls) == 1
+        and len(scope_discovery_calls) == 1
+        and _takes_deploy_root(scope_discovery_calls[0])
+        and len(exclusion_calls) == 1
+        and len(registry_validation_calls) == 1
+        and len(bootstrap_calls) == 1
+        and len(manifest_write_calls) == 1
+        and len(dry_run_validation_calls) == 1
+        and target_calls[0].lineno < run_calls[0].lineno
+        and scope_partition_calls[0].lineno < run_calls[0].lineno
+        and scope_discovery_calls[0].lineno < run_calls[0].lineno
+        and exclusion_calls[0].lineno < run_calls[0].lineno
+        and dry_run_validation_calls[0].lineno < run_calls[0].lineno
+        and registry_validation_calls[0].lineno < bootstrap_calls[0].lineno
+        and bootstrap_calls[0].lineno < manifest_write_calls[0].lineno
+        and len(manifest_calls) == 1
+        and _takes_scope(manifest_calls[0])
+        and len(apm_dir_calls) == 1
+        and _takes_scope(apm_dir_calls[0])
+        and all(argument.arg != "global_" for argument in validator_args)
+    )
+    if valid:
+        return ()
+    return (
+        _summary(
+            rule_id,
+            _INSTALL_ADAPTER,
+            "Direct MCP installs must consume the install command scope",
+        ),
+    )
 
 
 _SOURCE_PLAN_OWNER = "src/apm_cli/install/deployable_source_plan.py"

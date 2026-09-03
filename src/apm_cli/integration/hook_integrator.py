@@ -1868,6 +1868,7 @@ class HookIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set = None,  # noqa: RUF013
+        managed_file_hashes: dict[str, str] | None = None,
         targets=None,
     ) -> dict:
         """Remove APM-managed hook files.
@@ -1875,21 +1876,12 @@ class HookIntegrator(BaseIntegrator):
         Uses *managed_files* (relative paths) to surgically remove only
         APM-tracked files; falls back to legacy ``*-apm.json`` glob when
         *managed_files* is ``None``. **Never** calls ``shutil.rmtree``.
-        Also cleans APM entries from merged-hook JSON files via the
-        ``_apm_source`` marker.
-
-        ``targets`` (#2250) scopes ONLY the merged-hook JSON cleanup below,
-        NOT the ``managed_files`` prefix guard (union of ``KNOWN_TARGETS``
-        + ``targets``): that guard defends against deleting outside a
-        recognized ``hooks/`` dir, and narrowing it would strand real
-        files deployed under a since-dropped target.
+        Also cleans ``_apm_source`` entries from merged-hook JSON files.
+        ``targets`` (#2250) scopes only the merged-hook JSON cleanup below.
         """
         from .targets import KNOWN_TARGETS
 
-        stats: dict[str, int] = {"files_removed": 0, "errors": 0}
-
-        # Prefix guard: union of KNOWN_TARGETS + caller `targets`, never
-        # narrower than the unscoped default -- see docstring above.
+        stats: dict[str, Any] = {"files_removed": 0, "errors": 0}
         guard_targets = list(KNOWN_TARGETS.values())
         if targets is not None:
             guard_targets = guard_targets + list(targets)
@@ -1899,28 +1891,36 @@ class HookIntegrator(BaseIntegrator):
             if t.supports("hooks")
         ]
         hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
-
         if managed_files is not None:
-            # Manifest-based removal -- only remove tracked files
-            deleted: list = []
+            from apm_cli.integration.cleanup import remove_stale_deployed_files
+            from apm_cli.utils.diagnostics import DiagnosticCollector
+
+            cleanup_paths: set[str] = set()
             for rel_path in managed_files:
-                normalized = rel_path.replace("\\", "/")
-                if not normalized.startswith(hook_prefix_tuple):
+                if not (normalized := rel_path.replace("\\", "/")).startswith(hook_prefix_tuple):
                     continue
-                if ".." in rel_path:
-                    continue
-                target_file = project_root / rel_path
-                if target_file.exists() and target_file.is_file():
-                    try:
-                        target_file.unlink()
-                        stats["files_removed"] += 1
-                        deleted.append(target_file)
-                    except Exception:
-                        stats["errors"] += 1
-            # Batch parent cleanup -- single bottom-up pass
-            self.cleanup_empty_parents(deleted, stop_at=project_root)
+                cleanup_paths.add(normalized)
+
+            cleanup_diagnostics = DiagnosticCollector()
+            cleanup = remove_stale_deployed_files(
+                cleanup_paths,
+                project_root,
+                dep_key="<uninstall hooks>",
+                targets=guard_targets,
+                diagnostics=cleanup_diagnostics,
+                recorded_hashes=managed_file_hashes,
+                failed_path_retained=False,
+                allow_final_symlink=True,
+            )
+            cleanup_diagnostics.render_summary()
+            stats["files_removed"] += len(cleanup.deleted)
+            retained = cleanup.retained
+            if retained:
+                stats["errors"] += len(retained)
+                stats.setdefault("failed_paths", []).extend(retained)
+            stats.setdefault("unsafe_paths", []).extend(cleanup.skipped_unmanaged)
+            self.cleanup_empty_parents(cleanup.deleted_targets, stop_at=project_root)
         else:
-            # Legacy fallback  -- glob for old -apm suffix files
             hooks_dir = project_root / ".github" / "hooks"
             if hooks_dir.exists():
                 for hook_file in hooks_dir.glob("*-apm.json"):
@@ -1929,6 +1929,7 @@ class HookIntegrator(BaseIntegrator):
                         stats["files_removed"] += 1
                     except Exception:
                         stats["errors"] += 1
+                        stats.setdefault("failed_paths", []).append(hook_file.as_posix())
 
         # Clean APM entries from merged-hook JSON configs, scoped to
         # `targets` when supplied -- matches the rebuild phase (#2250).
@@ -2043,7 +2044,7 @@ class HookIntegrator(BaseIntegrator):
     @staticmethod
     def _clean_apm_entries_from_json(
         json_path: Path,
-        stats: dict[str, int],
+        stats: dict[str, Any],
         container: str = "hooks",
         sidecar_path: Path | None = None,
     ) -> None:
@@ -2096,3 +2097,4 @@ class HookIntegrator(BaseIntegrator):
                 sidecar_path.unlink()
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1
+            stats.setdefault("failed_paths", []).append(json_path.as_posix())

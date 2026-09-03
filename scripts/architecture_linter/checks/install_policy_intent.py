@@ -13,11 +13,13 @@ from __future__ import annotations
 from scripts.architecture_linter.checks.install_policy_deployment_and_ref import (
     RULE_DEPLOYMENT_FRAME,
     RULE_LOCAL_ANCHOR,
+    RULE_MCP_REGISTRY_RESOLUTION,
     RULE_QUEUE_DEDUP,
     RULE_REF_RECHECK,
     RULE_REGISTRY_INTENT,
     check_deployment_frame_projection,
     check_local_identity_anchor,
+    check_mcp_registry_resolution,
     check_ref_recheck_ownership,
     check_registry_dependency_intent,
     check_resolver_queue_dedup,
@@ -46,7 +48,7 @@ from scripts.architecture_linter.checks.install_policy_plugin_and_approval impor
     check_manifest_inheritance,
     check_plugin_bin_eligibility,
 )
-from scripts.architecture_linter.checks.install_policy_shared import _semantic_rule
+from scripts.architecture_linter.checks.install_policy_shared import GROUP, _semantic_rule
 from scripts.architecture_linter.checks.install_policy_skill_and_lock import (
     RULE_CLAUDE_SKILL,
     RULE_GIT_OBJECT_FIELDS,
@@ -138,6 +140,13 @@ EXTRA_RULES: tuple[Rule, ...] = (
         RULE_LOCAL_ANCHOR,
         "Local identity uses its anchor and persists declaring-parent provenance.",
         check_local_identity_anchor,
+    ),
+    Rule(
+        id=RULE_MCP_REGISTRY_RESOLUTION,
+        group=GROUP,
+        guard_ids=(RULE_MCP_REGISTRY_RESOLUTION,),
+        description="MCP registry URL precedence routes through registry/client.py.",
+        check=check_mcp_registry_resolution,
     ),
     _semantic_rule(
         RULE_REGISTRY_INTENT,

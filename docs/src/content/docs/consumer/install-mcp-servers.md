@@ -88,6 +88,12 @@ apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /
 
 # Remote
 apm install --mcp linear --transport http --url https://mcp.linear.app/sse
+
+# Global stdio install (writes user APM + runtime config only)
+apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/server-fetch
+
+# Global registry install (requires one unique registry match)
+apm install -g --target claude --mcp io.github.github/github-mcp-server
 ```
 
 `apm mcp install NAME ...` is an alias that forwards to the same code
@@ -220,12 +226,16 @@ non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
 `$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or `~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`, Antigravity CLI to `~/.gemini/config/mcp_config.json`, Windsurf to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
-and JetBrains Copilot to its OS-specific user config). When the
-package declares a `targets:` field (or the CLI passes `--target`),
-only the matching runtimes receive the config write. When neither
-restricts targets, all detected user-scope-capable runtimes are
-configured. Workspace-only runtimes (VS Code, Cursor, OpenCode) are
-skipped at user scope.
+JetBrains Copilot to its OS-specific user config, and Hermes when enabled).
+When the user-scope manifest declares a `targets:` field (or the CLI passes `--target`),
+only the matching runtimes receive the config write. When no CLI target,
+user-scope manifest target, or saved `apm config target` restricts targets,
+all detected user-scope-capable runtimes are configured. Workspace-only
+runtimes (VS Code, Cursor, OpenCode) are
+skipped with a warning when a mixed target set also contains a global-capable
+runtime. If none of the selected targets supports user scope, the command exits
+`2` before changing the user manifest, lockfile, or runtime configuration. The direct command creates or updates
+`~/.apm/apm.yml`; it does not fall back to the current project's manifest.
 
 ## stdio vs HTTP servers
 

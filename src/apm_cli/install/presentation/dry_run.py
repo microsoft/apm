@@ -31,11 +31,13 @@ def render_and_exit(
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.drift import detect_orphans
 
-    logger.progress("Dry run mode - showing what would be installed:")
+    logger.progress("Dry run mode - showing what would change:")
 
-    if plan.should_install_apm and plan.selected_apm_dependencies:
+    selected_apm_dependencies = plan.selected_apm_dependencies if plan.should_install_apm else ()
+
+    if selected_apm_dependencies:
         logger.progress(f"APM dependencies ({plan.apm_dependency_count}):")
-        for dep in plan.selected_apm_dependencies:
+        for dep in selected_apm_dependencies:
             action = (
                 "update"
                 if update or dep.get_identity() in plan.updated_apm_identities
@@ -48,8 +50,32 @@ def render_and_exit(
         for dep in plan.selected_mcp_dependencies:
             logger.progress(f"  - {dep}")
 
-    if not plan.selected_apm_dependencies and not plan.selected_mcp_dependencies:
-        logger.progress("No dependencies found in apm.yml")
+    if plan.selected_lsp_dependencies:
+        logger.progress(f"LSP servers to configure ({plan.lsp_dependency_count}):")
+        for dep in plan.selected_lsp_dependencies:
+            logger.progress(f"  - {dep}")
+
+    if (
+        not selected_apm_dependencies
+        and not plan.selected_mcp_dependencies
+        and not plan.selected_lsp_dependencies
+    ):
+        if (
+            plan.should_install_apm
+            and not plan.should_install_mcp
+            and (plan.mcp_dependencies or plan.lsp_dependencies)
+        ):
+            logger.progress(
+                "No APM dependencies selected by --only=apm. "
+                "Drop --only to preview MCP/LSP dependencies."
+            )
+        elif not plan.should_install_apm and plan.all_apm_dependencies:
+            logger.progress(
+                "No MCP/LSP dependencies selected by --only=mcp. "
+                "Drop --only to preview APM dependencies."
+            )
+        else:
+            logger.progress("No dependencies found in apm.yml")
 
     # Orphan preview: lockfile + manifest difference -- no integration
     # required, accurate to compute.
@@ -73,7 +99,7 @@ def render_and_exit(
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
 
-    if plan.selected_apm_dependencies:
+    if selected_apm_dependencies:
         logger.dry_run_notice(
             "Per-package stale-file cleanup (renames within a package) is "
             "not previewed -- it requires running integration. Run without "

@@ -54,8 +54,8 @@ with a warning unless policy requires hashes. With
 ## How the install works
 
 :::note[Governed offline installs]
-When the policy cache is warm, offline bundles still apply target, MCP, and
-integrity rules without network access.
+When the policy cache is warm, offline bundles still apply target, MCP, LSP,
+canvas, and integrity rules without network access.
 :::
 
 ```
@@ -70,20 +70,24 @@ Steps APM runs:
 1. **Detect.** Path exists and contains `plugin.json` at the bundle root
    (zip archives and legacy tarballs are extracted to a temp directory first).
 2. **Apply cached policy.** Resolve the actual targets, then apply any cached
-   org policy to bundle MCP entries and targets before files are written.
-   Bundle install never fetches policy from the network. `--no-policy` skips
-   this local gate for one invocation.
+   org policy to bundle MCP, LSP, canvas, and target rules before files are
+   written. Bundle install never fetches policy from the network. `--no-policy`
+   skips this local gate for one invocation.
 3. **Verify integrity.** Hash every file listed in `pack.bundle_files`;
    reject any symlink, hash mismatch, or unlisted file.
-4. **Deploy.** Map `agents/`, `skills/`, `commands/`, `hooks/` into the
-   harness layout for each `--target` you passed. For plugin skill declaration
-   precedence, see [Package Types](../../reference/package-types/#plugin-collection-pluginjson).
+4. **Deploy.** Map `agents/`, `skills/`, `commands/`, `hooks/`, LSP metadata,
+   and canvas extensions into the harness layout for each `--target` you
+   passed. For plugin skill declaration precedence, see
+   [Package Types](../../reference/package-types/#plugin-collection-pluginjson).
 5. **Record.** Write a lockfile entry under the project's `apm.lock.yaml`
    so [drift detection](../drift-and-secure-by-default/) can audit the
    deployed files later.
 
 `apm.yml` is never touched. Re-running the same command re-deploys (use
 `--force` to overwrite locally-edited files).
+If executable trust blocks bundle MCP, LSP, or canvas content, copy the exact
+`name#version@sha256:<digest>` key printed by `apm install` into
+`executables.allow`; changed bundle bytes require a new key.
 For centrally governed installs, warm the policy cache before distributing an
 offline bundle. See [APM policy](../../enterprise/apm-policy/).
 

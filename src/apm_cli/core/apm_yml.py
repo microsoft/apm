@@ -13,6 +13,8 @@ Validates each token against CANONICAL_TARGETS.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from apm_cli.core.errors import (
     ConflictingTargetsError,
     EmptyTargetsListError,
@@ -21,6 +23,9 @@ from apm_cli.core.errors import (
     render_unknown_target_error,
 )
 from apm_cli.core.target_catalog import get_target_capability, manifest_target_names
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Canonical target names accepted by APM.
 CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
@@ -88,7 +93,7 @@ def _warn_legacy_all_once() -> None:
     _rich_warning(
         "'all' in apm.yml targets is deprecated and will become a hard "
         "error in a future release. APM is treating the field as omitted "
-        "for this install so --target / auto-detect decide. If you "
+        "so the current command's default target selection applies. If you "
         "maintain this package, remove 'all' from the manifest.",
         symbol="warning",
     )
@@ -120,11 +125,18 @@ def _validate_and_fold_legacy_all(tokens: list[str]) -> list[str]:
     return tokens
 
 
-def parse_targets_field(yaml_data: dict) -> list[str]:
+def parse_targets_field(
+    yaml_data: dict,
+    *,
+    allow_empty_singular: bool = True,
+) -> list[str]:
     """Parse targets/target from raw apm.yml data dict.
 
     Returns a canonical list of target names. Empty list means neither
-    key was present (caller should fall through to auto-detect).
+    key was present (caller should fall through to auto-detect). Existing
+    consumers retain the historical empty-singular fallback by default;
+    authoritative readers can set ``allow_empty_singular=False`` to fail
+    closed instead.
     """
     has_targets = "targets" in yaml_data
     has_target = "target" in yaml_data
@@ -148,21 +160,73 @@ def parse_targets_field(yaml_data: dict) -> list[str]:
     if has_target:
         raw = yaml_data["target"]
         if raw is None:
-            return []
+            if allow_empty_singular:
+                return []
+            raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
         if isinstance(raw, list):
             # YAML list sugar: 'target: [claude, copilot]' or block list.
             # Empty list under singular key falls through to auto-detect
             # (consistent with 'target:' with no value).
             tokens = [str(t).strip() for t in raw if str(t).strip()]
             if not tokens:
-                return []
+                if allow_empty_singular:
+                    return []
+                raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
             return _validate_and_fold_legacy_all(tokens)
         raw_str = str(raw).strip()
         if not raw_str:
-            return []
+            if allow_empty_singular:
+                return []
+            raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
         # CSV sugar: "claude,copilot" -> ['claude', 'copilot']
         tokens = [t.strip() for t in raw_str.split(",") if t.strip()]
+        if not tokens and not allow_empty_singular:
+            raise EmptyTargetsListError(_EMPTY_TARGETS_MESSAGE)
         return _validate_and_fold_legacy_all(tokens)
 
     # Neither key present
     return []
+
+
+def read_declared_target_names(root: Path) -> list[str] | None:
+    """Return target names declared by ``root/apm.yml``, else ``None``.
+
+    Returns ``None`` only when the manifest is absent or its mapping contains
+    no target declaration, so callers can distinguish that fallback from a
+    present declaration.
+
+    A manifest that exists is otherwise authoritative and its failures
+    propagate, because reporting "nothing declared" for a broken manifest would
+    silently widen a caller's target set on a typo, which is the failure mode
+    callers use this to avoid. Malformed YAML (including undecodable bytes)
+    arrives as ``yaml.YAMLError`` from :func:`~apm_cli.utils.yaml_io.load_yaml`,
+    an invalid ``targets:`` value raises out of :func:`parse_targets_field`, and
+    a document that is not a mapping is rejected the same way
+    :meth:`~apm_cli.models.apm_package.APMPackage.from_apm_yml` rejects it.
+
+    Names are returned as written, so ``vscode`` comes back as ``vscode``.
+    Callers mapping them onto target profiles must first normalize through
+    :func:`~apm_cli.core.target_catalog.normalize_target_name`.
+    """
+    import yaml
+
+    from apm_cli.utils.yaml_io import load_yaml
+
+    manifest_path = root / "apm.yml"
+    if manifest_path.is_symlink():
+        raise OSError("apm.yml must be a regular, non-symlink file")
+    if not manifest_path.exists():
+        return None
+    if not manifest_path.is_file():
+        raise OSError("apm.yml must be a regular, non-symlink file")
+    data = load_yaml(manifest_path)
+    if data is None:
+        raise yaml.YAMLError("apm.yml must contain a YAML object, got an empty document")
+    if not isinstance(data, dict):
+        # Raised as YAMLError, not ValueError, so callers keep the single
+        # fail-closed ``except yaml.YAMLError`` that _bounded_load already
+        # normalizes its own non-parse failures into.
+        raise yaml.YAMLError(f"apm.yml must contain a YAML object, got {type(data)}")
+    if "target" not in data and "targets" not in data:
+        return None
+    return parse_targets_field(data, allow_empty_singular=False)

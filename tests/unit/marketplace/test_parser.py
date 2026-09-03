@@ -24,6 +24,7 @@ from apm_cli.marketplace.source_identity import parse_marketplace_source
     [
         "/srv/marketplaces/agent-forge",
         "./relative/path",
+        ".github/plugin/marketplace.json",
         "../up/path",
         "~/code/marketplace",
         "~",
@@ -43,6 +44,7 @@ def test_local_paths_classified_as_local(raw: str) -> None:
         r"C:\repos\mkt",
         r"C:/repos/mkt",
         r".\local",
+        r".github\plugin\marketplace.json",
     ],
 )
 def test_windows_paths_classified_as_local(raw: str) -> None:

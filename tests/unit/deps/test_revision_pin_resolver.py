@@ -101,11 +101,14 @@ def test_revision_pin_package_name_strips_git_suffix() -> None:
     assert package_name(dependency) == "pkg"
 
 
-def test_apply_revision_pin_updates_annotates_manifest_atomically(tmp_path: Path) -> None:
+@pytest.mark.windows_compat
+def test_apply_revision_pin_updates_annotates_manifest_atomically_with_lf(tmp_path: Path) -> None:
     manifest = tmp_path / "apm.yml"
-    manifest.write_text(
-        f"name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{OLD_SHA} # v1.0.0\n",
-        encoding="utf-8",
+    manifest.write_bytes(
+        (
+            "name: demo\r\nversion: 1.0.0\r\ndependencies:\r\n"
+            f"  apm:\r\n    - org/pkg#{OLD_SHA} # v1.0.0\r\n"
+        ).encode()
     )
 
     apply_revision_pin_updates(
@@ -113,9 +116,9 @@ def test_apply_revision_pin_updates_annotates_manifest_atomically(tmp_path: Path
         [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],
     )
 
-    assert manifest.read_text(encoding="utf-8").splitlines()[-1] == (
-        f"    - org/pkg#{NEW_SHA} # v2.0.0"
-    )
+    rendered = manifest.read_bytes()
+    assert b"\r" not in rendered
+    assert rendered.splitlines()[-1] == f"    - org/pkg#{NEW_SHA} # v2.0.0".encode()
 
 
 def test_apply_revision_pin_updates_keeps_old_pin_when_replace_fails(tmp_path: Path) -> None:
@@ -123,7 +126,10 @@ def test_apply_revision_pin_updates_keeps_old_pin_when_replace_fails(tmp_path: P
     original = f"name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{OLD_SHA}\n"
     manifest.write_text(original, encoding="utf-8")
 
-    with patch("apm_cli.utils.yaml_io.os.replace", side_effect=OSError("disk full")):
+    with patch(
+        "apm_cli.utils.atomic_io._replace_atomic_file",
+        side_effect=OSError("disk full"),
+    ):
         with pytest.raises(OSError, match="disk full"):
             apply_revision_pin_updates(
                 manifest,
@@ -147,7 +153,7 @@ def test_apply_revision_pin_updates_uses_project_sibling_temp_file(tmp_path: Pat
         seen_tmp_paths.append(str(src))
         real_replace(src, dst)
 
-    with patch("apm_cli.utils.yaml_io.os.replace", side_effect=capture_replace):
+    with patch("apm_cli.utils.atomic_io._replace_atomic_file", side_effect=capture_replace):
         apply_revision_pin_updates(
             manifest,
             [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],
@@ -327,7 +333,7 @@ def test_apply_revision_pin_updates_uses_unique_temp_names(tmp_path: Path) -> No
         seen_tmp_paths.append(str(src))
         real_replace(src, dst)
 
-    with patch("apm_cli.utils.yaml_io.os.replace", side_effect=capture_replace):
+    with patch("apm_cli.utils.atomic_io._replace_atomic_file", side_effect=capture_replace):
         apply_revision_pin_updates(
             manifest,
             [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],

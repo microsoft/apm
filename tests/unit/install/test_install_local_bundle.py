@@ -142,6 +142,46 @@ def _invoke(project: Path, monkeypatch, *args: str):
     return _invoke_cli(project, monkeypatch, "install", *args)
 
 
+def test_local_bundle_receives_enabled_empty_executable_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bundle LSP filtering must distinguish an enabled empty gate from disabled."""
+    bundle = _make_bundle(
+        tmp_path / "source",
+        files={
+            "lsp.json": json.dumps(
+                {
+                    "lspServers": {
+                        "unsafe": {
+                            "command": "unsafe-language-server",
+                            "extensionToLanguage": {".unsafe": "unsafe"},
+                        }
+                    }
+                }
+            )
+        },
+    )
+    project = _make_project(tmp_path / "destination")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["executables"] = {}
+    (project / "apm.yml").write_text(yaml.dump(manifest), encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "apm_cli.install.local_bundle_handler.install_local_bundle",
+        _capture,
+    )
+
+    result = _invoke(project, monkeypatch, str(bundle), "--no-policy")
+
+    assert result.exit_code == 0, result.output
+    assert captured["allow_executables"] == {}
+
+
 # ---------------------------------------------------------------------------
 # Duck-type contract test for package_info
 # ---------------------------------------------------------------------------
@@ -803,6 +843,63 @@ class TestLocalBundleCanvasTrust:
         )
         assert result.exit_code == 0, result.output
         assert (project / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+
+    def test_canvas_requires_exact_bundle_content_approval(self, tmp_path, monkeypatch):
+        import apm_cli.config as _conf
+        from apm_cli.bundle.local_bundle import detect_local_bundle
+        from apm_cli.security.executables import local_bundle_approval_key
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"canvas": True}})
+        bundle = _make_bundle(
+            tmp_path / "source",
+            files={"extensions/widget/extension.mjs": "export default {};\n"},
+            include_lockfile=False,
+        )
+        bundle_info = detect_local_bundle(bundle)
+        assert bundle_info is not None
+        approval_key = local_bundle_approval_key(
+            bundle_info.package_id,
+            str(bundle_info.plugin_json.get("version") or ""),
+            bundle_info.source_dir,
+            bundle_info.lockfile,
+        )
+        project = _make_project(tmp_path / "generic")
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {"test-plugin": {"canvas": True}}}
+        manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+        generic = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
+
+        assert generic.exit_code == 0, generic.output
+        assert not (project / ".github" / "extensions" / "widget").exists()
+        assert approval_key in "".join(generic.output.split())
+        assert "executables:" in generic.output
+        assert "allow:" in generic.output
+        assert "canvas: true" in generic.output
+
+        manifest["executables"] = {"allow": {approval_key: {"canvas": True}}}
+        manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+        exact = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
+        assert exact.exit_code == 0, exact.output
+        assert (project / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+
+        (bundle / "extensions" / "widget" / "extension.mjs").write_text(
+            "export default { changed: true };\n",
+            encoding="utf-8",
+        )
+        changed_project = _make_project(tmp_path / "changed")
+        changed_manifest = yaml.safe_load((changed_project / "apm.yml").read_text(encoding="utf-8"))
+        changed_manifest["executables"] = {"allow": {approval_key: {"canvas": True}}}
+        (changed_project / "apm.yml").write_text(
+            yaml.safe_dump(changed_manifest),
+            encoding="utf-8",
+        )
+
+        changed = _invoke(changed_project, monkeypatch, str(bundle), "--target", "copilot")
+
+        assert changed.exit_code == 0, changed.output
+        assert not (changed_project / ".github" / "extensions" / "widget").exists()
 
     def test_canvas_blocked_when_feature_off_regardless(self, tmp_path, monkeypatch):
         """When the experimental flag is off, canvas is always silently dropped."""

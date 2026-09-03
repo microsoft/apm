@@ -794,6 +794,7 @@ def integrate_local_bundle(
     scope: InstallScope | None = None,
     alias: str | None = None,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+    approval_key: str | None = None,
 ) -> dict:
     """Integrate a detected local bundle into project / user scope.
 
@@ -823,11 +824,8 @@ def integrate_local_bundle(
         logger: Install-flow logger.
         scope: ``InstallScope`` (project vs user) for downstream consumers.
         alias: Slug override from ``--as``.
-        allow_executables: The ``allowExecutables`` block from the consuming
-            project's ``apm.yml``.  When ``None`` (no enforcement), all
-            executable primitives including canvas are allowed.  When
-            provided, canvas extensions from the bundle are only deployed if
-            the bundle slug is approved for the ``canvas`` exec type.
+        allow_executables: Effective executable approvals, or ``None`` when disabled.
+        approval_key: Exact local-bundle content identity for executable approval.
 
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
@@ -924,8 +922,9 @@ def integrate_local_bundle(
     if _canvas_enabled:
         from ..security.executables import EXEC_TYPE_CANVAS, is_package_approved
 
-        _canvas_approved_bundle = allow_executables is None or is_package_approved(
-            allow_executables, slug, EXEC_TYPE_CANVAS
+        _canvas_approved_bundle = allow_executables is None or (
+            approval_key is not None
+            and is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)
         )
     else:
         _canvas_approved_bundle = False
@@ -941,8 +940,13 @@ def integrate_local_bundle(
                 _msg = (
                     f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
                     f"'{slug}': canvas extensions are executable extension.mjs code "
-                    f"and are not approved in allowExecutables. "
-                    f"Run 'apm approve {slug}' to approve them."
+                    "and are not approved for this exact bundle content. "
+                    "Add this to apm.yml:\n"
+                    "executables:\n"
+                    "  allow:\n"
+                    f'    "{approval_key}":\n'
+                    "      canvas: true\n"
+                    "Then rerun the install."
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message=_msg, package=str(slug))

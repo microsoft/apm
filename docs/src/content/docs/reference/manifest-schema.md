@@ -144,14 +144,14 @@ actionable nudge (the authoring path only).
 |---|---|
 | **Type** | `target`: `string` or `list<string>`; `targets`: `list<string>` (a scalar is accepted as one-item compatibility input) |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect from filesystem signals (see below). |
+| **Default** | Auto-detect from filesystem signals (see below). [`apm compile -g`](../cli/compile/#global-compilation) instead writes every supported user-scope target when both fields are omitted. |
 | **Allowed values** | `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
 **Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently; `all` will become a hard parse error in a future release.
 
-When both fields are omitted, APM auto-detects from the
+For project-scope commands, when both fields are omitted, APM auto-detects from the
 [documented filesystem signals](../cli/targets/#detection-signals).
 Once set, the field is authoritative.
 
@@ -173,8 +173,8 @@ When a list is specified, only those targets are compiled, installed, and packed
 A plural `targets:` form is also accepted; use a YAML list in new manifests.
 A scalar remains accepted as a one-item compatibility input. Declaring both
 fields is a parse error. Prefer `targets:` in new manifests; `target:` remains
-supported for backward compatibility and accepts legacy CLI aliases such as
-`vscode`. The canonical `targets:` form requires canonical names.
+supported for backward compatibility. The `vscode` alias is accepted in either
+form and normalized to `copilot`; `agents` remains a CLI-only alias.
 
 | Value | Effect |
 |---|---|
@@ -758,7 +758,13 @@ dependencies:
 
 #### 4.3.4. What Gets Written
 
-`apm install` writes LSP server configs to detected runtime targets. Claude Code uses `.lsp.json` at project scope or `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at project scope or `~/.copilot/lsp-config.json` at user scope. See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats and lifecycle details.
+`apm install` writes LSP server configs to detected runtime targets. Claude
+Code uses the `lspServers` section in
+`.claude/skills/apm-lsp/.claude-plugin/plugin.json` at project scope or
+`~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at
+project scope or `~/.copilot/lsp-config.json` at user scope. See
+[Install LSP servers](../../consumer/install-lsp-servers/) for output formats
+and lifecycle details.
 
 ---
 
@@ -784,6 +790,11 @@ Created automatically by [`apm plugin init`](../cli/plugin/). Use [`apm install 
 ```bash
 apm install --dev owner/test-helpers
 ```
+
+Once this section contains an APM or MCP dependency, the root `apm.yml`
+becomes eligible and direct installs select the APM package layout over a
+co-located `plugin.json`. Keep the section empty when direct installs should
+select the plugin layout.
 
 Plain `apm install` (no flag) deploys both `dependencies` and
 `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation

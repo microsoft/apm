@@ -23,6 +23,10 @@ for runtime-specific config details.
 
 Declare an LSP server in `apm.yml` and run `apm install`:
 
+For this root-manifest example, install `gopls` separately and make sure it is
+available on `PATH`; APM configures the runtime but does not install external
+language-server executables.
+
 ```yaml
 dependencies:
   lsp:
@@ -34,13 +38,35 @@ dependencies:
 ```
 
 ```bash
-apm install
+apm install --target claude
 ```
 
-APM writes runtime-specific config for each detected target. Claude Code
-uses `.lsp.json` or `~/.claude.json`; Copilot CLI uses `.github/lsp.json`
-or `~/.copilot/lsp-config.json`. The runtime starts the configured
-language servers automatically.
+APM writes runtime-specific config for each detected target. At project scope,
+Claude Code discovers LSP servers from the APM-managed plugin manifest at
+`.claude/skills/apm-lsp/.claude-plugin/plugin.json`; user-scope installs use
+`~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. Copilot CLI uses
+`.github/lsp.json` or `~/.copilot/lsp-config.json`. This generated shape
+matches each runtime's documented discovery contract.
+
+Claude skills-directory plugin discovery requires Claude Code v2.1.157 or
+newer. For project installs, accept Claude Code's workspace-trust prompt; LSP
+servers start only after you trust the workspace. Start Claude from the
+repository root so its primary working directory contains `.claude/skills/`:
+project-scope skills-directory plugins do not walk up from a subdirectory to
+the repo root. Personal-scope plugins under your home directory have no
+workspace-trust gate. After APM reports that it configured or removed Claude
+LSP servers, restart Claude Code or run `/reload-plugins` (use
+`/reload-plugins --force` when Claude requests it). Open a file matching a
+configured extension and confirm its LSP-backed diagnostics or navigation work
+before relying on the integration. If another enabled Claude LSP server already
+claims the same file extension, Claude uses the first registered server for
+that extension and the others never start; for example, an APM-declared `.py`
+server can lose to an installed `pyright-lsp`.
+
+If an earlier APM version created a project-root `.lsp.json`, APM leaves it
+unchanged because it may contain user-owned entries. Claude Code does not use
+that file for project plugin discovery. Review it, migrate any entries you
+still need, then remove it.
 
 ## The `lsp:` section in apm.yml
 
@@ -74,18 +100,21 @@ The full field reference is in the
 
 | Runtime | Project file | User file (`-g`) | Language map key |
 |---|---|---|---|
-| Claude Code | `.lsp.json` | `~/.claude.json` `lspServers` | `extensionToLanguage` |
+| Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` `lspServers` | `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json` `lspServers` | `extensionToLanguage` |
 | GitHub Copilot CLI | `.github/lsp.json` `lspServers` | `~/.copilot/lsp-config.json` `lspServers` | `fileExtensions` |
 
-**Claude Code project-scope `.lsp.json` example:**
+**Claude Code project-scope plugin manifest example:**
 
 ```json
 {
-  "gopls": {
-    "command": "gopls",
-    "args": ["serve"],
-    "extensionToLanguage": {
-      ".go": "go"
+  "name": "apm-lsp",
+  "lspServers": {
+    "gopls": {
+      "command": "gopls",
+      "args": ["serve"],
+      "extensionToLanguage": {
+        ".go": "go"
+      }
     }
   }
 }
@@ -108,7 +137,8 @@ The full field reference is in the
 ```
 
 User-scope files keep the same runtime-specific server shape under their
-`lspServers` section.
+`lspServers` section. Claude skills-directory plugins are auto-discovered, so
+APM does not write an `enabledPlugins` entry.
 
 ## Required and optional fields
 
@@ -116,7 +146,7 @@ Two fields are required for every LSP server definition (object form):
 
 | Field | Type | Description |
 |---|---|---|
-| `command` | `string` | Binary to execute. Must be on `$PATH` or a relative path. |
+| `command` | `string` | Binary to execute. Must resolve from `$PATH` or use an absolute or relative path. |
 | `extensionToLanguage` | `map<string, string>` | Maps file extensions to LSP language identifiers (e.g. `".go": "go"`). |
 
 Optional fields give you finer control:
@@ -142,33 +172,42 @@ entries, APM collects them transitively after installation. Direct
 transitive package both declare a server with the same name, the
 root definition wins.
 
-Unlike MCP, LSP has no registry vs self-defined distinction. All
-LSP servers from installed packages are treated as trusted.
+Unlike MCP, LSP has no registry vs self-defined distinction. LSP commands from
+dependency packages pass the executable trust gate for their declaring package
+when the gate is enabled. Approve the package with `apm approve <package>`
+before APM exposes its server to a supported runtime. Without a project or org
+`executables` opt-in, the compatibility default permits dependency
+executables. Root-project LSP declarations are trusted as local project
+content.
 
 ## Stale server cleanup
 
 When a previously installed LSP server is no longer declared by
 any dependency, APM removes it from the target runtime configs it manages.
 The lockfile tracks which servers APM manages, so hand-added servers are
-never touched.
+never touched. When cleanup removes the last managed server from an otherwise
+empty APM-owned Claude project plugin, APM deletes the plugin and its empty
+`apm-lsp` directory.
 
 ## Lockfile
 
-`apm install` persists two fields in `apm.lock.yaml`:
-
-- `lsp_servers` -- sorted list of APM-managed server names.
-- `lsp_configs` -- server-name-to-config baseline for drift detection.
-
-See the [Lockfile specification](../../reference/lockfile-spec/).
+`apm install` records resolved LSP configuration, declaration ownership, and
+target ownership in `apm.lock.yaml`. These fields let lifecycle commands
+reconcile only APM-owned entries. See the
+[Lockfile specification](../../reference/lockfile-spec/) for the canonical
+field definitions.
 
 ## Plugin extraction
 
-When APM installs a plugin that contains `lspServers` in `plugin.json`
-or a `.lsp.json` file, the LSP servers are automatically extracted and
-wired into the install pipeline. Plugin `.lsp.json` files may use either
-a flat server map or a `{ "lspServers": { ... } }` envelope. The
+When APM installs a plugin, it extracts LSP servers from an inline or
+file-valued `lspServers` entry in `plugin.json`, or auto-discovers
+`com.microsoft.apm/lsp.json`, `lsp.json`, or `.lsp.json`. The servers are
+then wired into the install pipeline. Plugin LSP files may use either a flat
+server map or a `{ "lspServers": { ... } }` envelope. The
 `${CLAUDE_PLUGIN_ROOT}` placeholder in server configs is replaced with
 the absolute plugin path for legacy Claude Code plugin compatibility.
+These are source files shipped by a dependency package, distinct from the
+`.claude-plugin/plugin.json` that APM generates for Claude discovery.
 Plugins authored for Copilot CLI may use `fileExtensions` instead of
 `extensionToLanguage` and `warmupTimeoutMs` instead of `startupTimeout`;
 APM normalizes those aliases before validation. A non-null canonical value
@@ -190,7 +229,7 @@ success.
 
 | Runtime | LSP support |
 |---|---|
-| Claude Code | `.lsp.json` / `~/.claude.json` |
+| Claude Code | `.claude/skills/apm-lsp/.claude-plugin/plugin.json` / `~/.claude/skills/apm-lsp/.claude-plugin/plugin.json` |
 | GitHub Copilot CLI | `.github/lsp.json` / `~/.copilot/lsp-config.json` |
 | Others | Not yet supported |
 

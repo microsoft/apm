@@ -538,9 +538,9 @@ class TestGlobalOpenCodeScope:
         assert "## Files matching `**/*.py`" in opencode_agents
         assert "SCOPED_OPENCODE_MARKER" in opencode_agents
 
-        claude_agents = (claude_root / "CLAUDE.md").read_text(encoding="utf-8")
-        assert "GLOBAL_OPENCODE_MARKER" in claude_agents
-        assert "SCOPED_OPENCODE_MARKER" not in claude_agents
+        # The global manifest declares only OpenCode, so compile must not
+        # materialize a root context file for the unrelated Claude target.
+        assert not (claude_root / "CLAUDE.md").exists()
 
         lock_path = fake_home / ".apm" / "apm.lock.yaml"
         first_lock = lock_path.read_bytes()
@@ -563,7 +563,7 @@ class TestGlobalOpenCodeScope:
         assert foreign_native_skill.read_text(encoding="utf-8") == "# Foreign native\n"
         assert project_skill.is_file()
         assert (project_root / "AGENTS.md").read_text(encoding="utf-8") == project_agents
-        assert (claude_root / "CLAUDE.md").read_text(encoding="utf-8") == claude_agents
+        assert not (claude_root / "CLAUDE.md").exists()
 
 
 class TestGlobalUninstallLifecycle:

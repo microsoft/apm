@@ -66,6 +66,9 @@ _GUARD_APPLY_TO = "contracts-tooling-apply-to-placement"
 _GUARD_FRONTMATTER = "contracts-tooling-frontmatter-yaml"
 
 
+_GUARD_PROJECT_YAML_WRITES = "contracts-tooling-project-yaml-write-delegation"
+
+
 _GUARD_LOCKFILE_READ = "contracts-tooling-lockfile-read"
 
 
@@ -755,6 +758,7 @@ _FRONTMATTER_OWNER = "src/apm_cli/utils/yaml_io.py"
 _INSTRUCTION_INTEGRATOR = "src/apm_cli/integration/instruction_integrator.py"
 _CONTENT_SCANNER = "src/apm_cli/security/content_scanner.py"
 _INSTALL_SERVICES = "src/apm_cli/install/services.py"
+_REVISION_PINS = "src/apm_cli/deps/revision_pins.py"
 _FRONTMATTER_METHODS = frozenset({"load", "loads", "parse"})
 
 
@@ -1183,6 +1187,36 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+def check_project_yaml_write_delegation(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Project YAML writers must delegate to the canonical text-write owner."""
+    rule_id = _GUARD_PROJECT_YAML_WRITES
+    contracts = (
+        (_FRONTMATTER_OWNER, "dump_yaml_roundtrip", "write_text_lf"),
+        (_FRONTMATTER_OWNER, "write_yaml_text_atomic", "atomic_write_text"),
+        (_REVISION_PINS, "apply_revision_pin_updates", "write_yaml_text_atomic"),
+    )
+    findings: list[Violation] = []
+    for path, function_name, delegate in contracts:
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if failures or facts.tree_index is None:
+            continue
+        function = facts.tree_index.function(function_name)
+        if function is None:
+            findings.append(_summary(rule_id, path, f"missing project YAML writer {function_name}"))
+            continue
+        calls = _named_calls(facts.tree_index.own_scope(function), delegate)
+        if len(calls) != 1:
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    f"{function_name} must call {delegate} exactly once",
+                )
+            )
+    return tuple(findings)
+
+
 _LIFECYCLE_CONTRACT = "tests/quality/test_ci_topology.py"
 
 
@@ -1282,6 +1316,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_FRONTMATTER,
         "Frontmatter delimiter detection, BOM decoding, and bounded YAML parsing stay owned by utils/yaml_io.py.",
         check_frontmatter_yaml,
+    ),
+    _owner_rule(
+        _GUARD_PROJECT_YAML_WRITES,
+        "Project YAML writes route through the canonical deterministic text writers.",
+        check_project_yaml_write_delegation,
     ),
     _owner_rule(
         _GUARD_LOCKFILE_READ,

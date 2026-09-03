@@ -533,6 +533,27 @@ class TestLockFile:
         yaml_str = lock.to_yaml()
         assert "lsp_configs" not in yaml_str
 
+    def test_lsp_target_servers_round_trip_through_deployment_ledger(self, tmp_path):
+        """Target-scoped LSP ownership must survive lockfile serialization."""
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        lock = LockFile()
+        DeploymentLedgerCodec.replace_lsp_target_servers(
+            lock,
+            {"claude": ["pyright"], "copilot": ["ruff-lsp", "pyright"]},
+        )
+        lock_path = tmp_path / "apm.lock"
+        lock.write(lock_path)
+
+        loaded = LockFile.read(lock_path)
+
+        assert loaded is not None
+        assert loaded.lsp_target_servers == {
+            "claude": ["pyright"],
+            "copilot": ["pyright", "ruff-lsp"],
+        }
+        assert loaded._lsp_target_servers_present is True
+
     def test_read_nonexistent(self, tmp_path):
         loaded = LockFile.read(tmp_path / "apm.lock.yaml")
         assert loaded is None

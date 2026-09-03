@@ -55,6 +55,7 @@ LEGACY_AC_ALIASES: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "install-deployment-manifest-inheritance-includes": ("AC3",),
         "install-deployment-marketplace-mutation-lock": ("AC7",),
         "install-deployment-mcp-ownership-migration": ("AC21",),
+        "install-deployment-mcp-registry-resolution": ("AC4",),
         "install-deployment-package-target-authorization": ("AC15b",),
         "install-deployment-plugin-bin-eligibility": ("AC3",),
         "install-deployment-provenance-state": ("AC4", "AC18"),

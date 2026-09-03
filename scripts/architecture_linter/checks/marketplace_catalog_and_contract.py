@@ -149,6 +149,7 @@ def _check_catalog_manifest(provider: FactsProvider) -> tuple[Violation, ...]:
 
 
 _RID_CONTRACT = "marketplace-integrations-agent-plugin-contract"
+_RID_FORMAT_PRECEDENCE = "marketplace-integrations-package-format-precedence"
 
 
 _LOADER = "src/apm_cli/agent_plugins/loader.py"
@@ -476,10 +477,12 @@ def _check_component_ir(provider: FactsProvider, inv: frozenset[str]) -> tuple[V
             _VALIDATION,
             (
                 "agent_plugin_detection: AgentPluginDetection | None = None",
+                "pkg_type, plugin_json_path = detect_package_type(",
+                "agent_plugin_detection=native_detection",
                 "result.agent_plugin = plugin",
                 "detection.manifest_path.parent.resolve() != package_root",
             ),
-            "same-root detection reuse or cross-root rejection changed",
+            "validation must reuse detection while routing precedence through the planner",
         )
     )
     findings.extend(
@@ -518,7 +521,11 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             inv,
             _RID_CONTRACT,
             _LOCAL_BUNDLE,
-            ("if schema_id == PLUGIN_SCHEMA_ID:",),
+            (
+                "if schema_id == PLUGIN_SCHEMA_ID:",
+                "package_type, _ = detect_package_type(",
+                "if package_type != PackageType.AGENT_PLUGIN:",
+            ),
             "plugin schema routing must select exact schema IDs",
         )
     )
@@ -635,6 +642,48 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
     return tuple(findings)
 
 
+def _check_package_format_precedence(provider: FactsProvider) -> tuple[Violation, ...]:
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            _FORMAT_DETECTION,
+            ("class NormalizationPlanner:", "if has_eligible_apm_yml:"),
+            "NormalizationPlanner must own eligible-manifest precedence",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            _VALIDATION,
+            (
+                "pkg_type, plugin_json_path = detect_package_type(",
+                "agent_plugin_detection=native_detection",
+            ),
+            "validation must delegate package-format precedence to the planner",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FORMAT_PRECEDENCE,
+            _LOCAL_BUNDLE,
+            (
+                "package_type, _ = detect_package_type(",
+                "if package_type != PackageType.AGENT_PLUGIN:",
+            ),
+            "Agent Plugin ingress must delegate package-format precedence to the planner",
+        )
+    )
+    return tuple(findings)
+
+
 def _calls_in_scope_match(facts: FileFacts, scope: str, terminals: frozenset[str]) -> bool:
     return any(
         call.scope == scope
@@ -692,6 +741,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_CONTRACT,),
         description="Agent Plugins v1 contract and component IR stay owned by agent_plugins/loader.py.",
         check=_check_agent_plugin_contract,
+    ),
+    Rule(
+        id=_RID_FORMAT_PRECEDENCE,
+        group=GROUP,
+        guard_ids=(_RID_FORMAT_PRECEDENCE,),
+        description="Package ingress delegates format precedence to NormalizationPlanner.",
+        check=_check_package_format_precedence,
     ),
 )
 

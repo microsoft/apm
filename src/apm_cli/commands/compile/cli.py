@@ -11,6 +11,7 @@ import click
 
 if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
+    from ...integration.targets import TargetProfile
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
@@ -374,15 +375,44 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
+def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], list[str] | None]:
+    """Return the target profiles ``apm compile -g`` should write.
+
+    The optional names preserve the manifest spelling for diagnostics.
+
+    ``--target`` is rejected alongside ``--global``, so the user manifest's
+    ``targets:`` is the only way to narrow user-scope output. Honoring it keeps
+    the resolution chain consistent with ``apm install -g`` and stops compile
+    from creating deploy roots for harnesses the user never declared (#2768).
+    Declaring nothing keeps the historical every-known-target behavior.
+
+    Declared names are normalized before lookup because ``apm.yml`` accepts the
+    ``vscode`` alias, which is not a ``KNOWN_TARGETS`` key; matching raw tokens
+    would drop it and silently compile nothing.
+    """
+    from ...core.apm_yml import read_declared_target_names
+    from ...core.target_catalog import normalize_target_name
+    from ...integration.targets import KNOWN_TARGETS
+
+    declared = read_declared_target_names(source_root)
+    if declared is None or not declared:
+        return list(KNOWN_TARGETS.values()), None
+    canonical = dict.fromkeys(normalize_target_name(name) for name in declared)
+    profiles = (KNOWN_TARGETS.get(name) for name in canonical)
+    return [profile for profile in profiles if profile is not None], declared
+
+
 def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     """Handle --global compilation of user-scope root context files.
 
     Returns 0 on success, 1 on error (for sys.exit).
     """
 
+    import yaml
+
     from ...compilation import compile_user_root_contexts
+    from ...core.errors import TargetResolutionError
     from ...core.scope import InstallScope, get_apm_dir
-    from ...integration.targets import KNOWN_TARGETS
 
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
@@ -395,19 +425,68 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         )
         return 1
 
+    # A malformed user manifest is authoritative-but-broken, so it fails closed
+    # with the same framing 'apm install -g' uses rather than degrading to
+    # "nothing declared" and compiling every harness.
+    try:
+        compile_targets, declared_targets = _global_compile_targets(source_root)
+    except TargetResolutionError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
+        logger.error(
+            f"{summary}\n\nFix {display_path} and rerun 'apm compile -g'.",
+            symbol="",
+        )
+        return 1
+    except yaml.YAMLError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        logger.error(
+            f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun 'apm compile -g'.",
+            symbol="error",
+        )
+        return 1
+    except OSError as exc:
+        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        logger.error(
+            f"Failed to read {display_path}: {exc}. "
+            "Ensure it is a readable YAML file and rerun 'apm compile -g'.",
+            symbol="error",
+        )
+        return 1
+
+    target_names = ", ".join(profile.name for profile in compile_targets)
+    if declared_targets is None:
+        provenance = target_names
+        selection_source = "global default"
+    else:
+        declared_names = ", ".join(declared_targets)
+        provenance = (
+            declared_names
+            if declared_names == target_names
+            else f"{declared_names} -> {target_names}"
+        )
+        selection_source = "~/.apm/apm.yml"
+    logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
+
     results = compile_user_root_contexts(
-        list(KNOWN_TARGETS.values()),
+        compile_targets,
         source_root,
         dry_run=dry_run,
         logger=None,
     )
 
     if not results:
-        logger.info(
-            "No user-scope targets produced output -- run 'apm install -g <package>' "
-            "to add global instructions.",
-            symbol="info",
-        )
+        if declared_targets is not None:
+            message = (
+                f"Declared global targets ({target_names}) produce no user-scope "
+                "root context output. No files changed."
+            )
+        else:
+            message = (
+                "No user-scope targets produced output -- run 'apm install -g <package>' "
+                "to add global instructions."
+            )
+        logger.info(message, symbol="info")
         return 0
 
     has_error = False
@@ -1176,9 +1255,10 @@ def _run_compilation(
     default=False,
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
-        "from ~/.apm/apm_modules. Cannot be combined with project-scoped output "
-        "flags such as --target, --all, --watch, --root, or --output; use with "
-        "--dry-run to preview changes."
+        "from ~/.apm/apm_modules, using target(s) from ~/.apm/apm.yml or every "
+        "supported target when undeclared. Cannot be combined with project-scoped "
+        "output flags such as --target, --all, --watch, --root, or --output; "
+        "use with --dry-run to preview changes."
     ),
 )
 @click.pass_context

@@ -55,7 +55,7 @@ def _load_config_json_registries() -> dict[str, str]:
         from ...config import _get_registries_section
 
         result: dict[str, str] = {}
-        for name, body in _get_registries_section().items():
+        for name, body in _get_registries_section(bootstrap=False).items():
             if not isinstance(name, str) or not name.strip():
                 continue
             if isinstance(body, dict):
@@ -121,7 +121,7 @@ def resolve_effective_registries(
     )
     default_name = project_default
     if default_name is None:
-        default_name = get_config_json_default_registry()
+        default_name = get_config_json_default_registry(bootstrap=False)
 
     if default_name is not None and default_name not in merged:
         default_name = None

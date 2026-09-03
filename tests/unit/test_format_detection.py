@@ -421,6 +421,44 @@ class TestNormalizationPlanner:
         assert pkg_type == PackageType.AGENT_PLUGIN
         assert plugin_json == plugin_path
 
+    @pytest.mark.parametrize(
+        ("has_apm_dir", "declares_dependencies"),
+        [(True, False), (False, True)],
+    )
+    def test_eligible_apm_package_wins_over_plugin_formats(
+        self,
+        tmp_path: Path,
+        has_apm_dir: bool,
+        declares_dependencies: bool,
+    ) -> None:
+        plugin_path = tmp_path / "plugin.json"
+        report = self._make_report(
+            apm_yml=self._apm_yml_evidence(
+                has_apm_dir=has_apm_dir,
+                declares_dependencies=declares_dependencies,
+            ),
+            agent_plugin=self._agent_plugin_evidence(plugin_json_path=plugin_path, supported=True),
+            claude_plugin=self._plugin_evidence(plugin_json_path=plugin_path),
+        )
+
+        pkg_type, plugin_json = NormalizationPlanner().plan(report)
+
+        assert pkg_type == PackageType.APM_PACKAGE
+        assert plugin_json is None
+
+    def test_metadata_only_apm_yml_preserves_plugin_selection(self, tmp_path: Path) -> None:
+        plugin_path = tmp_path / "plugin.json"
+        report = self._make_report(
+            apm_yml=self._apm_yml_evidence(),
+            agent_plugin=self._agent_plugin_evidence(plugin_json_path=plugin_path, supported=True),
+            claude_plugin=self._plugin_evidence(plugin_json_path=plugin_path),
+        )
+
+        pkg_type, plugin_json = NormalizationPlanner().plan(report)
+
+        assert pkg_type == PackageType.AGENT_PLUGIN
+        assert plugin_json == plugin_path
+
     def test_unsupported_agent_plugin_rejected(self, tmp_path: Path) -> None:
         plugin_path = tmp_path / "plugin.json"
         report = self._make_report(
@@ -480,15 +518,14 @@ class TestNormalizationPlanner:
         pkg_type, _ = NormalizationPlanner().plan(report)
         assert pkg_type == PackageType.INVALID
 
-    def test_plugin_wins_over_hybrid_signals(self) -> None:
-        """Claude plugin beats hybrid when all signals present (cascade step 1 wins)."""
+    def test_hybrid_wins_over_plugin_signal_when_apm_yml_is_eligible(self) -> None:
         report = self._make_report(
             claude_plugin=self._plugin_evidence(plugin_json_path=Path("/fake/plugin.json")),
             apm_yml=self._apm_yml_evidence(has_apm_dir=True),
             skill_md=self._skill_md_evidence(has_root=True),
         )
         pkg_type, _ = NormalizationPlanner().plan(report)
-        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        assert pkg_type == PackageType.HYBRID
 
     def test_skill_bundle_wins_over_apm_only(self) -> None:
         """Nested skills beat plain apm.yml (cascade step 4 before step 5)."""

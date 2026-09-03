@@ -31,6 +31,9 @@ from apm_cli.install.errors import (
     PolicyViolationError,
     RequiredIntegrationError,
 )
+from apm_cli.install.errors import (
+    frozen_install_tip as _frozen_install_tip,
+)
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
 from apm_cli.install.helpers.ref_reuse import is_git_semver_resolution_eligible
 
@@ -119,10 +122,17 @@ from ..core.project_name import (
 )
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
+from ..install.mcp.args import parse_env_pairs as _parse_mcp_env_pairs
+from ..install.mcp.args import parse_header_pairs as _parse_mcp_header_pairs
 
 # MCP --mcp helpers (module-level re-exports for test patches); must stay at
 # import time per comments in the original mid-file block.
-from ..install.mcp.command import run_mcp_install as _run_mcp_install
+from ..install.mcp.command import (
+    run_mcp_install as _run_mcp_install,
+)
+from ..install.mcp.command import (
+    run_mcp_policy_preflight as _run_mcp_policy_preflight,
+)
 from ..install.mcp.conflicts import (
     validate_mcp_conflicts as _validate_mcp_conflicts,
 )
@@ -144,7 +154,6 @@ from ._helpers import (
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
-
 
 # ---------------------------------------------------------------------------
 # InstallContext -- parameter bundle for the APM install pipeline
@@ -196,6 +205,8 @@ class InstallContext:
     install_result: InstallResult | None = None
     target_decision: "EffectiveTargetDecision | None" = None
     trust_bin: bool | None = None
+    exec_allow_map: builtins.dict[str, builtins.dict[str, bool]] | None = None
+    exec_allow_resolved: bool = False
 
 
 # APM Dependencies (conditional import for graceful degradation)
@@ -739,13 +750,6 @@ def _validate_and_add_packages_to_apm_yml(
 # per LOC budget. Re-bind module-level names for back-compat with tests
 # that still patch ``apm_cli.commands.install._warn_*``.
 
-# MCP registry / dry-run helpers are imported at module top (see
-# ``..install.mcp.*`` imports above) so test patches keep working.
-
-# ---------------------------------------------------------------------------
-# install() decomposition: extracted flow helpers
-# ---------------------------------------------------------------------------
-
 
 def _handle_mcp_install(  # noqa: PLR0913
     *,
@@ -765,91 +769,95 @@ def _handle_mcp_install(  # noqa: PLR0913
     logger,
     no_policy,
     validated_registry_url,
+    scope,
 ):
-    """Execute the ``--mcp`` install path (MCP server add).
+    """Resolve and execute the direct ``--mcp`` install path."""
+    from ..core.scope import get_apm_dir, get_deploy_root, get_manifest_path, is_user_scope
 
-    Resolves registry URL, runs policy preflight, handles dry-run,
-    and delegates to :func:`_run_mcp_install` for the actual installation.
-    Called from :func:`install` when ``--mcp`` is specified; the caller
-    returns immediately after this function completes.
-    """
-    from ..core.scope import (
-        InstallScope,
-        get_apm_dir,
-        get_manifest_path,
-    )
-
-    # Apply CLI > env > default precedence; emit override diagnostic.
-    resolved_registry_url, _registry_source = _resolve_registry_url(
+    # Apply CLI > env > apm config > default precedence. Only dry runs announce
+    # here; real installs announce the endpoint they query in the integrator.
+    resolved_registry_url, registry_source = _resolve_registry_url(
         validated_registry_url,
         logger=logger,
+        announce=logger.dry_run,
     )
-    mcp_scope = InstallScope.PROJECT
-    mcp_manifest_path = get_manifest_path(mcp_scope)
-    mcp_apm_dir = get_apm_dir(mcp_scope)
+    integration_registry_url = resolved_registry_url
+    mcp_manifest_path = get_manifest_path(scope)
+    mcp_apm_dir = get_apm_dir(scope)
     from ..core.target_detection import resolve_manifest_target_decision
 
     target_decision = resolve_manifest_target_decision(
         Path.cwd(),
         manifest_path=mcp_manifest_path,
         explicit_target=target or runtime,
+        user_scope=is_user_scope(scope),
     )
-
-    # -- W2-mcp-preflight: policy enforcement before MCP install --
-    # Build a lightweight MCPDependency for policy evaluation.
-    # This mirrors _build_mcp_entry routing but we only need the
-    # fields that policy checks inspect (name, transport, registry).
-    from ..models.dependency.mcp import MCPDependency as _MCPDep
-    from ..policy.install_preflight import (
-        PolicyBlockError,
-        run_policy_preflight,
-    )
-
-    _is_self_defined = bool(url or command_argv)
-    _preflight_transport = transport
-    if _preflight_transport is None:
-        if command_argv:
-            _preflight_transport = "stdio"
-        elif url:
-            _preflight_transport = "http"
-    _preflight_dep = _MCPDep(
-        name=mcp_name,
-        transport=_preflight_transport,
-        registry=False if _is_self_defined else None,
-        url=url,
-    )
-    from ..core.target_detection import normalize_policy_targets
-
-    policy_targets = normalize_policy_targets(target_decision.value)
-
-    try:
-        _pf_result, _pf_active = run_policy_preflight(
-            project_root=Path.cwd(),
-            mcp_deps=[_preflight_dep],
-            no_policy=no_policy,
-            logger=logger,
-            dry_run=logger.dry_run,
-            effective_target=policy_targets,
+    if is_user_scope(scope):
+        from ..core.target_detection import EffectiveTargetDecision
+        from ..integration.mcp_integrator_install import (
+            discover_user_scope_mcp_runtimes,
+            filter_excluded_mcp_runtimes,
+            partition_user_scope_runtimes,
+            unavailable_user_scope_targets_message,
         )
-    except PolicyBlockError:
-        # Diagnostics already emitted by the helper + logger.
-        logger.render_summary()
-        sys.exit(1)
+
+        scoped_runtime_targets = target_decision.runtime_targets_for_scope(user_scope=True)
+        if scoped_runtime_targets is None:
+            supported_runtimes, skipped_runtimes = discover_user_scope_mcp_runtimes(
+                get_deploy_root(scope), exclude=exclude
+            )
+        else:
+            scoped_runtime_targets = filter_excluded_mcp_runtimes(
+                list(scoped_runtime_targets), exclude
+            )
+            supported_runtimes, skipped_runtimes = partition_user_scope_runtimes(
+                list(scoped_runtime_targets)
+            )
+        if skipped_runtimes and supported_runtimes:
+            logger.warning(
+                "Skipped workspace-only runtimes at user scope: "
+                f"{', '.join(sorted(skipped_runtimes))} -- omit --global to install these"
+            )
+        if not supported_runtimes:
+            if exclude:
+                raise click.UsageError(
+                    f"All selected MCP runtimes were removed by --exclude {exclude}; "
+                    "choose another target or remove the exclusion"
+                )
+            raise click.UsageError(
+                unavailable_user_scope_targets_message(
+                    target_decision, scoped_runtime_targets, skipped_runtimes
+                )
+            )
+        target_decision = EffectiveTargetDecision(supported_runtimes, target_decision.source)
+    _run_mcp_policy_preflight(
+        mcp_name=mcp_name,
+        transport=transport,
+        url=url,
+        command_argv=command_argv,
+        no_policy=no_policy,
+        logger=logger,
+        target_decision=target_decision,
+    )
 
     if logger.dry_run:
-        # C1: validate eagerly so dry-run rejects what real install would.
         _validate_mcp_dry_run_entry(
             mcp_name,
             transport=transport,
             url=url,
-            env=env_pairs,
-            headers=header_pairs,
+            env=_parse_mcp_env_pairs(env_pairs),
+            headers=_parse_mcp_header_pairs(header_pairs),
             version=mcp_version,
             command_argv=command_argv,
             registry_url=resolved_registry_url,
         )
-        logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {mcp_manifest_path}")
-        return
+
+    initial_manifest_config = None
+    if is_user_scope(scope) and not mcp_manifest_path.exists():
+        project_name = _resolve_bootstrap_project_name(Path.home().name)
+        initial_manifest_config = _get_default_config(project_name)
+        if target is not None or runtime is not None:
+            initial_manifest_config["targets"] = supported_runtimes
     _run_mcp_install(
         mcp_name=mcp_name,
         transport=transport,
@@ -866,8 +874,11 @@ def _handle_mcp_install(  # noqa: PLR0913
         exclude=exclude,
         logger=logger,
         apm_dir=mcp_apm_dir,
-        scope=mcp_scope,
-        registry_url=validated_registry_url,
+        scope=scope,
+        registry_url=integration_registry_url,
+        registry_allow_http=registry_source == "flag",
+        registry_source=registry_source,
+        initial_manifest_config=initial_manifest_config,
     )
 
 
@@ -886,14 +897,14 @@ def _handle_mcp_install(  # noqa: PLR0913
 @click.option(
     "--only",
     type=click.Choice(["apm", "mcp"]),
-    help="Install only specific dependency type",
+    help="Install only APM packages or MCP/LSP service dependencies",
 )
 @click.option(
     "--update",
     is_flag=True,
     help="Update dependencies to latest Git references (deprecated: prefer 'apm update' for an interactive plan, or 'apm update --yes' for CI). Unlike --refresh, --update restructures the entire dependency graph.",
 )
-@click.option("--dry-run", is_flag=True, help="Show what would be installed without installing")
+@click.option("--dry-run", is_flag=True, help="Show what would change without writing files")
 @click.option(
     "--force",
     is_flag=True,
@@ -965,7 +976,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot).",
+    help="Install to user scope (~/.apm/) instead of the current project. Direct MCP installs create or update ~/.apm/apm.yml. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing the user manifest, lockfile, or runtime configuration. Supported runtimes include Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot, and Hermes when enabled.",
 )
 @click.option(
     "--ssh",
@@ -1039,8 +1050,8 @@ def _handle_mcp_install(  # noqa: PLR0913
     metavar="URL",
     help=(
         "MCP registry URL (http:// or https://) for resolving --mcp NAME. "
-        "Overrides the MCP_REGISTRY_URL env var. Default: "
-        "https://api.mcp.github.com. Captured in apm.yml on the entry's "
+        "Precedence: this flag, MCP_REGISTRY_URL, apm config, then the public "
+        "default. Captured in apm.yml on the entry's "
         "'registry:' field for auditability. Not valid with --url "
         "or a stdio command (self-defined entries)."
     ),
@@ -1174,15 +1185,15 @@ def install(  # noqa: C901, PLR0913
 
     Detects AI runtimes from your apm.yml scripts and installs MCP servers for
     all detected runtimes; also installs APM package dependencies from GitHub.
-    --only filters by type (apm or mcp).
+    --only filters to APM packages or MCP/LSP service dependencies.
 
     Examples:
         apm install                             # Install existing deps from apm.yml
         apm install org/pkg1#1.0.0              # Add package to apm.yml and install
         apm install --exclude codex             # Install for all except Codex CLI
-        apm install --only=apm                  # Install only APM dependencies
+        apm install --only=apm                  # Install only APM packages
         apm install --update                    # Update dependencies to latest Git refs
-        apm install --dry-run                   # Show what would be installed
+        apm install --dry-run                   # Show what would change
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
         apm install --allow-insecure http://...  # HTTP URL (needs allow_insecure)
         apm install --skill my-skill org/bundle  # Install one skill from bundle
@@ -1224,7 +1235,6 @@ def install(  # noqa: C901, PLR0913
             "--frozen and --update are mutually exclusive. "
             "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
         )
-    # The root redirect restores cwd in the command's existing finally block.
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
     from ..core.install_audit import resolve_audit_override_from_cli
@@ -1239,24 +1249,18 @@ def install(  # noqa: C901, PLR0913
         InstallService.reject_missing_frozen_root(frozen, root)
     except FrozenInstallError as exc:
         raise click.ClickException(str(exc)) from exc
+    _source_root = Path.cwd()
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
     _root_redirect.__enter__()
     try:
-        # Create structured logger for install output early so exception
-        # handlers can always reference it (avoids UnboundLocalError if
-        # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
-
         # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
         if not legacy_skill_paths:
             from ..integration.targets import should_use_legacy_skill_paths
 
             legacy_skill_paths = should_use_legacy_skill_paths()
 
-        # ----------------------------------------------------------------
-        # Local bundles bypass dependency resolution and do not mutate apm.yml.
-        # ----------------------------------------------------------------
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
 
@@ -1268,12 +1272,17 @@ def install(  # noqa: C901, PLR0913
                 raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
                 enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)
+                from ..install.local_bundle_handler import (
+                    effective_bundle_allow_map as _effective_bundle_allow_map,
+                )
                 from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
-                # allowExecutables for bundle install gate.
-                from ..security.executables import read_bundle_allow_executables as _rbae
-
-                _allow_execs_for_bundle = _rbae(Path(root or ".") / "apm.yml", logger)
+                _bundle_project_root = _source_root
+                _allow_execs_for_bundle = _effective_bundle_allow_map(
+                    _bundle_project_root,
+                    no_policy=no_policy,
+                    logger=logger,
+                )
                 _install_lb(
                     bundle_info=_bundle_info,
                     bundle_arg=packages[0],
@@ -1348,11 +1357,9 @@ def install(  # noqa: C901, PLR0913
         if verbose:
             os.environ["APM_VERBOSE"] = "1"
 
-        # ----------------------------------------------------------------
         # --mcp branch (W3): when --mcp is set, route to the dedicated
         # MCP-add path.  We compute the post-`--` argv here BEFORE Click's
         # silent handling: see _split_argv_at_double_dash().
-        # ----------------------------------------------------------------
         _, command_argv = _split_argv_at_double_dash(_get_invocation_argv())
         # `packages` from Click already includes the post-`--` items; the
         # pre-`--` portion is what the user typed as positional packages.
@@ -1365,6 +1372,9 @@ def install(  # noqa: C901, PLR0913
 
         # Validate --registry (raises UsageError on a bad URL).
         validated_registry_url = _validate_registry_url(registry_url)
+        from ..core.scope import InstallScope
+
+        scope = InstallScope.USER if global_ else InstallScope.PROJECT
 
         _validate_mcp_conflicts(
             mcp_name=mcp_name,
@@ -1376,7 +1386,6 @@ def install(  # noqa: C901, PLR0913
             headers=header_pairs,
             mcp_version=mcp_version,
             command_argv=command_argv,
-            global_=global_,
             only=only,
             update=update,
             any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
@@ -1405,6 +1414,7 @@ def install(  # noqa: C901, PLR0913
                 logger=logger,
                 no_policy=no_policy,
                 validated_registry_url=validated_registry_url,
+                scope=scope,
             )
             summary_rendered = True
             return
@@ -1425,25 +1435,22 @@ def install(  # noqa: C901, PLR0913
             # Precedence: APM_GIT_PROTOCOL env var > apm config ssh > git insteadOf
             from ..config import get_apm_protocol_pref as _get_apm_protocol_pref
 
-            _pref_str = _get_apm_protocol_pref()
+            _pref_str = _get_apm_protocol_pref(bootstrap=not dry_run)
             protocol_pref = ProtocolPreference.from_str(_pref_str)
         # CLI flag > env var (APM_ALLOW_PROTOCOL_FALLBACK) > apm config > default.
         # get_apm_allow_protocol_fallback() already encodes env > config > False.
         from ..config import get_apm_allow_protocol_fallback as _get_apm_apf
 
-        allow_protocol_fallback = allow_protocol_fallback or _get_apm_apf()
+        allow_protocol_fallback = allow_protocol_fallback or _get_apm_apf(bootstrap=not dry_run)
 
         # Resolve scope
         from ..core.scope import (
-            InstallScope,
             ensure_user_dirs,
             get_apm_dir,
             get_manifest_path,
             get_modules_dir,
             warn_unsupported_user_scope,
         )
-
-        scope = InstallScope.USER if global_ else InstallScope.PROJECT
 
         if scope is InstallScope.USER:
             ensure_user_dirs()
@@ -1698,31 +1705,15 @@ def install(  # noqa: C901, PLR0913
         ctx.exit(command_result.exit_code)
 
 
-def _frozen_install_tip(error: FrozenInstallError) -> str:
-    """Return recovery guidance tailored to package or MCP lock drift."""
-    has_mcp_drift = any("MCP server" in reason for reason in error.reasons)
-    has_package_drift = any("MCP server" not in reason for reason in error.reasons)
-    if has_mcp_drift and has_package_drift:
-        return (
-            "Tip: run 'apm outdated' to inspect package drift, then run "
-            "'apm install' without --frozen to repair package and MCP lock state."
-        )
-    if has_mcp_drift:
-        return "Tip: run 'apm install' without --frozen to create or repair MCP lock state."
-    return "Tip: run 'apm outdated' to see what changed, then 'apm update'."
-
-
 def _install_apm_packages(ctx, outcome):
     """Execute the APM + transitive MCP installation pipeline.
 
     Parses ``apm.yml``, installs APM dependencies, collects and installs
     transitive MCP servers, and handles lockfile updates.
-
     Args:
         ctx: :class:`InstallContext` with configuration and environment.
         outcome: ``_ValidationOutcome`` from package validation (may be
             ``None`` when no explicit packages were passed).
-
     Returns:
         Tuple of ``(apm_count, mcp_count, lsp_count, apm_diagnostics)``.
     """
@@ -1789,6 +1780,7 @@ def _install_apm_packages(ctx, outcome):
             only_packages=ctx.only_packages,
             updated_packages=outcome.updated_packages if outcome is not None else (),
         )
+        prospective_plan = prospective_plan.with_allowed_lsp_dependencies(apm_package, logger)
         logger.record_dry_run_apm_updates(len(prospective_plan.updated_apm_identities))
         _check_insecure_dependencies(
             prospective_plan.selected_apm_dependencies,
@@ -1822,7 +1814,7 @@ def _install_apm_packages(ctx, outcome):
             update=ctx.update,
             apm_dir=ctx.apm_dir,
         )
-        return prospective_plan.apm_dependency_count, prospective_plan.mcp_dependency_count, 0, None
+        return (*prospective_plan.dependency_counts, None)
 
     _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
 
@@ -1916,6 +1908,8 @@ def _install_apm_packages(ctx, outcome):
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
             ctx.target_decision = install_result.target_decision
+            ctx.exec_allow_map = install_result.exec_allow_map
+            ctx.exec_allow_resolved = install_result.exec_allow_resolved
             if install_result.disposition not in {
                 InstallDisposition.SUCCESS,
                 InstallDisposition.PARTIAL_SUCCESS,

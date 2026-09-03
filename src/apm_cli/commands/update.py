@@ -230,6 +230,9 @@ def _run_mcp_lsp_integration(
     diagnostics: Any,
     logger: InstallLogger,
     verbose: bool,
+    effective_allow_executables: dict[str, dict[str, bool]] | None = None,
+    effective_allow_resolved: bool = False,
+    force: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -310,6 +313,9 @@ def _run_mcp_lsp_integration(
         target_context=(mcp_apm_config, effective_target, scope),
         target_decision=target_decision,
         fail_on_write_error=True,
+        effective_allow_executables=effective_allow_executables,
+        effective_allow_resolved=effective_allow_resolved,
+        force=force,
     )
 
 
@@ -321,6 +327,7 @@ def _handle_service_only_update(
     dry_run: bool,
     logger: InstallLogger,
     verbose: bool,
+    force: bool,
 ) -> bool:
     """Reconcile service-only manifests and return whether update is complete."""
     if apm_package.has_any_apm_dependencies():
@@ -362,6 +369,7 @@ def _handle_service_only_update(
             diagnostics=None,
             logger=logger,
             verbose=verbose,
+            force=force,
         )
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
@@ -609,6 +617,7 @@ def _run_dep_update(
         dry_run=dry_run,
         logger=logger,
         verbose=verbose,
+        force=force,
     ):
         return
 
@@ -834,6 +843,9 @@ def _run_dep_update(
                 diagnostics=getattr(result, "diagnostics", None),
                 logger=logger,
                 verbose=verbose,
+                effective_allow_executables=getattr(result, "exec_allow_map", None),
+                effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
+                force=force,
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))

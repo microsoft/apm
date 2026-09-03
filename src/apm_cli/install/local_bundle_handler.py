@@ -59,7 +59,7 @@ def install_local_bundle(
         check_target_mismatch,
         verify_bundle_integrity,
     )
-    from ..core.scope import InstallScope
+    from ..core.scope import InstallScope, get_source_root
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ..install.services import (
         enforce_agent_plugin_deployment_boundary,
@@ -87,6 +87,7 @@ def install_local_bundle(
 
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     project_root = Path.home() if global_ else Path.cwd()
+    source_root = get_source_root(scope)
 
     logger.start(f"Installing local bundle from {bundle_arg}")
 
@@ -149,29 +150,41 @@ def install_local_bundle(
             if bundle_mcp_declared and bundle_info.source_dir is not None
             else []
         )
-        bundle_mcp_deps = _filter_bundle_executables(
-            bundle_mcp_deps,
-            bundle_info=bundle_info,
-            allow_executables=allow_executables,
-            exec_type="mcp",
-            logger=logger,
-        )
         bundle_lsp_deps = (
             _parse_bundle_lsp_servers(bundle_info.source_dir)
             if bundle_info.source_dir is not None
             else []
         )
+        bundle_approval_key = None
+        if allow_executables is not None:
+            from ..security.executables import local_bundle_approval_key
+
+            bundle_approval_key = local_bundle_approval_key(
+                bundle_info.package_id,
+                str(bundle_info.plugin_json.get("version") or ""),
+                bundle_info.source_dir,
+                bundle_info.lockfile,
+            )
+        bundle_mcp_deps = _filter_bundle_executables(
+            bundle_mcp_deps,
+            bundle_info=bundle_info,
+            allow_executables=allow_executables,
+            approval_key=bundle_approval_key,
+            exec_type="mcp",
+            logger=logger,
+        )
         bundle_lsp_deps = _filter_bundle_executables(
             bundle_lsp_deps,
             bundle_info=bundle_info,
             allow_executables=allow_executables,
+            approval_key=bundle_approval_key,
             exec_type="lsp",
             logger=logger,
         )
         from ..policy.install_preflight import run_policy_preflight
 
         policy_fetch, _enforcement_active = run_policy_preflight(
-            project_root=project_root,
+            project_root=source_root,
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
             no_policy=no_policy,
@@ -220,6 +233,17 @@ def install_local_bundle(
         if warning:
             logger.warning(warning)
 
+        if bundle_lsp_deps:
+            from apm_cli.install.errors import RequiredIntegrationError
+            from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+            target_names = [resolved.name for resolved in targets]
+            if not LSPIntegrator.supported_target_runtimes(target_names):
+                raise RequiredIntegrationError(
+                    "Bundle lsp.json cannot be configured because the resolved target set has "
+                    "no LSP-compatible runtime. Select --target claude or --target copilot."
+                )
+
         result = integrate_local_bundle(
             bundle_info,
             project_root,
@@ -231,6 +255,7 @@ def install_local_bundle(
             scope=scope,
             alias=alias,
             allow_executables=allow_executables,
+            approval_key=bundle_approval_key,
         )
 
         deployed = result.get("deployed_files", [])
@@ -274,7 +299,7 @@ def install_local_bundle(
                 deps=bundle_mcp_deps,
                 owner=_bundle_owner_key(bundle_info),
             )
-        if bundle_lsp_deps and bundle_info.source_dir is not None:
+        if bundle_info.source_dir is not None:
             _wire_bundle_lsp_servers(
                 bundle_dir=bundle_info.source_dir,
                 targets=targets,
@@ -284,6 +309,7 @@ def install_local_bundle(
                 logger=logger,
                 deps=bundle_lsp_deps,
                 owner=_bundle_owner_key(bundle_info),
+                force=force,
             )
 
         # Persist into project lockfile -- never mutate apm.yml (per design).
@@ -452,28 +478,58 @@ def _parse_legacy_bundle_mcp_servers(
     return out
 
 
+def effective_bundle_allow_map(
+    project_root: Path,
+    *,
+    no_policy: bool,
+    logger: Any,
+) -> dict[str, dict[str, bool]] | None:
+    """Resolve local-bundle trust through the canonical project owner."""
+    from ..security.executables import effective_exec_map_for_project
+
+    policy = None
+    if not no_policy:
+        from ..policy.discovery import discover_policy_with_chain
+
+        policy = getattr(
+            discover_policy_with_chain(project_root, cache_only=True),
+            "policy",
+            None,
+        )
+    return effective_exec_map_for_project(
+        project_root,
+        policy=policy,
+        logger=logger,
+    )
+
+
 def _filter_bundle_executables(
     dependencies: list[Any],
     *,
     bundle_info,
     allow_executables: dict[str, dict[str, bool]] | None,
+    approval_key: str | None,
     exec_type: str,
     logger,
 ) -> list[Any]:
-    """Apply executable trust to a bundle identity, never to server names."""
+    """Apply executable trust to the exact bundle artifact, never its claimed name."""
     if not dependencies or allow_executables is None:
         return dependencies
-    from ..security.executables import build_approval_key, is_package_approved
+    from ..security.executables import is_package_approved
 
-    version = str(bundle_info.plugin_json.get("version") or "")
-    package_key = build_approval_key(bundle_info.package_id, version)
-    candidate_keys = (package_key, bundle_info.package_id)
-    if any(is_package_approved(allow_executables, key, exec_type) for key in candidate_keys):
+    if approval_key is None:
+        raise ValueError("Local bundle executable approval requires an artifact digest")
+    if is_package_approved(allow_executables, approval_key, exec_type):
         return dependencies
+    noun = "executable" if len(dependencies) == 1 else "executables"
     logger.warning(
-        f"Skipped {len(dependencies)} bundle {exec_type.upper()} executable(s) from "
-        f"{package_key}: approve the bundle identity under allowExecutables.{exec_type} "
-        "to enable them."
+        f"Skipped {len(dependencies)} bundle {exec_type.upper()} {noun} from "
+        f"{bundle_info.package_id}. To approve this exact local bundle, add:\n"
+        "executables:\n"
+        "  allow:\n"
+        f'    "{approval_key}":\n'
+        f"      {exec_type}: true\n"
+        "Then rerun the install."
     )
     return []
 
@@ -562,8 +618,6 @@ def _parse_bundle_lsp_servers(
     bundle_dir: Path,
 ):
     """Parse ``<bundle>/lsp.json`` or ``<bundle>/com.microsoft.apm/lsp.json`` into LSP deps."""
-    from apm_cli.models.dependency.lsp import LSPDependency
-
     lsp_path: Path | None = None
     for entry in bundle_dir.iterdir() if bundle_dir.is_dir() else []:
         if (
@@ -573,7 +627,7 @@ def _parse_bundle_lsp_servers(
         ):
             lsp_path = entry
             break
-        if entry.is_dir() and entry.name == COM_MICROSOFT_APM_NAMESPACE:
+        if entry.is_dir() and not entry.is_symlink() and entry.name == COM_MICROSOFT_APM_NAMESPACE:
             candidate = entry / "lsp.json"
             if candidate.is_file() and not candidate.is_symlink():
                 lsp_path = candidate
@@ -593,17 +647,13 @@ def _parse_bundle_lsp_servers(
     if not isinstance(servers, dict):
         return []
 
-    out: list[LSPDependency] = []
-    for name, cfg in servers.items():
-        if not isinstance(name, str) or not isinstance(cfg, dict):
-            continue
-        spec = dict(cfg)
-        spec["name"] = name
-        try:
-            out.append(LSPDependency.from_dict(spec))
-        except (ValueError, TypeError):
-            continue
-    return out
+    from apm_cli.deps.plugin_parser import lsp_servers_to_apm_deps
+    from apm_cli.models.dependency.lsp import LSPDependency
+
+    return [
+        LSPDependency.from_dict(spec)
+        for spec in lsp_servers_to_apm_deps(servers, lsp_path, warn_on_invalid=False)
+    ]
 
 
 def _wire_bundle_lsp_servers(
@@ -616,12 +666,15 @@ def _wire_bundle_lsp_servers(
     logger,
     deps,
     owner: str,
+    force: bool = False,
 ) -> int:
     """Wire bundle LSP servers through the canonical owned lifecycle."""
     from apm_cli.deps.lockfile import get_lockfile_path
     from apm_cli.install.lsp.integration import run_owned_lsp_integration
+    from apm_cli.integration.lsp_integrator import LSPIntegrator
 
     target_names = [t.name for t in targets]
+    lsp_target_names = LSPIntegrator.supported_target_runtimes(target_names)
     count = run_owned_lsp_integration(
         dependencies=deps,
         owner=owner,
@@ -629,16 +682,17 @@ def _wire_bundle_lsp_servers(
         project_root=project_root,
         user_scope=user_scope,
         logger=logger,
-        target_runtimes=target_names,
+        target_runtimes=lsp_target_names,
         fail_on_write_error=True,
+        force=force,
     )
 
     if count:
         logger.success(
-            f"Wired {count} LSP server(s) from bundle lsp.json (target(s): {', '.join(target_names)})"
+            f"Wired {count} LSP server(s) from bundle lsp.json (target(s): {', '.join(lsp_target_names)})"
         )
     elif deps:
         logger.info(
-            f"Bundle lsp.json declared {len(deps)} server(s); no new LSP config changes for target(s): {', '.join(target_names)}"
+            f"Bundle lsp.json declared {len(deps)} server(s); no new LSP config changes for target(s): {', '.join(lsp_target_names)}"
         )
     return count

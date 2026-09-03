@@ -115,6 +115,11 @@ lsp_configs:
     args: ["--stdio"]
     extensionToLanguage:
       ".py": python
+lsp_target_servers:
+  claude:
+    - pyright
+lsp_config_provenance:
+  pyright: "project:."
 local_deployed_files:
   - .github/skills/my-local-skill/SKILL.md
 local_deployed_file_hashes:
@@ -139,10 +144,12 @@ deployments:
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
 | `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
-| `mcp_target_servers` | map of string lists | no | `target -> server names` for MCP entries APM successfully wrote. Reinstall uses this ownership record to remove only APM-managed entries when a target is dropped. Older lockfiles without this field adopt an existing self-defined native entry only when it exactly matches the stored `mcp_configs` baseline; registry-resolved and user-edited entries remain unowned. |
+| `mcp_target_servers` | map of string lists | no | `target -> server names` for MCP entries APM successfully wrote. Reinstall and uninstall use this ownership record to remove only APM-managed entries. An explicitly empty map authorizes no cleanup. Older lockfiles without this field adopt an existing self-defined native entry only when it exactly matches the stored `mcp_configs` baseline; registry-resolved and user-edited entries remain unowned. |
 | `mcp_config_provenance` | map | no | `server_name -> declaring package` for transitively contributed MCP servers. Used to identify the former owner in `config-consistency` diagnostics; it never exempts a lock-only entry. |
-| `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest as of the last install or update. |
-| `lsp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect LSP drift. |
+| `lsp_servers` | list of strings | no | Names of all LSP servers in current APM-managed state, including package- and bundle-contributed servers. |
+| `lsp_configs` | map | no | `server_name -> resolved config dict` retained for owner-aware lifecycle reconciliation. It is not an `apm audit` drift baseline. |
+| `lsp_target_servers` | map of string lists | no | `target -> server names` for LSP entries APM successfully wrote. Reinstall and uninstall use this ownership record to remove stale executable entries without claiming legacy or user-owned content. |
+| `lsp_config_provenance` | map of strings | no | `server_name -> declaration owner` using `project:.`, `package:<identity>`, or `bundle:<identity>`. Reconciliation uses this field to preserve bundle and surviving-package entries while removing departed owners. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
 | `deployments` | list | no | Canonical deployment ownership rows, additive alongside the legacy `deployed_files`/`local_deployed_files` views. See [Canonical deployment rows](#canonical-deployment-rows). |
@@ -174,11 +181,11 @@ and [`apm prune`](../cli/prune/#canonical-deployment-ownership).
 
 `deployments` is the canonical source APM writes to going forward. The
 per-dependency `deployed_files`/`deployed_file_hashes` and the top-level
-`local_deployed_files`/`local_deployed_file_hashes`/`mcp_target_servers`
-fields remain on disk as derived, one-cycle-compatible legacy views of the
-same ledger -- older tooling that only reads the flat fields still sees a
-consistent projection. Author neither view by hand; both are written by
-`apm install`, `apm prune`, and related commands.
+`local_deployed_files`/`local_deployed_file_hashes`/`mcp_target_servers`/
+`lsp_target_servers` fields remain on disk as derived, one-cycle-compatible
+legacy views of the same ledger -- older tooling that only reads the flat
+fields still sees a consistent projection. Author neither view by hand; both
+are written by `apm install`, `apm prune`, and related commands.
 
 ## Per-entry fields
 

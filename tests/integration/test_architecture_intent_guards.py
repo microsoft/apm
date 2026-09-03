@@ -206,15 +206,24 @@ def test_transitive_local_identity_includes_parent_and_anchor(tmp_path: Path) ->
 
 
 def test_configured_mcp_registry_url_is_used(monkeypatch) -> None:
-    """The URL shown by the command must be the URL passed to its client."""
+    """The URL shown by the command must be the URL its client resolved.
+
+    The command deliberately hands the client no URL: SimpleRegistryClient owns
+    the precedence chain and records which layer supplied the endpoint, and a
+    caller-supplied URL is recorded as the "explicit" layer regardless of where
+    it really came from.
+    """
+    from urllib.parse import urlparse
+
     from apm_cli.commands import mcp
+    from apm_cli.registry.client import SimpleRegistryClient
 
     captured: list[str | None] = []
 
     class FakeRegistry:
         def __init__(self, registry_url=None):
             captured.append(registry_url)
-            self.client = MagicMock(registry_url=registry_url)
+            self.client = SimpleRegistryClient(registry_url)
 
     monkeypatch.delenv(mcp.MCP_REGISTRY_ENV, raising=False)
     monkeypatch.setattr("apm_cli.config.get_mcp_registry_url", lambda: "https://registry.test/v0")
@@ -222,8 +231,9 @@ def test_configured_mcp_registry_url_is_used(monkeypatch) -> None:
 
     registry = mcp._build_registry_with_diag(None, MagicMock())
 
-    assert captured == ["https://registry.test/v0"]
-    assert registry.client.registry_url == captured[0]
+    assert captured == [None]
+    assert urlparse(registry.client.registry_url).hostname == "registry.test"
+    assert registry.client.registry_url_source == "config"
 
 
 def test_marketplace_registry_routing_returns_registry_dependency(monkeypatch) -> None:

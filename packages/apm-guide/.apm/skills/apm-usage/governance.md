@@ -175,10 +175,10 @@ Notes:
 ## Executable trust governance
 
 Issue #1873 unifies executable-primitive trust (hooks, `bin/` executables,
-self-defined MCP servers, canvas extensions) onto one noun, `executables`,
-across three layers. The org policy is the **ceiling on deny**: it can deny and
-require fleet-wide and recommend a vetted set, but personal or project consent
-can never widen past an org deny.
+self-defined MCP servers, LSP servers, canvas extensions) onto one noun,
+`executables`, across three layers. The org policy is the **ceiling on deny**:
+it can deny and require fleet-wide and recommend a vetted set, but personal or
+project consent can never widen past an org deny.
 
 ```yaml
 # .github/apm-policy.yml
@@ -229,14 +229,17 @@ package PRESENCE, not materialized files. A separate audit signal,
 `required-executable-untrusted`, hard-fails CI when a required package's
 executables are untrusted (denied or gated).
 
-There is no `enforce` mandate runtime, no cryptographic signing, and no
-content-hash binding in this release: an org `executables.enforce` rung is
-accepted but fail-safe degrades to `recommend` (allowed, still overridable by a
-deny). Inspect the deciding layer for one package with `apm policy explain
-<pkg>`, and surface fleet-wide layer conflicts (packages allowed locally but
-denied by org policy) with `apm doctor`. The same doctor row reports a malformed
-project executable-trust configuration under either `executables` or the
-deprecated `allowExecutables` key and names the configuration to fix.
+There is no `enforce` mandate runtime or package signing in this release: an org
+`executables.enforce` rung is accepted but fail-safe degrades to `recommend`
+(allowed, still overridable by a deny). Local bundle LSP, MCP, and canvas
+approvals use a narrower content-bound key: when one is skipped, APM prints an
+exact `executables.allow` entry containing that bundle's SHA-256 digest. A
+different bundle that claims the same package name cannot inherit the grant. Inspect the
+deciding layer for one package with `apm policy explain <pkg>`, and surface
+fleet-wide layer conflicts (packages allowed locally but denied by org policy)
+with `apm doctor`. The same doctor row reports a malformed project
+executable-trust configuration under either `executables` or the deprecated
+`allowExecutables` key and names the configuration to fix.
 
 ## Plugin bin/ deployment governance (deprecated alias)
 
@@ -289,8 +292,10 @@ Because a canvas from a dependency is arbitrary executable code, APM blocks
 dependency-provided canvases when the project opts in to the executable gate:
 the project must add an `executables:` block to `apm.yml` and run
 `apm approve <pkg>` to deploy it. A first-party canvas in the root package being
-installed deploys once the flag is on; dependency canvases always require
-explicit approval.
+installed deploys once the flag is on. With `--global`, dependency-provided
+canvases always require explicit approval. Local bundle canvases use the exact
+`name#version@sha256:<digest>` key printed by `apm install`, so changed bundle
+bytes require renewed consent.
 
 By default `apm approve` records the grant in the project `apm.yml`
 `executables.allow` block (committed, shared with the team); `apm approve --user`
@@ -309,12 +314,12 @@ global canvas.
 
 The trust gate is enforced on every install path -- normal install and offline
 bundle install (`apm install <bundle>`) -- so a vendored bundle cannot smuggle
-an executable canvas past trust. Canvas trust is unified with the `executables`
-default-deny gate (hooks, bin, mcp, canvas); approve once and all four
-executable types are governed consistently. The org `executables:` policy block
-governs canvas trust alongside the other types (`deny_all`, `deny`, `require`,
-`recommend`); a canvas-only policy knob is not part of this experimental
-release.
+an executable canvas past trust. Once an `executables:` block enables the
+default-deny gate, canvas trust is unified with hook, bin, MCP, and LSP
+execution; approve once and all five executable types are governed consistently.
+The org `executables:` policy block governs canvas trust alongside
+the other types (`deny_all`, `deny`, `require`, `recommend`); a canvas-only
+policy knob is not part of this experimental release.
 
 ## Local content governance
 

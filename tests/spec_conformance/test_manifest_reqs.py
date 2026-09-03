@@ -904,6 +904,76 @@ def test_dependency_package_targets_are_restriction_only() -> None:
     )
 
 
+@pytest.mark.req("req-tg-014")
+def test_user_scoped_mcp_target_selection_ignores_project_signals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """User-scope MCP discovery cannot inherit project-only target signals."""
+    from apm_cli.core.target_detection import resolve_manifest_target_decision
+    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".cursor").mkdir()
+    user_manifest = tmp_path / "home" / ".apm" / "apm.yml"
+    user_manifest.parent.mkdir(parents=True)
+    user_manifest.write_text(
+        "name: user-scope\nversion: 0.1.0\ndependencies:\n  mcp: []\n",
+        encoding="ascii",
+    )
+    monkeypatch.setattr("apm_cli.config.get_install_target", lambda: None)
+
+    discovery = resolve_manifest_target_decision(
+        project,
+        manifest_path=user_manifest,
+        explicit_target=None,
+        user_scope=True,
+    )
+    explicit = resolve_manifest_target_decision(
+        project,
+        manifest_path=user_manifest,
+        explicit_target="codex",
+        user_scope=True,
+    )
+    manifest_target_path = user_manifest.with_name("manifest-target.yml")
+    manifest_target_path.write_text(
+        "name: user-scope\nversion: 0.1.0\ntargets: [claude]\n",
+        encoding="ascii",
+    )
+    manifest = resolve_manifest_target_decision(
+        project,
+        manifest_path=manifest_target_path,
+        explicit_target=None,
+        user_scope=True,
+    )
+    configured_path = user_manifest.with_name("configured-target.yml")
+    configured_path.write_text(
+        "name: user-scope\nversion: 0.1.0\n",
+        encoding="ascii",
+    )
+    monkeypatch.setattr("apm_cli.config.get_install_target", lambda: "vscode")
+    configured = resolve_manifest_target_decision(
+        project,
+        manifest_path=configured_path,
+        explicit_target=None,
+        user_scope=True,
+    )
+
+    assert (discovery.value, discovery.source) == (None, "auto-detect")
+    assert (explicit.value, explicit.source) == ("codex", "--target flag")
+    assert (manifest.value, manifest.source) == (["claude"], "apm.yml")
+    assert (configured.value, configured.source) == ("vscode", "apm config target")
+    assert partition_user_scope_runtimes(["vscode", "claude"]) == (["claude"], ["vscode"])
+    assert_spec_contains(
+        "User-scoped MCP target selection",
+        "Once a source selects one or more\ntargets, the consumer MUST NOT consult",
+        "Project-scoped\ntarget-detection signals outside the user scope MUST NOT",
+        "Before creating or modifying the user-scope manifest, lockfile, or target",
+        "For a mixed set, the supported\nsubset MUST become the effective target set",
+    )
+
+
 @pytest.mark.req("req-tg-009")
 def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None:
     """Fail-closed evaluation precedes any content-identity adoption fast-path.

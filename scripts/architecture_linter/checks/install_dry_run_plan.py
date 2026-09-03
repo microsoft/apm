@@ -44,8 +44,11 @@ def check_prospective_dry_run_plan(provider: FactsProvider) -> tuple[Violation, 
     contract_holds = (
         _count_re(owner, class_pattern) == 1
         and _present(owner, "def from_apm_package(")
+        and _present(owner, "def with_allowed_lsp_dependencies(")
         and _present(owner, "selected_apm_dependencies=selected_apm_dependencies")
+        and _present(owner, "lsp_dependencies=tuple(apm_package.get_lsp_dependencies())")
         and _present(command, "ProspectiveInstallPlan.from_apm_package(")
+        and _present(command, "prospective_plan.with_allowed_lsp_dependencies(")
         and sum(
             "prospective_plan.selected_apm_dependencies" in line
             for line in getattr(command, "lines", ())
@@ -55,10 +58,12 @@ def check_prospective_dry_run_plan(provider: FactsProvider) -> tuple[Violation, 
             command,
             "mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None",
         )
-        and _present(command, "prospective_plan.mcp_dependency_count")
+        and _present(command, "prospective_plan.dependency_counts")
         and _present(renderer, "plan: ProspectiveInstallPlan")
-        and _present(renderer, "for dep in plan.selected_apm_dependencies:")
+        and _present(renderer, "plan.selected_apm_dependencies if plan.should_install_apm else ()")
+        and _present(renderer, "for dep in selected_apm_dependencies:")
         and _present(renderer, "for dep in plan.selected_mcp_dependencies:")
+        and _present(renderer, "for dep in plan.selected_lsp_dependencies:")
         and not _present(renderer, "ProspectiveInstallPlan(")
         and not duplicates
     )

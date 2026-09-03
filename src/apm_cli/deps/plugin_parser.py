@@ -599,7 +599,7 @@ def synthesize_apm_yml_from_plugin(
         substitute_plugin_root=substitute_plugin_root,
     )
     if lsp_servers:
-        lsp_deps = _lsp_servers_to_apm_deps(
+        lsp_deps = lsp_servers_to_apm_deps(
             lsp_servers,
             plugin_path,
             warn_on_invalid=warn_on_invalid_servers,
@@ -965,7 +965,7 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     return dict(data)
 
 
-def _lsp_servers_to_apm_deps(
+def lsp_servers_to_apm_deps(
     servers: dict[str, Any],
     plugin_path: Path,
     *,
@@ -1077,6 +1077,9 @@ def _lsp_servers_to_apm_deps(
         deps.append(dep)
 
     return deps
+
+
+_lsp_servers_to_apm_deps = lsp_servers_to_apm_deps
 
 
 def _map_plugin_artifacts(

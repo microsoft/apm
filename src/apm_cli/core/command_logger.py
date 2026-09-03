@@ -887,6 +887,16 @@ class InstallLogger(CommandLogger):
             timing_suffix = f" in {elapsed_seconds:.1f}s"
 
         if disposition is InstallDisposition.DRY_RUN:
+            dry_parts = []
+            if apm_count > 0:
+                noun = "dependency" if apm_count == 1 else "dependencies"
+                dry_parts.append(f"install {apm_count} APM {noun}")
+            if mcp_count > 0:
+                noun = "server" if mcp_count == 1 else "servers"
+                dry_parts.append(f"configure {mcp_count} MCP {noun}")
+            if lsp_count > 0:
+                noun = "server" if lsp_count == 1 else "servers"
+                dry_parts.append(f"configure {lsp_count} LSP {noun}")
             update_count = min(self._dry_run_apm_update_count, apm_count)
             if update_count:
                 update_noun = "update" if update_count == 1 else "updates"
@@ -894,22 +904,22 @@ class InstallLogger(CommandLogger):
                 install_count = apm_count - update_count
                 if install_count:
                     noun = "dependency" if install_count == 1 else "dependencies"
-                    dry_parts.append(f"{install_count} APM {noun} to install")
+                    dry_parts.append(f"install {install_count} APM {noun}")
                 if mcp_count:
                     noun = "server" if mcp_count == 1 else "servers"
-                    dry_parts.append(f"{mcp_count} MCP {noun}")
+                    dry_parts.append(f"configure {mcp_count} MCP {noun}")
                 if lsp_count:
                     noun = "server" if lsp_count == 1 else "servers"
-                    dry_parts.append(f"{lsp_count} LSP {noun}")
+                    dry_parts.append(f"configure {lsp_count} LSP {noun}")
                 summary = " and ".join(dry_parts)
                 _rich_info(
                     f"Dry run completed: would apply {summary}{timing_suffix}.",
                     symbol="info",
                 )
                 return
-            summary = " and ".join(parts) if parts else "no changes"
+            summary = " and ".join(dry_parts) if dry_parts else "make no changes"
             _rich_info(
-                f"Dry run completed: would install {summary}{timing_suffix}.",
+                f"Dry run completed: would {summary}{timing_suffix}.",
                 symbol="info",
             )
         elif disposition is InstallDisposition.FAILED:

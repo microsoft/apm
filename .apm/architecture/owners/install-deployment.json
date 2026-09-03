@@ -10,8 +10,8 @@
     },
     {
       "id": "legacy-mcp-ownership-key-migration",
-      "decision": "Legacy MCP runtime ownership-key migration",
-      "owner": "install/mcp/ownership.py (migrate_legacy_project_target_servers)",
+      "decision": "Legacy MCP target ownership migration and adoption",
+      "owner": "install/mcp/ownership.py",
       "selectors": ["src/apm_cli/install/mcp/ownership.py"],
       "guards": ["install-deployment-mcp-ownership-migration"]
     },
@@ -68,11 +68,22 @@
       "id": "install-invocation-option-defaults",
       "decision": "Install invocation option defaults",
       "owner": "install/request.py (InstallRequest)",
-      "selectors": [
-        "src/apm_cli/install/request.py",
-        "src/apm_cli/commands/install.py"
-      ],
+      "selectors": ["src/apm_cli/install/request.py"],
       "guards": ["install-deployment-request-defaults"]
+    },
+    {
+      "id": "install-command-scope-selection",
+      "decision": "Install command scope selection",
+      "owner": "commands/install.py (install computes scope once)",
+      "selectors": ["src/apm_cli/commands/install.py"],
+      "guards": ["install-deployment-install-scope-selection"]
+    },
+    {
+      "id": "mcp-registry-url-resolution",
+      "decision": "MCP registry URL resolution precedence",
+      "owner": "registry/client.py (resolve_mcp_registry_url)",
+      "selectors": ["src/apm_cli/registry/client.py"],
+      "guards": ["install-deployment-mcp-registry-resolution"]
     },
     {
       "id": "file-level-deploy-sync-cleanup",
@@ -80,6 +91,27 @@
       "owner": "BaseIntegrator (see integrators.instructions.md)",
       "selectors": ["src/apm_cli/integration/base_integrator.py"],
       "guards": ["install-deployment-base-integrator"]
+    },
+    {
+      "id": "executable-trust-context",
+      "decision": "Executable trust context and per-package approval",
+      "owner": "security/executables.py (exec_trust_context_for_project, resolve_exec_decision)",
+      "selectors": ["src/apm_cli/security/executables.py"],
+      "guards": ["install-deployment-executable-trust-context"]
+    },
+    {
+      "id": "lsp-target-contract",
+      "decision": "LSP target path, shape, and reserved Claude namespace",
+      "owner": "integration/lsp_integrator.py (LSPIntegrator)",
+      "selectors": ["src/apm_cli/integration/lsp_integrator.py"],
+      "guards": ["install-deployment-lsp-target-contract"]
+    },
+    {
+      "id": "lsp-lifecycle",
+      "decision": "LSP lifecycle orchestration and reconciliation",
+      "owner": "install/lsp/integration.py",
+      "selectors": ["src/apm_cli/install/lsp/integration.py"],
+      "guards": ["install-deployment-lsp-lifecycle"]
     },
     {
       "id": "post-uninstall-dependency-reachability",

@@ -9,6 +9,7 @@ Covers the _handle_global_flag function and --global integration in the compile 
 * compile command: --global with --watch rejected
 * compile command: --global with --root rejected
 * compile command: --global without errors exits 0
+* _handle_global_flag: honors targets: declared in the user manifest (#2768)
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
@@ -436,3 +438,340 @@ class TestCompileGlobalCommand:
 
             # Runner exit_code should be 1
             assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Declared-target restriction (#2768)
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalCompileHonorsDeclaredTargets:
+    """`apm compile -g` must compile only the targets ~/.apm/apm.yml declares."""
+
+    @staticmethod
+    def _prepare(tmp_path: Path, manifest: str | None) -> Path:
+        """Build a user-scope apm dir, optionally carrying an apm.yml."""
+        source_root = tmp_path / "source"
+        (source_root / "apm_modules").mkdir(parents=True)
+        if manifest is not None:
+            (source_root / "apm.yml").write_text(manifest)
+        return source_root
+
+    @staticmethod
+    def _compiled_target_names(compile_mock: MagicMock) -> list[str]:
+        """Extract the target names handed to compile_user_root_contexts."""
+        profiles = compile_mock.call_args.args[0]
+        return [p.name for p in profiles]
+
+    def _run(self, source_root: Path, logger: MagicMock) -> MagicMock:
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        compile_mock = MagicMock(return_value=[])
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            assert _handle_global_flag(dry_run=False, logger=logger) == 0
+        return compile_mock
+
+    def test_declared_targets_restrict_compiled_set(self, tmp_path):
+        """targets: [claude, codex] -> only those two are compiled."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [claude, codex]\n",
+        )
+
+        logger = MagicMock()
+        names = self._compiled_target_names(self._run(source_root, logger))
+
+        assert sorted(names) == ["claude", "codex"]
+        logger.verbose_detail.assert_called_once_with(
+            "Global targets from ~/.apm/apm.yml: claude, codex"
+        )
+
+    def test_declared_target_without_root_output_has_accurate_message(self, tmp_path):
+        """A valid no-output target does not suggest reinstalling packages."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntarget: agent-skills\n",
+        )
+        logger = MagicMock()
+
+        self._run(source_root, logger)
+
+        logger.info.assert_called_once_with(
+            "Declared global targets (agent-skills) produce no user-scope "
+            "root context output. No files changed.",
+            symbol="info",
+        )
+
+    def test_declared_targets_exclude_explicit_only_and_gated_targets(self, tmp_path):
+        """A narrow targets: must not drag in antigravity or gated harnesses."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [claude]\n",
+        )
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert names == ["claude"]
+        assert "antigravity" not in names
+        assert "hermes" not in names
+
+    def test_singular_target_key_is_honored(self, tmp_path):
+        """The singular `target:` sugar restricts the set the same way."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntarget: codex\n",
+        )
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert names == ["codex"]
+
+    def test_no_declared_targets_compiles_every_known_target(self, tmp_path):
+        """No targets: key -> unchanged behavior, the full known set is passed."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        source_root = self._prepare(tmp_path, "name: h\nversion: 1.0.0\n")
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert sorted(names) == sorted(p.name for p in KNOWN_TARGETS.values())
+
+    def test_absent_manifest_compiles_every_known_target(self, tmp_path):
+        """No ~/.apm/apm.yml at all -> unchanged behavior."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        source_root = self._prepare(tmp_path, None)
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert sorted(names) == sorted(p.name for p in KNOWN_TARGETS.values())
+
+    def test_vscode_alias_is_normalized_to_a_known_profile(self, tmp_path):
+        """`targets: [vscode]` is manifest-legal but not a KNOWN_TARGETS key."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [vscode]\n",
+        )
+
+        logger = MagicMock()
+        names = self._compiled_target_names(self._run(source_root, logger))
+
+        assert names == ["copilot"]
+        logger.verbose_detail.assert_called_once_with(
+            "Global targets from ~/.apm/apm.yml: vscode -> copilot"
+        )
+
+    def test_alias_and_canonical_name_collapse_to_one_profile(self, tmp_path):
+        """vscode and copilot name the same target, so it is compiled once."""
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [vscode, copilot]\n",
+        )
+
+        names = self._compiled_target_names(self._run(source_root, MagicMock()))
+
+        assert names == ["copilot"]
+
+    def test_malformed_manifest_fails_closed_without_compiling(self, tmp_path):
+        """Broken YAML must not degrade to "nothing declared" and write all 11."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [claude\n  broken: [[[\n",
+        )
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        error = logger.error.call_args.args[0].lower()
+        assert "failed to parse" in error
+        assert "fix the manifest and rerun 'apm compile -g'" in error
+
+    def test_invalid_target_name_has_global_manifest_recovery(self, tmp_path):
+        """An unknown token identifies the manifest and global command."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [not-a-harness]\n",
+        )
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        error = str(logger.error.call_args).lower()
+        assert "unknown target 'not-a-harness'" in error
+        assert str(source_root / "apm.yml").lower() in error
+        assert "rerun 'apm compile -g'" in error
+        assert "apm install" not in error
+
+    def test_unreadable_manifest_fails_closed_without_compiling(self, tmp_path):
+        """A manifest read error must not expand to every known target."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(
+            tmp_path,
+            "name: h\nversion: 1.0.0\ntargets: [claude]\n",
+        )
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+            patch(
+                "apm_cli.utils.yaml_io.load_yaml",
+                side_effect=PermissionError("permission denied"),
+            ),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        error = str(logger.error.call_args).lower()
+        assert "failed to read" in error
+        assert "permission denied" in error
+        assert "ensure it is a readable yaml file" in error
+        assert "rerun 'apm compile -g'" in error
+
+    def test_non_mapping_manifest_fails_closed_without_compiling(self, tmp_path):
+        """A YAML sequence parses cleanly but is not a usable manifest."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, "- claude\n- codex\n")
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "must contain a yaml object" in str(logger.error.call_args).lower()
+
+    def test_scalar_manifest_fails_closed_without_compiling(self, tmp_path):
+        """A bare scalar document is rejected the same way a sequence is."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, "just-a-string\n")
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=MagicMock())
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+
+    def test_empty_manifest_fails_closed_without_compiling(self, tmp_path):
+        """An empty existing manifest is invalid and must not widen output."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, "")
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "empty document" in str(logger.error.call_args).lower()
+
+    def test_dangling_manifest_symlink_fails_closed_without_compiling(self, tmp_path):
+        """A present dangling manifest link is not mistaken for no manifest."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, None)
+        manifest_path = source_root / "apm.yml"
+        try:
+            manifest_path.symlink_to(source_root / "missing-apm.yml")
+        except OSError:
+            pytest.skip("symbolic links are unavailable")
+        compile_mock = MagicMock(return_value=[])
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "failed to read" in str(logger.error.call_args).lower()
+
+    def test_valid_manifest_symlink_fails_closed_without_compiling(self, tmp_path):
+        """A manifest link is rejected instead of following its target."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, None)
+        external_manifest = tmp_path / "external-apm.yml"
+        external_manifest.write_text("targets: [claude]\n", encoding="utf-8")
+        try:
+            (source_root / "apm.yml").symlink_to(external_manifest)
+        except OSError:
+            pytest.skip("symbolic links are unavailable")
+        compile_mock = MagicMock(return_value=[])
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "regular, non-symlink file" in str(logger.error.call_args).lower()
+
+    def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path):
+        """Invalid UTF-8 reaches the handler as a YAMLError, not a raw decode error.
+
+        ``load_yaml`` opens the manifest as UTF-8, so bad bytes raise
+        ``UnicodeDecodeError``; ``_bounded_load`` normalizes that ``ValueError``
+        into ``yaml.YAMLError``. This pins that normalization, because without it
+        the decode failure would escape the handler uncaught.
+        """
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = self._prepare(tmp_path, None)
+        (source_root / "apm.yml").write_bytes(b"\xff\xfename: h\n")
+        logger = MagicMock()
+        compile_mock = MagicMock(return_value=[])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", compile_mock),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 1
+        compile_mock.assert_not_called()
+        assert "unicodedecodeerror" in str(logger.error.call_args).lower()

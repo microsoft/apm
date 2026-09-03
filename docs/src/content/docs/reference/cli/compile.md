@@ -144,13 +144,33 @@ globally installed instruction packages -- one command, no per-tool setup.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --global` | Compile user-scope root context files from `~/.apm/apm_modules`. Reads globally installed packages and writes one root context file per supported user-scope target (e.g. `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`). Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if `~/.apm/apm_modules` does not exist. |
+| `-g, --global` | Compile user-scope root context files from `~/.apm/apm_modules`. Writes targets declared by `target:` or `targets:` in `~/.apm/apm.yml`, or every supported user-scope target when neither field is declared. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if `~/.apm/apm_modules` does not exist. |
 
 `apm compile --global` is explicit. `apm install -g` does not run it; instead,
 when global instructions land on a root-context-only target, install prints a
 one-line hint pointing at `apm compile -g`. Run it manually after adding or
 removing global packages. Hand-authored files (files that do not carry the
 APM-generated marker) are never overwritten.
+
+Because `--target` is rejected alongside `--global`, `target:` or `targets:` in
+`~/.apm/apm.yml` is how you narrow user-scope output. When it declares a target
+set, `apm compile -g` writes only those targets. If you install with an explicit
+`apm install -g --target`, update the manifest declaration before compiling;
+the explicit install flag does not replace it. Declare nothing and every
+applicable user-scope root context file is written.
+The manifest must be a regular, non-symlink file. Malformed or unreadable YAML,
+a non-mapping document, or an invalid target declaration stops compilation
+before any target output is written; fix the reported manifest problem and
+rerun the command.
+
+```yaml
+# ~/.apm/apm.yml
+targets: [claude, codex]
+```
+
+```bash
+apm compile -g --dry-run
+```
 
 For OpenCode, `apm compile -g` writes
 `~/.config/opencode/AGENTS.md` and retains scoped `applyTo` sections.

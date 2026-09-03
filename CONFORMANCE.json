@@ -1,4 +1,9 @@
 {
+  "consumer_user_scope": {
+    "lockfile_location": "~/.apm/apm.lock.yaml",
+    "manifest_location": "~/.apm/apm.yml",
+    "target_capability_declaration": "MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)"
+  },
   "generator": "gen_statement.py v1",
   "requirements": [
     {
@@ -1389,12 +1394,23 @@
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_plugin_name_precedence_and_owner_identity_are_deterministic",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-014",
+      "keyword": "MUST",
+      "section": "8.5.8",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_user_scoped_mcp_target_selection_ignores_project_signals"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 89,
+      "active": 90,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1418,5 +1434,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 120
+  "total_requirements": 121
 }

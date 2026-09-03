@@ -3,9 +3,31 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_mcp_target_servers(
+    *,
+    recorded_target_servers: dict[str, set[str]],
+    ownership_present: bool,
+    server_names: set[str],
+    stored_configs: dict[str, dict],
+    project_root: Path | None,
+    user_scope: bool,
+) -> dict[str, set[str]]:
+    """Return recorded ownership, adopting exact legacy baselines only when absent."""
+    target_servers = {runtime: set(servers) for runtime, servers in recorded_target_servers.items()}
+    if target_servers or ownership_present:
+        return target_servers
+    return adopt_legacy_mcp_target_servers(
+        server_names=server_names,
+        stored_configs=stored_configs,
+        project_root=project_root,
+        user_scope=user_scope,
+    )
 
 
 def migrate_legacy_project_target_servers(
@@ -26,7 +48,7 @@ def adopt_legacy_mcp_target_servers(
     *,
     server_names: set[str],
     stored_configs: dict[str, dict],
-    project_root,
+    project_root: Path | None,
     user_scope: bool,
 ) -> dict[str, set[str]]:
     """Adopt legacy native entries only when they exactly match their baseline."""

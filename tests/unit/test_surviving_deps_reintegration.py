@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 import yaml
@@ -84,6 +84,44 @@ def _package_info(pkg_path: Path, repo_url: str) -> PackageInfo:
             ref_name="main",
         ),
     )
+
+
+def test_uninstall_warns_when_managed_hook_fails_containment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsafe managed hook skips must be visible and actionable."""
+    (tmp_path / "apm.yml").write_text(
+        "name: root\nversion: 0.0.0\ntargets:\n  - copilot\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        HookIntegrator,
+        "sync_integration",
+        lambda *_args, **_kwargs: {
+            "files_removed": 0,
+            "errors": 1,
+            "unsafe_paths": [".copilot/hooks/pkg-hooks.json"],
+        },
+    )
+    logger = MagicMock()
+
+    _sync_integrations_after_uninstall(
+        APMPackage.from_apm_yml(tmp_path / "apm.yml"),
+        tmp_path,
+        {".copilot/hooks/pkg-hooks.json"},
+        logger,
+        user_scope=True,
+        lockfile=LockFile(),
+    )
+
+    assert logger.warning.call_args_list == [
+        call(
+            "Skipped 1 managed hook path that failed containment validation. "
+            "Inspect or repair symlinked parents before removing anything."
+        ),
+        call("Preserved managed hook path: ~/.copilot/hooks/pkg-hooks.json"),
+    ]
 
 
 def test_surviving_refs_include_lockfile_transitive(tmp_path: Path) -> None:

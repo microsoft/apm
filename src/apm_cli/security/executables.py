@@ -18,6 +18,7 @@ See also: ``apm approve`` / ``apm deny`` CLI commands.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 import sys
 from dataclasses import dataclass, field
@@ -289,6 +290,11 @@ def _strip_version(package_key: str) -> str:
     return package_key.split("#", 1)[0]
 
 
+def _is_content_bound_key(package_key: str) -> bool:
+    """Return whether an approval key identifies one exact content digest."""
+    return "@sha256:" in package_key
+
+
 def normalize_bin_deploy_deny_key(value: object) -> str:
     """Normalize package identity for ``bin_deploy.deny`` storage and lookup."""
     raw = str(value or "").strip()
@@ -310,9 +316,8 @@ def _map_grants(
 ) -> bool:
     """Return True if *grant_map* grants *exec_type* for *package_key*.
 
-    Matches the exact key, the version-blind name, or any stored key that
-    shares the same version-blind name -- so approving ``owner/repo``
-    covers ``owner/repo#v1`` and vice-versa.
+    Ordinary package grants are version-blind. Content-bound local-bundle
+    grants match only the exact digest key.
     """
     if not grant_map:
         return False
@@ -320,9 +325,13 @@ def _map_grants(
     for stored_key, entry in grant_map.items():
         if not isinstance(entry, dict):
             continue
-        if (stored_key in (package_key, name) or _strip_version(stored_key) == name) and bool(
-            entry.get(exec_type, False)
-        ):
+        content_bound = _is_content_bound_key(package_key) or _is_content_bound_key(stored_key)
+        matches = (
+            stored_key == package_key
+            if content_bound
+            else stored_key in (package_key, name) or _strip_version(stored_key) == name
+        )
+        if matches and bool(entry.get(exec_type, False)):
             return True
     return False
 
@@ -450,6 +459,57 @@ def build_approval_key(package_name: str, version: str) -> str:
     return f"{package_name}#{version}"
 
 
+def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
+    """Return trust keys derived only from a locked package identity."""
+    identity = dependency.get_unique_key()
+    versioned = build_approval_key(identity, dependency.version or "")
+    return tuple(dict.fromkeys((identity, versioned)))
+
+
+def local_bundle_approval_key(
+    package_id: str,
+    version: str,
+    source_dir: Path,
+    lockfile: dict[str, Any] | None = None,
+) -> str:
+    """Bind local-bundle executable consent to every deployable content byte."""
+    hasher = hashlib.sha256()
+    pack = lockfile.get("pack") if isinstance(lockfile, dict) else None
+    bundle_files = pack.get("bundle_files") if isinstance(pack, dict) else None
+    if isinstance(bundle_files, dict):
+        for rel_path in sorted(bundle_files, key=str):
+            digest = bundle_files[rel_path]
+            encoded_path = str(rel_path).encode("utf-8")
+            encoded_digest = str(digest).encode("utf-8")
+            hasher.update(len(encoded_path).to_bytes(8, "big"))
+            hasher.update(encoded_path)
+            hasher.update(len(encoded_digest).to_bytes(8, "big"))
+            hasher.update(encoded_digest)
+    else:
+        files: list[tuple[str, Path]] = []
+        for item in source_dir.rglob("*"):
+            rel_path = item.relative_to(source_dir).as_posix()
+            if item.is_symlink():
+                raise ValueError(f"Local bundle contains a symlink: {rel_path}")
+            if item.is_dir():
+                continue
+            if not item.is_file():
+                raise ValueError(f"Local bundle contains a special file: {rel_path}")
+            files.append((rel_path, item))
+        for rel_path, item in sorted(files):
+            encoded_path = rel_path.encode("utf-8")
+            content_length = item.stat().st_size
+            hasher.update(len(encoded_path).to_bytes(8, "big"))
+            hasher.update(encoded_path)
+            hasher.update(content_length.to_bytes(8, "big"))
+            with item.open("rb") as handle:
+                while chunk := handle.read(1024 * 1024):
+                    hasher.update(chunk)
+    artifact_version = version or "local"
+    digest = f"sha256:{hasher.hexdigest()}"
+    return f"{package_id}#{artifact_version}@{digest}"
+
+
 # -------------------------------------------------------------------
 # Package scanning
 # -------------------------------------------------------------------
@@ -460,6 +520,8 @@ def scan_package_executables(
     package_name: str,
     package_version: str,
     *,
+    approval_identity: str | None = None,
+    manifest_data: dict[str, Any] | None = None,
     is_transitive: bool = False,
     parent_name: str | None = None,
 ) -> ExecutableDeclaration:
@@ -477,7 +539,7 @@ def scan_package_executables(
     Returns an :class:`ExecutableDeclaration` (may have zero counts if
     the package declares no executables).
     """
-    key = build_approval_key(package_name, package_version)
+    key = build_approval_key(approval_identity or package_name, package_version)
 
     # 1. Hooks: .apm/hooks/*.json and hooks/*.json (aligned with
     #    HookIntegrator.find_hook_files -- only JSON files are actionable).
@@ -514,32 +576,33 @@ def scan_package_executables(
     lsp_count = 0
     lsp_details: list[str] = []
     apm_yml = install_path / "apm.yml"
-    if apm_yml.is_file():
+    data = manifest_data
+    if data is None and apm_yml.is_file():
         try:
             from ..utils.yaml_io import load_yaml
 
             data = load_yaml(apm_yml)
-            if isinstance(data, dict):
-                deps = data.get("dependencies", {})
-                if isinstance(deps, dict):
-                    mcp_list = deps.get("mcp", [])
-                    if isinstance(mcp_list, list):
-                        mcp_count = len(mcp_list)
-                        for entry in mcp_list:
-                            if isinstance(entry, str):
-                                mcp_details.append(entry)
-                            elif isinstance(entry, dict):
-                                mcp_details.append(entry.get("name", str(entry)))
-                    lsp_list = deps.get("lsp", [])
-                    if isinstance(lsp_list, list):
-                        lsp_count = len(lsp_list)
-                        for entry in lsp_list:
-                            if isinstance(entry, str):
-                                lsp_details.append(entry)
-                            elif isinstance(entry, dict):
-                                lsp_details.append(entry.get("name", str(entry)))
         except Exception:
-            pass  # Non-fatal: if we cannot parse, treat as zero MCP
+            data = None
+    if isinstance(data, dict):
+        deps = data.get("dependencies", {})
+        if isinstance(deps, dict):
+            mcp_list = deps.get("mcp", [])
+            if isinstance(mcp_list, list):
+                mcp_count = len(mcp_list)
+                for entry in mcp_list:
+                    if isinstance(entry, str):
+                        mcp_details.append(entry)
+                    elif isinstance(entry, dict):
+                        mcp_details.append(entry.get("name", str(entry)))
+            lsp_list = deps.get("lsp", [])
+            if isinstance(lsp_list, list):
+                lsp_count = len(lsp_list)
+                for entry in lsp_list:
+                    if isinstance(entry, str):
+                        lsp_details.append(entry)
+                    elif isinstance(entry, dict):
+                        lsp_details.append(entry.get("name", str(entry)))
 
     # 4. Canvas extensions: .apm/extensions/<name>/extension.mjs
     #    Mirrors CanvasIntegrator.find_canvas_bundles marker detection.
@@ -705,7 +768,7 @@ def parse_allow_executables(data: dict[str, Any]) -> dict[str, dict[str, bool]] 
     if not isinstance(raw, dict):
         raise ValueError(
             "allowExecutables must be a mapping of "
-            "package keys to {hooks: bool, mcp: bool, bin: bool, canvas: bool}"
+            "package keys to {hooks: bool, mcp: bool, lsp: bool, bin: bool, canvas: bool}"
         )
 
     result: dict[str, dict[str, bool]] = {}
@@ -789,7 +852,7 @@ def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | 
                 continue
             result.setdefault(key, {})[exec_type] = True
             name = _strip_version(key)
-            if name != key:
+            if name != key and not _is_content_bound_key(key):
                 result.setdefault(name, {})[exec_type] = True
     return result
 
@@ -849,6 +912,47 @@ def build_effective_exec_map(
     """
     ctx = build_exec_trust_context(policy=policy, project_data=project_data)
     return materialize_exec_map(ctx)
+
+
+def exec_trust_context_for_project(
+    project_root: Path,
+    *,
+    policy: Any | None,
+    fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
+    logger: Any | None = None,
+) -> ExecTrustContext:
+    """Resolve project, user, and policy executable trust through one owner."""
+    from apm_cli.utils.yaml_io import load_yaml
+
+    project_data: dict[str, Any] | None = None
+    manifest_path = project_root / "apm.yml"
+    if manifest_path.is_file():
+        data = load_yaml(manifest_path)
+        if isinstance(data, dict):
+            project_data = data
+            if data.get("allowExecutables") is not None:
+                warn_allow_executables_alias_once(logger)
+    if project_data is None and isinstance(fallback_allow_executables, dict):
+        project_data = {"allowExecutables": fallback_allow_executables}
+    return build_exec_trust_context(policy=policy, project_data=project_data)
+
+
+def effective_exec_map_for_project(
+    project_root: Path,
+    *,
+    policy: Any | None,
+    fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
+    logger: Any | None = None,
+) -> dict[str, dict[str, bool]] | None:
+    """Materialize the canonical trust context for one project."""
+    return materialize_exec_map(
+        exec_trust_context_for_project(
+            project_root,
+            policy=policy,
+            fallback_allow_executables=fallback_allow_executables,
+            logger=logger,
+        )
+    )
 
 
 def effective_allow_executables(
@@ -932,17 +1036,65 @@ def filter_mcp_by_allow_executables(
 
 def filter_lsp_by_allow_executables(
     lsp_deps: list,
-    project_allow_execs: dict | None,
+    effective_allow_execs: dict | None,
     logger: Any,
 ) -> list:
-    """Filter LSP deps not approved in allowExecutables."""
-    return _filter_service_dependencies_by_allow_executables(
-        lsp_deps,
-        project_allow_execs,
-        logger,
-        exec_type=EXEC_TYPE_LSP,
-        service_label="LSP",
-    )
+    """Filter transitive LSP deps by their declaring package's decision."""
+    if effective_allow_execs is None or not lsp_deps:
+        return lsp_deps
+    filtered = []
+    skipped: dict[str, bool] = {}
+    for dependency in lsp_deps:
+        owner = getattr(dependency, "resolved_by", None)
+        approval_keys = getattr(dependency, "approval_keys", ())
+        if owner is None or any(
+            is_package_approved(effective_allow_execs, key, EXEC_TYPE_LSP) for key in approval_keys
+        ):
+            filtered.append(dependency)
+            continue
+        skipped[owner] = bool(approval_keys)
+        dependency_name = getattr(dependency, "name", "(unnamed)")
+        if approval_keys:
+            logger.verbose_detail(
+                f"Skipping LSP server '{dependency_name}' from '{owner}': "
+                f"executables not trusted. Run 'apm policy explain {owner}'; "
+                f"if policy permits, run 'apm approve {owner}'."
+            )
+        else:
+            logger.verbose_detail(
+                f"Skipping LSP server '{dependency_name}' from '{owner}': package "
+                "identity cannot be verified without lock state. Run 'apm install' "
+                "to regenerate apm.lock.yaml, then approve the package."
+            )
+    if len(filtered) < len(lsp_deps):
+        skipped_count = len(lsp_deps) - len(filtered)
+        noun = "server" if skipped_count == 1 else "servers"
+        owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
+        known_owners = sorted(owner for owner, has_keys in skipped.items() if has_keys)
+        unlocked_owners = sorted(owner for owner, has_keys in skipped.items() if not has_keys)
+        remediation_parts = []
+        if known_owners:
+            remediation_parts.append(
+                (f"Run 'apm policy explain {known_owners[0]}'; approve it only if policy permits.")
+                if len(known_owners) == 1
+                else (
+                    "Run 'apm policy explain <package>' for each identified package; "
+                    "approve only packages policy permits."
+                )
+            )
+        if unlocked_owners:
+            package_noun = "that package" if len(unlocked_owners) == 1 else "each package"
+            remediation_parts.append(
+                f"Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
+            )
+        remediation = " " + " ".join(remediation_parts)
+        package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
+        logger.warning(
+            f"Filtered {skipped_count} LSP {noun} from {owners}: "
+            f"{package_clause} not trusted yet.{remediation}",
+            symbol="warning",
+        )
+    return filtered
 
 
 def read_bundle_allow_executables(apm_yml_path: Path, logger: Any) -> dict | None:
@@ -987,7 +1139,7 @@ def _parse_grant_block(
     if not isinstance(raw, dict):
         raise ValueError(
             f"{where} must be a mapping of package keys to "
-            "{hooks: bool, mcp: bool, bin: bool, canvas: bool}"
+            "{hooks: bool, mcp: bool, lsp: bool, bin: bool, canvas: bool}"
         )
     result: dict[str, dict[str, bool]] = {}
     for pkg_key, entry in raw.items():
