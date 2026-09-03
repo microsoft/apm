@@ -240,6 +240,26 @@ class MCPIntegrator:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def prevalidate_registry_dependencies(
+        mcp_deps: list,
+        *,
+        registry_url: str | None,
+        verbose: bool,
+        logger,
+    ) -> None:
+        """Validate direct-install registry identities before any write."""
+        from apm_cli.integration.mcp_integrator_install import (
+            prevalidate_registry_dependencies,
+        )
+
+        prevalidate_registry_dependencies(
+            mcp_deps,
+            registry_url=registry_url,
+            verbose=verbose,
+            logger=logger,
+        )
+
+    @staticmethod
     def collect_transitive(
         apm_modules_dir: Path,
         lock_path: Path | None = None,

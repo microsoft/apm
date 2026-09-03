@@ -53,7 +53,7 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 - `self-update.channel` must be `stable` or `prerelease`.
 - `self-update.install-dir` is expanded and stored as an absolute path. It becomes the default `APM_INSTALL_DIR` for `apm self-update` when the env var is not set.
 - `copilot-cowork-skills-dir` must be absolute after expansion; the directory itself does not need to exist.
-- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. All other schemes are rejected. Configured `http://` endpoints require `MCP_REGISTRY_ALLOW_HTTP=1` when used.
+- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. Embedded credentials, invalid ports, query strings, fragments, and other schemes are rejected. Configured `http://` endpoints require `MCP_REGISTRY_ALLOW_HTTP=1` when used.
 - Boolean keys reject anything outside the accepted truthy/falsy strings.
 
 ### `apm config unset KEY`

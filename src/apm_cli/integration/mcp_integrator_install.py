@@ -36,6 +36,47 @@ if TYPE_CHECKING:
 _STRICT_CONFIG_FAILURE_RUNTIMES = frozenset({"intellij"})
 
 
+def _validate_registry_servers(
+    operations: Any,
+    server_names: list[str],
+    *,
+    dependency_count: int,
+    verbose: bool,
+    logger: Any,
+) -> list[str]:
+    """Validate registry identities and raise before any target write."""
+    logger.mcp_lookup_heartbeat(len(server_names))
+    if verbose:
+        logger.verbose_detail(f"Validating {dependency_count} registry servers...")
+    valid_servers, invalid_servers = operations.validate_servers_exist(server_names)
+    if invalid_servers:
+        logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
+        logger.progress("Run 'apm mcp search <query>' to find available servers")
+        raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
+    return valid_servers
+
+
+def prevalidate_registry_dependencies(
+    mcp_deps: list,
+    *,
+    registry_url: str | None,
+    verbose: bool,
+    logger: Any,
+) -> None:
+    """Resolve direct-install registry identities before persistent writes."""
+    from apm_cli.registry.operations import MCPServerOperations
+
+    server_names = [dep.name if hasattr(dep, "name") else dep for dep in mcp_deps]
+    operations = MCPServerOperations(registry_url=registry_url)
+    _validate_registry_servers(
+        operations,
+        server_names,
+        dependency_count=len(mcp_deps),
+        verbose=verbose,
+        logger=logger,
+    )
+
+
 class _TargetSelectionSource(StrEnum):
     """Source that supplied the MCP target set before compatibility gates."""
 
@@ -77,18 +118,13 @@ def _install_registry_group(
     configured_count = 0
     failed_installations: list[str] = []
 
-    # Early validation: check all servers exist in registry (fail-fast).
-    # F4 (#1116): emit a single batch heartbeat so users see the
-    # registry round-trip in progress instead of silent stall.
-    logger.mcp_lookup_heartbeat(len(group_dep_names))
-    if verbose:
-        logger.verbose_detail(f"Validating {len(group_deps)} registry servers...")
-    valid_servers, invalid_servers = operations.validate_servers_exist(group_dep_names)
-
-    if invalid_servers:
-        logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
-        logger.progress("Run 'apm mcp search <query>' to find available servers")
-        raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
+    valid_servers = _validate_registry_servers(
+        operations,
+        group_dep_names,
+        dependency_count=len(group_deps),
+        verbose=verbose,
+        logger=logger,
+    )
 
     if valid_servers:
         servers_to_install = operations.check_servers_needing_installation(

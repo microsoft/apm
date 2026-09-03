@@ -2274,6 +2274,7 @@ class TestInstallMcpFlag:
 
         assert result.exit_code == 2, (result.output, result.exception)
         assert "enable selected experimental targets" in result.output
+        assert "Skipped workspace-only runtimes" not in result.output
         assert not user_manifest.exists()
 
     def test_global_mcp_rejects_unsupported_saved_target_without_fallback(
@@ -2306,6 +2307,7 @@ class TestInstallMcpFlag:
 
         assert result.exit_code == 2
         assert "enable selected experimental targets" in result.output
+        assert "Skipped workspace-only runtimes" not in result.output
         assert not user_manifest.exists()
 
     def test_global_mcp_filters_mixed_target_set_before_dispatch(self, tmp_path, monkeypatch):
@@ -2333,19 +2335,6 @@ class TestInstallMcpFlag:
             patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,
         ):
             result = self.runner.invoke(cli, argv[1:])
-            replay_argv = [
-                "apm",
-                "install",
-                "-g",
-                "--mcp",
-                "probe-two",
-                "--no-policy",
-                "--",
-                "echo",
-                "ready",
-            ]
-            invocation.return_value = replay_argv
-            replay = self.runner.invoke(cli, replay_argv[1:])
             excluded_argv = [
                 "apm",
                 "install",
@@ -2365,17 +2354,13 @@ class TestInstallMcpFlag:
             excluded = self.runner.invoke(cli, excluded_argv[1:])
 
         assert result.exit_code == 0, result.output
-        assert replay.exit_code == 0, replay.output
         assert excluded.exit_code == 0, excluded.output
-        first_call, replay_call, excluded_call = run_mcp_install.call_args_list
+        first_call, excluded_call = run_mcp_install.call_args_list
         decision = first_call.kwargs["target_decision"]
         assert decision.value == ["claude"]
-        assert replay_call.kwargs["target_decision"].value == ["claude"]
+        assert first_call.kwargs["initial_manifest_config"]["targets"] == ["claude"]
         assert excluded_call.kwargs["target_decision"].value == ["claude"]
-        user_manifest = yaml.safe_load((fake_home / ".apm" / "apm.yml").read_text(encoding="utf-8"))
-        assert user_manifest["targets"] == ["claude"]
         assert "Skipped workspace-only runtimes at user scope: vscode" in result.output
-        assert "Skipped workspace-only runtimes" not in replay.output
         assert "Skipped workspace-only runtimes" not in excluded.output
 
     def test_global_mcp_dry_run_creates_no_user_state(self, tmp_path, monkeypatch):

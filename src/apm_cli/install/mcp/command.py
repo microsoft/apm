@@ -102,6 +102,7 @@ def run_mcp_install(  # noqa: PLR0913
     target_decision: EffectiveTargetDecision | None = None,
     registry_url: str | None = None,
     registry_allow_http: bool = True,
+    initial_manifest_config: dict | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
@@ -118,7 +119,7 @@ def run_mcp_install(  # noqa: PLR0913
     # Build entry (validates through MCPDependency).  Convert ValueError
     # to UsageError so the CLI exits 2 with the model wording.
     try:
-        entry, _is_self_defined = build_mcp_entry(
+        entry, is_self_defined = build_mcp_entry(
             mcp_name,
             transport=transport,
             url=url,
@@ -139,7 +140,34 @@ def run_mcp_install(  # noqa: PLR0913
     stdio_command = command_argv[0] if command_argv else None
     warn_shell_metachars(env, logger, command=stdio_command)
 
-    # Write to apm.yml.
+    # Build MCPDependency for install.  ``entry`` may be a bare string.
+    if isinstance(entry, str):
+        dep = MCPDependency.from_string(entry)
+    else:
+        dep = MCPDependency.from_dict(entry)
+
+    if APM_DEPS_AVAILABLE and not is_self_defined:
+        with registry_env_override(registry_url, allow_http=registry_allow_http):
+            try:
+                MCPIntegrator.prevalidate_registry_dependencies(
+                    [dep],
+                    registry_url=registry_url,
+                    verbose=verbose,
+                    logger=logger,
+                )
+            except Exception as exc:
+                logger.verbose_detail(f"MCP registry validation error: {exc}")
+                raise click.ClickException(
+                    f"MCP registry validation failed for '{mcp_name}'; no state was changed"
+                ) from None
+
+    if initial_manifest_config is not None:
+        from ...commands._helpers import _create_minimal_apm_yml
+
+        apm_dir.mkdir(parents=True, exist_ok=True)
+        _create_minimal_apm_yml(initial_manifest_config, target_path=manifest_path)
+        logger.success(f"Created {manifest_path}")
+
     status, _diff = add_mcp_to_apm_yml(
         mcp_name,
         entry,
@@ -148,17 +176,8 @@ def run_mcp_install(  # noqa: PLR0913
         manifest_path=manifest_path,
         logger=logger,
     )
-
     if status == "skipped":
         logger.progress(f"MCP server '{mcp_name}' already declared; checking integrations")
-        # Fall through intentionally: unchanged entries still need legacy
-        # IntelliJ migration and per-target ownership repair.
-
-    # Build MCPDependency for install.  ``entry`` may be a bare string.
-    if isinstance(entry, str):
-        dep = MCPDependency.from_string(entry)
-    else:
-        dep = MCPDependency.from_dict(entry)
 
     # Install just this MCP via the integrator and update lockfile.
     # ``registry_env_override`` exports MCP_REGISTRY_URL for THIS call so

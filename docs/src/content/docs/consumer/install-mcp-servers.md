@@ -222,9 +222,10 @@ relative values are rejected. Codex CLI writes to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
 JetBrains Copilot to its OS-specific user config, and Hermes when enabled).
 When the user-scope manifest declares a `targets:` field (or the CLI passes `--target`),
-only the matching runtimes receive the config write. When neither
-restricts targets, all detected user-scope-capable runtimes are
-configured. Workspace-only runtimes (VS Code, Cursor, OpenCode) are
+only the matching runtimes receive the config write. When no CLI target,
+user-scope manifest target, or saved `apm config target` restricts targets,
+all detected user-scope-capable runtimes are configured. Workspace-only
+runtimes (VS Code, Cursor, OpenCode) are
 skipped with a warning when a mixed target set also contains a global-capable
 runtime. If none of the selected targets supports user scope, the command exits
 `2` before changing the user manifest, lockfile, or runtime configuration. The direct command creates or updates

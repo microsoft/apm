@@ -803,7 +803,7 @@ def _handle_mcp_install(  # noqa: PLR0913
             supported_runtimes, skipped_runtimes = partition_user_scope_runtimes(
                 list(scoped_runtime_targets)
             )
-        if skipped_runtimes:
+        if skipped_runtimes and supported_runtimes:
             logger.warning(
                 "Skipped workspace-only runtimes at user scope: "
                 f"{', '.join(sorted(skipped_runtimes))} -- omit --global to install these"
@@ -842,14 +842,12 @@ def _handle_mcp_install(  # noqa: PLR0913
         )
         logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {mcp_manifest_path}")
         return
+    initial_manifest_config = None
     if is_user_scope(scope) and not mcp_manifest_path.exists():
-        mcp_apm_dir.mkdir(parents=True, exist_ok=True)
         project_name = _resolve_bootstrap_project_name(Path.home().name)
-        config = _get_default_config(project_name)
+        initial_manifest_config = _get_default_config(project_name)
         if target is not None or runtime is not None:
-            config["targets"] = supported_runtimes
-        _create_minimal_apm_yml(config, target_path=mcp_manifest_path)
-        logger.success(f"Created {mcp_manifest_path}")
+            initial_manifest_config["targets"] = supported_runtimes
     _run_mcp_install(
         mcp_name=mcp_name,
         transport=transport,
@@ -869,6 +867,7 @@ def _handle_mcp_install(  # noqa: PLR0913
         scope=scope,
         registry_url=integration_registry_url,
         registry_allow_http=registry_source == "flag",
+        initial_manifest_config=initial_manifest_config,
     )
 
 
