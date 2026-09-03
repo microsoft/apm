@@ -430,6 +430,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Catalog-only marketplace manifest materialization loses its owner.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-command-prompt-normalization",
+        rule_id="marketplace-integrations-command-prompt-normalization",
+        path="src/apm_cli/install/local_bundle_paths.py",
+        old="plugin_command_prompt_name(command_parts[-1])",
+        new='f"{command_parts[-1][:-3]}.prompt.md"',
+        intent="Local bundle routing re-derives plugin command filename normalization.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-copilot-ownership",
         rule_id="marketplace-integrations-copilot-ownership",
         path="src/apm_cli/copilot_plugins/registrar.py",

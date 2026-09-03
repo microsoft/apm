@@ -6,6 +6,7 @@ from functools import cache
 from typing import TYPE_CHECKING
 
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
+from ..bundle.plugin_layout import plugin_command_prompt_name
 from ..utils.path_security import PathTraversalError, validate_path_segments
 
 if TYPE_CHECKING:
@@ -77,6 +78,8 @@ def bundle_deploy_relative_path(
     rel_path: str,
     allowed_prefixes: frozenset[str],
     known_deploy_prefixes: frozenset[str],
+    *,
+    target: TargetProfile | None = None,
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root."""
     validate_path_segments(rel_path, context="bundle deploy path")
@@ -90,4 +93,21 @@ def bundle_deploy_relative_path(
     if matched_prefixes and not allowed_matches:
         return None
     matched_prefix = max(allowed_matches, key=len, default="")
-    return rel_path[len(matched_prefix) :] if matched_prefix else rel_path
+    deploy_rel = rel_path[len(matched_prefix) :] if matched_prefix else rel_path
+    return _retarget_copilot_command(deploy_rel, target)
+
+
+def _retarget_copilot_command(rel_path: str, target: TargetProfile | None) -> str:
+    """Map Claude plugin commands to Copilot prompt paths."""
+    if target is None or target.name != "copilot" or not rel_path.startswith("commands/"):
+        return rel_path
+    prompt_mapping = target.primitives.get("prompts")
+    if prompt_mapping is None:
+        return rel_path
+    command_path = rel_path.removeprefix("commands/")
+    command_parts = command_path.split("/")
+    prompt_name = plugin_command_prompt_name(command_parts[-1])
+    if prompt_name == command_parts[-1] and not prompt_name.endswith(prompt_mapping.extension):
+        return rel_path
+    command_parts[-1] = prompt_name
+    return f"{prompt_mapping.subdir}/{'/'.join(command_parts)}"

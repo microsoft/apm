@@ -108,6 +108,13 @@
       "guards": ["marketplace-integrations-legacy-skill-membership"]
     },
     {
+      "id": "plugin-command-prompt-filename-normalization",
+      "decision": "Plugin command to APM prompt filename normalization",
+      "owner": "bundle/plugin_layout.py (plugin_command_prompt_name)",
+      "selectors": ["src/apm_cli/bundle/plugin_layout.py"],
+      "guards": ["marketplace-integrations-command-prompt-normalization"]
+    },
+    {
       "id": "native-agent-plugin-registration-admission",
       "decision": "Native Agent Plugin registration admission (Copilot target + client capability)",
       "owner": "copilot_plugins/capability.py (resolve_native_registration_capability, admits_native_plugin)",

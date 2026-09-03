@@ -21,6 +21,7 @@ from typing import Any
 
 import yaml
 
+from ..bundle.plugin_layout import plugin_command_prompt_name
 from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
@@ -1241,8 +1242,7 @@ def _map_plugin_artifacts(
                 target_path = dest_dir / relative_path
             else:
                 target_path = dest_dir / source_file.name
-            if not source_file.name.endswith(".prompt.md") and source_file.suffix == ".md":
-                target_path = target_path.with_name(f"{source_file.stem}.prompt.md")
+            target_path = target_path.with_name(plugin_command_prompt_name(source_file.name))
             target_path.parent.mkdir(parents=True, exist_ok=True)
             if _is_same_path(source_file, target_path):
                 return

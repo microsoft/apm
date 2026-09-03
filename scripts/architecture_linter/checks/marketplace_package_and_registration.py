@@ -265,6 +265,52 @@ def _check_legacy_skill_membership(provider: FactsProvider) -> tuple[Violation, 
     return tuple(findings)
 
 
+_RID_COMMAND_PROMPT = "marketplace-integrations-command-prompt-normalization"
+
+
+_PLUGIN_LAYOUT = "src/apm_cli/bundle/plugin_layout.py"
+
+
+def _check_command_prompt_normalization(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Plugin command filename consumers must route through plugin_layout."""
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    owner_definition = re.compile(r"^def plugin_command_prompt_name\(")
+    count = _count_across(
+        provider,
+        inv,
+        _RID_COMMAND_PROMPT,
+        _src_python(provider),
+        owner_definition,
+    )
+    if count != 1:
+        findings.append(
+            violation(
+                _RID_COMMAND_PROMPT,
+                _PLUGIN_LAYOUT,
+                f"plugin_command_prompt_name must be defined exactly once, found {count}",
+            )
+        )
+    for path, call in (
+        (_PLUGIN_PARSER, "plugin_command_prompt_name(source_file.name)"),
+        (
+            "src/apm_cli/install/local_bundle_paths.py",
+            "plugin_command_prompt_name(command_parts[-1])",
+        ),
+    ):
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_COMMAND_PROMPT,
+                path,
+                (call,),
+                "Plugin command filename consumers must route through plugin_layout",
+            )
+        )
+    return tuple(findings)
+
+
 _RID_NATIVE = "marketplace-integrations-native-registration"
 
 
@@ -387,6 +433,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_SKILL,),
         description="Legacy plugin skill membership stays owned by deps/plugin_parser.py.",
         check=_check_legacy_skill_membership,
+    ),
+    Rule(
+        id=_RID_COMMAND_PROMPT,
+        group=GROUP,
+        guard_ids=(_RID_COMMAND_PROMPT,),
+        description="Plugin command filename normalization stays owned by bundle/plugin_layout.py.",
+        check=_check_command_prompt_normalization,
     ),
     Rule(
         id=_RID_NATIVE,

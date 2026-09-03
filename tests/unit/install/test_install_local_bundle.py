@@ -696,6 +696,24 @@ class TestGrokBuildLocalBundleDeployment:
 class TestLocalBundlePathRouting:
     """Direct contracts for untrusted packed bundle paths."""
 
+    def test_copilot_retargets_packed_commands_as_prompts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="claude",
+            files={"commands/test-command.md": "# Test Command\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
+
+        assert result.exit_code == 0, result.output
+        assert (project / ".github/prompts/test-command.prompt.md").read_text(
+            encoding="utf-8"
+        ) == "# Test Command\n"
+        assert not (project / ".github/commands/test-command.md").exists()
+
     def test_rejects_traversal_before_prefix_routing(self) -> None:
         from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
         from apm_cli.utils.path_security import PathTraversalError

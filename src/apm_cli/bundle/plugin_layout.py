@@ -22,3 +22,12 @@ def find_plugin_root_sources(project_root: Path) -> list[str]:
     if (project_root / "hooks.json").is_file():
         sources.append("hooks.json")
     return sources
+
+
+def plugin_command_prompt_name(name: str) -> str:
+    """Return the APM prompt filename represented by a plugin command."""
+    if name.endswith(".prompt.md"):
+        return name
+    if name.endswith(".md"):
+        return f"{name[: -len('.md')]}.prompt.md"
+    return name

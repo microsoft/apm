@@ -1015,6 +1015,7 @@ def integrate_local_bundle(
                 _rel_norm,
                 _allowed_deploy_prefixes,
                 _known_deploy_prefixes,
+                target=target,
             )
             if _deploy_rel is None:
                 continue

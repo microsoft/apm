@@ -74,6 +74,7 @@ LEGACY_AC_ALIASES: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "marketplace-integrations-agent-plugin-contract": ("AC1",),
         "marketplace-integrations-bundle-format-authority": ("AC1",),
         "marketplace-integrations-catalog-manifest": ("AC35",),
+        "marketplace-integrations-command-prompt-normalization": ("AC1",),
         "marketplace-integrations-copilot-ownership": ("AC35",),
         "marketplace-integrations-generated-bundle-lf-writers": ("AC2",),
         "marketplace-integrations-hash-visible-lf-writers": ("AC34",),
