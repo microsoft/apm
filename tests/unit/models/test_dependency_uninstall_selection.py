@@ -90,6 +90,32 @@ def test_remote_dependency_named_local_owner_keeps_exact_identity_semantics() ->
     assert selection.manifest_entry == "_local/remote-package"
 
 
+def test_unique_remote_basename_selects_manifest_entry() -> None:
+    """A short package name selects one unambiguous installed dependency."""
+    selection = select_manifest_dependency(
+        "perform-code-review",
+        ["jfrog/perform-code-review#v1.15.0"],
+        lockfile=None,
+    )
+
+    assert selection.status is DependencySelectionStatus.MATCHED
+    assert selection.manifest_entry == "jfrog/perform-code-review#v1.15.0"
+    assert selection.match_count == 1
+
+
+def test_duplicate_remote_basename_is_ambiguous() -> None:
+    """A short name shared by multiple owners must fail closed."""
+    selection = select_manifest_dependency(
+        "shared-skill",
+        ["acme/shared-skill", "contoso/shared-skill"],
+        lockfile=None,
+    )
+
+    assert selection.status is DependencySelectionStatus.AMBIGUOUS
+    assert selection.manifest_entry is None
+    assert selection.match_count == 2
+
+
 @pytest.mark.windows_compat
 def test_windows_declared_path_accepts_portable_lock_alias() -> None:
     """Windows local paths match by persisted identity on every host OS."""

@@ -43,7 +43,7 @@ def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
 
 
 @click.command(
-    help="Remove packages using manifest entries or direct locked keys from 'apm deps list'"
+    help="Remove packages by full identifier, unambiguous short name, or direct locked keys from 'apm deps list'"
 )
 @click.argument("packages", nargs=-1, required=True)
 @click.option(
@@ -69,6 +69,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
     Examples:
         apm uninstall acme/my-package                # Remove one package
+        apm uninstall my-package                     # Remove by unambiguous short name
         apm uninstall org/pkg1 org/pkg2              # Remove multiple packages
         apm uninstall acme/my-package --dry-run      # Show what would be removed
         apm uninstall -g acme/my-package             # Remove from user scope

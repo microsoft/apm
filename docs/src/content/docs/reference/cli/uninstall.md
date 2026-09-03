@@ -23,7 +23,7 @@ The command only deletes files tracked in the lockfile's `deployed_files` manife
 
 | Argument | Description |
 |---|---|
-| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. |
+| `PACKAGES...` | One or more packages to remove. Accepts an unambiguous short name (`repo`), shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. |
 
 ## Options
 
@@ -39,6 +39,12 @@ Remove one package:
 
 ```bash
 apm uninstall acme/my-package
+```
+
+Remove one package by its short name:
+
+```bash
+apm uninstall my-package
 ```
 
 Remove several at once:
@@ -103,6 +109,10 @@ What gets removed, in order:
 Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No
 matched package in the same invocation is removed. Fix the identifier and retry.
+Short names match the final path segment of installed remote dependencies. If
+more than one owner provides that name, selection is ambiguous and the command
+exits without changes; retry with an exact `owner/repo` identifier from
+`apm deps list`.
 
 If a target-scoped file owned only by a removed package was edited or cannot be
 deleted, uninstall lists the retained paths and exits before changing `apm.yml`,

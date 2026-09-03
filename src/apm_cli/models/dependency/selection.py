@@ -44,10 +44,15 @@ def select_manifest_dependency(
     """Select exactly one manifest entry for an uninstall identifier.
 
     Exact declared identifiers use ``DependencyReference`` identity semantics.
+    A bare package name matches the final path segment only when that name
+    identifies exactly one remote dependency.
     A portable local alias such as ``_local/pkg`` is accepted only when persisted
     lock metadata maps that alias back to one declared local dependency key.
     Ambiguous aliases fail closed instead of guessing.
     """
+    short_name = (
+        package if "/" not in package and not DependencyReference.is_local_path(package) else None
+    )
     try:
         requested_identity = DependencyReference.parse(package).get_identity()
     except (ValueError, TypeError, AttributeError, KeyError):
@@ -63,7 +68,11 @@ def select_manifest_dependency(
                 matched_entries[index] = entry
             continue
         parsed_entries.append((index, entry, dependency))
-        if dependency.get_identity() == requested_identity:
+        if dependency.get_identity() == requested_identity or (
+            short_name is not None
+            and not dependency.is_local
+            and dependency.repo_url.rstrip("/").split("/")[-1] == short_name
+        ):
             matched_entries[index] = entry
 
     locked_alias_keys: set[str] = set()

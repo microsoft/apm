@@ -625,8 +625,9 @@ def _validate_uninstall_packages(
     for package in packages:
         # A package arg is either: (a) a marketplace ref in
         # `name@marketplace[#ref]` form (no slash), (b) an `owner/repo`
-        # slug, or (c) a local filesystem path. The legacy guard below
-        # only handled (a) when there is no `/`, but Windows absolute
+        # slug or unambiguous package basename, or (c) a local filesystem
+        # path. The legacy guard below only handled (a) when there is no
+        # `/`, but Windows absolute
         # paths use backslashes (e.g. `C:\Users\...\my-pkg`) and have
         # no `/` either -- they were wrongly rejected as "Invalid
         # package format" and the DB row for any deployed copilot-app
@@ -645,13 +646,8 @@ def _validate_uninstall_packages(
                 canonical_for_match = canonical
                 display_label = package
             else:
-                logger.error(
-                    f"Invalid package format: {package}. "
-                    "Use 'owner/repo', 'plugin-name@marketplace', a local path, "
-                    "or a key copied from 'apm deps list'."
-                )
-                packages_not_found.append(package)
-                continue
+                canonical_for_match = package
+                display_label = package
         else:
             canonical_for_match = package
             display_label = package
