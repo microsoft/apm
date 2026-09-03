@@ -44,6 +44,7 @@ def _validate_registry_servers(
     verbose: bool,
     logger: Any,
     fail_closed: bool = False,
+    server_info_cache: dict[str, dict] | None = None,
 ) -> list[str]:
     """Validate registry identities and raise before any target write."""
     logger.mcp_lookup_heartbeat(len(server_names))
@@ -51,7 +52,9 @@ def _validate_registry_servers(
         logger.verbose_detail(f"Validating {dependency_count} registry servers...")
     if fail_closed:
         valid_servers, invalid_servers = operations.validate_servers_exist(
-            server_names, fail_closed=True
+            server_names,
+            fail_closed=True,
+            server_info_cache=server_info_cache,
         )
     else:
         valid_servers, invalid_servers = operations.validate_servers_exist(server_names)
@@ -68,12 +71,13 @@ def prevalidate_registry_dependencies(
     registry_url: str | None,
     verbose: bool,
     logger: Any,
-) -> set[str]:
+) -> dict[str, dict]:
     """Resolve direct-install registry identities before persistent writes."""
     from apm_cli.registry.operations import MCPServerOperations
 
     server_names = [dep.name if hasattr(dep, "name") else dep for dep in mcp_deps]
     operations = MCPServerOperations(registry_url=registry_url)
+    server_info_cache: dict[str, dict] = {}
     valid_servers = _validate_registry_servers(
         operations,
         server_names,
@@ -81,8 +85,9 @@ def prevalidate_registry_dependencies(
         verbose=verbose,
         logger=logger,
         fail_closed=True,
+        server_info_cache=server_info_cache,
     )
-    return set(valid_servers)
+    return {name: server_info_cache[name] for name in valid_servers}
 
 
 class _TargetSelectionSource(StrEnum):
@@ -111,7 +116,7 @@ def _install_registry_group(  # noqa: PLR0913
     console: Any,
     logger: Any,
     managed_target_servers: dict[str, set[str]] | None,
-    prevalidated_servers: set[str] | None = None,
+    prevalidated_servers: dict[str, dict] | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Process one group of registry deps through a single ``MCPServerOperations`` instance.
@@ -127,7 +132,7 @@ def _install_registry_group(  # noqa: PLR0913
     configured_count = 0
     failed_installations: list[str] = []
 
-    if prevalidated_servers is not None and set(group_dep_names) <= prevalidated_servers:
+    if prevalidated_servers is not None and set(group_dep_names) <= prevalidated_servers.keys():
         valid_servers = group_dep_names
     else:
         valid_servers = _validate_registry_servers(
@@ -191,7 +196,16 @@ def _install_registry_group(  # noqa: PLR0913
             # Batch fetch server info once
             if verbose:
                 logger.verbose_detail(f"Installing {len(servers_to_install)} servers...")
-            server_info_cache = operations.batch_fetch_server_info(servers_to_install)
+            server_info_cache = {
+                name: prevalidated_servers[name]
+                for name in servers_to_install
+                if prevalidated_servers is not None and name in prevalidated_servers
+            }
+            unresolved_servers = [
+                name for name in servers_to_install if name not in server_info_cache
+            ]
+            if unresolved_servers:
+                server_info_cache.update(operations.batch_fetch_server_info(unresolved_servers))
 
             # Apply overlays
             for server_name in servers_to_install:
@@ -534,6 +548,23 @@ def partition_user_scope_runtimes(
         destination = supported if client.supports_user_scope else skipped
         destination.append(runtime)
     return supported, skipped
+
+
+def unavailable_user_scope_targets_message(
+    target_decision: EffectiveTargetDecision,
+    scoped_targets: list[str] | None,
+    skipped_targets: list[str],
+) -> str:
+    """Render recovery that distinguishes disabled from workspace-only targets."""
+    original_targets = set(target_decision.runtime_targets or [])
+    disabled_targets = original_targets - set(scoped_targets or [])
+    experimental_hint = "enable selected experimental targets, " if disabled_targets else ""
+    rendered_targets = ", ".join(sorted(original_targets or set(skipped_targets)))
+    return (
+        "Selected targets are unavailable for user-scope MCP installation "
+        f"({rendered_targets}; source: {target_decision.source}); "
+        f"{experimental_hint}choose a global-capable --target or omit --global"
+    )
 
 
 def discover_user_scope_mcp_runtimes(
@@ -1005,7 +1036,7 @@ def run_mcp_install(  # noqa: PLR0913
     diagnostics=None,
     scope: InstallScope | None = None,
     managed_target_servers: dict[str, set[str]] | None = None,
-    prevalidated_registry_servers: set[str] | None = None,
+    prevalidated_registry_servers: dict[str, dict] | None = None,
     fail_on_write_error: bool = False,
 ) -> int:
     """Install MCP dependencies.

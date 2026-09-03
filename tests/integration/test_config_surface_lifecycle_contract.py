@@ -1405,6 +1405,59 @@ def test_unknown_global_registry_server_changes_no_user_state(
     assert not (isolated.home / ".claude.json").exists()
 
 
+def test_unreachable_global_registry_changes_no_user_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A connection failure must precede every user-scope write."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path / "unreachable-direct-registry",
+        base_env=dict(os.environ),
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    document = {
+        "name": "io.github.apm/known-server",
+        "description": "Closed registry fixture",
+        "version": "1.0.0",
+        "packages": [],
+    }
+    registry_factory = LocalMcpRegistryFactory(isolated.root / "registries")
+    with registry_factory.start(document) as registry:
+        registry_url = registry.url
+        registry_port = urlparse(registry_url).port
+        assert registry_port is not None
+
+    environment = isolated.subprocess_env()
+    environment["APM_TEST_LOOPBACK_PORTS"] = str(registry_port)
+    environment["MCP_REGISTRY_ALLOW_HTTP"] = "1"
+    result = _runner(apm_binary_path).run(
+        (
+            "install",
+            "-g",
+            "--mcp",
+            document["name"],
+            "--target",
+            "claude",
+            "--registry",
+            registry_url,
+            "--no-policy",
+        ),
+        scenario_id="unreachable-global-direct-registry",
+        cwd=project,
+        env=environment,
+    )
+
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    output = result.stdout + result.stderr
+    assert "Check the server name" in output
+    assert "then retry" in output
+    assert "no state was changed" in output
+    assert not (isolated.home / ".apm" / "apm.yml").exists()
+    assert not (isolated.home / ".apm" / "apm.lock.yaml").exists()
+    assert not (isolated.home / ".claude.json").exists()
+
+
 def test_ambient_registry_source_is_pinned_for_replay(
     tmp_path: Path,
     apm_binary_path: Path,

@@ -454,6 +454,13 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.assertIsNone(result)
         mock_get_server.assert_not_called()
 
+    def test_constructor_rejects_registry_url_with_embedded_credentials(self):
+        credential = ":".join(("registry-user", "registry-password"))
+        registry_url = f"https://{credential}@registry.example.com"
+
+        with self.assertRaisesRegex(ValueError, "embedded credentials"):
+            SimpleRegistryClient(registry_url)
+
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     def test_find_server_by_reference_qualified_no_match(

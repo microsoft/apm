@@ -182,6 +182,7 @@ class MCPServerOperations:
         max_workers: int = 4,
         *,
         fail_closed: bool = False,
+        server_info_cache: dict[str, dict] | None = None,
     ) -> tuple[list[str], list[str]]:
         """Validate that all servers exist in the registry before attempting installation.
 
@@ -198,6 +199,8 @@ class MCPServerOperations:
             max_workers: Max parallel HTTP lookups (default 4).
             fail_closed: Raise on registry network errors instead of assuming
                 the reference is valid.
+            server_info_cache: Optional destination for successfully resolved
+                server documents.
 
         Returns:
             Tuple of (valid_servers, invalid_servers)
@@ -207,31 +210,36 @@ class MCPServerOperations:
         valid_servers: list[str] = []
         invalid_servers: list[str] = []
 
-        def _validate_one(server_ref: str) -> tuple[str, bool]:
-            """Return (server_ref, is_valid)."""
+        def _validate_one(server_ref: str) -> tuple[str, bool, dict | None]:
+            """Return the reference, validity, and resolved server document."""
             try:
                 server_info = self.registry_client.find_server_by_reference(server_ref)
-                return (server_ref, server_info is not None)
+                return (server_ref, server_info is not None, server_info)
             except requests.RequestException:
                 if fail_closed or getattr(self.registry_client, "_is_custom_url", False):
+                    if getattr(self.registry_client, "_is_custom_url", False):
+                        recovery = "verify the configured registry URL and reachability"
+                    else:
+                        recovery = "verify network connectivity and registry reachability"
                     raise RuntimeError(  # noqa: B904
                         f"Could not reach MCP registry at "
                         f"{self.registry_client.registry_url} while validating "
-                        f"server '{server_ref}'. MCP_REGISTRY_URL is set -- "
-                        f"verify the URL is correct and reachable."
+                        f"server '{server_ref}'; {recovery}."
                     )
                 logger.debug(
                     "Registry lookup failed for %s, assuming valid (transient error)",
                     server_ref,
                     exc_info=True,
                 )
-                return (server_ref, True)
+                return (server_ref, True, None)
 
         workers = min(max_workers, len(server_references)) if server_references else 1
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-validate") as executor:
-            for ref, is_valid in executor.map(_validate_one, server_references):
+            for ref, is_valid, server_info in executor.map(_validate_one, server_references):
                 if is_valid:
                     valid_servers.append(ref)
+                    if server_info_cache is not None and server_info is not None:
+                        server_info_cache[ref] = server_info
                 else:
                     invalid_servers.append(ref)
 

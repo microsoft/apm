@@ -246,7 +246,7 @@ class MCPIntegrator:
         registry_url: str | None,
         verbose: bool,
         logger,
-    ) -> builtins.set[str]:
+    ) -> builtins.dict[str, builtins.dict]:
         """Validate direct-install registry identities before any write."""
         from apm_cli.integration.mcp_integrator_install import (
             prevalidate_registry_dependencies,
@@ -1289,7 +1289,7 @@ class MCPIntegrator:
         diagnostics=None,
         scope=None,
         managed_target_servers: builtins.dict | None = None,
-        prevalidated_registry_servers: builtins.set[str] | None = None,
+        prevalidated_registry_servers: builtins.dict[str, builtins.dict] | None = None,
         fail_on_write_error: bool = False,
     ) -> int:
         """Install MCP dependencies.

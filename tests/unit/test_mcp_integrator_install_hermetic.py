@@ -154,7 +154,9 @@ class TestRunMcpInstallSingleRuntime:
         dep = self._make_reg_dep("my-server")
         logger = MagicMock()
         mock_ops = MagicMock()
-        mock_ops.check_servers_needing_installation.return_value = []
+        mock_ops.check_servers_needing_installation.return_value = ["my-server"]
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
 
         with (
             patch(
@@ -165,16 +167,21 @@ class TestRunMcpInstallSingleRuntime:
                 "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
                 side_effect=lambda runtimes, **_kwargs: runtimes,
             ),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime",
+                return_value=True,
+            ),
         ):
             run_mcp_install(
                 mcp_deps=[dep],
                 runtime="copilot",
                 project_root=tmp_path,
                 logger=logger,
-                prevalidated_registry_servers={"my-server"},
+                prevalidated_registry_servers={"my-server": {"packages": []}},
             )
 
         mock_ops.validate_servers_exist.assert_not_called()
+        mock_ops.batch_fetch_server_info.assert_not_called()
 
 
 def test_direct_registry_prevalidation_fails_closed():
@@ -183,7 +190,12 @@ def test_direct_registry_prevalidation_fails_closed():
     dep = MagicMock()
     dep.name = "my-server"
     operations = MagicMock()
-    operations.validate_servers_exist.return_value = (["my-server"], [])
+
+    def validate(_names, **kwargs):
+        kwargs["server_info_cache"]["my-server"] = {"packages": []}
+        return ["my-server"], []
+
+    operations.validate_servers_exist.side_effect = validate
 
     with patch(
         "apm_cli.registry.operations.MCPServerOperations",
@@ -196,8 +208,9 @@ def test_direct_registry_prevalidation_fails_closed():
             logger=MagicMock(),
         )
 
-    operations.validate_servers_exist.assert_called_once_with(["my-server"], fail_closed=True)
-    assert result == {"my-server"}
+    operations.validate_servers_exist.assert_called_once()
+    assert operations.validate_servers_exist.call_args.kwargs["fail_closed"] is True
+    assert result == {"my-server": {"packages": []}}
 
 
 # ---------------------------------------------------------------------------
