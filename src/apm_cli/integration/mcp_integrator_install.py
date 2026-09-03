@@ -488,9 +488,14 @@ def partition_user_scope_runtimes(
     return supported, skipped
 
 
-def discover_user_scope_mcp_runtimes(project_root: Path) -> tuple[list[str], list[str]]:
+def discover_user_scope_mcp_runtimes(
+    project_root: Path,
+    *,
+    exclude: str | None = None,
+) -> tuple[list[str], list[str]]:
     """Discover installed MCP runtimes and partition them for user scope."""
     discovered = _discover_installed_runtimes(project_root, user_scope=True)
+    discovered = filter_excluded_mcp_runtimes(discovered, exclude)
     return partition_user_scope_runtimes(discovered)
 
 

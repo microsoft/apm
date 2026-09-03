@@ -361,6 +361,29 @@ class TestRedactUrlCredentials:
         assert "topsecret" not in str(raised.value)
         logger.progress.assert_not_called()
 
+    def test_malformed_ambient_value_is_redacted_from_override_diagnostic(self, monkeypatch):
+        secret = "REGISTRY_SECRET_SENTINEL"
+        monkeypatch.setenv("MCP_REGISTRY_URL", secret)
+        logger = MagicMock()
+
+        resolved, source = resolve_registry_url("https://registry.example.com", logger=logger)
+
+        assert resolved == "https://registry.example.com"
+        assert source == "flag"
+        message = logger.progress.call_args.args[0]
+        assert secret not in message
+        assert "<redacted-invalid-registry-url>" in message
+
+    def test_malformed_ambient_value_is_redacted_from_validation_error(self, monkeypatch):
+        secret = "REGISTRY_SECRET_SENTINEL"
+        monkeypatch.setenv("MCP_REGISTRY_URL", secret)
+
+        with pytest.raises(click.UsageError) as raised:
+            resolve_registry_url(None)
+
+        assert secret not in str(raised.value)
+        assert "<redacted-invalid-registry-url>" in str(raised.value)
+
 
 class TestSsrfWarning:
     """U2 regression: warn (not block) on loopback / link-local / RFC1918 hosts."""

@@ -1550,6 +1550,30 @@ def test_global_direct_mcp_filters_mixed_and_rejects_zero_supported_targets(
     claude_config = json.loads((isolated.home / ".claude.json").read_text(encoding="utf-8"))
     assert set(claude_config["mcpServers"]) == {"mixed-server", "replay-server"}
 
+    explicitly_excluded = runner.run(
+        (
+            "install",
+            "-g",
+            "--target",
+            "vscode,claude",
+            "--exclude",
+            "vscode",
+            "--mcp",
+            "explicit-exclusion-server",
+            "--no-policy",
+            "--",
+            "echo",
+            "excluded",
+        ),
+        scenario_id="global-workspace-target-explicitly-excluded",
+        cwd=project,
+        env=environment,
+    )
+    assert explicitly_excluded.returncode == 0
+    assert "Skipped workspace-only runtimes" not in (
+        explicitly_excluded.stdout + explicitly_excluded.stderr
+    )
+
 
 def test_global_direct_mcp_dry_run_creates_no_user_state(
     tmp_path: Path,
@@ -1600,6 +1624,10 @@ def test_global_direct_mcp_dry_run_creates_no_user_state(
         (
             "https://registry.example.invalid:bare-port-secret",
             ("bare-port-secret",),
+        ),
+        (
+            "REGISTRY_SECRET_SENTINEL",
+            ("REGISTRY_SECRET_SENTINEL",),
         ),
     ),
 )

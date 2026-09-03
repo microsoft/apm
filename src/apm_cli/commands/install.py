@@ -122,7 +122,12 @@ from ..core.target_detection import TargetParamType, manifest_targets_from_targe
 
 # MCP --mcp helpers (module-level re-exports for test patches); must stay at
 # import time per comments in the original mid-file block.
-from ..install.mcp.command import run_mcp_install as _run_mcp_install
+from ..install.mcp.command import (
+    run_mcp_install as _run_mcp_install,
+)
+from ..install.mcp.command import (
+    run_mcp_policy_preflight as _run_mcp_policy_preflight,
+)
 from ..install.mcp.conflicts import (
     validate_mcp_conflicts as _validate_mcp_conflicts,
 )
@@ -739,9 +744,6 @@ def _validate_and_add_packages_to_apm_yml(
 # per LOC budget. Re-bind module-level names for back-compat with tests
 # that still patch ``apm_cli.commands.install._warn_*``.
 
-# MCP registry / dry-run helpers are imported at module top (see
-# ``..install.mcp.*`` imports above) so test patches keep working.
-
 
 def _handle_mcp_install(  # noqa: PLR0913
     *,
@@ -792,13 +794,15 @@ def _handle_mcp_install(  # noqa: PLR0913
         scoped_runtime_targets = target_decision.runtime_targets_for_scope(user_scope=True)
         if scoped_runtime_targets is None:
             supported_runtimes, skipped_runtimes = discover_user_scope_mcp_runtimes(
-                get_deploy_root(scope)
+                get_deploy_root(scope), exclude=exclude
             )
         else:
+            scoped_runtime_targets = filter_excluded_mcp_runtimes(
+                list(scoped_runtime_targets), exclude
+            )
             supported_runtimes, skipped_runtimes = partition_user_scope_runtimes(
                 list(scoped_runtime_targets)
             )
-        supported_runtimes = filter_excluded_mcp_runtimes(supported_runtimes, exclude)
         if skipped_runtimes:
             logger.warning(
                 "Skipped workspace-only runtimes at user scope: "
@@ -815,41 +819,15 @@ def _handle_mcp_install(  # noqa: PLR0913
                 "enable selected experimental targets, choose copilot, or omit --global"
             )
         target_decision = EffectiveTargetDecision(supported_runtimes, target_decision.source)
-    from ..models.dependency.mcp import MCPDependency as _MCPDep
-    from ..policy.install_preflight import (
-        PolicyBlockError,
-        run_policy_preflight,
-    )
-
-    _is_self_defined = bool(url or command_argv)
-    _preflight_transport = transport
-    if _preflight_transport is None:
-        if command_argv:
-            _preflight_transport = "stdio"
-        elif url:
-            _preflight_transport = "http"
-    _preflight_dep = _MCPDep(
-        name=mcp_name,
-        transport=_preflight_transport,
-        registry=False if _is_self_defined else None,
+    _run_mcp_policy_preflight(
+        mcp_name=mcp_name,
+        transport=transport,
         url=url,
+        command_argv=command_argv,
+        no_policy=no_policy,
+        logger=logger,
+        target_decision=target_decision,
     )
-    from ..core.target_detection import normalize_policy_targets
-
-    policy_targets = normalize_policy_targets(target_decision.value)
-
-    try:
-        _pf_result, _pf_active = run_policy_preflight(
-            project_root=Path.cwd(),
-            mcp_deps=[_preflight_dep],
-            no_policy=no_policy,
-            logger=logger,
-            dry_run=logger.dry_run,
-            effective_target=policy_targets,
-        )
-    except PolicyBlockError:
-        logger.render_summary()
-        sys.exit(1)
 
     if logger.dry_run:
         _validate_mcp_dry_run_entry(

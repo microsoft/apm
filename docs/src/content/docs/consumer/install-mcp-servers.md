@@ -221,8 +221,7 @@ relative values are rejected. Codex CLI writes to
 `$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or `~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`, Antigravity CLI to `~/.gemini/config/mcp_config.json`, Windsurf to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
 JetBrains Copilot to its OS-specific user config, and Hermes when enabled).
-When the
-package declares a `targets:` field (or the CLI passes `--target`),
+When the user-scope manifest declares a `targets:` field (or the CLI passes `--target`),
 only the matching runtimes receive the config write. When neither
 restricts targets, all detected user-scope-capable runtimes are
 configured. Workspace-only runtimes (VS Code, Cursor, OpenCode) are

@@ -2346,17 +2346,37 @@ class TestInstallMcpFlag:
             ]
             invocation.return_value = replay_argv
             replay = self.runner.invoke(cli, replay_argv[1:])
+            excluded_argv = [
+                "apm",
+                "install",
+                "-g",
+                "--target",
+                "vscode,claude",
+                "--exclude",
+                "vscode",
+                "--mcp",
+                "probe-three",
+                "--no-policy",
+                "--",
+                "echo",
+                "ready",
+            ]
+            invocation.return_value = excluded_argv
+            excluded = self.runner.invoke(cli, excluded_argv[1:])
 
         assert result.exit_code == 0, result.output
         assert replay.exit_code == 0, replay.output
-        first_call, replay_call = run_mcp_install.call_args_list
+        assert excluded.exit_code == 0, excluded.output
+        first_call, replay_call, excluded_call = run_mcp_install.call_args_list
         decision = first_call.kwargs["target_decision"]
         assert decision.value == ["claude"]
         assert replay_call.kwargs["target_decision"].value == ["claude"]
+        assert excluded_call.kwargs["target_decision"].value == ["claude"]
         user_manifest = yaml.safe_load((fake_home / ".apm" / "apm.yml").read_text(encoding="utf-8"))
         assert user_manifest["targets"] == ["claude"]
         assert "Skipped workspace-only runtimes at user scope: vscode" in result.output
         assert "Skipped workspace-only runtimes" not in replay.output
+        assert "Skipped workspace-only runtimes" not in excluded.output
 
     def test_global_mcp_dry_run_creates_no_user_state(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"

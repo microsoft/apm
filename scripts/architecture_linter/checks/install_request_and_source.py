@@ -175,7 +175,7 @@ def _takes_scope(call: ast.Call) -> bool:
 
 def _takes_deploy_root(call: ast.Call) -> bool:
     """Return whether discovery consumes the canonical deploy-root projection."""
-    if len(call.args) != 1 or call.keywords:
+    if len(call.args) != 1:
         return False
     value = call.args[0]
     return (
@@ -185,6 +185,7 @@ def _takes_deploy_root(call: ast.Call) -> bool:
         and len(value.args) == 1
         and isinstance(value.args[0], ast.Name)
         and value.args[0].id == "scope"
+        and _has_name_keyword(call, "exclude", "exclude")
     )
 
 

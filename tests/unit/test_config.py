@@ -271,6 +271,13 @@ class TestMcpRegistryUrlConfig:
         config_mod.unset_mcp_registry_url()
         assert config_mod.get_mcp_registry_url() is None
 
+    def test_set_redacts_credentials_from_missing_scheme_error(self, isolated_config):
+        secret = "REGISTRY_SECRET_SENTINEL"
+        with pytest.raises(ValueError) as raised:
+            config_mod.set_mcp_registry_url(f"//user:{secret}@corp.mcp.example.com")
+        assert secret not in str(raised.value)
+        assert "<redacted-invalid-registry-url>" in str(raised.value)
+
     def test_set_rejects_invalid_port_without_echoing_value(self, isolated_config):
         secret = "config-port-secret"
         with pytest.raises(ValueError) as raised:

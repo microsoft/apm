@@ -761,9 +761,12 @@ def _validate_mcp_registry_url(url: str) -> str:
             f"({len(normalized)} > {_MCP_REGISTRY_URL_MAX_LENGTH} characters)"
         )
     parsed = urlparse(normalized)
+    from apm_cli.install.mcp.registry import _redact_url_credentials
+
+    safe_url = _redact_url_credentials(normalized)
     if not parsed.scheme:
         raise ValueError(
-            f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
+            f"mcp-registry-url: Invalid URL '{safe_url}': expected scheme://host "
             f"(e.g. https://mcp.internal.example.com)"
         )
     scheme = parsed.scheme.lower()
@@ -783,7 +786,7 @@ def _validate_mcp_registry_url(url: str) -> str:
         raise ValueError("mcp-registry-url: base URL must not contain a query or fragment")
     if not parsed.hostname:
         raise ValueError(
-            f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
+            f"mcp-registry-url: Invalid URL '{safe_url}': expected scheme://host "
             f"(e.g. https://mcp.internal.example.com)"
         )
     return normalized

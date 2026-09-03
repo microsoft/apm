@@ -482,6 +482,16 @@ APM integrates MCP (Model Context Protocol) server configurations from packages.
 For Codex remote transport requirements, see
 [stdio vs HTTP servers](../../consumer/install-mcp-servers/#stdio-vs-http-servers).
 
+### Direct registry installs at user scope
+
+`apm install -g --mcp NAME` can use an MCP registry endpoint to update
+account-wide runtime configuration. APM requires HTTPS for registry URLs from
+the environment or saved config unless `MCP_REGISTRY_ALLOW_HTTP=1` is set, and
+rejects embedded credentials, query strings, and fragments. The validated
+registry URL is saved for reproducible replay, but registry metadata is not
+signed or content-hash verified. Treat a custom registry as a trusted source
+with access to every global runtime selected for the install.
+
 ### Direct dependencies
 
 MCP servers declared by your direct dependencies (packages listed in your `apm.yml`) are auto-trusted. You explicitly chose to depend on these packages, so their MCP server declarations are accepted.

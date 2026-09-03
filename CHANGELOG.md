@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#2667)
 - `apm install -g --mcp NAME` now creates or updates the user manifest and
   deploys only to global-capable runtimes instead of rejecting `--global`.
+  Registry URLs now reject embedded credentials, queries, and fragments;
+  saved or environment-provided HTTP endpoints require explicit opt-in.
   `openapm-v0.1.md` now codifies the user-scope target-selection and
   pre-mutation contract. (#2734)
 - Distributed `apm compile` now reconciles existing managed-section

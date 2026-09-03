@@ -47,6 +47,8 @@ def _redact_url_credentials(url: str) -> str:
     """
     try:
         parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return "<redacted-invalid-registry-url>"
         parsed_port = parsed.port
         netloc = parsed.netloc
         if "@" in netloc:

@@ -41,6 +41,47 @@ except ImportError:
     pass
 
 
+def run_mcp_policy_preflight(
+    *,
+    mcp_name: str,
+    transport: str | None,
+    url: str | None,
+    command_argv: Sequence[str] | None,
+    no_policy: bool,
+    logger,
+    target_decision: EffectiveTargetDecision,
+) -> None:
+    """Run policy checks for a direct MCP install before any persistent write."""
+    from ...core.target_detection import normalize_policy_targets
+    from ...models.dependency.mcp import MCPDependency
+    from ...policy.install_preflight import PolicyBlockError, run_policy_preflight
+
+    resolved_transport = transport
+    if resolved_transport is None:
+        if command_argv:
+            resolved_transport = "stdio"
+        elif url:
+            resolved_transport = "http"
+    dependency = MCPDependency(
+        name=mcp_name,
+        transport=resolved_transport,
+        registry=False if url or command_argv else None,
+        url=url,
+    )
+    try:
+        run_policy_preflight(
+            project_root=Path.cwd(),
+            mcp_deps=[dependency],
+            no_policy=no_policy,
+            logger=logger,
+            dry_run=logger.dry_run,
+            effective_target=normalize_policy_targets(target_decision.value),
+        )
+    except PolicyBlockError:
+        logger.render_summary()
+        raise click.exceptions.Exit(1) from None
+
+
 def run_mcp_install(  # noqa: PLR0913
     *,
     mcp_name: str,

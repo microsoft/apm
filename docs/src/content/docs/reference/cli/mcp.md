@@ -25,8 +25,10 @@ plus a thin install alias.
 The canonical install path for MCP servers is
 [`apm install --mcp NAME`](../install/#mcp-server-entry-use-only-with---mcp). It
 edits `apm.yml`, resolves the registry entry, and writes the resulting
-`mcpServers` block to your project. `apm mcp install` is a forwarder
-that calls the same code path -- use whichever spelling you prefer.
+`mcpServers` block to your project. With `-g` or `--global`, it creates or
+updates `~/.apm/apm.yml` and writes only to global-capable runtime
+configurations. `apm mcp install` is a forwarder that calls the same code path
+-- use whichever spelling you prefer.
 
 For an end-to-end consumer walkthrough (declaring an MCP server in
 `apm.yml`, configuring transport and credentials, deploying to a
@@ -103,6 +105,7 @@ list):
 | `--dev` | Add to `devDependencies`. |
 | `--dry-run` | Resolve and print without writing `apm.yml`. |
 | `--force` | Overwrite an existing entry. |
+| `-g`, `--global` | Install through `~/.apm/apm.yml` into global-capable runtimes. |
 | `--no-policy` | Skip policy checks. |
 | `--verbose`, `-v` | Verbose output. |
 
@@ -141,6 +144,15 @@ Install a stdio server with a runtime command:
 ```bash
 apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch
 ```
+
+Install the same server at user scope:
+
+```bash
+apm mcp install fetch -g --target claude -- npx -y @modelcontextprotocol/server-fetch
+```
+
+This creates or updates `~/.apm/apm.yml` and the selected runtime's user
+configuration.
 
 Install a remote HTTP server:
 
