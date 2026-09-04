@@ -1379,9 +1379,9 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             ``(host, repo_url)`` where *host* may be ``None``.
         """
-        host_virtual = cls.parse_host_qualified_virtual_shorthand(repo_url)
-        if host_virtual is not None:
-            return host_virtual.host, host_virtual.repo_url
+        host_reference = cls.parse_host_qualified_reference(repo_url)
+        if host_reference is not None and host_reference.subpath is not None:
+            return host_reference.host, host_reference.repo_url
 
         parts = repo_url.split("/")
 
