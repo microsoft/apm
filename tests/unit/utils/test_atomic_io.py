@@ -4,7 +4,7 @@ Covers:
 - Basic write: file created with correct content
 - Overwrites existing file atomically
 - new_file_mode applied via fchmod when file is new
-- new_file_mode NOT applied when file already exists
+- existing file mode preserved when replacing its contents
 - new_file_mode=None never calls fchmod
 - Write failure: tmp file is cleaned up and exception propagates
 - Write failure + unlink failure: original exception still propagates
@@ -14,6 +14,7 @@ Covers:
 
 from __future__ import annotations
 
+import stat
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -147,18 +148,22 @@ class TestAtomicWriteText:
         _fd, mode = mock_fchmod.call_args[0]
         assert mode == 0o600
 
-    def test_fchmod_not_called_when_file_exists(self, tmp_path: Path) -> None:
-        """fchmod is NOT called when the file already exists."""
+    def test_fchmod_preserves_mode_when_file_exists(self, tmp_path: Path) -> None:
+        """The replacement receives the existing file's mode."""
         target = tmp_path / "existing.txt"
         target.write_text("existing", encoding="utf-8")
+        target.chmod(0o640)
+        expected_mode = stat.S_IMODE(target.stat().st_mode)
 
         with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
             atomic_write_text(target, "data", new_file_mode=0o600)
 
-        mock_fchmod.assert_not_called()
+        mock_fchmod.assert_called_once()
+        _fd, mode = mock_fchmod.call_args[0]
+        assert mode == expected_mode
 
     def test_fchmod_not_called_when_mode_is_none(self, tmp_path: Path) -> None:
-        """fchmod is NOT called when new_file_mode is None."""
+        """A new file without a requested mode does not call fchmod."""
         target = tmp_path / "out.txt"
 
         with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:

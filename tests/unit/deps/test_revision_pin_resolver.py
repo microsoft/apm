@@ -199,21 +199,22 @@ def test_apply_revision_pin_updates_rejects_non_manifest_path(tmp_path: Path) ->
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="Windows does not honor POSIX file modes; st_mode & 0o777 is not 0o600",
+    reason="Windows does not honor POSIX file modes reliably",
 )
-def test_apply_revision_pin_updates_writes_restrictive_permissions(tmp_path: Path) -> None:
+def test_apply_revision_pin_updates_preserves_existing_permissions(tmp_path: Path) -> None:
     manifest = tmp_path / "apm.yml"
     manifest.write_text(
         f"name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{OLD_SHA}\n",
         encoding="utf-8",
     )
+    manifest.chmod(0o644)
 
     apply_revision_pin_updates(
         manifest,
         [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],
     )
 
-    assert manifest.stat().st_mode & 0o777 == 0o600
+    assert manifest.stat().st_mode & 0o777 == 0o644
 
 
 def test_resolve_revision_pin_updates_uses_tags_only_fetch() -> None:

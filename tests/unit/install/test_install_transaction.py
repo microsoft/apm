@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import gc
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,9 +15,47 @@ from filelock import FileLock
 
 from apm_cli.cli import cli
 from apm_cli.core.command_logger import _ValidationOutcome
-from apm_cli.install.transaction import InstallTransaction
+from apm_cli.install.locking import acquire_lifecycle_lock, lifecycle_lock
+from apm_cli.install.transaction import InstallTransaction, resolution_for_context
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
+
+pytestmark = pytest.mark.windows_compat
+
+
+def _hold_workspace_transaction(
+    manifest: str,
+    modules: str,
+    ready,
+    release,
+) -> None:
+    transaction = InstallTransaction(
+        manifest_path=Path(manifest),
+        apm_modules_dir=Path(modules),
+        validation=None,
+        logger=None,
+    )
+    ready.set()
+    if not release.wait(10):
+        raise TimeoutError("test did not release workspace transaction")
+    transaction.commit(InstallResult())
+
+
+def _acquire_workspace_transaction(
+    manifest: str,
+    modules: str,
+    attempting,
+    acquired,
+) -> None:
+    attempting.set()
+    transaction = InstallTransaction(
+        manifest_path=Path(manifest),
+        apm_modules_dir=Path(modules),
+        validation=None,
+        logger=None,
+    )
+    acquired.set()
+    transaction.commit(InstallResult())
 
 
 def _transaction(
@@ -379,6 +420,175 @@ def test_concurrent_duplicate_prepare_is_idempotent(tmp_path: Path) -> None:
     transaction.rollback()
 
     assert (package / "marker").read_text(encoding="ascii") == "original"
+
+
+def test_workspace_lock_serializes_concurrent_processes(tmp_path: Path) -> None:
+    """Only one process may mutate a workspace transaction at a time."""
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text("name: fixture\nversion: 1.0.0\n", encoding="ascii")
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    process_context = multiprocessing.get_context("spawn")
+    holder_ready = process_context.Event()
+    release_holder = process_context.Event()
+    holder = process_context.Process(
+        target=_hold_workspace_transaction,
+        args=(str(manifest), str(modules), holder_ready, release_holder),
+    )
+    holder.start()
+    assert holder_ready.wait(10)
+
+    contenders = []
+    contender_events = []
+    for _ in range(4):
+        attempting = process_context.Event()
+        acquired = process_context.Event()
+        contender = process_context.Process(
+            target=_acquire_workspace_transaction,
+            args=(str(manifest), str(modules), attempting, acquired),
+        )
+        contender.start()
+        contenders.append(contender)
+        contender_events.append((attempting, acquired))
+
+    assert all(attempting.wait(10) for attempting, _ in contender_events)
+    assert not any(acquired.wait(0.2) for _, acquired in contender_events)
+
+    release_holder.set()
+    assert all(acquired.wait(10) for _, acquired in contender_events)
+    holder.join(10)
+    for contender in contenders:
+        contender.join(10)
+
+    assert holder.exitcode == 0
+    assert all(contender.exitcode == 0 for contender in contenders)
+
+
+def test_workspace_lock_releases_after_interruption(tmp_path: Path) -> None:
+    """Rollback releases the process lock after cancellation and errors."""
+    transaction = _transaction(tmp_path)
+
+    with pytest.raises(KeyboardInterrupt):
+        with transaction:
+            raise KeyboardInterrupt()
+
+    replacement = InstallTransaction(
+        manifest_path=transaction.manifest_path,
+        apm_modules_dir=transaction.apm_modules_dir,
+        validation=None,
+        logger=MagicMock(),
+    )
+    replacement.commit(InstallResult())
+
+
+def test_workspace_lock_releases_when_initialization_fails(tmp_path: Path) -> None:
+    """A constructor failure cannot strand the cross-process lock."""
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text("name: fixture\nversion: 1.0.0\n", encoding="ascii")
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+
+    with (
+        patch(
+            "apm_cli.install.transaction.ResolutionStagingSession",
+            side_effect=RuntimeError("boom"),
+        ),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        InstallTransaction(
+            manifest_path=manifest,
+            apm_modules_dir=modules,
+            validation=None,
+            logger=MagicMock(),
+        )
+
+    replacement = InstallTransaction(
+        manifest_path=manifest,
+        apm_modules_dir=modules,
+        validation=None,
+        logger=MagicMock(),
+    )
+    replacement.commit(InstallResult())
+
+
+def test_workspace_lock_releases_when_commit_fails(tmp_path: Path) -> None:
+    """A failed resolution commit rolls back before unlocking the workspace."""
+    transaction = _transaction(tmp_path)
+    transaction.resolution.commit = MagicMock(side_effect=RuntimeError("boom"))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        transaction.commit(InstallResult())
+
+    replacement = InstallTransaction(
+        manifest_path=transaction.manifest_path,
+        apm_modules_dir=transaction.apm_modules_dir,
+        validation=None,
+        logger=MagicMock(),
+    )
+    replacement.commit(InstallResult())
+
+
+def test_repeated_commit_releases_only_transaction_acquisition(tmp_path: Path) -> None:
+    """Repeated completion cannot release the outer command lock."""
+    outer_lock = acquire_lifecycle_lock()
+    try:
+        transaction = _transaction(tmp_path)
+        result = InstallResult()
+
+        transaction.commit(result)
+        transaction.commit(result)
+
+        assert outer_lock.is_locked
+    finally:
+        outer_lock.release()
+
+
+def test_repeated_dry_run_releases_only_transaction_acquisition(tmp_path: Path) -> None:
+    """Repeated dry-run completion cannot release the outer command lock."""
+    outer_lock = acquire_lifecycle_lock()
+    try:
+        transaction = _transaction(tmp_path)
+        result = InstallResult(disposition=InstallDisposition.DRY_RUN)
+
+        transaction.complete(result)
+        transaction.complete(result)
+
+        assert outer_lock.is_locked
+    finally:
+        outer_lock.release()
+
+
+def test_abandoned_transaction_does_not_strand_lifecycle_lock(tmp_path: Path) -> None:
+    """Dropping the last transaction owner releases its FileLock acquisition."""
+    transaction = _transaction(tmp_path)
+    del transaction
+    gc.collect()
+
+    assert not lifecycle_lock().is_locked
+    replacement = InstallTransaction(
+        manifest_path=tmp_path / "apm.yml",
+        apm_modules_dir=tmp_path / "apm_modules",
+        validation=None,
+        logger=MagicMock(),
+    )
+    replacement.commit(InstallResult())
+
+
+def test_phase_compatibility_journal_does_not_own_lifecycle_lock(tmp_path: Path) -> None:
+    """Only the command/pipeline transaction owns lifecycle serialization."""
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    ctx = SimpleNamespace(
+        transaction=None,
+        source_root=tmp_path,
+        apm_modules_dir=modules,
+        logger=MagicMock(),
+    )
+
+    resolution_for_context(ctx)
+
+    assert not lifecycle_lock().is_locked
+    ctx.transaction.rollback()
 
 
 def test_commit_only_after_cycle_validation(tmp_path: Path) -> None:

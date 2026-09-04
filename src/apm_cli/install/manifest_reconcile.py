@@ -25,7 +25,7 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -37,6 +37,77 @@ if TYPE_CHECKING:
     from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+
+def _profiles_by_name(
+    targets: Iterable[TargetProfile] | None,
+) -> dict[str, TargetProfile]:
+    """Return profiles keyed by catalog target name."""
+    by_name: dict[str, TargetProfile] = {}
+    for target in targets or ():
+        name = getattr(target, "name", None)
+        if isinstance(name, str) and name not in by_name:
+            by_name[name] = target
+    return by_name
+
+
+def _has_gated_resolver(profile: TargetProfile) -> bool:
+    """Return whether an inactive supplemental target must not resolve."""
+    return profile.requires_flag is not None and profile.user_root_resolver is not None
+
+
+def _record_inactive_resolver_skip(
+    profile: TargetProfile,
+    diagnostics: DiagnosticCollector | None,
+) -> None:
+    """Record the intentional skip of an inactive experimental resolver."""
+    if diagnostics is None:
+        return
+    from apm_cli.utils.diagnostics import CATEGORY_INFO
+
+    message = (
+        f"Skipped inactive experimental resolver for target '{profile.name}' "
+        "during lockfile reconciliation."
+    )
+    if any(
+        diagnostic.message == message
+        for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
+    ):
+        return
+    flag = profile.requires_flag or profile.name
+    diagnostics.info(
+        message,
+        detail=(
+            f"To include it, enable '{flag.replace('_', '-')}' and select "
+            f"target '{profile.name}' for this install."
+        ),
+    )
+
+
+def _scoped_known_targets_for_reconciliation(
+    *,
+    user_scope: bool,
+    active_targets: Iterable[TargetProfile],
+    declared_targets: Iterable[TargetProfile] | None,
+) -> dict[str, TargetProfile]:
+    """Return known targets without running inactive experimental resolvers."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    active_by_name = _profiles_by_name(active_targets)
+    declared_by_name = _profiles_by_name(declared_targets)
+    scoped_known_targets: dict[str, TargetProfile] = {}
+    for name, profile in KNOWN_TARGETS.items():
+        resolved = active_by_name.get(name) or declared_by_name.get(name)
+        if resolved is not None:
+            scoped_known_targets[name] = resolved
+            continue
+        if _has_gated_resolver(profile):
+            scoped_known_targets[name] = profile
+            continue
+        scoped = profile.for_scope(user_scope=user_scope)
+        if scoped is not None:
+            scoped_known_targets[name] = scoped
+    return scoped_known_targets
 
 
 def _surface_target_cleanup(
@@ -191,8 +262,9 @@ def union_preserving(
     same-target reinstall still drops files removed from the package.
 
     ``declared_targets`` is the consumer's legitimate target universe --
-    apm.yml-declared canonical targets plus the always-legitimate gated/dynamic
-    targets -- independent of any ``--target`` narrowing (see
+    apm.yml-declared canonical targets plus gated/dynamic target metadata
+    that can be included without probing inactive roots -- independent of any
+    ``--target`` narrowing (see
     ``phases.targets.declared_target_profiles``). When provided, a prior entry
     that belongs to NEITHER this install's targets NOR any of those targets is
     an inactive-target *ghost* (e.g. a dependency's
@@ -217,15 +289,14 @@ def union_preserving(
         MaterializationStatus,
         NativePayloadValidation,
     )
-    from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
-    scoped_known_targets = {
-        name: scoped_target
-        for name, target in KNOWN_TARGETS.items()
-        if (scoped_target := target.for_scope(user_scope=user_scope)) is not None
-    }
-    active_by_name = {target.name: target for target in targets}
+    scoped_known_targets = _scoped_known_targets_for_reconciliation(
+        user_scope=user_scope,
+        active_targets=targets,
+        declared_targets=declared_targets,
+    )
+    active_by_name = _profiles_by_name(targets)
     declared_by_name = (
         {target.name: target for target in declared_targets}
         if declared_targets is not None
@@ -335,7 +406,7 @@ def union_preserving(
         for locator in reconciled.removed:
             if (
                 locator.value not in current_set
-                and locator.target in KNOWN_TARGETS
+                and locator.target in scoped_known_targets
                 and locator.target not in active_by_name
             ):
                 on_ghost_drop(locator.value)
@@ -359,6 +430,8 @@ def declared_target_profiles(
     project_root: Path,
     *,
     user_scope: bool = False,
+    active_targets: Iterable[TargetProfile] | None = None,
+    diagnostics: DiagnosticCollector | None = None,
 ) -> list[TargetProfile] | None:
     """Resolve the target universe declared by a project manifest."""
     from apm_cli.core.apm_yml import CANONICAL_TARGETS, parse_targets_field
@@ -376,19 +449,29 @@ def declared_target_profiles(
         names = parse_targets_field(data)
     except TargetResolutionError:
         return None
-    if not names:
+    active_by_name = _profiles_by_name(active_targets)
+    if not names and not active_by_name:
         return None
 
     profiles: list[TargetProfile] = []
-    for name in dict.fromkeys(names):
-        profile = KNOWN_TARGETS.get(name)
-        if profile is None:
-            continue
-        scoped = profile.for_scope(user_scope=user_scope)
-        if scoped is not None:
-            profiles.append(scoped)
+    if names:
+        for name in dict.fromkeys(names):
+            profile = KNOWN_TARGETS.get(name)
+            if profile is None:
+                continue
+            scoped = profile.for_scope(user_scope=user_scope)
+            if scoped is not None:
+                profiles.append(scoped)
     for name, profile in KNOWN_TARGETS.items():
         if name in CANONICAL_TARGETS:
+            continue
+        active_profile = active_by_name.get(name)
+        if _has_gated_resolver(profile):
+            if active_profile is None:
+                _record_inactive_resolver_skip(profile, diagnostics)
+                profiles.append(profile)
+            else:
+                profiles.append(active_profile)
             continue
         scoped = profile.for_scope(user_scope=user_scope)
         profiles.append(scoped if scoped is not None else profile)
@@ -615,7 +698,6 @@ def reconcile_target_deployed_files(
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.deployment_state import DeploymentLedger
     from apm_cli.deps.lockfile import _SELF_KEY
-    from apm_cli.integration.targets import KNOWN_TARGETS
 
     selected_owner_removal = remove_selected_ownership and dependency_keys is not None
     survivor_files = {
@@ -634,11 +716,13 @@ def reconcile_target_deployed_files(
     )
     allowed_targets = [*active_targets, *(declared_targets or [])]
     allowed_prefixes, allowed_schemes = install_governance(allowed_targets)
-    known_targets = [
-        scoped_target
-        for target in KNOWN_TARGETS.values()
-        if (scoped_target := target.for_scope(user_scope=user_scope)) is not None
-    ]
+    known_targets = list(
+        _scoped_known_targets_for_reconciliation(
+            user_scope=user_scope,
+            active_targets=active_targets,
+            declared_targets=declared_targets,
+        ).values()
+    )
     known_prefixes, known_schemes = install_governance(known_targets)
 
     def _retained(files: list[str]) -> list[str]:
@@ -789,19 +873,31 @@ def reconcile_project_deployed_state(
     lockfile = LockFile.read(lock_path)
     if lockfile is None:
         return False
-    declared = declared_target_profiles(manifest_root, user_scope=user_scope)
+    diagnostics = DiagnosticCollector(verbose=verbose)
+    declared = declared_target_profiles(
+        manifest_root,
+        user_scope=user_scope,
+        diagnostics=diagnostics,
+    )
     if explicit_target is None and declared is not None:
         targets = declared
     elif user_scope:
         targets = active_targets_user_scope(explicit_target=explicit_target)
     else:
         targets = active_targets(deploy_root, explicit_target=explicit_target)
+    if explicit_target is not None:
+        declared = declared_target_profiles(
+            manifest_root,
+            user_scope=user_scope,
+            active_targets=targets,
+            diagnostics=diagnostics,
+        )
     changed = reconcile_deployed_state(
         project_root=deploy_root,
         lockfile=lockfile,
         active_targets=targets,
         declared_targets=declared,
-        diagnostics=DiagnosticCollector(verbose=verbose),
+        diagnostics=diagnostics,
         user_scope=user_scope,
     )
     if changed:

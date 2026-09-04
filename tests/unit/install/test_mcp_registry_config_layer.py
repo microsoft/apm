@@ -124,7 +124,9 @@ def test_manifest_install_announces_the_configured_registry(
     monkeypatch, recorded_registry, project
 ):
     """A redirect away from the public registry is stated, never inferred."""
-    monkeypatch.setattr("apm_cli.config.get_mcp_registry_url", lambda: CONFIG_REGISTRY)
+    monkeypatch.setattr(
+        "apm_cli.config.get_mcp_registry_url", lambda *, create_config=True: CONFIG_REGISTRY
+    )
 
     result = _install()
 
@@ -135,7 +137,9 @@ def test_manifest_install_announces_the_configured_registry(
 def test_env_layer_still_outranks_the_config_layer(monkeypatch, recorded_registry, project):
     """MCP_REGISTRY_URL keeps precedence, so the lookup misses and fails loudly."""
     monkeypatch.setenv("MCP_REGISTRY_URL", ENV_REGISTRY)
-    monkeypatch.setattr("apm_cli.config.get_mcp_registry_url", lambda: CONFIG_REGISTRY)
+    monkeypatch.setattr(
+        "apm_cli.config.get_mcp_registry_url", lambda *, create_config=True: CONFIG_REGISTRY
+    )
 
     result = _install()
 
@@ -156,7 +160,7 @@ def test_missing_server_error_names_the_registry_queried(monkeypatch, recorded_r
 
 def test_public_default_registry_stays_quiet(monkeypatch, recorded_registry, project):
     """Defaults are quiet: no override in effect means no breadcrumb."""
-    monkeypatch.setattr("apm_cli.config.get_mcp_registry_url", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_mcp_registry_url", lambda *, create_config=True: None)
 
     result = _install()
 

@@ -10,6 +10,7 @@ import click
 
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..install.locking import serialized_lifecycle
 from ..version import get_version
 from ._helpers import HIGHLIGHT, RESET, _get_console, _load_apm_config
 
@@ -342,6 +343,7 @@ def config(ctx):
 @config.command(help="Set a configuration value")
 @click.argument("key")
 @click.argument("value")
+@serialized_lifecycle
 def set(key, value):  # noqa: F811
     """Set a configuration value.
 
@@ -703,6 +705,7 @@ def list_config():
 
 @config.command(help="Unset a configuration value")
 @click.argument("key")
+@serialized_lifecycle
 def unset(key):
     """Unset (remove) a configuration value.
 

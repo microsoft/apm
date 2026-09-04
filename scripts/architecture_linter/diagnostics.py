@@ -41,6 +41,7 @@ LEGACY_AC_ALIASES: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "install-deployment-approval-outcome-routing": ("AC3",),
         "install-deployment-audit-policy-discovery": ("AC3",),
         "install-deployment-audit-replay": ("AC4",),
+        "install-deployment-bundle-native-layout": ("AC4",),
         "install-deployment-cached-claude-skill-metadata": ("AC4",),
         "install-deployment-dependency-winner-selection": ("AC4",),
         "install-deployment-deployment-frame-projection": ("AC4",),

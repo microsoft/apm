@@ -90,7 +90,7 @@ class TestCacheHitDiagnostics:
             cache.get_checkout("ssh://sensitive-user@example.com/org/repo.git", "main")
 
         logged_url = urlsplit(caplog.records[-1].getMessage().split()[2])
-        assert logged_url.username is None
+        assert logged_url.username == "***"
         assert logged_url.hostname == "example.com"
 
 

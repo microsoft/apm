@@ -1,8 +1,8 @@
 """Package-construction, projection, skill-membership, and registration
 marketplace analyzers.
 
-Ports five of the twelve canonical owner decisions recorded in
-``.apm/architecture/owners/marketplace-plugins.json``.
+Ports marketplace-package decisions plus the local-bundle layout lowering
+guard recorded in ``.apm/architecture/owners/install-deployment.json``.
 """
 
 from __future__ import annotations
@@ -265,6 +265,68 @@ def _check_legacy_skill_membership(provider: FactsProvider) -> tuple[Violation, 
     return tuple(findings)
 
 
+_RID_BUNDLE_LAYOUT = "install-deployment-bundle-native-layout"
+
+
+_PLUGIN_LAYOUT = "src/apm_cli/bundle/plugin_layout.py"
+_LOCAL_BUNDLE_PATHS = "src/apm_cli/install/local_bundle_paths.py"
+_INSTALL_SERVICES = "src/apm_cli/install/services.py"
+_TARGET_NAME_COMPARISON = re.compile(r"\btarget\.name\s*(?:==|!=)|(?:==|!=)\s*target\.name\b")
+
+
+def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Local-bundle layout lowering must stay target-profile driven."""
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _PLUGIN_LAYOUT,
+            (
+                "class PluginDirSpec:",
+                "PLUGIN_LAYOUT: dict[str, PluginDirSpec]",
+                '"commands": PluginDirSpec(',
+                '("commands", "prompts")',
+                "plugin_command_prompt_name",
+            ),
+            "plugin_layout must own plugin-native directory and filename lowering data",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _LOCAL_BUNDLE_PATHS,
+            (
+                "def _lower_to_target(",
+                "PLUGIN_LAYOUT.get(head)",
+                "for primitive_kind in spec.primitive_kinds:",
+                "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
+            ),
+            "local bundle deployment must route through PLUGIN_LAYOUT and TargetProfile.primitives",
+        )
+    )
+    for path in (_LOCAL_BUNDLE_PATHS, _INSTALL_SERVICES):
+        facts, failures = checked_facts(provider, path, _RID_BUNDLE_LAYOUT, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        for number, line in enumerate(facts.lines, start=1):
+            if _TARGET_NAME_COMPARISON.search(line):
+                findings.append(
+                    violation(
+                        _RID_BUNDLE_LAYOUT,
+                        path,
+                        "Local bundle lowering must not branch on target.name; use TargetProfile.primitives",
+                        line=number,
+                    )
+                )
+    return tuple(findings)
+
+
 _RID_NATIVE = "marketplace-integrations-native-registration"
 
 
@@ -387,6 +449,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_SKILL,),
         description="Legacy plugin skill membership stays owned by deps/plugin_parser.py.",
         check=_check_legacy_skill_membership,
+    ),
+    Rule(
+        id=_RID_BUNDLE_LAYOUT,
+        group=GROUP,
+        guard_ids=(_RID_BUNDLE_LAYOUT,),
+        description="Local bundle layout lowering stays owned by bundle/plugin_layout.py.",
+        check=_check_bundle_native_layout,
     ),
     Rule(
         id=_RID_NATIVE,

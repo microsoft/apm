@@ -43,7 +43,7 @@ def _load_yaml_registries(yaml_path: Path) -> dict[str, str]:
         return {}
 
 
-def _load_config_json_registries() -> dict[str, str]:
+def _load_config_json_registries(*, create_config: bool = False) -> dict[str, str]:
     """Return {name: url} from ~/.apm/config.json.
 
     Silently returns an empty dict on any parse error (oversize, deep-nest
@@ -55,7 +55,7 @@ def _load_config_json_registries() -> dict[str, str]:
         from ...config import _get_registries_section
 
         result: dict[str, str] = {}
-        for name, body in _get_registries_section(bootstrap=False).items():
+        for name, body in _get_registries_section(create_config=create_config).items():
             if not isinstance(name, str) or not name.strip():
                 continue
             if isinstance(body, dict):
@@ -70,6 +70,8 @@ def _load_config_json_registries() -> dict[str, str]:
 def load_merged_registries(
     project_registries: dict[str, str] | None = None,
     policy_registries: dict[str, str] | None = None,
+    *,
+    create_config: bool = False,
 ) -> dict[str, str]:
     """Return merged registry name->URL map with precedence applied.
 
@@ -80,7 +82,7 @@ def load_merged_registries(
     merged: dict[str, str] = {}
 
     # 4. config.json (lowest)
-    merged.update(_load_config_json_registries())
+    merged.update(_load_config_json_registries(create_config=create_config))
 
     # 3. workspace ~/.apm/apm.yml
     workspace_yml = Path.home() / ".apm" / "apm.yml"
@@ -103,6 +105,7 @@ def resolve_effective_registries(
     project_default: str | None,
     *,
     policy_registries: dict[str, str] | None = None,
+    create_config: bool = False,
 ) -> tuple[dict[str, str] | None, str | None]:
     """Merge registry URLs and resolve the effective default registry.
 
@@ -118,10 +121,11 @@ def resolve_effective_registries(
     merged = load_merged_registries(
         project_registries=project_registries,
         policy_registries=policy_registries,
+        create_config=create_config,
     )
     default_name = project_default
     if default_name is None:
-        default_name = get_config_json_default_registry(bootstrap=False)
+        default_name = get_config_json_default_registry(create_config=create_config)
 
     if default_name is not None and default_name not in merged:
         default_name = None

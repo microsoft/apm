@@ -461,6 +461,7 @@ def test_public_github_connectivity_and_throttle_failures_never_resolve(
         (RuntimeError("remote: Repository not found"), True),
         (RuntimeError("terminal prompts disabled"), True),
         (RuntimeError("unable to get password from user"), True),
+        (RuntimeError("fatal: unable to get password for user"), True),
         (RuntimeError("The requested URL returned error: 404"), True),
         (RuntimeError("HTTP error 403"), True),
         (RuntimeError("status code=401"), True),
@@ -539,7 +540,12 @@ def test_translated_clone_failure_still_retries_with_a_token() -> None:
 
     def clone_action(url: str, env: dict[str, str], _target: Path) -> None:
         calls.append((url, env))
-        if urlparse(url).username is not None:
+        if any(
+            key.startswith("GIT_CONFIG_KEY_")
+            and value == "http.extraheader"
+            and env.get(key.replace("KEY", "VALUE"), "").startswith("Authorization: ")
+            for key, value in env.items()
+        ):
             return
         raise subprocess.CalledProcessError(
             128,
@@ -558,7 +564,7 @@ def test_translated_clone_failure_still_retries_with_a_token() -> None:
 
     assert len(calls) == 2
     assert urlparse(calls[0][0]).username is None
-    assert urlparse(calls[1][0]).username is not None
+    assert urlparse(calls[1][0]).username is None
 
 
 def test_clear_git_auth_env_only_removes_real_auth_channels() -> None:
@@ -580,6 +586,7 @@ def test_clear_git_auth_env_only_removes_real_auth_channels() -> None:
     assert _indexed_git_config(env) == [
         ("http.sslCAInfo", "/authorization/corporate-ca.pem"),
         ("custom.policy", "X-Custom: authorization=reviewed"),
+        ("http.extraHeader", "X-Harmless: value"),
     ]
 
 
@@ -681,7 +688,13 @@ def test_private_github_clone_resolves_one_path_scoped_fallback() -> None:
 
     def clone_action(url: str, env: dict[str, str], _target: Path) -> None:
         calls.append((url, env))
-        if urlparse(url).username is None:
+        has_auth_header = any(
+            key.startswith("GIT_CONFIG_KEY_")
+            and value == "http.extraheader"
+            and env.get(key.replace("KEY", "VALUE"), "").startswith("Authorization: ")
+            for key, value in env.items()
+        )
+        if not has_auth_header:
             raise subprocess.CalledProcessError(
                 128,
                 ("git", "clone"),
@@ -706,7 +719,7 @@ def test_private_github_clone_resolves_one_path_scoped_fallback() -> None:
     authenticated_url = urlparse(calls[1][0])
     assert anonymous_url.hostname == authenticated_url.hostname == "github.com"
     assert anonymous_url.username is None
-    assert authenticated_url.username is not None
+    assert authenticated_url.username is None
     _assert_anonymous_attempt_env(calls[0][1])
     manager.resolve_credential_from_git.assert_called_once_with(
         "github.com",
@@ -996,7 +1009,7 @@ def test_ghe_cloud_https_keeps_existing_auth_first_behavior() -> None:
     manager.get_token_for_purpose.return_value = "ghe-token"
     resolver = AuthResolver(token_manager=manager)
     dep_ref = DependencyReference.parse("https://contoso.ghe.com/acme/widgets.git#main")
-    calls: list[str] = []
+    calls: list[tuple[str, dict[str, str]]] = []
 
     with patch.dict(os.environ, {}, clear=True):
         downloader = _public_downloader(resolver)
@@ -1004,11 +1017,16 @@ def test_ghe_cloud_https_keeps_existing_auth_first_behavior() -> None:
             dep_ref.repo_url,
             Path("unused-target"),
             dep_ref=dep_ref,
-            clone_action=lambda url, _env, _target: calls.append(url),
+            clone_action=lambda url, env, _target: calls.append((url, env)),
         )
 
     assert len(calls) == 1
-    parsed = urlparse(calls[0])
+    parsed = urlparse(calls[0][0])
     assert parsed.hostname == "contoso.ghe.com"
-    assert parsed.username is not None
+    assert parsed.username is None
+    assert any(
+        value.startswith("Authorization: Basic ")
+        for key, value in calls[0][1].items()
+        if key.startswith("GIT_CONFIG_VALUE_")
+    )
     manager.get_token_for_purpose.assert_called()

@@ -23,6 +23,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.install.locking import serialized_lifecycle
+
 from ..core.command_logger import CommandLogger
 from ..policy import outcome_routing as policy_outcomes
 from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
@@ -131,6 +133,7 @@ def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> 
     help="Persist to your personal ~/.apm/config.json (lowest authority) "
     "instead of the shared project apm.yml.",
 )
+@serialized_lifecycle
 def approve_cmd(
     packages: tuple[str, ...],
     pending: bool,
@@ -194,6 +197,7 @@ def approve_cmd(
     is_flag=True,
     help="Record the deny in your personal ~/.apm/config.json instead of apm.yml.",
 )
+@serialized_lifecycle
 def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
     """Deny executable primitives for packages (a narrowing override).
 

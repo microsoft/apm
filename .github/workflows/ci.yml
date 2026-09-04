@@ -153,6 +153,7 @@ jobs:
         uv run --extra dev pytest -p no:cacheprovider -v
         -m windows_compat
         tests/unit
+        tests/integration/test_lifecycle_workspace_lock.py
 
     - name: Diagnostics on failure
       if: failure()

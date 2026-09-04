@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Hermes is now a stable explicit-only target, and state-mutating APM commands
+  share one per-user cross-process lock to prevent concurrent updates from losing state.
+  (by @lkshrk; closes #2608) (#2655)
 - Architecture ownership guards now use a sharded JSON registry and a
   single-process Python linter while preserving exact-revision compatibility
   and reducing warm median lint time by 75%. (#2739)
@@ -16,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now performs a hash-verified cached APM 0.28
+  marketplace-plugin upgrade before stale cleanup, preserving prior Claude and
+  Codex deployments instead of deleting them. (fixes #2744) (#2787)
+- `apm install` launched from Git hooks now isolates dependency Git operations
+  from the invoking repository, preventing installs from detaching or mutating
+  the caller's branch. Safe Git URL rewrites remain supported; credential-bearing,
+  insecure, and cross-host network rewrites now fail before network use,
+  and managed credentials stay out of Git URL arguments and stored remotes.
+  (#2759)
 - Windows users no longer get repeated line-ending churn when APM rewrites
   `apm.yml`: install, uninstall, dependency resolution, and revision-pin
   updates now produce deterministic LF output. An `apm.yml` that already uses
@@ -23,12 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole-file line-ending change. (closes #2624) (#2675)
 - `apm compile` now preserves hand-authored root `AGENTS.md` and `CLAUDE.md`
   files, including `--root` destinations, instead of replacing them. (#2779)
+- `apm compile` now derives hand-authored root context protection from the
+  target catalog, so targets such as Gemini preserve existing `GEMINI.md`
+  files instead of replacing them.
 - `apm uninstall` now removes MCP servers only from recorded owning runtimes,
   accepts JetBrains Copilot JSONC, and reports target cleanup failures after
   attempting every owner. (by @aryansk, fixes #2551) (#2591)
+- Global audit now checks external deployment roots without mutating them, and
+  uninstall/prune remove only runtime-scoped APM-owned MCP entries while
+  preserving same-named user configuration. (by @lkshrk; closes #2608) (#2655)
 - `apm uninstall --global` now removes managed Copilot hook files from
   `~/.copilot/hooks/` while preserving user-authored hooks. (by @aryansk; closes
   #2558) (#2559)
+- `apm install --dry-run -g` no longer creates `~/.apm` when the user
+  manifest is absent; preview state now stays temporary.
+  (by @aryansk, closes #2549) (#2592)
 - `apm install` now preserves previously deployed skills when package
   integration is skipped instead of treating them as stale cleanup candidates.
   (#2758)
@@ -52,6 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Repositories that publish plugin metadata alongside an eligible root
   `apm.yml` now install as APM packages; metadata-only manifests continue to
   select the plugin layout. (#2776)
+- Legacy lockfile synthesis now leaves shared `.agents/` deployment paths
+  unattributed instead of assigning them to Copilot's `.github/` target. (#2774)
+- Packed Claude plugin commands now install as native Copilot
+  `.github/prompts/*.prompt.md` files instead of `.github/commands/*.md`.
+  (closes #2763) (#2778)
 - `apm install` now preserves previously deployed skills when package
   integration is skipped instead of treating them as stale cleanup candidates.
   (#2758)

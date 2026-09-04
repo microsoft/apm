@@ -106,7 +106,7 @@ class TestResolveRegistryUrlConfigLayer:
         )
         monkeypatch.setattr(
             "apm_cli.config.get_mcp_registry_url",
-            lambda: "https://config.example.com",
+            lambda *, create_config=True: "https://config.example.com",
         )
         url, source = resolve_registry_url(None)
         assert url == "https://config.example.com"
@@ -117,7 +117,7 @@ class TestResolveRegistryUrlConfigLayer:
         monkeypatch.setenv("MCP_REGISTRY_URL", "https://env.example.com")
         monkeypatch.setattr(
             "apm_cli.config.get_mcp_registry_url",
-            lambda: "https://config.example.com",
+            lambda *, create_config=True: "https://config.example.com",
         )
         url, source = resolve_registry_url(None)
         assert url == "https://env.example.com"
@@ -128,7 +128,7 @@ class TestResolveRegistryUrlConfigLayer:
         monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
         monkeypatch.setattr(
             "apm_cli.config.get_mcp_registry_url",
-            lambda: "https://config.example.com",
+            lambda *, create_config=True: "https://config.example.com",
         )
         url, source = resolve_registry_url("https://flag.example.com")
         assert url == "https://flag.example.com"
@@ -160,7 +160,7 @@ class TestResolveRegistryUrlConfigLayer:
         monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
         monkeypatch.setattr(
             "apm_cli.config.get_mcp_registry_url",
-            lambda: "https://config.example.com",
+            lambda *, create_config=True: "https://config.example.com",
         )
         logger = MagicMock()
         resolve_registry_url(None, logger=logger)
@@ -180,7 +180,7 @@ class TestResolveRegistryUrlConfigLayer:
         monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
         monkeypatch.setattr(
             "apm_cli.config.get_mcp_registry_url",
-            lambda: "http://127.0.0.1:8080",
+            lambda *, create_config=True: "http://127.0.0.1:8080",
         )
         logger = MagicMock()
 
@@ -195,7 +195,7 @@ class TestResolveRegistryUrlConfigLayer:
         monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
         monkeypatch.setattr(
             "apm_cli.config.get_mcp_registry_url",
-            lambda: None,
+            lambda *, create_config=True: None,
         )
         url, source = resolve_registry_url(None)
         assert url is None

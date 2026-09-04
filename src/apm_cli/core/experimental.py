@@ -135,16 +135,6 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "skills at ~/.openclaw/skills/."
         ),
     ),
-    "hermes": ExperimentalFlag(
-        name="hermes",
-        description="Deploy skills, AGENTS.md, and MCP servers to the Hermes agent.",
-        default=False,
-        hint=(
-            "Use '--target hermes' to deploy skills + AGENTS.md to your "
-            "project, or '--target hermes --global' for your personal Hermes "
-            "home at ~/.hermes/ (skills + MCP servers in config.yaml)."
-        ),
-    ),
 }
 
 
@@ -171,7 +161,7 @@ def display_name(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _get_experimental_section() -> dict:
+def _get_experimental_section(*, create_config: bool = True) -> dict:
     """Return the ``experimental`` section from config as a dict.
 
     If the value is not a dict (e.g. user hand-edited the file to an int
@@ -179,7 +169,7 @@ def _get_experimental_section() -> dict:
     """
     from apm_cli.config import get_config
 
-    experimental = get_config().get("experimental", {})
+    experimental = get_config(create=create_config).get("experimental", {})
     return experimental if isinstance(experimental, dict) else {}
 
 
@@ -188,7 +178,7 @@ def _get_experimental_section() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def is_enabled(name: str) -> bool:
+def is_enabled(name: str, *, create_config: bool = True) -> bool:
     """Check whether an experimental flag is currently enabled.
 
     Derives directly from ``get_config()`` (already cached in
@@ -211,7 +201,7 @@ def is_enabled(name: str) -> bool:
             f"Unknown experimental flag: {name!r}. Registered flags: {', '.join(sorted(FLAGS))}"
         )
 
-    experimental = _get_experimental_section()
+    experimental = _get_experimental_section(create_config=create_config)
 
     value = experimental.get(name)
     # Reject non-bool overrides -- fail closed to registry default.

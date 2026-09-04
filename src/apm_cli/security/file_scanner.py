@@ -15,11 +15,13 @@ Two scopes, because the two signals need different ones:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..integration.base_integrator import BaseIntegrator
+from ..integration.targets import TargetProfile
 from ..security.content_scanner import ContentScanner, ScanFinding
 from ..utils.path_security import PathTraversalError, ensure_path_within
 
@@ -91,7 +93,41 @@ def _minimal_governed_prefixes(prefixes: set[str]) -> tuple[str, ...]:
     return tuple(path.as_posix() for path in accepted)
 
 
-def _scan_deployed_trees(project_root: Path) -> _FileScanResult:
+def _scan_external_deployed_trees(targets: Sequence[TargetProfile]) -> _FileScanResult:
+    """Scan bounded governed paths below resolved external target roots."""
+    from ..install.audit_target_roots import external_target_relative_roots
+
+    result = _empty_scan()
+    for target in targets:
+        deploy_root = target.managed_deploy_root
+        if deploy_root is None:
+            continue
+        for relative_root in external_target_relative_roots(target):
+            candidate = deploy_root / relative_root
+            if candidate.is_symlink():
+                continue
+            try:
+                deploy_path = ensure_path_within(candidate, deploy_root)
+            except PathTraversalError:
+                continue
+            label = f"{target.name}:{relative_root}"
+            if deploy_path.is_dir():
+                result = result.merged(_scan_directory_result(deploy_path, label))
+            elif deploy_path.is_file():
+                findings = ContentScanner.scan_file(deploy_path)
+                result = result.merged(
+                    _FileScanResult(
+                        findings_by_file={label: findings} if findings else {},
+                        scanned_files=frozenset({label}),
+                    )
+                )
+    return result
+
+
+def _scan_deployed_trees(
+    project_root: Path,
+    targets: Sequence[TargetProfile] = (),
+) -> _FileScanResult:
     """Scan every file under the deploy trees this project's targets govern.
 
     Hash verification has to be manifest-driven: comparing a hash needs a
@@ -140,7 +176,7 @@ def _scan_deployed_trees(project_root: Path) -> _FileScanResult:
                 )
             )
 
-    return result
+    return result.merged(_scan_external_deployed_trees(targets))
 
 
 def scan_deployed_trees(project_root: Path) -> tuple[dict[str, list[ScanFinding]], int]:
@@ -230,9 +266,10 @@ def scan_project_files(
     package_filter: str | None = None,
     lockfile: LockFile | None = None,
     include_deployed_trees: bool,
+    targets: Sequence[TargetProfile] = (),
 ) -> tuple[dict[str, list[ScanFinding]], int]:
     """Union lockfile and deploy-tree scopes with exact unique accounting."""
     result = _scan_lockfile_packages(project_root, package_filter, lockfile)
     if include_deployed_trees:
-        result = result.merged(_scan_deployed_trees(project_root))
+        result = result.merged(_scan_deployed_trees(project_root, targets))
     return result.findings_by_file, len(result.scanned_files)

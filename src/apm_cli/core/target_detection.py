@@ -70,9 +70,11 @@ TargetType = Literal[
     "codex",
     "gemini",
     "antigravity",
+    "grok-build",
     "windsurf",
     "kiro",
     "agent-skills",
+    "hermes",
     "all",
     "minimal",
 ]
@@ -115,6 +117,7 @@ UserTargetType = Literal[
     "windsurf",
     "kiro",
     "agent-skills",
+    "hermes",
     "all",
     "minimal",
 ]
@@ -164,6 +167,8 @@ def detect_target(  # noqa: PLR0911
             return "grok-build", "explicit --target flag"
         elif explicit_target == "agent-skills":
             return "agent-skills", "explicit --target flag"
+        elif explicit_target == "hermes":
+            return "hermes", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
 
@@ -191,6 +196,8 @@ def detect_target(  # noqa: PLR0911
             return "grok-build", "apm.yml target"
         elif config_target == "agent-skills":
             return "agent-skills", "apm.yml target"
+        elif config_target == "hermes":
+            return "hermes", "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
 
@@ -414,7 +421,7 @@ def get_target_description(target: UserTargetType) -> str:
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
-        "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
+        "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
@@ -922,6 +929,7 @@ def resolve_effective_target_decision(
     manifest_target: str | list[str] | None,
     user_scope: bool = False,
     auto_detect: bool = True,
+    create_config: bool = True,
 ) -> EffectiveTargetDecision:
     """Choose the effective install target once using the public precedence.
 
@@ -939,7 +947,7 @@ def resolve_effective_target_decision(
 
     from apm_cli.config import get_install_target
 
-    configured_target = get_install_target()
+    configured_target = get_install_target(create_config=create_config)
     if configured_target is not None:
         return EffectiveTargetDecision(configured_target, "apm config target")
 
@@ -957,6 +965,7 @@ def resolve_package_target_decision(
     explicit_target: str | list[str] | None,
     user_scope: bool = False,
     auto_detect: bool = True,
+    create_config: bool = True,
 ) -> EffectiveTargetDecision:
     """Resolve one effective target decision from a parsed package manifest."""
     from apm_cli.models.apm_package import package_target_selection
@@ -967,6 +976,7 @@ def resolve_package_target_decision(
         manifest_target=package_target_selection(package) if package is not None else None,
         user_scope=user_scope,
         auto_detect=auto_detect,
+        create_config=create_config,
     )
 
 
@@ -976,6 +986,7 @@ def resolve_manifest_target_decision(
     manifest_path: Path,
     explicit_target: str | list[str] | None,
     user_scope: bool = False,
+    create_config: bool = True,
 ) -> EffectiveTargetDecision:
     """Resolve one effective target decision from an optional manifest path."""
     package = None
@@ -988,6 +999,7 @@ def resolve_manifest_target_decision(
         package=package,
         explicit_target=explicit_target,
         user_scope=user_scope,
+        create_config=create_config,
     )
 
 

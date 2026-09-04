@@ -49,6 +49,18 @@ def _make_downloader() -> GitHubPackageDownloader:
     return dl
 
 
+def _configure_http_remote_env(downloader: GitHubPackageDownloader) -> None:
+    """Make the resolver mock return the canonical plaintext-HTTP fence."""
+    downloader.auth_resolver.git_env_for_remote.return_value = (
+        AuthResolver.build_noninteractive_git_env(
+            base_env=downloader.git_env,
+            host_kind="gitlab",
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # GitProgressReporter._get_op_name -- lines 143, 145, 149, 151, 153
 # ---------------------------------------------------------------------------
@@ -393,6 +405,7 @@ class TestDownloadSubdirectoryPersistentCache:
                 "GIT_HTTP_EXTRAHEADER": "Authorization: Basic secret",
             }
         )
+        _configure_http_remote_env(dl)
 
         persistent_cache = MagicMock()
         persistent_cache.get_checkout.return_value = cached_checkout
@@ -496,6 +509,7 @@ class TestDownloadWholeRepositoryPersistentCache:
                 "GIT_HTTP_EXTRAHEADER": "Authorization: Basic secret",
             }
         )
+        _configure_http_remote_env(dl)
         persistent_cache = MagicMock()
         persistent_cache.get_checkout.return_value = cached_checkout
         dl.persistent_git_cache = persistent_cache

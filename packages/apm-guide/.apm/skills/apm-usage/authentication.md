@@ -2,9 +2,33 @@
 
 ## Token precedence chain
 
-For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, overrides authorization headers and credential helpers with empty values, and preserves caller-supplied global/system Git config such as CA settings, URL rewrites, and `credential.interactive=never`.
+For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.
 
-Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Private-repository fallback is cached per repository path for the process, so persistent Git cache population and later phases reuse it without applying that credential to a different repository. APM never writes the credential into persistent cache keys or stored remote URLs.
+Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Ordinary credentials are cached per `(host, port, org)` for the process. A private `github.com` helper fallback adds the repository path to that scope, so later phases reuse it without applying that credential to another repository. APM never writes the credential into persistent cache keys or stored remote URLs.
+
+Managed GitHub, GitLab, and Azure DevOps credentials use process-scoped
+Authorization headers. They are never embedded in Git URL userinfo.
+
+Before each dependency Git operation that consumes a remote URL, APM rejects a
+matching rewrite that embeds credentials, downgrades to insecure transports such
+as `http://` or `git://`, selects remote-helper syntax such as `ext::` or
+`https::`, or redirects any network remote to another host, regardless of host
+class. A managed HTTPS credential cannot cross a scheme, host, or port boundary.
+Same-host SSH and local-mirror selections remain credential-free. Inspect
+rejected rules with:
+
+```bash
+git config --show-origin --get-regexp '^url\..*\.insteadOf$'
+```
+
+If the selected rewrite is a `file://` mirror and the clone fails, verify that
+the local path exists and is readable. Fix or remove that rewrite; host
+credentials cannot repair a missing local mirror.
+
+APM snapshots effective Git config, validates the longest matching rewrite, and
+freezes the result for the child. It drops malformed ambient HTTP headers before
+applying an anonymous empty-header fence or one path-scoped AuthResolver header.
+Dependency clones ignore Git templates and checkout hooks.
 
 When fallback is required, APM checks these sources in order:
 
@@ -112,7 +136,8 @@ apm install dev.azure.com/org/project/_git/repo
 ```
 
 ADO paths use the 3-segment format: `org/project/repo`. Auth is always required.
-`apm marketplace check` uses this same credential chain. See
+No ADO Git path invokes native credential helpers.
+`apm marketplace check` uses the PAT-to-bearer chain. See
 [Marketplace source bases](package-authoring.md#marketplace-source-bases) for
 ADO marketplace URL authoring.
 

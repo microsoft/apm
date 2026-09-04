@@ -618,7 +618,7 @@ class TestBareCloneFallback:
 
         # Verify tier-1 sequence
         cmd_strings = [" ".join(c) for c in captured]
-        assert any("init --bare" in s for s in cmd_strings), "missing init --bare"
+        assert any("init" in c and "--bare" in c for c in captured), "missing init --bare"
         assert any("remote add origin" in s for s in cmd_strings), "missing remote add"
         assert any("fetch --depth=1" in s for s in cmd_strings), "missing fetch --depth=1"
         # 6.18: update-ref HEAD <sha> MUST be called
@@ -675,8 +675,8 @@ class TestBareCloneFallback:
         cmd_strings = [" ".join(c) for c in captured]
         # Tier 2: full clone --bare invoked after tier-1 failed
         assert any(
-            "clone --bare" in s and "--depth=1" not in s and "--branch" not in s
-            for s in cmd_strings
+            "clone" in c and "--bare" in c and "--depth=1" not in c and "--branch" not in c
+            for c in captured
         ), f"missing tier-2 full bare clone: {cmd_strings}"
         # rev-parse --verify validates the SHA
         assert any("rev-parse --verify" in s and "^{commit}" in s for s in cmd_strings), (
@@ -722,14 +722,14 @@ class TestBareCloneFallback:
 
         cmd_strings = [" ".join(c) for c in captured]
         # Tier 1 (init+fetch) MUST NOT be attempted for short SHAs.
-        assert not any("init --bare" in s for s in cmd_strings), (
+        assert not any("init" in c and "--bare" in c for c in captured), (
             f"tier-1 must be skipped for short SHA, got {cmd_strings}"
         )
         assert not any("fetch --depth=1" in s for s in cmd_strings), (
             "tier-1 fetch must be skipped for short SHA"
         )
         # Tier 2 full clone + rev-parse + update-ref
-        assert any("clone --bare" in s for s in cmd_strings), "missing tier-2 clone"
+        assert any("clone" in c and "--bare" in c for c in captured), "missing tier-2 clone"
         update_ref_calls = [
             c for c in captured if len(c) >= 4 and c[-3] == "update-ref" and c[-2] == "HEAD"
         ]
@@ -761,9 +761,14 @@ class TestBareCloneFallback:
             )
 
         cmd_strings = [" ".join(c) for c in captured]
-        assert any("clone --bare --depth=1 --branch main" in s for s in cmd_strings), (
-            f"missing tier-1 shallow clone: {cmd_strings}"
-        )
+        assert any(
+            "clone" in c
+            and "--bare" in c
+            and "--depth=1" in c
+            and c[c.index("--branch") + 1] == "main"
+            for c in captured
+            if "--branch" in c
+        ), f"missing tier-1 shallow clone: {cmd_strings}"
 
 
 class TestMaterializeFromBare:
@@ -1179,11 +1184,13 @@ class TestAdoBareBearerRetry:
     """
 
     def _make_ado_downloader(self, tmp_path: Path):
+        from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.deps.transport_selection import TransportAttempt, TransportPlan
 
         d = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
-        d.auth_resolver = MagicMock()
+        d.auth_resolver = AuthResolver()
+        d.auth_resolver.emit_stale_pat_diagnostic = MagicMock()
         d.token_manager = MagicMock()
         d._transport_selector = MagicMock()
         d._protocol_pref = MagicMock()
@@ -1202,9 +1209,19 @@ class TestAdoBareBearerRetry:
             )
         )
         d._resolve_dep_token = MagicMock(return_value="pat-token")
-        ctx = MagicMock()
-        ctx.auth_scheme = "basic"
-        ctx.git_env = {}
+        ctx = AuthContext(
+            token="pat-token",
+            source="ADO_APM_PAT",
+            token_type="unknown",
+            host_info=HostInfo(
+                host="dev.azure.com",
+                kind="ado",
+                has_public_repos=False,
+                api_base="https://dev.azure.com",
+            ),
+            git_env={},
+            auth_scheme="basic",
+        )
         d._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
         d._sanitize_git_error = MagicMock(side_effect=lambda s: s)
 
@@ -1228,8 +1245,7 @@ class TestAdoBareBearerRetry:
         urls_seen: list[str] = []
 
         def fake_run(args, **kwargs):
-            cmd_str = " ".join(args)
-            if "clone --bare" in cmd_str:
+            if "clone" in args and "--bare" in args:
                 # URL appears in args; locate it by content rather than position
                 # (varies for tier-1 shallow vs tier-2 full clone).
                 url = next((a for a in args if a.startswith("https://")), "")

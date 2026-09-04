@@ -52,8 +52,11 @@
     {
       "id": "distributed-agents-output-preparation",
       "decision": "Agent root-context output eligibility and content preparation",
-      "owner": "compilation/agents_compiler.py (_prepare_distributed_file and _hand_authored_root_context_blocks_write)",
-      "selectors": ["src/apm_cli/compilation/agents_compiler.py"],
+      "owner": "compilation/agents_compiler.py with compilation/root_context_protection.py",
+      "selectors": [
+        "src/apm_cli/compilation/agents_compiler.py",
+        "src/apm_cli/compilation/root_context_protection.py"
+      ],
       "guards": [
         "contracts-tooling-distributed-agents-output",
         "contracts-tooling-root-context-write-eligibility"

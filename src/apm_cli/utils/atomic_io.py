@@ -13,6 +13,7 @@ backward compatibility with existing tests) and
 
 import contextlib
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -88,6 +89,7 @@ def atomic_write_text(
     file (if any) remains untouched.
     """
     existed = path.exists()
+    existing_mode = stat.S_IMODE(path.stat().st_mode) if existed else None
     _validate_temp_name_fragment(temp_prefix, "temp_prefix")
     _validate_temp_name_fragment(temp_suffix, "temp_suffix")
     fd, tmp_name = tempfile.mkstemp(
@@ -97,9 +99,10 @@ def atomic_write_text(
     )
     fd_wrapped = False
     try:
-        if new_file_mode is not None and not existed and hasattr(os, "fchmod"):
+        mode = existing_mode if existed else new_file_mode
+        if mode is not None and hasattr(os, "fchmod"):
             with contextlib.suppress(OSError):
-                os.fchmod(fd, new_file_mode)
+                os.fchmod(fd, mode)
         fh = os.fdopen(fd, "w", encoding="utf-8", newline="")
         fd_wrapped = True
         with fh:

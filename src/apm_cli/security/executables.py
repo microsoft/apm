@@ -901,6 +901,7 @@ def build_effective_exec_map(
     *,
     policy: Any | None,
     project_data: dict[str, Any] | None,
+    migrate_user_legacy: bool = True,
 ) -> dict[str, dict[str, bool]] | None:
     """Materialise the deny-wins effective allow-map consumed by the install gate.
 
@@ -910,7 +911,11 @@ def build_effective_exec_map(
     Returns ``None`` when the gate is disabled (backward-compatible: every
     executable deploys), mirroring :attr:`ExecTrustContext.gate_enabled`.
     """
-    ctx = build_exec_trust_context(policy=policy, project_data=project_data)
+    ctx = build_exec_trust_context(
+        policy=policy,
+        project_data=project_data,
+        migrate_user_legacy=migrate_user_legacy,
+    )
     return materialize_exec_map(ctx)
 
 
@@ -920,6 +925,7 @@ def exec_trust_context_for_project(
     policy: Any | None,
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
+    migrate_user_legacy: bool = True,
 ) -> ExecTrustContext:
     """Resolve project, user, and policy executable trust through one owner."""
     from apm_cli.utils.yaml_io import load_yaml
@@ -934,7 +940,11 @@ def exec_trust_context_for_project(
                 warn_allow_executables_alias_once(logger)
     if project_data is None and isinstance(fallback_allow_executables, dict):
         project_data = {"allowExecutables": fallback_allow_executables}
-    return build_exec_trust_context(policy=policy, project_data=project_data)
+    return build_exec_trust_context(
+        policy=policy,
+        project_data=project_data,
+        migrate_user_legacy=migrate_user_legacy,
+    )
 
 
 def effective_exec_map_for_project(
@@ -943,6 +953,7 @@ def effective_exec_map_for_project(
     policy: Any | None,
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
+    migrate_user_legacy: bool = True,
 ) -> dict[str, dict[str, bool]] | None:
     """Materialize the canonical trust context for one project."""
     return materialize_exec_map(
@@ -951,6 +962,7 @@ def effective_exec_map_for_project(
             policy=policy,
             fallback_allow_executables=fallback_allow_executables,
             logger=logger,
+            migrate_user_legacy=migrate_user_legacy,
         )
     )
 
@@ -1097,8 +1109,13 @@ def filter_lsp_by_allow_executables(
     return filtered
 
 
-def read_bundle_allow_executables(apm_yml_path: Path, logger: Any) -> dict | None:
-    """Read allowExecutables from apm.yml for bundle install. Fail-closed on error."""
+def read_bundle_allow_executables(
+    apm_yml_path: Path,
+    logger: Any,
+    *,
+    migrate_user_legacy: bool = True,
+) -> dict | None:
+    """Read executable trust settings from apm.yml for bundle install."""
     try:
         from ..utils.yaml_io import load_yaml  # local import avoids circular at module init
 
@@ -1106,11 +1123,17 @@ def read_bundle_allow_executables(apm_yml_path: Path, logger: Any) -> dict | Non
             return None
         data = load_yaml(apm_yml_path)
         if isinstance(data, dict):
-            return parse_allow_executables(data)
+            if data.get("allowExecutables") is not None:
+                warn_allow_executables_alias_once(logger)
+            return build_effective_exec_map(
+                policy=None,
+                project_data=data,
+                migrate_user_legacy=migrate_user_legacy,
+            )
         return None
     except Exception as exc:
         logger.warning(
-            f"Could not read allowExecutables from apm.yml: {exc}. "
+            f"Could not read executable trust settings from apm.yml: {exc}. "
             "Treating as fully enforced with no approvals.",
             symbol="warning",
         )
@@ -1246,7 +1269,11 @@ def _legacy_approvals_path() -> Path:
     return Path.home() / ".apm" / "approvals.yml"
 
 
-def _migrate_legacy_approvals(allow: dict[str, dict[str, bool]]) -> dict[str, dict[str, bool]]:
+def _migrate_legacy_approvals(
+    allow: dict[str, dict[str, bool]],
+    *,
+    persist: bool = True,
+) -> dict[str, dict[str, bool]]:
     """Fold a legacy ``approvals.yml`` into *allow* and delete the file.
 
     The legacy file stored a bare ``{package_key: {exec_type: bool}}`` map of
@@ -1265,12 +1292,16 @@ def _migrate_legacy_approvals(allow: dict[str, dict[str, bool]]) -> dict[str, di
             if isinstance(entry, dict):
                 merged = {**{k: bool(v) for k, v in entry.items()}, **allow.get(pkg_key, {})}
                 allow[pkg_key] = merged
-    with contextlib.suppress(OSError):
-        legacy.unlink()
+    if persist:
+        with contextlib.suppress(OSError):
+            legacy.unlink()
     return allow
 
 
-def load_user_executables() -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
+def load_user_executables(
+    *,
+    migrate_legacy: bool = True,
+) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
     """Load personal executable consent from ``~/.apm/config.json``.
 
     Returns ``(allow, deny)``. On first read, any legacy
@@ -1290,8 +1321,9 @@ def load_user_executables() -> tuple[dict[str, dict[str, bool]], dict[str, dict[
     allow = dict(section.get("allow") or {})
     deny = dict(section.get("deny") or {})
 
-    migrated = _migrate_legacy_approvals(allow)
-    if migrated != allow or (allow and "executables" not in cfg):
+    original_allow = {key: dict(value) for key, value in allow.items()}
+    migrated = _migrate_legacy_approvals(allow, persist=migrate_legacy)
+    if migrate_legacy and (migrated != original_allow or (allow and "executables" not in cfg)):
         allow = migrated
         save_user_executables(allow, deny)
     else:
@@ -1330,6 +1362,7 @@ def build_exec_trust_context(
     *,
     policy: Any | None,
     project_data: dict[str, Any] | None,
+    migrate_user_legacy: bool = True,
 ) -> ExecTrustContext:
     """Assemble an :class:`ExecTrustContext` from org / project / user inputs.
 
@@ -1344,7 +1377,7 @@ def build_exec_trust_context(
     """
     data = project_data or {}
     project_allow, project_deny, _alias = parse_project_executables(data)
-    user_allow, user_deny = load_user_executables()
+    user_allow, user_deny = load_user_executables(migrate_legacy=migrate_user_legacy)
 
     org_deny_all = False
     org_deny: frozenset[str] = frozenset()

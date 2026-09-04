@@ -14,6 +14,7 @@ from ..core.scope import InstallScope
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..install.locking import serialized_lifecycle_unless
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
 from ..models.apm_package import APMPackage
@@ -86,6 +87,7 @@ def _preflight_prune_survivors(
     help="Preview package removal and ownership repair without mutating anything",
 )
 @click.pass_context
+@serialized_lifecycle_unless("dry_run")
 def prune(ctx, dry_run):
     """Remove orphaned packages and repair stale deployment ownership.
 
@@ -97,6 +99,7 @@ def prune(ctx, dry_run):
         apm prune           # Remove orphaned packages
         apm prune --dry-run # Show what would be removed
     """
+    apm_modules_dir = Path(APM_MODULES_DIR)
     logger = CommandLogger("prune", dry_run=dry_run)
     registration_token = _publish_native_registration(Path.cwd())
     try:
@@ -104,7 +107,6 @@ def prune(ctx, dry_run):
             logger.error("No apm.yml found. Run 'apm init' first.")
             sys.exit(1)
 
-        apm_modules_dir = Path(APM_MODULES_DIR)
         logger.start("Analyzing installed packages vs apm.yml...")
 
         try:
@@ -327,6 +329,19 @@ def prune(ctx, dry_run):
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
+            if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
+                from .uninstall.engine import _cleanup_stale_mcp
+
+                _cleanup_stale_mcp(
+                    apm_package,
+                    lockfile,
+                    lockfile_path,
+                    set(lockfile.mcp_servers),
+                    modules_dir=apm_modules_dir,
+                    project_root=project_root,
+                    scope=InstallScope.PROJECT,
+                    persist=False,
+                )
             try:
                 if lockfile_has_persisted_state(lockfile):
                     lockfile.write(lockfile_path)

@@ -226,7 +226,10 @@ def test_configured_mcp_registry_url_is_used(monkeypatch) -> None:
             self.client = SimpleRegistryClient(registry_url)
 
     monkeypatch.delenv(mcp.MCP_REGISTRY_ENV, raising=False)
-    monkeypatch.setattr("apm_cli.config.get_mcp_registry_url", lambda: "https://registry.test/v0")
+    monkeypatch.setattr(
+        "apm_cli.config.get_mcp_registry_url",
+        lambda *, create_config=True: "https://registry.test/v0",
+    )
     monkeypatch.setattr("apm_cli.registry.integration.RegistryIntegration", FakeRegistry)
 
     registry = mcp._build_registry_with_diag(None, MagicMock())

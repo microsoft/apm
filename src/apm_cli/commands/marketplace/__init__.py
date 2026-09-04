@@ -19,6 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 import click
 
 from ...core.command_logger import CommandLogger
+from ...install.locking import serialized_lifecycle
 from ...marketplace.builder import BuildOptions, BuildReport, MarketplaceBuilder, ResolvedPackage
 from ...marketplace.errors import (
     BuildError,
@@ -324,6 +325,7 @@ Examples:
     help="Git host FQDN for OWNER/REPO shorthand (default: github.com)",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@serialized_lifecycle
 def add(source, name, ref, branch, host, verbose):
     """Register a marketplace.
 
@@ -759,6 +761,7 @@ def browse(name, verbose):
 @marketplace.command(help="Refresh marketplace cache")
 @click.argument("name", required=False, default=None)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@serialized_lifecycle
 def update(name, verbose):
     """Refresh cached marketplace data (one or all)."""
     logger = CommandLogger("marketplace-update", verbose=verbose)
@@ -806,6 +809,7 @@ def update(name, verbose):
 @click.argument("name", required=True)
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@serialized_lifecycle
 def remove(name, yes, verbose):
     """Unregister a marketplace."""
     logger = CommandLogger("marketplace-remove", verbose=verbose)

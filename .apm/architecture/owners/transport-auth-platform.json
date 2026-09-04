@@ -9,7 +9,13 @@
         "src/apm_cli/core/auth.py",
         "src/apm_cli/core/host_providers.py"
       ],
-      "guards": ["transport-platform-host-credential-resolution"]
+      "guards": [
+        "transport-platform-ado-validation-bearer-fallback",
+        "transport-platform-ado-validation-caller-config",
+        "transport-platform-ado-validation-clone-bearer-fallback",
+        "transport-platform-ado-validation-helper-suppression",
+        "transport-platform-host-credential-resolution"
+      ]
     },
     {
       "id": "url-path-containment-decoding",
@@ -31,6 +37,35 @@
       "owner": "cache/url_normalize.py (normalize_repo_url / cache_shard_key)",
       "selectors": ["src/apm_cli/cache/url_normalize.py"],
       "guards": ["transport-platform-git-cache-identity"]
+    },
+    {
+      "id": "git-child-repository-isolation",
+      "decision": "Git child-process repository location and URL rewrite safety",
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation, and Git auth-channel scrubbing)",
+      "selectors": ["src/apm_cli/utils/git_env.py"],
+      "guards": [
+        "transport-platform-git-child-environment",
+        "transport-platform-git-clone-hooks-disabled",
+        "transport-platform-git-clone-templates-disabled",
+        "transport-platform-git-diagnostic-redaction",
+        "transport-platform-git-diagnostic-redaction-debug",
+        "transport-platform-git-diagnostic-sanitizer-ownership",
+        "transport-platform-git-diagnostic-sanitizer-ownership-downloader",
+        "transport-platform-git-diagnostic-token-shapes",
+        "transport-platform-git-diagnostic-token-shapes-jwt",
+        "transport-platform-git-single-remote-fetch",
+        "transport-platform-git-url-credentials-out-of-argv",
+        "transport-platform-git-url-header-specificity",
+        "transport-platform-git-url-header-specificity-fence",
+        "transport-platform-git-url-header-specificity-fence-malformed-values",
+        "transport-platform-git-url-header-specificity-fence-managed-auth",
+        "transport-platform-git-url-rewrite-enforcement",
+        "transport-platform-git-url-rewrite-once",
+        "transport-platform-git-url-rewrite-recovery",
+        "transport-platform-git-url-rewrite-routing",
+        "transport-platform-git-url-rewrite-routing-validation",
+        "transport-platform-git-url-rewrite-safety"
+      ]
     },
     {
       "id": "sparse-cone-symlink-validation",
@@ -72,7 +107,10 @@
       "decision": "Git semver preflight eligibility and resolution",
       "owner": "install/helpers/ref_reuse.py (is_git_semver_resolution_eligible / maybe_resolve_git_semver)",
       "selectors": ["src/apm_cli/install/helpers/ref_reuse.py"],
-      "guards": ["transport-platform-git-semver-preflight"]
+      "guards": [
+        "transport-platform-git-semver-preflight",
+        "transport-platform-git-semver-remote-auth"
+      ]
     },
     {
       "id": "network-host-loopback-classification",

@@ -922,7 +922,7 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
         "name: user-scope\nversion: 0.1.0\ndependencies:\n  mcp: []\n",
         encoding="ascii",
     )
-    monkeypatch.setattr("apm_cli.config.get_install_target", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_install_target", lambda *, create_config=True: None)
 
     discovery = resolve_manifest_target_decision(
         project,
@@ -952,7 +952,7 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
         "name: user-scope\nversion: 0.1.0\n",
         encoding="ascii",
     )
-    monkeypatch.setattr("apm_cli.config.get_install_target", lambda: "vscode")
+    monkeypatch.setattr("apm_cli.config.get_install_target", lambda *, create_config=True: "vscode")
     configured = resolve_manifest_target_decision(
         project,
         manifest_path=configured_path,

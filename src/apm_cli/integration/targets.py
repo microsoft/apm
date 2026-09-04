@@ -259,6 +259,9 @@ class TargetProfile:
     external_locator_encoder: Callable[[Path, Path], str] | None = None
     """Encode managed-root paths that require a native lockfile URI."""
 
+    external_locator_decoder: Callable[[str, Path], Path] | None = None
+    """Decode a native lockfile URI below the managed deployment root."""
+
     lockfile_uri_schemes: tuple[str, ...] = ()
     """URI prefixes governed by this target during reconciliation."""
 
@@ -351,6 +354,12 @@ class TargetProfile:
         if self.external_locator_encoder is None or deploy_root is None:
             return None
         return self.external_locator_encoder(path, deploy_root)
+
+    def decode_external_locator(self, locator: str, deploy_root: Path) -> Path | None:
+        """Decode a managed native locator through the target adapter."""
+        if self.external_locator_decoder is None:
+            return None
+        return self.external_locator_decoder(locator, deploy_root)
 
     def for_scope(self, user_scope: bool = False) -> TargetProfile | None:
         """Return a scope-resolved copy of this profile.
@@ -464,6 +473,13 @@ def _encode_cowork_locator(path: Path, deploy_root: Path) -> str:
     from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
 
     return to_lockfile_path(path, deploy_root)
+
+
+def _decode_cowork_locator(locator: str, deploy_root: Path) -> Path:
+    """Translate a Cowork lockfile URI through its native target adapter."""
+    from apm_cli.integration.copilot_cowork_paths import from_lockfile_path
+
+    return from_lockfile_path(locator, deploy_root)
 
 
 def _encode_copilot_app_locator(path: Path) -> str:
@@ -870,7 +886,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_dir=".openclaw",
     ),
-    # Hermes agent (Nous Research) -- experimental.  Hermes natively reads
+    # Hermes agent (Nous Research) -- stable explicit-only. Hermes natively reads
     # the agentskills.io SKILL.md format and the AGENTS.md context-file
     # standard, both already emitted by APM, so skills + instructions reuse
     # the existing skill_standard / compile_family="agents" paths.  Skills
@@ -914,6 +930,9 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_resolver=lambda: _resolve_copilot_cowork_root(),
         external_locator_encoder=lambda path, deploy_root: _encode_cowork_locator(
             path, deploy_root
+        ),
+        external_locator_decoder=lambda locator, deploy_root: _decode_cowork_locator(
+            locator, deploy_root
         ),
         lockfile_uri_schemes=("cowork://",),
         warn_unsupported_primitives=True,
@@ -1069,14 +1088,14 @@ def _resolve_copilot_app_root() -> Path | None:
     return resolve_copilot_app_root()
 
 
-def _is_flag_enabled(flag_name: str) -> bool:
+def _is_flag_enabled(flag_name: str, *, create_config: bool = True) -> bool:
     """Check whether an experimental flag is enabled.
 
     Lazy import to avoid config I/O at module load time.
     """
     from apm_cli.core.experimental import is_enabled
 
-    return is_enabled(flag_name)
+    return is_enabled(flag_name, create_config=create_config)
 
 
 def resolve_hermes_root() -> Path:
@@ -1099,11 +1118,11 @@ def resolve_hermes_root() -> Path:
     return (Path.home() / ".hermes").resolve(strict=False)
 
 
-def _flag_gated(profile: TargetProfile) -> bool:
+def _flag_gated(profile: TargetProfile, *, create_config: bool = True) -> bool:
     """Return ``True`` if *profile* passes its flag gate (or has none)."""
     if profile.requires_flag is None:
         return True
-    return _is_flag_enabled(profile.requires_flag)
+    return _is_flag_enabled(profile.requires_flag, create_config=create_config)
 
 
 def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple:
@@ -1158,6 +1177,8 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
 
 def active_targets_user_scope(
     explicit_target: str | list[str] | None = None,
+    *,
+    create_config: bool = True,
 ) -> list:
     """Return ``TargetProfile`` instances for user-scope deployment.
 
@@ -1203,13 +1224,13 @@ def active_targets_user_scope(
                     if p.name in all_targets
                     and not p.capability.explicit_only
                     and p.user_supported
-                    and _flag_gated(p)
+                    and _flag_gated(p, create_config=create_config)
                 ]
             profile = KNOWN_TARGETS.get(canonical)
             if (
                 profile
                 and profile.user_supported
-                and _flag_gated(profile)
+                and _flag_gated(profile, create_config=create_config)
                 and profile.name not in seen
             ):
                 seen.add(profile.name)
@@ -1223,7 +1244,7 @@ def active_targets_user_scope(
         for p in KNOWN_TARGETS.values()
         if p.user_supported
         and p.detect_by_dir
-        and _flag_gated(p)
+        and _flag_gated(p, create_config=create_config)
         and (home / p.effective_root(user_scope=True)).is_dir()
     ]
     if detected:
@@ -1236,6 +1257,8 @@ def active_targets_user_scope(
 def active_targets(
     project_root,
     explicit_target: str | list[str] | None = None,
+    *,
+    create_config: bool = True,
 ) -> list:
     """Return the list of ``TargetProfile`` instances that should be
     deployed into *project_root*.
@@ -1285,7 +1308,11 @@ def active_targets(
                 all_targets = {normalize_target_name(target) for target in expand_all("install")}
                 return [p for p in KNOWN_TARGETS.values() if p.name in all_targets]
             profile = KNOWN_TARGETS.get(canonical)
-            if profile and _flag_gated(profile) and profile.name not in seen:
+            if (
+                profile
+                and _flag_gated(profile, create_config=create_config)
+                and profile.name not in seen
+            ):
                 seen.add(profile.name)
                 profiles.append(profile)
         return profiles
@@ -1295,7 +1322,9 @@ def active_targets(
     detected = [
         p
         for p in KNOWN_TARGETS.values()
-        if p.detect_by_dir and _flag_gated(p) and (root / p.root_dir).is_dir()
+        if p.detect_by_dir
+        and _flag_gated(p, create_config=create_config)
+        and (root / p.root_dir).is_dir()
     ]
     if detected:
         return detected
@@ -1308,6 +1337,8 @@ def resolve_targets(
     project_root,
     user_scope: bool = False,
     explicit_target: str | list[str] | None = None,
+    *,
+    create_config: bool = True,
 ) -> list:
     """Return scope-resolved ``TargetProfile`` instances.
 
@@ -1325,9 +1356,9 @@ def resolve_targets(
             or ``"all"``.  ``None`` means auto-detect.
     """
     if user_scope:
-        raw = active_targets_user_scope(explicit_target)
+        raw = active_targets_user_scope(explicit_target, create_config=create_config)
     else:
-        raw = active_targets(project_root, explicit_target)
+        raw = active_targets(project_root, explicit_target, create_config=create_config)
 
     resolved = []
     for t in raw:

@@ -119,7 +119,7 @@ class TestCheckPackageConflicts:
         assert result == set()
 
     def test_string_dep_adds_identity(self) -> None:
-        with patch("apm_cli.commands.install.DependencyReference") as mock_cls:
+        with patch("apm_cli.models.apm_package.DependencyReference") as mock_cls:
             mock_ref = MagicMock()
             mock_ref.get_identity.return_value = "github.com/owner/repo"
             mock_cls.parse.return_value = mock_ref
@@ -127,7 +127,7 @@ class TestCheckPackageConflicts:
         assert "github.com/owner/repo" in result
 
     def test_dict_dep_uses_parse_from_dict(self) -> None:
-        with patch("apm_cli.commands.install.DependencyReference") as mock_cls:
+        with patch("apm_cli.models.apm_package.DependencyReference") as mock_cls:
             mock_ref = MagicMock()
             mock_ref.get_identity.return_value = "github.com/owner/repo"
             mock_cls.parse_from_dict.return_value = mock_ref
@@ -135,7 +135,7 @@ class TestCheckPackageConflicts:
         assert "github.com/owner/repo" in result
 
     def test_invalid_dep_entry_is_skipped(self) -> None:
-        with patch("apm_cli.commands.install.DependencyReference") as mock_cls:
+        with patch("apm_cli.models.apm_package.DependencyReference") as mock_cls:
             mock_cls.parse.side_effect = ValueError("bad format")
             result = _check_package_conflicts(["bad-format"])
         assert result == set()
@@ -145,7 +145,7 @@ class TestCheckPackageConflicts:
         assert result == set()
 
     def test_multiple_deps_returns_all_identities(self) -> None:
-        with patch("apm_cli.commands.install.DependencyReference") as mock_cls:
+        with patch("apm_cli.models.apm_package.DependencyReference") as mock_cls:
             ref_a = MagicMock()
             ref_a.get_identity.return_value = "github.com/a/repo"
             ref_b = MagicMock()

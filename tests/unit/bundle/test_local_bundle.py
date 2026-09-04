@@ -239,7 +239,9 @@ class TestDetectLocalBundle:
         assert result is not None
         assert result.package_id == "Test Plugin"
 
-    def test_detect_rejects_unsupported_agent_plugin_schema(self, tmp_path: Path) -> None:
+    def test_detect_treats_unsupported_agent_plugin_schema_as_legacy_miss(
+        self, tmp_path: Path
+    ) -> None:
         bundle = _make_plugin_bundle(tmp_path)
         (bundle / "plugin.json").write_text(
             json.dumps(
@@ -251,10 +253,15 @@ class TestDetectLocalBundle:
             encoding="utf-8",
         )
 
-        with pytest.raises(ValueError, match="Unsupported Agent Plugins manifest schema"):
-            detect_local_bundle(bundle)
+        result = detect_local_bundle(bundle)
 
-    def test_detect_rejects_foreign_schema_bearing_manifest(self, tmp_path: Path) -> None:
+        assert result is not None
+        assert result.format == BundleFormat.CLAUDE_PLUGIN.value
+        assert result.agent_plugin is None
+
+    def test_detect_treats_foreign_schema_bearing_manifest_as_legacy_miss(
+        self, tmp_path: Path
+    ) -> None:
         bundle = _make_plugin_bundle(tmp_path)
         (bundle / "plugin.json").write_text(
             json.dumps(
@@ -266,11 +273,14 @@ class TestDetectLocalBundle:
             encoding="utf-8",
         )
 
-        with pytest.raises(ValueError, match="Unsupported schema-bearing plugin manifest"):
-            detect_local_bundle(bundle)
+        result = detect_local_bundle(bundle)
+
+        assert result is not None
+        assert result.format == BundleFormat.CLAUDE_PLUGIN.value
+        assert result.agent_plugin is None
 
     @pytest.mark.parametrize("container", ("zip", "tar"))
-    def test_rejected_schema_archive_cleans_temporary_extraction(
+    def test_schema_miss_archive_cleans_temporary_extraction(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -297,10 +307,12 @@ class TestDetectLocalBundle:
             lambda **_kwargs: str(extraction),
         )
 
-        with pytest.raises(ValueError, match="Unsupported Agent Plugins manifest schema"):
-            detect_local_bundle(archive)
+        result = detect_local_bundle(archive)
 
-        assert not extraction.exists()
+        assert result is not None
+        assert result.format == BundleFormat.CLAUDE_PLUGIN.value
+        assert result.temp_dir == extraction
+        assert extraction.exists()
 
     @pytest.mark.parametrize("container", ("directory", "zip", "tar"))
     def test_exact_schema_routes_every_local_bundle_container_through_canonical_ir(

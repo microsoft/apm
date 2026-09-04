@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from .path_security import PathTraversalError, ensure_path_within
@@ -200,6 +201,7 @@ def repair_dangling_cone_symlinks(
     env: dict[str, str] | None,
     timeout: int = FULL_CHECKOUT_TIMEOUT_SECONDS,
     extra_git_args: list[str] | None = None,
+    repair_env_factory: Callable[[], dict[str, str]] | None = None,
 ) -> Path | None:
     """Widen a cone checkout to a full tree if it left a dangling symlink.
 
@@ -219,6 +221,9 @@ def repair_dangling_cone_symlinks(
     (no cross-cone symlinks) checks only mode-120000 index entries and
     never disables sparse-checkout.
 
+    ``repair_env_factory`` defers remote validation and credential setup until
+    the uncommon widening path can fetch promised blobs.
+
     Returns:
         The first dangling symlink found (repo-relative resolution
         already applied by the caller's ``repo_dir``), or ``None`` if
@@ -234,20 +239,21 @@ def repair_dangling_cone_symlinks(
     )
     if dangling is None:
         return None
+    repair_env = repair_env_factory() if repair_env_factory is not None else env
     head = [git_exe, *(extra_git_args or [])]
     subprocess.run(
         [*head, "-C", str(repo_dir), "sparse-checkout", "disable"],
         capture_output=True,
         text=True,
         timeout=timeout,
-        env=env,
+        env=repair_env,
         check=True,
     )
     validate_materialized_symlinks(
         git_exe,
         repo_dir,
         paths,
-        env=env,
+        env=repair_env,
         timeout=timeout,
         extra_git_args=extra_git_args,
     )

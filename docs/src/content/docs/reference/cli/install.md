@@ -31,7 +31,7 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 |---|---|---|
 | `--update` | off | Re-resolve dependencies to the latest version or Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. Mutable Git refs must resolve against upstream; APM does not fall back to stale refs from the local bare Git cache. Mutually exclusive with `--frozen`. For interactive use with a confirmation prompt, use [`apm update`](../update/) instead. |
 | `--frozen` | off | Lockfile-only install: refuse to resolve anything new and fail before any project, config, deployment, or cache write if `apm.lock.yaml` is missing or out of sync with `apm.yml`, including MCP state. Mirrors `npm ci`. Mutually exclusive with `--update`, positional package additions, and `--mcp`. |
-| `--dry-run` | off | Print the install plan without deployment writes. Positional packages and ref changes appear in the preview after validation but do not change an existing `apm.yml`; auto-bootstrap still keeps its new manifest and any explicit `--target` selection for the next run. The `-g --mcp` path creates no user manifest, lockfile, or runtime configuration. |
+| `--dry-run` | off | Print the install plan without deployment writes. Positional packages and ref changes appear in the preview after validation but do not change an existing `apm.yml`. Project auto-bootstrap still keeps its new manifest and any explicit `--target` selection for the next run; global dry-run bootstrap uses temporary preview state and does not create `~/.apm`. The `-g --mcp` path creates no user manifest, lockfile, or runtime configuration. |
 | `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Does **not** suppress general install errors (any reported error still exits `1`, matching npm / pip / cargo) or select ref freshness. Add `--update` or `--refresh` to resolve mutable refs upstream; [`apm update`](../update/) does so with or without `--force`. Use only after independent verification. |
 | `--verbose`, `-v` | off | Show per-file paths and full error context in the diagnostic summary. |
 | `--dev` | off | Add new packages to `devDependencies`. Dev deps install locally but are excluded from `apm pack` output. |
@@ -46,11 +46,11 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 | Flag | Default | Description |
 |---|---|---|
-| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `intellij`, `vscode`, `agent-skills`, `all`; experimental `copilot-cowork`, `copilot-app`, `grok-cloud` (skills only), and `hermes` are also accepted when enabled. IntelliJ-specific integration is MCP-only and writes JetBrains Copilot's user-scope MCP config; package file primitives use the Copilot profile. `all` excludes `agent-skills`, `antigravity`, `intellij`, and all experimental targets; combine them explicitly to add them, for example `all,intellij`. Explicit MCP target lists are exact: `intellij,claude` writes only those two MCP configs. See the precedence note below. With nothing to detect, install exits `2` with a teaching message. |
+| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `intellij`, `vscode`, `agent-skills`, `hermes`, `all`; experimental `copilot-cowork`, `copilot-app`, and `grok-cloud` (skills only) are also accepted when enabled. Hermes is stable but explicit-only. IntelliJ-specific integration is MCP-only and writes JetBrains Copilot's user-scope MCP config; package file primitives use the Copilot profile. `all` excludes `agent-skills`, `antigravity`, `hermes`, `intellij`, and all experimental targets; combine them explicitly to add them, for example `all,hermes`. Explicit MCP target lists are exact: `intellij,claude` writes only those two MCP configs. See the precedence note below. With nothing to detect, install exits `2` with a teaching message. |
 | `--runtime VALUE` | unset | Legacy alias for `--target` (single value only). Still accepted; prefer `--target`. |
 | `--exclude VALUE` | unset | Skip one runtime from the resolved MCP/LSP target set (explicit selection, manifest, saved config, or auto-detection). |
 | `--only apm\|mcp` | both | Install only APM packages or MCP/LSP service dependencies. Use `--only=apm` to skip service configuration and `--only=mcp` to select MCP and LSP services only. |
-| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. `apm install -g --mcp NAME` creates or updates `~/.apm/apm.yml`, then deploys only to global-capable runtimes, such as Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot, and Hermes when enabled. Mixed selections skip workspace-only targets with a warning. A selection with no global-capable target exits `2` before changing the user manifest, lockfile, or runtime configuration. |
+| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. `apm install -g --mcp NAME` creates or updates `~/.apm/apm.yml`, then deploys only to global-capable runtimes, such as Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot. Mixed selections skip workspace-only targets with a warning. A selection with no global-capable target exits `2` before changing the user manifest, lockfile, or runtime configuration. |
 | `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 File primitives resolve targets in this order: `--target`, manifest
@@ -116,8 +116,8 @@ in `apm.yml`, then run `apm install` again.
 
 ## Behavior
 
-- **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Its name comes from the current directory (or home directory for global installs) and falls back to `my-project` if that derived name is invalid. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
-- **Target persistence on bootstrap.** When `--target` maps to recognized manifest targets, those target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` redeploys to the same targets without re-specifying `--target`.
+- **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Its name comes from the current directory (or home directory for global installs) and falls back to `my-project` if that derived name is invalid. `apm install --dry-run -g <pkg>` validates through a temporary manifest when `~/.apm/apm.yml` is absent, reports the real user manifest path, and leaves `~/.apm` uncreated. If `~/.apm/apm.yml` already exists, global dry-run reads it in place without writing changes. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
+- **Target persistence on bootstrap.** When `--target` maps to recognized manifest targets, those target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` redeploys to the same targets without re-specifying `--target`. For absent user manifests, `apm install --dry-run -g --target ... <pkg>` previews that target field but does not write it.
 - **One effective target.** Package primitives, MCP servers, and LSP servers consume one target decision per invocation: `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. A saved target therefore applies to `apm install`, `apm install --mcp`, and later `apm update` runs without another flag.
 - **Claude LSP discovery.** Project installs write the APM-managed plugin at
   `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs write
@@ -131,6 +131,15 @@ in `apm.yml`, then run `apm install` again.
   replacements to isolated staging paths and validate them before publication.
   If download, validation, or activation fails, APM keeps the previous package
   and lockfile active and exits non-zero with retry guidance.
+- **Git-hook isolation.** Dependency Git operations ignore repository-locating
+  hook variables, preserving the caller's branch and HEAD. APM allows safe URL
+  rewrites but rejects credentials, insecure transports including `http://` and
+  `git://`, remote-helper syntax such as `ext::` and `https::`, and cross-host
+  network targets for every host class. Credentials are resolved per
+  `(host, port, org)`; private `github.com` helper fallback also uses the
+  repository path. Managed and anonymous HTTPS auth is scoped to the effective
+  repository URL. See
+  [Git URL rewrite safety](../../../getting-started/authentication/#git-url-rewrite-safety).
 - **Instruction frontmatter preflight.** Malformed YAML always rejects the
   package before any of its primitives are deployed. Critical hidden characters
   decoded from metadata also prevent installation by default; `--force`
@@ -212,7 +221,10 @@ For a CI workflow that also gates on `apm audit --ci`, see [Enforce in CI](../..
 ```bash
 apm install --dry-run
 apm install microsoft/apm-sample-package --dry-run
+apm install -g microsoft/apm-sample-package --dry-run
 ```
+
+With `-g`, an absent `~/.apm` remains uncreated while APM previews the user-scope install.
 
 ### Redirect writes to a scratch directory
 

@@ -615,6 +615,7 @@ contracts-tooling-project-yaml-write-delegation
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
+install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cached-claude-skill-metadata
 install-deployment-dependency-winner-selection
@@ -633,11 +634,13 @@ install-deployment-lsp-lifecycle
 install-deployment-lsp-target-contract
 install-deployment-manifest-inheritance-includes
 install-deployment-marketplace-mutation-lock
+install-deployment-lifecycle-serialization
 install-deployment-mcp-ownership-migration
 install-deployment-mcp-registry-resolution
 install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
+install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
@@ -708,6 +711,7 @@ registry_delegation.target_vocabulary
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
 transport-platform-git-cache-identity
+transport-platform-git-child-environment
 transport-platform-git-semver-preflight
 transport-platform-github-throttle
 transport-platform-host-credential-resolution

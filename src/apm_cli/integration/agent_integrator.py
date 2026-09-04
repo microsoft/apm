@@ -13,6 +13,11 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from apm_cli.install.primitive_classification import (
+    AgentSourceClassification,
+    PrimitiveKind,
+    classify_agent_source_file,
+)
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
@@ -51,7 +56,25 @@ class AgentIntegrator(BaseIntegrator):
     # Deploys via write_text_lf -> compare adopt candidates in LF mode.
     _LF_NORMALIZED_DEPLOY = True
 
-    def find_agent_files(self, package_path: Path, source_plan=None) -> list[Path]:
+    @staticmethod
+    def _warn_agent_classification(
+        classification: AgentSourceClassification,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        if classification.warning and diagnostics is not None:
+            diagnostics.warn(
+                message=classification.warning,
+                package=printable_ascii_text(package_name),
+            )
+
+    def find_agent_files(
+        self,
+        package_path: Path,
+        source_plan=None,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> list[Path]:
         """Find all agent files in a package.
 
         Searches in:
@@ -65,16 +88,28 @@ class AgentIntegrator(BaseIntegrator):
             List[Path]: List of absolute paths to agent files
         """
         files: list[Path] = []
-        # Flat search in package root
-        files += self.find_files_by_glob(package_path, "*.agent.md")
-        # Recursive search in .apm/agents/ (use ** glob for subdirectories)
+        # Flat search in package root. The extension is only the final
+        # fallback; declarations inside the file still route through the owner.
+        for candidate in self.find_files_by_glob(package_path, "*.agent.md"):
+            classification = classify_agent_source_file(candidate, package_path)
+            self._warn_agent_classification(classification, diagnostics, package_name)
+            if classification.kind is PrimitiveKind.AGENT:
+                files.append(candidate)
+        # Recursive search in .apm/agents/; the classification owner decides
+        # whether each file is an agent before target layout derives a name.
         apm_agents = package_path / ".apm" / "agents"
         if apm_agents.exists():
-            files += self.find_files_by_glob(apm_agents, "**/*.agent.md")
-            # Also pick up plain .md files; the directory name implies type
-            for f in self.find_files_by_glob(apm_agents, "**/*.md"):
-                if not f.name.endswith(".agent.md") and f not in files:
-                    files.append(f)
+            candidates = [f for f in self.find_files_by_glob(apm_agents, "**/*") if f.is_file()]
+            authorized = set(self.filter_authorized_files(candidates, source_plan))
+            for candidate in candidates:
+                classification = classify_agent_source_file(candidate, apm_agents)
+                self._warn_agent_classification(classification, diagnostics, package_name)
+                if (
+                    classification.kind is PrimitiveKind.AGENT
+                    and candidate in authorized
+                    and candidate not in files
+                ):
+                    files.append(candidate)
         return self.filter_authorized_files(files, source_plan)
 
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
@@ -129,7 +164,12 @@ class AgentIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         self.init_link_resolver(package_info, project_root)
-        agent_files = self.find_agent_files(package_info.install_path, source_plan)
+        agent_files = self.find_agent_files(
+            package_info.install_path,
+            source_plan,
+            diagnostics,
+            package_info.package.name,
+        )
         if not agent_files:
             return IntegrationResult(0, 0, 0, [])
 
@@ -668,7 +708,11 @@ class AgentIntegrator(BaseIntegrator):
         copilot = KNOWN_TARGETS["copilot"]
 
         self.init_link_resolver(package_info, project_root)
-        agent_files = self.find_agent_files(package_info.install_path)
+        agent_files = self.find_agent_files(
+            package_info.install_path,
+            diagnostics=diagnostics,
+            package_name=package_info.package.name,
+        )
         if not agent_files:
             return IntegrationResult(0, 0, 0, [])
 

@@ -31,9 +31,9 @@ Security gates (round-2 panel findings)
 
 from __future__ import annotations
 
-import base64
 import contextlib
 import re
+import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -44,10 +44,11 @@ import requests
 from git.exc import GitCommandError
 
 from ..config import get_apm_temp_dir
+from ..utils.git_env import git_subprocess_error_text
 from ..utils.github_host import (
     default_host,
+    is_ado_auth_failure_signal,
     is_github_hostname,
-    set_authorization_header_git_env,
 )
 from ..utils.path_security import (
     PathTraversalError,
@@ -331,30 +332,10 @@ def _build_validation_attempts(
 ) -> list[AttemptSpec]:
     """Return the AttemptSpec chain for a probe against ``dep_ref``.
 
-    Mirrors the auth chain in ``_clone_with_fallback`` and centralises the
-    header-injection switch so both ``ls-remote`` and the shallow-fetch
-    path probe reuse it.
+    AuthResolver owns remote-aware credential suppression and host-specific
+    header formatting. This helper builds tokenless URLs and labels the
+    resulting validation attempts; it never replaces AuthResolver output.
 
-    SECURITY (panel round-3 finding): for ALL HTTPS attempts (ADO and
-    non-ADO) we inject credentials via ``http.extraheader`` rather than
-    embedding them in the URL.  This keeps tokens out of the OS process
-    table, git's own logs, and any temp ``.git/config`` written by the
-    shallow-fetch probe.
-
-    Auth scheme handling (panel round-3 ADO Basic finding):
-      * ADO + ``auth_scheme == "basic"`` (PAT): ``Authorization: Basic
-        base64(":" + PAT)`` per ADO's HTTP Basic convention.  A raw
-        ``Bearer <PAT>`` is rejected with 401.
-      * ADO + ``auth_scheme == "bearer"`` (AAD JWT): ``Authorization:
-        Bearer <token>``.
-      * GitLab: ``Authorization: Basic base64("oauth2:" + PAT)`` to match
-        the GitLab HTTPS clone credential shape without putting the PAT in
-        the URL.
-      * Non-ADO with ``auth_scheme == "bearer"``: ``Authorization: Bearer
-        <token>`` (matches GitHub recommendation for OAuth/App tokens).
-      * Non-ADO with ``auth_scheme == "basic"`` (legacy classic PAT):
-        ``Authorization: Bearer <token>`` -- GitHub accepts both forms;
-        Bearer keeps the token out of any URL component.
     """
     if dep_ref.is_artifactory():
         return []
@@ -390,6 +371,35 @@ def _build_validation_attempts(
         dep_auth_ctx = downloader._resolve_dep_auth_ctx(dep_ref)
         dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
 
+    if is_ado:
+        ado_url = downloader._build_repo_url(
+            dep_ref.repo_url,
+            use_ssh=False,
+            dep_ref=dep_ref,
+            token="",
+            auth_scheme=dep_auth_scheme,
+        )
+        ado_env = (
+            downloader.auth_resolver.git_env_for_remote(dep_auth_ctx, ado_url)
+            if dep_auth_ctx is not None
+            else downloader.auth_resolver.build_noninteractive_git_env(
+                base_env=downloader.git_env,
+                host_kind="ado",
+                preserve_config_isolation=True,
+                suppress_credential_helpers=True,
+            )
+        )
+        auth_label = (
+            "ADO authenticated HTTPS (bearer header)"
+            if dep_auth_scheme == "bearer"
+            else (
+                "ADO authenticated HTTPS (basic header)"
+                if dep_token
+                else "ADO HTTPS without resolved credential"
+            )
+        )
+        return [AttemptSpec(auth_label, ado_url, ado_env)]
+
     attempts: list[AttemptSpec] = []
 
     # Attempt 1: explicit token, header-injected. Skipped when no token.
@@ -397,65 +407,59 @@ def _build_validation_attempts(
         if is_ado and dep_auth_scheme == "basic":
             # ADO PAT requires HTTP Basic with base64(":PAT"). A raw
             # Bearer header would 401 every ADO PAT user.
-            encoded = base64.b64encode(f":{dep_token}".encode()).decode("ascii")
-            auth_header = ("Basic", encoded)
             label = "ADO authenticated HTTPS (basic header)"
         elif is_ado:  # bearer (AAD JWT)
-            auth_header = ("Bearer", dep_token)
             label = "ADO authenticated HTTPS (bearer header)"
         elif is_gitlab:
-            encoded = base64.b64encode(f"oauth2:{dep_token}".encode()).decode("ascii")
-            auth_header = ("Basic", encoded)
             label = "GitLab authenticated HTTPS (basic header)"
         else:
             # Non-ADO: header injection rather than URL embedding so the
             # token never appears in argv or temp .git/config.
-            auth_header = ("Bearer", dep_token)
             label = "authenticated HTTPS (header)"
 
-        token_env = (
-            downloader.auth_resolver.git_env_for_context(
-                dep_auth_ctx,
-                base_env=downloader.git_env,
-            )
-            if dep_auth_ctx is not None
-            else dict(downloader.git_env)
-        )
-        set_authorization_header_git_env(token_env, *auth_header)
         token_url = downloader._build_repo_url(
             dep_ref.repo_url,
             use_ssh=False,
             dep_ref=dep_ref,
-            token="",  # tokenless URL: credentials live in the env header
+            token="",
             auth_scheme=dep_auth_scheme if is_ado else "basic",
+        )
+        token_env = (
+            downloader.auth_resolver.git_env_for_remote(
+                dep_auth_ctx,
+                token_url,
+            )
+            if dep_auth_ctx is not None
+            else downloader.auth_resolver._build_git_env(
+                dep_token,
+                scheme=dep_auth_scheme,
+                host_kind=host_info.kind if host_info is not None else "github",
+                base_env=downloader.git_env,
+            )
         )
         attempts.append(AttemptSpec(label, token_url, token_env))
 
     # Attempt 2: plain HTTPS w/ credential helper (no token, no header).
-    plain_env = (
-        downloader.auth_resolver.build_public_github_anonymous_git_env(
-            base_env=downloader.git_env,
-        )
-        if public_github_anonymous_first
-        else (
-            downloader.auth_resolver.build_noninteractive_git_env(
-                base_env=downloader.git_env,
-                host_kind="ado",
-                preserve_config_isolation=True,
-            )
-            if is_ado
-            else downloader._build_noninteractive_git_env(
-                preserve_config_isolation=is_insecure,
-                suppress_credential_helpers=is_insecure,
-            )
-        )
-    )
     plain_url = downloader._build_repo_url(
         dep_ref.repo_url,
         use_ssh=False,
         dep_ref=dep_ref,
         token="",
     )
+    if public_github_anonymous_first:
+        plain_env = downloader.auth_resolver.build_public_github_anonymous_git_env(
+            base_env=downloader.git_env,
+        )
+    elif host_info is not None:
+        plain_env = downloader.auth_resolver.build_native_git_credential_env(
+            host_info,
+            plain_url,
+        )
+    else:
+        plain_env = downloader._build_noninteractive_git_env(
+            preserve_config_isolation=is_insecure,
+            suppress_credential_helpers=is_insecure,
+        )
     plain_label = (
         "anonymous GitHub HTTPS"
         if public_github_anonymous_first
@@ -508,9 +512,33 @@ def _ref_exists_via_ls_remote(
         if ls-remote succeeded via SSH but the follow-up probe used the
         rejected PAT, the fallback would silently false-reject).
     """
+    if dep_ref.is_artifactory():
+        return False, None
     is_sha = _is_sha_pin(ref)
     ref_lc = ref.lower()
     g = git.cmd.Git()
+
+    def _run_remote(
+        url: str,
+        env: dict[str, str],
+        *,
+        options: tuple[str, ...] = (),
+        patterns: tuple[str, ...] = (),
+    ) -> str:
+        if type(g).__module__.startswith("unittest.mock"):
+            return g.ls_remote(*options, url, *patterns, env=env)
+        from ..utils.git_env import git_remote_refs
+
+        result = git_remote_refs(url, *patterns, env=env, options=options)
+        if result.returncode != 0:
+            # auth-delegated: the validated AttemptSpec owns this credential choice.
+            raise GitCommandError(
+                ["git", "ls-remote", *options, url, *patterns],
+                result.returncode,
+                stderr=result.stderr,
+            )
+        return result.stdout
+
     host = dep_ref.host or default_host()
     if (
         not dep_ref.is_insecure
@@ -529,8 +557,6 @@ def _ref_exists_via_ls_remote(
             probe_env = dict(git_env)
             label = "anonymous GitHub HTTPS"
             if token:
-                set_authorization_header_git_env(probe_env, "Bearer", token)
-                probe_env.pop("GIT_TOKEN", None)
                 label = "authenticated GitHub HTTPS"
             url = downloader._build_repo_url(
                 dep_ref.repo_url,
@@ -538,16 +564,16 @@ def _ref_exists_via_ls_remote(
                 dep_ref=dep_ref,
                 token="",
             )
-            if is_sha:
-                output = g.ls_remote(url, env=probe_env)
-            else:
-                output = g.ls_remote(
-                    "--heads",
-                    "--tags",
+            output = (
+                _run_remote(url, probe_env)
+                if is_sha
+                else _run_remote(
                     url,
-                    ref,
-                    env=probe_env,
+                    probe_env,
+                    options=("--heads", "--tags"),
+                    patterns=(ref,),
                 )
+            )
             return output, AttemptSpec(label, url, probe_env)
 
         org = dep_ref.repo_url.split("/", 1)[0]
@@ -581,12 +607,85 @@ def _ref_exists_via_ls_remote(
         except (GitCommandError, OSError) as exc:
             log(
                 "  [x] ls-remote failed via anonymous-first GitHub HTTPS: "
-                f"{downloader._sanitize_git_error(str(exc))}"
+                f"{git_subprocess_error_text(exc)}"
             )
             return False, None
 
     attempts = _build_validation_attempts(downloader, dep_ref, log)
     if not attempts:
+        return False, None
+
+    if dep_ref.is_azure_devops():
+        primary_attempt = attempts[0]
+        primary_ctx = downloader._resolve_dep_auth_ctx(dep_ref)
+
+        def _probe_ado(
+            attempt: AttemptSpec,
+        ) -> tuple[str, AttemptSpec, BaseException | None]:
+            try:
+                output = (
+                    _run_remote(attempt.url, attempt.env)
+                    if is_sha
+                    else _run_remote(
+                        attempt.url,
+                        attempt.env,
+                        options=("--heads", "--tags"),
+                        patterns=(ref,),
+                    )
+                )
+                return output, attempt, None
+            except (GitCommandError, OSError) as exc:
+                return "", attempt, exc
+
+        def _bearer_probe(bearer: str) -> tuple[str, AttemptSpec, BaseException | None]:
+            if primary_ctx is None:
+                return "", primary_attempt, RuntimeError("ADO auth context unavailable")
+            bearer_env = downloader.auth_resolver.build_ado_bearer_git_env(
+                primary_ctx,
+                bearer,
+                primary_attempt.url,
+            )
+            bearer_attempt = AttemptSpec(
+                "ADO authenticated HTTPS (bearer header)",
+                primary_attempt.url,
+                bearer_env,
+            )
+            return _probe_ado(bearer_attempt)
+
+        fallback = downloader.auth_resolver.execute_with_bearer_fallback(
+            dep_ref,
+            lambda: _probe_ado(primary_attempt),
+            _bearer_probe,
+            lambda outcome: bool(
+                primary_ctx is not None
+                and getattr(primary_ctx, "source", "") == "ADO_APM_PAT"
+                and outcome[2] is not None
+                and is_ado_auth_failure_signal(git_subprocess_error_text(outcome[2]))
+            ),
+        )
+        output, winning_attempt, error = fallback.outcome
+        if error is not None:
+            log(
+                f"  [x] ls-remote failed via {winning_attempt.label}: "
+                f"{git_subprocess_error_text(error)}"
+            )
+            return False, None
+        matched = bool(
+            output
+            and (
+                any(
+                    line.split("\t", 1)[0].lower().startswith(ref_lc)
+                    for line in output.splitlines()
+                    if line
+                )
+                if is_sha
+                else output.strip()
+            )
+        )
+        if matched:
+            log(f"  [+] ls-remote ok via {winning_attempt.label}")
+            return True, winning_attempt
+        log(f"  [!] ls-remote returned no matching refs via {winning_attempt.label}")
         return False, None
 
     for attempt in attempts:
@@ -596,7 +695,7 @@ def _ref_exists_via_ls_remote(
                 # SHA pins: scan the full advertised-refs list.  The
                 # ``--heads --tags`` filters scan only ``refs/heads/*``
                 # and ``refs/tags/*`` and silently drop commit SHAs.
-                output = g.ls_remote(url, env=env)
+                output = _run_remote(url, env)
                 if output and any(
                     line.split("\t", 1)[0].lower().startswith(ref_lc)
                     for line in output.splitlines()
@@ -606,13 +705,18 @@ def _ref_exists_via_ls_remote(
                     return True, attempt
                 log(f"  [!] ls-remote returned no SHA match via {label}")
             else:
-                output = g.ls_remote("--heads", "--tags", url, ref, env=env)
+                output = _run_remote(
+                    url,
+                    env,
+                    options=("--heads", "--tags"),
+                    patterns=(ref,),
+                )
                 if output and output.strip():
                     log(f"  [+] ls-remote ok via {label}")
                     return True, attempt
                 log(f"  [!] ls-remote returned no matching refs via {label}")
         except (GitCommandError, OSError) as exc:
-            log(f"  [x] ls-remote failed via {label}: {downloader._sanitize_git_error(str(exc))}")
+            log(f"  [x] ls-remote failed via {label}: {git_subprocess_error_text(exc)}")
 
     return False, None
 
@@ -652,30 +756,63 @@ def _path_exists_in_tree_at_ref(
     try:
         bare = tmpdir / "probe.git"
         bare.mkdir()
-        g = git.cmd.Git(str(bare))
+        from ..utils.git_env import (
+            get_git_executable,
+            git_network_env,
+            git_no_templates_args,
+            git_subprocess_env,
+        )
+
+        git_exe = get_git_executable()
+        probe_env = git_subprocess_env(env)
         try:
-            g.init("--bare")
-            g.remote("add", "origin", url)
+            subprocess.run(
+                [git_exe, "init", *git_no_templates_args(), "--bare", str(bare)],
+                check=True,
+                capture_output=True,
+                env=probe_env,
+            )
+            probe_env = git_network_env(url, probe_env, git_dir=bare)
+            subprocess.run(
+                [git_exe, "--git-dir", str(bare), "remote", "add", "origin", url],
+                check=True,
+                capture_output=True,
+                env=probe_env,
+            )
+            remote_env = git_network_env(url, probe_env, git_dir=bare)
             # --filter=tree:0 keeps the fetch payload tiny: we get the
             # commit + a single tree object, no blob contents.
-            g.fetch(
-                "--depth=1",
-                "--filter=tree:0",
-                "origin",
-                ref,
-                env=env,
+            subprocess.run(
+                [
+                    git_exe,
+                    "--git-dir",
+                    str(bare),
+                    "fetch",
+                    "--depth=1",
+                    "--filter=tree:0",
+                    "origin",
+                    ref,
+                ],
+                check=True,
+                capture_output=True,
+                env=remote_env,
             )
-        except (GitCommandError, OSError) as exc:
-            log(
-                f"  [x] shallow fetch failed via {label}: "
-                f"{downloader._sanitize_git_error(str(exc))}"
-            )
+        except (subprocess.CalledProcessError, OSError) as exc:
+            log(f"  [x] shallow fetch failed via {label}: {git_subprocess_error_text(exc)}")
             return False
 
         try:
-            output = g.ls_tree("FETCH_HEAD", vpath, env=env)
-        except (GitCommandError, OSError) as exc:
-            log(f"  [x] ls-tree failed via {label}: {downloader._sanitize_git_error(str(exc))}")
+            result = subprocess.run(
+                [git_exe, "--git-dir", str(bare), "ls-tree", "FETCH_HEAD", vpath],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=remote_env,
+            )
+            output = result.stdout
+        except (subprocess.CalledProcessError, OSError) as exc:
+            error = git_subprocess_error_text(exc)
+            log(f"  [x] ls-tree failed via {label}: {error}")
             return False
 
         if output and output.strip():

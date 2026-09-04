@@ -9,6 +9,8 @@ Strategy: hermetic -- mocks registry, runtime, console.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -18,8 +20,10 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.commands.uninstall.engine import _cleanup_stale_mcp
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.apm_package import clear_apm_yml_cache
@@ -27,6 +31,59 @@ from apm_cli.models.apm_package import clear_apm_yml_cache
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def test_uninstall_cleanup_preserves_same_named_server_in_other_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime ownership must prevent cross-runtime same-name deletion."""
+    home = tmp_path / "home"
+    hermes_config = home / ".hermes" / "config.yaml"
+    codex_config = home / ".codex" / "config.toml"
+    hermes_config.parent.mkdir(parents=True)
+    codex_config.parent.mkdir(parents=True)
+    hermes_config.write_text(
+        "mcp_servers:\n  shared-name:\n    command: managed\n",
+        encoding="utf-8",
+    )
+    codex_config.write_text(
+        '[mcp_servers."shared-name"]\ncommand = "user-command"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HERMES_HOME", str(hermes_config.parent))
+    lockfile = LockFile(
+        mcp_servers=["shared-name"],
+        mcp_target_servers={"hermes": ["shared-name"]},
+    )
+    view = SimpleNamespace(dependencies=[], configs={}, provenance={})
+
+    with patch(
+        "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
+        return_value=view,
+    ):
+        _cleanup_stale_mcp(
+            MagicMock(),
+            lockfile,
+            tmp_path / "apm.lock.yaml",
+            {"shared-name"},
+            modules_dir=tmp_path / "apm_modules",
+            user_scope=True,
+            scope=InstallScope.USER,
+            persist=False,
+        )
+
+    assert (
+        "shared-name"
+        not in yaml.safe_load(hermes_config.read_text(encoding="utf-8"))["mcp_servers"]
+    )
+    assert (
+        tomlkit.parse(codex_config.read_text(encoding="utf-8"))["mcp_servers"]["shared-name"][
+            "command"
+        ]
+        == "user-command"
+    )
 
 
 def _make_registry_dep(
@@ -392,6 +449,106 @@ def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_pat
     contracted_lock = LockFile.read(tmp_path / "apm.lock.yaml")
     assert contracted_lock is not None
     assert contracted_lock.mcp_target_servers == {"copilot": ["apm-managed"]}
+
+
+def test_global_manifest_removal_cleans_antigravity_config_and_lock(tmp_path, monkeypatch):
+    """Removing global MCP deps cleans Antigravity's user config and ownership state."""
+    home = tmp_path / "home"
+    apm_home = home / ".apm"
+    apm_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr("pathlib.Path.home", staticmethod(lambda: home))
+    monkeypatch.chdir(tmp_path)
+
+    manifest = _self_defined_manifest(targets=["antigravity"])
+    (apm_home / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    LockFile().write(apm_home / "apm.lock.yaml")
+
+    installed = CliRunner().invoke(cli, ["install", "--global", "--no-policy"])
+    assert installed.exit_code == 0, installed.output
+
+    config_path = home / ".gemini" / "config" / "mcp_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["mcpServers"]["user-authored"] = {"command": "keep"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    manifest["dependencies"]["mcp"] = []
+    (apm_home / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()
+    removed = CliRunner().invoke(cli, ["install", "--global", "--no-policy"])
+
+    assert removed.exit_code == 0, removed.output
+    servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert "apm-managed" not in servers
+    assert servers["user-authored"]["command"] == "keep"
+    lockfile = LockFile.read(apm_home / "apm.lock.yaml")
+    assert lockfile is not None
+    assert lockfile.mcp_servers == []
+    assert lockfile.mcp_target_servers == {}
+
+
+def test_prune_removes_only_owned_antigravity_mcp(tmp_path, monkeypatch):
+    """Pruning an orphan package reconciles its MCP config before saving the lock."""
+    package = tmp_path / "orphan-package"
+    package.mkdir()
+    (package / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "orphan-package",
+                "version": "1.0.0",
+                "dependencies": {
+                    "mcp": [
+                        {
+                            "name": "orphan-server",
+                            "registry": False,
+                            "transport": "stdio",
+                            "command": "echo",
+                            "args": ["orphan"],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    (project / "apm.yml").write_text(
+        "name: prune-mcp\nversion: 0.0.1\ndependencies:\n  apm: []\n  mcp: []\n",
+        encoding="utf-8",
+    )
+
+    installed = CliRunner().invoke(
+        cli,
+        ["install", str(package), "--target", "antigravity", "--no-policy"],
+    )
+    assert installed.exit_code == 0, installed.output
+
+    config_path = project / ".agents" / "mcp_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "orphan-server" in config["mcpServers"]
+    config["mcpServers"]["user-authored"] = {"command": "keep"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"] = []
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()
+
+    pruned = CliRunner().invoke(cli, ["prune"])
+    assert pruned.exit_code == 0, pruned.output
+
+    servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert "orphan-server" not in servers
+    assert servers["user-authored"]["command"] == "keep"
+    lockfile = LockFile.read(project / "apm.lock.yaml")
+    if lockfile is not None:
+        assert "orphan-server" not in lockfile.mcp_servers
+        assert all(
+            "orphan-server" not in servers for servers in lockfile.mcp_target_servers.values()
+        )
 
 
 def test_legacy_vscode_ownership_migrates_to_copilot_without_rewriting_vscode(

@@ -159,7 +159,11 @@ def mcp_registry_recovery_hint(source: str) -> str:
     }.get(source, "Check the MCP registry configuration.")
 
 
-def resolve_mcp_registry_url(explicit: str | None = None) -> tuple[str, str]:
+def resolve_mcp_registry_url(
+    explicit: str | None = None,
+    *,
+    create_config: bool = False,
+) -> tuple[str, str]:
     """Resolve the MCP registry endpoint and the layer that supplied it.
 
     This is the one place the precedence chain lives, so the endpoint that
@@ -193,7 +197,9 @@ def resolve_mcp_registry_url(explicit: str | None = None) -> tuple[str, str]:
     # pulled in by every import of the registry package.
     from ..config import get_mcp_registry_url
 
-    config_value = get_mcp_registry_url()
+    config_value = (
+        get_mcp_registry_url(create_config=True) if create_config else get_mcp_registry_url()
+    )
     if config_value:
         return config_value, "config"
     return _DEFAULT_REGISTRY_URL, "default"

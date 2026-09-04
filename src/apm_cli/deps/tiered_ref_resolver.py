@@ -325,7 +325,7 @@ class L2BareRevParse:
         for candidate in candidates:
             try:
                 result = subprocess.run(
-                    [git_exe, "-C", str(bare_dir), "rev-parse", "--verify", candidate],
+                    [git_exe, "--git-dir", str(bare_dir), "rev-parse", "--verify", candidate],
                     capture_output=True,
                     text=True,
                     timeout=5,

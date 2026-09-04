@@ -338,7 +338,7 @@ class TestAuthResolverResolve:
         assert ctx.git_env.get("GIT_TERMINAL_PROMPT") == "0"
         assert ctx.git_env.get("GIT_ASKPASS") == "echo"
 
-    def test_git_env_injects_git_token_for_basic_scheme(self) -> None:
+    def test_git_env_injects_basic_authorization_header(self) -> None:
         with (
             patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_tok"}, clear=True),
             _NO_GIT_CRED,
@@ -346,7 +346,12 @@ class TestAuthResolverResolve:
         ):
             resolver = AuthResolver()
             ctx = resolver.resolve("github.com")
-        assert ctx.git_env.get("GIT_TOKEN") == "ghp_tok"
+        assert "GIT_TOKEN" not in ctx.git_env
+        config_values = [
+            value for key, value in ctx.git_env.items() if key.startswith("GIT_CONFIG_VALUE_")
+        ]
+        assert any(value.startswith("Authorization: Basic ") for value in config_values)
+        assert all("ghp_tok" not in value for value in config_values)
         assert ctx.auth_scheme == "basic"
 
 

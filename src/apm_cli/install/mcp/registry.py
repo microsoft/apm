@@ -127,6 +127,7 @@ def resolve_registry_url(
     *,
     logger=None,
     announce: bool = True,
+    create_config: bool = True,
 ) -> tuple[str | None, str]:
     """Apply precedence chain: flag > env > apm config > default.
 
@@ -152,7 +153,7 @@ def resolve_registry_url(
     """
     from ...registry.client import REGISTRY_SOURCE_LABELS, resolve_mcp_registry_url
 
-    url, source = resolve_mcp_registry_url(cli_value)
+    url, source = resolve_mcp_registry_url(cli_value, create_config=create_config)
     if source == "default":
         return None, "default"
 

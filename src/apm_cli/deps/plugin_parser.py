@@ -21,6 +21,7 @@ from typing import Any
 
 import yaml
 
+from ..bundle.plugin_layout import plugin_command_prompt_name
 from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
@@ -352,6 +353,13 @@ def normalized_plugin_skill_sources(plugin_path: Path) -> tuple[dict[str, Path],
     return resolved, declared
 
 
+def has_normalized_plugin_skill_sources_receipt(plugin_path: Path) -> bool:
+    """Return whether parser-owned plugin skill membership is present."""
+    apm_dir = plugin_path.resolve() / ".apm"
+    receipt = apm_dir / _PLUGIN_SKILL_SOURCES_FILE
+    return not apm_dir.is_symlink() and receipt.is_file() and not receipt.is_symlink()
+
+
 def _write_plugin_skill_sources(
     plugin_path: Path,
     apm_dir: Path,
@@ -479,7 +487,10 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     ):
         manifest = parse_plugin_manifest(plugin_json_path)
         from ..agent_plugins.errors import AgentPluginLegacyBoundaryError
-        from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+        from ..install.primitive_classification import (
+            PluginSchemaRoute,
+            classify_plugin_manifest_schema,
+        )
 
         if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:
             raise AgentPluginLegacyBoundaryError(
@@ -1241,8 +1252,7 @@ def _map_plugin_artifacts(
                 target_path = dest_dir / relative_path
             else:
                 target_path = dest_dir / source_file.name
-            if not source_file.name.endswith(".prompt.md") and source_file.suffix == ".md":
-                target_path = target_path.with_name(f"{source_file.stem}.prompt.md")
+            target_path = target_path.with_name(plugin_command_prompt_name(source_file.name))
             target_path.parent.mkdir(parents=True, exist_ok=True)
             if _is_same_path(source_file, target_path):
                 return

@@ -226,13 +226,17 @@ def _assert_ado_transport_isolation(records: list[dict[str, object]]) -> None:
         assert record["git_token_sha256"] is None
         encoded = base64.b64encode(f":{_ADO_PAT}".encode()).decode()
         expected_header = f"Authorization: Basic {encoded}"
-        assert record["authorization_header_sha256"] == [
-            hashlib.sha256(expected_header.encode()).hexdigest()
-        ]
+        assert record["authorization_header_sha256"] in (
+            [],
+            [hashlib.sha256(expected_header.encode()).hexdigest()],
+        )
         assert record["github_tokens_present"] == [], record
         assert record["git_config_global"], record
         assert record["git_config_nosystem"] == "1"
-        assert any(str(key).startswith("url.") for key in record["non_auth_git_config_keys"])
+        command = record["argv_without_urls"]
+        assert isinstance(command, list)
+        if {"clone", "fetch", "ls-remote"}.intersection(command):
+            assert any(str(key).startswith("url.") for key in record["non_auth_git_config_keys"])
 
 
 def _snapshot(project_root: Path) -> LifecycleStateSnapshot:

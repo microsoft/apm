@@ -100,8 +100,12 @@ above, the MINIMUM evidence tier required to certify
 | Marketplace download + integrity | `integration-with-fixtures` | path segment + hash checks only meaningful against real downloaded content |
 | Cross-module integration | `integration-with-fixtures` | unit tests on either side do not catch contract drift across the boundary |
 | Canonical durable-fact owner | `integration-with-fixtures` | a static owner guard proves routing, not the consumer-visible fact |
+| Durable state across lifecycle phases | `lifecycle-state-machine` | install/compile/audit/uninstall interplay only manifests when the REAL binary drives real transitions over real on-disk state |
+| Ownership boundary (what APM may write or delete) | `lifecycle-state-machine` | "only touch what we own" is provable only by planting unowned sentinel files and running the full lifecycle against them |
+| Dry-run / preview no-write promise | `lifecycle-state-machine` | proving "nothing was written" requires a before/after state snapshot, not command output |
+| Uninstall / cleanup completeness | `lifecycle-state-machine` | orphaned files (under-delete) and collateral damage (over-delete) appear only after a real install-then-uninstall round trip |
 
-Two new disciplines follow from this matrix:
+Three new disciplines follow from this matrix:
 
 1. **Tier-floor compliance check.** When you find a unit test that
    covers a critical-surface change but no test at the floor tier
@@ -123,6 +127,92 @@ Two new disciplines follow from this matrix:
    test requires a credential you don't have (e.g. `GITHUB_APM_PAT`),
    note the skip in `evidence.run_evidence` and downgrade `outcome`
    to `unknown` for that row -- do NOT certify on a read.
+3. **ApmLifecycle contract-test signal (LOAD-BEARING).** When the diff
+   touches durable state, you MUST return an explicit signal about
+   whether an ApmLifecycle contract test is added, adjusted, or
+   missing. Silence is not an acceptable answer on these surfaces.
+   See the next section for the engine and the trigger list.
+
+## The ApmLifecycle engine (your highest-proof instrument)
+
+APM ships a real-CLI state-machine harness. It is the most powerful
+verification tool in this repo and the one most often skipped, because
+unit tests are cheaper to write and LOOK like proof. Know it and
+demand it.
+
+**What it is.** `tests/integration/test_required_lifecycle_state_machine.py`
+is the canonical module. Its machinery:
+
+- `tests/utils/apm_lifecycle_runner.py` -- `ApmLifecycleRunner` drives
+  the REAL `apm` binary, not Click's `CliRunner` and not Python APIs
+- `tests/utils/isolated_apm_environment.py` -- `IsolatedApmEnvironment`
+  gives a hermetic HOME + project root, so user-scope writes are
+  observable (`root_id="apm-home"`)
+- `tests/utils/lifecycle_state.py` -- `LifecycleStateSnapshot.capture()`
+  plus the `_assert_same_state(before, after)` equivalence helper
+- `tests/utils/local_package.py`, `tests/utils/local_git_repository.py`
+  -- build real fixture packages and git remotes
+- markers: `integration`, `e2e`, `lifecycle_smoke`,
+  `requires_apm_binary`, `requires_e2e_mode`
+
+**Why it is different in kind.** It drives real STATE TRANSITIONS
+(install -> compile -> audit -> uninstall, target widen-then-narrow,
+lock-then-prune) and snapshots durable state on both sides. It is the
+only tier that can prove a NEGATIVE -- "this file was not written",
+"this file was not deleted", "this user content survived" -- which is
+exactly the class of promise that unit and integration tests cannot
+certify. In full agentic coding, where a change lands without a human
+walking the CLI by hand, this harness IS the human walkthrough.
+
+**Trigger list -- signal REQUIRED when the diff touches any of:**
+
+- install / uninstall / update / compile / audit command paths
+- the deployment ledger, lockfile write path, or `deployed_files`
+- target resolution, target widening or narrowing, primitive-to-target
+  layout mapping
+- anything writing into a target root (`.github/`, `.claude/`,
+  `.cursor/`, `.agents/`, ...) or into user scope (`~/.apm/`)
+- `--dry-run` behavior on any command
+- cleanup, pruning, reconciliation, drift, or orphan handling
+
+**What you must return on a trigger.** One of exactly these, and never
+silence:
+
+- `outcome: passed`, `tier: lifecycle-state-machine` -- an
+  ApmLifecycle test covers this transition. `run_evidence` REQUIRED
+  (S7 PROBE RULE: you RAN it). Name the test and quote the assertion.
+- `outcome: missing`, `tier: lifecycle-state-machine` -- no lifecycle
+  coverage for this transition. Give the exact test file, the test
+  name you would use, the command SEQUENCE it should drive, and the
+  assertion pseudocode. Severity `recommended` by default; `blocking`
+  when the change touches an ownership boundary, a destructive path
+  (uninstall / cleanup / prune), or a dry-run no-write promise.
+- `outcome: passed`, `tier: <lower>` PLUS a second `outcome: missing`,
+  `tier: lifecycle-state-machine` row -- the tier-floor compliance
+  shape, when lower-tier tests exist but the floor is unmet.
+
+**Adjusting beats adding.** Prefer extending an EXISTING lifecycle
+test (a new assertion, a new parametrize case) over authoring a new
+module. These tests are expensive in CI shard time; a sibling PR in
+this repo already hit a Shard-2 timeout. When you recommend new
+lifecycle coverage, say explicitly whether it should extend a named
+existing test or stand alone, and justify the choice.
+
+**Derive from the catalog, not from a list.** When the surface is
+per-target, coverage that hardcodes target names rots the moment a
+target is added. Prefer parametrization derived from `KNOWN_TARGETS`
+(`src/apm_cli/integration/targets.py`) and say so in `suggestion`.
+
+**The anti-pattern that defeats this tier.** A lifecycle test whose
+only effective assertion is a string or ledger-field comparison is
+NOT lifecycle proof -- it is a unit test relocated into a lifecycle
+file, and it is worse than nothing because the filename implies a
+guarantee that is absent. When you certify `tier:
+lifecycle-state-machine`, the assertion you quote MUST be an
+observable state fact: a file present or absent, bytes unchanged, a
+snapshot equivalence. If the only assertion available is a string
+compare, return `outcome: missing` with a note that the existing test
+does not detect the regression it appears to guard.
 
 ## Review procedure (MANDATORY -- do not skip)
 
@@ -339,8 +429,9 @@ Per outcome, the required shape:
   the file has more than one test, `assertion_excerpt` REQUIRED
   (verbatim line carrying the assertion, under 240 chars), `proves`
   REQUIRED (the user promise in user words), `principles` REQUIRED,
-  `tier` REQUIRED (`unit` | `integration-with-fixtures` | `e2e` |
-  `manual-only` | `static`). When `tier` is `integration-with-fixtures`
+  `tier` REQUIRED (`unit` | `integration-with-fixtures` |
+  `lifecycle-state-machine` | `e2e` | `manual-only` | `static`). When
+  `tier` is `integration-with-fixtures`, `lifecycle-state-machine`,
   or `e2e` AND the surface is in the critical-promise list above,
   `run_evidence` REQUIRED (per the S7 PROBE RULE: you actually ran
   the test, you didn't just read it). Use this shape when you affirm
@@ -357,8 +448,10 @@ Per outcome, the required shape:
   it), `assertion_excerpt` REQUIRED (the line that WOULD assert,
   written as Python pseudocode), `proves` REQUIRED, `principles`
   REQUIRED, `tier` REQUIRED (the tier the surface FLOOR demands per
-  the matrix above; usually `integration-with-fixtures` for critical
-  surfaces). You MUST have probed via `view` / `grep` / `glob` to
+  the matrix above; `integration-with-fixtures` for most critical
+  surfaces, `lifecycle-state-machine` for durable-state, ownership-
+  boundary, dry-run no-write, and cleanup-completeness surfaces).
+  You MUST have probed via `view` / `grep` / `glob` to
   confirm absence at the floor tier before claiming `missing`. State
   the probe in the rationale (e.g. "grep'd `tests/integration/` for
   `*install*pipeline*`, no match"). This is the load-bearing case

@@ -69,7 +69,7 @@ class TestShouldSkipGithubProbeForDep:
 def _enable_gate(monkeypatch):
     monkeypatch.setattr(
         "apm_cli.deps.registry.feature_gate.is_package_registry_enabled",
-        lambda: True,
+        lambda *, create_config=True: True,
     )
 
 
@@ -101,7 +101,7 @@ class TestGetEffectiveDefaultRegistry:
         _enable_gate(monkeypatch)
         monkeypatch.setattr(
             "apm_cli.deps.registry.config_loader.resolve_effective_registries",
-            lambda regs, default: (regs, "user-default"),
+            lambda regs, default, **_: (regs, "user-default"),
         )
         data = {"registries": {"default": "corp", "corp": {"url": "https://r.example.com"}}}
         assert get_effective_default_registry(data) == "corp"
@@ -114,7 +114,7 @@ class TestGetEffectiveDefaultRegistry:
         _enable_gate(monkeypatch)
         monkeypatch.setattr(
             "apm_cli.deps.registry.config_loader.resolve_effective_registries",
-            lambda regs, default: (regs, None),
+            lambda regs, default, **_: (regs, None),
         )
         data = {"registries": {"default": "ghost", "corp": {"url": "https://r.example.com"}}}
         assert get_effective_default_registry(data) is None
@@ -124,7 +124,7 @@ class TestGetEffectiveDefaultRegistry:
         # routing, since the manifest load would reject the registries block.
         monkeypatch.setattr(
             "apm_cli.deps.registry.feature_gate.is_package_registry_enabled",
-            lambda: False,
+            lambda *, create_config=True: False,
         )
         data = {
             "registries": {"default": "corp-main", "corp-main": {"url": "https://r.example.com"}}
@@ -134,11 +134,11 @@ class TestGetEffectiveDefaultRegistry:
     def test_falls_back_to_user_config_when_no_project_default(self, monkeypatch):
         monkeypatch.setattr(
             "apm_cli.deps.registry.feature_gate.is_package_registry_enabled",
-            lambda: True,
+            lambda *, create_config=True: True,
         )
         monkeypatch.setattr(
             "apm_cli.deps.registry.config_loader.resolve_effective_registries",
-            lambda regs, default: (regs, "user-level-reg"),
+            lambda regs, default, **_: (regs, "user-level-reg"),
         )
         data = {"registries": {"corp-main": {"url": "https://r.example.com"}}}
         assert get_effective_default_registry(data) == "user-level-reg"
@@ -146,7 +146,7 @@ class TestGetEffectiveDefaultRegistry:
     def test_user_level_fallback_skipped_when_feature_disabled(self, monkeypatch):
         monkeypatch.setattr(
             "apm_cli.deps.registry.feature_gate.is_package_registry_enabled",
-            lambda: False,
+            lambda *, create_config=True: False,
         )
         data = {}
         assert get_effective_default_registry(data) is None

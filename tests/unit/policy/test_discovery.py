@@ -1922,10 +1922,10 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
         self.assertTrue(state)
         mock_run.assert_called_once()
         command = mock_run.call_args.args[0]
+        self.assertEqual(Path(command[0]).name, "git")
         self.assertEqual(
-            command,
+            command[1:],
             [
-                "git",
                 "ls-remote",
                 "--exit-code",
                 "https://gitlab.example.test:8443/contoso/apm-policy.git",

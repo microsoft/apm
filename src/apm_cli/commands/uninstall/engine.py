@@ -1462,7 +1462,17 @@ def _cleanup_stale_mcp(
     persist: bool = True,
 ):
     """Remove MCP servers that are no longer needed after uninstall."""
-    if not old_mcp_servers:
+    managed_servers = set(old_mcp_servers or ())
+    target_ownership = {}
+    if lockfile is not None:
+        managed_servers.update(getattr(lockfile, "mcp_servers", ()) or ())
+        target_ownership = getattr(lockfile, "mcp_target_servers", {}) or {}
+        if isinstance(target_ownership, dict):
+            for servers in target_ownership.values():
+                managed_servers.update(servers or ())
+        else:
+            target_ownership = {}
+    if not managed_servers:
         return
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 
@@ -1474,7 +1484,7 @@ def _cleanup_stale_mcp(
         trust_transitive_self_defined=True,
     )
     new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies)
-    stale_servers = old_mcp_servers - new_mcp_servers
+    stale_servers = managed_servers - new_mcp_servers
     from ...install.mcp.ownership import resolve_mcp_target_servers
 
     target_servers = resolve_mcp_target_servers(
@@ -1483,11 +1493,12 @@ def _cleanup_stale_mcp(
             for runtime, servers in (lockfile.mcp_target_servers or {}).items()
         },
         ownership_present=lockfile._mcp_target_servers_present,
-        server_names=old_mcp_servers,
+        server_names=managed_servers,
         stored_configs=lockfile.mcp_configs,
         project_root=project_root,
         user_scope=user_scope,
     )
+    retained_unowned: set[str] = set()
     if stale_servers:
         _remove_stale_mcp_from_recorded_targets(
             stale_servers,
@@ -1497,14 +1508,17 @@ def _cleanup_stale_mcp(
             scope=scope,
             target_servers=target_servers,
         )
+        owned_servers = {server for servers in target_servers.values() for server in servers}
+        retained_unowned = stale_servers - owned_servers
     contracted_target_servers = {
         runtime: sorted(servers.intersection(new_mcp_servers))
         for runtime, servers in target_servers.items()
         if servers.intersection(new_mcp_servers)
     }
+    surviving_mcp_servers = new_mcp_servers | retained_unowned
     if persist:
         MCPIntegrator.update_lockfile(
-            new_mcp_servers,
+            surviving_mcp_servers,
             lockfile_path,
             mcp_configs=dict(view.configs),
             mcp_config_provenance=dict(view.provenance),
@@ -1512,7 +1526,7 @@ def _cleanup_stale_mcp(
         )
         return
 
-    lockfile.mcp_servers = sorted(new_mcp_servers)
+    lockfile.mcp_servers = sorted(surviving_mcp_servers)
     lockfile.mcp_configs = dict(view.configs)
     lockfile.mcp_config_provenance = dict(view.provenance)
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec

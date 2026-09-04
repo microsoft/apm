@@ -237,6 +237,59 @@ def test_successful_alias_uses_portable_lifecycle_payloads(
     assert all(call.kwargs["packages"] == (alias,) for call in fire_scripts.call_args_list)
 
 
+@pytest.mark.windows_compat
+def test_mcp_cleanup_failure_preserves_lock_and_live_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uninstall must not persist dropped ownership after native cleanup fails."""
+    project = tmp_path / "project"
+    project.mkdir()
+    package = "owner/installed"
+    _write_manifest(project, [package])
+    dependency = LockedDependency(repo_url=package)
+    lock_path = project / "apm.lock.yaml"
+    LockFile(
+        dependencies={dependency.get_unique_key(): dependency},
+        mcp_servers=["owned-server"],
+        mcp_target_servers={"antigravity": ["owned-server"]},
+    ).write(lock_path)
+    config_path = project / ".agents" / "mcp_config.json"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        '{"mcpServers":["malformed"]}',
+        encoding="utf-8",
+    )
+    lock_before = lock_path.read_bytes()
+    config_before = config_path.read_bytes()
+    monkeypatch.chdir(project)
+
+    with (
+        patch("apm_cli.commands.uninstall.cli._fire_uninstall_scripts"),
+        patch(
+            "apm_cli.commands.uninstall.cli._remove_packages_from_disk",
+            return_value=0,
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._cleanup_transitive_orphans",
+            return_value=(0, set()),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
+            return_value=IntegrationCleanupOutcome({}, {}, [], 0),
+        ),
+    ):
+        result = CliRunner().invoke(uninstall, [package])
+
+    assert result.exit_code != 0
+    output = " ".join(result.output.split())
+    assert "MCP cleanup failed" in result.output
+    assert "apm install" in output
+    assert "lock ownership was retained" in output
+    assert lock_path.read_bytes() == lock_before
+    assert config_path.read_bytes() == config_before
+
+
 def test_preserved_hook_makes_completed_package_removal_nonzero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

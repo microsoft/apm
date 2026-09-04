@@ -198,7 +198,7 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
         _capability(
             "hermes",
             "Hermes native skills and MCP configuration",
-            experimental_flag="hermes",
+            explicit_only=True,
             primitive_profile="hermes",
             compile_family="agents",
         ),

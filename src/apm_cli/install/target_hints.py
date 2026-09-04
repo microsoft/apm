@@ -25,6 +25,8 @@ def emit_disabled_experimental_target_hint(
     requested_target: str,
     resolved_targets: Iterable[_TargetLike],
     logger: _LoggerLike | None,
+    *,
+    create_config: bool = True,
 ) -> bool:
     """Emit the canonical enable hint when an explicit target is flag-gated."""
     if requested_target == "all":
@@ -41,7 +43,7 @@ def emit_disabled_experimental_target_hint(
 
     from apm_cli.core.experimental import is_enabled
 
-    if is_enabled(capability.experimental_flag):
+    if is_enabled(capability.experimental_flag, create_config=create_config):
         return False
     if logger is not None:
         logger.progress(

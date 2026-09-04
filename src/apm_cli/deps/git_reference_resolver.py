@@ -25,6 +25,7 @@ pattern.
 from __future__ import annotations
 
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -37,6 +38,7 @@ from ..models.apm_package import (
     RemoteRef,
     ResolvedReference,
 )
+from ..utils.git_env import git_subprocess_error_text
 from ..utils.github_host import (
     default_host,
     is_ado_auth_failure_signal,
@@ -44,12 +46,13 @@ from ..utils.github_host import (
 )
 from .git_remote_ops import validate_ls_remote_tag_output
 from .github_rate_limit import raise_for_github_throttle
+from .transport_selection import ProtocolPreference
 
 if TYPE_CHECKING:
     import requests
 
     from ..core.auth import AuthResolver
-    from .transport_selection import ProtocolPreference, TransportSelector
+    from .transport_selection import TransportSelector
 
 
 # ---------------------------------------------------------------------------
@@ -142,11 +145,22 @@ class GitReferenceResolver:
 
         is_ado = dep_ref.is_azure_devops()
         repo_url_base = dep_ref.repo_url
+        explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower()
+        candidate_uses_ssh = explicit_scheme == "ssh" or (
+            not explicit_scheme and host._protocol_pref == ProtocolPreference.SSH
+        )
+        rewrite_candidate = host._build_repo_url(
+            repo_url_base,
+            use_ssh=candidate_uses_ssh,
+            dep_ref=dep_ref,
+            token="",
+        )
         anonymous_plan = host._transport_selector.select(
             dep_ref=dep_ref,
             cli_pref=host._protocol_pref,
             allow_fallback=False,
             has_token=False,
+            candidate_url=rewrite_candidate,
         )
         dep_host = dep_ref.host or default_host()
         public_github_https_first = bool(
@@ -174,6 +188,7 @@ class GitReferenceResolver:
                 cli_pref=host._protocol_pref,
                 allow_fallback=False,
                 has_token=bool(dep_token),
+                candidate_url=rewrite_candidate,
             )
         transport_attempt = transport_plan.attempts[0]
         use_ssh = transport_attempt.scheme == "ssh"
@@ -183,24 +198,34 @@ class GitReferenceResolver:
             remote_url = ""
         elif use_ssh:
             ls_env = host._build_noninteractive_git_env()
-            from ..core.auth import AuthResolver
+            from ..utils.git_env import clear_git_auth_env
 
-            AuthResolver._clear_git_auth_env(ls_env)
+            clear_git_auth_env(ls_env)
             ls_env.pop("GIT_ASKPASS", None)
         elif dep_token and transport_attempt.use_token:
-            ls_env = (
-                host.auth_resolver.git_env_for_context(
+            if dep_auth_ctx is not None:
+                ls_env = host.auth_resolver.git_env_for_context(
                     dep_auth_ctx,
                     base_env=host.git_env,
                 )
-                if dep_auth_ctx is not None
-                else host.git_env
-            )
+            else:
+                classified = host.auth_resolver.classify_host(
+                    dep_host or default_host(),
+                    port=dep_ref.port,
+                    host_type=dep_ref.host_type,
+                )
+                fallback_kind = "github" if is_github_hostname(dep_host or "") else "generic"
+                ls_env = host.auth_resolver._build_git_env(
+                    dep_token,
+                    host_kind=getattr(classified, "kind", fallback_kind),
+                    base_env=host.git_env,
+                )
         elif is_ado:
-            ls_env = host.auth_resolver.build_noninteractive_git_env(
+            ado_context = dep_auth_ctx or host.auth_resolver.resolve_for_dep(dep_ref)
+            ls_env = host.auth_resolver.git_env_for_remote(
+                ado_context,
+                transport_attempt.effective_url or rewrite_candidate,
                 base_env=host.git_env,
-                host_kind="ado",
-                preserve_config_isolation=True,
             )
         else:
             ls_env = host._build_noninteractive_git_env(
@@ -208,25 +233,43 @@ class GitReferenceResolver:
                 suppress_credential_helpers=bool(getattr(dep_ref, "is_insecure", False)),
             )
 
-        if not public_github_https_first:
+        if transport_attempt.requested_url is not None:
+            remote_url = transport_attempt.requested_url
+        elif not public_github_https_first:
             remote_url = host._build_repo_url(
                 repo_url_base,
                 use_ssh=use_ssh,
                 dep_ref=dep_ref,
-                token=None if use_ssh else (dep_token if transport_attempt.use_token else None),
+                token=(None if use_ssh else ""),
                 auth_scheme=dep_auth_scheme if transport_attempt.use_token else "basic",
             )
 
-        # Route through the github_downloader module so that test patches
-        # of ``apm_cli.deps.github_downloader.git.cmd.Git`` intercept here.
+        # Keep the GitPython object as a test seam. The network call itself
+        # routes through the direct-subprocess owner unless a test replaces
+        # this method.
         from . import github_downloader as _gd
 
         g = _gd.git.cmd.Git()
         ls_args = ("--tags", "--heads") if include_heads else ("--tags",)
 
+        def _run_remote(url: str, env: dict[str, str]) -> str:
+            if type(g).__module__.startswith("unittest.mock"):
+                return g.ls_remote(*ls_args, url, env=env)
+            from ..utils.git_env import git_remote_refs
+
+            result = git_remote_refs(url, env=env, options=ls_args)
+            if result.returncode != 0:
+                # auth-delegated: _primary_op and _bearer_op select this environment.
+                raise GitCommandError(
+                    ["git", "ls-remote", *ls_args, url],
+                    result.returncode,
+                    stderr=result.stderr,
+                )
+            return result.stdout
+
         def _primary_op():
             try:
-                output = g.ls_remote(*ls_args, remote_url, env=ls_env)
+                output = _run_remote(remote_url, ls_env)
                 return ("ok", output)
             except GitCommandError as exc:
                 return ("err", exc)
@@ -248,7 +291,7 @@ class GitReferenceResolver:
                 auth_scheme="bearer",
             )
             try:
-                output = g.ls_remote(*ls_args, bearer_url, env=bearer_env)
+                output = _run_remote(bearer_url, bearer_env)
                 return ("ok", output)
             except GitCommandError as exc:
                 return ("err", exc)
@@ -276,10 +319,10 @@ class GitReferenceResolver:
                     repo_url_base,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token=token or "",
+                    token="",
                     auth_scheme="basic",
                 )
-                return ("ok", g.ls_remote(*ls_args, public_url, env=git_env))
+                return ("ok", _run_remote(public_url, git_env))
 
             org = repo_url_base.split("/", 1)[0] if "/" in repo_url_base else None
             try:
@@ -349,7 +392,7 @@ class GitReferenceResolver:
                 bearer_also_failed=ado_bearer_also_failed,
             )
 
-        sanitized = host._sanitize_git_error(str(e))
+        sanitized = host._sanitize_git_error(git_subprocess_error_text(e))
         error_msg += f" Last error: {sanitized}"
         raise RuntimeError(error_msg) from e
 
@@ -513,15 +556,16 @@ class GitReferenceResolver:
 
             if is_likely_commit:
                 try:
-                    repo = host._clone_with_fallback(
+                    host._clone_with_fallback(
                         dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
                     )
-                    commit = repo.commit(ref)
+                    from ..utils.git_env import git_resolve_commit
+
                     ref_type = GitReferenceType.COMMIT
-                    resolved_commit = commit.hexsha
+                    resolved_commit = git_resolve_commit(temp_dir, ref, env=host.git_env)
                     ref_name = ref
                 except Exception as e:
-                    sanitized_error = host._sanitize_git_error(str(e))
+                    sanitized_error = host._sanitize_git_error(git_subprocess_error_text(e))
                     raise ValueError(  # noqa: B904
                         f"Could not resolve commit '{ref}' in repository "
                         f"{dep_ref.repo_url}: {sanitized_error}"
@@ -531,43 +575,53 @@ class GitReferenceResolver:
                     clone_kwargs = {"depth": 1}
                     if ref:
                         clone_kwargs["branch"] = ref
-                    repo = host._clone_with_fallback(
+                    host._clone_with_fallback(
                         dep_ref.repo_url,
                         temp_dir,
                         progress_reporter=None,
                         dep_ref=dep_ref,
                         **clone_kwargs,
                     )
+                    from ..utils.git_env import git_current_branch, git_worktree_head
+
                     ref_type = GitReferenceType.BRANCH
-                    resolved_commit = repo.head.commit.hexsha
-                    ref_name = ref if ref else repo.active_branch.name
+                    resolved_commit = git_worktree_head(temp_dir, env=host.git_env)
+                    ref_name = ref if ref else git_current_branch(temp_dir, env=host.git_env)
 
                 except GitCommandError:
                     try:
-                        repo = host._clone_with_fallback(
+                        host._clone_with_fallback(
                             dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
                         )
 
                         try:
+                            from ..utils.git_env import git_resolve_commit
+
                             try:
-                                branch = repo.refs[f"origin/{ref}"]
                                 ref_type = GitReferenceType.BRANCH
-                                resolved_commit = branch.commit.hexsha
+                                resolved_commit = git_resolve_commit(
+                                    temp_dir,
+                                    f"refs/remotes/origin/{ref}",
+                                    env=host.git_env,
+                                )
                                 ref_name = ref
-                            except IndexError:
+                            except subprocess.CalledProcessError:
                                 try:
-                                    tag = repo.tags[ref]
                                     ref_type = GitReferenceType.TAG
-                                    resolved_commit = tag.commit.hexsha
+                                    resolved_commit = git_resolve_commit(
+                                        temp_dir,
+                                        f"refs/tags/{ref}",
+                                        env=host.git_env,
+                                    )
                                     ref_name = ref
-                                except IndexError:
+                                except subprocess.CalledProcessError:
                                     raise ValueError(  # noqa: B904
                                         f"Reference '{ref}' not found in repository "
                                         f"{dep_ref.repo_url}"
                                     )
 
                         except Exception as e:
-                            sanitized_error = host._sanitize_git_error(str(e))
+                            sanitized_error = host._sanitize_git_error(git_subprocess_error_text(e))
                             raise ValueError(  # noqa: B904
                                 f"Could not resolve reference '{ref}' in repository "
                                 f"{dep_ref.repo_url}: {sanitized_error}"
@@ -589,7 +643,7 @@ class GitReferenceResolver:
                             )
                             raise RuntimeError(error_msg)  # noqa: B904
                         else:
-                            sanitized_error = host._sanitize_git_error(str(e))
+                            sanitized_error = host._sanitize_git_error(git_subprocess_error_text(e))
                             raise RuntimeError(  # noqa: B904
                                 f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}"
                             )

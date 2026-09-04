@@ -42,6 +42,7 @@ _GUARD_UNINSTALL_REACHABILITY = "install-deployment-uninstall-reachability"
 
 
 _GUARD_AUDIT_REPLAY = "install-deployment-audit-replay"
+_GUARD_LIFECYCLE_SERIALIZATION = "install-deployment-lifecycle-serialization"
 
 
 def _first_line(facts: object, needle: str) -> int | None:
@@ -294,4 +295,90 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
                 "CI audit scratch materialization must route through install/audit_replay.py",
             )
         )
+    return tuple(findings)
+
+
+def check_lifecycle_serialization(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Every declared lifecycle mutator must route through install/locking.py."""
+    rule_id = _GUARD_LIFECYCLE_SERIALIZATION
+    required = {
+        "src/apm_cli/commands/audit.py": {
+            "audit": "serialized_lifecycle_when",
+        },
+        "src/apm_cli/commands/approve.py": {
+            "approve_cmd": "serialized_lifecycle",
+            "deny_cmd": "serialized_lifecycle",
+        },
+        "src/apm_cli/commands/compile/cli.py": {
+            "_handle_global_flag": "serialized_lifecycle_unless",
+            "_run_compilation": "serialized_lifecycle_unless",
+        },
+        "src/apm_cli/commands/config.py": {
+            "set": "serialized_lifecycle",
+            "unset": "serialized_lifecycle",
+        },
+        "src/apm_cli/commands/deps/cli.py": {
+            "clean": "serialized_lifecycle_unless",
+            "update": "serialized_lifecycle",
+        },
+        "src/apm_cli/commands/experimental.py": {
+            "enable_flag": "serialized_lifecycle",
+            "disable_flag": "serialized_lifecycle",
+            "reset_flags": "serialized_lifecycle",
+        },
+        "src/apm_cli/commands/init.py": {"init": "serialized_lifecycle"},
+        "src/apm_cli/commands/install.py": {"install": "serialized_lifecycle_unless"},
+        "src/apm_cli/commands/lifecycle.py": {
+            "lifecycle_init": "serialized_lifecycle",
+        },
+        "src/apm_cli/commands/lock.py": {"_run_lock": "serialized_lifecycle"},
+        "src/apm_cli/commands/marketplace/__init__.py": {
+            "add": "serialized_lifecycle",
+            "update": "serialized_lifecycle",
+            "remove": "serialized_lifecycle",
+        },
+        "src/apm_cli/commands/marketplace/init.py": {"init": "serialized_lifecycle"},
+        "src/apm_cli/commands/marketplace/plugin/add.py": {"add": "serialized_lifecycle"},
+        "src/apm_cli/commands/marketplace/plugin/remove.py": {"remove": "serialized_lifecycle"},
+        "src/apm_cli/commands/marketplace/plugin/set.py": {"set_cmd": "serialized_lifecycle"},
+        "src/apm_cli/commands/plugin/init.py": {"init": "serialized_lifecycle"},
+        "src/apm_cli/commands/prune.py": {"prune": "serialized_lifecycle_unless"},
+        "src/apm_cli/commands/uninstall/cli.py": {"uninstall": "serialized_lifecycle"},
+        "src/apm_cli/commands/update.py": {"update": "serialized_lifecycle"},
+    }
+    findings: list[Violation] = []
+    for path, functions in required.items():
+        facts, failures = _facts_for(provider, path, rule_id)
+        if failures:
+            findings.extend(failures)
+            continue
+        definitions = {definition.name: definition for definition in facts.definitions}
+        for name, decorator in functions.items():
+            definition = definitions.get(name)
+            if definition is None or not any(
+                item == decorator or item.startswith(f"{decorator}(")
+                for item in definition.decorators
+            ):
+                findings.append(
+                    _summary(
+                        rule_id,
+                        path,
+                        f"{name} must route through @{decorator}",
+                    )
+                )
+
+    watcher_path = "src/apm_cli/commands/compile/watcher.py"
+    watcher, failures = _facts_for(provider, watcher_path, rule_id)
+    if failures:
+        findings.extend(failures)
+    else:
+        for name in ("_recompile", "_watch_mode"):
+            if "lifecycle_operation" not in _name_calls_in(watcher, name):
+                findings.append(
+                    _summary(
+                        rule_id,
+                        watcher_path,
+                        f"{name} must route through lifecycle_operation",
+                    )
+                )
     return tuple(findings)

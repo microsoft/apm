@@ -314,6 +314,83 @@ class TestGlobalManifestPlacement:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
+    def test_global_dry_run_with_absent_manifest_does_not_create_user_state(
+        self,
+        apm_binary_path,
+        fake_home,
+        local_package,
+    ):
+        """Dry-run global bootstrap validates without creating ~/.apm state."""
+        work_dir = fake_home / "workdir"
+        work_dir.mkdir()
+
+        result = _run_apm(
+            apm_binary_path,
+            ["install", "--dry-run", "--global", str(local_package)],
+            work_dir,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        unwrapped = combined.replace("\n", "").replace(" ", "")
+        user_manifest = fake_home / ".apm" / "apm.yml"
+        assert result.returncode == 0, combined
+        assert "Dry run: Would create" in combined
+        assert str(user_manifest) in unwrapped
+        assert local_package.name in combined
+        assert not (fake_home / ".apm").exists()
+        assert not (work_dir / "apm.yml").exists()
+
+    def test_global_dry_run_with_target_does_not_persist_targets_or_user_state(
+        self,
+        apm_binary_path,
+        fake_home,
+        local_package,
+    ):
+        """Dry-run global bootstrap previews targets without creating ~/.apm."""
+        work_dir = fake_home / "workdir"
+        work_dir.mkdir()
+
+        result = _run_apm(
+            apm_binary_path,
+            ["install", "--dry-run", "--global", "--target", "claude", str(local_package)],
+            work_dir,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "Dry run: Would create" in combined
+        assert "Dry run: Would set targets: claude" in combined
+        assert not (fake_home / ".apm").exists()
+        assert not (work_dir / "apm.yml").exists()
+
+    def test_global_dry_run_all_targets_does_not_create_user_config(
+        self,
+        apm_binary_path,
+        fake_home,
+        local_package,
+    ):
+        """Dry-run target gating must not create config in an existing ~/.apm."""
+        work_dir = fake_home / "workdir"
+        work_dir.mkdir()
+        apm_dir = fake_home / ".apm"
+        apm_dir.mkdir()
+
+        result = _run_apm(
+            apm_binary_path,
+            ["install", "--dry-run", "--global", "--target", "all", str(local_package)],
+            work_dir,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "Dry run: Would set targets:" in combined
+        assert not (apm_dir / "config.json").exists()
+        assert not (apm_dir / "apm.yml").exists()
+        assert not (work_dir / "apm.yml").exists()
+
     def test_user_manifest_does_not_pollute_cwd(self, apm_binary_path, fake_home, local_package):
         """--global must not create apm.yml in the working directory."""
         work_dir = fake_home / "workdir"

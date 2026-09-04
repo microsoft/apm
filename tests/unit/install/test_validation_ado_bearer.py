@@ -9,13 +9,13 @@ Tests that:
 """
 
 import base64
-import subprocess  # noqa: F401
+import subprocess
 import urllib.parse
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.core.auth import AuthResolver
+from apm_cli.core.auth import AuthResolver, BearerFallbackOutcome
 from apm_cli.install.errors import AuthenticationError
 
 # ---------------------------------------------------------------------------
@@ -58,6 +58,24 @@ def _make_resolver(auth_ctx=None):
         auth_ctx = _make_auth_ctx()
     resolver.resolve_for_dep.return_value = auth_ctx
     resolver.git_env_for_context.side_effect = AuthResolver.git_env_for_context
+    resolver.git_env_for_remote.side_effect = lambda ctx, _url: AuthResolver.git_env_for_context(
+        ctx,
+        base_env=ctx.git_env,
+    )
+    resolver.build_ado_bearer_git_env.side_effect = lambda _ctx, bearer, _url, **_kwargs: (
+        AuthResolver._build_git_env(
+            bearer,
+            scheme="bearer",
+            host_kind="ado",
+            base_env={},
+        )
+    )
+    resolver.execute_with_bearer_fallback.side_effect = (
+        lambda _dep, primary_op, _bearer_op, _is_auth_failure: BearerFallbackOutcome(
+            primary_op(),
+            False,
+        )
+    )
     resolver.build_error_context.return_value = "    Diagnostic payload"
     return resolver
 
@@ -130,9 +148,16 @@ class TestBearerGitEnvMergedIntoSubprocess:
         call_kwargs = mock_run.call_args
         # subprocess.run is called with env= keyword or positional
         env = call_kwargs.kwargs.get("env") or call_kwargs[1].get("env", {})
-        assert env.get("GIT_CONFIG_COUNT") == "1"
-        assert env.get("GIT_CONFIG_KEY_0") == "http.extraheader"
-        scheme, credential = env["GIT_CONFIG_VALUE_0"].split(" ", 2)[1:]
+        entries = {
+            env.get(f"GIT_CONFIG_KEY_{index}", ""): env.get(f"GIT_CONFIG_VALUE_{index}", "")
+            for index in range(int(env.get("GIT_CONFIG_COUNT", "0")))
+        }
+        header = next(
+            value
+            for key, value in entries.items()
+            if key.lower().endswith(".extraheader") and value.startswith("Authorization: ")
+        )
+        scheme, credential = header.split(" ", 2)[1:]
         assert scheme == "Bearer"
         assert credential == "test-bearer"
 
@@ -192,6 +217,87 @@ class TestAdoAuthFailureRaisesAuthenticationError:
             )
 
 
+class TestAdoValidationCanonicalFallback:
+    """ADO validation never asks Git credential helpers for authentication."""
+
+    def test_pat_401_uses_resolver_bearer_fallback_without_native_helper(self):
+        pat_ctx = _make_auth_ctx(token="stale-pat", auth_scheme="basic")
+        resolver = _make_resolver(pat_ctx)
+        bearer_calls: list[str] = []
+        outcomes = [
+            MagicMock(
+                returncode=128,
+                stderr="fatal: Authentication failed (401)",
+                stdout="",
+            ),
+            MagicMock(returncode=0, stderr="", stdout="refs/heads/main"),
+        ]
+
+        def execute_with_bearer_fallback(dep_ref, primary_op, bearer_op, is_auth_failure):
+            primary = primary_op()
+            assert is_auth_failure(primary) is True
+            fallback = bearer_op("selected-az-bearer")
+            bearer_calls.append("selected-az-bearer")
+            return type(
+                "Outcome",
+                (),
+                {"outcome": fallback, "bearer_attempted": True},
+            )()
+
+        resolver.execute_with_bearer_fallback.side_effect = execute_with_bearer_fallback
+        resolver.build_native_git_credential_env.side_effect = AssertionError(
+            "ADO validation must not construct a native helper environment"
+        )
+
+        from apm_cli.install.validation import _validate_package_exists
+
+        with patch(
+            "apm_cli.utils.git_env.git_remote_refs",
+            side_effect=outcomes,
+        ) as remote:
+            result = _validate_package_exists(
+                "dev.azure.com/myorg/myproject/_git/myrepo",
+                auth_resolver=resolver,
+            )
+
+        assert result is True
+        assert bearer_calls == ["selected-az-bearer"]
+        assert remote.call_count == 2
+        resolver.execute_with_bearer_fallback.assert_called_once()
+        resolver.build_native_git_credential_env.assert_not_called()
+        fallback_env = remote.call_args_list[1].kwargs["env"]
+        values = {
+            value for key, value in fallback_env.items() if key.startswith("GIT_CONFIG_VALUE_")
+        }
+        assert "Authorization: Bearer selected-az-bearer" in values
+
+    def test_both_401_failures_report_that_bearer_was_attempted(self):
+        resolver = _make_resolver(_make_auth_ctx(token="stale-pat", auth_scheme="basic"))
+        failed = MagicMock(
+            returncode=128,
+            stderr="fatal: Authentication failed (401)",
+            stdout="",
+        )
+
+        def attempted_fallback(_dep, primary_op, _bearer_op, _is_auth_failure):
+            return BearerFallbackOutcome(primary_op(), True)
+
+        resolver.execute_with_bearer_fallback.side_effect = attempted_fallback
+
+        from apm_cli.install.validation import _validate_package_exists
+
+        with (
+            patch("apm_cli.utils.git_env.git_remote_refs", return_value=failed),
+            pytest.raises(AuthenticationError),
+        ):
+            _validate_package_exists(
+                "dev.azure.com/myorg/myproject/_git/myrepo",
+                auth_resolver=resolver,
+            )
+
+        assert resolver.build_error_context.call_args.kwargs["bearer_also_failed"] is True
+
+
 class TestAdoNonAuthFailureReturnsFalse:
     """DNS / timeout / 404 returns False (no exception)."""
 
@@ -211,6 +317,33 @@ class TestAdoNonAuthFailureReturnsFalse:
             auth_resolver=resolver,
         )
         assert result is False
+
+    def test_verbose_git_stderr_redacts_bare_pat(self):
+        secret = "github_pat_" + "A" * 30
+        resolver = _make_resolver(_make_auth_ctx(token="bearer", auth_scheme="bearer"))
+        logs: list[str] = []
+
+        from apm_cli.install.validation import _validate_ado_git_package
+
+        with patch(
+            "apm_cli.utils.git_env.git_remote_refs",
+            return_value=subprocess.CompletedProcess(
+                ["git", "ls-remote"],
+                128,
+                stdout="",
+                stderr=f"fatal: network failure while processing {secret}",
+            ),
+        ):
+            result = _validate_ado_git_package(
+                _make_dep_ref(),
+                resolver,
+                logs.append,
+                "my-package",
+                None,
+            )
+
+        assert result is False
+        assert secret not in "\n".join(logs)
 
 
 class TestPatRegressionBasicScheme:

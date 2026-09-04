@@ -80,6 +80,8 @@ class TestInstallContextFields:
         # effective executable-trust projection consumed by service reconciliation
         "exec_allow_map",
         "exec_allow_resolved",
+        # issue #2549: read-only config mode for global dry-run
+        "create_config",
     )
 
     def test_all_required_fields_present(self):
@@ -138,6 +140,10 @@ class TestInstallContextDefaults:
     def test_only_packages_defaults_to_none(self):
         ctx = self._build_minimal()
         assert ctx.only_packages is None
+
+    def test_create_config_defaults_to_true(self):
+        ctx = self._build_minimal()
+        assert ctx.create_config is True
 
 
 class TestInstallContextRoundTrip:

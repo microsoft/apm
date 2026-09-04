@@ -25,6 +25,7 @@ class GitHttpObservation:
     method: str
     path: str
     authorization_present: bool
+    authorization: str | None
     accepted: bool
 
 
@@ -107,6 +108,7 @@ class _GitHttpHandler(SimpleHTTPRequestHandler):
             method=self.command,
             path=urlparse(self.path).path,
             authorization_present=self.headers.get("Authorization") is not None,
+            authorization=self.headers.get("Authorization"),
             accepted=accepted,
         )
         with self.server.observations_lock:

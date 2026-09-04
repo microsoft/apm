@@ -5,8 +5,8 @@ Extracted from :mod:`github_downloader` to keep that module under the
 
 Public entry points:
 
-* :func:`clone_with_fallback` -- working-tree clone via
-  ``Repo.clone_from``, threaded through a caller-supplied transport-plan
+* :func:`clone_with_fallback` -- sanitized working-tree clone threaded
+  through a caller-supplied transport-plan
   executor.
 * :func:`bare_clone_with_fallback` -- 3-tier bare-repo clone for the
   shared cache (the core fix for #1126).
@@ -30,6 +30,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from git import Repo
 
@@ -164,11 +165,18 @@ def bare_clone_with_fallback(
     the cache boundary. See design.md sec 12 (Bare integrity
     verification).
     """
-    from ..utils.git_env import get_git_executable
+    from ..utils.git_env import (
+        get_git_executable,
+        git_clone_env,
+        git_network_env,
+        git_no_templates_args,
+        git_subprocess_env,
+    )
 
     git_exe = get_git_executable()
 
     def _bare_action(url: str, env: dict[str, str], target: Path) -> None:
+        env = git_subprocess_env(env)
         # Pre-attempt cleanup: any prior tier-1 partial state must be
         # wiped before re-attempting (e.g. on ADO bearer retry the
         # template re-invokes _bare_action with a fresh URL/env, and
@@ -193,21 +201,24 @@ def bare_clone_with_fallback(
                 # below redacts the URL after a successful clone so the
                 # token does not persist on disk.
                 try:
+                    env = git_network_env(url, env)
                     subprocess.run(
-                        [git_exe, "init", "--bare", str(target)],
+                        [git_exe, "init", *git_no_templates_args(), "--bare", str(target)],
                         env=env,
                         check=True,
                         capture_output=True,
                     )
+                    env = git_network_env(url, env, git_dir=target)
                     subprocess.run(
                         [git_exe, "--git-dir", str(target), "remote", "add", "origin", url],
                         env=env,
                         check=True,
                         capture_output=True,
                     )
+                    remote_env = git_network_env(url, env, git_dir=target)
                     subprocess.run(
                         [git_exe, "--git-dir", str(target), "fetch", "--depth=1", "origin", ref],
-                        env=env,
+                        env=remote_env,
                         check=True,
                         capture_output=True,
                         timeout=300,
@@ -230,8 +241,9 @@ def bare_clone_with_fallback(
             # Tier 2: full bare clone, validate SHA, set HEAD.
             if target.exists():
                 _rmtree(target)
+            env = git_clone_env(url, env, target, bare=True)
             subprocess.run(
-                [git_exe, "clone", "--bare", url, str(target)],
+                [git_exe, "clone", *git_no_templates_args(), "--bare", url, str(target)],
                 env=env,
                 check=True,
                 capture_output=True,
@@ -269,10 +281,11 @@ def bare_clone_with_fallback(
             return
 
         # Symbolic ref or default branch.
-        args = [git_exe, "clone", "--bare", "--depth=1"]
+        args = [git_exe, "clone", *git_no_templates_args(), "--bare", "--depth=1"]
         if ref:
             args += ["--branch", ref]
         args += [url, str(target)]
+        env = git_clone_env(url, env, target, bare=True)
         try:
             subprocess.run(args, env=env, check=True, capture_output=True, timeout=300)
             _scrub_bare_remote_url(target, git_exe, env)
@@ -280,8 +293,9 @@ def bare_clone_with_fallback(
         except subprocess.CalledProcessError:
             # Tier 2: full bare clone (no shallow, no --branch).
             _rmtree(target)
+            env = git_clone_env(url, env, target, bare=True)
             subprocess.run(
-                [git_exe, "clone", "--bare", url, str(target)],
+                [git_exe, "clone", *git_no_templates_args(), "--bare", url, str(target)],
                 env=env,
                 check=True,
                 capture_output=True,
@@ -347,14 +361,15 @@ def fetch_sha_into_bare(
     Returns:
         ``True`` if the SHA is now present in the bare, ``False`` otherwise.
     """
-    from ..utils.git_env import get_git_executable
+    from ..utils.git_env import get_git_executable, git_network_env, git_subprocess_env
 
     git_exe = get_git_executable()
+    local_env = git_subprocess_env()
 
     def _rev_parse_present() -> bool:
         """Return True if sha is already reachable in the bare."""
         try:
-            # no env= needed -- purely local git plumbing, no network access
+            # Use the sanitized local environment even for non-network plumbing.
             result = subprocess.run(
                 [
                     git_exe,
@@ -364,6 +379,7 @@ def fetch_sha_into_bare(
                     "--verify",
                     f"{sha}^{{commit}}",
                 ],
+                env=local_env,
                 capture_output=True,
                 timeout=10,
             )
@@ -398,6 +414,7 @@ def fetch_sha_into_bare(
             # no env= needed -- purely local git plumbing, no network access
             result = subprocess.run(
                 [git_exe, "--git-dir", str(bare_path), "update-ref", ref_name, sha],
+                env=local_env,
                 capture_output=True,
                 timeout=10,
             )
@@ -451,9 +468,10 @@ def fetch_sha_into_bare(
         )
 
         def _fetch_action_sha(url: str, env: dict[str, str], target: Path) -> None:
+            network_env = git_network_env(url, env, git_dir=target)
             subprocess.run(
                 [git_exe, "--git-dir", str(target), "fetch", "--depth=1", url, sha],
-                env=env,
+                env=network_env,
                 check=True,
                 capture_output=True,
                 timeout=300,
@@ -472,9 +490,9 @@ def fetch_sha_into_bare(
                 _pin_sha_as_head_ref()
                 return True
         except subprocess.CalledProcessError as exc:
-            stderr_text = ""
-            if exc.stderr:
-                stderr_text = exc.stderr.decode(errors="replace").strip()
+            from ..utils.git_env import git_subprocess_error_text
+
+            stderr_text = git_subprocess_error_text(exc)
             _log.debug(
                 "fetch_sha_into_bare: shallow fetch of %s failed: %s",
                 sha[:12],
@@ -494,9 +512,10 @@ def fetch_sha_into_bare(
     _log.debug("fetch_sha_into_bare: broadening shallow in %s to find %s", bare_path, sha[:12])
 
     def _fetch_action_broad(url: str, env: dict[str, str], target: Path) -> None:
+        network_env = git_network_env(url, env, git_dir=target)
         subprocess.run(
             [git_exe, "--git-dir", str(target), "fetch", f"--depth={broad_depth}", url],
-            env=env,
+            env=network_env,
             check=True,
             capture_output=True,
             timeout=300,
@@ -515,9 +534,9 @@ def fetch_sha_into_bare(
             _pin_sha_as_head_ref()
             return True
     except subprocess.CalledProcessError as exc:
-        stderr_text = ""
-        if exc.stderr:
-            stderr_text = exc.stderr.decode(errors="replace").strip()
+        from ..utils.git_env import git_subprocess_error_text
+
+        stderr_text = git_subprocess_error_text(exc)
         _log.debug(
             "fetch_sha_into_bare: broad fetch failed for %s in %s: %s",
             sha[:12],
@@ -589,9 +608,15 @@ def materialize_from_bare(
         The resolved commit SHA. Caller threads this into
         ``resolved_commit`` for the lockfile.
     """
-    from ..utils.git_env import get_git_executable
+    from ..utils.git_env import (
+        get_git_executable,
+        git_no_hooks_args,
+        git_no_templates_args,
+        git_subprocess_env,
+    )
 
     git_exe = get_git_executable()
+    env = git_subprocess_env(env)
 
     if known_sha:
         resolved_sha = known_sha
@@ -612,7 +637,9 @@ def materialize_from_bare(
     subprocess.run(
         [
             git_exe,
+            *git_no_hooks_args(),
             "clone",
+            *git_no_templates_args(),
             "--local",
             "--shared",
             "--no-checkout",
@@ -655,7 +682,14 @@ def materialize_from_bare(
     if sparse_paths:
         apply_sparse_cone(git_exe, consumer_dir, list(sparse_paths), env=env)
     subprocess.run(
-        [git_exe, "-C", str(consumer_dir), "checkout", checkout_target],
+        [
+            git_exe,
+            *git_no_hooks_args(),
+            "-C",
+            str(consumer_dir),
+            "checkout",
+            checkout_target,
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -690,13 +724,7 @@ def clone_with_fallback(
 
     Thin adapter over the caller-supplied ``execute_transport_plan``
     callable (typically ``self._execute_transport_plan``) that supplies
-    a working-tree clone action (``Repo.clone_from``). Behavior is
-    unchanged from the pre-#1126 implementation, except every clone
-    attempt now begins with a robust ``_rmtree`` of the target
-    for symmetry with the bare-clone path. This is strictly safer
-    (clean slate per attempt) and matches the existing behavior on
-    the second-and-subsequent attempts where target may contain a
-    partial clone from the failed first attempt.
+    a working-tree clone action with a complete sanitized environment.
 
     Returns:
         The successfully cloned :class:`Repo`.
@@ -706,23 +734,40 @@ def clone_with_fallback(
     """
     repo_holder: list[Repo] = []
     _repo = repo_cls if repo_cls is not None else Repo
+    supported = {"branch", "depth", "no_checkout", "single_branch"}
+    unsupported = sorted(set(clone_kwargs) - supported)
+    if unsupported:
+        raise TypeError(f"Unsupported clone options: {', '.join(unsupported)}")
 
     def _wt_action(url: str, env: dict[str, str], target: Path) -> None:
-        # Pre-attempt cleanup: GitPython's Repo.clone_from refuses a
-        # non-empty target. Symmetric with _bare_action so retries
-        # always start from a clean slate. Behavior change from the
-        # pre-#1126 implementation - covered by 6.13.
+        from ..utils.git_env import clone_git_worktree, git_subprocess_env
+
+        # Retries always start from a clean target, matching the bare path.
         if target.exists():
             _rmtree(target)
-        repo_holder.append(
-            _repo.clone_from(
-                url,
-                target,
-                env=env,
-                progress=progress_reporter,
-                **clone_kwargs,
+        if repo_cls is not None and repo_cls is not Repo:
+            repo_holder.append(
+                getattr(_repo, "clone_from")(  # noqa: B009 - injected test double only
+                    url,
+                    target,
+                    env=git_subprocess_env(env),
+                    progress=progress_reporter,
+                    **clone_kwargs,
+                )
             )
+            return
+        extra_options = ("--single-branch",) if bool(clone_kwargs.get("single_branch")) else ()
+        clone_git_worktree(
+            url,
+            target,
+            env=env,
+            depth=clone_kwargs.get("depth"),
+            branch=clone_kwargs.get("branch"),
+            no_checkout=bool(clone_kwargs.get("no_checkout")),
+            extra_options=extra_options,
+            progress=progress_reporter,
         )
+        repo_holder.append(_repo(target))
 
     execute_transport_plan(
         repo_url_base,
@@ -806,7 +851,6 @@ def build_clone_failure_message(
     default_host_fn: Callable[[], str],
     last_error: Exception | None,
     last_attempt_scheme: str | None,
-    sanitize_git_error: Callable[[str], str],
     public_github_non_auth_failure: bool = False,
 ) -> str:
     """Build the aggregate ``RuntimeError`` message for a failed transport plan.
@@ -822,7 +866,21 @@ def build_clone_failure_message(
             error_msg += plan.fallback_hint + " "
     else:
         error_msg = f"Failed to clone repository {repo_url_base} using all available methods. "
-    if is_ado and not has_ado_token:
+    effective_scheme = last_attempt_scheme
+    for attempt in reversed(plan.attempts):
+        if attempt.scheme != last_attempt_scheme:
+            continue
+        effective_url = getattr(attempt, "effective_url", None)
+        if isinstance(effective_url, str) and effective_url:
+            effective_scheme = urlsplit(effective_url).scheme.lower()
+            break
+    if effective_scheme == "file":
+        error_msg += (
+            "The configured local Git mirror failed. Verify that its path exists "
+            "and is readable, then inspect the matching rule with "
+            "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'."
+        )
+    elif is_ado and not has_ado_token:
         host = dep_host or "dev.azure.com"
         error_msg += auth_resolver.build_error_context(
             host,
@@ -841,8 +899,9 @@ def build_clone_failure_message(
         else:
             host_name = "the target host"
         error_msg += (
-            f"For private repositories on {host_name}, configure SSH keys or a git credential helper. "
-            f"APM delegates authentication to git for non-GitHub/ADO hosts."
+            f"For private repositories on {host_name}, configure SSH keys or a git "
+            "credential helper. APM delegates authentication to git for "
+            "non-GitHub/ADO hosts."
         )
     elif (
         configured_github_host
@@ -882,7 +941,8 @@ def build_clone_failure_message(
     error_msg += _ssh_key_auth_diagnostic(last_error, last_attempt_scheme)
 
     if last_error:
-        sanitized_error = sanitize_git_error(str(last_error))
-        error_msg += f" Last error: {sanitized_error}"
+        from ..utils.git_env import git_subprocess_error_text
+
+        error_msg += f" Last error: {git_subprocess_error_text(last_error)}"
 
     return error_msg

@@ -7,8 +7,9 @@ import os
 import tempfile
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.results import InstallDisposition, InstallResult
 
@@ -84,15 +85,22 @@ class InstallTransaction:
         apm_modules_dir: Path,
         validation: _ValidationOutcome | None,
         logger: InstallLogger,
+        acquire_lock: bool = True,
     ) -> None:
         """Capture the manifest and create one resolution staging session."""
         self.manifest_path = manifest_path
         self.apm_modules_dir = apm_modules_dir
         self._validation = validation
         self._logger = logger
-        self._manifest_existed = manifest_path.exists()
-        self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
-        self._resolution = ResolutionStagingSession(apm_modules_dir)
+        self._workspace_lock = acquire_lifecycle_lock() if acquire_lock else None
+        self._workspace_lock_held = self._workspace_lock is not None
+        try:
+            self._manifest_existed = manifest_path.exists()
+            self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
+            self._resolution = ResolutionStagingSession(apm_modules_dir)
+        except BaseException:
+            self._release_workspace_lock()
+            raise
         self._lock = threading.RLock()
         self.committed = False
         self._completed = False
@@ -122,20 +130,27 @@ class InstallTransaction:
         with self._lock:
             if self._rolled_back:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
-            if not self.committed:
-                cleanup_issues = self._resolution.commit() or []
-                self.committed = True
-                self._completed = True
-                cleanup_issues.extend(self._resolution.remove_abandoned_roots())
-                self._report_resolution_cleanup_issues(cleanup_issues)
-            if (
-                self._validation is not None
-                and self._validation.has_failures
-                and result.disposition is InstallDisposition.SUCCESS
-            ):
-                result.disposition = InstallDisposition.PARTIAL_SUCCESS
-            result.committed = True
-            return result
+            try:
+                if not self.committed:
+                    cleanup_issues = self._resolution.commit() or []
+                    self.committed = True
+                    self._completed = True
+                    cleanup_issues.extend(self._resolution.remove_abandoned_roots())
+                    self._report_resolution_cleanup_issues(cleanup_issues)
+                if (
+                    self._validation is not None
+                    and self._validation.has_failures
+                    and result.disposition is InstallDisposition.SUCCESS
+                ):
+                    result.disposition = InstallDisposition.PARTIAL_SUCCESS
+                result.committed = True
+                return result
+            except BaseException:
+                self.rollback()
+                raise
+            finally:
+                if self.committed:
+                    self._release_workspace_lock()
 
     def _report_resolution_cleanup_issues(self, issues: list[tuple[Path, str]]) -> None:
         """Report cleanup paths that require safe manual recovery."""
@@ -164,9 +179,12 @@ class InstallTransaction:
             with self._lock:
                 if self._rolled_back:
                     raise RuntimeError("Cannot complete an install transaction after rollback")
-                cleanup_issues = self._resolution.rollback() or []
-                self._report_resolution_cleanup_issues(cleanup_issues)
-                self._completed = True
+                try:
+                    cleanup_issues = self._resolution.rollback() or []
+                    self._report_resolution_cleanup_issues(cleanup_issues)
+                    self._completed = True
+                finally:
+                    self._release_workspace_lock()
             return result
         if result.disposition in {
             InstallDisposition.CANCELLED,
@@ -182,11 +200,14 @@ class InstallTransaction:
         with self._lock:
             if self.committed or self._rolled_back:
                 return
-            cleanup_issues = self._resolution.rollback() or []
-            self._report_resolution_cleanup_issues(cleanup_issues)
-            self._restore_manifest()
-            self._rolled_back = True
-            self._completed = True
+            try:
+                cleanup_issues = self._resolution.rollback() or []
+                self._report_resolution_cleanup_issues(cleanup_issues)
+                self._restore_manifest()
+                self._rolled_back = True
+                self._completed = True
+            finally:
+                self._release_workspace_lock()
 
     def fail(self, error: BaseException) -> InstallResult:
         """Rollback and return a structured failed install result."""
@@ -201,7 +222,7 @@ class InstallTransaction:
         """Enter this install attempt."""
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, exc_type, exc, tb) -> Literal[False]:
         """Rollback every uncommitted exit and preserve exception semantics."""
         if exc is not None or not self._completed:
             self.rollback()
@@ -216,6 +237,13 @@ class InstallTransaction:
             self._manifest_existed,
         )
 
+    def _release_workspace_lock(self) -> None:
+        """Release this transaction's nested lifecycle acquisition once."""
+        lock = self._workspace_lock
+        if self._workspace_lock_held and lock is not None:
+            self._workspace_lock_held = False
+            lock.release()
+
 
 def resolution_for_context(ctx: Any) -> ResolutionStagingSession:
     """Return the context transaction's journal, creating a legacy adapter."""
@@ -225,5 +253,6 @@ def resolution_for_context(ctx: Any) -> ResolutionStagingSession:
             apm_modules_dir=ctx.apm_modules_dir,
             validation=None,
             logger=ctx.logger,
+            acquire_lock=False,
         )
-    return ctx.transaction.resolution
+    return cast(ResolutionStagingSession, ctx.transaction.resolution)

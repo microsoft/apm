@@ -279,10 +279,11 @@ class TestListRemoteRefsGitHub:
         dep = _make_dep_ref(host="github.com")
 
         dl._resolve_dep_token = MagicMock(return_value="ghp_test_token")
-        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
-        dl._build_repo_url = MagicMock(
-            return_value="https://x-access-token:ghp_test_token@github.com/owner/repo.git"
-        )
+        auth_ctx = MagicMock(token="ghp_test_token", auth_scheme="basic")
+        auth_ctx.host_info.kind = "github"
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=auth_ctx)
+        dl.auth_resolver.git_env_for_context.side_effect = AuthResolver.git_env_for_context
+        dl._build_repo_url = MagicMock(return_value="https://github.com/owner/repo.git")
 
         mock_git = MockGitCmd.return_value
         mock_git.ls_remote.return_value = SAMPLE_LS_REMOTE
@@ -290,17 +291,23 @@ class TestListRemoteRefsGitHub:
         result = dl.list_remote_refs(dep)
 
         dl._resolve_dep_token.assert_called_once_with(dep)
-        dl._build_repo_url.assert_called_once_with(
+        dl._build_repo_url.assert_any_call(
             "owner/repo",
             use_ssh=False,
             dep_ref=dep,
-            token="ghp_test_token",
+            token="",
             auth_scheme="basic",
         )
         mock_git.ls_remote.assert_called_once()
-        # Env should be the locked-down git_env (token present)
+        # The token travels through transient Git config, not URL userinfo.
         call_kwargs = mock_git.ls_remote.call_args
-        assert call_kwargs.kwargs.get("env") is dl.git_env
+        env = call_kwargs.kwargs["env"]
+        assert "GIT_TOKEN" not in env
+        assert any(
+            value.startswith("Authorization: Basic ")
+            for key, value in env.items()
+            if key.startswith("GIT_CONFIG_VALUE_")
+        )
 
         # Result is sorted: tags first (descending), then branches alpha
         tag_names = [r.name for r in result if r.ref_type == GitReferenceType.TAG]
@@ -448,9 +455,12 @@ class TestListRemoteRefsADO:
         dep = _make_dep_ref(ado=True)
 
         dl._resolve_dep_token = MagicMock(return_value="ado_pat_token")
-        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
+        auth_ctx = MagicMock(token="ado_pat_token", auth_scheme="basic")
+        auth_ctx.host_info.kind = "ado"
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=auth_ctx)
+        dl.auth_resolver.git_env_for_context.side_effect = AuthResolver.git_env_for_context
         dl._build_repo_url = MagicMock(
-            return_value="https://ado_pat_token@dev.azure.com/myorg/myproj/_git/myrepo",
+            return_value="https://dev.azure.com/myorg/myproj/_git/myrepo",
         )
 
         mock_git = MockGitCmd.return_value
@@ -459,11 +469,11 @@ class TestListRemoteRefsADO:
         result = dl.list_remote_refs(dep)
 
         dl._resolve_dep_token.assert_called_once_with(dep)
-        dl._build_repo_url.assert_called_once_with(
+        dl._build_repo_url.assert_any_call(
             "owner/repo",
             use_ssh=False,
             dep_ref=dep,
-            token="ado_pat_token",
+            token="",
             auth_scheme="basic",
         )
         mock_git.ls_remote.assert_called_once()
@@ -543,12 +553,12 @@ class TestAuthTokenResolution:
         dl.list_remote_refs(dep)
 
         dl._resolve_dep_token.assert_called_once_with(dep)
-        # _build_repo_url should receive token=None for generic hosts
-        dl._build_repo_url.assert_called_once_with(
+        # Generic remote URLs remain credential-free.
+        dl._build_repo_url.assert_any_call(
             "owner/repo",
             use_ssh=False,
             dep_ref=dep,
-            token=None,
+            token="",
             auth_scheme="basic",
         )
 

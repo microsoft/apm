@@ -17,6 +17,7 @@ import pytest
 
 from apm_cli.cache.git_cache import GitCache, _dir_size, _safe_git_args, _sanitize_url
 from apm_cli.cache.url_normalize import cache_shard_key
+from apm_cli.utils.git_env import _GitConfigSnapshot
 
 
 def _proc(*, returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
@@ -183,6 +184,15 @@ class TestResolveSha:
 
 
 class TestLsRemoteResolve:
+    @pytest.fixture(autouse=True)
+    def _validated_rewrites(self):
+        """Keep subprocess mocks focused on ls-remote after policy validation."""
+        with patch(
+            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
+            return_value=(None, _GitConfigSnapshot((), (), ())),
+        ):
+            yield
+
     def test_returns_head_sha_when_ref_is_none(self, cache: GitCache) -> None:
         sha = "1" * 40
         with (
@@ -202,14 +212,18 @@ class TestLsRemoteResolve:
                 "subprocess.run", return_value=_proc(stdout=f"{sha}\trefs/heads/main\n")
             ) as mock_run,
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={"DEFAULT": "1"}),
+            patch(
+                "apm_cli.utils.git_env.git_subprocess_env",
+                return_value={"DEFAULT": "1"},
+            ) as sanitize,
         ):
             result = cache._ls_remote_resolve(
                 "https://example.com/repo.git", "main", env=explicit_env
             )
 
         assert result == sha
-        assert mock_run.call_args.kwargs["env"] is explicit_env
+        sanitize.assert_any_call(explicit_env)
+        assert mock_run.call_args.kwargs["env"]["DEFAULT"] == "1"
 
     def test_uses_default_git_env_when_env_not_provided(self, cache: GitCache) -> None:
         sha = "3" * 40
@@ -331,6 +345,15 @@ class TestLsRemoteResolve:
 
 
 class TestEnsureBareRepo:
+    @pytest.fixture(autouse=True)
+    def _validated_rewrites(self):
+        """Keep subprocess mocks focused on clone after policy validation."""
+        with patch(
+            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
+            return_value=(None, _GitConfigSnapshot((), (), ())),
+        ):
+            yield
+
     def test_existing_bare_repo_with_sha_is_reused(self, cache: GitCache) -> None:
         shard_key = cache_shard_key("https://example.com/repo.git")
         bare_dir = cache._db_root / shard_key
@@ -451,6 +474,15 @@ class TestEnsureBareRepo:
 
 
 class TestCreateCheckout:
+    @pytest.fixture(autouse=True)
+    def _validated_rewrites(self):
+        """Keep subprocess mocks focused on checkout after policy validation."""
+        with patch(
+            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
+            return_value=(None, _GitConfigSnapshot((), (), ())),
+        ):
+            yield
+
     def test_write_dedup_hit_under_lock_returns_existing_checkout(self, cache: GitCache) -> None:
         url = "https://example.com/repo.git"
         shard_key = cache_shard_key(url)
@@ -661,6 +693,15 @@ class TestFetchIntoBare:
 
 
 class TestFetchIntoBareLocked:
+    @pytest.fixture(autouse=True)
+    def _validated_rewrites(self):
+        """Keep subprocess mocks focused on fetch after policy validation."""
+        with patch(
+            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
+            return_value=(None, _GitConfigSnapshot((), (), ())),
+        ):
+            yield
+
     def test_fetches_specific_sha_successfully(self, cache: GitCache, tmp_path: Path) -> None:
         bare_dir = tmp_path / "bare.git"
         bare_dir.mkdir()
@@ -675,14 +716,14 @@ class TestFetchIntoBareLocked:
         assert mock_run.call_args_list[0].args[0] == [
             "git",
             *_safe_git_args(),
-            "-C",
+            "--git-dir",
             str(bare_dir),
             "fetch",
             "https://example.com/repo.git",
             "a" * 40,
         ]
 
-    def test_falls_back_to_fetch_all_when_fetch_by_sha_fails(
+    def test_falls_back_to_explicit_remote_refs_when_fetch_by_sha_fails(
         self, cache: GitCache, tmp_path: Path
     ) -> None:
         bare_dir = tmp_path / "bare.git"
@@ -701,10 +742,12 @@ class TestFetchIntoBareLocked:
         assert mock_run.call_args_list[1].args[0] == [
             "git",
             *_safe_git_args(),
-            "-C",
+            "--git-dir",
             str(bare_dir),
             "fetch",
-            "--all",
+            "https://example.com/repo.git",
+            "+refs/heads/*:refs/remotes/apm-fallback/*",
+            "+refs/tags/*:refs/tags/*",
         ]
 
 
@@ -855,13 +898,13 @@ class TestHelperFunctions:
         with patch("os.walk", side_effect=_raise):
             assert _dir_size(root) == 0
 
-    def test_sanitize_url_strips_userinfo_and_preserves_port(self) -> None:
+    def test_sanitize_url_redacts_userinfo_and_preserves_port(self) -> None:
         sanitized = _sanitize_url("https://alice:secret@example.com:8443/repo.git")
-        assert sanitized == "https://example.com:8443/repo.git"
+        assert sanitized == "https://***@example.com:8443/repo.git"
 
-    def test_sanitize_url_strips_username_only_url(self) -> None:
+    def test_sanitize_url_redacts_username_only_url(self) -> None:
         url = "https://alice@example.com/repo.git"
-        assert _sanitize_url(url) == "https://example.com/repo.git"
+        assert _sanitize_url(url) == "https://***@example.com/repo.git"
 
     def test_sanitize_url_removes_query_fragment_and_embedded_credentials(self) -> None:
         diagnostic = (
@@ -872,8 +915,7 @@ class TestHelperFunctions:
 
         assert "SECRET123" not in sanitized
         assert "user:pass" not in sanitized
-        assert sanitized == "fatal: fetch https://example.com/repo.git failed"
+        assert sanitized == "fatal: fetch https://***@example.com/repo.git?access_token=*** failed"
 
     def test_sanitize_url_redacts_parser_errors(self) -> None:
-        with patch("urllib.parse.urlparse", side_effect=ValueError("bad url")):
-            assert _sanitize_url("https://example.com/repo.git") == "<redacted git URL>"
+        assert _sanitize_url("https://example.com:bad/repo.git") == "<redacted-git-url>"

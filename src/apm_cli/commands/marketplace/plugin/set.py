@@ -7,6 +7,7 @@ import sys
 import click
 
 from ....core.command_logger import CommandLogger
+from ....install.locking import serialized_lifecycle
 from ....marketplace.errors import MarketplaceYmlError
 from . import (
     _SHA_RE,
@@ -35,6 +36,7 @@ from . import (
     help="Include prerelease versions",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@serialized_lifecycle
 def set_cmd(
     name,
     version,

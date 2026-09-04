@@ -47,7 +47,7 @@ def test_fetch_local_bare_repo_via_git_show(tmp_path: Path) -> None:
 
     assert result == manifest
     args = run_mock.call_args.args[0]
-    assert args[0] == "git"
+    assert Path(args[0]).name == "git"
     assert "--git-dir" in args
     assert "core.hooksPath=/dev/null" in args
     assert "main:marketplace.json" in args

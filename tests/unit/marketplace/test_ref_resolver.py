@@ -7,6 +7,7 @@ import os
 import subprocess
 import time
 import urllib.parse
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -334,6 +335,37 @@ class TestRefResolver:
         resolver.close()
 
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_anonymous_first_retries_with_resolved_auth(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = (
+            _make_completed(returncode=128, stderr="authentication required"),
+            _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT),
+        )
+        auth_resolver = MagicMock()
+
+        def try_with_fallback(_target, operation, **kwargs):
+            assert kwargs["unauth_first"] is True
+            assert kwargs["base_env"] == {"BASE": "1"}
+            with pytest.raises(RuntimeError, match="authentication required"):
+                operation(None, {"ATTEMPT": "anonymous"})
+            return operation("resolved-token", {"ATTEMPT": "authenticated"})
+
+        auth_resolver.try_with_fallback.side_effect = try_with_fallback
+        resolver = RefResolver(
+            timeout_seconds=5.0,
+            auth_resolver=auth_resolver,
+            git_env={"BASE": "1"},
+            unauth_first=True,
+        )
+
+        refs = resolver.list_remote_refs("acme/tools")
+
+        assert len(refs) == 3
+        assert mock_run.call_count == 2
+        assert mock_run.call_args_list[0].kwargs["env"]["ATTEMPT"] == "anonymous"
+        assert mock_run.call_args_list[1].kwargs["env"]["ATTEMPT"] == "authenticated"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_cache_hit(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -439,7 +471,8 @@ class TestRefResolver:
         resolver.list_remote_refs("acme/tools")
         args, kwargs = mock_run.call_args
         cmd = args[0]
-        assert cmd[:4] == ["git", "ls-remote", "--tags", "--heads"]
+        assert Path(cmd[0]).name == "git"
+        assert cmd[1:4] == ["ls-remote", "--tags", "--heads"]
         parsed = urllib.parse.urlparse(cmd[4])
         assert parsed.hostname == "github.com"
         assert parsed.path.rstrip("/") == "/acme/tools.git"
@@ -472,8 +505,9 @@ class TestRefResolver:
         args, kwargs = mock_run.call_args
         assert args[0][4] == "git@github.com:acme/tools.git"
         assert "GIT_TOKEN" not in kwargs["env"]
-        assert "GIT_CONFIG_COUNT" not in kwargs["env"]
-        assert "GIT_CONFIG_VALUE_0" not in kwargs["env"]
+        count = int(kwargs["env"].get("GIT_CONFIG_COUNT", "0"))
+        keys = {kwargs["env"].get(f"GIT_CONFIG_KEY_{index}", "").lower() for index in range(count)}
+        assert all("extraheader" not in key for key in keys)
         resolver.close()
 
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
@@ -569,7 +603,8 @@ class TestResolveRefSha:
         # Verify command uses the ref directly (no --tags --heads).
         args, kwargs = mock_run.call_args  # noqa: RUF059
         cmd = args[0]
-        assert cmd[:2] == ["git", "ls-remote"]
+        assert Path(cmd[0]).name == "git"
+        assert cmd[1] == "ls-remote"
         assert cmd[-1] == "main"
         parsed = urllib.parse.urlparse(cmd[2])
         assert parsed.hostname == "github.com"
@@ -773,8 +808,8 @@ class TestRefResolverGHEHost:
 class TestRefResolverTokenInjection:
     """Token injection into ls-remote URLs."""
 
-    def test_token_injected_in_url(self) -> None:
-        """When token is provided, URL uses x-access-token auth and ends with .git."""
+    def test_token_uses_header_and_url_has_no_userinfo(self) -> None:
+        """When token is provided, the URL remains credential-free."""
         resolver = RefResolver(host="github.com", token="ghp_testtoken123")
         with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
             mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/tags/v1.0.0\n")
@@ -785,8 +820,15 @@ class TestRefResolverTokenInjection:
             parsed = urllib.parse.urlparse(url_arg)
             assert parsed.scheme == "https"
             assert parsed.hostname == "github.com"
-            assert parsed.username == "x-access-token"
+            assert parsed.username is None
+            assert parsed.password is None
             assert parsed.path.endswith(".git")
+            values = [
+                value
+                for key, value in mock_run.call_args.kwargs["env"].items()
+                if key.startswith("GIT_CONFIG_VALUE_")
+            ]
+            assert any(value.startswith("Authorization: Basic ") for value in values)
 
     def test_no_token_url_has_git_suffix(self) -> None:
         """Without token, URL still ends with .git and has no userinfo."""
@@ -800,8 +842,8 @@ class TestRefResolverTokenInjection:
             assert parsed.path.endswith(".git")
             assert parsed.username is None
 
-    def test_resolve_ref_sha_with_token(self) -> None:
-        """Token is also injected in resolve_ref_sha URL."""
+    def test_resolve_ref_sha_with_token_uses_header(self) -> None:
+        """Single-ref resolution also keeps the token out of its URL."""
         resolver = RefResolver(host="corp.ghe.com", token="ghp_xxx")
         with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
             mock_run.return_value = _make_completed("bbbb" * 10 + "\trefs/heads/main\n")
@@ -811,7 +853,8 @@ class TestRefResolverTokenInjection:
             url_arg = cmd_args[2]
             parsed = urllib.parse.urlparse(url_arg)
             assert parsed.hostname == "corp.ghe.com"
-            assert parsed.username == "x-access-token"
+            assert parsed.username is None
+            assert parsed.password is None
             assert parsed.path.endswith(".git")
 
     def test_bearer_auth_rejects_non_ado_host(self) -> None:
@@ -849,7 +892,12 @@ class TestRefResolverTokenInjection:
             for i in range(int(env["GIT_CONFIG_COUNT"]))
             if "Authorization" in (v := env[f"GIT_CONFIG_VALUE_{i}"])
         ]
-        assert headers == [("http.extraheader", f"Authorization: Basic {expected}")]
+        assert headers == [
+            (
+                "http.https://dev.azure.com/contoso/platform/_git/repo.extraheader",
+                f"Authorization: Basic {expected}",
+            )
+        ]
 
     def test_ado_ssh_transport_skips_bearer_retry(self) -> None:
         """SSH transport never retries an ADO PAT as an HTTP bearer flow."""
@@ -899,11 +947,13 @@ class TestGitUrlAndEnvPreservesRetainedGitConfig:
             git_env=self._retained(),
         )
         _url, env = resolver._git_url_and_env("contoso/platform/repo")
-        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_COUNT"] == "3"
         assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
         assert env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
-        assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
-        assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer aad-jwt"
+        assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert env["GIT_CONFIG_VALUE_1"] == ""
+        assert env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_2"] == "Authorization: Bearer aad-jwt"
         resolver.close()
 
     def test_ado_basic_appends_after_retained_entries(self) -> None:
@@ -915,10 +965,12 @@ class TestGitUrlAndEnvPreservesRetainedGitConfig:
         )
         _url, env = resolver._git_url_and_env("contoso/platform/repo")
         expected = base64.b64encode(b":ado_pat").decode()
-        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_COUNT"] == "3"
         assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
-        assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
-        assert env["GIT_CONFIG_VALUE_1"] == f"Authorization: Basic {expected}"
+        assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert env["GIT_CONFIG_VALUE_1"] == ""
+        assert env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_2"] == f"Authorization: Basic {expected}"
         resolver.close()
 
     def test_ado_bearer_replaces_stale_header_instead_of_stacking(self) -> None:
@@ -942,6 +994,8 @@ class TestGitUrlAndEnvPreservesRetainedGitConfig:
             if k.startswith("GIT_CONFIG_VALUE_") and "Authorization" in str(v)
         ]
         assert headers == ["Authorization: Bearer fresh-jwt"]
-        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_COUNT"] == "3"
         assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+        assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert env["GIT_CONFIG_VALUE_1"] == ""
         resolver.close()

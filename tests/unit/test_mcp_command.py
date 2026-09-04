@@ -751,7 +751,7 @@ class TestMcpRegistryEnvVar:
         monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
         monkeypatch.setattr(
             "apm_cli.config.get_mcp_registry_url",
-            lambda: "https://config.internal.example.com",
+            lambda *, create_config=True: "https://config.internal.example.com",
         )
         runner = make_runner()
         with patch_registry(detail_result=FAKE_SERVER_DETAIL) as mock_cls:
@@ -760,7 +760,9 @@ class TestMcpRegistryEnvVar:
 
     def test_list_lets_the_client_resolve(self, monkeypatch):
         monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
-        monkeypatch.setattr("apm_cli.config.get_mcp_registry_url", lambda: None)
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url", lambda *, create_config=True: None
+        )
         runner = make_runner()
         with patch_registry(list_result=FAKE_SERVERS) as mock_cls:
             runner.invoke(mcp, ["list"])

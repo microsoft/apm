@@ -43,6 +43,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.install.locking import serialized_lifecycle
+
 from ..core.command_logger import InstallLogger
 from ..core.target_detection import TargetParamType
 from ..export.formats import FORMAT_CYCLONEDX, SUPPORTED_FORMATS
@@ -168,6 +170,7 @@ def lock(
     )
 
 
+@serialized_lifecycle
 def _run_lock(
     *,
     verbose: bool,
@@ -222,7 +225,7 @@ def _run_lock(
     try:
         from apm_cli.commands.install import _install_apm_dependencies
 
-        _install_apm_dependencies(
+        result = _install_apm_dependencies(
             apm_package,
             update_refs=update_refs,
             verbose=verbose,
@@ -238,7 +241,10 @@ def _run_lock(
     except Exception as e:
         _handle_lock_error(e, verbose)
 
-    _rich_success("Lockfile written to apm.lock.yaml", symbol="check")
+    from apm_cli.install.summary import exit_unless_install_result_allows_success
+
+    exit_unless_install_result_allows_success(logger=logger, result=result)
+    logger.success("Lockfile written to apm.lock.yaml", symbol="check")
 
 
 @lock.command(
