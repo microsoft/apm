@@ -353,7 +353,7 @@ The canonical set of `target` identifiers registered by this
 specification at v0.1 is:
 
 ```
-copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, kiro, grok-build, copilot-cowork, vscode, all
+copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, kiro, grok-build, copilot-cowork, hermes, vscode, all
 ```
 
 The legacy aliases `vscode` and `agents` MAY appear in input manifests
@@ -369,7 +369,7 @@ registered **auto-detectable** target (see
 least one detection predicate for it; a target registered without a
 detection predicate is **explicit-only** and MUST be selected
 explicitly. At v0.1 the explicit-only targets are `agent-skills`,
-`antigravity`, and `copilot-cowork`, so `all` excludes them.
+`antigravity`, `copilot-cowork`, and `hermes`, so `all` excludes them.
 
 Concrete per-target detection signals and deploy roots are documented
 in the non-normative companion **"OpenAPM Target Registry v0.1"**
@@ -2364,8 +2364,8 @@ A target registered without a detection predicate
 MUST NOT be auto-detected and MUST be excluded from the expansion of
 `all`; such an **explicit-only** target MUST be selected explicitly
 via `--target <name>` or via the manifest's `target:` field. At v0.1
-the explicit-only targets are `agent-skills`, `antigravity`, and
-`copilot-cowork`. When
+the explicit-only targets are `agent-skills`, `antigravity`,
+`copilot-cowork`, and `hermes`. When
 no detection signal fires, the consumer MAY fall back to a `minimal`
 profile that emits `AGENTS.md` only.
 
