@@ -950,7 +950,7 @@ def resolve_effective_target_decision(
 
     from apm_cli.config import get_install_target
 
-    configured_target = get_install_target()
+    configured_target = get_install_target(create_config=create_config)
     if configured_target is not None:
         return EffectiveTargetDecision(configured_target, "apm config target")
 
