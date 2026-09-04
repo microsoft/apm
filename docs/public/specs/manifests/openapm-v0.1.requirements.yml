@@ -443,6 +443,11 @@ requirements:
     section: "8.5.8"
     conformance_class: consumer
     notes: "user-scoped MCP target selection uses a disclosed versioned capability contract, ignores project-only detection signals, applies first-source precedence without fallback, filters mixed sets, and refuses zero-supported selections before user manifest, lockfile, or target-config mutation"
+  - id: req-tg-015
+    keyword: MUST
+    section: "8.5.9"
+    conformance_class: consumer
+    notes: "Cursor universal applyTo maps to alwaysApply without globs; scoped patterns remain globs"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"

@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..023, req-ext-001..002, req-sc-001..010,
-req-tg-001..008, req-cf-001..002.
+Covers req-mf-001..024, req-ext-001..002, req-sc-001..014,
+req-tg-001..014, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -25,6 +25,7 @@ from apm_cli.install.phases.finalize import _hint_project_compile_needed
 from apm_cli.install.target_filter import resolve_effective_package_targets
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage
@@ -900,7 +901,29 @@ def test_dependency_package_targets_are_restriction_only() -> None:
         "MUST be reconciled under",
         "[req-lk-021](#req-lk-021)",
         "[req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),\n"
-        "[req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),",
+        "[req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),\n"
+        "[req-tg-014](#req-tg-014), [req-tg-015](#req-tg-015),",
+    )
+
+
+@pytest.mark.req("req-tg-015")
+def test_consumer_preserves_cursor_universal_instruction_intent() -> None:
+    universal = InstructionIntegrator._convert_to_cursor_rules(
+        "---\napplyTo: '**'\n---\n\n# Repository guardrails"
+    )
+    scoped = InstructionIntegrator._convert_to_cursor_rules(
+        "---\napplyTo: 'src/**/*.py'\n---\n\n# Python rules"
+    )
+
+    assert "alwaysApply: true" in universal
+    assert "globs" not in universal
+    assert "alwaysApply" not in scoped
+    assert 'globs: "src/**/*.py"' in scoped
+    assert_spec_contains(
+        "`.cursor/rules/<name>.mdc`",
+        "MUST contain `alwaysApply: true` and MUST NOT contain a\n`globs` field",
+        "MUST encode the source patterns in\n`globs`",
+        "MUST omit both `alwaysApply` and `globs`",
     )
 
 

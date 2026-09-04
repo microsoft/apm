@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cursor instruction output now ports a universal `applyTo: "**"` to
+  `alwaysApply: true` instead of `globs: "**"`, preserving always-on intent
+  while leaving scoped globs unchanged. (by @WilliamK112, closes #1744)
 - Windows users no longer get repeated line-ending churn when APM rewrites
   `apm.yml`: install, uninstall, dependency resolution, and revision-pin
   updates now produce deterministic LF output. An `apm.yml` that already uses
