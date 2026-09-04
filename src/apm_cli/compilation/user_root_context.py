@@ -17,6 +17,8 @@ Files are ONLY written when:
 4. The existing file either does not exist OR carries the generated marker
 
 Hand-authored files (no marker) are left untouched.
+Claude instructions already delivered by equivalent native user rules are
+omitted. Explicit cleanup can remove an unchanged, fully redundant Claude root.
 """
 
 from __future__ import annotations
@@ -160,11 +162,70 @@ def discover_global_instructions(
     )
 
 
+def _handle_redundant_claude_root(
+    target: str,
+    path: Path,
+    expected_content: str,
+    *,
+    clean: bool,
+    dry_run: bool,
+) -> UserRootCompileResult:
+    """Retain or explicitly clean an unchanged root now covered by native rules.
+
+    Global roots have no deployment hash ledger. Require the exact legacy
+    output of the current instruction set, not merely a generated marker,
+    before removal. Older or edited content is left for manual review.
+    """
+    from ..integration.cleanup import remove_stale_deployed_files
+    from ..utils.diagnostics import DiagnosticCollector
+    from .constants import AGENTS_MD_GENERATED_MARKER, has_generated_marker_header
+
+    if path.is_symlink():
+        return UserRootCompileResult(target, path, "skipped-symlink")
+    if not path.exists():
+        return UserRootCompileResult(target, path, "skipped-native-rules")
+    try:
+        existing = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return UserRootCompileResult(target, path, f"error:cannot read {path}: {exc}")
+    if not has_generated_marker_header(existing, (AGENTS_MD_GENERATED_MARKER,)):
+        return UserRootCompileResult(target, path, "skipped-hand-authored")
+    if existing != expected_content:
+        return UserRootCompileResult(target, path, "skipped-modified")
+    if not clean:
+        return UserRootCompileResult(target, path, "retained-redundant")
+    if dry_run:
+        return UserRootCompileResult(target, path, "would-remove")
+
+    # Hash the expected generated output, not untrusted on-disk bytes. The
+    # cleanup owner rechecks it and refuses a replacement symlink or user edit.
+    expected_hash = "sha256:" + hashlib.sha256(expected_content.encode("utf-8")).hexdigest()
+    result = remove_stale_deployed_files(
+        [path.name],
+        path.parent,
+        dep_key="global-claude-root",
+        targets=[],
+        diagnostics=DiagnosticCollector(),
+        recorded_hashes={path.name: expected_hash},
+        allowed_prefixes=(path.name,),
+        allow_final_symlink=True,
+        failed_path_retained=False,
+    )
+    if result.failed or result.skipped_unmanaged:
+        return UserRootCompileResult(
+            target, path, f"error:could not remove {path}; inspect its access and path, then retry"
+        )
+    if result.skipped_user_edit:
+        return UserRootCompileResult(target, path, "skipped-modified")
+    return UserRootCompileResult(target, path, "removed")
+
+
 def compile_user_root_contexts(
     targets: Iterable[TargetProfile],
     source_root: Path,
     *,
     dry_run: bool = False,
+    clean: bool = False,
     logger: _logging_module.Logger | None = None,
 ) -> list[UserRootCompileResult]:
     """Compile user-scope root context files from global (apply_to-less) instructions.
@@ -183,6 +244,8 @@ def compile_user_root_contexts(
             e.g. ``Path.home() / ".apm"``.
         dry_run: When True, no files are written or directories created.
             The returned status values reflect what *would* happen.
+        clean: Remove an unchanged Claude root fully covered by native rules.
+            Other orphaned output and hand-authored or edited roots are retained.
         logger: Optional logger.  Falls back to ``logging.getLogger(__name__)``.
 
     Returns:
@@ -195,6 +258,11 @@ def compile_user_root_contexts(
         * ``"would-write"``          -- dry_run; file would have been written
         * ``"skipped-no-instructions"`` -- no global instructions found
         * ``"skipped-hand-authored"`` -- existing file has no APM marker
+        * ``"skipped-native-rules"`` -- Claude rules already deliver all instructions
+        * ``"retained-redundant"``   -- redundant generated root needs explicit cleanup
+        * ``"skipped-modified"``    -- redundant root differs from expected output
+        * ``"skipped-symlink"``     -- redundant root is a user-owned symlink
+        * ``"removed"`` / ``"would-remove"`` -- explicit redundant-root cleanup
         * ``"error:<msg>"``          -- OS error during read or write
     """
     from ..utils.path_security import PathTraversalError, ensure_path_within
@@ -245,14 +313,33 @@ def compile_user_root_contexts(
 
         deploy_root = _resolve_deploy_root(scoped)
         root_filename = _ROOT_FILENAME[family]
+        lexical_output_path = deploy_root / root_filename
         try:
-            output_path = ensure_path_within(deploy_root / root_filename, deploy_root)
-        except PathTraversalError as exc:
+            output_path = ensure_path_within(lexical_output_path, deploy_root)
+        except (PathTraversalError, RuntimeError) as exc:
             log.warning("user_root_context: unsafe output path for %s: %s", scoped.name, exc)
             results.append(
                 UserRootCompileResult(scoped.name, deploy_root / root_filename, f"error:{exc}")
             )
             continue
+
+        if family == "claude":
+            from .instruction_dedup import uncovered_instructions
+
+            target_instructions = uncovered_instructions(
+                "claude", target_instructions, deploy_root / "rules", deploy_root, log.warning
+            )
+            if not target_instructions:
+                results.append(
+                    _handle_redundant_claude_root(
+                        scoped.name,
+                        lexical_output_path,
+                        _generate_content(global_instructions),
+                        clean=clean,
+                        dry_run=dry_run,
+                    )
+                )
+                continue
 
         content = _generate_content(
             target_instructions,

@@ -404,7 +404,7 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
 
 
 @serialized_lifecycle_unless("dry_run")
-def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
+def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = False) -> int:
     """Handle --global compilation of user-scope root context files.
 
     Returns 0 on success, 1 on error (for sys.exit).
@@ -474,6 +474,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
         compile_targets,
         source_root,
         dry_run=dry_run,
+        clean=clean,
         logger=None,
     )
 
@@ -495,6 +496,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     written_count = 0
     would_write_count = 0
     unchanged_count = 0
+    removed_count = 0
     for entry in results:
         status = entry.status
         tname = entry.target
@@ -511,6 +513,33 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
             unchanged_count += 1
         elif status == "skipped-hand-authored":
             logger.info(f"{tname}: skipped (hand-authored) {display_path}", symbol="info")
+        elif status == "skipped-native-rules":
+            logger.info(
+                f"{tname}: native rules already deliver all global instructions; "
+                f"{display_path} not needed.",
+                symbol="info",
+            )
+        elif status == "retained-redundant":
+            logger.warning(
+                f"{tname}: retained redundant {display_path}. Preview its removal with "
+                "'apm compile -g --clean --dry-run', then rerun without --dry-run."
+            )
+        elif status in {"skipped-modified", "skipped-symlink"}:
+            reason = (
+                "is a symlink" if status == "skipped-symlink" else "differs from expected output"
+            )
+            logger.warning(
+                f"{tname}: retained {display_path}: it {reason}. "
+                "Review it manually against the native rules before removing duplicate content."
+            )
+        elif status in {"removed", "would-remove"}:
+            if status == "would-remove":
+                logger.info(
+                    f"{tname}: would remove redundant {display_path} (dry-run)", symbol="preview"
+                )
+            else:
+                logger.success(f"{tname}: removed redundant {display_path}", symbol="check")
+            removed_count += 1
         elif status == "skipped-no-instructions":
             logger.verbose_detail(f"{tname}: skipped (no global instructions)")
         elif status.startswith("error:"):
@@ -521,9 +550,15 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
 
     if not has_error:
         changed_count = written_count + would_write_count
-        if changed_count:
-            verb = "Would compile" if dry_run else "Compiled"
-            message = f"{verb} {changed_count} user-scope root context file(s)"
+        if changed_count or removed_count:
+            changes = []
+            if changed_count:
+                verb = "Would compile" if dry_run else "Compiled"
+                changes.append(f"{verb} {changed_count} user-scope root context file(s)")
+            if removed_count:
+                verb = "Would remove" if dry_run else "Removed"
+                changes.append(f"{verb} {removed_count} redundant file(s)")
+            message = "; ".join(changes)
             if unchanged_count:
                 message += f"; {unchanged_count} unchanged"
             message += "."
@@ -1195,6 +1230,7 @@ def _run_compilation(
     is_flag=True,
     help=(
         "Remove orphaned output files (AGENTS.md, CLAUDE.md) no longer generated. "
+        "With --global, only removes an unchanged Claude root covered by native rules. "
         "Hand-authored files are never deleted; use --dry-run to preview removals."
     ),
 )
@@ -1334,7 +1370,7 @@ def compile(  # noqa: PLR0913 -- Click handler
     if global_:
         from click.core import ParameterSource
 
-        allowed_with_global = {"global_", "dry_run", "verbose"}
+        allowed_with_global = {"global_", "dry_run", "verbose", "clean"}
         flag_names = {
             "chatmode": "--chatmode",
             "clean": "--clean",
@@ -1357,7 +1393,7 @@ def compile(  # noqa: PLR0913 -- Click handler
                 continue
             flag = flag_names.get(name, f"--{name.replace('_', '-')}")
             raise click.UsageError(f"--global is not valid with {flag}")
-        rc = _handle_global_flag(dry_run=dry_run, logger=logger)
+        rc = _handle_global_flag(dry_run=dry_run, logger=logger, clean=clean)
         if rc != 0:
             ctx.exit(rc)
         return

@@ -9,7 +9,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from ..core.target_catalog import accepted_target_values, get_target_capability
 from ..core.target_detection import (
@@ -34,6 +34,12 @@ from .constants import (
     has_generated_marker_header,
 )
 from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
+from .instruction_dedup import (
+    build_expected_rule_filenames as _build_expected_rule_filenames,
+)
+from .instruction_dedup import (
+    detect_deployed_instructions as _detect_deployed_instructions,
+)
 from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .managed_section import ManagedSectionError
@@ -68,71 +74,6 @@ _AGENTS_ROOT_GENERATED_MARKERS = (
 )
 # Compatibility alias for callers that imported the former module constant.
 _COPILOT_ROOT_GENERATED_MARKER = AGENTS_MD_GENERATED_MARKER
-
-
-def _detect_deployed_instructions(
-    rules_dir: Path,
-    base_dir: Path,
-    warn_fn: Callable[[str], None],
-    expected_filenames: set[str] | None = None,
-) -> bool:
-    """Return True when rules_dir contains at least one rule file safely inside base_dir.
-
-    Shared by the Claude, Copilot, and Antigravity compile paths: each passes
-    its own target-specific rules directory (.claude/rules/, .github/instructions/,
-    or .agents/rules/) so the detection logic stays in one place (R0801 guard).
-    """
-    if not rules_dir.is_dir():
-        return False
-    from ..utils.path_security import PathTraversalError, ensure_path_within
-
-    try:
-        ensure_path_within(rules_dir, base_dir)
-    except PathTraversalError:
-        warn_fn(f"{rules_dir} is a symlink outside the project root -- ignoring")
-        return False
-
-    if expected_filenames is not None:
-        return any((rules_dir / name).is_file() for name in expected_filenames)
-    return any(rules_dir.glob("*.md"))
-
-
-def _build_expected_rule_filenames(
-    target_key: str,
-    primitives: PrimitiveCollection,
-) -> set[str]:
-    """Return the set of expected rule filenames for *target_key* given *primitives*.
-
-    Shared by the Antigravity/Copilot (_compile_distributed) and Claude
-    (_compile_claude_md) dedup paths so the filename-building policy stays in
-    one place (R0801 guard).
-
-    Args:
-        target_key: Canonical KNOWN_TARGETS key (e.g. "claude", "copilot",
-            "antigravity").
-        primitives: Compiled agent primitives whose instructions drive the
-            expected filenames.
-
-    Returns:
-        A set of expected rule filenames (stem + target extension), or an empty
-        set if the target profile is unknown or lacks an ``instructions``
-        primitive mapping.
-    """
-    # Late import avoids a circular dependency: integration.targets imports
-    # integration helpers that eventually reach the compilation package.
-    from ..integration.targets import KNOWN_TARGETS
-
-    expected: set[str] = set()
-    target_profile = KNOWN_TARGETS.get(target_key)
-    if target_profile and "instructions" in target_profile.primitives:
-        mapping = target_profile.primitives["instructions"]
-        extension = mapping.extension
-        for instr in primitives.instructions:
-            stem = instr.file_path.name
-            if stem.endswith(".instructions.md"):
-                stem = stem[: -len(".instructions.md")]
-            expected.add(f"{stem}{extension}")
-    return expected
 
 
 # Compiler families allowed inside a multi-target frozenset (built by
