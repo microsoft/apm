@@ -933,6 +933,65 @@ class TestNormalizePluginDirectory:
         assert parsed["name"] == "dir-name-plugin"
         assert (plugin_dir / ".apm" / "prompts" / "go.prompt.md").exists()
 
+    @pytest.mark.parametrize(
+        "schema_id",
+        [
+            "https://json.schemastore.org/claude-code-plugin-manifest.json",
+            "https://example.com/plugin.schema.json",
+            "https://agent-plugins.org.example.com/schemas/1.0.0/plugin.schema.json",
+            42,
+            None,
+        ],
+    )
+    def test_nested_manifest_with_foreign_schema_normalizes_as_legacy(self, tmp_path, schema_id):
+        """A .claude-plugin/plugin.json carrying a non-Agent-Plugins $schema is legacy.
+
+        Regression test for #2780.  The root-manifest router was reused as the
+        predicate here, and it raises on a Claude Code schemastore $schema
+        instead of answering, so the legacy path could never be reached.
+
+        A near-miss hostname and a non-string $schema resolve the same way.
+        The legacy route grants no Agent Plugins semantics, so declining to
+        claim the manifest is the safe answer.
+        """
+        plugin_dir = tmp_path / "hello"
+        plugin_dir.mkdir()
+        (plugin_dir / "SKILL.md").write_text("---\nname: hello\n---\n\n# hello\n")
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        pj = claude_dir / "plugin.json"
+        pj.write_text(json.dumps({"$schema": schema_id, "name": "hello", "version": "1.0.0"}))
+
+        result = normalize_plugin_directory(plugin_dir, pj)
+
+        assert result == plugin_dir / "apm.yml"
+        parsed = yaml.safe_load(result.read_text())
+        assert parsed["name"] == "hello"
+
+    @pytest.mark.parametrize(
+        "schema_id",
+        [
+            "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+            "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+        ],
+    )
+    def test_nested_agent_plugin_manifest_stays_outside_legacy_normalization(
+        self, tmp_path, schema_id
+    ):
+        """An Agent Plugin manifest outside the package root is rejected."""
+        from apm_cli.agent_plugins.errors import AgentPluginLegacyBoundaryError
+
+        plugin_dir = tmp_path / "hello"
+        plugin_dir.mkdir()
+        claude_dir = plugin_dir / ".claude-plugin"
+        claude_dir.mkdir()
+        pj = claude_dir / "plugin.json"
+        pj.write_text(json.dumps({"$schema": schema_id, "name": "hello", "version": "1.0.0"}))
+
+        with pytest.raises(AgentPluginLegacyBoundaryError, match="admitted from the package root"):
+            normalize_plugin_directory(plugin_dir, pj)
+        assert not (plugin_dir / "apm.yml").exists()
+
 
 class TestValidatePluginPackage:
     def test_validate_with_plugin_json(self, tmp_path):

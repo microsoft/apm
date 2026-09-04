@@ -480,11 +480,17 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     ):
         manifest = parse_plugin_manifest(plugin_json_path)
         from ..agent_plugins.errors import AgentPluginLegacyBoundaryError
-        from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+        from ..agent_plugins.validation import is_agent_plugin_schema_id
 
-        if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:
+        # Only an Agent Plugin manifest is barred here.  A foreign $schema,
+        # including the Claude Code schemastore URL that conforming Claude
+        # plugins carry, is legacy metadata.  classify_plugin_manifest_schema()
+        # is scoped to root manifests and raises rather than answers for an
+        # unrecognised $schema, so it cannot serve as the predicate (#2780).
+        schema_id = manifest.get("$schema")
+        if isinstance(schema_id, str) and is_agent_plugin_schema_id(schema_id):
             raise AgentPluginLegacyBoundaryError(
-                "Schema-bearing plugin.json must be admitted from the package root, "
+                "An Agent Plugin manifest must be admitted from the package root, "
                 "not Claude plugin normalization"
             )
 

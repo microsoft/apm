@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now accepts a conforming Claude Code plugin whose
+  `.claude-plugin/plugin.json` carries the official Claude Code `$schema`.
+  The root-manifest schema router was reused as the predicate on the nested
+  legacy manifest, and that router raises on an unrecognised `$schema` rather
+  than answering, so the legacy path could never be reached. Strict admission
+  for a root `plugin.json` is unchanged, and an Agent Plugin manifest placed
+  outside the package root is still rejected. (closes #2780) (#2798)
 - Windows users no longer get repeated line-ending churn when APM rewrites
   `apm.yml`: install, uninstall, dependency resolution, and revision-pin
   updates now produce deterministic LF output. An `apm.yml` that already uses

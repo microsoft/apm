@@ -926,13 +926,18 @@ def test_schema_bearing_manifest_never_falls_back_to_legacy_normalization(
     [
         PLUGIN_SCHEMA_ID,
         "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
-        "https://example.com/plugin.schema.json",
     ],
 )
 def test_nested_marketplace_manifest_cannot_bypass_root_schema_admission(
     tmp_path: Path,
     schema_id: str,
 ) -> None:
+    """Only an Agent Plugin manifest is barred from the nested legacy path.
+
+    A foreign ``$schema``, such as the Claude Code schemastore URL, is legacy
+    metadata and normalizes.  ``TestNormalizePluginDirectory`` in
+    ``tests/unit/test_plugin_parser.py`` covers that case (#2780).
+    """
     manifest = tmp_path / ".claude-plugin" / "plugin.json"
     manifest.parent.mkdir()
     manifest.write_text(
