@@ -247,7 +247,7 @@ class CloneEngine:
                     base_env=host.git_env,
                 )
             if is_generic and dep_ref is not None:
-                org = repo_url_base.split("/", 1)[0] if "/" in repo_url_base else None
+                org = repository_owner(repo_url_base)
                 policy_url = attempt.effective_url or attempt_url
                 context = host.auth_resolver.resolve_for_remote(
                     dep_host or default_host(),

@@ -463,7 +463,7 @@ def _validate_ado_git_package(
         candidate_url=candidate_url,
     )
     attempts: list[tuple[object, str, dict[str, str]]] = []
-    org = dep_ref.repo_url.split("/", 1)[0] if dep_ref.repo_url else None
+    org = dependency_repository_owner(dep_ref)
     for attempt in transport_plan.attempts:
         if attempt.requested_url is not None:
             probe_url = attempt.requested_url

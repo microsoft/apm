@@ -333,7 +333,7 @@ class GitHubPackageDownloader:
             auth_ctx = self.auth_resolver.resolve_for_remote(
                 dep_ref.host or default_host(),
                 remote_url,
-                dep_ref.repo_url.split("/", 1)[0],
+                dependency_repository_owner(dep_ref),
                 port=dep_ref.port,
                 host_type=dep_ref.host_type,
             )
@@ -1295,7 +1295,7 @@ class GitHubPackageDownloader:
                     auth_url,
                 )
             else:
-                org = dep_ref.repo_url.split("/", 1)[0]
+                org = dependency_repository_owner(dep_ref)
                 generic_ctx = self.auth_resolver.resolve_for_remote(
                     dep_ref.host or default_host(),
                     auth_url,
