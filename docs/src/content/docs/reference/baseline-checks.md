@@ -118,8 +118,8 @@ the [policy schema](../policy-schema/).
 
 ### `skill-subset-consistency`
 
-- **What it verifies.** That the `skills:` selection in `apm.yml` for each `skill_bundle` dependency matches the `skill_subset` recorded in the lockfile.
-- **Fails when.** The sorted manifest skill list differs from the sorted lockfile `skill_subset` for any skill bundle.
+- **What it verifies.** That each `skills:` selection in `apm.yml` matches the `skill_subset` recorded in the lockfile, and that every recorded skill path exists in the resolved package tree.
+- **Fails when.** The sorted manifest skill list differs from the sorted lockfile `skill_subset`, or a recorded subset path no longer maps to a deployable skill in the installed package.
 - **Remediation.** Run `apm install` to regenerate the lockfile against the current selection.
 
 ### `config-consistency`

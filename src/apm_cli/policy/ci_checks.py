@@ -341,22 +341,34 @@ def _check_no_orphans(
 def _check_skill_subset_consistency(
     manifest: APMPackage,
     lock: LockFile,
+    project_root: Path,
 ) -> CheckResult:
-    """Verify lockfile skill_subset matches manifest skills: for each entry."""
+    """Verify skill subsets match the lockfile and real package tree."""
     mismatches: list[str] = []
     for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
         locked_dep = lock.get_dependency(key)
         if locked_dep is None:
             continue
-        # Only check skill_bundle packages
-        if locked_dep.package_type != "skill_bundle":
+        if not dep_ref.skill_subset and not locked_dep.skill_subset:
             continue
         manifest_subset = sorted(dep_ref.skill_subset) if dep_ref.skill_subset else []
         lock_subset = sorted(locked_dep.skill_subset) if locked_dep.skill_subset else []
         if manifest_subset != lock_subset:
             mismatches.append(
                 f"{key}: manifest skills {manifest_subset} != lockfile skill_subset {lock_subset}"
+            )
+            continue
+        missing = _missing_recorded_skill_subset_paths(
+            project_root,
+            dep_ref,
+            locked_dep.package_type,
+            lock_subset,
+        )
+        if missing:
+            mismatches.append(
+                f"{key}: recorded skill subset path(s) not found in package tree: "
+                f"{', '.join(missing)}"
             )
 
     if not mismatches:
@@ -373,6 +385,37 @@ def _check_skill_subset_consistency(
         ),
         details=mismatches,
     )
+
+
+def _missing_recorded_skill_subset_paths(
+    project_root: Path,
+    dep_ref,
+    package_type: str | None,
+    subset: list[str],
+) -> tuple[str, ...]:
+    """Return recorded skill subset paths absent from the materialized package."""
+    if not subset:
+        return ()
+
+    from types import SimpleNamespace
+
+    from ..constants import APM_MODULES_DIR
+    from ..install.outcome import missing_requested_components
+    from ..integration.skill_integrator import SkillIntegrator
+    from ..models.validation import PackageType
+
+    try:
+        resolved_package_type = PackageType(package_type) if package_type else None
+        package_info = SimpleNamespace(
+            install_path=dep_ref.get_install_path(project_root / APM_MODULES_DIR),
+            package_type=resolved_package_type,
+        )
+        available = SkillIntegrator.available_skill_names(package_info)
+    except (OSError, RuntimeError, ValueError):
+        available = frozenset()
+    if available is None:
+        available = frozenset()
+    return missing_requested_components(requested=subset, available=available)
 
 
 def _check_config_consistency(
@@ -930,7 +973,7 @@ def run_baseline_checks(
         return result
 
     # Check 6: Skill subset consistency (manifest vs lockfile)
-    if _run(_check_skill_subset_consistency(manifest, lock)):
+    if _run(_check_skill_subset_consistency(manifest, lock, project_root)):
         return result
 
     # Check 7: Config consistency (MCP)

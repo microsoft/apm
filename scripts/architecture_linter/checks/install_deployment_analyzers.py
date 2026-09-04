@@ -54,10 +54,12 @@ from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
     _GUARD_OUTCOME,
+    _GUARD_PRIMITIVE_CLASSIFICATION,
     _GUARD_REQUEST_DEFAULTS,
     _GUARD_SOURCE_PLAN,
     check_install_scope_selection,
     check_outcome,
+    check_primitive_classification,
     check_request_defaults,
     check_source_plan,
 )
@@ -114,6 +116,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_SOURCE_PLAN,
         "Authorized deployable source paths come from install/deployable_source_plan.py.",
         check_source_plan,
+    ),
+    _rule(
+        _GUARD_PRIMITIVE_CLASSIFICATION,
+        "Primitive kind classification is declaration-first and has one owner.",
+        check_primitive_classification,
     ),
     _rule(
         _GUARD_REQUEST_DEFAULTS,

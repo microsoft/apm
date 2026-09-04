@@ -98,13 +98,12 @@ class TestAgentPluginDetector:
         assert isinstance(ev, AgentPluginFormatEvidence)
         assert ev.supported is True
 
-    def test_returns_unsupported_evidence_for_unknown_agent_version(self, tmp_path: Path) -> None:
+    def test_returns_no_native_evidence_for_unknown_agent_schema(self, tmp_path: Path) -> None:
         (tmp_path / "plugin.json").write_text(
             '{"$schema":"https://agent-plugins.org/schemas/2.0.0/plugin.schema.json"}'
         )
         ev = AgentPluginDetector().detect(tmp_path)
-        assert isinstance(ev, AgentPluginFormatEvidence)
-        assert ev.supported is False
+        assert ev is None
 
     def test_manifest_authority_conflict_is_invalid_evidence(self, tmp_path: Path) -> None:
         (tmp_path / "plugin.json").write_text(

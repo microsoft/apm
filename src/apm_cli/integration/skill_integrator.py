@@ -618,9 +618,18 @@ class SkillIntegrator(BaseIntegrator):
         if (package_path / "SKILL.md").is_file():
             return None
 
-        return frozenset(
-            SkillIntegrator.skill_source_paths(package_path, package_info.package_type)
-        )
+        source_paths = SkillIntegrator.skill_source_paths(package_path, package_info.package_type)
+        from apm_cli.deps.plugin_parser import normalized_plugin_skill_sources
+
+        plugin_source_paths, declared = normalized_plugin_skill_sources(package_path)
+        if declared:
+            source_paths = {**source_paths, **plugin_source_paths}
+        available = set(source_paths)
+        skills_root = package_path / "skills"
+        for source_path in source_paths.values():
+            if source_path.is_relative_to(skills_root):
+                available.add(source_path.relative_to(skills_root).as_posix())
+        return frozenset(available)
 
     @staticmethod
     def _skill_filter_misses_available(

@@ -837,6 +837,14 @@ def _run_dep_update_locked(
             _rich_info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
+    from apm_cli.install.summary import exit_unless_install_result_allows_success
+
+    exit_unless_install_result_allows_success(
+        logger=logger,
+        result=result,
+        allow_neutral_outcome=True,
+    )
+
     plan = plan_state.plan
     if plan is None or not isinstance(plan, UpdatePlan):
         return

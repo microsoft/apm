@@ -480,7 +480,10 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     ):
         manifest = parse_plugin_manifest(plugin_json_path)
         from ..agent_plugins.errors import AgentPluginLegacyBoundaryError
-        from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+        from ..install.primitive_classification import (
+            PluginSchemaRoute,
+            classify_plugin_manifest_schema,
+        )
 
         if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:
             raise AgentPluginLegacyBoundaryError(

@@ -234,6 +234,7 @@ _MANIFEST_SCHEMA_OWNERS = (
     _MANIFEST_CONTRACT_OWNER,
     "src/apm_cli/agent_plugins/loader.py",
     "src/apm_cli/agent_plugins/validation.py",
+    "src/apm_cli/install/primitive_classification.py",
 )
 
 
