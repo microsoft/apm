@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- BREAKING: `apm install` now exits non-zero when target exclusion leaves an
+  Agent Plugins v1.0.0 package deployed to no target. Migration: install an
+  individual skill subpath such as
+  `apm install <owner>/<repo>/skills/<skill> --target <target>` (for example,
+  `apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`), or
+  select `--target copilot` for native registration; mixed installs still exit
+  0 when at least one package deploys. (closes #2796) (#2806)
 - Hermes is now a stable explicit-only target, and state-mutating APM commands
   share one per-user cross-process lock to prevent concurrent updates from losing state.
   (by @lkshrk; closes #2608) (#2655)

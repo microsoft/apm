@@ -141,6 +141,12 @@ writes only `.vscode/mcp.json`.
 
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
 
+Agent Plugins v1 packages register natively only with the effective `copilot`
+target today. If target exclusion leaves an install with no deployed package,
+`apm install` exits `1` and prints a recovery command such as
+`apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`; mixed
+installs that deploy at least one other package still exit `0`.
+
 ## Compilation
 
 | Command | Purpose | Key flags |

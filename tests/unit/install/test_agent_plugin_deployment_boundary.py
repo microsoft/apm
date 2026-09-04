@@ -31,7 +31,10 @@ from apm_cli.install.services import (
     integrate_package_primitives,
 )
 from apm_cli.install.sources import Materialization
-from apm_cli.install.template import run_integration_template
+from apm_cli.install.template import (
+    _agent_plugin_target_skip_message,
+    run_integration_template,
+)
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator, get_effective_type
 from apm_cli.models.apm_package import APMPackage, PackageContentType, PackageInfo
@@ -293,7 +296,7 @@ class _MaterializedSource:
         ("registry", False, "registry", 1, "Failed to integrate primitives from cached package"),
     ],
 )
-def test_every_materialization_shape_skips_without_committing_state_when_target_excludes_copilot(
+def test_every_materialization_shape_fails_when_target_exclusion_deploys_nothing(
     tmp_path: Path,
     shape: str,
     is_local: bool,
@@ -301,15 +304,15 @@ def test_every_materialization_shape_skips_without_committing_state_when_target_
     initial_installed: int,
     error_prefix: str,
 ) -> None:
-    """A non-Copilot target set is a routine, non-fatal skip for every shape.
+    """A non-Copilot target set skips safely for every materialization shape.
 
     ``ctx.targets`` here is a mock target that never resolves to ``copilot``,
     so the capability owner reports ``AgentPluginTargetExcludedError`` --
     never a fatal boundary error, and never dependent on whether a Copilot
     binary exists on this host. This holds across every materialization
     shape (local/cached/fresh/registry): the package is skipped with one
-    warning, no integrator ever mutates the project tree, and the batch
-    still exits 0.
+    warning and no integrator ever mutates the project tree. Issue #2796 then
+    makes the install outcome fail because no package was deployed.
     """
     package_info = _write_adversarial_agent_plugin(
         tmp_path / f"{shape}-source",
@@ -362,13 +365,14 @@ def test_every_materialization_shape_skips_without_committing_state_when_target_
     assert deltas["installed"] == 0
     assert ctx.package_deployed_files == {f"blocked/{shape}": []}
     assert diagnostics.error_count == 0
+    assert diagnostics.agent_plugin_target_excluded_count == 1
     assert len(diagnostics._diagnostics) == 1
     assert diagnostics._diagnostics[0].category == "warning"
     result = finalize_install_result(
         InstallResult(installed_count=deltas["installed"], diagnostics=diagnostics),
         force=True,
     )
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert _tree_snapshot(project) == before
     for integrator in integrator_map.values():
         assert integrator.mock_calls == []
@@ -440,19 +444,19 @@ def _write_ordinary_package(root: Path) -> None:
         ("--skill", "safe"),
     ),
 )
-def test_target_exclusion_skips_the_plugin_without_touching_the_rest_of_the_batch(
+def test_target_exclusion_does_not_hard_fail_when_the_rest_of_the_batch_installs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     native_first: bool,
     extra_args: tuple[str, ...],
 ) -> None:
-    """A batch with an otherwise-valid native plugin excluded by target.
+    """A mixed batch with an otherwise-valid native plugin excluded by target.
 
     Admission is a pure function of resolved target names, so excluding
-    ``copilot`` is the ONLY way a canonical Agent Plugin is refused -- and it
-    is always non-fatal (Item 4): the plugin is skipped with one warning and
-    the rest of the batch installs, regardless of dependency ordering or
-    which install flags are in play.
+    ``copilot`` is the ONLY way a canonical Agent Plugin is refused. Issue
+    #2796 makes a pure no-op fail, but this mixed install must stay non-fatal:
+    the plugin is skipped with one warning and the rest of the batch installs,
+    regardless of dependency ordering or which install flags are in play.
     """
     workspace = tmp_path / "workspace"
     project = workspace / "project"
@@ -498,6 +502,8 @@ def test_target_exclusion_skips_the_plugin_without_touching_the_rest_of_the_batc
         catch_exceptions=False,
     )
 
+    # Issue #2796: exit 0 is intentional only because the ordinary package was
+    # deployed; a target-excluded Agent Plugin alone must fail loudly.
     assert result.exit_code == 0, result.output
     # The excluded plugin is never handed to any integrator -- native or
     # legacy -- it is dropped outright, not decomposed.
@@ -515,22 +521,90 @@ def test_target_exclusion_skips_the_plugin_without_touching_the_rest_of_the_batc
     assert "ask the publisher for a legacy-compatible package" not in output
 
 
+def test_target_exclusion_fails_when_no_package_is_deployed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #2796: a target-excluded Agent Plugin cannot be a successful no-op."""
+    project = tmp_path / "project"
+    native = tmp_path / "native"
+    project.mkdir()
+    _write_adversarial_agent_plugin(native, tmp_path / "outside.txt")
+    (native / "skills" / "native" / "nested" / "outside-link").unlink()
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "dependencies": {"apm": ["../native"]},
+                "target": "codex",
+            }
+        ),
+        encoding="ascii",
+    )
+    native_integrator_calls: list[str] = []
+    original_integrate = SkillIntegrator.integrate_package_skill
+
+    def tracked_integrate(self, package_info, *args, **kwargs):
+        if package_info.package_type is PackageType.AGENT_PLUGIN:
+            native_integrator_calls.append("integrate")
+        return original_integrate(self, package_info, *args, **kwargs)
+
+    monkeypatch.setattr(SkillIntegrator, "integrate_package_skill", tracked_integrate)
+    monkeypatch.chdir(project)
+
+    result = CliRunner().invoke(
+        cli,
+        ["install", "--no-policy", "--target", "codex", "--skill", "native"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code != 0, result.output
+    assert native_integrator_calls == []
+    output = " ".join(result.output.split())
+    assert "No selected target received this package" in output
+    assert "apm install ../native/skills/native --target codex" in output
+    assert not (project / ".codex" / "skills" / "native").exists()
+    assert not (project / ".agents" / "skills" / "native").exists()
+
+
+def test_target_exclusion_hint_names_remote_skill_subpath_form() -> None:
+    """The no-op error must name the working subpath workaround from #2796."""
+    source = SimpleNamespace(
+        ctx=SimpleNamespace(
+            targets=[SimpleNamespace(name="codex")],
+            skill_subset=("lavish",),
+        ),
+        dep_ref=SimpleNamespace(
+            is_local=False,
+            to_display_reference=lambda: "kunchenguid/lavish-axi#main",
+        ),
+    )
+    materialization = SimpleNamespace(package_info=SimpleNamespace(package=None))
+
+    message = _agent_plugin_target_skip_message(
+        source,
+        materialization,
+        AgentPluginTargetExcludedError("target excluded"),
+    )
+
+    assert "apm install kunchenguid/lavish-axi/skills/lavish#main --target codex" in message
+    assert "#main/skills" not in message
+
+
 @pytest.mark.parametrize("include_ordinary", (False, True))
-def test_dry_run_target_exclusion_is_non_fatal_like_a_real_install(
+def test_dry_run_target_exclusion_is_non_fatal_preview(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     include_ordinary: bool,
 ) -> None:
-    """``--dry-run`` must not fatal-fail on an outcome a real install tolerates.
+    """``--dry-run`` must not fatal-fail while previewing target exclusion.
 
-    Admission is a pure function of resolved target names. A real install
-    skips an excluded native plugin with one non-fatal warning and installs
-    the rest of the batch (Item 4); the dry-run preflight
-    (``preflight_agent_plugin_dry_run``) evaluates the SAME
-    ``enforce_agent_plugin_deployment_boundary`` call and must swallow the
-    same ``AgentPluginTargetExcludedError`` instead of aborting the whole
-    preview -- regression coverage for a real dry-run/real-install exit-code
-    parity bug this refactor uncovered and fixed.
+    Admission is a pure function of resolved target names. Issue #2796 makes a
+    real no-op fail, but dry-run still previews without mutating targets. The
+    preflight evaluates the SAME ``enforce_agent_plugin_deployment_boundary``
+    call and must swallow the same ``AgentPluginTargetExcludedError`` instead
+    of aborting the preview.
     """
     workspace = tmp_path / "workspace"
     native_sources = [workspace / "native-a", workspace / "native-b"]
@@ -571,42 +645,35 @@ def test_dry_run_target_exclusion_is_non_fatal_like_a_real_install(
         source: _tree_snapshot(source)
         for source in [*native_sources, *([ordinary] if include_ordinary else [])]
     }
-    outputs = {}
-    for mode, extra_args in (("real", ()), ("dry-run", ("--dry-run",))):
-        project = workspace / mode
-        project.mkdir()
-        (project / "apm.yml").write_text(
-            json.dumps(
-                {
-                    "name": f"consumer-{mode}",
-                    "version": "1.0.0",
-                    "dependencies": {"apm": dependencies},
-                    "target": "claude",
-                }
-            ),
-            encoding="ascii",
-        )
-        monkeypatch.chdir(project)
+    project = workspace / "dry-run"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer-dry-run",
+                "version": "1.0.0",
+                "dependencies": {"apm": dependencies},
+                "target": "claude",
+            }
+        ),
+        encoding="ascii",
+    )
+    monkeypatch.chdir(project)
 
-        result = CliRunner().invoke(
-            cli,
-            ["install", "--no-policy", "--target", "claude", *extra_args],
-            catch_exceptions=False,
-        )
+    result = CliRunner().invoke(
+        cli,
+        ["install", "--dry-run", "--no-policy", "--target", "claude"],
+        catch_exceptions=False,
+    )
 
-        # The exit-code parity is the whole point of this regression: before
-        # the fix, dry-run raised AgentPluginTargetExcludedError uncaught
-        # (exit 1) for the exact scenario a real install tolerates (exit 0).
-        assert result.exit_code == 0, result.output
-        for source, snapshot in source_snapshots.items():
-            assert _tree_snapshot(source) == snapshot
-        outputs[mode] = " ".join(result.output.split())
+    assert result.exit_code == 0, result.output
+    for source, snapshot in source_snapshots.items():
+        assert _tree_snapshot(source) == snapshot
+    output = " ".join(result.output.split())
 
     assert native_integrator_calls == []
-    # Only the real install renders the per-package skip warning; the
-    # dry-run preflight is reject-only and does not render diagnostics.
-    assert outputs["real"].count("Re-run with --target copilot") == 2
-    assert outputs["dry-run"].count("Re-run with --target copilot") == 0
+    # The dry-run preflight is reject-only and does not render diagnostics.
+    assert output.count("Re-run with --target copilot") == 0
 
 
 def test_dry_run_target_exclusion_uses_the_explicit_target(

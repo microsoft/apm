@@ -118,9 +118,10 @@ def preflight_agent_plugin_materializations(
     """Reject the batch once, before any package can mutate a target.
 
     A native Agent Plugin whose effective targets simply do not select
-    ``copilot`` is not a failure: it is skipped per-package during integration
-    (:func:`_record_agent_plugin_target_skip`), so it must not abort the
-    batch -- ``AgentPluginTargetExcludedError`` carries that distinction.
+    ``copilot`` is not a structural package failure: it is skipped per-package
+    during integration (:func:`_record_agent_plugin_target_skip`), so it must
+    not abort a batch that can still deploy other packages. The final install
+    outcome may still fail a pure no-op run.
     Anything else raised here (missing canonical IR, the imperative bundle
     route) is a real, actionable failure and aborts the whole batch.
     """
@@ -145,11 +146,12 @@ def preflight_agent_plugin_dry_run(
     'no native harness' fallback. Admission never depends on whether a
     Copilot binary exists or which version it reports.
 
-    Target exclusion (``AgentPluginTargetExcludedError``) is never fatal --
-    a real install skips that package with one warning and installs the
-    rest of the batch, so the dry-run preview must not abort the whole
-    preview for the same reason either. Only a genuine structural failure
-    (missing canonical IR, the imperative bundle route) aborts here.
+    Target exclusion (``AgentPluginTargetExcludedError``) is non-fatal during
+    preflight and per-package integration: a real install skips that package
+    with one warning and can still install the rest of the batch. The command
+    outcome owner may still fail a pure no-op install after integration. Only a
+    genuine structural failure (missing canonical IR, the imperative bundle
+    route) aborts here.
     """
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.copilot_plugins.capability import native_registration_scope
@@ -242,17 +244,87 @@ def _record_agent_plugin_boundary_failure(
     return deltas
 
 
+def _target_names_for_hint(ctx: InstallContext) -> str:
+    """Return the target argument to use in a recovery command."""
+    names: list[str] = []
+    for target in getattr(ctx, "targets", None) or ():
+        name = getattr(target, "name", target)
+        if isinstance(name, str) and name:
+            names.append(name)
+    return ",".join(sorted(set(names))) or "<target>"
+
+
+def _dependency_parts_for_skill_subpath(dep_ref) -> tuple[str, str]:
+    """Return dependency base and ref suffix for a skill-subpath command."""
+    if getattr(dep_ref, "is_local", False) and getattr(dep_ref, "local_path", None):
+        display = dep_ref.local_path
+    elif hasattr(dep_ref, "to_display_reference"):
+        display = dep_ref.to_display_reference()
+    elif hasattr(dep_ref, "get_identity"):
+        display = dep_ref.get_identity()
+    else:
+        display = getattr(dep_ref, "repo_url", "")
+    base, separator, reference = str(display).partition("#")
+    return base.rstrip("/"), f"{separator}{reference}" if separator else ""
+
+
+def _agent_plugin_skill_name_for_hint(
+    source: DependencySource,
+    materialization: Materialization,
+) -> str | None:
+    """Return one skill name that can be installed through the subpath route."""
+    requested = getattr(source.ctx, "skill_subset", None)
+    if requested:
+        for value in requested:
+            skill_name = str(value)
+            if skill_name and skill_name != "*":
+                return skill_name
+
+    package = getattr(materialization.package_info, "package", None)
+    plugin = getattr(package, "agent_plugin", None)
+    components = getattr(plugin, "components", None)
+    for skill in getattr(components, "skills", ()) or ():
+        skill_name = getattr(skill, "directory_name", None) or getattr(skill, "name", None)
+        if skill_name:
+            return str(skill_name)
+    return None
+
+
+def _agent_plugin_target_skip_message(
+    source: DependencySource,
+    materialization: Materialization,
+    error: AgentPluginTargetExcludedError,
+) -> str:
+    """Return the actionable target-exclusion diagnostic for one package."""
+    message = str(error)
+    skill_name = _agent_plugin_skill_name_for_hint(source, materialization)
+    if skill_name is None:
+        return (
+            f"{message} No selected target received this package. "
+            "Select --target copilot or install a target-compatible package."
+        )
+
+    dep_base, ref_suffix = _dependency_parts_for_skill_subpath(source.dep_ref)
+    target_arg = _target_names_for_hint(source.ctx)
+    command = f"apm install {dep_base}/skills/{skill_name}{ref_suffix} --target {target_arg}"
+    return (
+        f"{message} No selected target received this package. "
+        "To install this skill as a plain skill bundle, use "
+        f"'{command}'."
+    )
+
+
 def _record_agent_plugin_target_skip(
     source: DependencySource,
     materialization: Materialization,
     error: AgentPluginTargetExcludedError,
 ) -> dict[str, int]:
-    """Record a non-fatal skip for a package this project does not target at copilot.
+    """Record a target skip for a package this project does not target at copilot.
 
     Mirrors the per-dependency ``targets:`` subset already handled in
     ``finalize_native_plugin``: native registration is skipped, ONE warning
-    names the package, and the rest of the batch installs. This is a warning,
-    not an error, so the install still exits 0.
+    names the package, and the rest of the batch can still install. The
+    install outcome owner fails later only when no package deployed.
     """
     ctx = source.ctx
     deltas = materialization.deltas
@@ -261,7 +333,10 @@ def _record_agent_plugin_target_skip(
     deltas["installed"] = 0
     ctx.package_deployed_files[dep_key] = []
     package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
-    ctx.diagnostics.warn(str(error), package=package_key)
+    ctx.diagnostics.agent_plugin_target_excluded(
+        _agent_plugin_target_skip_message(source, materialization, error),
+        package=package_key,
+    )
     return deltas
 
 

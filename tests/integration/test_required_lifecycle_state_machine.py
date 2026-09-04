@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
+from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_package_hash
@@ -212,6 +213,49 @@ def _publish_legacy_plugin(
             "git": remote_url,
             "ref": commit.sha,
             "alias": package.name,
+        },
+        environment=scenario.repositories.url_rewrite_subprocess_env(repository, remote_url),
+    )
+
+
+def _publish_agent_plugin(
+    scenario: _Scenario,
+    name: str,
+    *,
+    skill: str,
+) -> _PublishedPackage:
+    source_root = scenario.isolated.package_root / name
+    skill_dir = source_root / "skills" / skill
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_skill(skill), encoding="ascii")
+    (source_root / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": PLUGIN_SCHEMA_ID,
+                "name": name,
+                "version": "1.0.0",
+                "description": "Agent Plugin target exclusion fixture",
+            },
+            sort_keys=True,
+        ),
+        encoding="ascii",
+    )
+    repository = scenario.repositories.create(name, source_tree=source_root)
+    commit = scenario.repositories.commit(repository, message="publish agent plugin")
+    remote_url = f"https://github.com/{_OWNER}/{name}"
+    return _PublishedPackage(
+        package=LocalPackage(
+            name=name,
+            root=source_root,
+            manifest_path=source_root / "plugin.json",
+        ),
+        repository=repository,
+        commit=commit,
+        remote_url=remote_url,
+        dependency={
+            "git": remote_url,
+            "ref": commit.sha,
+            "alias": name,
         },
         environment=scenario.repositories.url_rewrite_subprocess_env(repository, remote_url),
     )
@@ -581,6 +625,81 @@ def test_required_invalid_skill_subset_never_reaches_manifest_or_lockfile(
     assert invalid_selector in consumer.manifest_path.read_text(encoding="utf-8")
     assert invalid_selector in lock_path.read_text(encoding="utf-8")
     assert skill_subset_check["passed"] is False, _result_evidence(audit_result)
+
+
+def test_required_agent_plugin_target_exclusion_noop_fails_without_mutating_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Issue #2796: a target-excluded Agent Plugin is not a successful no-op."""
+    scenario = _new_scenario(tmp_path / "agent-plugin-target-exclusion", apm_binary_path)
+    native = _publish_agent_plugin(scenario, "native-plugin", skill="native")
+    consumer = scenario.consumers.create(
+        "agent-plugin-noop-consumer",
+        dependencies=(native.dependency,),
+        targets=("codex",),
+    )
+    capture_args = {
+        "targets": ("codex",),
+        "config_paths": (
+            PurePosixPath("apm.lock.yaml"),
+            PurePosixPath(".codex/skills/native/SKILL.md"),
+            PurePosixPath(".agents/skills/native/SKILL.md"),
+        ),
+    }
+    before = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+
+    install = scenario.runner.run(
+        (*_INSTALL_ARGS, "--target", "codex", "--skill", "native"),
+        scenario_id="agent-plugin-target-exclusion-noop",
+        cwd=consumer.root,
+        env=native.environment,
+    )
+    after = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    output = f"{install.stdout} {install.stderr}"
+    output_compact = "".join(output.split())
+    expected_command = (
+        f"apm install {_OWNER}/native-plugin/skills/native#{native.commit.sha} --target codex"
+    )
+
+    assert install.returncode == 1, _result_evidence(install)
+    assert "No selected target received this package" in output
+    assert "".join(expected_command.split()) in output_compact
+    assert "No changes" not in output
+    _assert_same_state(before, after)
+
+    ordinary = _publish(scenario, "ordinary-after-native", skill="ordinary")
+    mixed_env = scenario.repositories.url_rewrite_subprocess_env_many(
+        (
+            (native.repository, native.remote_url),
+            (ordinary.repository, ordinary.remote_url),
+        )
+    )
+    mixed_consumer = scenario.consumers.create(
+        "agent-plugin-mixed-consumer",
+        dependencies=(native.dependency, ordinary.dependency),
+        targets=("codex",),
+    )
+
+    mixed_install = _run_success(
+        scenario,
+        mixed_consumer,
+        (*_INSTALL_ARGS, "--target", "codex"),
+        environment=mixed_env,
+        scenario_id="agent-plugin-target-exclusion-mixed",
+    )
+    mixed_output = f"{mixed_install.stdout} {mixed_install.stderr}"
+
+    assert "No selected target received this package" in mixed_output
+    assert "".join(expected_command.split()) in "".join(mixed_output.split())
+    assert not (mixed_consumer.root / ".codex" / "skills" / "native").exists()
+    lockfile = LockFile.read(mixed_consumer.root / "apm.lock.yaml")
+    assert lockfile is not None
+    locked_dependencies = lockfile.get_package_dependencies()
+    assert any(
+        dependency.name == "ordinary-after-native" and dependency.deployed_files
+        for dependency in locked_dependencies
+    )
 
 
 def test_required_lsp_only_dry_run_reports_plan_without_writing_state(

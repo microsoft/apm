@@ -294,9 +294,17 @@ Any target set that excludes Copilot refuses this native install rather than
 falling back to the Claude plugin artifact mapping above -- APM never partially
 dissects a recognized Agent Plugin through its normal primitive integrators.
 Older Copilot clients may copy plugins into private state outside APM ownership,
-so APM cannot guarantee cleanup of those client-created copies. Ask the
-publisher for a Claude-compatible package (`apm pack --claude-plugin`) for a
-non-Copilot target.
+so APM cannot guarantee cleanup of those client-created copies.
+
+When target exclusion leaves a full Agent Plugins v1 package deployed to no
+target, `apm install` exits `1` with a recovery command. To install one skill as
+a plain skill bundle for another target, use
+`apm install <owner>/<repo>/skills/<skill> --target <target>`; refs stay after
+the skill path, for example
+`apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`. A mixed
+install that deploys at least one other package still exits `0`. Publishers can
+also provide a Claude-compatible package (`apm pack --claude-plugin`) for
+non-Copilot targets.
 :::
 
 **When to choose:** you are producing a portable package with
