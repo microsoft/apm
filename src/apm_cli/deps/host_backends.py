@@ -43,6 +43,7 @@ from ..core.host_providers import (
     host_backend_factory,
     register_host_backend,
 )
+from ..models.dependency.host_virtual import repository_path_segments
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
@@ -215,10 +216,10 @@ class _GitHubFamilyBase:
     def build_commits_api_url(self, dep_ref: DependencyReference, ref: str) -> str | None:
         # GitHub-family commits API: GET {api_base}/repos/{owner}/{repo}/commits/{ref}
         # api_base differs across github.com / *.ghe.com / GHES.
-        try:
-            owner, repo = dep_ref.repo_url.split("/", 1)
-        except ValueError:
+        parts = repository_path_segments(dep_ref.repo_url)
+        if len(parts) < 2:
             return None
+        owner, repo = parts[0], "/".join(parts[1:])
         # Treat already-resolved 40-char SHAs as a no-op -- caller should
         # short-circuit the network round-trip.
         if re.match(r"^[a-f0-9]{40}$", (ref or "").lower()):

@@ -18,6 +18,13 @@
       ]
     },
     {
+      "id": "host-reference-coordinates",
+      "decision": "Host-qualified reference host/repo/subpath coordinates",
+      "owner": "models/dependency/host_virtual.py (parse_host_qualified_reference)",
+      "selectors": ["src/apm_cli/models/dependency/host_virtual.py"],
+      "guards": ["transport-platform-host-reference-coordinates"]
+    },
+    {
       "id": "url-path-containment-decoding",
       "decision": "Symlink-component containment and strict percent-encoded URL-path decoding",
       "owner": "utils/path_security.py (has_symlink_component, decode_url_path_segments)",

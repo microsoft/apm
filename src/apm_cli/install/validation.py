@@ -32,6 +32,11 @@ from pathlib import Path
 import requests
 
 from ..deps.github_rate_limit import GitHubThrottleError, raise_for_github_throttle
+from ..models.dependency.host_virtual import (
+    dependency_repository_owner,
+    repository_owner,
+    repository_path_segments,
+)
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.git_env import (
     GitUrlRewriteError,
@@ -181,7 +186,7 @@ def _generic_host_ambiguous_subpath_hint(dep_ref) -> str | None:
         return None
     if is_github_hostname(host) or dep_ref.is_azure_devops() or is_gitlab_hostname(host):
         return None
-    segments = [seg for seg in dep_ref.repo_url.split("/") if seg]
+    segments = repository_path_segments(dep_ref.repo_url)
     if len(segments) <= 2:
         return None
     return (
@@ -287,7 +292,7 @@ def _validate_virtual_package(
         return True
 
     host = dep_ref.host or default_host()
-    org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url and "/" in dep_ref.repo_url else None
+    org = dependency_repository_owner(dep_ref)
     if verbose_log:
         if (
             auth_resolver.uses_public_github_anonymous_first(
@@ -458,7 +463,7 @@ def _validate_ado_git_package(
         candidate_url=candidate_url,
     )
     attempts: list[tuple[object, str, dict[str, str]]] = []
-    org = dep_ref.repo_url.split("/", 1)[0] if dep_ref.repo_url else None
+    org = dependency_repository_owner(dep_ref)
     for attempt in transport_plan.attempts:
         if attempt.requested_url is not None:
             probe_url = attempt.requested_url
@@ -617,11 +622,7 @@ def _validate_ado_git_package(
     if result.returncode != 0 and not is_generic:
         if is_ado_auth_failure_signal(result.stderr or ""):
             _host = dep_ref.host or "dev.azure.com"
-            _org = (
-                dep_ref.repo_url.split("/")[0]
-                if dep_ref.repo_url and "/" in dep_ref.repo_url
-                else None
-            )
+            _org = dependency_repository_owner(dep_ref)
             _diag = auth_resolver.build_error_context(
                 _host,
                 "validate",
@@ -655,7 +656,7 @@ def _validate_github_package(
 
     host = dep_ref.host or default_host()
     port = dep_ref.port
-    org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url and "/" in dep_ref.repo_url else None
+    org = dependency_repository_owner(dep_ref)
     host_info = auth_resolver.classify_host(host, port=port)
 
     if is_enforce_only():
@@ -762,7 +763,7 @@ def _validate_parse_failure_fallback(
     from ..deps.registry_proxy import is_enforce_only
 
     host = default_host()
-    org = package.split("/")[0] if "/" in package else None
+    org = repository_owner(package)
     repo_path = package  # owner/repo format
     # Defensive owner/repo guard: when DependencyReference.parse raises,
     # we fall back to embedding `repo_path` directly into an API URL and

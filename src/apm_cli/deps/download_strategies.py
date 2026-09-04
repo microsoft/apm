@@ -25,6 +25,7 @@ import requests
 
 from ..core.auth import AuthResolver, HostInfo
 from ..models.apm_package import DependencyReference
+from ..models.dependency.host_virtual import dependency_repository_owner, repository_owner_and_repo
 from ..utils.archive import ArchiveError, safe_extract_zip
 from ..utils.git_env import redact_git_diagnostic
 from ..utils.github_host import (
@@ -879,7 +880,7 @@ class DownloadDelegate:
             return self._host.auth_resolver.try_with_fallback(
                 host,
                 _fetch,
-                org=dep_ref.repo_url.split("/", 1)[0],
+                org=dependency_repository_owner(dep_ref),
                 port=dep_ref.port,
                 path=dep_ref.repo_url,
                 host_type=dep_ref.host_type,
@@ -1077,7 +1078,10 @@ class DownloadDelegate:
     ) -> bytes:
         """Fetch one github.com file anonymously, resolving auth only on 4xx."""
         host = dep_ref.host or default_host()
-        owner, repo = dep_ref.repo_url.split("/", 1)
+        owner_repo = repository_owner_and_repo(dep_ref.repo_url)
+        if owner_repo is None:
+            raise RuntimeError(f"Invalid repository path for {dep_ref.repo_url}")
+        owner, repo = owner_repo
         refs = [ref]
         if ref in ("main", "master"):
             refs.append("master" if ref == "main" else "main")
@@ -1237,7 +1241,10 @@ class DownloadDelegate:
             )
 
         # Parse owner/repo from repo_url
-        owner, repo = dep_ref.repo_url.split("/", 1)
+        owner_repo = repository_owner_and_repo(dep_ref.repo_url)
+        if owner_repo is None:
+            raise RuntimeError(f"Invalid repository path for {dep_ref.repo_url}")
+        owner, repo = owner_repo
 
         # Resolve auth once through the same per-dependency boundary used by
         # clone URLs. Generic hosts intentionally return None here so APM

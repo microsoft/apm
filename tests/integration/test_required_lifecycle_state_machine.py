@@ -645,6 +645,84 @@ def test_required_lsp_only_dry_run_reports_plan_without_writing_state(
     _assert_same_state(before, after)
 
 
+def test_required_unknown_host_qualified_virtual_install_fails_before_state_write(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    scenario = _new_scenario(tmp_path / "unknown-host-virtual", apm_binary_path)
+    folded_source = scenario.sources.create("folded-host-source")
+    scenario.sources.add_skill(folded_source, "jdk-installer", _skill("jdk-installer"))
+    split_virtual_root = folded_source.root / "packages" / "skill"
+    split_virtual_skill = split_virtual_root / "skills" / "jdk-installer"
+    split_virtual_skill.mkdir(parents=True)
+    dump_yaml(
+        {
+            "name": "split-virtual-source",
+            "version": "0.1.0",
+            "description": "Split virtual source for the unknown-host guard",
+        },
+        split_virtual_root / "apm.yml",
+    )
+    (split_virtual_skill / "SKILL.md").write_text(_skill("jdk-installer"), encoding="utf-8")
+    folded_repository = scenario.repositories.create(
+        "folded-host-source",
+        source_tree=folded_source.root,
+    )
+    scenario.repositories.commit(folded_repository, message="seed folded host source")
+    split_remote_url = "https://github.corp.example.com/acme/internal-skills"
+    folded_remote_url = "https://github.corp.example.com/acme/internal-skills/packages/skill"
+    consumer = scenario.consumers.create(
+        "unknown-host-consumer",
+        targets=("copilot",),
+    )
+    bad_reference = "github.corp.example.com/acme/internal-skills/packages/skill"
+    dump_yaml(
+        {
+            "name": "unknown-host-consumer",
+            "version": "0.1.0",
+            "dependencies": {"apm": [bad_reference]},
+            "targets": ["copilot"],
+        },
+        consumer.manifest_path,
+    )
+    capture_args = {
+        "targets": ("copilot",),
+        "config_paths": (
+            PurePosixPath("apm.lock.yaml"),
+            PurePosixPath("apm_modules"),
+            PurePosixPath(".agents/skills/jdk-installer/SKILL.md"),
+        ),
+    }
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        (
+            (folded_repository, split_remote_url),
+            (folded_repository, folded_remote_url),
+        ),
+    )
+    for name in ("GITHUB_HOST", "GITLAB_HOST", "APM_GITLAB_HOSTS", "ADO_HOST", "APM_ADO_HOSTS"):
+        environment.pop(name, None)
+    before = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+
+    failed = scenario.runner.run(
+        _INSTALL_ARGS,
+        scenario_id="unknown-host-virtual-install",
+        cwd=consumer.root,
+        env=environment,
+    )
+    after = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+
+    assert after.lockfile_bytes is None
+    assert after.file("apm_modules").kind == "missing"
+    assert after.file(".agents/skills/jdk-installer/SKILL.md").kind == "missing"
+    assert not after.deployment_records
+    _assert_same_state(before, after)
+    assert failed.returncode != 0, _result_evidence(failed)
+    combined_output = f"{failed.stdout}\n{failed.stderr}"
+    normalized_output = " ".join(combined_output.split())
+    assert "Unsupported package host: 'github.corp.example.com'." in normalized_output
+    assert "Invalid repository format" not in combined_output
+
+
 def _hook_commands(settings_path: Path) -> list[str]:
     if not settings_path.exists():
         return []

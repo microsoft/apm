@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now fails before state writes when a host-qualified package
+  path uses an unknown platform host, and routes all host/reference coordinate
+  parsing through one canonical parser. (#2800)
 - `apm install` now performs a hash-verified cached APM 0.28
   marketplace-plugin upgrade before stale cleanup, preserving prior Claude and
   Codex deployments instead of deleting them. (fixes #2744) (#2787)

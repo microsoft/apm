@@ -715,6 +715,7 @@ transport-platform-git-child-environment
 transport-platform-git-semver-preflight
 transport-platform-github-throttle
 transport-platform-host-credential-resolution
+transport-platform-host-reference-coordinates
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
 transport-platform-revision-pin-outcome

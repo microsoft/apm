@@ -1,4 +1,4 @@
-"""Phase-3 unit tests for apm_cli.core.auth — targeting uncovered branches.
+"""Phase-3 unit tests for apm_cli.core.auth -- targeting uncovered branches.
 
 Focuses on:
 - HostInfo.display_name with various ports
@@ -37,6 +37,8 @@ from apm_cli.core.auth import (
     _org_to_env_suffix,
 )
 from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.models.dependency.host_virtual import UnsupportedHostQualifiedVirtualPackageError
+from apm_cli.models.dependency.reference import DependencyReference
 
 # ---------------------------------------------------------------------------
 # Autouse fixtures
@@ -222,7 +224,7 @@ class TestSetLogger:
 
 
 # ---------------------------------------------------------------------------
-# resolve() — caching and port discrimination
+# resolve() -- caching and port discrimination
 # ---------------------------------------------------------------------------
 
 
@@ -309,6 +311,101 @@ class TestResolveForDep:
             assert ctx.host_info.kind == "gitlab"
             assert ctx.host_info.api_base == "https://code.acme.com/api/v4"
 
+    @pytest.mark.parametrize(
+        ("reference", "env", "expected_source"),
+        [
+            (
+                "github.com/acme/repo",
+                {"GITHUB_APM_PAT_ACME": "ghp_org", "GITHUB_APM_PAT": "ghp_global"},
+                "GITHUB_APM_PAT_ACME",
+            ),
+            (
+                "github.corp.example.com/acme/repo",
+                {"GITHUB_HOST": "github.corp.example.com", "GITHUB_APM_PAT_ACME": "ghp_ghes"},
+                "GITHUB_APM_PAT_ACME",
+            ),
+            (
+                "dev.azure.com/acme/project/repo",
+                {"ADO_APM_PAT": "ado_pat"},
+                "ADO_APM_PAT",
+            ),
+            (
+                "dev.azure.com/acme/My%20Project/_git/repo",
+                {"ADO_APM_PAT": "ado_pat"},
+                "ADO_APM_PAT",
+            ),
+            (
+                "acme.visualstudio.com/project/_git/repo",
+                {"ADO_APM_PAT": "ado_pat"},
+                "ADO_APM_PAT",
+            ),
+            (
+                "gitlab.corp.example.com/group/subgroup/repo",
+                {
+                    "GITLAB_HOST": "gitlab.corp.example.com",
+                    "GITLAB_APM_PAT": "glpat_token",
+                    "GITHUB_APM_PAT_GROUP": "ghp_wrong",
+                    "GITHUB_APM_PAT": "ghp_wrong_global",
+                },
+                "GITLAB_APM_PAT",
+            ),
+            (
+                "bitbucket.org/team/repo",
+                {},
+                "git-credential-fill",
+            ),
+        ],
+    )
+    def test_resolve_for_dep_preserves_credential_source_by_host_shape(
+        self,
+        reference: str,
+        env: dict[str, str],
+        expected_source: str,
+    ) -> None:
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="helper-token",
+            ),
+        ):
+            resolver = AuthResolver()
+            dep = DependencyReference.parse(reference)
+            ctx = resolver.resolve_for_dep(dep)
+
+        assert ctx.source == expected_source
+
+    def test_unknown_platform_package_host_resolves_no_credential_source(self) -> None:
+        reference = "github.corp.example.com/acme/internal-skills/.agents/skills/jdk-installer"
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_must_not_use"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="helper-token",
+            ) as fill,
+        ):
+            with pytest.raises(UnsupportedHostQualifiedVirtualPackageError) as exc:
+                DependencyReference.parse(reference)
+
+        assert exc.value.host == "github.corp.example.com"
+        fill.assert_not_called()
+
+    def test_nested_host_in_virtual_path_does_not_reroute_credentials(self) -> None:
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT_USER": "ghp_must_not_use"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="helper-token",
+            ) as fill,
+        ):
+            with pytest.raises(ValueError):
+                DependencyReference.parse("evil.com/github.com/user/repo/prompts/file.prompt.md")
+
+        fill.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # _purpose_for_host / _identify_env_source
@@ -348,7 +445,7 @@ class TestIdentifyEnvSource:
 
 
 # ---------------------------------------------------------------------------
-# _build_git_env — no-token path
+# _build_git_env -- no-token path
 # ---------------------------------------------------------------------------
 
 
@@ -397,7 +494,7 @@ class TestDiagnosticsOrNone:
 
 
 # ---------------------------------------------------------------------------
-# emit_stale_pat_diagnostic — with logger wired
+# emit_stale_pat_diagnostic -- with logger wired
 # ---------------------------------------------------------------------------
 
 
@@ -507,13 +604,13 @@ class TestNotifyAuthSource:
 
     def test_ctx_none_is_noop(self) -> None:
         resolver = AuthResolver()
-        # ctx=None → source check does getattr(None, "source", "none") == "none" → return
+        # ctx=None -> source check does getattr(None, "source", "none") == "none" -> return
         resolver.notify_auth_source("github.com", None)
         # No exception expected
 
 
 # ---------------------------------------------------------------------------
-# try_with_fallback — unauth_first path
+# try_with_fallback -- unauth_first path
 # ---------------------------------------------------------------------------
 
 
@@ -563,7 +660,7 @@ class TestTryWithFallbackUnauthFirst:
 
 
 # ---------------------------------------------------------------------------
-# try_with_fallback — auth_first with public repo fallback
+# try_with_fallback -- auth_first with public repo fallback
 # ---------------------------------------------------------------------------
 
 
@@ -597,7 +694,7 @@ class TestTryWithFallbackAuthFirst:
 
 
 # ---------------------------------------------------------------------------
-# try_with_fallback — ghe_cloud (auth-only)
+# try_with_fallback -- ghe_cloud (auth-only)
 # ---------------------------------------------------------------------------
 
 
@@ -611,7 +708,7 @@ class TestTryWithFallbackGheCloud:
 
 
 # ---------------------------------------------------------------------------
-# try_with_fallback — credential fallback (non-ADO, non-secondary source)
+# try_with_fallback -- credential fallback (non-ADO, non-secondary source)
 # ---------------------------------------------------------------------------
 
 
@@ -642,7 +739,7 @@ class TestTryWithFallbackCredentialChain:
 
 
 # ---------------------------------------------------------------------------
-# build_error_context — non-ADO paths
+# build_error_context -- non-ADO paths
 # ---------------------------------------------------------------------------
 
 
@@ -887,7 +984,7 @@ class TestBearerFallbackOutcome:
 
 
 # ---------------------------------------------------------------------------
-# classify_host — ghes requires valid FQDN
+# classify_host -- ghes requires valid FQDN
 # ---------------------------------------------------------------------------
 
 
@@ -913,7 +1010,7 @@ class TestClassifyHostGhes:
 
 
 # ---------------------------------------------------------------------------
-# Thread safety — resolve() under contention
+# Thread safety -- resolve() under contention
 # ---------------------------------------------------------------------------
 
 

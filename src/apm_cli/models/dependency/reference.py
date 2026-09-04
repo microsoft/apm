@@ -14,7 +14,6 @@ from ...utils.github_host import (
     is_gitlab_hostname,
     is_supported_git_host,
     is_visualstudio_legacy_hostname,
-    maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
     reject_unsupported_ado_server_base_path,
     unsupported_host_error,
@@ -26,6 +25,16 @@ from ...utils.path_security import (
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
+from .host_virtual import (
+    HostQualifiedReference,
+    HostQualifiedVirtualShorthand,
+)
+from .host_virtual import (
+    parse_host_qualified_reference as _parse_host_qualified_reference,
+)
+from .host_virtual import (
+    parse_host_qualified_virtual_shorthand as _parse_host_qualified_virtual_shorthand,
+)
 from .identity import (
     _DEFAULT_SCHEME_PORTS,
     _NON_ADO_PATH_SEGMENT_RE,
@@ -81,7 +90,7 @@ class DependencyReference(ProviderCoordinateMixin):
     declaring_parent: str | None = None
     anchored_local_path: str | None = None
 
-    # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
+    # Monorepo inheritance: { git: parent, path: ... } -- expanded in resolver
     is_parent_repo_inheritance: bool = False
 
     artifactory_prefix: str | None = None  # e.g., "artifactory/github" (repo key path)
@@ -111,7 +120,7 @@ class DependencyReference(ProviderCoordinateMixin):
     # the lockfile (which records source="local") agree on a local dep's source.
     # registry_name: name of the registry from apm.yml's registries: block when
     # source == "registry". Carried in-memory only; never serialized into the
-    # lockfile (the lockfile uses URL-based identity per design §6.1).
+    # lockfile (the lockfile uses URL-based identity per design section6.1).
     source: str | None = None
     registry_name: str | None = None
 
@@ -793,7 +802,7 @@ class DependencyReference(ProviderCoordinateMixin):
                 marketplace_version_spec=version_spec,
             )
 
-        # Object-form registry package — design §3.2.
+        # Object-form registry package -- design section3.2.
         # Discriminated by the ``registry:`` or ``id:`` key (``registry:`` is
         # optional when a ``registries.default:`` is configured).  Mutually
         # exclusive with ``git:``.
@@ -801,7 +810,7 @@ class DependencyReference(ProviderCoordinateMixin):
             if "git" in entry:
                 raise ValueError(
                     "Object-style dependency cannot mix 'registry:'/'id:' and 'git:' "
-                    "keys — choose one resolver."
+                    "keys -- choose one resolver."
                 )
             return cls._parse_registry_object_entry(entry)
 
@@ -944,6 +953,53 @@ class DependencyReference(ProviderCoordinateMixin):
         return "." not in last
 
     @classmethod
+    def reject_removed_collection_extension(cls, virtual_path: str) -> None:
+        """Raise the migration error for removed `.collection.yml` package paths."""
+        if any(virtual_path.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+            raise ValueError(
+                f".collection.yml is no longer supported. "
+                f"Convert '{virtual_path}' to an apm.yml with a "
+                f"'dependencies' section. "
+                f"See: https://microsoft.github.io/apm/guides/dependencies/"
+            )
+
+    @classmethod
+    def parse_host_qualified_virtual_shorthand(
+        cls,
+        dependency_str: str,
+    ) -> HostQualifiedVirtualShorthand | None:
+        """Parse ``host/repo/path`` virtual-package shorthand without fallback.
+
+        Returns ``None`` for non-virtual shorthand. If the string looks like a
+        host-qualified virtual package but the host is not configured as a
+        supported repo-boundary owner, raise a named error instead of folding
+        the host into ``repo_url``.
+        """
+        parsed = _parse_host_qualified_virtual_shorthand(
+            dependency_str,
+            virtual_file_extensions=cls.VIRTUAL_FILE_EXTENSIONS,
+            gitlab_repo_segment_count=cls._gitlab_shorthand_repo_segment_count,
+        )
+        if parsed is not None:
+            cls.reject_removed_collection_extension(parsed.virtual_path)
+        return parsed
+
+    @classmethod
+    def parse_host_qualified_reference(
+        cls,
+        dependency_str: str,
+        *,
+        virtual_only: bool = False,
+    ) -> HostQualifiedReference | None:
+        """Parse host-qualified shorthand through the canonical host parser."""
+        return _parse_host_qualified_reference(
+            dependency_str,
+            virtual_file_extensions=cls.VIRTUAL_FILE_EXTENSIONS,
+            gitlab_repo_segment_count=cls._gitlab_shorthand_repo_segment_count,
+            virtual_only=virtual_only,
+        )
+
+    @classmethod
     def split_gitlab_direct_shorthand_parts(
         cls, package: str
     ) -> tuple[str, list[str], str | None] | None:
@@ -958,21 +1014,11 @@ class DependencyReference(ProviderCoordinateMixin):
             s = s.strip()
             r = r.strip()
             ref_out = r if r else None
-        maybe_raise_bare_fqdn_github_gitlab_conflict(package)
-        if s.startswith(("git@", "https://", "http://", "ssh://", "//")):
+        parsed = cls.parse_host_qualified_reference(package)
+        if parsed is None or not is_gitlab_hostname(parsed.host):
             return None
-        if "/" not in s:
-            return None
-        parts = s.split("/")
-        host_cand = parts[0]
-        if "." not in host_cand:
-            return None
-        segs = [p for p in parts[1:] if p]
-        if len(segs) < 1:
-            return None
-        if not is_supported_git_host(host_cand) or not is_gitlab_hostname(host_cand):
-            return None
-        return (host_cand, segs, ref_out)
+        segs = [segment for segment in s.split("/")[1:] if segment]
+        return (parsed.host, segs, ref_out)
 
     @classmethod
     def needs_gitlab_direct_shorthand_probing(
@@ -1117,7 +1163,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
     @classmethod
     def _parse_registry_object_entry(cls, entry: dict) -> "DependencyReference":
-        """Parse the object-form registry entry per §3.2. See ``registry_entry.py``."""
+        """Parse the object-form registry entry per section3.2. See ``registry_entry.py``."""
         from .registry_entry import parse_registry_object_entry
 
         return parse_registry_object_entry(cls, entry)
@@ -1129,6 +1175,10 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             (is_virtual_package, virtual_path, validated_host)
         """
+        host_virtual = cls.parse_host_qualified_virtual_shorthand(dependency_str)
+        if host_virtual is not None:
+            return True, host_virtual.virtual_path, host_virtual.host
+
         # Temporarily remove reference for path segment counting
         temp_str = dependency_str
         if "#" in temp_str:
@@ -1141,30 +1191,18 @@ class DependencyReference(ProviderCoordinateMixin):
         if temp_str.lower().startswith(("git@", "https://", "http://", "ssh://")):
             return is_virtual_package, virtual_path, validated_host
 
+        host_reference = cls.parse_host_qualified_reference(temp_str)
+        if host_reference is not None:
+            return (
+                host_reference.subpath is not None,
+                host_reference.subpath,
+                host_reference.host,
+            )
+
         check_str = temp_str
 
-        if "/" in check_str:
-            first_segment = check_str.split("/")[0]
-
-            if "." in first_segment:
-                test_url = f"https://{check_str}"
-                try:
-                    parsed = urllib.parse.urlparse(test_url)
-                    hostname = parsed.hostname
-
-                    if hostname and is_supported_git_host(hostname):
-                        validated_host = hostname
-                        path_parts = parsed.path.lstrip("/").split("/")
-                        if len(path_parts) >= 2:
-                            check_str = "/".join(check_str.split("/")[1:])
-                    else:
-                        raise ValueError(unsupported_host_error(hostname or first_segment))
-                except (ValueError, AttributeError) as e:
-                    if isinstance(e, ValueError) and "Invalid Git host" in str(e):
-                        raise
-                    raise ValueError(unsupported_host_error(first_segment)) from e
-            elif check_str.startswith("gh/"):
-                check_str = "/".join(check_str.split("/")[1:])
+        if check_str.startswith("gh/"):
+            check_str = "/".join(check_str.split("/")[1:])
 
         path_segments = [seg for seg in check_str.split("/") if seg]
 
@@ -1341,6 +1379,10 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             ``(host, repo_url)`` where *host* may be ``None``.
         """
+        host_reference = cls.parse_host_qualified_reference(repo_url)
+        if host_reference is not None and host_reference.subpath is not None:
+            return host_reference.host, host_reference.repo_url
+
         parts = repo_url.split("/")
 
         if "_git" in parts:
@@ -1348,39 +1390,7 @@ class DependencyReference(ProviderCoordinateMixin):
             parts = parts[:git_idx] + parts[git_idx + 1 :]
 
         host = None
-        if len(parts) >= 3 and is_supported_git_host(parts[0]):
-            host = parts[0]
-            if is_azure_devops_hostname(parts[0]):
-                if is_visualstudio_legacy_hostname(parts[0]):
-                    # myorg.visualstudio.com/proj/repo/path: org in subdomain,
-                    # need at least host + proj + repo + 1 virtual segment.
-                    if len(parts) < 4:
-                        raise ValueError(
-                            "Invalid Azure DevOps virtual package format: must be "
-                            "myorg.visualstudio.com/project/repo/path"
-                        )
-                    repo_url = "/".join(parts[1:3])
-                else:
-                    # dev.azure.com/org/proj/repo/path: org in path
-                    if len(parts) < 5:
-                        raise ValueError(
-                            "Invalid Azure DevOps virtual package format: must be dev.azure.com/org/project/repo/path"
-                        )
-                    repo_url = "/".join(parts[1:4])
-            elif is_artifactory_path(parts[1:]):
-                art_result = parse_artifactory_path(parts[1:])
-                if art_result:
-                    repo_url = f"{art_result[1]}/{art_result[2]}"
-            elif is_gitlab_hostname(parts[0]) and virtual_path:
-                vparts = [p for p in virtual_path.split("/") if p]
-                tail = len(vparts)
-                if tail > 0 and len(parts) > 1 + tail:
-                    repo_url = "/".join(parts[1 : len(parts) - tail])
-                else:
-                    repo_url = "/".join(parts[1:])
-            else:
-                repo_url = "/".join(parts[1:3])
-        elif len(parts) >= 2:
+        if len(parts) >= 2:
             if not host:
                 host = default_host()
             if validated_host and is_azure_devops_hostname(validated_host):
@@ -1416,50 +1426,37 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             ``(parsed_url, host, port)`` with any custom shorthand port.
         """
-        parts = repo_url.split("/")
-
-        if "_git" in parts:
-            git_idx = parts.index("_git")
-            parts = parts[:git_idx] + parts[git_idx + 1 :]
-
-        parts[0], port = _split_shorthand_host_port(parts[0])
-
-        if len(parts) >= 3 and is_supported_git_host(parts[0]):
-            host = parts[0]
-            if is_visualstudio_legacy_hostname(host) and len(parts) >= 3:
-                # *.visualstudio.com/proj/repo: org is in the subdomain, path is proj/repo only
-                user_repo = "/".join(parts[1:3])
-            elif is_azure_devops_hostname(host) and len(parts) >= 4:
-                # dev.azure.com/org/proj/repo: org is the first path segment
-                user_repo = "/".join(parts[1:4])
-            elif not is_github_hostname(host) and not is_azure_devops_hostname(host):
-                if is_artifactory_path(parts[1:]):
-                    art_result = parse_artifactory_path(parts[1:])
-                    if art_result:
-                        user_repo = f"{art_result[1]}/{art_result[2]}"
-                    else:
-                        user_repo = "/".join(parts[1:])
-                else:
-                    user_repo = "/".join(parts[1:])
-            else:
-                user_repo = "/".join(parts[1:])
-        elif len(parts) >= 2 and "." not in parts[0]:
-            if not host:
-                host = default_host()
-            if is_azure_devops_hostname(host) and len(parts) >= 3:
-                user_repo = "/".join(parts[:3])
-            elif host and not is_github_hostname(host) and not is_azure_devops_hostname(host):
-                user_repo = "/".join(parts)
-            elif len(parts) >= 3 and cls._bare_shorthand_repo_segment_count(parts) > 2:
-                # Registry-only mode allows nested-group repo paths
-                # (GitLab via proxy).  Keep the full multi-segment path.
-                user_repo = "/".join(parts[: cls._bare_shorthand_repo_segment_count(parts)])
-            else:
-                user_repo = "/".join(parts[:2])
+        host_reference = cls.parse_host_qualified_reference(repo_url) if host is None else None
+        if host_reference is not None:
+            host = host_reference.host
+            port = host_reference.port
+            user_repo = host_reference.repo_url
         else:
-            raise ValueError(
-                "Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"
-            )
+            parts = repo_url.split("/")
+
+            if "_git" in parts:
+                git_idx = parts.index("_git")
+                parts = parts[:git_idx] + parts[git_idx + 1 :]
+
+            parts[0], port = _split_shorthand_host_port(parts[0])
+
+            if len(parts) >= 2 and "." not in parts[0]:
+                if not host:
+                    host = default_host()
+                if is_azure_devops_hostname(host) and len(parts) >= 3:
+                    user_repo = "/".join(parts[:3])
+                elif host and not is_github_hostname(host) and not is_azure_devops_hostname(host):
+                    user_repo = "/".join(parts)
+                elif len(parts) >= 3 and cls._bare_shorthand_repo_segment_count(parts) > 2:
+                    # Registry-only mode allows nested-group repo paths
+                    # (GitLab via proxy).  Keep the full multi-segment path.
+                    user_repo = "/".join(parts[: cls._bare_shorthand_repo_segment_count(parts)])
+                else:
+                    user_repo = "/".join(parts[:2])
+            else:
+                raise ValueError(
+                    "Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"
+                )
 
         if not user_repo or "/" not in user_repo:
             raise ValueError(
@@ -1530,6 +1527,7 @@ class DependencyReference(ProviderCoordinateMixin):
             if presentation_path_parts[-1].endswith(".git"):
                 presentation_path_parts[-1] = presentation_path_parts[-1][:-4]
         path = "/".join(path_parts)
+        had_git_marker = "_git" in path_parts
         if "_git" in path_parts:
             git_idx = path_parts.index("_git")
             path_parts = path_parts[:git_idx] + path_parts[git_idx + 1 :]
@@ -1545,7 +1543,8 @@ class DependencyReference(ProviderCoordinateMixin):
             # *.visualstudio.com encodes org in the subdomain; URL path is proj/repo (2 parts).
             # dev.azure.com encodes org as the first path segment; URL path is org/proj/repo (3 parts).
             is_vs_legacy = is_visualstudio_legacy_hostname(hostname)
-            min_ado_parts = 2 if is_vs_legacy else 3
+            inject_visualstudio_org = is_vs_legacy and (had_git_marker or len(path_parts) == 2)
+            min_ado_parts = 2 if inject_visualstudio_org else 3
             if len(path_parts) < min_ado_parts:
                 raise ValueError(
                     f"Invalid Azure DevOps repository path: expected 'org/project/repo', got '{path}'"
@@ -1587,7 +1586,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
             # For *.visualstudio.com, inject the org from the subdomain so that the
             # normalised repo_url is always org/project/repo (matching dev.azure.com).
-            if is_vs_legacy:
+            if inject_visualstudio_org:
                 vs_org = hostname.split(".")[0]
                 path_parts = [vs_org, *path_parts]
         else:
@@ -1822,7 +1821,7 @@ class DependencyReference(ProviderCoordinateMixin):
         cls._reject_shorthand_alias(dependency_str)
         reject_unsupported_ado_server_base_path(dependency_str)
 
-        maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
+        cls.parse_host_qualified_reference(dependency_str)
 
         # Guard: detect a subpath embedded in an explicit git URL form (#872).
         # Fires before virtual-package detection so the user gets an actionable
