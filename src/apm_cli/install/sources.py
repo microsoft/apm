@@ -39,6 +39,11 @@ from apm_cli.install.registry_wiring import (
     registry_resolution_for_cached_registry_dep,
     resolver_last_registry_resolution,
 )
+from apm_cli.install.source_helpers import (
+    format_package_type_label,
+    rebuild_cached_semver_resolution,
+    record_declared_license,
+)
 from apm_cli.models.dependency.host_virtual import (
     dependency_repository_owner,
     repository_path_segments,
@@ -49,81 +54,6 @@ from apm_cli.utils.short_sha import format_short_sha
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.models.apm_package import PackageInfo
-
-
-def _format_package_type_label(pkg_type) -> str | None:
-    """Human-readable label for a detected ``PackageType``.
-
-    Centralised so every install path emits the same wording and so
-    new ``PackageType`` values can be added without grepping for ad-hoc
-    dicts.  Missing ``HOOK_PACKAGE`` from this table is what made
-    microsoft/apm#780 silent -- keep all classifiable enum members
-    covered.
-    """
-    from apm_cli.models.apm_package import PackageType
-
-    return {
-        PackageType.CLAUDE_SKILL: "Skill (SKILL.md detected)",
-        PackageType.AGENT_PLUGIN: "Agent Plugin (plugin.json)",
-        PackageType.MARKETPLACE_PLUGIN: "Marketplace Plugin (plugin.json or agents/skills/commands)",
-        PackageType.HYBRID: "Hybrid (apm.yml + SKILL.md)",
-        PackageType.APM_PACKAGE: "APM Package (apm.yml)",
-        PackageType.HOOK_PACKAGE: "Hook Package (hooks/*.json only)",
-        PackageType.SKILL_BUNDLE: "Skill Bundle (skills/<name>/SKILL.md)",
-    }.get(pkg_type)
-
-
-def _record_declared_license(ctx, dep_key: str, install_path) -> None:
-    """Backfill ctx.package_declared_licenses from the resolved dep's manifest.
-
-    Reads the DECLARED license (apm.yml ``license:`` or plugin.json
-    ``license``) at the install path. APM never reads the LICENSE file text or
-    concludes a license -- this is a passthrough of an author claim. When no
-    manifest declares one, the key is left ABSENT (not declared == unknown);
-    no sentinel is stored. Best-effort: any read error leaves the key absent.
-    """
-    try:
-        from apm_cli.export.declared_license import read_declared_license
-
-        declared = read_declared_license(install_path)
-    except Exception:
-        declared = None
-    if declared:
-        ctx.package_declared_licenses[dep_key] = declared
-
-
-def _rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
-    """Rebuild a ``GitSemverResolution`` from a cached lockfile entry.
-
-    Returns ``None`` unless ALL required fields are present on
-    *dep_locked_chk*:  ``constraint``, ``version``, ``resolved_tag``,
-    and ``resolved_commit``.  Per PR #1496 review thread: gating on
-    just ``constraint`` and back-filling missing fields with empty
-    strings risks propagating an incomplete semver resolution into
-    ``InstalledPackage`` and rewriting the lockfile with empty/missing
-    fields (and an empty ``resolved_ref``).  When the lockfile cache is
-    incomplete we prefer to leave the resolution as ``None`` so the
-    caller falls back to the literal-ref path.
-    """
-    if dep_locked_chk is None:
-        return None
-    if not (
-        dep_locked_chk.constraint
-        and dep_locked_chk.version
-        and dep_locked_chk.resolved_tag
-        and dep_locked_chk.resolved_commit
-    ):
-        return None
-    from apm_cli.deps.git_semver_resolver import GitSemverResolution
-
-    return GitSemverResolution(
-        constraint=dep_locked_chk.constraint,
-        resolved_version=dep_locked_chk.version,
-        resolved_tag=dep_locked_chk.resolved_tag,
-        resolved_sha=dep_locked_chk.resolved_commit,
-        matched_pattern="",
-        resolved_at=dep_locked_chk.resolved_at or "",
-    )
 
 
 @dataclass
@@ -334,7 +264,7 @@ class LocalDependencySource(DependencySource):
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
-        _record_declared_license(ctx, dep_key, install_path)
+        record_declared_license(ctx, dep_key, install_path)
 
         return Materialization(
             package_info=local_info,
@@ -593,11 +523,11 @@ class CachedDependencySource(DependencySource):
         # so re-writing the lockfile from cache preserves constraint /
         # resolved_tag / resolved_at instead of dropping them. The
         # lockfile-backed reconstruction is gated on ALL required fields
-        # being present (see ``_rebuild_cached_semver_resolution`` and the
+        # being present (see ``rebuild_cached_semver_resolution`` and the
         # PR #1496 review thread).
         _cached_semver = ctx.git_semver_resolutions.get(dep_key)
         if _cached_semver is None:
-            _cached_semver = _rebuild_cached_semver_resolution(dep_locked_chk)
+            _cached_semver = rebuild_cached_semver_resolution(dep_locked_chk)
 
         ctx.installed_packages.append(
             InstalledPackage(
@@ -621,7 +551,7 @@ class CachedDependencySource(DependencySource):
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
-        _record_declared_license(ctx, dep_key, install_path)
+        record_declared_license(ctx, dep_key, install_path)
         warn_unrecognized_plugin_schema(ctx.diagnostics, dep_key, install_path)
 
         # Return without deploying integration files when the target set is empty.
@@ -907,12 +837,12 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
-            _record_declared_license(ctx, dep_key, install_path)
+            record_declared_license(ctx, dep_key, install_path)
             warn_unrecognized_plugin_schema(diagnostics, dep_key, install_path)
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type
-                _type_label = _format_package_type_label(package_type)
+                _type_label = format_package_type_label(package_type)
                 if _type_label and logger:
                     logger.package_type_info(_type_label)
 
