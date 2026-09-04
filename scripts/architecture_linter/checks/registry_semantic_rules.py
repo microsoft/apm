@@ -165,15 +165,24 @@ _COMPILE_INVENTORY_PATHS: tuple[str, ...] = (
 
 _ROOT_CONTEXT_OWNER = "src/apm_cli/compilation/agents_compiler.py"
 
+_ROOT_CONTEXT_HELPER = "src/apm_cli/compilation/root_context_protection.py"
+
 _ROOT_CONTEXT_CLI = "src/apm_cli/commands/compile/cli.py"
 
-_ROOT_CONTEXT_PATHS = (_ROOT_CONTEXT_OWNER, _ROOT_CONTEXT_CLI)
+_ROOT_CONTEXT_PATHS = (_ROOT_CONTEXT_OWNER, _ROOT_CONTEXT_HELPER, _ROOT_CONTEXT_CLI)
 
 _ROOT_CONTEXT_OWNER_FRAGMENTS = (
     "def _hand_authored_root_context_blocks_write(",
+    "return hand_authored_root_context_blocks_write(",
     "and self._hand_authored_root_context_blocks_write(root_claude_path)",
     "and self._hand_authored_root_context_blocks_write(output_file)",
     "and self._hand_authored_root_context_blocks_write(agents_path)",
+)
+
+_ROOT_CONTEXT_HELPER_FRAGMENTS = (
+    "def hand_authored_root_context_blocks_write(",
+    "def catalog_root_context_markers(",
+    "for profile in KNOWN_TARGETS.values():",
 )
 
 _ROOT_CONTEXT_CLI_FRAGMENTS = (
@@ -390,6 +399,7 @@ def _check_root_context_write_eligibility(provider: FactsProvider) -> Iterable[V
         return failures
 
     owner_text = source_text(facts_by_path[_ROOT_CONTEXT_OWNER])
+    helper_text = source_text(facts_by_path[_ROOT_CONTEXT_HELPER])
     cli_text = source_text(facts_by_path[_ROOT_CONTEXT_CLI])
     defects: list[str] = []
     if owner_text.count("def _hand_authored_root_context_blocks_write(") != 1:
@@ -397,6 +407,9 @@ def _check_root_context_write_eligibility(provider: FactsProvider) -> Iterable[V
     for fragment in _ROOT_CONTEXT_OWNER_FRAGMENTS:
         if fragment not in owner_text:
             defects.append(f"{_ROOT_CONTEXT_OWNER} is missing {fragment!r}")
+    for fragment in _ROOT_CONTEXT_HELPER_FRAGMENTS:
+        if fragment not in helper_text:
+            defects.append(f"{_ROOT_CONTEXT_HELPER} is missing {fragment!r}")
     for fragment in _ROOT_CONTEXT_CLI_FRAGMENTS:
         if fragment not in cli_text:
             defects.append(f"{_ROOT_CONTEXT_CLI} is missing {fragment!r}")
@@ -405,7 +418,11 @@ def _check_root_context_write_eligibility(provider: FactsProvider) -> Iterable[V
         line_pattern_violations(
             provider,
             rule_id=rule_id,
-            paths=_python_paths(provider, under=_SRC, exclude=(_ROOT_CONTEXT_OWNER,)),
+            paths=_python_paths(
+                provider,
+                under=_SRC,
+                exclude=(_ROOT_CONTEXT_OWNER, _ROOT_CONTEXT_HELPER),
+            ),
             pattern=_ROOT_CONTEXT_DUPLICATE_PATTERN,
             message=(
                 "hand-authored project root write eligibility belongs in "

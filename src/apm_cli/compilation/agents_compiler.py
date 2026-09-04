@@ -7,7 +7,6 @@ primitives & constitution are unchanged.
 
 import hashlib
 import logging
-import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
@@ -38,6 +37,7 @@ from .footer import VALID_AGENTS_MD_MODES, build_generation_footer
 from .inventory import CompileInventory
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .managed_section import ManagedSectionError
+from .root_context_protection import hand_authored_root_context_blocks_write
 from .template_builder import (
     TemplateData,
     build_conditional_sections,
@@ -1282,17 +1282,43 @@ class AgentsCompiler:
         gemini_formatter = GeminiFormatter(str(self.base_dir))
         gemini_result = gemini_formatter.format_distributed(primitives)
 
+        protected_gemini_paths = {
+            path
+            for path in gemini_result.content_map
+            if self._hand_authored_root_context_blocks_write(path)
+        }
+        if protected_gemini_paths:
+            gemini_result.content_map = {
+                path: content
+                for path, content in gemini_result.content_map.items()
+                if path not in protected_gemini_paths
+            }
+            gemini_result.placements = [
+                placement
+                for placement in gemini_result.placements
+                if placement.gemini_path not in protected_gemini_paths
+            ]
+            gemini_result.stats["gemini_files_generated"] = len(gemini_result.placements)
+
         all_warnings = self.warnings + gemini_result.warnings
         all_errors = self.errors + gemini_result.errors
 
         if config.dry_run:
+            count = len(gemini_result.placements)
             return CompilationResult(
                 success=len(all_errors) == 0,
                 output_path="Preview mode - GEMINI.md",
-                content="GEMINI.md Preview: Would generate stub importing AGENTS.md",
+                content=(
+                    "GEMINI.md Preview: Would generate stub importing AGENTS.md"
+                    if count
+                    else "GEMINI.md Preview: Would generate 0 files"
+                ),
                 warnings=all_warnings,
                 errors=all_errors,
-                stats=gemini_result.stats,
+                stats={
+                    **gemini_result.stats,
+                    "root_context_files_protected": len(protected_gemini_paths),
+                },
             )
 
         files_written = 0
@@ -1307,8 +1333,16 @@ class AgentsCompiler:
 
         stats = gemini_result.stats.copy()
         stats["gemini_files_written"] = files_written
+        stats["root_context_files_protected"] = len(protected_gemini_paths)
 
-        self._log("progress", "Generated GEMINI.md (imports AGENTS.md)")
+        if files_written:
+            self._log("progress", "Generated GEMINI.md (imports AGENTS.md)")
+        elif protected_gemini_paths:
+            self._log(
+                "progress",
+                "GEMINI.md not generated -- protected hand-authored root file retained",
+                symbol="info",
+            )
 
         return CompilationResult(
             success=len(all_errors) == 0,
@@ -1832,72 +1866,13 @@ class AgentsCompiler:
         path: Path,
     ) -> bool:
         """Return whether an existing project-root file must be retained."""
-        canonical_name = None
-        normalized_path = Path(os.path.abspath(path))
-        lexical_root = Path(os.path.abspath(path.parent)) == self._resolved_base_dir
-        canonical_paths = (
-            self._resolved_base_dir / "AGENTS.md",
-            self._resolved_base_dir / "CLAUDE.md",
+        return hand_authored_root_context_blocks_write(
+            path,
+            base_dir=self.base_dir,
+            resolved_base_dir=self._resolved_base_dir,
+            protected_paths=self._protected_root_context_paths,
+            warnings=self.warnings,
         )
-        if lexical_root:
-            for candidate in canonical_paths:
-                if normalized_path == candidate:
-                    canonical_name = candidate.name
-                    break
-                try:
-                    if os.path.samestat(path.lstat(), candidate.lstat()):
-                        canonical_name = candidate.name
-                        break
-                except OSError:
-                    continue
-        if canonical_name is None:
-            if not path.is_file():
-                return False
-            try:
-                resolved = ensure_path_within(path, self.base_dir)
-                if resolved.parent != self._resolved_base_dir:
-                    return False
-                for candidate in canonical_paths:
-                    if candidate.is_file() and path.samefile(candidate):
-                        canonical_name = candidate.name
-                        break
-            except (OSError, PathTraversalError):
-                return False
-            if canonical_name is None:
-                return False
-        rel_path = portable_relpath(path, self.base_dir)
-        if lexical_root and path.is_symlink():
-            self._protected_root_context_paths.add(path)
-            self.warnings.append(
-                f"Protected {rel_path}: root context symlinks are not overwritten. "
-                "Replace the symlink with a regular generated file before rerunning."
-            )
-            return True
-        if not path.is_file():
-            return False
-        try:
-            ensure_path_within(path, self.base_dir)
-            with path.open("rb") as handle:
-                prefix = decode_utf8_prefix(handle.read(4096))
-        except (OSError, PathTraversalError, UnicodeDecodeError) as exc:
-            self._protected_root_context_paths.add(path)
-            self.warnings.append(
-                f"Skipped {rel_path}: could not verify the APM-generated marker; "
-                f"file will not be overwritten ({type(exc).__name__}). "
-                "Fix file access, UTF-8 encoding, or path containment, then rerun."
-            )
-            return True
-        accepted_markers = (
-            _AGENTS_ROOT_GENERATED_MARKERS if canonical_name == "AGENTS.md" else (CLAUDE_HEADER,)
-        )
-        if has_generated_marker_header(prefix, accepted_markers):
-            return False
-        self._protected_root_context_paths.add(path)
-        self.warnings.append(
-            f"Protected {rel_path}: hand-authored file will not be overwritten. "
-            "To regenerate it, delete or rename the file, then re-run 'apm compile'."
-        )
-        return True
 
     @staticmethod
     def _new_managed_section_content(content: str, config: CompilationConfig) -> str:

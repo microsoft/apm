@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole-file line-ending change. (closes #2624) (#2675)
 - `apm compile` now preserves hand-authored root `AGENTS.md` and `CLAUDE.md`
   files, including `--root` destinations, instead of replacing them. (#2779)
+- `apm compile` now derives hand-authored root context protection from the
+  target catalog, so targets such as Gemini preserve existing `GEMINI.md`
+  files instead of replacing them.
 - `apm uninstall` now removes MCP servers only from recorded owning runtimes,
   accepts JetBrains Copilot JSONC, and reports target cleanup failures after
   attempting every owner. (by @aryansk, fixes #2551) (#2591)
