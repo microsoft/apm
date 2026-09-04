@@ -39,6 +39,10 @@ from apm_cli.install.registry_wiring import (
     registry_resolution_for_cached_registry_dep,
     resolver_last_registry_resolution,
 )
+from apm_cli.models.dependency.host_virtual import (
+    dependency_repository_owner,
+    repository_path_segments,
+)
 from apm_cli.utils.console import _rich_success
 from apm_cli.utils.short_sha import format_short_sha
 
@@ -529,8 +533,9 @@ class CachedDependencySource(DependencySource):
                     raise DirectDependencyError(f"Cached Claude Skill is invalid: {details}")
                 cached_package = validation_result.package
             else:
+                repo_segments = repository_path_segments(dep_ref.repo_url)
                 cached_package = APMPackage(
-                    name=dep_ref.repo_url.split("/")[-1],
+                    name=repo_segments[-1] if repo_segments else dep_ref.repo_url,
                     version="unknown",
                     package_path=install_path,
                     source=dep_ref.repo_url,
@@ -801,7 +806,7 @@ class FreshDependencySource(DependencySource):
                     try:
                         _host = dep_ref.host or "github.com"
                         _org = (
-                            dep_ref.repo_url.split("/")[0]
+                            dependency_repository_owner(dep_ref)
                             if dep_ref.repo_url and "/" in dep_ref.repo_url
                             else None
                         )

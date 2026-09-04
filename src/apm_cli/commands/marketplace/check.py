@@ -14,6 +14,7 @@ from ...marketplace.errors import GitLsRemoteError, OfflineMissError
 from ...marketplace.ref_resolver import RefResolver
 from ...marketplace.semver import satisfies_range
 from ...marketplace.yml_schema import PackageEntry
+from ...models.dependency.host_virtual import repository_owner
 from ...utils.github_host import is_azure_devops_hostname
 from . import (
     _CheckResult,
@@ -61,7 +62,7 @@ def _entry_coordinates(
     if source_base:
         source_url = f"{source_base}/{entry.source}"
         dependency = DependencyReference.parse(source_url)
-        org = dependency.ado_organization or dependency.repo_url.split("/", 1)[0]
+        org = dependency.ado_organization or repository_owner(dependency.repo_url)
         return dependency.host, dependency.repo_url, org, source_url
     return None, entry.source, None, None
 

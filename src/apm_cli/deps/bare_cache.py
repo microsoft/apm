@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 from git import Repo
 
+from ..models.dependency.host_virtual import dependency_repository_owner
 from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
 
 if TYPE_CHECKING:
@@ -868,7 +869,7 @@ def build_clone_failure_message(
         )
     elif not has_token:
         host = dep_host or default_host_fn()
-        org = dep_ref.repo_url.split("/")[0] if dep_ref and dep_ref.repo_url else None
+        org = dependency_repository_owner(dep_ref) if dep_ref else None
         error_msg += auth_resolver.build_error_context(
             host,
             "clone",
