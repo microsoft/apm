@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Accept GitHub `SKILL.md` file URLs in `apm install`, normalize them to HTTPS
+  repository references, and persist per-package skill selections.
+  (by @WilliamK112, #1989)
+
 ### Changed
 
 - Hermes is now a stable explicit-only target, and state-mutating APM commands
