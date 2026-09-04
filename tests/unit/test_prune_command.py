@@ -19,6 +19,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -30,6 +31,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.cleanup import remove_stale_deployed_files
 from apm_cli.models.apm_package import clear_apm_yml_cache
@@ -409,6 +411,44 @@ dependencies:
                 assert "orphan-org/orphan-repo" not in lockfile_path.read_text()
             else:
                 pass
+
+    @pytest.mark.windows_compat
+    def test_prune_mcp_cleanup_failure_preserves_lock_and_live_config(self):
+        """Prune aborts before lock persistence when native MCP cleanup fails."""
+        from apm_cli.install.errors import RequiredIntegrationError
+
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
+            _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            dependency = LockedDependency(
+                repo_url="orphan-org/orphan-repo",
+                resolved_commit="abc123",
+            )
+            lock_path = tmp / "apm.lock.yaml"
+            LockFile(
+                dependencies={dependency.get_unique_key(): dependency},
+                mcp_servers=["owned-server"],
+                mcp_target_servers={"antigravity": ["owned-server"]},
+            ).write(lock_path)
+            config_path = tmp / ".agents" / "mcp_config.json"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                '{"mcpServers":{"owned-server":{"command":"keep"}}}',
+                encoding="utf-8",
+            )
+            lock_before = lock_path.read_bytes()
+            config_before = config_path.read_bytes()
+
+            with patch(
+                "apm_cli.commands.uninstall.engine._cleanup_stale_mcp",
+                side_effect=RequiredIntegrationError("native config malformed"),
+            ) as cleanup:
+                result = self.runner.invoke(cli, ["prune"])
+
+            assert result.exit_code != 0
+            assert cleanup.call_args.kwargs["scope"] is InstallScope.PROJECT
+            assert lock_path.read_bytes() == lock_before
+            assert config_path.read_bytes() == config_before
 
     def test_prune_removes_lockfile_entry_exact(self):
         """prune deletes apm.lock.yaml when it only contained the pruned package."""

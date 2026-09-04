@@ -25,7 +25,7 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -37,6 +37,77 @@ if TYPE_CHECKING:
     from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+
+def _profiles_by_name(
+    targets: Iterable[TargetProfile] | None,
+) -> dict[str, TargetProfile]:
+    """Return profiles keyed by catalog target name."""
+    by_name: dict[str, TargetProfile] = {}
+    for target in targets or ():
+        name = getattr(target, "name", None)
+        if isinstance(name, str) and name not in by_name:
+            by_name[name] = target
+    return by_name
+
+
+def _has_gated_resolver(profile: TargetProfile) -> bool:
+    """Return whether an inactive supplemental target must not resolve."""
+    return profile.requires_flag is not None and profile.user_root_resolver is not None
+
+
+def _record_inactive_resolver_skip(
+    profile: TargetProfile,
+    diagnostics: DiagnosticCollector | None,
+) -> None:
+    """Record the intentional skip of an inactive experimental resolver."""
+    if diagnostics is None:
+        return
+    from apm_cli.utils.diagnostics import CATEGORY_INFO
+
+    message = (
+        f"Skipped inactive experimental resolver for target '{profile.name}' "
+        "during lockfile reconciliation."
+    )
+    if any(
+        diagnostic.message == message
+        for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
+    ):
+        return
+    flag = profile.requires_flag or profile.name
+    diagnostics.info(
+        message,
+        detail=(
+            f"To include it, enable '{flag.replace('_', '-')}' and select "
+            f"target '{profile.name}' for this install."
+        ),
+    )
+
+
+def _scoped_known_targets_for_reconciliation(
+    *,
+    user_scope: bool,
+    active_targets: Iterable[TargetProfile],
+    declared_targets: Iterable[TargetProfile] | None,
+) -> dict[str, TargetProfile]:
+    """Return known targets without running inactive experimental resolvers."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    active_by_name = _profiles_by_name(active_targets)
+    declared_by_name = _profiles_by_name(declared_targets)
+    scoped_known_targets: dict[str, TargetProfile] = {}
+    for name, profile in KNOWN_TARGETS.items():
+        resolved = active_by_name.get(name) or declared_by_name.get(name)
+        if resolved is not None:
+            scoped_known_targets[name] = resolved
+            continue
+        if _has_gated_resolver(profile):
+            scoped_known_targets[name] = profile
+            continue
+        scoped = profile.for_scope(user_scope=user_scope)
+        if scoped is not None:
+            scoped_known_targets[name] = scoped
+    return scoped_known_targets
 
 
 def _surface_target_cleanup(
@@ -136,17 +207,32 @@ def merge_hook_config_paths(targets: list[TargetProfile]) -> set[str]:
     ``integration/_hook_dropped_targets.py`` was split out; the registry stays
     the single source of truth for the filenames.
     """
+    paths = merge_hook_config_projection_specs(targets)
+    return set(paths) | {sidecar_path for sidecar_path, _ in paths.values()}
+
+
+def merge_hook_config_projection_specs(
+    targets: list[TargetProfile],
+) -> dict[str, tuple[str, str]]:
+    """Return native merge-config paths with sidecar and container metadata.
+
+    The HookIntegrator registry remains the canonical target-path vocabulary.
+    Drift uses these specs to select the APM-owned structural projection rather
+    than comparing a user-shared native config as a whole.
+    """
     from apm_cli.integration import hook_integrator as _hi
 
-    paths: set[str] = set()
+    specs: dict[str, tuple[str, str]] = {}
     for target in targets or []:
         config = _hi._MERGE_HOOK_TARGETS.get(getattr(target, "name", ""))
         root = str(getattr(target, "root_dir", "") or "").rstrip("/")
         if config is None or not root:
             continue
-        paths.add(f"{root}/{config.config_filename}")
-        paths.add(f"{root}/{_hi._APM_HOOKS_SIDECAR}")
-    return paths
+        specs[f"{root}/{config.config_filename}"] = (
+            f"{root}/{_hi._APM_HOOKS_SIDECAR}",
+            config.event_container_key,
+        )
+    return specs
 
 
 def union_preserving(
@@ -162,6 +248,9 @@ def union_preserving(
     current_run_trusted: bool = True,
     owner: str = "legacy",
     include_ledger: bool = False,
+    desired_owners: frozenset[str] | None = None,
+    generic_governed_values: frozenset[str] = frozenset(),
+    user_scope: bool = False,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Union the current install's manifest with preserved other-target entries.
 
@@ -173,8 +262,9 @@ def union_preserving(
     same-target reinstall still drops files removed from the package.
 
     ``declared_targets`` is the consumer's legitimate target universe --
-    apm.yml-declared canonical targets plus the always-legitimate gated/dynamic
-    targets -- independent of any ``--target`` narrowing (see
+    apm.yml-declared canonical targets plus gated/dynamic target metadata
+    that can be included without probing inactive roots -- independent of any
+    ``--target`` narrowing (see
     ``phases.targets.declared_target_profiles``). When provided, a prior entry
     that belongs to NEITHER this install's targets NOR any of those targets is
     an inactive-target *ghost* (e.g. a dependency's
@@ -199,10 +289,14 @@ def union_preserving(
         MaterializationStatus,
         NativePayloadValidation,
     )
-    from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
-    active_by_name = {target.name: target for target in targets}
+    scoped_known_targets = _scoped_known_targets_for_reconciliation(
+        user_scope=user_scope,
+        active_targets=targets,
+        declared_targets=declared_targets,
+    )
+    active_by_name = _profiles_by_name(targets)
     declared_by_name = (
         {target.name: target for target in declared_targets}
         if declared_targets is not None
@@ -215,7 +309,7 @@ def union_preserving(
         ordered = [
             *targets,
             *(declared_targets or []),
-            *KNOWN_TARGETS.values(),
+            *scoped_known_targets.values(),
         ]
         seen_names: set[str] = set()
         for profile in ordered:
@@ -237,11 +331,11 @@ def union_preserving(
         )
 
     prior_values = set(prior_files or ())
-    prior_records = {
-        key: record
-        for key, record in (prior_ledger.records.items() if prior_ledger is not None else ())
-        if record.locator.value in prior_values
-    }
+    prior_records = {}
+    for key, record in prior_ledger.records.items() if prior_ledger is not None else ():
+        if record.locator.value not in prior_values:
+            continue
+        prior_records[key] = record
     prior_record_values = {record.locator.value for record in prior_records.values()}
     for path in prior_files or ():
         if path in prior_record_values:
@@ -278,7 +372,7 @@ def union_preserving(
     )
     reconciled = DeploymentReconciler(
         Path.cwd(),
-        KNOWN_TARGETS,
+        scoped_known_targets,
         diagnostics=DiagnosticCollector(),
     ).reconcile(
         DeploymentLedger(records=prior_records),
@@ -288,7 +382,7 @@ def union_preserving(
             declared_targets=(
                 frozenset(declared_by_name) if declared_by_name is not None else None
             ),
-            desired_owners=None,
+            desired_owners=desired_owners,
             authoritative_targets=current_run_trusted,
             generic_governed_values=(
                 frozenset(
@@ -296,12 +390,13 @@ def union_preserving(
                     for path in prior_values
                     if is_governed_by_install(path, active_prefixes, active_schemes)
                 )
+                | generic_governed_values
                 if (
                     current_run_trusted
                     and declared_by_name is not None
                     and set(active_by_name) == set(declared_by_name)
                 )
-                else None
+                else generic_governed_values or None
             ),
         ),
     )
@@ -311,7 +406,7 @@ def union_preserving(
         for locator in reconciled.removed:
             if (
                 locator.value not in current_set
-                and locator.target in KNOWN_TARGETS
+                and locator.target in scoped_known_targets
                 and locator.target not in active_by_name
             ):
                 on_ghost_drop(locator.value)
@@ -335,6 +430,8 @@ def declared_target_profiles(
     project_root: Path,
     *,
     user_scope: bool = False,
+    active_targets: Iterable[TargetProfile] | None = None,
+    diagnostics: DiagnosticCollector | None = None,
 ) -> list[TargetProfile] | None:
     """Resolve the target universe declared by a project manifest."""
     from apm_cli.core.apm_yml import CANONICAL_TARGETS, parse_targets_field
@@ -352,19 +449,29 @@ def declared_target_profiles(
         names = parse_targets_field(data)
     except TargetResolutionError:
         return None
-    if not names:
+    active_by_name = _profiles_by_name(active_targets)
+    if not names and not active_by_name:
         return None
 
     profiles: list[TargetProfile] = []
-    for name in dict.fromkeys(names):
-        profile = KNOWN_TARGETS.get(name)
-        if profile is None:
-            continue
-        scoped = profile.for_scope(user_scope=user_scope)
-        if scoped is not None:
-            profiles.append(scoped)
+    if names:
+        for name in dict.fromkeys(names):
+            profile = KNOWN_TARGETS.get(name)
+            if profile is None:
+                continue
+            scoped = profile.for_scope(user_scope=user_scope)
+            if scoped is not None:
+                profiles.append(scoped)
     for name, profile in KNOWN_TARGETS.items():
         if name in CANONICAL_TARGETS:
+            continue
+        active_profile = active_by_name.get(name)
+        if _has_gated_resolver(profile):
+            if active_profile is None:
+                _record_inactive_resolver_skip(profile, diagnostics)
+                profiles.append(profile)
+            else:
+                profiles.append(active_profile)
             continue
         scoped = profile.for_scope(user_scope=user_scope)
         profiles.append(scoped if scoped is not None else profile)
@@ -440,6 +547,8 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     owner: str = "legacy",
     include_ledger: bool = False,
     apply_disk_deletion: bool = True,
+    desired_owners: frozenset[str] | None = None,
+    generic_governed_values: frozenset[str] = frozenset(),
     user_scope: bool = False,
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
@@ -465,6 +574,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         current_run_trusted=current_run_trusted,
         owner=owner,
         include_ledger=True,
+        desired_owners=desired_owners,
+        generic_governed_values=generic_governed_values,
+        user_scope=user_scope,
     )
     dropped = set(prior_files) - set(files)
     # Ledger-authoritative orphan detection. A prior value that HELD a ledger
@@ -567,6 +679,9 @@ def reconcile_target_deployed_files(
     active_targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
+    dependency_keys: set[str] | None = None,
+    remove_selected_ownership: bool = False,
+    retained_selected_paths: set[str] | None = None,
     user_scope: bool = False,
     logger: InstallLogger | None = None,
 ) -> bool:
@@ -581,14 +696,38 @@ def reconcile_target_deployed_files(
     never silent.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.deployment_state import DeploymentLedger
     from apm_cli.deps.lockfile import _SELF_KEY
-    from apm_cli.integration.targets import KNOWN_TARGETS
 
+    selected_owner_removal = remove_selected_ownership and dependency_keys is not None
+    survivor_files = {
+        path
+        for dep_key, dependency in lockfile.dependencies.items()
+        if dep_key not in (dependency_keys or set())
+        for path in dependency.deployed_files
+    }
+    desired_owners = (
+        DeploymentLedgerCodec.valid_owner_keys(
+            lockfile,
+            excluded_dependency_keys=dependency_keys or set(),
+        )
+        if selected_owner_removal
+        else None
+    )
     allowed_targets = [*active_targets, *(declared_targets or [])]
     allowed_prefixes, allowed_schemes = install_governance(allowed_targets)
-    known_prefixes, known_schemes = install_governance(list(KNOWN_TARGETS.values()))
+    known_targets = list(
+        _scoped_known_targets_for_reconciliation(
+            user_scope=user_scope,
+            active_targets=active_targets,
+            declared_targets=declared_targets,
+        ).values()
+    )
+    known_prefixes, known_schemes = install_governance(known_targets)
 
     def _retained(files: list[str]) -> list[str]:
+        if selected_owner_removal:
+            return [path for path in files if path in survivor_files or "://" in path]
         if declared_targets is None:
             return list(files)
         return [
@@ -602,8 +741,12 @@ def reconcile_target_deployed_files(
 
     changed = False
     prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    prior_records_by_value: dict[str, dict[str, object]] = {}
+    for key, record in prior_ledger.records.items():
+        prior_records_by_value.setdefault(record.locator.value, {})[key] = record
+    dependency_updates: dict[str, tuple[list[str], dict[str, str]]] = {}
     for dep_key, dependency in lockfile.dependencies.items():
-        if dep_key == _SELF_KEY:
+        if dep_key == _SELF_KEY or (dependency_keys is not None and dep_key not in dependency_keys):
             continue
         prior_files = list(dependency.deployed_files)
         prior_hashes = dict(dependency.deployed_file_hashes)
@@ -611,6 +754,13 @@ def reconcile_target_deployed_files(
         current_hashes = {
             path: value for path, value in prior_hashes.items() if path in current_files
         }
+        dependency_ledger = DeploymentLedger(
+            records={
+                key: record
+                for path in prior_files
+                for key, record in prior_records_by_value.get(path, {}).items()
+            }
+        )
         files, hashes = reconcile_deployed_block(
             project_root=project_root,
             dep_key=dep_key,
@@ -621,37 +771,58 @@ def reconcile_target_deployed_files(
             active_targets=active_targets,
             declared_targets=declared_targets,
             diagnostics=diagnostics,
-            prior_ledger=prior_ledger,
+            prior_ledger=dependency_ledger,
             on_cleanup=partial(_surface_target_cleanup, logger, dep_key),
+            desired_owners=desired_owners,
+            generic_governed_values=(
+                frozenset(prior_files) if selected_owner_removal else frozenset()
+            ),
             user_scope=user_scope,
         )
+        if selected_owner_removal:
+            if retained_selected_paths is not None:
+                retained_selected_paths.update(
+                    path for path in files if path not in survivor_files and "://" not in path
+                )
+            continue
         if files != prior_files or hashes != prior_hashes:
-            DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
+            dependency_updates[dep_key] = (files, hashes)
             changed = True
 
-    prior_local = list(lockfile.local_deployed_files)
-    prior_local_hashes = dict(lockfile.local_deployed_file_hashes)
-    current_local = _retained(prior_local)
-    current_local_hashes = {
-        path: value for path, value in prior_local_hashes.items() if path in current_local
-    }
-    local_files, local_hashes = reconcile_deployed_block(
-        project_root=project_root,
-        dep_key="<local .apm/>",
-        current_files=current_local,
-        current_hashes=current_local_hashes,
-        prior_files=prior_local,
-        prior_hashes=prior_local_hashes,
-        active_targets=active_targets,
-        declared_targets=declared_targets,
-        diagnostics=diagnostics,
-        prior_ledger=prior_ledger,
-        on_cleanup=partial(_surface_target_cleanup, logger, "<local .apm/>"),
-        user_scope=user_scope,
-    )
-    if local_files != prior_local or local_hashes != prior_local_hashes:
-        DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
-        changed = True
+    if dependency_updates:
+        DeploymentLedgerCodec.replace_legacy_owners(lockfile, dependency_updates)
+
+    if dependency_keys is None:
+        prior_local = list(lockfile.local_deployed_files)
+        prior_local_hashes = dict(lockfile.local_deployed_file_hashes)
+        current_local = _retained(prior_local)
+        current_local_hashes = {
+            path: value for path, value in prior_local_hashes.items() if path in current_local
+        }
+        local_ledger = DeploymentLedger(
+            records={
+                key: record
+                for path in prior_local
+                for key, record in prior_records_by_value.get(path, {}).items()
+            }
+        )
+        local_files, local_hashes = reconcile_deployed_block(
+            project_root=project_root,
+            dep_key="<local .apm/>",
+            current_files=current_local,
+            current_hashes=current_local_hashes,
+            prior_files=prior_local,
+            prior_hashes=prior_local_hashes,
+            active_targets=active_targets,
+            declared_targets=declared_targets,
+            diagnostics=diagnostics,
+            prior_ledger=local_ledger,
+            on_cleanup=partial(_surface_target_cleanup, logger, "<local .apm/>"),
+            user_scope=user_scope,
+        )
+        if local_files != prior_local or local_hashes != prior_local_hashes:
+            DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
+            changed = True
 
     return changed
 
@@ -702,19 +873,31 @@ def reconcile_project_deployed_state(
     lockfile = LockFile.read(lock_path)
     if lockfile is None:
         return False
-    declared = declared_target_profiles(manifest_root, user_scope=user_scope)
+    diagnostics = DiagnosticCollector(verbose=verbose)
+    declared = declared_target_profiles(
+        manifest_root,
+        user_scope=user_scope,
+        diagnostics=diagnostics,
+    )
     if explicit_target is None and declared is not None:
         targets = declared
     elif user_scope:
         targets = active_targets_user_scope(explicit_target=explicit_target)
     else:
         targets = active_targets(deploy_root, explicit_target=explicit_target)
+    if explicit_target is not None:
+        declared = declared_target_profiles(
+            manifest_root,
+            user_scope=user_scope,
+            active_targets=targets,
+            diagnostics=diagnostics,
+        )
     changed = reconcile_deployed_state(
         project_root=deploy_root,
         lockfile=lockfile,
         active_targets=targets,
         declared_targets=declared,
-        diagnostics=DiagnosticCollector(verbose=verbose),
+        diagnostics=diagnostics,
         user_scope=user_scope,
     )
     if changed:

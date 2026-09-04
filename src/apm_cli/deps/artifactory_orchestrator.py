@@ -41,7 +41,7 @@ from ..models.apm_package import (
     ResolvedReference,
     validate_apm_package,
 )
-from ..utils.github_host import default_host, is_github_hostname
+from ..utils.github_host import default_host, is_full_commit_sha, is_github_hostname
 
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
@@ -190,6 +190,13 @@ class ArtifactoryOrchestrator:
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=completed, total=total)
 
+    @staticmethod
+    def _resolved_commit_metadata(ref: str) -> tuple[GitReferenceType, str | None]:
+        """Classify an archive ref for lockfile-safe resolution metadata."""
+        if is_full_commit_sha(ref):
+            return GitReferenceType.COMMIT, ref
+        return GitReferenceType.BRANCH, None
+
     # -- public surface -------------------------------------------------
 
     def download_package(
@@ -227,11 +234,12 @@ class ArtifactoryOrchestrator:
 
         validation_result = validate_apm_package(target_path)
         package = _validate_and_load_package(validation_result, target_path, dep_ref)
-        package.resolved_commit = None
+        ref_type, resolved_commit = self._resolved_commit_metadata(ref)
+        package.resolved_commit = resolved_commit
         resolved_ref = ResolvedReference(
             original_ref=f"{dep_ref.repo_url}#{ref}",
-            ref_type=GitReferenceType.BRANCH,
-            resolved_commit=None,
+            ref_type=ref_type,
+            resolved_commit=resolved_commit,
             ref_name=ref,
         )
         self._progress(progress_obj, progress_task_id, completed=100)
@@ -292,20 +300,21 @@ class ArtifactoryOrchestrator:
                     robust_copy2(src, dst)
 
         self._progress(progress_obj, progress_task_id, completed=80)
+        from ._shared import _validate_and_load_package
+
         validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            raise RuntimeError(
-                f"Subdirectory is not a valid APM package: {'; '.join(validation_result.errors)}"
-            )
+        package = _validate_and_load_package(validation_result, target_path, dep_ref)
+        ref_type, resolved_commit = self._resolved_commit_metadata(ref)
+        package.resolved_commit = resolved_commit
         resolved_ref = ResolvedReference(
             original_ref=ref,
             ref_name=ref,
-            ref_type=GitReferenceType.BRANCH,
-            resolved_commit=None,
+            ref_type=ref_type,
+            resolved_commit=resolved_commit,
         )
         self._progress(progress_obj, progress_task_id, completed=100)
         return PackageInfo(
-            package=validation_result.package,
+            package=package,
             install_path=target_path,
             resolved_reference=resolved_ref,
             installed_at=datetime.now().isoformat(),

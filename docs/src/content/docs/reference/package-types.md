@@ -4,18 +4,25 @@ sidebar:
   order: 4
 ---
 
-APM supports five package layouts, each with distinct install semantics.
-Pick the layout that matches the author's intent -- APM preserves it.
+APM supports six source layouts plus catalog-only marketplace packages.
+Pick the form that matches the author's intent -- APM preserves it.
 
 ## Layout summary
 
-| Root signal | Author intent | Install semantic |
+| Package signal | Author intent | Install semantic |
 |---|---|---|
 | `.apm/` (with or without apm.yml) | "I have N independent primitives" | Hoist each primitive into the target's runtime dirs |
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Deploy each hook to the target's `hooks/` directory |
-| `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
+| Marketplace entry with inline `lspServers` or `mcpServers` | Catalog owns server metadata | Synthesize and validate `apm.yml`, then deploy servers |
+
+When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
+An `apm.yml` is eligible when the root also has `.apm/` or the manifest
+declares APM or MCP dependencies. To intentionally select a plugin layout,
+omit `apm.yml` or keep it metadata-only, without `.apm/` or dependencies.
 
 ## APM package (`.apm/` directory)
 
@@ -128,6 +135,8 @@ installing N separate CLAUDE_SKILL packages.
 from the bundle (repeatable). The selection is **persisted** in `apm.yml`
 (as a `skills:` field) and `apm.lock.yaml` (as `skill_subset`), so
 subsequent bare `apm install` commands are deterministic.
+For nested skill bundles, the selector must match a deployable skill path;
+for example, use `productivity/grill-me`, not an invented prefix.
 Use `--skill '*'` to reset and install all skills. `--skill` is additive
 across separate installs (a later `--skill X` unions onto the existing pin
 and never removes already-deployed skills) -- see
@@ -192,10 +201,27 @@ primitives. If you also ship skills or instructions, prefer the `.apm/`
 layout and put your hooks under `.apm/hooks/` so they install alongside
 the rest.
 
+## Catalog-only marketplace package
+
+A marketplace entry can supply a package's only APM metadata. When its
+downloaded source has no `apm.yml`, `SKILL.md`, or plugin manifest, APM uses one
+or both inline `lspServers` and `mcpServers` fields. It admits only `name`,
+`description`, `version`, `lspServers`, and `mcpServers`; unrelated catalog
+fields, including dependency fields, cannot add APM dependencies.
+
+APM stages and validates a synthesized `apm.yml` before committing it. Every
+declared server must validate. Any failure rejects the package and removes its
+download. A symlinked package path, `apm.yml`, or `.apm` path also fails closed.
+On warm installs, APM rematerializes the manifest when the admitted catalog
+metadata variant changes.
+
 ## Plugin collection (`plugin.json`)
 
-A Claude-native plugin layout. APM dissects the plugin artifacts and maps
-them into runtime directories.
+A Claude-native plugin layout. A `plugin.json` with no `$schema` field, or with
+an unrecognized `$schema`, is detected by its structure as this layout. APM
+dissects the plugin artifacts and maps them into runtime directories. An
+unrecognized schema is a warning, not a rejection; only the recognized Agent
+Plugins schema selects the portable Agent Plugin route.
 
 ```
 my-plugin/
@@ -208,8 +234,21 @@ my-plugin/
 
 **What gets installed:** each artifact listed in `plugin.json` is mapped to
 the appropriate runtime directory via `_map_plugin_artifacts`. Use `--skill`
-to cherry-pick plugin skills by leaf name or manifest path, such as
-`skills/productivity/grill-me`.
+to cherry-pick plugin skills by leaf name or a source-relative path under
+`skills/`, such as `productivity/grill-me`.
+
+A declared key is authoritative for its primitive: it replaces the default
+directory scan rather than adding to it. `"skills": ["./skills/search"]`
+deploys `search` and nothing else, and a skill declared outside `skills/`
+deploys even though no scan would have found it. Only an omitted key falls
+back to scanning the conventional directory.
+
+This is a migration point for existing plugin authors. A string or list is
+exhaustive after normalization, including a declared container with one skill
+per immediate child. `"skills": []` intentionally deploys no skills. When that
+empty declaration shadows root `skills/` entries, APM emits one diagnostic that
+names the package and tells you to declare the skills (or their container), or
+remove the key to restore discovery.
 
 **Marketplace version checks:** a local Plugin collection may omit `apm.yml`.
 For `apm pack --check-versions`, APM uses `plugin.json`'s `version` only when
@@ -219,12 +258,51 @@ for manifest precedence, failure behavior, and a plugin-only example.
 Declared component paths are requirements, not hints. If an `agents`,
 `skills`, `commands`, or `hooks` entry is missing or escapes the plugin
 root, install exits non-zero before deployment or lockfile commit. Likewise,
-`--skill` exits non-zero when none of the manifest-declared skills match.
+`--skill` exits non-zero when none of the manifest-declared skill paths match.
 Omit an optional field or use an empty list when the plugin has no component
 of that type.
 
 **When to choose:** you already have a Claude plugin and want APM to
-consume it without restructuring.
+consume it without restructuring. This is still the no-flag default output
+of `apm pack` and `apm plugin init`.
+
+## Agent Plugin (`plugin.json` with an Agent Plugins schema)
+
+A `plugin.json` that declares the exact Agent Plugins v1 `"$schema"` is a
+distinct package type from the Claude plugin collection above. Other schema
+identifiers are identification misses: APM warns, then classifies by structure.
+A non-string `$schema` remains a manifest error.
+
+```
+my-plugin/
++-- plugin.json          # "$schema": ".../1.0.0/plugin.schema.json"
++-- skills/
+|   +-- search/SKILL.md
++-- mcp.json
+```
+
+**What gets installed:** nothing is dissected. With `--target copilot`, APM
+keeps the plugin whole under `apm_modules/` and registers it with Copilot as a
+live directory marketplace. APM does not require or inspect a Copilot binary
+during install. Stable Copilot CLI 1.0.81 or newer is the supported runtime for
+loading the generated projection.
+Copilot loads the unit from APM's bytes -- it never copies it. See
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
+
+:::caution[Runtime compatibility and other targets]
+Any target set that excludes Copilot refuses this native install rather than
+falling back to the Claude plugin artifact mapping above -- APM never partially
+dissects a recognized Agent Plugin through its normal primitive integrators.
+Older Copilot clients may copy plugins into private state outside APM ownership,
+so APM cannot guarantee cleanup of those client-created copies. Ask the
+publisher for a Claude-compatible package (`apm pack --claude-plugin`) for a
+non-Copilot target.
+:::
+
+**When to choose:** you are producing a portable package with
+`apm pack --format agent-plugin` for GitHub Copilot and other
+Agent-Plugin-aware hosts that read the Agent Plugins v1 schema directly.
+See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
 
 ## See also
 

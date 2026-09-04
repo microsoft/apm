@@ -696,6 +696,23 @@ class TestResolverResolveDependenciesNoApmYml:
         # Should return some graph without crashing
         assert graph is not None
 
+    def test_staged_root_package_gets_project_source_anchor(self, tmp_path: Path) -> None:
+        """An in-memory root retains portable local-dependency anchoring."""
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = tmp_path / "apm.yml"
+        _write_apm_yml(manifest, {"name": "staged-root", "version": "1.0.0"})
+        root_package = APMPackage.from_apm_yml(manifest)
+        assert root_package.source_path is None
+
+        graph = APMDependencyResolver().resolve_dependencies(
+            tmp_path,
+            root_package=root_package,
+        )
+
+        assert graph.root_package.source_path == tmp_path.resolve()
+
 
 class TestResolverBuildDependencyTree:
     """build_dependency_tree constructs the tree for simple packages."""
@@ -873,6 +890,7 @@ class TestResolverTryLoadDependencyPackageWithCallback:
 
         def mock_callback(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
             callback_calls.append(dep_ref)
+            return install_path
 
         resolver = APMDependencyResolver(
             apm_modules_dir=apm_modules,
@@ -1693,14 +1711,15 @@ class TestNormalizePluginDirectory:
         data = yaml.safe_load(path.read_text())
         assert data["name"] == tmp_path.name
 
-    def test_with_invalid_manifest_falls_back_to_dir_name(self, tmp_path: Path) -> None:
+    def test_with_invalid_manifest_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
+        from apm_cli.agent_plugins import AgentPluginLegacyBoundaryError
         from apm_cli.deps.plugin_parser import normalize_plugin_directory
 
         pj = tmp_path / "plugin.json"
         pj.write_text("{bad json", encoding="utf-8")
-        path = normalize_plugin_directory(tmp_path, pj)
-        data = yaml.safe_load(path.read_text())
-        assert data["name"] == tmp_path.name
+        with pytest.raises(AgentPluginLegacyBoundaryError, match="Invalid JSON"):
+            normalize_plugin_directory(tmp_path, pj)
+        assert not (tmp_path / "apm.yml").exists()
 
 
 class TestValidatePluginPackage:

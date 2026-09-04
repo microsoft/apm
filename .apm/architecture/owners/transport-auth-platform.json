@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "owners": [
+    {
+      "id": "host-credential-resolution",
+      "decision": "Host + credential resolution",
+      "owner": "core/auth.py (AuthResolver), core/host_providers.py",
+      "selectors": [
+        "src/apm_cli/core/auth.py",
+        "src/apm_cli/core/host_providers.py"
+      ],
+      "guards": [
+        "transport-platform-ado-validation-bearer-fallback",
+        "transport-platform-ado-validation-caller-config",
+        "transport-platform-ado-validation-clone-bearer-fallback",
+        "transport-platform-ado-validation-helper-suppression",
+        "transport-platform-host-credential-resolution"
+      ]
+    },
+    {
+      "id": "url-path-containment-decoding",
+      "decision": "Symlink-component containment and strict percent-encoded URL-path decoding",
+      "owner": "utils/path_security.py (has_symlink_component, decode_url_path_segments)",
+      "selectors": ["src/apm_cli/utils/path_security.py"],
+      "guards": ["transport-platform-url-path-security"]
+    },
+    {
+      "id": "windows-stable-executable-path",
+      "decision": "Windows stable executable path",
+      "owner": "install.ps1 ($currentDir / $currentExe)",
+      "selectors": ["install.ps1"],
+      "guards": ["transport-platform-windows-stable-path"]
+    },
+    {
+      "id": "git-cache-key-normalization",
+      "decision": "Git repository cache-key normalization",
+      "owner": "cache/url_normalize.py (normalize_repo_url / cache_shard_key)",
+      "selectors": ["src/apm_cli/cache/url_normalize.py"],
+      "guards": ["transport-platform-git-cache-identity"]
+    },
+    {
+      "id": "git-child-repository-isolation",
+      "decision": "Git child-process repository location and URL rewrite safety",
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation, and Git auth-channel scrubbing)",
+      "selectors": ["src/apm_cli/utils/git_env.py"],
+      "guards": [
+        "transport-platform-git-child-environment",
+        "transport-platform-git-clone-hooks-disabled",
+        "transport-platform-git-clone-templates-disabled",
+        "transport-platform-git-diagnostic-redaction",
+        "transport-platform-git-diagnostic-redaction-debug",
+        "transport-platform-git-diagnostic-sanitizer-ownership",
+        "transport-platform-git-diagnostic-sanitizer-ownership-downloader",
+        "transport-platform-git-diagnostic-token-shapes",
+        "transport-platform-git-diagnostic-token-shapes-jwt",
+        "transport-platform-git-single-remote-fetch",
+        "transport-platform-git-url-credentials-out-of-argv",
+        "transport-platform-git-url-header-specificity",
+        "transport-platform-git-url-header-specificity-fence",
+        "transport-platform-git-url-header-specificity-fence-malformed-values",
+        "transport-platform-git-url-header-specificity-fence-managed-auth",
+        "transport-platform-git-url-rewrite-enforcement",
+        "transport-platform-git-url-rewrite-once",
+        "transport-platform-git-url-rewrite-recovery",
+        "transport-platform-git-url-rewrite-routing",
+        "transport-platform-git-url-rewrite-routing-validation",
+        "transport-platform-git-url-rewrite-safety"
+      ]
+    },
+    {
+      "id": "sparse-cone-symlink-validation",
+      "decision": "Sparse-cone setup, dangling-symlink repair, and materialized symlink validation",
+      "owner": "utils/git_sparse.py",
+      "selectors": ["src/apm_cli/utils/git_sparse.py"],
+      "guards": ["transport-platform-sparse-symlink-validation"]
+    },
+    {
+      "id": "self-update-release-resolution",
+      "decision": "Self-update release -> installer ref + VERSION",
+      "owner": "commands/self_update.py (_ResolvedSelfUpdateRelease)",
+      "selectors": ["src/apm_cli/commands/self_update.py"],
+      "guards": ["transport-platform-self-update-resolution"]
+    },
+    {
+      "id": "github-api-throttle-classification",
+      "decision": "GitHub API throttle classification",
+      "owner": "deps/github_rate_limit.py",
+      "selectors": ["src/apm_cli/deps/github_rate_limit.py"],
+      "guards": ["transport-platform-github-throttle"]
+    },
+    {
+      "id": "git-ref-freshness",
+      "decision": "Git ref freshness and cache eligibility",
+      "owner": "deps/tiered_ref_resolver.py (RefFreshnessPolicy)",
+      "selectors": ["src/apm_cli/deps/tiered_ref_resolver.py"],
+      "guards": ["transport-platform-ref-freshness"]
+    },
+    {
+      "id": "revision-pin-update-outcome",
+      "decision": "Revision-pin update outcome (updates vs retained SHA pins)",
+      "owner": "deps/revision_pins.py (RevisionPinResolutionResult)",
+      "selectors": ["src/apm_cli/deps/revision_pins.py"],
+      "guards": ["transport-platform-revision-pin-outcome"]
+    },
+    {
+      "id": "git-semver-preflight-resolution",
+      "decision": "Git semver preflight eligibility and resolution",
+      "owner": "install/helpers/ref_reuse.py (is_git_semver_resolution_eligible / maybe_resolve_git_semver)",
+      "selectors": ["src/apm_cli/install/helpers/ref_reuse.py"],
+      "guards": [
+        "transport-platform-git-semver-preflight",
+        "transport-platform-git-semver-remote-auth"
+      ]
+    },
+    {
+      "id": "network-host-loopback-classification",
+      "decision": "Network host literal parsing and loopback classification",
+      "owner": "utils/net.py (parse_host_address, is_loopback_host)",
+      "selectors": ["src/apm_cli/utils/net.py"],
+      "guards": ["transport-platform-network-host-parsing"]
+    },
+    {
+      "id": "artifactory-full-commit-sha-classification",
+      "decision": "Full commit SHA classification for Artifactory replay",
+      "owner": "utils/github_host.py (is_full_commit_sha)",
+      "selectors": ["src/apm_cli/utils/github_host.py"],
+      "guards": ["transport-platform-artifactory-full-commit-sha"]
+    },
+    {
+      "id": "artifactory-netrc-isolation",
+      "decision": "Artifactory HTTP requests exclude ambient netrc credentials",
+      "owner": "deps/artifactory_entry.py (_NoNetrcSession)",
+      "selectors": ["src/apm_cli/deps/artifactory_entry.py"],
+      "guards": ["transport-platform-artifactory-netrc-isolation"]
+    }
+  ]
+}

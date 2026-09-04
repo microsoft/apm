@@ -7,6 +7,7 @@ real control flow.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -503,6 +504,10 @@ class TestResolve:
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
             ),
+            patch(
+                "apm_cli.utils.git_env.git_resolve_commit",
+                return_value="b" * 40,
+            ),
             patch("apm_cli.deps.github_downloader._rmtree") as mock_rmtree,
         ):
             result = GitReferenceResolver(host).resolve(dep)
@@ -548,6 +553,10 @@ class TestResolve:
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
             ),
+            patch(
+                "apm_cli.utils.git_env.git_worktree_head",
+                return_value="c" * 40,
+            ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             result = GitReferenceResolver(host).resolve(dep)
@@ -575,6 +584,14 @@ class TestResolve:
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
             ),
+            patch(
+                "apm_cli.utils.git_env.git_worktree_head",
+                return_value="d" * 40,
+            ),
+            patch(
+                "apm_cli.utils.git_env.git_current_branch",
+                return_value="develop",
+            ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             result = GitReferenceResolver(host).resolve(dep)
@@ -598,6 +615,10 @@ class TestResolve:
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
+            ),
+            patch(
+                "apm_cli.utils.git_env.git_resolve_commit",
+                return_value="e" * 40,
             ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
@@ -623,6 +644,13 @@ class TestResolve:
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
             patch(
                 "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
+            ),
+            patch(
+                "apm_cli.utils.git_env.git_resolve_commit",
+                side_effect=[
+                    subprocess.CalledProcessError(1, "git"),
+                    "f" * 40,
+                ],
             ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):

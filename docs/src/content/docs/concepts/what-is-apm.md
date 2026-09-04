@@ -47,7 +47,7 @@ APM commits to three things. Each gets a one-paragraph summary here; the deep di
 
 ### Portable by manifest
 
-One `apm.yml`. Nine default harnesses. Reproducible AI agent setup. Every developer who clones the repo runs `apm install` and gets the same supported primitives wired into Copilot, Claude, Grok Build, Cursor, OpenCode, Codex, Gemini, Windsurf, and Kiro. Antigravity is available as an explicit CLI target. The lockfile pins exact versions and content hashes.
+One `apm.yml`. Nine default harnesses. Reproducible AI agent setup. Every developer who clones the repo runs `apm install` and gets the same supported primitives wired into Copilot, Claude, Grok Build, Cursor, OpenCode, Codex, Gemini, Windsurf, and Kiro. Antigravity and Hermes are available as explicit CLI targets. The lockfile pins exact versions and content hashes.
 
 ### Secure by default
 

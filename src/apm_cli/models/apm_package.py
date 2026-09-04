@@ -7,7 +7,7 @@ compatibility.
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,6 +36,7 @@ from .validation import (
 )
 
 if TYPE_CHECKING:
+    from apm_cli.agent_plugins.ir import AgentPlugin
     from apm_cli.deps.lockfile import LockFile
 
 _log = logging.getLogger(__name__)
@@ -65,13 +66,14 @@ __all__ = [  # noqa: RUF022
     "surviving_dependency_refs_for_reintegration",
 ]
 
-# Module-level parse cache: (resolved apm.yml path, resolved source dir) ->
-# APMPackage. The source-dir half of the key is part of cache identity (#940)
+# Module-level parse cache: (resolved apm.yml path, resolved source dir,
+# create_config) -> APMPackage. The source-dir half of the key is part of cache
+# identity (#940)
 # because two logical loads of the same apm.yml file can declare different
 # anchors for relative ``local_path`` deps depending on which parent package
 # declared them. Sharing one APMPackage instance across both would let the
 # resolver mutate ``source_path`` and poison the cache for the other consumer.
-_apm_yml_cache: dict[tuple[Path, Path | None], "APMPackage"] = {}
+_apm_yml_cache: dict[tuple[Path, Path | None, bool], "APMPackage"] = {}
 
 
 def clear_apm_yml_cache() -> None:
@@ -115,7 +117,13 @@ def _parse_v01_registries_block(
     return registries or None, default_name
 
 
-def _parse_registries_block(data: dict, apm_yml_path: Path, manifest_contract):
+def _parse_registries_block(
+    data: dict,
+    apm_yml_path: Path,
+    manifest_contract,
+    *,
+    create_config: bool = True,
+):
     """Parse the top-level ``registries:`` block per design §3.1.
 
     Schema::
@@ -142,7 +150,10 @@ def _parse_registries_block(data: dict, apm_yml_path: Path, manifest_contract):
     if raw != {}:
         from ..deps.registry.feature_gate import require_package_registry_enabled
 
-        require_package_registry_enabled("Top-level 'registries:' blocks")
+        require_package_registry_enabled(
+            "Top-level 'registries:' blocks",
+            create_config=create_config,
+        )
     if not isinstance(raw, dict):
         raise ValueError(
             f"Top-level 'registries:' block in {apm_yml_path} must be a "
@@ -332,6 +343,7 @@ class APMPackage:
     # Keys are package handles with pinned version; values map exec type
     # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
     allow_executables: dict[str, dict[str, bool]] | None = None
+    agent_plugin: "AgentPlugin | None" = None
 
     def __post_init__(self) -> None:
         """Derive the canonical target projection for compatibility callers."""
@@ -406,55 +418,49 @@ class APMPackage:
         return parsed
 
     @classmethod
-    def from_apm_yml(
+    def from_mapping(
         cls,
-        apm_yml_path: Path,
+        manifest_data: Mapping[str, Any],
+        *,
+        package_path: Path,
         source_path: Path | None = None,
+        manifest_path: Path | None = None,
+        create_config: bool = True,
     ) -> "APMPackage":
-        """Load APM package from apm.yml file.
+        """Construct a package from already interpreted manifest data.
 
-        Results are cached by ``(resolved apm.yml path, resolved source_path)``
-        for the lifetime of the process. ``source_path`` is part of the cache
-        identity so two logical loads of the same file with different anchors
-        for relative ``local_path`` deps each get their own immutable
-        APMPackage instance (#940 -- prevents cache poisoning).
+        This is the public construction owner for manifest semantics. File
+        loaders and compatibility adapters must interpret their source format,
+        then delegate here rather than rebuilding dependency, registry, target,
+        executable, and content-type parsing independently.
 
         Args:
-            apm_yml_path: Path to the apm.yml file.
+            manifest_data: Interpreted manifest mapping.
+            package_path: Directory containing the package content.
             source_path: Optional absolute directory used to anchor relative
-                ``local_path`` dependencies declared in this apm.yml. The
-                resolver passes the *original* user source directory for
-                local deps (not the apm_modules copy) so transitive
-                ``../sibling`` references resolve as a developer reading the
-                file expects. Callers that don't care about this anchoring
-                may omit the argument and get the legacy behavior.
+                ``local_path`` dependencies.
+            manifest_path: Source manifest path used in diagnostics. Defaults
+                to ``package_path / "apm.yml"``.
+            create_config: When false, missing user config is read as defaults
+                without creating ``~/.apm/config.json``.
 
         Returns:
-            APMPackage: Loaded package instance with ``source_path`` set.
+            A package with all compatibility projections populated.
 
         Raises:
-            ValueError: If the file is invalid or missing required fields
-            FileNotFoundError: If the file doesn't exist
+            ValueError: If interpreted manifest fields are invalid.
         """
-        if not apm_yml_path.exists():
-            raise FileNotFoundError(f"apm.yml not found: {apm_yml_path}")
+        data = dict(manifest_data)
+        from apm_cli.deps.plugin_parser import resolve_plugin_root_placeholders
 
-        resolved = apm_yml_path.resolve()
+        for dependency_key in ("dependencies", "devDependencies"):
+            if dependency_key in data:
+                data[dependency_key] = resolve_plugin_root_placeholders(
+                    data[dependency_key],
+                    package_path,
+                )
+        source_manifest = manifest_path or package_path / "apm.yml"
         resolved_source = source_path.resolve() if source_path is not None else None
-        cache_key = (resolved, resolved_source)
-        cached = _apm_yml_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        try:
-            from ..utils.yaml_io import load_yaml
-
-            data = load_yaml(apm_yml_path)
-        except yaml.YAMLError as e:
-            raise ValueError(f"Invalid YAML format in {apm_yml_path}: {e}")  # noqa: B904
-
-        if not isinstance(data, dict):
-            raise ValueError(f"apm.yml must contain a YAML object, got {type(data)}")
 
         from .manifest_contract import negotiate_manifest_contract
 
@@ -473,8 +479,9 @@ class APMPackage:
         # Top-level ``registries:`` block per design §3.1.
         registries, default_registry = _parse_registries_block(
             data,
-            apm_yml_path,
+            source_manifest,
             manifest_contract,
+            create_config=create_config,
         )
 
         # Parse dependencies
@@ -483,7 +490,7 @@ class APMPackage:
         if raw_deps is not None:
             if not isinstance(raw_deps, dict):
                 raise ValueError(
-                    f"Invalid 'dependencies' in {apm_yml_path}: expected a mapping "
+                    f"Invalid 'dependencies' in {source_manifest}: expected a mapping "
                     f"with 'apm:' and/or 'mcp:' keys, got {type(raw_deps).__name__}. "
                     "Use the structured format:\n"
                     "  dependencies:\n"
@@ -498,7 +505,7 @@ class APMPackage:
         if raw_dev_deps is not None:
             if not isinstance(raw_dev_deps, dict):
                 raise ValueError(
-                    f"Invalid 'devDependencies' in {apm_yml_path}: expected a mapping "
+                    f"Invalid 'devDependencies' in {source_manifest}: expected a mapping "
                     f"with 'apm:' and/or 'mcp:' keys, got {type(raw_dev_deps).__name__}. "
                     "Use the structured format:\n"
                     "  devDependencies:\n"
@@ -510,11 +517,18 @@ class APMPackage:
         # Merge user/policy registry URLs and config.json default routing.
         from ..deps.registry.config_loader import resolve_effective_registries
 
-        registries, default_registry = resolve_effective_registries(registries, default_registry)
+        registries, default_registry = resolve_effective_registries(
+            registries,
+            default_registry,
+            create_config=create_config,
+        )
         if registries or default_registry:
             from ..deps.registry.feature_gate import require_package_registry_enabled
 
-            require_package_registry_enabled("Registry configuration")
+            require_package_registry_enabled(
+                "Registry configuration",
+                create_config=create_config,
+            )
 
         # Route unscoped deps to the effective default registry when configured.
         if default_registry:
@@ -570,7 +584,7 @@ class APMPackage:
         else:
             target_value = parse_target_field(
                 data.get("target"),
-                source_path=apm_yml_path,
+                source_path=source_manifest,
             )
             parsed_target_values = (
                 target_value
@@ -593,7 +607,7 @@ class APMPackage:
             dependencies=dependencies,
             dev_dependencies=dev_dependencies,
             scripts=data.get("scripts"),
-            package_path=apm_yml_path.parent,
+            package_path=package_path,
             source_path=resolved_source,
             target=target_value,
             targets=targets_value,
@@ -604,6 +618,51 @@ class APMPackage:
             default_registry=default_registry,
             manifest_contract=manifest_contract.value,
             allow_executables=allow_executables,
+        )
+        return result
+
+    @classmethod
+    def from_apm_yml(
+        cls,
+        apm_yml_path: Path,
+        source_path: Path | None = None,
+        *,
+        create_config: bool = True,
+    ) -> "APMPackage":
+        """Load an APM package from an ``apm.yml`` file.
+
+        Results are cached by ``(resolved apm.yml path, resolved source_path,
+        create_config)`` for the lifetime of the process. ``source_path`` is
+        part of the cache identity so two logical loads of the same file with
+        different anchors for relative ``local_path`` dependencies each get
+        their own package instance.
+        """
+        if not apm_yml_path.exists():
+            raise FileNotFoundError(f"apm.yml not found: {apm_yml_path}")
+
+        resolved = apm_yml_path.resolve()
+        resolved_source = source_path.resolve() if source_path is not None else None
+        cache_key = (resolved, resolved_source, create_config)
+        cached = _apm_yml_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            from ..utils.yaml_io import load_yaml
+
+            data = load_yaml(apm_yml_path)
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML format in {apm_yml_path}: {e}")  # noqa: B904
+
+        if not isinstance(data, dict):
+            raise ValueError(f"apm.yml must contain a YAML object, got {type(data)}")
+
+        result = cls.from_mapping(
+            data,
+            package_path=apm_yml_path.parent,
+            source_path=resolved_source,
+            manifest_path=apm_yml_path,
+            create_config=create_config,
         )
         _apm_yml_cache[cache_key] = result
         return result
@@ -758,6 +817,10 @@ class PackageInfo:
 
     def has_primitives(self) -> bool:
         """Check if the package has any primitives."""
+        plugin = self.package.agent_plugin
+        if plugin is not None and (plugin.components.skills or plugin.components.mcp_servers):
+            return True
+
         apm_dir = self.get_primitives_path()
         if apm_dir.exists():
             # Check for any primitive files in .apm/ subdirectories

@@ -9,6 +9,11 @@ root context files each agent harness reads at startup. It does not
 fetch packages, does not resolve dependencies, does not write the
 lockfile, and does not deploy other primitive types.
 
+Compile is bounded to the active Git checkout. It does not discover
+instructions inside a nested Git repository or linked worktree, even when
+`includes: auto` is set, and it does not write or clean generated files there.
+Run `apm compile` from the nested checkout when you want to compile it.
+
 :::note[When you actually need it]
 Compile is **optional for the `copilot` target** -- GitHub Copilot
 natively reads `.github/instructions/*.instructions.md` (with their
@@ -90,9 +95,9 @@ apm compile --all                            # default stable target set
 ```
 
 Canonical targets are `copilot`, `claude`, `grok-build`, `cursor`, `opencode`,
-`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`.
+`codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and `hermes`.
 The `all` selector is not a target; it expands to every canonical target except
-the explicit-only `antigravity` and `agent-skills` targets. Compiling for
+the explicit-only `antigravity`, `agent-skills`, and `hermes` targets. Compiling for
 `agent-skills` is a successful no-op because `apm install` deploys skills.
 
 The accepted `intellij` entry is MCP-only, not a canonical target, and excluded
@@ -100,11 +105,11 @@ from `all`. Compile uses the Copilot profile for its file primitives and produce
 `AGENTS.md`; IntelliJ-specific integration remains MCP-only. Unknown slugs are
 rejected before any work runs.
 
-Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
+Experimental targets (`openclaw`, `copilot-cowork`,
 `copilot-app`, `grok-cloud`) are deployment targets for `apm install --target <flag>`
 once enabled via `apm experimental enable <flag>`, and are excluded
 from `--all`. `apm compile` does not emit harness-specific output for
-them: Hermes and the other agents-family harnesses read the standard
+them. Stable explicit-only Hermes and the other agents-family harnesses read the standard
 `AGENTS.md` your normal `apm compile` flow already produces. See
 [Hermes Agent](../../integrations/hermes/).
 
@@ -205,10 +210,10 @@ This flag affects both the Claude and Copilot deduplication paths (see
 
 ## Managed-section mode
 
-By default `apm compile` overwrites `AGENTS.md` entirely. If your team
-keeps hand-written content in `AGENTS.md` alongside APM-managed rules,
-use **managed-section mode** to update only the APM-owned block while
-leaving everything else untouched.
+By default `apm compile` replaces an APM-generated `AGENTS.md` entirely and
+retains an unmarked project-root file. If your team keeps hand-written content
+in root `AGENTS.md` alongside APM-managed rules, use **managed-section mode** to
+update only the APM-owned block while leaving everything else untouched.
 
 For the full `apm.yml` key reference for `compilation.agents_md`, see
 [the `compilation.agents_md` section in the manifest schema](../../reference/manifest-schema/#62-compilationagents_md).
@@ -235,19 +240,39 @@ The default markers are `<!-- apm:start -->` and `<!-- apm:end -->`, so
 you can omit `start_marker` and `end_marker` if you use those verbatim.
 
 **Constraints:**
-- The target file must already exist: if it does not, APM raises a clear
-  error ("does not exist yet") instead of a confusing "markers not found".
-  Use `mode: full` for the first run to create the file, then switch to
-  `managed_section`.
+- An existing target file must carry the markers. New distributed placements
+  are created with a managed block, ready for later recompiles. This automatic
+  bootstrap applies only to distributed placements; add markers yourself before
+  enabling the mode for a single-file `AGENTS.md`.
 - Both markers must be present in the file exactly once (missing or
   duplicate markers raise a loud error so no content is silently lost).
 - The start marker must appear before the end marker; reversed order raises a loud error.
 - `start_marker` and `end_marker` must be distinct non-empty strings.
 - Content outside the markers is preserved verbatim across every compile
-  run for the root `AGENTS.md`; only the block between the markers is
-  replaced.
-- In distributed compile mode, subdirectory `AGENTS.md` files remain fully
-  APM-owned and are overwritten on each run.
+  run; only the block between the markers is replaced. When source attribution
+  emits a footer, it identifies this block as a generated section rather than
+  describing the whole file as generated.
+- In distributed compile mode, the same marker rules apply to every generated
+  `AGENTS.md`. A placement in a nested Git repository (a `.git` directory or
+  gitfile), including its descendants, is excluded from discovery and output.
+- After adding markers and enabling managed-section mode, use
+  `apm compile --dry-run --clean` to inspect the eligible placement set. The
+  preview excludes nested repositories and reports managed orphan files that
+  `--clean` retains, just like a real compile.
+- `apm compile --clean` never removes an orphan with either managed marker,
+  because the file can contain team-owned content outside the managed block.
+  Remove it manually when that content is no longer needed.
+
+For example, compile scoped rules while retaining the rest of each generated
+file:
+
+```bash
+apm compile --target codex --dry-run --clean
+apm compile --target codex --clean
+```
+
+If an existing distributed `AGENTS.md` has no markers, add the marker block
+around the content APM should own before the first managed-section compile.
 
 ## Global compilation (-g)
 
@@ -271,11 +296,15 @@ root-context targets:
 - `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
 
+OpenCode is the exception: its generated `~/.config/opencode/AGENTS.md`
+retains explicit sections for `applyTo` instructions as well.
+
 ### Overwrite protection
 
-When a root file exists but contains no APM marker, it is treated as
-hand-authored and never overwritten. Use `--dry-run` to preview what would
-be written without modifying files.
+When a target root context file exists but contains no APM marker, it is
+treated as hand-authored and never overwritten. This applies to every
+catalog target, including `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`.
+Use `--dry-run` to preview what would be written without modifying files.
 
 ### Constraints
 
@@ -306,7 +335,7 @@ be written without modifying files.
   `claude` target, `--clean` also removes a stale APM-generated
   `CLAUDE.md` when deduplication suppresses `CLAUDE.md` entirely: all
   instructions already live in `.claude/rules/`, and no constitution or
-  dependency content keeps `CLAUDE.md` active. Hand-authored `CLAUDE.md`
+  dependency content keeps `CLAUDE.md` active. Hand-authored root context
   files (those without the `<!-- Generated by APM CLI -->` marker) are
   never deleted.
 - **Hand-edited primitives skip the security scan.** `apm compile`

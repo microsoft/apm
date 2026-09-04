@@ -16,15 +16,16 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
 from apm_cli.integration.agent_integrator import AgentIntegrator
-from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.base_integrator import BaseIntegrator, _managed_absolute_target_root
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import (
     APMPackage,
     GitReferenceType,
@@ -710,6 +711,35 @@ class TestHookSync:
         assert not (hooks_dir / "pkg-hooks.json").exists()
         assert (hooks_dir / "user-hooks.json").exists()
 
+    def test_sync_reports_managed_file_unlink_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A failed unlink must make the cleanup outcome incomplete."""
+        hooks_dir = tmp_path / ".github" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        managed_file = hooks_dir / "pkg-hooks.json"
+        managed_file.write_text('{"managed": true}')
+        original_unlink = Path.unlink
+
+        def fail_managed_unlink(path: Path, *args, **kwargs) -> None:
+            if path == managed_file:
+                raise OSError("simulated unlink failure")
+            original_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", fail_managed_unlink)
+
+        stats = HookIntegrator().sync_integration(
+            None,
+            tmp_path,
+            managed_files={".github/hooks/pkg-hooks.json"},
+        )
+
+        assert stats["errors"] == 1
+        assert stats["failed_paths"] == [".github/hooks/pkg-hooks.json"]
+        assert managed_file.exists()
+
     def test_sync_ignores_non_hook_paths(self, tmp_path: Path):
         """Managed paths outside .github/hooks/ are ignored by hook sync."""
         hooks_dir = tmp_path / ".github" / "hooks"
@@ -722,6 +752,208 @@ class TestHookSync:
         stats = HookIntegrator().sync_integration(None, tmp_path, managed_files=managed)
         assert stats["files_removed"] == 0
         assert (prompts_dir / "a.prompt.md").exists()
+
+    def test_sync_rejects_symlinked_hook_root(self, tmp_path: Path):
+        """Managed hook cleanup must not follow a target-root symlink."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        outside_hooks = tmp_path / "outside" / "hooks"
+        outside_hooks.mkdir(parents=True)
+        outside_file = outside_hooks / "pkg-hooks.json"
+        outside_file.write_text('{"outside": true}', encoding="utf-8")
+        try:
+            (project_root / ".copilot").symlink_to(
+                outside_hooks.parent,
+                target_is_directory=True,
+            )
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
+        stats = HookIntegrator().sync_integration(
+            None,
+            project_root,
+            managed_files={".copilot/hooks/pkg-hooks.json"},
+            targets=[target],
+        )
+
+        assert stats["files_removed"] == 0
+        assert stats["errors"] == 1
+        assert stats["unsafe_paths"] == [".copilot/hooks/pkg-hooks.json"]
+        assert stats["failed_paths"] == [".copilot/hooks/pkg-hooks.json"]
+        assert outside_file.read_text(encoding="utf-8") == '{"outside": true}'
+
+    def test_sync_rejects_hook_root_redirect_within_project_root(self, tmp_path: Path):
+        """A user-root redirect must not become a valid managed hook root."""
+        project_root = tmp_path / "home"
+        redirected_hooks = project_root / "Documents" / "hooks"
+        redirected_hooks.mkdir(parents=True)
+        redirected_file = redirected_hooks / "pkg-hooks.json"
+        redirected_file.write_text('{"outside": true}', encoding="utf-8")
+        try:
+            (project_root / ".copilot").symlink_to(
+                redirected_hooks.parent,
+                target_is_directory=True,
+            )
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
+        stats = HookIntegrator().sync_integration(
+            None,
+            project_root,
+            managed_files={".copilot/hooks/pkg-hooks.json"},
+            targets=[target],
+        )
+
+        assert stats["files_removed"] == 0
+        assert stats["unsafe_paths"] == [".copilot/hooks/pkg-hooks.json"]
+        assert redirected_file.read_text(encoding="utf-8") == '{"outside": true}'
+
+    @pytest.mark.parametrize("target_exists", [True, False])
+    def test_sync_unlinks_final_managed_symlink_without_following_target(
+        self,
+        tmp_path: Path,
+        target_exists: bool,
+    ):
+        """Managed cleanup removes a final symlink, not its referent."""
+        project_root = tmp_path / "project"
+        hooks_dir = project_root / ".copilot" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        outside_file = tmp_path / "outside-hook.json"
+        if target_exists:
+            outside_file.write_text('{"outside": true}', encoding="utf-8")
+        managed_link = hooks_dir / "pkg-hooks.json"
+        try:
+            managed_link.symlink_to(outside_file)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
+        stats = HookIntegrator().sync_integration(
+            None,
+            project_root,
+            managed_files={".copilot/hooks/pkg-hooks.json"},
+            targets=[target],
+        )
+
+        assert stats["files_removed"] == 1
+        assert not managed_link.is_symlink()
+        if target_exists:
+            assert outside_file.read_text(encoding="utf-8") == '{"outside": true}'
+
+    @pytest.mark.parametrize("target_exists", [True, False])
+    def test_sync_unlinks_absolute_final_managed_symlink_without_following_target(
+        self,
+        tmp_path: Path,
+        target_exists: bool,
+    ):
+        """Absolute managed roots use the same final-symlink safety."""
+        from dataclasses import replace
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        target_root = tmp_path / "claude-root"
+        hooks_dir = target_root / "hooks"
+        hooks_dir.mkdir(parents=True)
+        outside_file = tmp_path / "outside-hook.json"
+        if target_exists:
+            outside_file.write_text('{"outside": true}', encoding="utf-8")
+        managed_link = hooks_dir / "pkg-hooks.json"
+        try:
+            managed_link.symlink_to(outside_file)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        target = replace(
+            KNOWN_TARGETS["claude"],
+            root_dir=str(target_root),
+            resolved_deploy_root=target_root,
+        )
+        stats = HookIntegrator().sync_integration(
+            None,
+            project_root,
+            managed_files={str(managed_link)},
+            targets=[target],
+        )
+
+        assert stats["files_removed"] == 1
+        assert not managed_link.is_symlink()
+        if target_exists:
+            assert outside_file.read_text(encoding="utf-8") == '{"outside": true}'
+
+    def test_sync_rejects_absolute_managed_hook_parent_symlink(self, tmp_path: Path):
+        """Absolute managed roots must reject symlinked hook parents."""
+        from dataclasses import replace
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        target_root = tmp_path / "claude-root"
+        redirected_hooks = target_root / "redirected" / "hooks"
+        redirected_hooks.mkdir(parents=True)
+        redirected_file = redirected_hooks / "pkg-hooks.json"
+        redirected_file.write_text('{"outside": true}', encoding="utf-8")
+        try:
+            (target_root / "hooks").symlink_to(
+                redirected_hooks,
+                target_is_directory=True,
+            )
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        target = replace(
+            KNOWN_TARGETS["claude"],
+            root_dir=str(target_root),
+            resolved_deploy_root=target_root,
+        )
+        managed_path = target_root / "hooks" / "pkg-hooks.json"
+        stats = HookIntegrator().sync_integration(
+            None,
+            project_root,
+            managed_files={str(managed_path)},
+            targets=[target],
+        )
+
+        assert stats["files_removed"] == 0
+        assert stats["unsafe_paths"] == [str(managed_path)]
+        assert redirected_file.read_text(encoding="utf-8") == '{"outside": true}'
+
+    def test_absolute_path_checks_symlink_components_once_per_target(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Primitive mappings share one invariant parent-component scan."""
+        from dataclasses import replace
+
+        target_root = tmp_path / "claude-root"
+        hooks_dir = target_root / "hooks"
+        hooks_dir.mkdir(parents=True)
+        target = replace(
+            KNOWN_TARGETS["claude"],
+            root_dir=str(target_root),
+            resolved_deploy_root=target_root,
+        )
+        calls = 0
+
+        def record_scan(_root: Path, _parent: Path) -> bool:
+            nonlocal calls
+            calls += 1
+            return False
+
+        monkeypatch.setattr(
+            "apm_cli.integration.base_integrator.has_symlink_component",
+            record_scan,
+        )
+
+        managed_root = _managed_absolute_target_root(
+            hooks_dir / "pkg-hooks.json",
+            [target],
+            allow_final_symlink=True,
+        )
+
+        assert managed_root == target_root.resolve()
+        assert calls == 1
 
 
 # ---------------------------------------------------------------------------

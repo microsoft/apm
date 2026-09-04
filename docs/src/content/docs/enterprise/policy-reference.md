@@ -612,11 +612,17 @@ Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-re
 
 ### 2. Discovery and applicability
 
-APM auto-discovers policy from `<org>/.github/apm-policy.yml` for GitHub and
-GitHub Enterprise remotes. Azure DevOps remotes use the org `_apm` project and
-`_apm` repository. GitLab and plain git remotes currently fall through with no
-policy applied. Repositories with no detectable git remote emit an explicit
-"could not determine org" line and skip discovery.
+For GitHub and GitHub Enterprise remotes, APM auto-discovers the first policy
+found in the organization cascade: `.github-private`, `.github`, `.apm`, then
+`_apm`. Azure DevOps remotes use the org `apm` project and `apm-policy`
+repository. Legacy `_apm/_apm` is a temporary fallback after a 404 from the
+primary coordinate.
+GitLab remotes use `<top-level-group>/apm-policy/apm-policy.yml`, using the
+first path segment of the remote; nested subgroup scopes are not searched. Set
+`GITLAB_HOST` or `APM_GITLAB_HOSTS` to recognize a self-managed host, and use
+`APM_GITLAB_POLICY_REPO` to select another project name. Plain git remotes
+fall through with no policy applied. Repositories with no detectable git remote
+emit an explicit "could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today** — it works on `apm audit --ci` but is not yet wired through `apm install`. Use the escape hatches in section 8 if you need to bypass install-time enforcement for a single invocation.
 

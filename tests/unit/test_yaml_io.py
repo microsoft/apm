@@ -115,6 +115,24 @@ class TestDumpYaml:
         assert "- a" in raw
         assert "{" not in raw
 
+    @pytest.mark.windows_compat
+    def test_dump_writes_lf_only_bytes(self, tmp_path):
+        """On-disk bytes use LF exclusively on every platform (apm#2619).
+
+        Callers such as ``stamp_plugin_version`` rewrite ``apm.yml`` INSIDE
+        an installed package tree that ``compute_package_hash`` hashes raw,
+        so a platform-native CRLF write on Windows would make the lockfile
+        ``content_hash`` diverge from POSIX for identical upstream content.
+        """
+        p = tmp_path / "test.yml"
+        dump_yaml(
+            {"name": "skills", "version": "2c7ec5e", "description": "", "type": "hybrid"},
+            p,
+        )
+        raw = p.read_bytes()
+        assert b"\r" not in raw
+        assert raw.endswith(b"\n")
+
 
 class TestYamlToStr:
     """Tests for yaml_to_str()."""
@@ -233,6 +251,25 @@ class TestLoadYamlRoundtrip:
         assert "# deps note" in rendered
         assert "github:owner/new-skill@v1" in rendered
 
+    @pytest.mark.windows_compat
+    def test_dump_roundtrip_writes_deterministic_lf(self, tmp_path):
+        """Rewrites land as LF bytes on every OS -- no CRLF flip-flop (apm#2624).
+
+        Project-file rewrite paths (install / uninstall / package
+        resolution) previously wrote platform-native newlines here while
+        other commands wrote LF, so a Windows apm.yml alternated line
+        endings between consecutive commands and churned git diffs.
+        """
+        p = tmp_path / "apm.yml"
+        p.write_bytes(b"# note\r\nname: demo\r\ndependencies: []\r\n")
+
+        data = load_yaml_roundtrip(p)
+        dump_yaml_roundtrip(data, p)
+
+        raw = p.read_bytes()
+        assert b"\r" not in raw
+        assert b"# note\n" in raw
+
     def test_alias_expansion_bomb_fails_closed(self, tmp_path):
         """The round-trip path keeps the bounded-loader expansion guard."""
         p = tmp_path / "apm.yml"
@@ -280,6 +317,36 @@ class TestLoadFrontmatter:
         bomb = "---\n" + "\n".join(lines) + "\n---\nbody\n"
         with pytest.raises(yaml.YAMLError):
             load_frontmatter(io.StringIO(bomb))
+
+    @pytest.mark.windows_compat
+    def test_leading_bom_does_not_break_the_fence(self, tmp_path):
+        """A UTF-8 BOM (PowerShell/Notepad on Windows) doesn't hide the front matter (apm#2683)."""
+        text = '---\ndescription: Scoped rule\napplyTo: "**/*.py"\n---\n# Style\n'
+        path = tmp_path / "withbom.md"
+        path.write_bytes(text.encode("utf-8-sig"))
+        post = load_frontmatter(str(path))
+        assert post.metadata["applyTo"] == "**/*.py"
+        assert post.metadata["description"] == "Scoped rule"
+
+    @pytest.mark.windows_compat
+    def test_bom_and_no_bom_files_parse_identically(self, tmp_path):
+        """A BOM'd and a plain file with the same content yield the same metadata."""
+        text = '---\napplyTo: "**/*.py"\n---\nbody\n'
+        no_bom = tmp_path / "nobom.md"
+        with_bom = tmp_path / "withbom.md"
+        no_bom.write_bytes(text.encode("utf-8"))
+        with_bom.write_bytes(text.encode("utf-8-sig"))
+        assert load_frontmatter(str(no_bom)).metadata == load_frontmatter(str(with_bom)).metadata
+
+    @pytest.mark.windows_compat
+    def test_leading_bom_is_stripped_from_already_open_utf8_stream(self, tmp_path):
+        """The shared parser owns BOM removal even for already-open streams."""
+        text = '---\napplyTo: "**/*.py"\n---\nbody\n'
+        path = tmp_path / "withbom.md"
+        path.write_bytes(text.encode("utf-8-sig"))
+
+        with path.open(encoding="utf-8") as f:
+            assert load_frontmatter(f).metadata["applyTo"] == "**/*.py"
 
 
 class TestBoundedMergeHappyPath:
@@ -339,10 +406,23 @@ class TestWriteYamlTextAtomic:
         write_yaml_text_atomic(target, "new: 2\n")
         assert target.read_text(encoding="utf-8") == "new: 2\n"
 
+    @pytest.mark.windows_compat
+    def test_atomic_write_is_lf_deterministic(self, tmp_path):
+        """On-disk bytes are LF regardless of platform or input domain (apm#2624)."""
+        from apm_cli.utils.yaml_io import write_yaml_text_atomic
+
+        target = tmp_path / "out.yml"
+        write_yaml_text_atomic(target, "a: 1\nb: 2\n")
+        assert target.read_bytes() == b"a: 1\nb: 2\n"
+
+        write_yaml_text_atomic(target, "a: 1\r\nb: 2\r\n")
+        assert target.read_bytes() == b"a: 1\nb: 2\n"
+
     def test_atomic_write_leaves_original_on_replace_failure(self, tmp_path, monkeypatch):
         """If os.replace fails, the original file is untouched and temp cleaned."""
 
-        from apm_cli.utils import yaml_io as _yi
+        from apm_cli.utils import atomic_io
+        from apm_cli.utils.yaml_io import write_yaml_text_atomic
 
         target = tmp_path / "out.yml"
         target.write_text("orig: 1\n", encoding="utf-8")
@@ -350,9 +430,9 @@ class TestWriteYamlTextAtomic:
         def _boom(src, dst):
             raise OSError("replace denied")
 
-        monkeypatch.setattr(_yi.os, "replace", _boom)
+        monkeypatch.setattr(atomic_io, "_replace_atomic_file", _boom)
         with pytest.raises(OSError):
-            _yi.write_yaml_text_atomic(target, "new: 2\n")
+            write_yaml_text_atomic(target, "new: 2\n")
         assert target.read_text(encoding="utf-8") == "orig: 1\n"
         leftovers = [p for p in tmp_path.iterdir() if p.name.startswith(".out.yml.")]
         assert leftovers == []

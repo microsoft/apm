@@ -6,8 +6,10 @@ import ast
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from scripts.architecture_linter.runner import registered_rules
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_LINT_SCRIPT = _REPO_ROOT / "scripts" / "lint-architecture-boundaries.sh"
+_RULES_BY_ID = {rule.id: rule for rule in registered_rules()}
 
 
 def _find_function(tree: ast.AST, name: str) -> ast.FunctionDef:
@@ -120,24 +122,21 @@ def test_audit_replay_forwards_locked_skill_subset_without_interpreting_it() -> 
 
 
 def test_static_boundary_guard_covers_replay_skill_subset_authority() -> None:
-    """The static lint script must guard both propagation edges above.
+    """The architecture-linter catalog must guard both propagation edges above.
 
     This meta-test does not itself re-derive runtime behavior; it only
-    confirms the two independent, function-scoped static guards below exist
-    in the lint script. Both AST tests above are structural routing guards
-    and the lint script is the second, independent guardrail required by
-    the single-canonical-owner discipline (see
+    confirms the registered, function-scoped static guard below exists in
+    the architecture-linter rule catalog. Both AST tests above are structural
+    routing guards and the linter rule is the second, independent guardrail
+    required by the single-canonical-owner discipline (see
     .github/instructions/architecture.instructions.md, AC4). A
     behavioral/AST regression test alone can be deleted or weakened by a
-    future change, so both guards -- lockfile-side reconstruction and
-    replay-side forwarding -- must be present in the script.
+    future change, so a registered semantic rule guarding locked skill-subset
+    propagation must remain present in the catalog.
     """
-    lint_source = _LINT_SCRIPT.read_text(encoding="utf-8")
-    assert (
-        "LockedDependency.to_dependency_ref must reconstruct skill_subset "
-        "from self.skill_subset" in lint_source
-    )
-    assert "Audit replay must preserve locked skill subset intent" in lint_source
+    rule = _RULES_BY_ID["install-deployment-skill-subset-tokens"]
+
+    assert "Skill subset filter tokens come from models/dependency/subsets.py" in rule.description
 
 
 def test_incompatible_refs_survive_to_conflict_selection(tmp_path: Path) -> None:
@@ -207,24 +206,37 @@ def test_transitive_local_identity_includes_parent_and_anchor(tmp_path: Path) ->
 
 
 def test_configured_mcp_registry_url_is_used(monkeypatch) -> None:
-    """The URL shown by the command must be the URL passed to its client."""
+    """The URL shown by the command must be the URL its client resolved.
+
+    The command deliberately hands the client no URL: SimpleRegistryClient owns
+    the precedence chain and records which layer supplied the endpoint, and a
+    caller-supplied URL is recorded as the "explicit" layer regardless of where
+    it really came from.
+    """
+    from urllib.parse import urlparse
+
     from apm_cli.commands import mcp
+    from apm_cli.registry.client import SimpleRegistryClient
 
     captured: list[str | None] = []
 
     class FakeRegistry:
         def __init__(self, registry_url=None):
             captured.append(registry_url)
-            self.client = MagicMock(registry_url=registry_url)
+            self.client = SimpleRegistryClient(registry_url)
 
     monkeypatch.delenv(mcp.MCP_REGISTRY_ENV, raising=False)
-    monkeypatch.setattr("apm_cli.config.get_mcp_registry_url", lambda: "https://registry.test/v0")
+    monkeypatch.setattr(
+        "apm_cli.config.get_mcp_registry_url",
+        lambda *, create_config=True: "https://registry.test/v0",
+    )
     monkeypatch.setattr("apm_cli.registry.integration.RegistryIntegration", FakeRegistry)
 
     registry = mcp._build_registry_with_diag(None, MagicMock())
 
-    assert captured == ["https://registry.test/v0"]
-    assert registry.client.registry_url == captured[0]
+    assert captured == [None]
+    assert urlparse(registry.client.registry_url).hostname == "registry.test"
+    assert registry.client.registry_url_source == "config"
 
 
 def test_marketplace_registry_routing_returns_registry_dependency(monkeypatch) -> None:

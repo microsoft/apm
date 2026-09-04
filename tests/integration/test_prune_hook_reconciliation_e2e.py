@@ -71,6 +71,7 @@ def _clear_package_cache() -> None:
 def _stub_download_package(
     hook_commands: dict[str, str],
     package_deps: dict[str, list[str]] | None = None,
+    hook_assets: dict[str, dict[str, str]] | None = None,
 ):
     """Build a ``download_package`` stub that materializes a hooked fixture package.
 
@@ -85,6 +86,7 @@ def _stub_download_package(
     chain (see ``test_prune_preserves_transitive_dependency_hooks``).
     """
     nested_deps = package_deps or {}
+    assets = hook_assets or {}
 
     def _download(
         _self: GitHubPackageDownloader,
@@ -132,6 +134,10 @@ def _stub_download_package(
                 ),
                 encoding="utf-8",
             )
+        for relative_path, content in assets.get(dep_ref.repo_url, {}).items():
+            asset_path = install_path / relative_path
+            asset_path.parent.mkdir(parents=True, exist_ok=True)
+            asset_path.write_text(content, encoding="utf-8")
         package = APMPackage.from_apm_yml(install_path / "apm.yml")
         return PackageInfo(
             package=package,
@@ -187,12 +193,17 @@ def _run_install(
     hook_commands: dict[str, str],
     *,
     package_deps: dict[str, list[str]] | None = None,
+    hook_assets: dict[str, dict[str, str]] | None = None,
 ) -> object:
     with patch.object(
         GitHubPackageDownloader,
         "download_package",
         autospec=True,
-        side_effect=_stub_download_package(hook_commands, package_deps=package_deps),
+        side_effect=_stub_download_package(
+            hook_commands,
+            package_deps=package_deps,
+            hook_assets=hook_assets,
+        ),
     ):
         return _run_cli(project, monkeypatch, ["install", "--no-policy"])
 
@@ -430,6 +441,74 @@ def test_uninstall_preserves_transitive_dependency_hooks(
     commands = _pre_tool_use_commands(settings_path)
     assert "./scripts/transitive-hook.sh" in commands
     assert "./scripts/to-uninstall-hook.sh" not in commands
+
+
+def test_uninstall_reintegrates_surviving_hook_without_source_only_asset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Install and uninstall retain an approved survivor without scanning source-only content."""
+    project = tmp_path / "proj-source-plan-survivor"
+    _write_project(project, ["acme/survivor", "acme/to-uninstall"], ["claude"])
+    hook_assets = {
+        "acme/survivor": {
+            ".apm/hooks/run.sh": "#!/bin/sh\necho survivor\n",
+            "source-only/hostile.txt": "source-only \u202e fixture\n",
+        },
+        "acme/to-uninstall": {".apm/hooks/removed.sh": "#!/bin/sh\necho removed\n"},
+    }
+
+    install_result = _run_install(
+        project,
+        monkeypatch,
+        {
+            "acme/survivor": "./run.sh",
+            "acme/to-uninstall": "./removed.sh",
+        },
+        hook_assets=hook_assets,
+    )
+    assert install_result.exit_code == 0, install_result.output
+    survivor_script = project / ".claude" / "hooks" / "survivor" / "run.sh"
+    hostile_target = project / ".claude" / "hooks" / "survivor" / "source-only" / "hostile.txt"
+    assert survivor_script.read_text(encoding="utf-8") == "#!/bin/sh\necho survivor\n"
+    assert not hostile_target.exists()
+
+    uninstall_result = _run_uninstall(project, monkeypatch, "acme/to-uninstall")
+    assert uninstall_result.exit_code == 0, uninstall_result.output
+    assert survivor_script.read_text(encoding="utf-8") == "#!/bin/sh\necho survivor\n"
+    assert not hostile_target.exists()
+
+
+def test_prune_refuses_hostile_survivor_before_hook_rebuild(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prune cannot write a survivor that became hostile after install."""
+    project = tmp_path / "proj-hostile-prune-survivor"
+    _write_project(project, ["acme/survivor", "acme/to-prune"], ["claude"])
+    install_result = _run_install(
+        project,
+        monkeypatch,
+        {
+            "acme/survivor": "./run.sh",
+            "acme/to-prune": "./removed.sh",
+        },
+        hook_assets={
+            "acme/survivor": {".apm/hooks/run.sh": "#!/bin/sh\necho clean\n"},
+            "acme/to-prune": {".apm/hooks/removed.sh": "#!/bin/sh\necho removed\n"},
+        },
+    )
+    assert install_result.exit_code == 0, install_result.output
+    deployed = project / ".claude" / "hooks" / "survivor" / "run.sh"
+    assert deployed.read_text(encoding="utf-8") == "#!/bin/sh\necho clean\n"
+
+    source = project / "apm_modules" / "acme" / "survivor" / ".apm" / "hooks" / "run.sh"
+    source.write_text("#!/bin/sh\necho hostile \u202e\n", encoding="utf-8")
+    _remove_dependency(project, "acme/to-prune")
+
+    prune_result = _run_prune(project, monkeypatch)
+
+    assert prune_result.exit_code == 0, prune_result.output
+    assert "Hook reconciliation failed" in prune_result.output
+    assert deployed.read_text(encoding="utf-8") == "#!/bin/sh\necho clean\n"
 
 
 def test_prune_hook_reconciliation_is_idempotent(

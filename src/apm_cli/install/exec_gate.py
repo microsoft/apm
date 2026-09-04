@@ -21,8 +21,8 @@ def check_executable_approval(
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
     *,
     ctx: InstallContext | None = None,
-) -> tuple[bool, bool, bool, bool]:
-    """Return ``(hooks_approved, bin_approved, mcp_approved, canvas_approved)`` for a package.
+) -> tuple[bool, bool, bool, bool, bool]:
+    """Return hook, bin, MCP, canvas, and LSP approval for a package.
 
     Local project content (``_local``) is always trusted.  Dependency
     packages are checked against the ``allowExecutables`` block.  When
@@ -34,12 +34,13 @@ def check_executable_approval(
     """
     is_local = package_name == "_local"
     if is_local or allow_executables is None:
-        return True, True, True, True
+        return True, True, True, True, True
 
     from apm_cli.security.executables import (
         EXEC_TYPE_BIN,
         EXEC_TYPE_CANVAS,
         EXEC_TYPE_HOOKS,
+        EXEC_TYPE_LSP,
         EXEC_TYPE_MCP,
         build_approval_key,
         is_package_approved,
@@ -78,10 +79,11 @@ def check_executable_approval(
     canvas_ok = any(
         is_package_approved(allow_executables, k, EXEC_TYPE_CANVAS) for k in candidate_keys
     )
+    lsp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_LSP) for k in candidate_keys)
 
     # Track blocked packages for the post-loop approval prompt, and record the
     # lockfile exec_status for the audit (Gap B) from the same scan.
-    blocked = not hooks_ok or not bin_ok or not mcp_ok or not canvas_ok
+    blocked = not hooks_ok or not bin_ok or not mcp_ok or not canvas_ok or not lsp_ok
     needs_status = ctx is not None and getattr(ctx, "exec_trust_ctx", None) is not None
     if ctx is not None and (blocked or needs_status):
         from apm_cli.security.executables import scan_package_executables
@@ -103,7 +105,7 @@ def check_executable_approval(
             if status is not None:
                 ctx.package_exec_status[package_name] = status
 
-    return hooks_ok, bin_ok, mcp_ok, canvas_ok
+    return hooks_ok, bin_ok, mcp_ok, canvas_ok, lsp_ok
 
 
 def resolve_package_key(package_info: Any, package_name: str) -> str:
@@ -137,6 +139,59 @@ def resolve_package_key(package_info: Any, package_name: str) -> str:
     return package_name
 
 
+def resolve_bin_skip(
+    bin_approved: bool,
+    trust_bin: bool | None,
+    *,
+    non_interactive: bool = False,
+) -> tuple[bool, str | None]:
+    """Combine executable approval with the ``--trust-bin`` posture."""
+    if not bin_approved:
+        return True, "not_approved"
+    if trust_bin is False:
+        return True, "not_trusted"
+    if trust_bin is None and non_interactive:
+        return True, "not_trusted"
+    return False, None
+
+
+def plugin_bin_deployable(
+    package_info: Any,
+    targets: list[Any],
+    *,
+    project_root: Path,
+    scope: Any,
+    policy: Any,
+    skip_bin: bool,
+) -> bool:
+    """Return whether approved marketplace plugin bin files can reach a target."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.models.apm_package import PackageType
+    from apm_cli.security.executables import normalize_bin_deploy_deny_key
+
+    if (
+        skip_bin
+        or package_info.package_type is not PackageType.MARKETPLACE_PLUGIN
+        or scope is not InstallScope.USER
+        or not (Path(package_info.install_path) / "bin").is_dir()
+        or not any(
+            target.name == "claude"
+            and target.supports("skills")
+            and (target.auto_create or (project_root / target.root_dir).is_dir())
+            for target in targets
+        )
+    ):
+        return False
+    bin_policy = getattr(policy, "bin_deploy", None)
+    if bin_policy is None:
+        return True
+    if bin_policy.deny_all:
+        return False
+    package_key = normalize_bin_deploy_deny_key(package_info.get_canonical_dependency_string())
+    denied = {normalize_bin_deploy_deny_key(item) for item in bin_policy.deny}
+    return package_key not in denied
+
+
 def log_bin_status(
     skill_result: Any,
     suffix: str,
@@ -145,6 +200,9 @@ def log_bin_status(
     log_fn,
 ) -> None:
     """Emit integration-tree lines for bin/ deployment or skip reasons."""
+    from apm_cli.utils.diagnostics import printable_ascii_text
+
+    package_label = printable_ascii_text(package_name or getattr(package_info, "name", "unknown"))
     if skill_result.bin_deployed > 0:
         log_fn(
             f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
@@ -160,10 +218,17 @@ def log_bin_status(
             "  |-- plugin ships executables; no active Claude Code skills target to receive them"
         )
     elif skill_result.bin_skipped_reason == "not_approved":
-        _pkg_label = package_name or getattr(package_info, "name", "unknown")
         log_fn(
             f"  |-- bin/ executables skipped (not approved in allowExecutables). "
-            f"Run 'apm approve {_pkg_label}' to approve."
+            f"Run 'apm approve {package_label}' to approve."
         )
     elif skill_result.bin_skipped_reason == "not_trusted":
-        log_fn("  |-- bin/ executables skipped (--no-trust-bin). Pass --trust-bin to deploy.")
+        log_fn(
+            "  |-- bin/ executables skipped (not trusted). "
+            f"Run 'apm install --trust-bin {package_label}' to deploy."
+        )
+    elif skill_result.bin_skipped_reason == "not_retrusted_on_uninstall":
+        log_fn(
+            "  |-- bin/ executables not re-deployed during uninstall cleanup. "
+            f"Run 'apm install --trust-bin {package_label}' to restore them."
+        )

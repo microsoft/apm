@@ -447,10 +447,10 @@ class TestGrokCloudTarget:
     def test_grok_cloud_requires_flag_gate(self, monkeypatch, tmp_path):
         import apm_cli.integration.targets as tg
 
-        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: False)
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name, **kwargs: False)
         assert active_targets(tmp_path, explicit_target="grok-cloud") == []
 
-        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name, **kwargs: True)
         assert [p.name for p in active_targets(tmp_path, explicit_target="grok-cloud")] == [
             "grok-cloud"
         ]
@@ -458,7 +458,7 @@ class TestGrokCloudTarget:
     def test_grok_cloud_is_excluded_from_all(self, monkeypatch, tmp_path):
         import apm_cli.integration.targets as tg
 
-        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name, **kwargs: True)
         names = {p.name for p in active_targets(tmp_path, explicit_target="all")}
         assert "grok-cloud" not in names
 
@@ -484,7 +484,7 @@ class TestGrokBuildTarget:
 
 
 class TestHermesTarget:
-    """Registry + scope + flag-gating invariants for the hermes target."""
+    """Registry + scope invariants for the stable explicit-only Hermes target."""
 
     def setup_method(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -503,35 +503,27 @@ class TestHermesTarget:
         assert profile.user_supported is True
         assert profile.user_root_dir == ".hermes"
         assert profile.detect_by_dir is False
-        assert profile.requires_flag == "hermes"
+        assert profile.requires_flag is None
         assert profile.compile_family == "agents"
         assert "skills" in profile.primitives
         assert profile.primitives["skills"].format_id == "skill_standard"
 
-    def test_hermes_requires_flag_gate(self, monkeypatch):
-        import apm_cli.integration.targets as tg
-
-        # Flag OFF -> explicit hermes is filtered out of active targets.
-        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: False)
-        off = active_targets(self.root, explicit_target="hermes")
-        assert all(p.name != "hermes" for p in off)
-
-        # Flag ON -> explicit hermes resolves.
-        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
-        on = active_targets(self.root, explicit_target="hermes")
-        assert any(p.name == "hermes" for p in on)
+    @pytest.mark.windows_compat
+    def test_hermes_explicit_target_resolves_without_flag(self):
+        targets = active_targets(self.root, explicit_target="hermes")
+        assert any(p.name == "hermes" for p in targets)
 
     def test_hermes_excluded_from_all(self, monkeypatch):
         import apm_cli.integration.targets as tg
 
-        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name, **kwargs: True)
         names = {p.name for p in active_targets(self.root, explicit_target="all")}
         assert "hermes" not in names
 
     def test_hermes_user_scope_root(self, monkeypatch):
         import apm_cli.integration.targets as tg
 
-        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name, **kwargs: True)
         profile = KNOWN_TARGETS["hermes"].for_scope(user_scope=True)
         assert profile is not None
         assert profile.root_dir == ".hermes"

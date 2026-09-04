@@ -130,6 +130,23 @@ def test_detector_passes_on_out_of_scope_only(tmp_path):
     assert "no critical-path diff" in out.stdout, out.stdout
 
 
+def test_detector_passes_when_critical_diff_has_no_substantive_additions(tmp_path):
+    """A comment-only critical-path diff MUST report zero and exit 0."""
+    repo = _make_repo(tmp_path)
+    target = repo / "src" / "apm_cli" / "install" / ".keep"
+    target.write_text("# Clarify existing behavior.\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "clarify install comment")
+
+    out = _run_detector(repo)
+
+    assert out.returncode == 0, (
+        f"comment-only diff MUST pass; got exit {out.returncode}\n"
+        f"stdout: {out.stdout}\nstderr: {out.stderr}"
+    )
+    assert "0 substantive added lines" in out.stdout, out.stdout
+
+
 def test_detector_fires_on_substantive_critical_path_add(tmp_path):
     """Substantive critical-path add with NO spec edit MUST fire."""
     repo = _make_repo(tmp_path)

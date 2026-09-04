@@ -53,7 +53,7 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 - `self-update.channel` must be `stable` or `prerelease`.
 - `self-update.install-dir` is expanded and stored as an absolute path. It becomes the default `APM_INSTALL_DIR` for `apm self-update` when the env var is not set.
 - `copilot-cowork-skills-dir` must be absolute after expansion; the directory itself does not need to exist.
-- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. All other schemes are rejected.
+- `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. Embedded credentials, invalid ports, query strings, fragments, and other schemes are rejected. Configured `http://` endpoints require `MCP_REGISTRY_ALLOW_HTTP=1` when used.
 - Boolean keys reject anything outside the accepted truthy/falsy strings.
 
 ### `apm config unset KEY`
@@ -75,7 +75,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | `audit-on-install` | enum | `off` | Default content-audit mode for `apm install`: `off` / `warn` / `block`. `warn` records findings in the install summary; `block` halts on critical findings. Overridable per-install with `--audit` / `--no-audit`; an org policy `security.audit.on_install` floor can raise it. Requires the `external-scanners` experimental flag for `set`. |
 | `external.<name>.llm` | boolean | unset | Opt a SARIF scanner into LLM-powered analysis (`<name>` validated against supported scanners). SkillSpector default is offline. LLM mode makes outbound API calls and needs `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`. Overridable per-run with `--external-llm` / `--no-external-llm`. Requires the `external-scanners` experimental flag. |
 | `external.<name>.args` | string | unset | Extra scanner CLI flags, stored shlex-split as a list (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter at run time. Overridable per-run with `--external-args`. Requires the `external-scanners` experimental flag. |
-| `mcp-registry-url` | URL | public registry | Persist a private MCP registry endpoint. Accepts `http://` or `https://` URLs. Sits between `MCP_REGISTRY_URL` env and the built-in default in the resolution chain. Equivalent to exporting `MCP_REGISTRY_URL` permanently. |
+| `mcp-registry-url` | URL | public registry | Persist a private MCP registry endpoint. Accepts `http://` or `https://` URLs. Provides a persistent fallback below `MCP_REGISTRY_URL` and above the built-in default, and applies to every registry lookup: `apm mcp list/search/show`, `apm install --mcp NAME`, and the `dependencies.mcp` entries `apm install` reads from `apm.yml`. |
 | `registry.<name>.url` | URL | unset | Base URL for registry `<name>`. Requires `registries` experimental flag. |
 | `registry.<name>.token` | string | unset | Bearer token for registry `<name>`. Stored in `~/.apm/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
 | `registry.<name>.default` | boolean | `false` | Mark `<name>` as the user-scoped default registry. Only one registry may be default at a time; setting `true` clears any previous default. Requires `registries` experimental flag. |
@@ -90,10 +90,15 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 
 `mcp-registry-url` follows a four-layer precedence chain (CLI flag wins):
 
-1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (this invocation only)
+1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (used immediately and persisted on the dependency in `apm.yml`)
 2. `MCP_REGISTRY_URL` environment variable
 3. `mcp-registry-url` value in `~/.apm/config.json`
 4. Built-in public default registry
+
+A per-dependency `registry:` URL in `apm.yml` overrides the chain for that entry
+only. Plaintext `http://` needs `MCP_REGISTRY_ALLOW_HTTP=1` when it arrives from
+the environment or from `apm.yml`; a URL you persisted with `apm config set`
+needs no opt-in, since setting it is already the explicit choice.
 
 `allow-protocol-fallback` and `prefer-ssh` follow the layered transport precedence:
 

@@ -17,6 +17,7 @@ import threading
 import time
 import weakref
 import zipfile
+from functools import partial
 from pathlib import Path
 from urllib.parse import quote
 
@@ -25,6 +26,7 @@ import requests
 from ..core.auth import AuthResolver, HostInfo
 from ..models.apm_package import DependencyReference
 from ..utils.archive import ArchiveError, safe_extract_zip
+from ..utils.git_env import redact_git_diagnostic
 from ..utils.github_host import (
     build_ado_api_url,
     build_artifactory_archive_url,
@@ -33,9 +35,9 @@ from ..utils.github_host import (
     build_ssh_url,
     default_host,
     is_github_hostname,
-    set_authorization_header_git_env,
 )
 from ..utils.path_security import PathTraversalError
+from .artifactory_entry import _NoNetrcSession
 from .git_file_transport import (
     GitFileFetchResult,
     GitFileTransportError,
@@ -54,7 +56,7 @@ from .host_backends import backend_for
 def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
-        print(f"[DEBUG] {message}", file=sys.stderr)
+        print(f"[DEBUG] {redact_git_diagnostic(message)}", file=sys.stderr)
 
 
 def _close_response(response: requests.Response, context: str) -> None:
@@ -131,6 +133,7 @@ class DownloadDelegate:
         *,
         stream: bool = False,
         retry_throttles: bool = True,
+        allow_netrc: bool = True,
     ) -> requests.Response:
         """HTTP GET with selectable retries for transient HTTP failures.
 
@@ -143,6 +146,7 @@ class DownloadDelegate:
             retry_throttles: Whether general callers retry a classified
                 throttle. Virtual-file download callers disable this so they
                 can select sparse Git without a retry or sleep.
+            allow_netrc: Whether Requests may use ambient netrc credentials.
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -154,7 +158,21 @@ class DownloadDelegate:
         last_response = None
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=headers, timeout=timeout, stream=stream)
+                if allow_netrc:
+                    response = requests.get(
+                        url,
+                        headers=headers,
+                        timeout=timeout,
+                        stream=stream,
+                    )
+                else:
+                    with _NoNetrcSession() as session:
+                        response = session.get(
+                            url,
+                            headers=headers,
+                            timeout=timeout,
+                            stream=stream,
+                        )
 
                 throttle = github_throttle_error(response, "GitHub API")
                 if throttle is not None:
@@ -423,7 +441,13 @@ class DownloadDelegate:
             _debug(f"Trying Artifactory archive: {url}")
             resp = None
             try:
-                resp = self._host._resilient_get(url, headers=headers, timeout=60, stream=True)
+                resp = self._host._resilient_get(
+                    url,
+                    headers=headers,
+                    timeout=60,
+                    stream=True,
+                    allow_netrc=False,
+                )
                 if resp.status_code == 200:
                     target_path.mkdir(parents=True, exist_ok=True)
                     with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
@@ -477,6 +501,7 @@ class DownloadDelegate:
         error.
         """
         # Fast path: use the RegistryClient interface for entry download
+        artifactory_get = partial(self._host._resilient_get, allow_netrc=False)
         cfg = self._host.registry_config
         if cfg is not None and cfg.host == host:
             client = cfg.get_client()
@@ -485,7 +510,7 @@ class DownloadDelegate:
                 repo,
                 file_path,
                 ref,
-                resilient_get=self._host._resilient_get,
+                resilient_get=artifactory_get,
             )
         else:
             # No RegistryConfig or host mismatch (explicit FQDN mode) --
@@ -501,7 +526,7 @@ class DownloadDelegate:
                 ref,
                 scheme=scheme,
                 headers=self.get_artifactory_headers(),
-                resilient_get=self._host._resilient_get,
+                resilient_get=artifactory_get,
             )
         if content is not None:
             return content
@@ -515,7 +540,12 @@ class DownloadDelegate:
 
         for url in archive_urls:
             try:
-                resp = self._host._resilient_get(url, headers=headers, timeout=60)
+                resp = self._host._resilient_get(
+                    url,
+                    headers=headers,
+                    timeout=60,
+                    allow_netrc=False,
+                )
                 if resp.status_code != 200:
                     continue
                 with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -762,12 +792,33 @@ class DownloadDelegate:
         with self._git_file_transports_lock:
             transport = self._git_file_transports.get(key)
             if transport is None:
-                git_env = {**os.environ, **(self._host.git_env or {})}
+                auth_ctx = self._host.auth_resolver.resolve_for_dep(dep_ref)
+                remote_url = self.build_repo_url(
+                    dep_ref.repo_url,
+                    dep_ref=dep_ref,
+                    token="",
+                    auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
+                )
+                git_env = (
+                    self._host.auth_resolver.git_env_for_remote(
+                        auth_ctx,
+                        remote_url,
+                    )
+                    if auth_ctx is not None
+                    else dict(self._host.git_env or {})
+                )
+                from functools import partial
+
+                tokenless_url_builder = partial(
+                    self.build_repo_url,
+                    token="",
+                    auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
+                )
                 transport_factory = self._git_file_transport_factory or GitSparseFileTransport
                 transport = transport_factory(
                     dep_ref,
                     ref,
-                    build_repo_url_fn=self.build_repo_url,
+                    build_repo_url_fn=tokenless_url_builder,
                     git_env=git_env,
                 )
                 self._git_file_transports[key] = transport
@@ -796,17 +847,10 @@ class DownloadDelegate:
         ):
 
             def _fetch(
-                token: str | None,
+                _token: str | None,
                 git_env: dict[str, str],
             ) -> GitFileFetchResult:
                 attempt_env = dict(git_env)
-                if token:
-                    set_authorization_header_git_env(
-                        attempt_env,
-                        "Bearer",
-                        token,
-                    )
-                    attempt_env.pop("GIT_TOKEN", None)
 
                 def _tokenless_repo_url(
                     repo_ref: str,
@@ -844,27 +888,21 @@ class DownloadDelegate:
             )
 
         auth_ctx = self._host.auth_resolver.resolve_for_dep(dep_ref)
+        remote_url = self.build_repo_url(
+            dep_ref.repo_url,
+            dep_ref=dep_ref,
+            token="",
+            auth_scheme="basic",
+        )
         if auth_ctx.token:
-            # AuthResolver owns credential resolution. Convert its resolved
-            # GitHub credential into Git's header channel so the token remains
-            # out of the remote URL and is actually consumed by git.
-            git_env = dict(auth_ctx.git_env)
-            set_authorization_header_git_env(git_env, "Bearer", auth_ctx.token)
-            git_env.pop("GIT_TOKEN", None)
-            auth_scheme = "basic"
+            git_env = self._host.auth_resolver.git_env_for_remote(auth_ctx, remote_url)
         else:
             # Public repositories use normal non-interactive Git. Do not
             # inherit an unrelated downloader token into this fallback.
             git_env = self._host._build_noninteractive_git_env()
-            auth_scheme = "basic"
 
         def _tokenless_repo_url(repo_ref: str, *, dep_ref: DependencyReference) -> str:
-            return self.build_repo_url(
-                repo_ref,
-                dep_ref=dep_ref,
-                token="",
-                auth_scheme=auth_scheme,
-            )
+            return remote_url
 
         with self._git_file_transports_lock:
             transport = self._git_file_transports.get(key)
@@ -1109,11 +1147,17 @@ class DownloadDelegate:
         except requests.exceptions.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else "unknown"
             if status in (401, 403):
+                context = self._host.auth_resolver.build_error_context(
+                    host,
+                    "download",
+                    org=owner,
+                    port=dep_ref.port,
+                    dep_url=dep_ref.repo_url,
+                )
                 raise RuntimeError(
                     f"Authentication failed for {dep_ref.repo_url} "
                     f"(file: {file_path}, ref: {ref}). "
-                    "The repository may be private or the resolved credential "
-                    "may lack access."
+                    f"{context}"
                 ) from exc
             if status == 404:
                 raise RuntimeError(

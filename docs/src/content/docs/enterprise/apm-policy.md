@@ -47,14 +47,14 @@ APM discovers your org-level policy by checking candidate repos in this order --
 | 1 | `.github-private` | GitHub and GitHub API-compatible hosts |
 | 2 | `.github` | GitHub and GitHub API-compatible hosts |
 | 3 | `.apm` | GitHub and GitHub API-compatible hosts |
-| 4 | `_apm` | GitHub API-compatible hosts and Azure DevOps |
+| 4 | `_apm` | GitHub API-compatible hosts |
 
-Azure DevOps does not allow repository names starting or ending with a period, so only `_apm` is tried on ADO hosts. ADO requires repositories to live inside projects; the convention uses `_apm` for both the project and repo:
+Azure DevOps does not allow project or repository names starting with an underscore, and repositories must live inside projects. Use `apm` as the project and `apm-policy` as the repository. APM temporarily falls back to legacy `_apm/_apm` only after the primary location returns 404, and reports a migration warning.
 
 ```
 <org>/
-  _apm/              # ADO project
-    _apm/            # repo inside the project
+  apm/               # ADO project
+    apm-policy/      # repo inside the project
       apm-policy.yml
 ```
 
@@ -65,6 +65,24 @@ On GitHub and GitHub API-compatible hosts, the `.github-private` repo is preferr
   .github-private/
     apm-policy.yml         # auto-discovered by every repo in <org>
 ```
+
+**GitLab (gitlab.com and self-managed)** rejects project paths that start with `.` or `_`, so none of the candidates above are valid there. GitLab uses its own default instead:
+
+| Priority | Repo name | Valid on |
+|----------|-----------|---------|
+| 1 | `apm-policy` | GitLab (gitlab.com and self-managed) |
+
+```
+<top-level-group>/
+  apm-policy/
+    apm-policy.yml         # auto-discovered by projects whose remote starts with <top-level-group>/
+```
+
+GitLab discovery uses only the top-level group: APM takes the first path segment from the project remote and looks for `<top-level-group>/apm-policy`. It does not search nested subgroup scopes. Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project without `apm-policy` (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
+
+:::caution[Self-managed GitLab requires GITLAB_HOST or APM_GITLAB_HOSTS]
+An arbitrary FQDN is never auto-classified as GitLab -- the same domain shape could be Bitbucket, Gitea, or a plain git server. `gitlab.com` is recognised automatically, but a self-managed instance (e.g. `gitlab.example.com`) is only recognised once you set `GITLAB_HOST=gitlab.example.com` (or `APM_GITLAB_HOSTS` for more than one instance). Without it, APM falls through to the GitHub-style cascade above, which is invalid on GitLab and behaves exactly like the unfixed discovery this section describes. This mirrors `GITHUB_HOST` for GitHub Enterprise Server and `ADO_HOST` for on-prem Azure DevOps Server -- see [Environment Variables](../../reference/environment-variables/).
+:::
 
 When `apm install` or `apm audit --ci --policy org` runs in a project, APM resolves the org from the project's git remote and searches the candidate repos above (cached locally, default 1 hour TTL).
 

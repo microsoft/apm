@@ -144,14 +144,14 @@ actionable nudge (the authoring path only).
 |---|---|
 | **Type** | `target`: `string` or `list<string>`; `targets`: `list<string>` (a scalar is accepted as one-item compatibility input) |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect from filesystem signals (see below). |
+| **Default** | Auto-detect from filesystem signals (see below). [`apm compile -g`](../cli/compile/#global-compilation) instead writes every supported user-scope target when both fields are omitted. |
 | **Allowed values** | `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
 **Deprecated: `all`.** Manifests published before the canonical target catalog could declare `all`, meaning "no restriction". The value is deprecated: parsers treat a field containing `all` as if the field were omitted (auto-detect / `--target` decide; any sibling targets listed alongside `all` are ignored, though they are still validated) and emit a deprecation warning once per run. Remove the field to keep this behavior permanently; `all` will become a hard parse error in a future release.
 
-When both fields are omitted, APM auto-detects from the
+For project-scope commands, when both fields are omitted, APM auto-detects from the
 [documented filesystem signals](../cli/targets/#detection-signals).
 Once set, the field is authoritative.
 
@@ -173,8 +173,8 @@ When a list is specified, only those targets are compiled, installed, and packed
 A plural `targets:` form is also accepted; use a YAML list in new manifests.
 A scalar remains accepted as a one-item compatibility input. Declaring both
 fields is a parse error. Prefer `targets:` in new manifests; `target:` remains
-supported for backward compatibility and accepts legacy CLI aliases such as
-`vscode`. The canonical `targets:` form requires canonical names.
+supported for backward compatibility. The `vscode` alias is accepted in either
+form and normalized to `copilot`; `agents` remains a CLI-only alias.
 
 | Value | Effect |
 |---|---|
@@ -182,7 +182,7 @@ supported for backward compatibility and accepts legacy CLI aliases such as
 | `claude` | Emits `CLAUDE.md` at the project root. |
 | `grok-build` | Emits `AGENTS.md` and deploys to `.grok/rules/`, `.grok/agents/`, `.grok/commands/`, `.grok/skills/`. |
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`. |
-| `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`. |
+| `opencode` | Emits `AGENTS.md`, `.opencode/agents/`, `.opencode/commands/`, and `.agents/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
 | `antigravity` | Emits `AGENTS.md` and deploys rules, skills, hooks, and MCP config under `.agents/`. |
@@ -283,6 +283,10 @@ For plugin packing, `includes:` is allow-list only. There is no `exclude:`
 form. To keep maintainer-only primitives out of shipped artifacts, author them
 outside the selected source layout and reference them via a local-path
 devDependency. See [Dev-only Primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
+
+Compile discovery independently stops at nested Git repositories and linked
+worktrees. This active-checkout boundary applies whether `includes` is `auto`,
+an explicit list, or omitted.
 
 When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
 
@@ -434,7 +438,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
-| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`. Experimental: `grok-cloud`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
+| `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `hermes`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
 
 Unknown object-form fields are rejected. On a Git object, `version` reports an
 actionable error to use `ref` for a branch, tag, or commit; `version` belongs
@@ -606,7 +610,7 @@ Any additional keys not listed above are preserved as **extra passthrough fields
 
 Two guardrails apply:
 
-- **Reserved keys are rejected.** A passthrough key whose name collides with a modeled field above -- `name`, `transport`/`type`, `command`, `url`, `headers`, `env`, `args`, `tools`, `version`, `registry`, `package` (and the Codex `http_headers` alias) -- is dropped with a warning. This prevents a passthrough value from shadowing or redirecting a modeled field. Extra keys also never overwrite a value the target adapter set itself.
+- **Reserved keys are rejected.** A passthrough key whose name collides with a modeled field above -- `name`, `transport`/`type`, `command`, `url`, `headers`, `env`, `args`, `tools`, `version`, `registry`, `package` -- or with an adapter-owned field (`http_headers`, `enabled`, `environment`, `id`) is dropped with a warning. This prevents a passthrough value from shadowing or redirecting a modeled field. Extra keys also never overwrite a value the target adapter set itself.
 - **Extra keys broadcast to every target.** Passthrough keys are written uniformly into the generated config for **all** installed harnesses, not just the one that understands them. A Claude Code `oauth` block (`clientId`/`callbackPort`), for example, is emitted into every target's server entry; harnesses that do not recognise the key ignore it. Per-harness scoping is tracked as a future enhancement (see issue #1806).
 
 > A future release may require passthrough keys to be nested under an explicit `extra:` block and stop auto-capturing bare top-level keys (fail-closed), via a deprecation path. See issue #1806.
@@ -754,7 +758,13 @@ dependencies:
 
 #### 4.3.4. What Gets Written
 
-`apm install` writes LSP server configs to detected runtime targets. Claude Code uses `.lsp.json` at project scope or `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at project scope or `~/.copilot/lsp-config.json` at user scope. See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats and lifecycle details.
+`apm install` writes LSP server configs to detected runtime targets. Claude
+Code uses the `lspServers` section in
+`.claude/skills/apm-lsp/.claude-plugin/plugin.json` at project scope or
+`~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at
+project scope or `~/.copilot/lsp-config.json` at user scope. See
+[Install LSP servers](../../consumer/install-lsp-servers/) for output formats
+and lifecycle details.
 
 ---
 
@@ -780,6 +790,11 @@ Created automatically by [`apm plugin init`](../cli/plugin/). Use [`apm install 
 ```bash
 apm install --dev owner/test-helpers
 ```
+
+Once this section contains an APM or MCP dependency, the root `apm.yml`
+becomes eligible and direct installs select the APM package layout over a
+co-located `plugin.json`. Keep the section empty when direct installs should
+select the plugin layout.
 
 Plain `apm install` (no flag) deploys both `dependencies` and
 `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation
@@ -812,7 +827,7 @@ The `compilation` key is OPTIONAL. It controls [`apm compile`](../cli/compile/) 
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
 | `chatmode` | `string` | unset | | Chatmode filter for compilation. |
 | `resolve_links` | `bool` | `true` | | Resolve relative Markdown links in primitives. |
-| `source_attribution` | `bool` | `false` | | Include source-file origin comments in compiled output (opt-in). |
+| `source_attribution` | `bool` | `false` | | Include the cosmetic compile annotations -- source-file origin comments, the APM version comment, and the generated-by footer -- in compiled output (opt-in). Applies to every compile target, including `AGENTS.md` targets. |
 | `exclude` | `list<string>` or `string` | `[]` | Glob patterns | Directories to skip during compilation (e.g. `apm_modules/**`). |
 | `placement` | `object` | unset | | Placement tuning. See Section 6.1. |
 | `agents_md` | `object` | unset | | AGENTS.md output tuning. See Section 6.2. |
@@ -837,15 +852,15 @@ compilation:
 
 ### 6.2. `compilation.agents_md`
 
-Controls how `apm compile` writes the root `AGENTS.md` output file. All fields are OPTIONAL; omitting the entire sub-object keeps the default full-overwrite behaviour. Use `managed_section` mode when your root `AGENTS.md` contains hand-written content you want to preserve across recompiles. In distributed compile mode, subdirectory `AGENTS.md` files remain fully APM-owned and are overwritten on each run.
+Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIONAL; omitting the entire sub-object keeps full-file replacement for APM-generated files and non-root placements. An unmarked project-root `AGENTS.md` is retained with a warning. Use `managed_section` mode to update an APM-owned block inside that hand-authored root file. In distributed compile mode, managed-section behavior applies to every generated `AGENTS.md` outside nested Git repositories.
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
-| `mode` | `enum<string>` | `full` | `full`, `managed_section` | `full` overwrites the entire file on every compile. `managed_section` replaces only the root `AGENTS.md` block between `start_marker` and `end_marker`, leaving surrounding content untouched. |
+| `mode` | `enum<string>` | `full` | `full`, `managed_section` | `full` replaces the entire APM-generated file on every compile but retains unmarked project-root files. `managed_section` replaces only the block between `start_marker` and `end_marker`, leaving surrounding content untouched. New distributed placements are created with a managed block for later recompiles. |
 | `start_marker` | `string` | `<!-- apm:start -->` | Non-empty, distinct from `end_marker` | Opening HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
 | `end_marker` | `string` | `<!-- apm:end -->` | Non-empty, distinct from `start_marker` | Closing HTML comment that delimits the APM-managed block. Required in the output file when `mode: managed_section`. |
 
-Both markers must appear **exactly once** in the file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content.
+Both markers must appear **exactly once** in every existing managed target file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content. Compile excludes primitives and distributed placements in a nested Git repository (a `.git` directory or gitfile), including descendants of that repository. Use `apm compile --dry-run` to preview the same eligible placement set before writing files.
 
 See [Managed-section mode](../../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
 
@@ -949,7 +964,7 @@ When `sourceBase` is set, relative package sources compose onto that base. For e
 
 A relative `source` may use arbitrary path depth. A value whose leading segments form a host-prefixed shape (`<host.tld>/<owner>/<repo>`) or a full `https://` URL is always treated as a per-entry override and ignores `sourceBase`. A value that looks like it is trying to name a host (a dotted, FQDN-like first segment) but does **not** form a valid override shape is rejected at parse time rather than silently composed onto the base -- this avoids a confused-deputy footgun. To target a different host, use an explicit host-prefixed override or a full `https://` URL instead of a relative source.
 
-`sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
+`sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Path segments may percent-encode UTF-8 bytes, such as `My%20Projects`. Empty, `.`, `..`, malformed escapes, encoded separators, and recursive encodings are refused. Full HTTPS `packages[].source` paths follow the same safe percent-encoding rules. APM keeps the encoded URL in generated output while using decoded ADO coordinates for repository and authentication lookup.
 
 Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps
 -- authenticate via the standard APM token chain -- see the

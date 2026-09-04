@@ -5,7 +5,7 @@ import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
+from unittest.mock import ANY, MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
@@ -273,7 +273,7 @@ class TestResolve:
         """Concurrent resolve() calls for the same key should populate cache once."""
         resolver = AuthResolver()
 
-        def _slow_resolve_token(host_info, org):
+        def _slow_resolve_token(host_info, org, **_kwargs):
             time.sleep(0.05)
             return ("cred-token", "git-credential-fill", "basic")
 
@@ -1067,11 +1067,13 @@ class TestBuildGitEnvBearerIsolation:
         value_slots = [v for k, v in env.items() if k.startswith("GIT_CONFIG_VALUE_")]
         assert any("fresh-jwt-from-az-cli" in v for v in value_slots)
 
-    def test_basic_scheme_still_sets_git_token(self):
-        """Non-bearer path keeps the legacy GIT_TOKEN behaviour."""
+    def test_github_basic_scheme_uses_header(self):
+        """GitHub PATs stay out of argv-compatible raw token channels."""
         with patch.dict(os.environ, {}, clear=True):
             env = AuthResolver._build_git_env("a-pat", scheme="basic", host_kind="github")
-        assert env.get("GIT_TOKEN") == "a-pat"
+        assert "GIT_TOKEN" not in env
+        values = [value for key, value in env.items() if key.startswith("GIT_CONFIG_VALUE_")]
+        assert any(value.startswith("Authorization: Basic ") for value in values)
 
     def test_ado_git_env_strips_raw_github_token_sources(self):
         """Only the selected ADO credential reaches the git subprocess."""
@@ -1099,6 +1101,21 @@ class TestBuildGitEnvBearerIsolation:
         encoded = header_values[0].split(" ", 2)[2]
         assert base64.b64decode(encoded).decode() == ":ado-pat"
 
+    def test_gitlab_git_env_uses_safe_basic_header(self):
+        """GitLab subprocesses receive a header, not a raw token variable."""
+        with patch.dict(os.environ, {"GIT_TOKEN": "stale-token"}, clear=True):
+            env = AuthResolver._build_git_env("glpat_fresh", host_kind="gitlab")
+
+        assert "GIT_TOKEN" not in env
+        header_values = [
+            value
+            for key, value in env.items()
+            if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization: Basic ")
+        ]
+        assert len(header_values) == 1
+        encoded = header_values[0].split(" ", 2)[2]
+        assert base64.b64decode(encoded).decode() == "oauth2:glpat_fresh"
+
     def test_bearer_env_preserves_retained_git_config_entries(self):
         """#2368: the bearer header must not clobber entries _clear_git_auth_env retained.
 
@@ -1116,11 +1133,13 @@ class TestBuildGitEnvBearerIsolation:
         }
         with patch.dict(os.environ, inherited, clear=False):
             env = AuthResolver._build_git_env("fresh-jwt", scheme="bearer", host_kind="ado")
-        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_COUNT"] == "3"
         assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
         assert env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
-        assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
-        assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer fresh-jwt"
+        assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert env["GIT_CONFIG_VALUE_1"] == ""
+        assert env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_2"] == "Authorization: Bearer fresh-jwt"
         assert not any("inherited-secret" in str(v) for v in env.values())
 
 
@@ -1206,7 +1225,7 @@ class TestResolvePortDiscrimination:
             resolver = AuthResolver()
             calls: list = []
 
-            def fake_cred(host, port=None):
+            def fake_cred(host, port=None, **_kwargs):
                 calls.append((host, port))
                 return f"tok-{host}-{port}"
 
@@ -1267,7 +1286,7 @@ class TestResolvePortDiscrimination:
 
         assert ctx.host_info.port == 7999
         assert ctx.host_info.display_name == "bitbucket.corp.com:7999"
-        mock_cred.assert_called_once_with("bitbucket.corp.com", port=7999)
+        mock_cred.assert_called_once_with("bitbucket.corp.com", port=7999, env=ANY)
 
     def test_resolve_for_dep_threads_port_from_https_url(self):
         """https://host:port/... also carries the port into the resolver."""
@@ -1284,7 +1303,7 @@ class TestResolvePortDiscrimination:
                 ctx = resolver.resolve_for_dep(dep)
 
         assert ctx.host_info.port == 7990
-        mock_cred.assert_called_once_with("bitbucket.corp.com", port=7990)
+        mock_cred.assert_called_once_with("bitbucket.corp.com", port=7990, env=ANY)
 
     def test_host_info_carries_port(self):
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "t"}, clear=True):
@@ -1431,6 +1450,30 @@ class TestTryWithFallbackPathDisambiguation:
 
                 resolver.try_with_fallback("github.com", op)
         assert seen_kwargs == [{"host": "github.com", "port": None, "path": None}]
+
+    def test_gitlab_auth_first_resolution_uses_repository_path(self):
+        """GitLab policy reads preserve credential.useHttpPath selection."""
+        resolver = AuthResolver()
+        host_info = AuthResolver.classify_host("gitlab.example.test", host_type="gitlab")
+        context = MagicMock(token=None, host_info=host_info, git_env={})
+
+        with patch.object(resolver, "resolve", return_value=context) as mock_resolve:
+            result = resolver.try_with_fallback(
+                "gitlab.example.test",
+                lambda token, env: "ok",
+                org="contoso",
+                path="contoso/apm-policy",
+                host_type="gitlab",
+            )
+
+        assert result == "ok"
+        mock_resolve.assert_called_once_with(
+            "gitlab.example.test",
+            "contoso",
+            port=None,
+            host_type="gitlab",
+            path="contoso/apm-policy",
+        )
 
 
 class TestGhCliShortCircuitsCredentialFill:

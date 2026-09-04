@@ -1,6 +1,8 @@
 client/node_modules/
 tests/.static-assets-*
 .github/extensions/
+!.apm/extensions/issue-monitor/dist/
+!.apm/extensions/issue-monitor/dist/**
 
 
 # APM dependencies

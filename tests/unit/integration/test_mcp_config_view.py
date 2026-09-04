@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -379,6 +380,116 @@ def test_manifestless_virtual_package_is_skipped(tmp_path: Path) -> None:
     assert view.problems == ()
 
 
+def test_manifestless_virtual_hook_package_is_skipped(tmp_path: Path) -> None:
+    """A matching virtual hook-package shape legitimately omits apm.yml."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        virtual_path="packages/git-hooks",
+        is_virtual=True,
+        package_type="hook_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text('{"hooks": {}}\n', encoding="ascii")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not (package_dir / "apm.yml").exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_missing_virtual_hook_package_records_problem(tmp_path: Path) -> None:
+    """Lock metadata alone cannot waive an entirely absent hook package."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        virtual_path="packages/git-hooks",
+        is_virtual=True,
+        package_type="hook_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not package_dir.exists()
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_hook_package_requires_virtual_subdirectory(tmp_path: Path) -> None:
+    """A hook shape alone cannot waive the manifest for a non-virtual package."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        package_type="hook_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text('{"hooks": {}}\n', encoding="ascii")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_virtual_hook_package_requires_matching_lock_type(
+    tmp_path: Path,
+) -> None:
+    """A detected virtual hook package cannot waive mismatched lock metadata."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        virtual_path="packages/git-hooks",
+        is_virtual=True,
+        package_type="claude_skill",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text('{"hooks": {}}\n', encoding="ascii")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_locked_virtual_hook_package_requires_matching_detected_type(
+    tmp_path: Path,
+) -> None:
+    """Hook lock metadata cannot waive a different manifestless package shape."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/hooks",
+        virtual_path="packages/git-hooks",
+        is_virtual=True,
+        package_type="hook_package",
+        depth=1,
+    )
+    package_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    package_dir.mkdir(parents=True)
+    (package_dir / "SKILL.md").write_text("# Not a hook package\n", encoding="ascii")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
 def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
     tmp_path: Path,
 ) -> None:
@@ -407,8 +518,76 @@ def test_manifestless_virtual_skill_skipped_when_modules_not_materialized(
     assert view.problems == ()
 
 
-def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) -> None:
-    """A Claude-skill filesystem shape does not waive non-virtual manifests."""
+def test_manifestless_repo_root_skill_is_skipped(tmp_path: Path) -> None:
+    """A materialized repo-root Claude skill ships no apm.yml (#2443)."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not (skill_dir / "apm.yml").exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_manifestless_repo_root_skill_skipped_when_not_materialized(
+    tmp_path: Path,
+) -> None:
+    """The locked type covers remote repo-root skills on a cold cache."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+    skill_dir = locked.to_dependency_ref().get_install_path(modules_root)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert not skill_dir.exists()
+    assert view.dependencies == ()
+    assert view.problems == ()
+
+
+def test_manifestless_repo_root_without_skill_shape_records_problem(
+    tmp_path: Path,
+) -> None:
+    """A claude_skill lock bit does not waive an invalid installed shape."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+    locked.to_dependency_ref().get_install_path(modules_root).mkdir(parents=True)
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_local_claude_skill_waived(tmp_path: Path) -> None:
+    """A local Claude-skill filesystem shape waives its missing manifest.
+
+    A local ``path:`` dependency is resolved directly from the filesystem
+    (it can point anywhere, including outside the repo, e.g. ``../sibling``)
+    rather than materialised into ``apm_modules/`` -- not a download target,
+    so the same defined-by-shape waiver that applies to virtual subdirectory
+    packages applies here too, gated by the on-disk shape actually being a
+    valid Claude skill (probed below, unlike the cold-cache fallback used
+    for virtual packages whose directory may not exist yet).
+    """
     root = _write_manifest(tmp_path, name="root")
     skill_dir = tmp_path / "packages" / "skill"
     skill_dir.mkdir(parents=True)
@@ -417,6 +596,44 @@ def test_manifestless_nonvirtual_claude_skill_records_problem(tmp_path: Path) ->
         repo_url="_local/skill",
         source="local",
         local_path="./packages/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert view.problems == ()
+
+
+def test_manifestless_local_package_without_skill_shape_records_problem(
+    tmp_path: Path,
+) -> None:
+    """A local lock bit does not waive an unrecognized on-disk shape."""
+    root = _write_manifest(tmp_path, name="root")
+    skill_dir = tmp_path / "packages" / "skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "not-a-skill.txt").write_text("nope\n", encoding="utf-8")
+    locked = LockedDependency(
+        repo_url="_local/skill",
+        source="local",
+        local_path="./packages/skill",
+        package_type="claude_skill",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+def test_manifestless_missing_local_claude_skill_records_problem(tmp_path: Path) -> None:
+    """A missing local directory cannot use the virtual cold-cache waiver."""
+    root = _write_manifest(tmp_path, name="root")
+    locked = LockedDependency(
+        repo_url="_local/missing-skill",
+        source="local",
+        local_path="./packages/missing-skill",
         package_type="claude_skill",
         depth=1,
     )
@@ -665,3 +882,87 @@ def test_unlocked_compat_excludes_dep_dev_mcp(tmp_path: Path) -> None:
         "transitive devDependencies.mcp do not propagate"
     ]
     assert all("dev-server" not in detail for detail in logger.details)
+
+
+def test_absent_git_apm_package_dep_is_skipped_on_cold_cache(tmp_path: Path) -> None:
+    """Absent non-local apm_package deps emit no problem on cold cache (#2456).
+
+    ``--frozen`` will hydrate these from the lock pins; the missing manifest
+    must be treated as benign rather than lockfile drift.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    # Remote git apm_package dep -- directory never created (cold cache)
+    locked = LockedDependency(
+        repo_url="owner/some-pkg",
+        resolved_ref="v1.0.0",
+        resolved_commit="a" * 40,
+        package_type="apm_package",
+        depth=1,
+    )
+    # Confirm the install path does not exist
+    assert not locked.to_dependency_ref().get_install_path(modules_root).exists()
+
+    view = _derive(root, _lock(locked), modules_root)
+
+    assert view.problems == (), "absent git apm_package dep must not produce a McpSourceProblem"
+    assert view.dependencies == ()
+
+
+def test_absent_local_apm_package_dep_still_records_problem(tmp_path: Path) -> None:
+    """Local apm_package deps with an absent manifest remain an error (#2456).
+
+    Only path-anchored (``source='local'``) packages are excluded from the
+    cold-cache exemption; they must exist on disk.
+    """
+    root = _write_manifest(tmp_path, name="root")
+    locked = LockedDependency(
+        repo_url="_local/missing-pkg",
+        source="local",
+        local_path="./packages/missing-pkg",
+        package_type="apm_package",
+        depth=1,
+    )
+
+    view = _derive(root, _lock(locked), tmp_path / "apm_modules")
+
+    assert len(view.problems) == 1
+    assert "manifest not found" in view.problems[0].message
+
+
+@pytest.mark.parametrize(
+    ("package_type", "expected_kind"),
+    (("apm_package", "APM package"), ("claude_skill", "Claude skill")),
+)
+def test_cold_cache_exemption_emits_verbose_trace(
+    tmp_path: Path,
+    package_type: str,
+    expected_kind: str,
+) -> None:
+    """Each remote cold-cache waiver explains its locked type in verbose mode."""
+    root = _write_manifest(tmp_path, name="root")
+    modules_root = tmp_path / "apm_modules"
+    locked = LockedDependency(
+        repo_url="owner/some-pkg",
+        resolved_ref="v1.0.0",
+        resolved_commit="a" * 40,
+        package_type=package_type,
+        depth=1,
+        name="some-pkg",
+    )
+    assert not locked.to_dependency_ref().get_install_path(modules_root).exists()
+
+    logger = _RecordingLogger()
+    view = CurrentMcpConfigView.derive(
+        root,
+        _lock(locked),
+        modules_root,
+        trust_transitive_self_defined=True,
+        logger=logger,
+    )
+
+    assert view.problems == ()
+    cold_cache_details = [d for d in logger.details if "cold cache" in d.lower()]
+    assert len(cold_cache_details) == 1
+    assert "some-pkg" in cold_cache_details[0]
+    assert expected_kind in cold_cache_details[0]

@@ -21,6 +21,14 @@ TABLE_HEADER = ("Decision / fact", "Canonical owner", "Owner path selectors")
 REPORT_VERSION = "1"
 EVIDENCE_VERSION = "2"
 DEFAULT_OWNER_TABLE = ".apm/instructions/architecture.instructions.md"
+REGISTRY_ROOT = ".apm/architecture/owners"
+REGISTRY_INDEX = f"{REGISTRY_ROOT}/index.json"
+REGISTRY_VERSION = 1
+_INDEX_FIELDS = frozenset({"version", "shards"})
+_SHARD_FIELDS = frozenset({"version", "owners"})
+_OWNER_FIELDS = frozenset({"id", "decision", "owner", "selectors", "guards"})
+_KEBAB_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_SHARD_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.json")
 OWNER_CLASSIFICATIONS = {
     "owner-extension",
     "new-owner",
@@ -57,9 +65,12 @@ class GateError(RuntimeError):
 class OwnerRow:
     """One parsed row from the canonical architecture owner table."""
 
+    id: str
     decision: str
     owner: str
     selectors: tuple[str, ...]
+    guards: tuple[str, ...] = ()
+    source_paths: tuple[str, ...] = ()
 
 
 @overload
@@ -72,7 +83,13 @@ def _git(repo_root: Path, *args: str, text: Literal[False]) -> bytes: ...
 
 def _git(repo_root: Path, *args: str, text: bool = True) -> str | bytes:
     """Run git in repo_root and return stdout, raising GateError on failure."""
-    command = [_git_executable(), "-C", str(repo_root), *args]
+    # Every operation in this gate resolves or reads an exact revision. Git
+    # replacement refs are local, mutable indirections: without this option a
+    # refs/replace entry can make ``show``/``diff``/``ls-tree`` inspect
+    # substituted content while ``rev-parse`` and the report still name the
+    # original commit SHA. Keep the hardening on the common standalone command
+    # path so no exact-revision operation can accidentally omit it.
+    command = [_git_executable(), "--no-replace-objects", "-C", str(repo_root), *args]
     completed = subprocess.run(  # noqa: S603 - fixed, PATH-resolved git executable, no shell
         command,
         check=False,
@@ -91,13 +108,13 @@ def _resolve_revision(repo_root: Path, revision: str) -> str:
     return resolved.strip()
 
 
-def _owner_table_at_revision(
+def _file_at_revision(
     repo_root: Path,
     revision_sha: str,
-    owner_table: str,
+    path: str,
 ) -> bytes:
-    """Read the canonical owner table from an exact commit."""
-    return _git(repo_root, "show", f"{revision_sha}:{owner_table}", text=False)
+    """Read one file from an exact commit."""
+    return _git(repo_root, "show", f"{revision_sha}:{path}", text=False)
 
 
 def _split_markdown_row(line: str) -> tuple[str, ...]:
@@ -112,13 +129,23 @@ def _validate_selector(selector: str) -> None:
     if not selector or not selector.isascii() or any(ord(char) < 32 for char in selector):
         raise GateError(f"invalid owner path selector: {selector!r}")
     path = PurePosixPath(selector)
-    if path.is_absolute() or ".." in path.parts or selector.startswith("./"):
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or "." in path.parts
+        or selector.startswith("./")
+        or "//" in selector
+    ):
         raise GateError(f"owner path selector must be repository-relative: {selector!r}")
     if selector.endswith("/") or "\\" in selector:
         raise GateError(f"owner path selector must use a file-oriented POSIX pattern: {selector!r}")
 
 
-def parse_owner_table(content: bytes) -> list[OwnerRow]:
+def parse_owner_table(
+    content: bytes,
+    *,
+    source_path: str = DEFAULT_OWNER_TABLE,
+) -> list[OwnerRow]:
     """Parse the one canonical owner table, rejecting any structural drift."""
     try:
         text = content.decode("ascii")
@@ -179,9 +206,237 @@ def parse_owner_table(content: bytes) -> list[OwnerRow]:
             selectors_seen.add(selector)
 
         decisions.add(decision)
-        rows.append(OwnerRow(decision=decision, owner=owner, selectors=selectors))
+        legacy_id = f"legacy-{hashlib.sha256(decision.encode('ascii')).hexdigest()}"
+        rows.append(
+            OwnerRow(
+                id=legacy_id,
+                decision=decision,
+                owner=owner,
+                selectors=selectors,
+                source_paths=(source_path,),
+            )
+        )
 
     return rows
+
+
+def _reject_duplicate_json_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build a JSON object while rejecting duplicate field names."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise GateError(f"duplicate JSON field: {key}")
+        result[key] = value
+    return result
+
+
+def _load_registry_json(content: bytes, label: str) -> Any:
+    """Decode one strict printable-ASCII registry document."""
+    try:
+        text = content.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise GateError(f"{label} must be printable ASCII") from exc
+    if any(ord(char) < 32 and char not in "\t\n\r" for char in text):
+        raise GateError(f"{label} must be printable ASCII")
+    try:
+        return json.loads(text, object_pairs_hook=_reject_duplicate_json_fields)
+    except json.JSONDecodeError as exc:
+        raise GateError(f"{label} is malformed JSON: {exc.msg}") from exc
+
+
+def _registry_mapping(value: Any, label: str) -> dict[str, Any]:
+    """Require one registry JSON object."""
+    if not isinstance(value, dict):
+        raise GateError(f"{label} must be an object")
+    return value
+
+
+def _registry_exact_fields(
+    value: dict[str, Any],
+    expected: frozenset[str],
+    label: str,
+) -> None:
+    """Reject unknown and missing registry fields."""
+    unknown = sorted(set(value) - expected)
+    missing = sorted(expected - set(value))
+    if unknown:
+        raise GateError(f"{label} has unknown fields: {', '.join(unknown)}")
+    if missing:
+        raise GateError(f"{label} is missing fields: {', '.join(missing)}")
+
+
+def _registry_version(value: Any, label: str) -> None:
+    """Require the exact supported registry version."""
+    if type(value) is not int or value != REGISTRY_VERSION:
+        raise GateError(f"{label}.version must be {REGISTRY_VERSION}")
+
+
+def _registry_string(value: Any, label: str) -> str:
+    """Require one non-empty trimmed printable-ASCII string."""
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise GateError(f"{label} must be a non-empty trimmed string")
+    if not value.isascii() or any(ord(char) < 32 or ord(char) > 126 for char in value):
+        raise GateError(f"{label} must be printable ASCII")
+    return value
+
+
+def _registry_string_array(value: Any, label: str) -> tuple[str, ...]:
+    """Require one non-empty duplicate-free registry string array."""
+    if not isinstance(value, list) or not value:
+        raise GateError(f"{label} must be a non-empty array")
+    items = tuple(_registry_string(item, f"{label}[]") for item in value)
+    if len(items) != len(set(items)):
+        raise GateError(f"{label} contains duplicates")
+    return items
+
+
+def _semantic_owner_hash(rows: list[OwnerRow]) -> str:
+    """Hash normalized ownership semantics, independent of formatting and order."""
+    owners = [
+        {
+            "id": row.id,
+            "decision": row.decision,
+            "owner": row.owner,
+            "selectors": sorted(row.selectors),
+            "guards": sorted(row.guards),
+        }
+        for row in sorted(rows, key=lambda item: item.id)
+    ]
+    normalized = {"version": REGISTRY_VERSION, "owners": owners}
+    encoded = json.dumps(
+        normalized,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _parse_owner_registry(
+    index_content: bytes,
+    shard_contents: dict[str, bytes],
+    tracked_files: list[str],
+) -> tuple[list[OwnerRow], str]:
+    """Parse and validate a complete exact-revision owner registry."""
+    index = _registry_mapping(_load_registry_json(index_content, "index.json"), "index.json")
+    _registry_exact_fields(index, _INDEX_FIELDS, "index.json")
+    _registry_version(index.get("version"), "index.json")
+    shards = _registry_string_array(index.get("shards"), "index.json.shards")
+    for shard in shards:
+        if _SHARD_NAME.fullmatch(shard) is None or shard == "index.json":
+            raise GateError(f"invalid registry shard name: {shard!r}")
+
+    listed = set(shards)
+    supplied = set(shard_contents)
+    missing = sorted(listed - supplied)
+    unlisted = sorted(supplied - listed)
+    if missing:
+        raise GateError(f"missing registry shards: {', '.join(missing)}")
+    if unlisted:
+        raise GateError(f"unlisted registry shards: {', '.join(unlisted)}")
+
+    rows: list[OwnerRow] = []
+    ids: set[str] = set()
+    decisions: set[str] = set()
+    selectors: set[str] = set()
+    guard_owners: dict[str, str] = {}
+    for shard in shards:
+        document = _registry_mapping(
+            _load_registry_json(shard_contents[shard], shard),
+            shard,
+        )
+        _registry_exact_fields(document, _SHARD_FIELDS, shard)
+        _registry_version(document.get("version"), shard)
+        raw_owners = document.get("owners")
+        if not isinstance(raw_owners, list) or not raw_owners:
+            raise GateError(f"{shard}.owners must be a non-empty array")
+        for index_number, raw_owner in enumerate(raw_owners):
+            label = f"{shard}.owners[{index_number}]"
+            item = _registry_mapping(raw_owner, label)
+            _registry_exact_fields(item, _OWNER_FIELDS, label)
+            owner_id = _registry_string(item.get("id"), f"{label}.id")
+            if _KEBAB_ID.fullmatch(owner_id) is None:
+                raise GateError(f"{label}.id must be a stable kebab-case ID")
+            decision = _registry_string(item.get("decision"), f"{label}.decision")
+            owner = _registry_string(item.get("owner"), f"{label}.owner")
+            row_selectors = _registry_string_array(
+                item.get("selectors"),
+                f"{label}.selectors",
+            )
+            guards = _registry_string_array(item.get("guards"), f"{label}.guards")
+            for guard in guards:
+                if _KEBAB_ID.fullmatch(guard) is None:
+                    raise GateError(f"{label}.guards[] must be a stable kebab-case ID")
+                assigned_owner = guard_owners.get(guard)
+                if assigned_owner is not None and assigned_owner != owner_id:
+                    raise GateError(
+                        f"guard ID assigned to multiple owners: {guard} "
+                        f"({assigned_owner}, {owner_id})"
+                    )
+                guard_owners[guard] = owner_id
+            if owner_id in ids:
+                raise GateError(f"duplicate canonical owner ID: {owner_id}")
+            if decision in decisions:
+                raise GateError(f"duplicate canonical owner decision: {decision}")
+            for selector in row_selectors:
+                _validate_selector(selector)
+                if selector in selectors:
+                    raise GateError(f"duplicate canonical owner selector: {selector}")
+                selectors.add(selector)
+            ids.add(owner_id)
+            decisions.add(decision)
+            rows.append(
+                OwnerRow(
+                    id=owner_id,
+                    decision=decision,
+                    owner=owner,
+                    selectors=row_selectors,
+                    guards=guards,
+                    source_paths=(f"{REGISTRY_ROOT}/{shard}",),
+                )
+            )
+
+    _validate_selector_matches(rows, tracked_files, source="registry")
+    rows.sort(key=lambda item: item.id)
+    return rows, _semantic_owner_hash(rows)
+
+
+def _ownership_at_revision(
+    repo_root: Path,
+    revision_sha: str,
+    owner_table: str,
+    tracked_files: list[str],
+) -> tuple[list[OwnerRow], str, bool]:
+    """Load JSON ownership when present, otherwise exact-revision legacy Markdown."""
+    prefix = f"{REGISTRY_ROOT}/"
+    registry_artifacts = [path for path in tracked_files if path.startswith(prefix)]
+    if REGISTRY_INDEX not in tracked_files:
+        if registry_artifacts:
+            raise GateError(
+                "canonical owner registry artifacts exist without "
+                f"{REGISTRY_INDEX}: {', '.join(registry_artifacts)}"
+            )
+        table_content = _file_at_revision(repo_root, revision_sha, owner_table)
+        rows = parse_owner_table(table_content, source_path=owner_table)
+        _validate_selector_matches(rows, tracked_files)
+        return rows, _semantic_owner_hash(rows), False
+
+    index_content = _file_at_revision(repo_root, revision_sha, REGISTRY_INDEX)
+    shard_paths = {
+        path
+        for path in registry_artifacts
+        if PurePosixPath(path).suffix.lower() == ".json" and path != REGISTRY_INDEX
+    }
+    shard_contents = {
+        path.removeprefix(prefix): _file_at_revision(repo_root, revision_sha, path)
+        for path in sorted(shard_paths)
+    }
+    rows, semantic_hash = _parse_owner_registry(
+        index_content,
+        shard_contents,
+        tracked_files,
+    )
+    return rows, semantic_hash, True
 
 
 def _changed_files(repo_root: Path, base_sha: str, head_sha: str) -> list[str]:
@@ -191,6 +446,8 @@ def _changed_files(repo_root: Path, base_sha: str, head_sha: str) -> list[str]:
         "diff",
         "--name-status",
         "-z",
+        "--find-copies=50%",
+        "--find-copies-harder",
         base_sha,
         head_sha,
         text=False,
@@ -227,12 +484,33 @@ def _tracked_files(repo_root: Path, head_sha: str) -> list[str]:
     return sorted(path.decode("utf-8") for path in output.split(b"\0") if path)
 
 
-def _validate_selector_matches(rows: list[OwnerRow], tracked_files: list[str]) -> None:
-    """Reject owner selectors that cannot match any file at the exact head."""
+def _validate_selector_matches(
+    rows: list[OwnerRow],
+    tracked_files: list[str],
+    *,
+    source: str = "canonical owner",
+) -> None:
+    """Reject stale selectors and files claimed by multiple owners."""
     for row in rows:
         for selector in row.selectors:
             if not any(fnmatch.fnmatchcase(path, selector) for path in tracked_files):
-                raise GateError(f"canonical owner selector matches no exact-head file: {selector}")
+                if source == "canonical owner":
+                    raise GateError(
+                        f"canonical owner selector matches no exact-head file: {selector}"
+                    )
+                raise GateError(f"{source} selector matches no exact-revision file: {selector}")
+
+    for path in tracked_files:
+        matching_owner_ids = sorted(
+            row.id
+            for row in rows
+            if any(fnmatch.fnmatchcase(path, selector) for selector in row.selectors)
+        )
+        if len(matching_owner_ids) > 1:
+            raise GateError(
+                f"{source} file matches selectors from multiple owners: "
+                f"{path} ({', '.join(matching_owner_ids)})"
+            )
 
 
 def _combined_owner_rows(
@@ -240,23 +518,58 @@ def _combined_owner_rows(
     head_rows: list[OwnerRow],
 ) -> list[OwnerRow]:
     """Combine exact-base and exact-head selectors without losing removed owners."""
-    base_by_decision = {row.decision: row for row in base_rows}
-    head_decisions = {row.decision for row in head_rows}
+    base_by_id = {row.id: row for row in base_rows}
+    head_ids = {row.id for row in head_rows}
     combined: list[OwnerRow] = []
     for head_row in head_rows:
-        base_row = base_by_decision.get(head_row.decision)
+        base_row = base_by_id.get(head_row.id)
         selectors = tuple(
             dict.fromkeys((*(() if base_row is None else base_row.selectors), *head_row.selectors))
         )
         combined.append(
             OwnerRow(
+                id=head_row.id,
                 decision=head_row.decision,
                 owner=head_row.owner,
                 selectors=selectors,
+                guards=head_row.guards,
+                source_paths=tuple(
+                    dict.fromkeys(
+                        (
+                            *(() if base_row is None else base_row.source_paths),
+                            *head_row.source_paths,
+                        )
+                    )
+                ),
             )
         )
-    combined.extend(row for row in base_rows if row.decision not in head_decisions)
+    combined.extend(row for row in base_rows if row.id not in head_ids)
     return combined
+
+
+def _changed_owner_ids(
+    base_rows: list[OwnerRow],
+    head_rows: list[OwnerRow],
+) -> set[str]:
+    """Return stable owner IDs whose registry semantics differ across revisions."""
+    base_by_id = {row.id: row for row in base_rows}
+    head_by_id = {row.id: row for row in head_rows}
+
+    def normalized(row: OwnerRow | None) -> tuple[Any, ...] | None:
+        if row is None:
+            return None
+        return (
+            row.decision,
+            row.owner,
+            tuple(sorted(row.selectors)),
+            tuple(sorted(row.guards)),
+        )
+
+    return {
+        owner_id
+        for owner_id in base_by_id.keys() | head_by_id.keys()
+        if normalized(base_by_id.get(owner_id)) != normalized(head_by_id.get(owner_id))
+    }
 
 
 def build_report(
@@ -268,36 +581,64 @@ def build_report(
     """Build the deterministic owner-touch report for an exact revision pair."""
     base_sha = _resolve_revision(repo_root, base)
     head_sha = _resolve_revision(repo_root, head)
-    base_table_content = _owner_table_at_revision(repo_root, base_sha, owner_table)
-    head_table_content = _owner_table_at_revision(repo_root, head_sha, owner_table)
-    base_rows = parse_owner_table(base_table_content)
-    head_rows = parse_owner_table(head_table_content)
-    _validate_selector_matches(base_rows, _tracked_files(repo_root, base_sha))
-    _validate_selector_matches(head_rows, _tracked_files(repo_root, head_sha))
+    base_files = _tracked_files(repo_root, base_sha)
+    head_files = _tracked_files(repo_root, head_sha)
+    base_rows, _, base_uses_registry = _ownership_at_revision(
+        repo_root,
+        base_sha,
+        owner_table,
+        base_files,
+    )
+    head_rows, head_semantic_hash, head_uses_registry = _ownership_at_revision(
+        repo_root,
+        head_sha,
+        owner_table,
+        head_files,
+    )
+    if base_uses_registry and not head_uses_registry:
+        raise GateError("head revision removed the canonical owner registry")
     owner_rows = _combined_owner_rows(base_rows, head_rows)
+    changed_owner_ids = _changed_owner_ids(base_rows, head_rows)
     changed_files = _changed_files(repo_root, base_sha, head_sha)
+    changed_file_set = set(changed_files)
 
     touched_owners: list[dict[str, Any]] = []
+    touched_indexes: dict[tuple[str, str, tuple[str, ...]], int] = {}
     for row in owner_rows:
-        matched_files = sorted(
+        matched_files = {
             path
             for path in changed_files
             if any(fnmatch.fnmatchcase(path, selector) for selector in row.selectors)
-        )
+        }
+        if row.id in changed_owner_ids:
+            # Metadata-only edits are owner touches too. Attribute only the
+            # exact artifact(s) that carried this row at base/head -- the
+            # legacy Markdown table or the row's JSON shard -- rather than
+            # every changed registry artifact.
+            matched_files.update(changed_file_set.intersection(row.source_paths))
         if matched_files:
+            display_key = (row.decision, row.owner, row.selectors)
+            existing_index = touched_indexes.get(display_key)
+            if existing_index is not None:
+                existing_files = touched_owners[existing_index]["matched_files"]
+                touched_owners[existing_index]["matched_files"] = sorted(
+                    set(existing_files) | matched_files
+                )
+                continue
+            touched_indexes[display_key] = len(touched_owners)
             touched_owners.append(
                 {
                     "decision": row.decision,
                     "owner": row.owner,
                     "selectors": list(row.selectors),
-                    "matched_files": matched_files,
+                    "matched_files": sorted(matched_files),
                 }
             )
 
     return {
         "version": REPORT_VERSION,
         "owner_table": owner_table,
-        "owner_table_sha256": hashlib.sha256(head_table_content).hexdigest(),
+        "owner_table_sha256": head_semantic_hash,
         "base_sha": base_sha,
         "head_sha": head_sha,
         "changed_files": changed_files,

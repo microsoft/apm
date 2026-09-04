@@ -268,6 +268,7 @@ def remove_stale_deployed_files(
     recorded_hashes: dict[str, str] | None = None,
     failed_path_retained: bool = True,
     user_scope: bool = False,
+    allow_final_symlink: bool = False,
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
@@ -386,12 +387,13 @@ def remove_stale_deployed_files(
                 project_root,
                 targets=targets,
                 user_scope=user_scope,
+                allow_final_symlink=allow_final_symlink,
             ):
                 result.skipped_unmanaged.append(stale_path)
                 continue
             stale_target = project_root / stale_path
 
-        if not stale_target.exists():
+        if not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink()):
             # File already gone -- treat as cleaned (no-op success).
             continue
 
@@ -426,6 +428,17 @@ def remove_stale_deployed_files(
         # etc.) we keep it rather than risk destroying user work.
         expected_hash = recorded_hashes.get(stale_path)
         if expected_hash:
+            if allow_final_symlink and stale_target.is_symlink():
+                result.skipped_user_edit.append(stale_path)
+                diagnostics.warn(
+                    (
+                        f"Skipped removing {stale_path}: the deployed file was "
+                        "replaced by a symlink. Inspect the link and delete it "
+                        "manually if no longer needed."
+                    ),
+                    package=dep_key,
+                )
+                continue
             try:
                 from ..utils.content_hash import compute_file_hash
 

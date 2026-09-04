@@ -57,6 +57,7 @@ _INSTALL_ARGS = (
     "--parallel-downloads",
     "0",
 )
+_FROZEN_INSTALL_ARGS = (*_INSTALL_ARGS, "--frozen")
 _LOCK_ARGS = (
     "lock",
     "--target",
@@ -92,6 +93,7 @@ class _MatrixRow:
     transition_source: str | None = None
     transition_rewrite_urls: tuple[str, ...] = ()
     expected_port: int | None = None
+    manifest_style: str = "object"
 
 
 _ROWS = (
@@ -207,6 +209,49 @@ _ROWS = (
     ),
 )
 
+_GITLAB_DEEP_BOUNDARY_ROWS = (
+    _MatrixRow(
+        id="gitlab-deep-https-string",
+        source="https://gitlab.com/ai/platform/collections/consume-matrix.git",
+        rewrite_urls=("https://gitlab.com/ai/platform/collections/consume-matrix.git",),
+        expected_host="gitlab.com",
+        expected_kind="gitlab",
+        expected_repo="ai/platform/collections/consume-matrix",
+        ref_selector="second-sha",
+        manifest_style="string",
+    ),
+    _MatrixRow(
+        id="gitlab-deep-scp-string",
+        source="git@gitlab.com:ai/platform/collections/consume-matrix.git",
+        rewrite_urls=("git@gitlab.com:ai/platform/collections/consume-matrix.git",),
+        expected_host="gitlab.com",
+        expected_kind="gitlab",
+        expected_repo="ai/platform/collections/consume-matrix",
+        ref_selector="second-sha",
+        manifest_style="string",
+    ),
+    _MatrixRow(
+        id="gitlab-deep-https-object",
+        source="https://code.example.invalid/ai/platform/collections/consume-matrix.git",
+        rewrite_urls=("https://code.example.invalid/ai/platform/collections/consume-matrix.git",),
+        expected_host="code.example.invalid",
+        expected_kind="gitlab",
+        expected_repo="ai/platform/collections/consume-matrix",
+        ref_selector="second-sha",
+        host_type="gitlab",
+    ),
+    _MatrixRow(
+        id="gitlab-deep-scp-object",
+        source="git@code.example.invalid:ai/platform/collections/consume-matrix.git",
+        rewrite_urls=("git@code.example.invalid:ai/platform/collections/consume-matrix.git",),
+        expected_host="code.example.invalid",
+        expected_kind="gitlab",
+        expected_repo="ai/platform/collections/consume-matrix",
+        ref_selector="second-sha",
+        host_type="gitlab",
+    ),
+)
+
 
 @dataclass(frozen=True)
 class _Scenario:
@@ -280,7 +325,9 @@ def _reference_for(
     raise AssertionError(f"Unknown ref selector: {row.ref_selector}")
 
 
-def _manifest_entry(row: _MatrixRow, source: str, reference: str) -> dict[str, str]:
+def _manifest_entry(row: _MatrixRow, source: str, reference: str) -> str | dict[str, str]:
+    if row.manifest_style == "string":
+        return f"{source}#{reference}"
     entry = {"git": source, "ref": reference}
     if row.host_type:
         entry["type"] = row.host_type
@@ -528,6 +575,103 @@ def test_immutable_source_ref_rows_resolve_deploy_audit_and_converge(
     record_property("scenario_seconds", round(time.monotonic() - started, 3))
 
 
+@pytest.mark.lifecycle_smoke
+@pytest.mark.parametrize("row", _GITLAB_DEEP_BOUNDARY_ROWS, ids=lambda row: row.id)
+def test_gitlab_deep_repository_boundary(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    record_property: Callable[[str, object], None],
+    row: _MatrixRow,
+) -> None:
+    """Deep GitLab paths pack, install, and replay frozen without state drift."""
+    started = time.monotonic()
+    scenario = _create_scenario(tmp_path / row.id, row)
+    _run_initial_contract(row, scenario, apm_binary_path=apm_binary_path)
+    lock_before = (scenario.project_root / "apm.lock.yaml").read_bytes()
+    deployed_before = (scenario.project_root / _SKILL_PATH).read_bytes()
+
+    pack_result = _runner(apm_binary_path).run(
+        ("pack", "--offline"),
+        scenario_id=f"{row.id}-pack",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(pack_result)
+    frozen_result = _runner(apm_binary_path).run(
+        _FROZEN_INSTALL_ARGS,
+        scenario_id=f"{row.id}-frozen",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+    _assert_success(frozen_result)
+    _assert_lock_provenance(
+        row,
+        scenario,
+        expected_source=row.source,
+        expected_ref=scenario.initial_ref,
+        expected_commit=scenario.expected_commit,
+    )
+    _assert_deployment(scenario, expected_skill_bytes=scenario.expected_skill_bytes)
+    assert (scenario.project_root / "apm.lock.yaml").read_bytes() == lock_before
+    assert (scenario.project_root / _SKILL_PATH).read_bytes() == deployed_before
+    record_property("scenario_seconds", round(time.monotonic() - started, 3))
+
+
+@pytest.mark.lifecycle_smoke
+@pytest.mark.parametrize(
+    ("dependency", "expected_error"),
+    (
+        (
+            "https://github.com/org/repo.git/collections/security",
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            {"git": "git@github.com:org/repo/collections/security.git"},
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            "https://gitlab.com/ai/platform/collections/consume-matrix.git/collections/security",
+            "A subpath cannot be embedded in a git URL",
+        ),
+        (
+            "https://github.com/org/repo/%2563ollections/security",
+            "residual percent-encoding",
+        ),
+        (
+            "https://github.com/org/repo/%2Fcollections/security",
+            "must not decode to a path separator",
+        ),
+    ),
+)
+def test_embedded_primitive_tail_fails_before_git_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    dependency: str | dict[str, str],
+    expected_error: str,
+) -> None:
+    """Malformed explicit paths fail before lock, cache, or module writes."""
+    row = _GITLAB_DEEP_BOUNDARY_ROWS[0]
+    scenario = _create_scenario(tmp_path / "invalid-embedded-tail", row)
+    manifest_path = scenario.project_root / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["dependencies"]["apm"] = [dependency]
+    dump_yaml(manifest, manifest_path)
+
+    result = _runner(apm_binary_path).run(
+        _LOCK_ARGS,
+        scenario_id="gitlab-deep-repository-boundary-invalid",
+        cwd=scenario.project_root,
+        env=scenario.environment,
+    )
+
+    assert result.returncode != 0
+    output = " ".join((result.stdout + result.stderr).split())
+    assert expected_error in output
+    assert not (scenario.project_root / "apm.lock.yaml").exists()
+    assert not (scenario.project_root / "apm_modules").exists()
+    assert list(scenario.isolated.cache_root.iterdir()) == []
+
+
 def test_warm_cache_only_audit_replays_after_origin_becomes_unavailable(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -634,6 +778,7 @@ def test_source_ref_transition_applies_once_and_invalid_twin_preserves_state(
     assert invalid.returncode == 1
     invalid_output = " ".join((invalid.stdout + invalid.stderr).split())
     assert "Failed to download dependency" in invalid_output
+    assert "existing installation remains active" in invalid_output
     assert "No install transaction changes were committed." in invalid_output
     assert (scenario.project_root / "apm.lock.yaml").read_bytes() == lock_bytes
     assert (scenario.project_root / _SKILL_PATH).read_bytes() == deployed_bytes

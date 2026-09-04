@@ -105,6 +105,35 @@ class TestPerDepRegistryCreatesSeparateOperations:
         assert ops_cls.call_count == 1
         assert ops_cls.call_args == call(registry_url=url)
 
+    def test_equivalent_custom_urls_share_one_instance(self):
+        canonical_url = "https://private.registry.internal"
+        deps = [
+            _make_dep("server-a", registry=f"  {canonical_url}/  "),
+            _make_dep("server-b", registry=canonical_url),
+            _make_dep("server-c", registry="HTTPS://PRIVATE.REGISTRY.INTERNAL:443"),
+        ]
+        ops_mock = _make_operations_mock(["server-a", "server-b", "server-c"])
+
+        with (
+            patch(_OPS_PATH, return_value=ops_mock) as ops_cls,
+            patch(_INTEGRATOR_PATH) as integrator_mock,
+        ):
+            integrator_mock._apply_overlay.return_value = None
+            integrator_mock._detect_mcp_config_drift.return_value = []
+            integrator_mock._append_drifted_to_install_list.return_value = None
+            integrator_mock._install_for_runtime.return_value = True
+
+            from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+            run_mcp_install(
+                mcp_deps=deps,
+                runtime="copilot",
+                logger=MagicMock(),
+            )
+
+        assert ops_cls.call_count == 1
+        assert ops_cls.call_args == call(registry_url=canonical_url)
+
 
 # ---------------------------------------------------------------------------
 # test_default_registry_deps_use_no_url

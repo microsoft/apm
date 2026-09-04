@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -634,6 +635,10 @@ class TestRunMcpInstall:
                 "apm_cli.install.mcp.command.MCPIntegrator.install",
                 return_value=0,
             ) as install_mcp,
+            patch(
+                "apm_cli.install.mcp.command.MCPIntegrator.prevalidate_registry_dependencies",
+                return_value={"my-server": {"id": "my-server-id"}},
+            ),
             patch("apm_cli.install.mcp.command.MCPIntegrator.update_lockfile"),
         ):
             run_mcp_install(
@@ -674,30 +679,133 @@ class TestRunMcpInstall:
             patch(
                 "apm_cli.install.mcp.command.add_mcp_to_apm_yml",
                 return_value=("added", None),
-            ),
+            ) as add_mcp,
             patch("apm_cli.install.mcp.command.warn_ssrf_url"),
             patch("apm_cli.install.mcp.command.warn_shell_metachars"),
             patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", False),
         ):
-            run_mcp_install(
-                mcp_name="registry-server",
-                transport=None,
-                url=None,
-                env_pairs=None,
-                header_pairs=None,
-                mcp_version=None,
-                command_argv=None,
-                dev=False,
-                force=False,
-                runtime=None,
-                exclude=None,
-                logger=logger,
-                apm_dir=tmp_path,
-                scope=None,
-            )
+            with pytest.raises(click.ClickException, match="validation is unavailable"):
+                run_mcp_install(
+                    mcp_name="registry-server",
+                    transport=None,
+                    url=None,
+                    env_pairs=None,
+                    header_pairs=None,
+                    mcp_version=None,
+                    command_argv=None,
+                    dev=False,
+                    force=False,
+                    runtime=None,
+                    exclude=None,
+                    logger=logger,
+                    apm_dir=tmp_path,
+                    scope=None,
+                )
 
-        logger.success.assert_called_once()
-        assert "Added" in logger.success.call_args[0][0]
+        add_mcp.assert_not_called()
+        logger.success.assert_not_called()
+
+    def test_direct_registry_prevalidation_failure_is_already_rendered(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.install.errors import InstallFailureAlreadyRendered
+        from apm_cli.install.mcp.command import run_mcp_install
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(_APM_YML_MINIMAL, encoding="utf-8")
+        logger = self._make_logger()
+
+        with (
+            patch(
+                "apm_cli.install.mcp.command.build_mcp_entry",
+                return_value=("registry-server", False),
+            ),
+            patch(
+                "apm_cli.install.mcp.command.add_mcp_to_apm_yml",
+                return_value=("added", None),
+            ) as add_mcp,
+            patch("apm_cli.install.mcp.command.warn_ssrf_url"),
+            patch("apm_cli.install.mcp.command.warn_shell_metachars"),
+            patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", True),
+            patch(
+                "apm_cli.install.mcp.command.MCPIntegrator.prevalidate_registry_dependencies",
+                side_effect=RuntimeError(
+                    "Could not reach MCP registry at https://registry.example "
+                    "while validating server 'registry-server'; verify reachability."
+                ),
+            ),
+        ):
+            with pytest.raises(InstallFailureAlreadyRendered):
+                run_mcp_install(
+                    mcp_name="registry-server",
+                    transport=None,
+                    url=None,
+                    env_pairs=None,
+                    header_pairs=None,
+                    mcp_version=None,
+                    command_argv=None,
+                    dev=False,
+                    force=False,
+                    runtime=None,
+                    exclude=None,
+                    logger=logger,
+                    apm_dir=tmp_path,
+                    scope=None,
+                )
+
+        add_mcp.assert_not_called()
+        logger.error.assert_called_once()
+        assert "No state was changed" in logger.error.call_args[0][0]
+        logger.success.assert_not_called()
+
+    def test_direct_registry_missing_server_failure_is_already_rendered(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.install.errors import InstallFailureAlreadyRendered
+        from apm_cli.install.mcp.command import run_mcp_install
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(_APM_YML_MINIMAL, encoding="utf-8")
+        logger = self._make_logger()
+
+        with (
+            patch(
+                "apm_cli.install.mcp.command.build_mcp_entry",
+                return_value=("missing-server", False),
+            ),
+            patch(
+                "apm_cli.install.mcp.command.add_mcp_to_apm_yml",
+                return_value=("added", None),
+            ) as add_mcp,
+            patch("apm_cli.install.mcp.command.warn_ssrf_url"),
+            patch("apm_cli.install.mcp.command.warn_shell_metachars"),
+            patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", True),
+            patch(
+                "apm_cli.install.mcp.command.MCPIntegrator.prevalidate_registry_dependencies",
+                side_effect=RuntimeError("Cannot install 1 missing server(s)"),
+            ),
+        ):
+            with pytest.raises(InstallFailureAlreadyRendered):
+                run_mcp_install(
+                    mcp_name="missing-server",
+                    transport=None,
+                    url=None,
+                    env_pairs=None,
+                    header_pairs=None,
+                    mcp_version=None,
+                    command_argv=None,
+                    dev=False,
+                    force=False,
+                    runtime=None,
+                    exclude=None,
+                    logger=logger,
+                    apm_dir=tmp_path,
+                    scope=None,
+                )
+
+        add_mcp.assert_not_called()
+        logger.verbose_detail.assert_not_called()
+        logger.success.assert_not_called()
 
     def test_replaced_dict_entry_no_deps_available(self, tmp_path: Path) -> None:
         from apm_cli.install.mcp.command import run_mcp_install

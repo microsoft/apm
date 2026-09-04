@@ -23,6 +23,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.install.locking import serialized_lifecycle
+
 from ..core.command_logger import CommandLogger
 from ..policy import outcome_routing as policy_outcomes
 from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
@@ -131,6 +133,7 @@ def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> 
     help="Persist to your personal ~/.apm/config.json (lowest authority) "
     "instead of the shared project apm.yml.",
 )
+@serialized_lifecycle
 def approve_cmd(
     packages: tuple[str, ...],
     pending: bool,
@@ -139,7 +142,7 @@ def approve_cmd(
     list_decisions: bool,
     user_scope: bool,
 ) -> None:
-    """Approve executable primitives (hooks, MCP, bin, canvas) for packages.
+    """Approve executable primitives (hooks, MCP, LSP, bin, canvas) for packages.
 
     By default writes to the project ``apm.yml`` ``executables.allow`` block
     (committed). Use ``--user`` to record a personal grant in
@@ -194,6 +197,7 @@ def approve_cmd(
     is_flag=True,
     help="Record the deny in your personal ~/.apm/config.json instead of apm.yml.",
 )
+@serialized_lifecycle
 def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
     """Deny executable primitives for packages (a narrowing override).
 
@@ -221,7 +225,9 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
                     break
         if decl is None:
             # Allow denying a package that is not (or no longer) installed.
-            deny[pkg] = {t: True for t in ("hooks", "mcp", "bin", "canvas")}
+            from ..security.executables import ALL_EXEC_TYPES
+
+            deny[pkg] = dict.fromkeys(ALL_EXEC_TYPES, True)
             allow.pop(_find_matching_key(allow, pkg) or pkg, None)
             _rich_info(f"Denied {pkg} (all executable types)", symbol="info")
             changed += 1
@@ -485,6 +491,57 @@ def scan_installed_executable_packages(manifest: Path) -> list:
     if not apm_modules.is_dir():
         return results
 
+    from ..deps.lockfile import LockFile, get_lockfile_path
+
+    lockfile = LockFile.read(get_lockfile_path(manifest.parent))
+    if lockfile is not None:
+        from ..deps.path_anchoring import LocalResolutionError, resolve_local_dep_dirs
+        from ..utils.yaml_io import load_yaml
+
+        try:
+            local_dependency_dirs = resolve_local_dep_dirs(lockfile, manifest.parent)
+        except LocalResolutionError as exc:
+            raise click.ClickException(
+                "Cannot inspect installed packages because apm.lock.yaml has "
+                f"invalid local dependency ancestry: {exc}. Run 'apm install' "
+                "to regenerate the lockfile, then retry."
+            ) from exc
+        for locked in lockfile.get_package_dependencies():
+            try:
+                package_dir = (
+                    local_dependency_dirs[locked.get_unique_key()]
+                    if locked.source == "local"
+                    else locked.to_dependency_ref().get_install_path(apm_modules)
+                )
+            except (OSError, ValueError):
+                continue
+            if not package_dir.is_dir():
+                continue
+            name = locked.name or package_dir.name
+            version = str(locked.version or "")
+            package_manifest = package_dir / "apm.yml"
+            manifest_data = None
+            if package_manifest.is_symlink():
+                manifest_data = {}
+            elif package_manifest.is_file():
+                try:
+                    manifest_data = load_yaml(package_manifest)
+                    if isinstance(manifest_data, dict):
+                        name = manifest_data.get("name", name)
+                        version = str(manifest_data.get("version", version))
+                except Exception:
+                    manifest_data = {}
+            declaration = scan_package_executables(
+                package_dir,
+                name,
+                version,
+                approval_identity=locked.get_unique_key(),
+                manifest_data=manifest_data,
+            )
+            if declaration.has_executables:
+                results.append(declaration)
+        return results
+
     def _scan_dir(base: Path) -> None:
         for pkg_dir in sorted(base.iterdir()):
             if not pkg_dir.is_dir() or pkg_dir.name.startswith("."):
@@ -496,18 +553,26 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             pkg_yml = pkg_dir / "apm.yml"
             name = pkg_dir.name
             version = ""
-            if pkg_yml.is_file():
+            manifest_data = None
+            if pkg_yml.is_symlink():
+                manifest_data = {}
+            elif pkg_yml.is_file():
                 try:
                     from ..utils.yaml_io import load_yaml
 
-                    data = load_yaml(pkg_yml)
-                    if isinstance(data, dict):
-                        name = data.get("name", name)
-                        version = str(data.get("version", ""))
+                    manifest_data = load_yaml(pkg_yml)
+                    if isinstance(manifest_data, dict):
+                        name = manifest_data.get("name", name)
+                        version = str(manifest_data.get("version", ""))
                 except Exception:
-                    pass
+                    manifest_data = {}
 
-            decl = scan_package_executables(pkg_dir, name, version)
+            decl = scan_package_executables(
+                pkg_dir,
+                name,
+                version,
+                manifest_data=manifest_data,
+            )
             if decl.has_executables:
                 results.append(decl)
 

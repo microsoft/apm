@@ -228,8 +228,10 @@ def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
     assert parse_targets_field({"targets": targets}) == targets
 
 
-def test_manifest_targets_from_target_option_filters_non_manifest_targets():
-    assert manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) is None
+def test_manifest_targets_from_target_option_keeps_stable_hermes_only():
+    assert manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) == [
+        "hermes"
+    ]
 
 
 def test_manifest_targets_from_target_option_preserves_grok_build():

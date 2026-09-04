@@ -13,6 +13,7 @@ backward compatibility with existing tests) and
 
 import contextlib
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -47,7 +48,21 @@ def write_text_lf(path: Path, data: str) -> None:
     path.write_text(normalize_crlf_to_lf(data), encoding="utf-8", newline="")
 
 
-def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None) -> None:
+def _validate_temp_name_fragment(fragment: str, parameter: str) -> None:
+    """Reject temp-name fragments that could escape the target directory."""
+    if "\x00" in fragment or "/" in fragment or "\\" in fragment or ":" in fragment:
+        raise ValueError(f"{parameter} must be a portable filename fragment")
+
+
+def atomic_write_text(
+    path: Path,
+    data: str,
+    *,
+    new_file_mode: int | None = None,
+    normalize_line_endings: bool = True,
+    temp_prefix: str = "apm-atomic-",
+    temp_suffix: str = "",
+) -> None:
     """Atomically write ``data`` (UTF-8) to ``path``.
 
     The temp file is created in ``path.parent`` so the eventual
@@ -62,20 +77,36 @@ def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None
     ignored on platforms where ``os.fchmod`` is unavailable
     (e.g. Windows), where POSIX mode bits are not enforced anyway.
 
+    By default CRLF sequences are normalized to LF for deterministic
+    generated output. Callers preserving hand-authored byte ranges can
+    disable normalization with ``normalize_line_endings=False``.
+
+    ``temp_prefix`` and ``temp_suffix`` let compatibility wrappers retain
+    an established sibling-file naming contract without reimplementing the
+    atomic write.
+
     On any failure, the temp file is removed and the original target
     file (if any) remains untouched.
     """
     existed = path.exists()
-    fd, tmp_name = tempfile.mkstemp(prefix="apm-atomic-", dir=str(path.parent))
+    existing_mode = stat.S_IMODE(path.stat().st_mode) if existed else None
+    _validate_temp_name_fragment(temp_prefix, "temp_prefix")
+    _validate_temp_name_fragment(temp_suffix, "temp_suffix")
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=temp_prefix,
+        suffix=temp_suffix,
+        dir=str(path.parent),
+    )
     fd_wrapped = False
     try:
-        if new_file_mode is not None and not existed and hasattr(os, "fchmod"):
+        mode = existing_mode if existed else new_file_mode
+        if mode is not None and hasattr(os, "fchmod"):
             with contextlib.suppress(OSError):
-                os.fchmod(fd, new_file_mode)
+                os.fchmod(fd, mode)
         fh = os.fdopen(fd, "w", encoding="utf-8", newline="")
         fd_wrapped = True
         with fh:
-            fh.write(normalize_crlf_to_lf(data))
+            fh.write(normalize_crlf_to_lf(data) if normalize_line_endings else data)
         _replace_atomic_file(tmp_name, path)
     except Exception:
         if not fd_wrapped:

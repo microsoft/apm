@@ -18,6 +18,7 @@ from apm_cli.security.executables import (
     build_exec_trust_context,
     load_user_executables,
     parse_project_executables,
+    read_bundle_allow_executables,
     save_user_executables,
 )
 
@@ -84,6 +85,50 @@ class TestUserExecutablesStore:
         assert allow.get("owner/repo", {}).get("hooks") is True
         # net-new control-surface files = 0: the legacy file is removed.
         assert not legacy.exists()
+
+
+class TestReadBundleAllowExecutables:
+    def test_canonical_empty_allow_enables_bundle_gate(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "config.json")
+        monkeypatch.setattr(ex, "_legacy_approvals_path", lambda: tmp_path / "approvals.yml")
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text("executables:\n  allow: {}\n", encoding="utf-8")
+
+        assert read_bundle_allow_executables(manifest, logger=None) == {}
+
+    def test_canonical_allow_is_accepted_for_bundle_gate(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "config.json")
+        monkeypatch.setattr(ex, "_legacy_approvals_path", lambda: tmp_path / "approvals.yml")
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text(
+            "executables:\n  allow:\n    test-plugin:\n      canvas: true\n",
+            encoding="utf-8",
+        )
+
+        assert read_bundle_allow_executables(manifest, logger=None) == {
+            "test-plugin": {"canvas": True}
+        }
+
+    def test_dry_run_bundle_read_does_not_migrate_legacy_user_approvals(
+        self, tmp_path, monkeypatch
+    ):
+        config = tmp_path / "config.json"
+        legacy = tmp_path / "approvals.yml"
+        monkeypatch.setattr(ex, "_user_config_file", lambda: config)
+        monkeypatch.setattr(ex, "_legacy_approvals_path", lambda: legacy)
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text("executables:\n  allow: {}\n", encoding="utf-8")
+        legacy.write_text("owner/repo:\n  hooks: true\n", encoding="utf-8")
+
+        result = read_bundle_allow_executables(
+            manifest,
+            logger=None,
+            migrate_user_legacy=False,
+        )
+
+        assert result == {"owner/repo": {"hooks": True}}
+        assert legacy.exists()
+        assert not config.exists()
 
 
 class TestBuildExecTrustContext:

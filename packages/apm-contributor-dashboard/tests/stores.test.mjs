@@ -157,22 +157,22 @@ describe("Solid.js stores", () => {
   // Polling interval registration
   // -------------------------------------------------------------------------
 
-  describe("30-second polling interval", () => {
-    it("registers exactly two intervals with a 30 000 ms period (one per store)", () => {
-      const thirtySecIntervals = capturedIntervals.filter(
-        (i) => i.ms === 30_000,
+  describe("15-minute polling interval", () => {
+    it("registers exactly two intervals with a 900 000 ms period (one per store)", () => {
+      const refreshIntervals = capturedIntervals.filter(
+        (i) => i.ms === 900_000,
       );
       assert.strictEqual(
-        thirtySecIntervals.length,
+        refreshIntervals.length,
         2,
-        `Expected 2 x 30 s intervals, got ${thirtySecIntervals.length}`,
+        `Expected 2 x 15 minute intervals, got ${refreshIntervals.length}`,
       );
     });
 
     it("issues store interval advances pollTick and triggers a new /api/issues fetch", async () => {
       // The issues store is imported first, so capturedIntervals[0] is its interval.
       const issuesInterval = capturedIntervals.filter(
-        (i) => i.ms === 30_000,
+        (i) => i.ms === 900_000,
       )[0];
       assert.ok(issuesInterval, "issues store interval should be registered");
 
@@ -190,7 +190,7 @@ describe("Solid.js stores", () => {
     it("prs store interval advances pollTick and triggers a new /api/prs fetch", async () => {
       // The prs store is imported second, so capturedIntervals[1] is its interval.
       const prsInterval = capturedIntervals.filter(
-        (i) => i.ms === 30_000,
+        (i) => i.ms === 900_000,
       )[1];
       assert.ok(prsInterval, "prs store interval should be registered");
 
@@ -213,7 +213,7 @@ describe("Solid.js stores", () => {
   describe("interval isolation", () => {
     it("firing the issues interval does NOT add a /api/prs fetch", async () => {
       const issuesInterval = capturedIntervals.filter(
-        (i) => i.ms === 30_000,
+        (i) => i.ms === 900_000,
       )[0];
       const prsBefore = countFetchCalls("/api/prs");
       issuesInterval.fn();
@@ -229,7 +229,7 @@ describe("Solid.js stores", () => {
 
     it("firing the prs interval does NOT add a /api/issues fetch", async () => {
       const prsInterval = capturedIntervals.filter(
-        (i) => i.ms === 30_000,
+        (i) => i.ms === 900_000,
       )[1];
       const issuesBefore = countFetchCalls("/api/issues");
       prsInterval.fn();

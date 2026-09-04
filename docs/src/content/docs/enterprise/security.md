@@ -124,6 +124,7 @@ These controls make the decision visible, but they do **not** make HTTP safe:
 - HTTP has no transport encryption or server authentication. A machine-in-the-middle can modify repository contents or refs in transit.
 - On the first HTTP fetch (or any update fetched over HTTP), the lockfile's `resolved_commit` and `content_hash` come from that same untrusted channel. They improve replay detection later, but they do not establish trustworthy provenance for the initial fetch.
 - APM explicitly suppresses git credential helpers for HTTP clone and `ls-remote` operations so stored tokens from Keychain, Credential Manager, `gh auth`, or other helpers are not sent over plaintext HTTP.
+- `apm config set mcp-registry-url http://...` is also explicit consent to plaintext registry metadata. A machine-in-the-middle can change the MCP package configuration returned by that registry; use HTTPS outside isolated development networks.
 
 For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](../registry-proxy/).
 
@@ -150,16 +151,17 @@ Researchers have found hidden Unicode characters embedded in popular shared rule
 
 ### Pre-deployment gate
 
-During `apm install`, source files in `apm_modules/` are scanned **before** any integrator copies them to target directories:
+During `apm install`, APM resolves the authorized targets, selected skill subset, and executable approvals, then scans only the source files selected for deployment **before** any integrator copies them to target directories. Source-only files are neither scanned nor deployed by this step:
 
 ```
-download → scan source → block or deploy → report
+download -> authorize deploy set -> scan selected files -> block or deploy -> report
 ```
 
-- **Critical findings block deployment.** The package is downloaded and cached so you can inspect it (`apm_modules/owner/package/`), but nothing reaches agent-readable directories.
+- **Critical findings block deployment.** Nothing reaches agent-readable directories. The package remains cached in `apm_modules/owner/package/` so you can inspect and fix the reported files.
 - **Warnings are non-blocking.** Zero-width characters are flagged in the diagnostics summary. Files are deployed normally.
 - **`--force` overrides the block.** Consistent with existing collision semantics — an explicit "I know what I'm doing."
 - **Multi-package installs continue.** A blocked package doesn't stop other packages from installing. After all packages are processed, `apm install` exits with code 1 if any package was blocked — failing the CI step.
+- **Removal reconciliation uses the same gate.** During `apm uninstall`, each surviving package is scanned before its integrations are rebuilt; a hostile survivor is skipped and the command warns. During `apm prune`, a hostile hook survivor aborts hook reconciliation before cleanup, leaving the prior hook state in place and warning that reconciliation failed. Fix the reported package source, then run `apm install` to rebuild its files.
 
 ### Compile and pack scanning
 
@@ -249,11 +251,28 @@ The experimental `external-scanners` feature can invoke a third-party SARIF scan
 
 ## Policy gates that block install
 
-`apm-policy.yml` is evaluated before any download or write. The install preflight walks the resolved dependency graph -- including transitive MCP servers -- and fails the install if a dep is not in the allow list, falls under a deny rule, uses a forbidden source/scope, or violates a configured trust rule. In CI, `apm audit --ci` runs the same baseline plus policy checks (allow/deny lists, target restrictions, MCP transport restrictions). Tighten-only inheritance (enterprise -> org -> repo) is enforced so a downstream layer can never loosen an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and [Policy Reference](../policy-reference/).
+`apm-policy.yml` is evaluated after dependency resolution and before target
+integration. The policy gate walks the resolved dependency graph -- including
+transitive MCP servers -- and fails the install if a dep is not in the allow
+list, falls under a deny rule, uses a forbidden source/scope, or violates a
+configured trust rule. Target-aware and integrity checks run later in the same
+transaction and roll resolution replacements back on failure. In CI,
+`apm audit --ci` runs the same baseline plus policy checks (allow/deny lists,
+target restrictions, MCP transport restrictions). Tighten-only inheritance
+(enterprise -> org -> repo) is enforced so a downstream layer can never loosen
+an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and
+[Policy Reference](../policy-reference/).
 
 ## Content integrity hashing
 
 APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). Use `apm install --update` to accept new upstream content and refresh the lockfile.
+
+Replacement packages download and pass package-shape validation in an isolated
+staging directory while the current package remains in place. APM publishes the
+staged tree only after those checks succeed, so a failed download does not
+unlink live hook scripts from the current package. Integrity and policy gates
+still run later in the install transaction and roll the replacement back on
+failure.
 
 ```yaml
 # apm.lock.yaml
@@ -306,14 +325,13 @@ Trust boundaries:
 
 1. **`bundle_files` keys are untrusted.** They come from the bundle's own `apm.lock.yaml` and are validated for traversal sequences before any filesystem path is constructed; resolved destinations must remain within the deploy root. Unsafe entries are rejected and the install aborts.
 2. **`plugin.json` is bundle metadata, never deployed.** It is recognized case-insensitively and skipped in both the manifest-driven deploy loop and the lockfile-less fallback walk so case-folding filesystems (HFS+, NTFS) cannot smuggle a renamed file past the skip.
-3. **`.mcp.json` is bundle metadata, never deployed verbatim.** It is recognized case-insensitively and skipped from the deploy loop. APM includes valid bundle MCP entries in cached policy preflight, so MCP allow/deny, transport, and self-defined rules run before deployment. After files deploy, `apm install` routes each entry through `MCPIntegrator.install` as a self-defined dependency, so the consumer's resolved target(s) get the servers in their own native MCP config (Claude `.mcp.json`, Copilot `~/.copilot/mcp-config.json`, VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`, etc.). `MCPIntegrator` enforces the same validation and runtime gating used by `apm.yml`-declared servers; per-server parse errors are isolated and do not block the rest of the install.
+3. **`.mcp.json` is bundle metadata, never deployed verbatim.** It is recognized case-insensitively and skipped from the deploy loop. APM includes valid bundle MCP entries in cached policy preflight, so MCP allow/deny, transport, and self-defined rules run before deployment. After files deploy, `apm install` routes each entry through `MCPIntegrator.install` as a self-defined dependency, so the consumer's resolved targets get the server in their native MCP configs (Claude `.mcp.json`, Copilot CLI `.github/mcp.json` (project) or `$COPILOT_HOME/mcp-config.json` (global), VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`, etc.). `MCPIntegrator` enforces the same validation and runtime gating used by `apm.yml`-declared servers; per-server parse errors are isolated and do not block the rest of the install.
 4. **Slug validation.** The bundle's `id` (used as `<slug>` for staged instructions and the install label) is rejected if it contains traversal sequences or characters outside `[A-Za-z0-9._-]`.
 
 ### Symlink handling
 
-Symlinks are rejected in most APM operations; the only context where in-package
-symlinks are followed is local-path install, under a per-symlink containment
-check (see below):
+Symlinks are rejected in most APM operations. They are followed only
+during contained package materialization:
 
 - **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
@@ -323,6 +341,12 @@ check (see below):
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
+
+Remote Git subdirectory installs can dereference a symlink whose target is a
+tracked file in the same checked-out commit. If sparse checkout excluded that
+target, APM widens the checkout before copying the package. Generated Git
+metadata, targets outside the repository, and links that remain broken after
+widening hard-fail the install.
 
 #### Local-install symlink dereference and containment guarantee
 
@@ -366,7 +390,7 @@ When APM deploys a file, it checks whether a file already exists at the target p
 APM separates production and development dependencies:
 
 - **Production dependencies** (`dependencies.apm`) are included in plugin bundles and shared packages.
-- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output (both plugin format -- the default -- and `--format apm`).
+- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output in every bundle format (the default Claude plugin format, the explicit Agent Plugin format, and the legacy `--format apm`).
 - **Development MCP servers** in the root project's `devDependencies.mcp` are active for authoring, but the same section in a direct or transitive dependency package never propagates into the consumer's target config or provenance.
 
 This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
@@ -396,10 +420,13 @@ across targets.
 
 ## Executable trust gate
 
-APM blocks executable primitives from dependency packages by default: hooks,
-`bin/` executables, self-defined MCP servers (`registry: false`), and canvas
-extensions. Text primitives (skills, agents, instructions) are never gated, and
-local root `.apm/` content is always trusted.
+When the executable trust gate is enabled, APM blocks unapproved executable
+primitives from dependency packages: hooks, `bin/` executables, self-defined
+MCP servers (`registry: false`), LSP servers, and canvas extensions. The gate is
+opt-in for backward compatibility; a project `executables:` block or org policy
+enables it. Text primitives (skills, agents, instructions) are never gated, and
+local root `.apm/` content is always trusted. Supported runtimes may start an
+approved generated LSP command automatically after install.
 
 Trust is expressed through one noun, `executables`, across three layers, and the
 install gate and `apm audit` resolve it through a single deny-wins,
@@ -422,14 +449,17 @@ first-match-wins ladder:
 - **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
   shared with the team.
 - **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest
-  authority -- a machine-local override that can only narrow, never widen past
-  an org or project deny.
+  authority. `apm approve --user` can grant machine-local trust when no org or
+  project deny blocks it; `apm deny --user` narrows trust on one machine.
 
 Personal consent can never widen past an org deny, and the default (rung 7) is
 **gated pending approval** -- a package with executables and no opinion anywhere
 is parked until approved, not hard-denied. This release ships no `enforce`
-mandate runtime, no signing, and no content-hash binding; an org
-`executables.enforce` rung degrades to `recommend`.
+mandate runtime or package signing; an org `executables.enforce` rung degrades
+to `recommend`. Local bundle MCP, LSP, and canvas approvals are narrower: APM
+prints an exact `executables.allow` key containing the bundle's SHA-256 content
+digest, so another bundle that claims the same package name cannot inherit that
+consent.
 
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, or `absent`).
@@ -455,6 +485,20 @@ use `apm approve` or `apm deny`.
 ## MCP server trust model
 
 APM integrates MCP (Model Context Protocol) server configurations from packages. Trust is explicit and scoped by dependency depth.
+
+For Codex remote transport requirements, see
+[stdio vs HTTP servers](../../consumer/install-mcp-servers/#stdio-vs-http-servers).
+
+### Direct registry installs at user scope
+
+`apm install -g --mcp NAME` can use an MCP registry endpoint to update
+account-wide runtime configuration. APM requires HTTPS for registry URLs from
+the environment or saved config unless `MCP_REGISTRY_ALLOW_HTTP=1` is set, and
+rejects embedded credentials, query strings, and fragments. When a non-default
+registry supplies the entry, APM saves that registry URL for reproducible
+replay, but registry metadata is not signed or content-hash verified. Treat a
+custom registry as a trusted source with access to every global runtime selected
+for the install.
 
 ### Direct dependencies
 
@@ -528,7 +572,11 @@ For an org standardizing on APM:
 
 ### Can a package embed hidden instructions?
 
-Not without detection. APM scans all package source files before deployment. Critical hidden characters (tag characters, bidi overrides) block deployment. `apm audit` provides on-demand scanning for any file, including those obtained outside APM.
+APM scans every authorized deployable source file for the hidden Unicode
+categories listed above before copying it. Critical tag characters and bidi
+overrides block deployment unless `--force` is used; warning-class findings do
+not. Source-only files are not deployed by this step. Use `apm audit` to scan
+other files, including those obtained outside APM.
 
 ### How do I audit what APM installed?
 

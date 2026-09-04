@@ -14,6 +14,7 @@ from ...marketplace.yml_schema import (
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
 )
+from ...utils.diagnostics import printable_ascii_text
 from . import (
     _DoctorCheck,
     _find_duplicate_names,
@@ -28,9 +29,10 @@ def _executable_trust_drift_check(
 
     Flags packages whose project/user *allow* is overridden by the org
     *deny* ceiling -- a governance conflict an admin should reconcile. Best
-    effort and informational: any failure to resolve degrades to ``None`` so
-    doctor never hangs or hard-fails on policy discovery. Points the operator
-    at ``apm policy explain <pkg>`` for the per-package detail.
+    effort and informational: policy-discovery failures degrade to ``None`` so
+    doctor never hangs or hard-fails. Invalid project executable configuration
+    is reported so the operator can repair ``apm.yml``. Points the operator at
+    ``apm policy explain <pkg>`` for per-package detail.
     """
     apm_path = project_root / "apm.yml"
     if not apm_path.is_file():
@@ -42,6 +44,7 @@ def _executable_trust_drift_check(
             LAYER_PROJECT_ALLOW,
             LAYER_USER_ALLOW,
             build_exec_trust_context,
+            parse_project_executables,
             resolve_exec_decision,
         )
         from ...utils.yaml_io import load_yaml
@@ -49,8 +52,27 @@ def _executable_trust_drift_check(
 
         data = load_yaml(apm_path)
         project_data = data if isinstance(data, dict) else {}
+        policy = load_org_policy(project_root, logger=logger)
+    except Exception:
+        return None
+
+    try:
+        parse_project_executables(project_data)
+    except ValueError as exc:
+        error_detail = printable_ascii_text(str(exc))
+        config_key = (
+            "allowExecutables" if error_detail.startswith("allowExecutables") else "executables"
+        )
+        return _DoctorCheck(
+            name="executable trust",
+            passed=False,
+            detail=f"Invalid executables block: {error_detail}. Fix '{config_key}' in apm.yml.",
+            informational=True,
+        )
+
+    try:
         ctx = build_exec_trust_context(
-            policy=load_org_policy(project_root, logger=logger),
+            policy=policy,
             project_data=project_data,
         )
     except Exception:
@@ -143,10 +165,11 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
     net_ok = False
     net_detail = ""
     try:
-        result = subprocess.run(
-            ["git", "ls-remote", "https://github.com/git/git.git", "HEAD"],
-            capture_output=True,
-            text=True,
+        from ...utils.git_env import git_remote_refs
+
+        result = git_remote_refs(
+            "https://github.com/git/git.git",
+            "HEAD",
             timeout=5,
         )
         if result.returncode == 0:
@@ -164,8 +187,12 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
         net_detail = "Network check timed out (5s)"
     except FileNotFoundError:
         net_detail = "git not found; cannot test network"
+    except ValueError as exc:
+        net_detail = str(exc)
     except (subprocess.SubprocessError, OSError) as exc:
-        net_detail = str(exc)[:60]
+        from ...utils.git_env import git_subprocess_error_text
+
+        net_detail = git_subprocess_error_text(exc)[:60]
 
     checks.append(
         _DoctorCheck(

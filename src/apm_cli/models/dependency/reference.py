@@ -22,12 +22,14 @@ from ...utils.github_host import (
 )
 from ...utils.path_security import (
     PathTraversalError,
+    parse_url_path_segments,
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
 from .identity import (
     _DEFAULT_SCHEME_PORTS,
     _NON_ADO_PATH_SEGMENT_RE,
+    _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE,
     InvalidSemverRangeError,
     _is_valid_registry_semver_range,
     _looks_like_invalid_semver_range,
@@ -118,6 +120,7 @@ class DependencyReference(ProviderCoordinateMixin):
     marketplace_name: str | None = None
     marketplace_plugin_name: str | None = None
     marketplace_version_spec: str | None = None
+    marketplace_manifest: dict[str, object] | None = None
 
     @property
     def canonical_repo_url(self) -> str:
@@ -496,14 +499,21 @@ class DependencyReference(ProviderCoordinateMixin):
         such as ``owner/repo#package@v1.0.1`` remain valid literal refs.
         """
         stripped = dependency_str.strip()
-        if "@" not in stripped:
-            return
         if stripped.lower().startswith(("https://", "http://", "ssh://")):
             return
         if SCP_LIKE_RE.match(stripped):
             return
         shorthand_part, _, ref_part = stripped.partition("#")
-        if "@" not in shorthand_part:
+        has_encoded_alias = False
+        if "%40" in shorthand_part.lower():
+            _, decoded_segments = parse_url_path_segments(
+                shorthand_part,
+                context="repository path",
+            )
+            has_encoded_alias = any("@" in segment for segment in decoded_segments)
+        if "@" not in stripped and not has_encoded_alias:
+            return
+        if "@" not in shorthand_part and not has_encoded_alias:
             _, _, ref_suffix = ref_part.rpartition("@")
             if _REF_VERSION_SUFFIX_RE.fullmatch(ref_suffix):
                 return
@@ -610,7 +620,7 @@ class DependencyReference(ProviderCoordinateMixin):
         return normalized
 
     @staticmethod
-    def _check_no_embedded_subpath(url: str) -> None:
+    def _check_no_embedded_subpath(url: str, *, host_type: str | None = None) -> None:
         """Guard: reject a subpath embedded in an explicit git URL form (#872).
 
         Detects when a user writes, e.g.:
@@ -620,45 +630,43 @@ class DependencyReference(ProviderCoordinateMixin):
         ``fatal: '...' does not appear to be a git repository`` message.
         This guard fires early and points at the supported ``path:`` key.
 
-        The heuristic: for SCP (``git@host:path``), ``ssh://``, or
-        ``https://``/``http://`` URL forms, if any non-last path segment
-        matches a known APM primitive directory name (skills, agents, prompts,
-        etc.), the URL encodes a subpath that belongs in the ``path:`` key.
-
-        GitLab subgroups and Azure DevOps org/project paths do not use APM
-        primitive names (skills, agents, prompts, ...) as segment labels, so
-        the check produces no false positives for those legitimate forms.
-
-        Scoping (issue #1014 follow-up): the embedded-subpath shape is
-        ``org/repo`` followed by ``<primitive>/<name>``, so a primitive
-        segment is only treated as an embedded subpath when it is preceded
-        by a complete ``org/repo`` prefix (segment index >= 2). This avoids
-        a false positive for a GitLab subgroup literally named after a
-        primitive, e.g. ``git@gitlab.com:group/skills/repo.git`` (here
-        ``skills`` is a subgroup at index 1 and ``repo`` is the real
-        repository). A residual ambiguity remains for deep subgroups that
-        embed a primitive name at index >= 2 (e.g.
-        ``group/sub/skills/repo``); that shape is genuinely undecidable
-        without probing the host, so it is still treated as malformed.
+        GitLab repository paths may have arbitrary namespace depth, including
+        namespace names that match APM primitive directories. Fixed-boundary
+        providers instead reserve the path after ``org/repo`` for an APM
+        subpath. The canonical host-provider registry supplies that grammar;
+        this method deliberately performs no network probing.
         """
         raw = url.strip()
 
-        if SCP_LIKE_RE.match(raw):
+        scp_match = SCP_LIKE_RE.match(raw)
+        if scp_match:
             colon_idx = raw.index(":")
             path_part = raw[colon_idx + 1 :]
+            host = scp_match.group("host")
         elif raw.lower().startswith(("ssh://", "https://", "http://")):
-            path_part = urllib.parse.urlparse(raw).path
+            parsed = urllib.parse.urlparse(raw)
+            path_part = parsed.path
+            host = parsed.hostname
         else:
             return  # bare shorthand or other form -- not in scope
 
-        # Strip fragment and query string, then remove trailing .git suffix
         path_part = path_part.split("#")[0].split("?")[0]
-        if path_part.endswith(".git"):
-            path_part = path_part[:-4]
-
-        segments = [s for s in path_part.replace("\\", "/").split("/") if s]
+        if "%" in path_part:
+            _, decoded_segments = parse_url_path_segments(
+                path_part,
+                context="repository URL path",
+            )
+            segments = list(decoded_segments)
+        else:
+            segments = [s for s in path_part.replace("\\", "/").split("/") if s]
         if len(segments) < 3:
             return  # too few segments to contain an interior primitive name
+
+        if host is None:
+            return
+        from apm_cli.core.host_providers import classify_host_provider
+
+        provider = classify_host_provider(host, host_type=host_type)
 
         # Azure DevOps repo URLs carry the repository under a `_git` segment
         # and legitimately encode a virtual path after it (e.g.
@@ -669,6 +677,17 @@ class DependencyReference(ProviderCoordinateMixin):
         if "_git" in segments:
             return
 
+        if provider.kind == "gitlab":
+            # A terminal .git segment is an unambiguous repository boundary.
+            # A .git segment followed by an APM primitive is instead an
+            # unambiguous embedded subpath, even on GitLab.
+            for idx, seg in enumerate(segments[:-1]):
+                if seg.endswith(".git") and any(
+                    tail in DependencyReference._APM_PRIMITIVE_DIRS for tail in segments[idx + 1 :]
+                ):
+                    DependencyReference._raise_embedded_subpath_error(raw)
+            return
+
         # An embedded subpath is `org/repo` + `<primitive>/<name>`, so the
         # primitive directory must be preceded by a complete org/repo prefix
         # (index >= 2). Restricting to index >= 2 keeps the real malformed-URL
@@ -677,14 +696,19 @@ class DependencyReference(ProviderCoordinateMixin):
         # (group/skills/repo, where `repo` is the actual repository).
         for idx, seg in enumerate(segments[:-1]):
             if idx >= 2 and seg in DependencyReference._APM_PRIMITIVE_DIRS:
-                raise ValueError(
-                    "A subpath cannot be embedded in a git URL. "
-                    f"Got: `{raw}`. "
-                    "Use the `path:` key instead: "
-                    "`git: <repo-url>` + `path: <primitive>/<name>` "
-                    "(or the shorthand `org/repo/<primitive>/<name>`). "
-                    "See https://microsoft.github.io/apm/consumer/manage-dependencies/"
-                )
+                DependencyReference._raise_embedded_subpath_error(raw)
+
+    @staticmethod
+    def _raise_embedded_subpath_error(raw: str) -> None:
+        """Raise the canonical recovery error for an embedded primitive path."""
+        raise ValueError(
+            "A subpath cannot be embedded in a git URL. "
+            f"Got: `{raw}`. "
+            "Use the `path:` key instead: "
+            "`git: <repo-url>` + `path: <primitive>/<name>` "
+            "(or the shorthand `org/repo/<primitive>/<name>`). "
+            "See https://microsoft.github.io/apm/consumer/manage-dependencies/"
+        )
 
     @classmethod
     def parse_from_dict(cls, entry: dict) -> "DependencyReference":
@@ -855,7 +879,7 @@ class DependencyReference(ProviderCoordinateMixin):
             validate_path_segments(sub_path, context="path")
 
         # Parse the git URL using the standard parser
-        dep = cls.parse(git_url)
+        dep = cls.parse(git_url, host_type=host_type)
         dep.host_type = host_type
         dep.allow_insecure = allow_insecure
         # Object-form ``- git:`` is an explicit Git resolver pin, even when
@@ -1492,17 +1516,26 @@ class DependencyReference(ProviderCoordinateMixin):
         if not is_supported_git_host(hostname):
             raise ValueError(unsupported_host_error(hostname or parsed_url.netloc))
 
-        path = parsed_url.path.strip("/")
-        if not path:
-            raise ValueError("Repository path cannot be empty")
-
-        if path.endswith(".git"):
-            path = path[:-4]
-
-        path_parts = [urllib.parse.unquote(p) for p in path.split("/")]
+        try:
+            raw_path_parts, decoded_path_parts = parse_url_path_segments(
+                parsed_url.path,
+                context="repository URL path",
+            )
+        except PathTraversalError as exc:
+            raise ValueError(str(exc)) from exc
+        path_parts = list(decoded_path_parts)
+        presentation_path_parts = list(raw_path_parts)
+        if path_parts[-1].endswith(".git"):
+            path_parts[-1] = path_parts[-1][:-4]
+            if presentation_path_parts[-1].endswith(".git"):
+                presentation_path_parts[-1] = presentation_path_parts[-1][:-4]
+        path = "/".join(path_parts)
         if "_git" in path_parts:
             git_idx = path_parts.index("_git")
             path_parts = path_parts[:git_idx] + path_parts[git_idx + 1 :]
+            presentation_path_parts = (
+                presentation_path_parts[:git_idx] + presentation_path_parts[git_idx + 1 :]
+            )
 
         is_ado_host = is_azure_devops_hostname(hostname)
 
@@ -1570,6 +1603,7 @@ class DependencyReference(ProviderCoordinateMixin):
             # :meth:`_extract_artifactory_prefix`.
             if is_artifactory_path(path_parts):
                 path_parts = path_parts[2:]
+                presentation_path_parts = presentation_path_parts[2:]
             for pp in path_parts:
                 if any(pp.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                     raise ValueError(
@@ -1577,17 +1611,22 @@ class DependencyReference(ProviderCoordinateMixin):
                         f"Use the dict format with 'path:' for virtual packages in HTTPS URLs"
                     )
 
-        allowed_pattern = _path_segment_pattern(is_ado_host)
+        validation_parts = path_parts if is_ado_host else presentation_path_parts
+        allowed_pattern = (
+            _path_segment_pattern(is_ado_host)
+            if is_ado_host
+            else _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE
+        )
         validate_path_segments(
-            "/".join(path_parts),
+            "/".join(validation_parts),
             context="repository URL path",
             reject_empty=True,
         )
-        for part in path_parts:
+        for part in validation_parts:
             if not re.match(allowed_pattern, part):
                 raise ValueError(f"Invalid repository path component: {part}")
 
-        return "/".join(path_parts), url_virtual_path
+        return "/".join(path_parts if is_ado_host else presentation_path_parts), url_virtual_path
 
     @classmethod
     def _parse_standard_url(
@@ -1661,7 +1700,7 @@ class DependencyReference(ProviderCoordinateMixin):
         return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
     @classmethod
-    def _validate_final_repo_fields(cls, host, repo_url):
+    def _validate_final_repo_fields(cls, host, repo_url, *, allow_percent_encoded: bool = False):
         """Validate a repository path and return its ADO coordinates when applicable."""
         is_ado_final = host and is_azure_devops_hostname(host)
         if is_ado_final:
@@ -1676,7 +1715,12 @@ class DependencyReference(ProviderCoordinateMixin):
         segments = repo_url.split("/")
         if len(segments) < 2:
             raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
-        if not all(re.match(_NON_ADO_PATH_SEGMENT_RE, s) for s in segments):
+        allowed_pattern = (
+            _PERCENT_ENCODED_NON_ADO_PATH_SEGMENT_RE
+            if allow_percent_encoded
+            else _NON_ADO_PATH_SEGMENT_RE
+        )
+        if not all(re.match(allowed_pattern, s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
         validate_path_segments(repo_url, context="repository path")
         for seg in segments:
@@ -1706,7 +1750,12 @@ class DependencyReference(ProviderCoordinateMixin):
         return None
 
     @classmethod
-    def parse(cls, dependency_str: str) -> "DependencyReference":
+    def parse(
+        cls,
+        dependency_str: str,
+        *,
+        host_type: str | None = None,
+    ) -> "DependencyReference":
         """Parse a dependency string into a DependencyReference.
 
         Supports formats:
@@ -1745,8 +1794,6 @@ class DependencyReference(ProviderCoordinateMixin):
         if not dependency_str.strip():
             raise ValueError("Empty dependency string")
 
-        dependency_str = urllib.parse.unquote(dependency_str)
-
         if any(ord(c) < 32 for c in dependency_str):
             raise ValueError("Dependency string contains invalid control characters")
 
@@ -1780,7 +1827,7 @@ class DependencyReference(ProviderCoordinateMixin):
         # Guard: detect a subpath embedded in an explicit git URL form (#872).
         # Fires before virtual-package detection so the user gets an actionable
         # error rather than a cryptic downstream git failure.
-        cls._check_no_embedded_subpath(dependency_str)
+        cls._check_no_embedded_subpath(dependency_str, host_type=host_type)
 
         # Phase 1: detect virtual packages
         is_virtual_package, virtual_path, validated_host = cls._detect_virtual_package(
@@ -1814,7 +1861,13 @@ class DependencyReference(ProviderCoordinateMixin):
 
         # Phase 3: full validation (all hosts) + ADO field extraction.
         # canonical_ado_coordinates is for consumers with validated input only.
-        ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(host, repo_url)
+        ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(
+            host,
+            repo_url,
+            allow_percent_encoded=dependency_str.strip()
+            .lower()
+            .startswith(("https://", "http://")),
+        )
 
         if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
             raise ValueError(
@@ -1830,6 +1883,7 @@ class DependencyReference(ProviderCoordinateMixin):
         return cls(
             repo_url=repo_url,
             host=host,
+            host_type=host_type,
             port=port,
             explicit_scheme=explicit_scheme,
             reference=reference,

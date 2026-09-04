@@ -67,6 +67,9 @@ def prepare_ci_audit_replay(
 ) -> PreparedCiAuditReplay:
     """Prepare one lock-pinned scratch replay for ``apm audit --ci`` consumers."""
     project_root = project_root.resolve()
+    from apm_cli.core.scope import get_workspace_deploy_root
+
+    user_scope = get_workspace_deploy_root(project_root) != project_root
     lockfile_path = get_lockfile_path(project_root)
     if not lockfile_path.exists():
         raise CiAuditReplayError(
@@ -92,6 +95,7 @@ def prepare_ci_audit_replay(
         cache_only=False,
         scratch_root=scratch_root,
         modules_root=modules_root,
+        user_scope=user_scope,
     )
     stderr_context = (
         contextlib.nullcontext() if verbose else contextlib.redirect_stderr(io.StringIO())
@@ -108,5 +112,11 @@ def prepare_ci_audit_replay(
         modules_root=modules_root,
         lockfile_path=lockfile_path,
         tracked_files=_git_tracked_files(project_root),
-        targets=tuple(resolve_targets(scratch_root, explicit_target=explicit_target)),
+        targets=tuple(
+            resolve_targets(
+                scratch_root,
+                user_scope=user_scope,
+                explicit_target=explicit_target,
+            )
+        ),
     )

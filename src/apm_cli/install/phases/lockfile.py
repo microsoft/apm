@@ -471,6 +471,17 @@ class LockfileBuilder:
         if self.ctx.existing_lockfile:
             lockfile.lsp_servers = list(self.ctx.existing_lockfile.lsp_servers)
             lockfile.lsp_configs = copy.deepcopy(self.ctx.existing_lockfile.lsp_configs)
+            lockfile.lsp_config_provenance = copy.deepcopy(
+                self.ctx.existing_lockfile.lsp_config_provenance
+            )
+            target_servers = self.ctx.existing_lockfile.lsp_target_servers
+            if target_servers:
+                from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+                DeploymentLedgerCodec.replace_lsp_target_servers(
+                    lockfile,
+                    copy.deepcopy(target_servers),
+                )
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(
                     "LSP state unchanged -- carrying forward "
@@ -526,7 +537,7 @@ class LockfileBuilder:
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail("apm.lock.yaml unchanged -- skipping write")
         else:
-            lockfile.save(lockfile_path)
+            lockfile.save(lockfile_path, existing_lockfile=existing_lockfile)
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(
                     f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies"

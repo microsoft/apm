@@ -2,17 +2,35 @@
 
 from __future__ import annotations
 
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
+from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.download_strategies import DownloadDelegate
 from apm_cli.deps.git_file_transport import GitFileFetchResult, GitFileTransportError
 from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.models.apm_package import DependencyReference
 
 _SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _assert_github_basic_header(value: str, token: str) -> None:
+    """Assert one canonical x-access-token Basic header."""
+    assert value.startswith("Authorization: Basic ")
+    encoded = value.removeprefix("Authorization: Basic ")
+    assert base64.b64decode(encoded).decode() == f"x-access-token:{token}"
+
+
+def _git_config_entries(env: dict[str, str]) -> dict[str, list[str]]:
+    """Return indexed Git config values grouped by normalized key."""
+    entries: dict[str, list[str]] = {}
+    for index in range(int(env.get("GIT_CONFIG_COUNT", "0"))):
+        key = env.get(f"GIT_CONFIG_KEY_{index}", "").lower()
+        entries.setdefault(key, []).append(env.get(f"GIT_CONFIG_VALUE_{index}", ""))
+    return entries
 
 
 def _response(status_code: int, headers: dict[str, str] | None = None) -> MagicMock:
@@ -40,12 +58,16 @@ def _host(token: str | None) -> MagicMock:
     context.token = token
     context.auth_scheme = "basic"
     context.git_env = {"GIT_TOKEN": token} if token else {}
+    context.host_info.kind = "github"
     host._resolve_dep_auth_ctx.return_value = context
     host._resolve_dep_token.return_value = token
     host.auth_resolver.resolve_for_dep.return_value = context
     host.auth_resolver.classify_host.return_value = MagicMock(
         kind="github",
         api_base="https://api.github.com",
+    )
+    host.auth_resolver.git_env_for_remote.side_effect = lambda ctx, _url: (
+        AuthResolver.git_env_for_context(ctx, base_env=ctx.git_env)
     )
     return host
 
@@ -171,8 +193,9 @@ def test_private_fallback_uses_only_auth_resolver_git_environment() -> None:
 
     assert result.resolved_commit == _SHA
     git_env = transport_factory.call_args.kwargs["git_env"]
-    assert git_env["GIT_CONFIG_KEY_0"] == "http.extraheader"
-    assert git_env["GIT_CONFIG_VALUE_0"] == "Authorization: Bearer private-token"
+    entries = _git_config_entries(git_env)
+    assert entries["credential.helper"] == [""]
+    _assert_github_basic_header(entries["http.extraheader"][-1], "private-token")
     assert "GIT_TOKEN" not in git_env
     assert url.call_args.kwargs["token"] == ""
 
@@ -205,11 +228,10 @@ def test_private_fallback_sets_header_after_retained_git_config() -> None:
         )
 
     git_env = transport_factory.call_args.kwargs["git_env"]
-    assert git_env["GIT_CONFIG_COUNT"] == "2"
-    assert git_env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
-    assert git_env["GIT_CONFIG_VALUE_0"] == "explicit"
-    assert git_env["GIT_CONFIG_KEY_1"] == "http.extraheader"
-    assert git_env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer private-token"
+    entries = _git_config_entries(git_env)
+    assert entries["safe.barerepository"] == ["explicit"]
+    assert entries["credential.helper"] == [""]
+    _assert_github_basic_header(entries["http.extraheader"][-1], "private-token")
     assert "GIT_TOKEN" not in git_env
 
 

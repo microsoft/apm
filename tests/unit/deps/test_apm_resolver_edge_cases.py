@@ -20,6 +20,7 @@ Covers error/edge branches not exercised by the parallel-BFS test suite:
 
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -27,7 +28,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.apm_resolver import APMDependencyResolver, DownloadedPackageError
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
 
@@ -582,6 +583,99 @@ class TestTryLoadDependencyPackage:
         assert pkg is not None
         assert pkg.get_apm_dependencies() == []
 
+    def test_native_agent_plugin_without_apm_yml_returns_projected_package(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "native"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "2.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        ref = _make_dep_ref("org/native")
+        ref.get_install_path.return_value = pkg_dir
+
+        pkg = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+
+        assert pkg is not None
+        assert pkg.name == "native.plugin"
+        assert pkg.version == "2.0.0"
+        assert pkg.agent_plugin is not None
+        assert not (pkg_dir / "apm.yml").exists()
+
+    def test_eligible_apm_manifest_wins_and_retains_transitive_dependencies(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
+
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "native"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "2.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (pkg_dir / "apm.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "apm-native",
+                    "version": "3.0.0",
+                    "dependencies": {"apm": ["org/child#v1.0.0"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        ref = _make_dep_ref("org/native")
+        ref.get_install_path.return_value = pkg_dir
+
+        pkg = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+
+        assert pkg is not None
+        assert pkg.name == "apm-native"
+        assert pkg.version == "3.0.0"
+        assert pkg.agent_plugin is None
+        assert [dep.repo_url for dep in pkg.get_apm_dependencies()] == ["org/child"]
+
+    def test_malformed_root_plugin_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "malformed"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "plugin.json").write_text("{bad json", encoding="utf-8")
+        ref = _make_dep_ref("org/malformed")
+        ref.get_install_path.return_value = pkg_dir
+
+        with pytest.raises(ValueError, match=r"Invalid root plugin.json"):
+            APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+
+        assert not (pkg_dir / "apm.yml").exists()
+
+    def test_nonregular_root_plugin_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "nonregular"
+        (pkg_dir / "plugin.json").mkdir(parents=True)
+        ref = _make_dep_ref("org/nonregular")
+        ref.get_install_path.return_value = pkg_dir
+
+        with pytest.raises(ValueError, match=r"plugin.json must be a regular file"):
+            APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+
+        assert not (pkg_dir / "apm.yml").exists()
+
     def test_missing_package_and_no_callback_returns_none(self, tmp_path: Path) -> None:
         mods = tmp_path / "apm_modules"
         mods.mkdir()
@@ -758,6 +852,188 @@ class TestTryLoadDependencyPackageForceRecheck:
 
         assert len(call_log) == 1
         assert result is not None
+
+    def test_failed_replacement_does_not_reuse_existing_path(self, tmp_path: Path) -> None:
+        """A failed refresh must not silently validate the old materialization."""
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        ref = self._semver_dep_ref(pkg_dir)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: None,
+            update_refs=True,
+        )
+
+        assert resolver._try_load_dependency_package(ref) is None
+        assert (pkg_dir / "apm.yml").exists()
+
+    def test_callback_exception_does_not_reuse_existing_path(self, tmp_path: Path) -> None:
+        """A callback exception must fail closed instead of validating stale bytes."""
+        mods = tmp_path / "apm_modules"
+        pkg_dir = mods / "org" / "pkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        ref = self._semver_dep_ref(pkg_dir)
+
+        def fail_callback(*_args, **_kwargs):
+            raise RuntimeError("injected replacement failure")
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=fail_callback,
+            update_refs=True,
+        )
+
+        assert resolver._try_load_dependency_package(ref) is None
+        assert (pkg_dir / "apm.yml").exists()
+
+    def test_invalid_candidate_is_not_activated(self, tmp_path: Path) -> None:
+        """A downloaded candidate must pass validation before publication."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        live.mkdir(parents=True)
+        (live / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("not: a-package\n")
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=lambda path: activated.append(path) or live,
+            update_refs=True,
+        )
+
+        with pytest.raises(DownloadedPackageError, match="existing installation remains active"):
+            resolver._try_load_dependency_package(ref)
+
+        assert activated == []
+        assert (live / "apm.yml").read_text() == "name: pkg\nversion: 1.0.0\n"
+
+    def test_invalid_fresh_candidate_does_not_claim_existing_install(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Fresh-install validation guidance must not claim prior content exists."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("not: a-package\n")
+        ref = self._semver_dep_ref(live)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=lambda _path: live,
+            update_refs=True,
+        )
+
+        with pytest.raises(DownloadedPackageError) as exc_info:
+            resolver._try_load_dependency_package(ref)
+
+        message = str(exc_info.value)
+        assert "downloaded candidate was not activated" in message
+        assert "existing installation remains active" not in message
+
+    def test_valid_candidate_is_activated_after_validation(self, tmp_path: Path) -> None:
+        """A valid candidate publishes once and exposes the live package path."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "pkg"
+        candidate = mods / ".staging" / "org" / "pkg"
+        candidate.mkdir(parents=True)
+        (candidate / "apm.yml").write_text("name: pkg\nversion: 2.0.0\n")
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live)
+
+        def activate(path: Path) -> Path:
+            activated.append(path)
+            live.parent.mkdir(parents=True)
+            path.replace(live)
+            return live
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=activate,
+            update_refs=True,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert activated == [candidate]
+        assert package is not None
+        assert package.version == "2.0.0"
+        assert package.package_path == live
+
+    def test_legacy_marketplace_candidate_is_normalized_before_activation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A staged legacy plugin is normalized with its source anchor before publication."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "legacy"
+        candidate = mods / ".staging" / "org" / "legacy"
+        candidate.mkdir(parents=True)
+        (candidate / "plugin.json").write_text(
+            json.dumps({"name": "legacy", "version": "2.0.0"}),
+            encoding="utf-8",
+        )
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live, key="org/legacy")
+
+        def activate(path: Path) -> Path:
+            activated.append(path)
+            live.parent.mkdir(parents=True)
+            path.replace(live)
+            return live
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=activate,
+            update_refs=True,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert activated == [candidate]
+        assert package is not None
+        assert package.package_path == live
+        assert package.source_path == live.resolve()
+        assert (live / "apm.yml").is_file()
+        reloaded = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+        assert reloaded is not None
+        assert reloaded.package_path == live
+        assert reloaded.source_path == live.resolve()
+
+    def test_cached_local_package_is_not_activated_as_candidate(self, tmp_path: Path) -> None:
+        """A live local cache hit remains readable for transitive resolution."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "_local" / "parent"
+        live.mkdir(parents=True)
+        (live / "apm.yml").write_text(
+            "name: parent\nversion: 1.0.0\ndependencies:\n  apm:\n    - path: ../child\n",
+        )
+        ref = DependencyReference(
+            repo_url="_local/parent",
+            is_local=True,
+            local_path="../parent",
+        )
+        activated: list[Path] = []
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: live,
+            activation_callback=lambda path: activated.append(path) or live,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert package is not None
+        assert len(package.get_apm_dependencies()) == 1
+        assert activated == []
 
     def test_existing_path_without_lock_calls_callback_on_plain_install(
         self,

@@ -47,6 +47,8 @@ function createMockDeps(overrides = {}) {
         ],
         getLastUpdated: () => "12:00:00",
         getLastError: () => null,
+        refreshData: async () => ({ ok: true, error: null }),
+        refreshIntervalMs: 900_000,
         repo: "test/repo",
         distDir: DIST_DIR,
         csrfToken: TEST_CSRF_TOKEN,
@@ -177,6 +179,31 @@ describe("GET /api/prs", () => {
         assert.equal(json.prs.length, 1);
         assert.equal(json.prs[0].number, 10);
         assert.equal(json.lastUpdated, "12:00:00");
+    });
+});
+
+describe("POST /refresh-data", () => {
+    before(() => setupServer());
+    after(teardownServer);
+
+    it("runs the injected refresh operation", async () => {
+        const { res, json } = await postJSON("/refresh-data", {});
+        assert.equal(res.status, 200);
+        assert.deepEqual(json, { ok: true, error: null });
+    });
+
+    it("rejects malformed JSON before refreshing", async () => {
+        const res = await fetch(`${baseUrl}/refresh-data`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
+            body: "{",
+        });
+        assert.equal(res.status, 400);
+        const json = await res.json();
+        assert.equal(json.ok, false);
     });
 });
 
@@ -592,9 +619,11 @@ describe("Static file serving", () => {
 
     it("GET / returns HTML with no-cache", async () => {
         const res = await fetch(`${baseUrl}/`);
+        const html = await res.text();
         assert.equal(res.status, 200);
         assert.ok(res.headers.get("content-type").includes("text/html"));
         assert.equal(res.headers.get("cache-control"), "no-cache");
+        assert.ok(html.includes("window.__APM_DASHBOARD_REFRESH_INTERVAL_MS__=900000"));
     });
 
     it("GET /unknown-route returns HTML (SPA fallback)", async () => {
@@ -791,6 +820,21 @@ describe("POST body size limits", () => {
                 "X-Canvas-Token": TEST_CSRF_TOKEN,
             },
             body: JSON.stringify(oversizedBody),
+        });
+        assert.equal(res.status, 413);
+        const json = await res.json();
+        assert.equal(json.ok, false);
+        assert.ok(String(json.error).includes("limit"));
+    });
+
+    it("returns 413 for oversized refresh payloads", async () => {
+        const res = await fetch(`${baseUrl}/refresh-data`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
+            body: JSON.stringify({ padding: "x".repeat(70 * 1024) }),
         });
         assert.equal(res.status, 413);
         const json = await res.json();

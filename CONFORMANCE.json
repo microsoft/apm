@@ -1,4 +1,9 @@
 {
+  "consumer_user_scope": {
+    "lockfile_location": "~/.apm/apm.lock.yaml",
+    "manifest_location": "~/.apm/apm.yml",
+    "target_capability_declaration": "MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)"
+  },
   "generator": "gen_statement.py v1",
   "requirements": [
     {
@@ -104,9 +109,10 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_resolved_field"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_resolved_field",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_new_lockfile_omits_generated_at_by_default"
       ]
     },
     {
@@ -544,9 +550,10 @@
       "keyword": "MUST",
       "section": "4.3.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_empty_skill_subset_match",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_names_skills_a_plugin_collection_exposes"
       ]
     },
     {
@@ -687,8 +694,9 @@
       "keyword": "MUST",
       "section": "6.1.1",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_gitlab_discovery_provider_is_a_distinct_convention",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_provides_default_allow_list_shape"
       ]
     },
@@ -745,6 +753,17 @@
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_deployment_ledger_owner_is_hard_integrity_failure"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-017",
+      "keyword": "MUST",
+      "section": "6.8",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_ado_policy_coordinate_fallback_is_404_only"
       ]
     },
     {
@@ -809,6 +828,28 @@
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_resolution_reqs.py::test_producer_should_carry_primitive_descriptions"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-006",
+      "keyword": "MUST",
+      "section": "8.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_plugin_skills_declaration_is_authoritative"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-pr-007",
+      "keyword": "MUST",
+      "section": "8.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_root_declared_plugin_component_excludes_generated_staging_tree"
       ]
     },
     {
@@ -1012,6 +1053,31 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-rs-017",
+      "keyword": "MUST",
+      "section": "7.7",
+      "status": "active",
+      "test_count": 15,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_accepts_each_normative_tag_form[1.2.3]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_accepts_each_normative_tag_form[revision-pin--v1.2.3]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_accepts_each_normative_tag_form[revision-pin-v1.2.3]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_accepts_each_normative_tag_form[v1.2.3]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_derives_repository_and_virtual_names",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_projection_and_scope_are_normative",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[0000000000000000000000000000000000000000\\trefs/tags/v2.0.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[\\n]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/bad name]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0 ]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0\\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\trefs/tags/v2.0.0^{}]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_retains_missing_release",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_selects_highest_stable_tag_deterministically",
+        "tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_wraps_transport_parse_failure"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-sc-001",
       "keyword": "MUST",
       "section": "10.4",
@@ -1167,6 +1233,20 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-sc-015",
+      "keyword": "MUST",
+      "oracle": "tests/fixtures/spec-conformance/source-plan/req-sc-015.json",
+      "section": "10.16",
+      "status": "active",
+      "test_count": 3,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_fixture_oracle_covers_symlinked_content",
+        "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_limits_scanning_and_skill_materialization",
+        "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_requirement_covers_reintegration_and_symlinks"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-tg-001",
       "keyword": "MUST",
       "section": "8.4",
@@ -1274,18 +1354,69 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_project_scoped_native_hook_command_is_portably_anchored"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-011",
+      "keyword": "MUST",
+      "section": "8.5.5",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_agent_plugin_target_exclusion_materializes_without_projection",
+        "tests/spec_conformance/test_manifest_reqs.py::test_agent_plugin_target_exclusion_stays_opaque_after_materialization"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-012",
+      "keyword": "MUST",
+      "section": "8.5.6",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_plugin_root_hook_resolution_preserves_quoting_and_warns"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-013",
+      "keyword": "MUST",
+      "section": "8.5.7",
+      "status": "active",
+      "test_count": 7,
+      "tests": [
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_invalid_settings_fail_closed_without_overwrite",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_ledger_re_adopts_only_the_exact_reserved_namespace",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_lifecycle_registration_clauses_persist_in_spec",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_in_place_and_consumer_owned",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_creates_no_native_registration",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_plugin_name_precedence_and_owner_identity_are_deterministic",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-014",
+      "keyword": "MUST",
+      "section": "8.5.8",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_user_scoped_mcp_target_selection_ignores_project_signals"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 82,
+      "active": 90,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
     },
     "governance": {
-      "active": 16,
+      "active": 17,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0
@@ -1303,5 +1434,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 112
+  "total_requirements": 121
 }

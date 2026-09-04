@@ -1,5 +1,6 @@
 """APM prune command."""
 
+import contextlib
 import sys
 from pathlib import Path
 
@@ -9,9 +10,11 @@ from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import DeploymentLedgerCodec
 from ..core.deployment_state import LocatorKind
+from ..core.scope import InstallScope
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..install.locking import serialized_lifecycle_unless
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
 from ..models.apm_package import APMPackage
@@ -43,6 +46,35 @@ def _lock_keys_by_install_path(
     return {path: tuple(keys) for path, keys in grouped.items()}
 
 
+def _preflight_prune_survivors(
+    apm_package: APMPackage,
+    project_root: Path,
+    apm_modules_dir: Path,
+    *,
+    lockfile: LockFile | None,
+    excluded_keys: set[str],
+    logger=None,
+) -> None:
+    """Reject unsafe survivors before prune can mutate package or target state."""
+    from ..agent_plugins.errors import preflight_reintegration_survivors
+    from ..models.apm_package import surviving_dependency_refs_for_reintegration
+
+    del logger  # Nothing to warn about: target exclusion is routine and silent.
+    survivors = surviving_dependency_refs_for_reintegration(
+        apm_package,
+        project_root,
+        lockfile=lockfile,
+    )
+    preflight_reintegration_survivors(
+        (
+            dependency
+            for dependency in survivors
+            if dependency.get_unique_key() not in excluded_keys
+        ),
+        apm_modules_dir,
+    )
+
+
 @click.command(
     help=(
         "Remove APM packages absent from the resolved dependency graph "
@@ -55,6 +87,7 @@ def _lock_keys_by_install_path(
     help="Preview package removal and ownership repair without mutating anything",
 )
 @click.pass_context
+@serialized_lifecycle_unless("dry_run")
 def prune(ctx, dry_run):
     """Remove orphaned packages and repair stale deployment ownership.
 
@@ -66,13 +99,14 @@ def prune(ctx, dry_run):
         apm prune           # Remove orphaned packages
         apm prune --dry-run # Show what would be removed
     """
+    apm_modules_dir = Path(APM_MODULES_DIR)
     logger = CommandLogger("prune", dry_run=dry_run)
+    registration_token = _publish_native_registration(Path.cwd())
     try:
         if not Path(APM_YML_FILENAME).exists():
             logger.error("No apm.yml found. Run 'apm init' first.")
             sys.exit(1)
 
-        apm_modules_dir = Path(APM_MODULES_DIR)
         logger.start("Analyzing installed packages vs apm.yml...")
 
         try:
@@ -141,7 +175,25 @@ def prune(ctx, dry_run):
                     "No orphaned packages found. apm_modules/ is clean.",
                     symbol="check",
                 )
+            _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
             return
+
+        planned_pruned_keys = set(missing_orphaned_keys)
+        for orphaned_package in orphaned_packages:
+            planned_pruned_keys.update(
+                key
+                for key in lock_keys_by_path.get(orphaned_package, ())
+                if key not in expected_lock_keys
+            )
+        if planned_pruned_keys and not dry_run:
+            _preflight_prune_survivors(
+                apm_package,
+                project_root,
+                apm_modules_dir,
+                lockfile=lockfile,
+                excluded_keys=planned_pruned_keys,
+                logger=logger,
+            )
 
         if orphaned_packages:
             logger.warning(f"Found {len(orphaned_packages)} orphaned package(s):")
@@ -163,13 +215,6 @@ def prune(ctx, dry_run):
             if missing_orphaned_keys:
                 logger.dry_run_notice(
                     f"remove {len(missing_orphaned_keys)} stale lockfile dependency record(s)"
-                )
-            planned_pruned_keys = set(missing_orphaned_keys)
-            for orphaned_package in orphaned_packages:
-                planned_pruned_keys.update(
-                    key
-                    for key in lock_keys_by_path.get(orphaned_package, ())
-                    if key not in expected_lock_keys
                 )
             planned_owner_repairs = (
                 DeploymentLedgerCodec.owner_reference_violations(
@@ -284,6 +329,19 @@ def prune(ctx, dry_run):
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
+            if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
+                from .uninstall.engine import _cleanup_stale_mcp
+
+                _cleanup_stale_mcp(
+                    apm_package,
+                    lockfile,
+                    lockfile_path,
+                    set(lockfile.mcp_servers),
+                    modules_dir=apm_modules_dir,
+                    project_root=project_root,
+                    scope=InstallScope.PROJECT,
+                    persist=False,
+                )
             try:
                 if lockfile_has_persisted_state(lockfile):
                     lockfile.write(lockfile_path)
@@ -300,6 +358,8 @@ def prune(ctx, dry_run):
                     "Filesystem cleanup may be partial. Rerun 'apm prune', then run 'apm audit'."
                 )
                 sys.exit(1)
+
+        _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
 
         logger.render_summary()
 
@@ -352,3 +412,67 @@ def prune(ctx, dry_run):
     except Exception as e:
         logger.error(f"Error pruning packages: {e}")
         sys.exit(1)
+    finally:
+        _retire_native_registration(registration_token)
+
+
+def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run: bool) -> None:
+    """Rebuild APM's Copilot plugin registration from surviving locked state."""
+    try:
+        from ..agent_plugins.errors import AgentPluginError
+        from ..copilot_plugins.registrar import resync_native_plugins
+        from ..copilot_plugins.settings import CopilotSettingsCollisionError
+
+        resync_native_plugins(
+            project_root=project_root,
+            modules_dir=apm_modules_dir,
+            scope=InstallScope.PROJECT,
+            lockfile=lockfile,
+            logger=logger,
+            dry_run=dry_run,
+        )
+    except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
+        logger.warning(
+            f"GitHub Copilot plugin registration could not be updated: {registration_error} "
+            "Re-run 'apm install' to re-register once resolved."
+        )
+
+
+def _publish_native_registration(project_root: Path):
+    """Publish the Copilot native-plugin capability for this prune.
+
+    Reads the SAME canonical target declaration (``apm.yml``'s ``target:``/
+    ``targets:`` field, via :func:`package_target_selection`) that ``install``
+    and hook reconciliation already use -- never falls back to directory
+    auto-detection, which would incorrectly treat ``copilot`` as active
+    whenever a ``.github/`` directory happens to exist on disk regardless of
+    what this project actually declares.
+    """
+    from ..copilot_plugins.capability import (
+        activate_native_registration,
+        resolve_native_registration_capability,
+    )
+    from ..integration.targets import resolve_targets
+    from ..models.apm_package import package_target_selection
+
+    manifest_target = None
+    with contextlib.suppress(Exception):
+        manifest_target = package_target_selection(
+            APMPackage.from_apm_yml(project_root / APM_YML_FILENAME)
+        )
+    try:
+        targets = resolve_targets(project_root, user_scope=False, explicit_target=manifest_target)
+    except Exception:
+        targets = ()
+    return activate_native_registration(resolve_native_registration_capability(targets))
+
+
+def _retire_native_registration(token) -> None:
+    """Retire the published capability once the command finishes."""
+    from ..copilot_plugins.capability import reset_native_registration
+
+    if token is None:
+        return
+    # A token created in another context is not ours to reset.
+    with contextlib.suppress(ValueError):
+        reset_native_registration(token)

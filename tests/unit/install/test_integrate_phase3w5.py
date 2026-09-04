@@ -157,6 +157,7 @@ class TestResolveDownloadStrategy:
             )
 
         assert not skip_download
+        assert "org/pkg" not in ctx.content_hash_verified_deps
         logger.progress.assert_called()
 
     def test_registry_enforce_only_skips_cached(self, tmp_path: Path) -> None:
@@ -759,6 +760,35 @@ class TestRunIntegrationLoop:
             run(ctx)
 
         assert ctx.installed_count == 1
+
+    def test_pre_downloaded_dependency_is_marked_fetched_this_run(self, tmp_path: Path) -> None:
+        from apm_cli.install.phases.integrate import run
+
+        ctx = self._make_full_ctx(tmp_path)
+        dep = _make_dep_ref("org/pkg")
+        ctx.deps_to_install = [dep]
+        ctx.callback_failures = set()
+        ctx.pre_downloaded_keys = {"org/pkg"}
+        mock_source = MagicMock()
+
+        with (
+            patch(
+                "apm_cli.install.phases.integrate._resolve_download_strategy",
+                return_value=(None, True, None, False),
+            ),
+            patch(
+                "apm_cli.install.phases.integrate.make_dependency_source",
+                return_value=mock_source,
+            ) as make_source,
+            patch(
+                "apm_cli.install.phases.integrate.prepare_integration_materialization",
+                return_value=(None, {}),
+            ),
+            patch("apm_cli.install.phases.integrate._integrate_root_project", return_value=None),
+        ):
+            run(ctx)
+
+        assert make_source.call_args.kwargs["fetched_this_run"] is True
 
     def test_direct_dep_failure_with_diagnostics(self, tmp_path: Path) -> None:
         from apm_cli.install.phases.integrate import run

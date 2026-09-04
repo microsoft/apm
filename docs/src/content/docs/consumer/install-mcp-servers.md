@@ -88,6 +88,12 @@ apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /
 
 # Remote
 apm install --mcp linear --transport http --url https://mcp.linear.app/sse
+
+# Global stdio install (writes user APM + runtime config only)
+apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/server-fetch
+
+# Global registry install (requires one unique registry match)
+apm install -g --target claude --mcp io.github.github/github-mcp-server
 ```
 
 `apm mcp install NAME ...` is an alias that forwards to the same code
@@ -135,13 +141,15 @@ unresolved required entries fail closed.
 
 | Harness | File | Scope | Format |
 |---|---|---|---|
-| GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |
+| GitHub Copilot CLI | `.github/mcp.json` | project | JSON `mcpServers` |
+| GitHub Copilot CLI | `$COPILOT_HOME/mcp-config.json` (`-g`, unset/blank: `~/.copilot/mcp-config.json`) | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
 | Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
 | Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
+| Hermes Agent | `$HERMES_HOME/config.yaml` (unset/blank: `~/.hermes/config.yaml`; explicit `--target hermes` only) | home-scoped | YAML `mcp_servers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
@@ -165,10 +173,11 @@ write.
 The same effective decision drives package, MCP, and LSP phases; APM does
 not re-resolve each phase independently.
 
-At project scope, the canonical `copilot` target writes MCP state to VS Code's
-`.vscode/mcp.json`. At global scope it writes Copilot CLI's
-`~/.copilot/mcp-config.json`. Use the legacy `--runtime copilot` override only
-when a project-scoped command must address the Copilot CLI adapter directly.
+At project scope, the `copilot` target writes MCP state to
+`.github/mcp.json`, which Copilot CLI discovers from the repository. The
+`vscode` target writes only `.vscode/mcp.json`. At global scope, `copilot`
+writes `$COPILOT_HOME/mcp-config.json`, or `~/.copilot/mcp-config.json` when
+`COPILOT_HOME` is unset.
 
 **Portability boundary:** A committed target list makes lockfile MCP ownership
 deterministic across machines with different installed harnesses. If `targets:`
@@ -211,18 +220,29 @@ permissions to check. (#1335)
 
 `apm install -g --mcp NAME` routes the write to each runtime's
 user-scope MCP config (for example, Copilot CLI to
-`~/.copilot/mcp-config.json`, Claude Code to
+`$COPILOT_HOME/mcp-config.json` when `COPILOT_HOME` is set, otherwise
+`~/.copilot/mcp-config.json`; Claude Code to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
 non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
 relative values are rejected. Codex CLI writes to
-`$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or `~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`, Antigravity CLI to `~/.gemini/config/mcp_config.json`, Windsurf to
+`$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or
+`~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`,
+Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
+`$HERMES_HOME/config.yaml` whenever selected explicitly (or
+`~/.hermes/config.yaml` when unset or blank), Windsurf to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
-and JetBrains Copilot to its OS-specific user config). When the
-package declares a `targets:` field (or the CLI passes `--target`),
-only the matching runtimes receive the config write. When neither
-restricts targets, all detected user-scope-capable runtimes are
-configured. Workspace-only runtimes (VS Code, Cursor, OpenCode) are
-skipped at user scope.
+and JetBrains Copilot to its OS-specific user config).
+When the user-scope manifest declares a `targets:` field (or the CLI passes
+`--target`), only the matching runtimes receive the config write. When no CLI
+target, user-scope manifest target, or saved `apm config target` restricts
+targets, all detected user-scope-capable runtimes are configured.
+Workspace-only runtimes (VS Code, Cursor, OpenCode) are skipped with a warning
+when a mixed target set also contains a global-capable runtime. If none of the
+selected targets supports user scope, the command exits `2` before changing the
+user manifest, lockfile, or runtime configuration. The direct command creates
+or updates `~/.apm/apm.yml`; it does not fall back to the current project's
+manifest. With `--dry-run`, it previews the user-scope entry and runtime
+targets without creating that manifest, lockfile, or runtime configuration.
 
 ## stdio vs HTTP servers
 
@@ -237,6 +257,17 @@ MCP defines two transport families. APM exposes both:
   remote endpoint. Requires `url:` (http or https only -- websockets
   and `file://` are rejected). Use `--header KEY=VALUE` (repeatable)
   for HTTP headers such as `Authorization`.
+
+Codex requires HTTPS for non-loopback remote endpoints. Plain HTTP is
+accepted only for literal loopback addresses such as `localhost`,
+`ip6-localhost`, `127.0.0.0/8`, and `::1`, which keeps local development
+servers usable without sending cleartext traffic off the machine. For example:
+
+```sh
+apm install --target codex --mcp local-dev --url http://localhost:3000/mcp
+```
+
+This writes the endpoint to the Codex MCP configuration.
 
 `--transport` is inferred when omitted: a `--url` implies a remote
 transport, a post-`--` command implies `stdio`. The mutually-exclusive

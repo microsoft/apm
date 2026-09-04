@@ -30,6 +30,7 @@ import json
 import os
 from pathlib import Path
 
+from ...models.dependency.mcp import _EXTRA_DENYLIST
 from .copilot import CopilotClientAdapter
 
 
@@ -152,5 +153,10 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         env = copilot_entry.get("env") or {}
         if env:
             entry["environment"] = dict(env)
+
+        translated_keys = _EXTRA_DENYLIST
+        for key, value in copilot_entry.items():
+            if key not in translated_keys and key not in entry:
+                entry[key] = value
 
         return entry

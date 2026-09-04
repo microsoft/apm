@@ -29,6 +29,97 @@ class PathTraversalError(ValueError):
     """Raised when a computed path escapes its expected base directory."""
 
 
+def decode_url_path_segments(
+    raw_path: str,
+    *,
+    context: str = "URL path",
+) -> tuple[str, ...]:
+    """Strictly decode safe URL path segments without changing URL structure.
+
+    Callers must parse a URL before passing its ``path`` component here.  The
+    returned values are decoded identity material; callers retain ``raw_path``
+    when they need to render or transport the original encoded URL.
+
+    A literal ``/`` separates segments.  Percent escapes are validated before
+    decoding, decoded as strict UTF-8, and may not introduce separators,
+    traversal names, empty values, or another percent escape.  Rejecting a
+    residual percent escape prevents multi-encoded traversal and separator
+    payloads from being accepted after a bounded number of decode passes.
+    """
+    _, decoded_segments = parse_url_path_segments(raw_path, context=context)
+    return decoded_segments
+
+
+def parse_url_path_segments(
+    raw_path: str,
+    *,
+    context: str = "URL path",
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return validated raw and decoded URL path segments.
+
+    The raw segments retain their encoded presentation for URL transport. The
+    decoded segments are suitable only for provider identities that require
+    decoded values, such as Azure DevOps organization and project names.
+    """
+    if not isinstance(raw_path, str):
+        raise PathTraversalError(f"Invalid {context}: URL path must be a string")
+
+    path = raw_path[1:] if raw_path.startswith("/") else raw_path
+    if not path:
+        raise PathTraversalError(f"Invalid {context}: path segments must not be empty")
+
+    raw_segments = tuple(path.split("/"))
+    decoded_segments: list[str] = []
+    for raw_segment in raw_segments:
+        if not raw_segment:
+            raise PathTraversalError(f"Invalid {context}: path segments must not be empty")
+        if "\\" in raw_segment:
+            raise PathTraversalError(
+                f"Invalid {context}: path segments must not contain path separators"
+            )
+        index = 0
+        while index < len(raw_segment):
+            character = raw_segment[index]
+            if ord(character) < 0x21 or ord(character) > 0x7E:
+                raise PathTraversalError(
+                    f"Invalid {context}: path segments must use percent-encoded UTF-8 bytes"
+                )
+            if character == "%":
+                if (
+                    index + 2 >= len(raw_segment)
+                    or raw_segment[index + 1] not in "0123456789abcdefABCDEF"
+                    or raw_segment[index + 2] not in "0123456789abcdefABCDEF"
+                ):
+                    raise PathTraversalError(f"Invalid {context}: malformed percent-encoding")
+                index += 3
+            else:
+                index += 1
+        try:
+            decoded = _up.unquote_to_bytes(raw_segment).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise PathTraversalError(
+                f"Invalid {context}: percent-encoding must be valid UTF-8"
+            ) from exc
+        if not decoded:
+            raise PathTraversalError(f"Invalid {context}: path segments must not be empty")
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in decoded):
+            raise PathTraversalError(
+                f"Invalid {context}: percent-encoding must not decode to control characters"
+            )
+        if "%" in decoded:
+            raise PathTraversalError(f"Invalid {context}: residual percent-encoding is not allowed")
+        if "/" in decoded or "\\" in decoded:
+            raise PathTraversalError(
+                f"Invalid {context}: percent-encoding must not decode to a path separator"
+            )
+        if decoded in {".", ".."}:
+            raise PathTraversalError(
+                f"Invalid {context}: segment '{raw_segment}' is a traversal sequence"
+            )
+        decoded_segments.append(decoded)
+    return raw_segments, tuple(decoded_segments)
+
+
 def validate_path_segments(
     path_str: str,
     *,
@@ -104,8 +195,16 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     This is intentionally strict: symlinks are resolved so that a link
     pointing outside the base is caught as well.
     """
+    return ensure_path_within_resolved(
+        path,
+        _strip_extended_prefix(base_dir.resolve()),
+    )
+
+
+def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
+    """Resolve *path* and assert containment against a pre-resolved base."""
     resolved = _strip_extended_prefix(path.resolve())
-    resolved_base = _strip_extended_prefix(base_dir.resolve())
+    resolved_base = _strip_extended_prefix(resolved_base)
     try:
         if not resolved.is_relative_to(resolved_base):
             raise PathTraversalError(
@@ -114,9 +213,23 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
             )
     except (TypeError, ValueError) as exc:
         raise PathTraversalError(
-            f"Cannot verify containment of '{path}' within '{base_dir}': {exc}"
+            f"Cannot verify containment of '{path}' within '{resolved_base}': {exc}"
         ) from exc
     return resolved
+
+
+def has_symlink_component(base_dir: Path, path: Path) -> bool:
+    """Return whether any component of *path* below *base_dir* is a symlink."""
+    try:
+        relative = path.relative_to(base_dir)
+        current = base_dir
+        for part in relative.parts:
+            current /= part
+            if current.is_symlink():
+                return True
+        return False
+    except (OSError, ValueError):
+        return True
 
 
 def safe_rmtree(path: Path, base_dir: Path) -> None:

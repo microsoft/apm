@@ -34,6 +34,13 @@ CONFORMANCE_MD = REPO_ROOT / "CONFORMANCE.md"
 
 SPEC_VERSION = "v0.1.1"
 GENERATOR = "gen_statement.py v1"
+USER_SCOPE_DISCLOSURE = {
+    "manifest_location": "~/.apm/apm.yml",
+    "lockfile_location": "~/.apm/apm.lock.yaml",
+    "target_capability_declaration": (
+        "MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)"
+    ),
+}
 
 
 def _ensure_coverage() -> dict[str, list[dict[str, str]]]:
@@ -128,6 +135,10 @@ def build_json() -> dict:
             "tests": [row["test_nodeid"] for row in rows],
             "test_count": len(rows),
         }
+        if r.fixture is not None:
+            entry["fixture"] = r.fixture
+        if r.oracle is not None:
+            entry["oracle"] = r.oracle
         if r.id in waivers:
             entry["waivers"] = sorted(waivers[r.id])
         entries.append(entry)
@@ -143,6 +154,7 @@ def build_json() -> dict:
         "generator": GENERATOR,
         "total_requirements": len(entries),
         "summary_by_class": summary,
+        "consumer_user_scope": USER_SCOPE_DISCLOSURE,
         "requirements": entries,
     }
 
@@ -187,16 +199,24 @@ def build_md(doc: dict) -> str:
     summary_section = (
         "## Coverage summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"
     )
+    user_scope = doc["consumer_user_scope"]
+    scope_section = (
+        "## Consumer user-scope disclosure\n\n"
+        f"- Manifest: `{user_scope['manifest_location']}`\n"
+        f"- Lockfile: `{user_scope['lockfile_location']}`\n"
+        "- Target capability declaration: "
+        f"`{user_scope['target_capability_declaration']}`\n\n"
+    )
     rows = [
         "## Per-requirement coverage\n",
-        "| Req ID | Keyword | Sec | Class | Status | Tests |",
-        "|--------|---------|----:|-------|--------|------:|",
+        "| Req ID | Keyword | Sec | Class | Status | Tests | Oracle |",
+        "|--------|---------|----:|-------|--------|------:|--------|",
     ]
     for e in doc["requirements"]:
         rows.append(
             f"| [{e['id']}](docs/src/content/docs/specs/openapm-v0.1.md#{e['id']}) "
             f"| {e['keyword']} | {e['section']} | {e['conformance_class']} "
-            f"| {e['status']} | {e['test_count']} |"
+            f"| {e['status']} | {e['test_count']} | {e.get('oracle', '-')} |"
         )
     table = "\n".join(rows) + "\n\n"
     waivers_section = ["## Waivers\n"]
@@ -207,7 +227,7 @@ def build_md(doc: dict) -> str:
                 waivers_section.append(f"- {w}")
             waivers_section.append("")
     waivers_md = "\n".join(waivers_section) + "\n"
-    return preamble + summary_section + table + waivers_md
+    return preamble + scope_section + summary_section + table + waivers_md
 
 
 def _is_ascii(text: str) -> bool:

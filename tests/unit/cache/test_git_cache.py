@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.cache.git_cache import GitCache
 
 
@@ -217,9 +219,11 @@ class TestGitCacheEnvForwarding:
         sha = "d" * 40
         mock_run.return_value = MagicMock(returncode=0, stdout=f"{sha}\trefs/heads/main\n")
         cache._resolve_sha("https://github.com/owner/repo", "main", env=sentinel)
-        # Assert env was passed through verbatim
+        # The cache must preserve auth values while returning a sanitized copy.
         call_kwargs = mock_run.call_args.kwargs
-        assert call_kwargs.get("env") is sentinel
+        child_env = call_kwargs["env"]
+        assert all(child_env.get(key) == value for key, value in sentinel.items())
+        assert child_env is not sentinel
 
     @patch("subprocess.run")
     def test_env_forwarded_to_get_checkout_miss(self, mock_run: MagicMock, tmp_path: Path) -> None:
@@ -253,12 +257,14 @@ class TestGitCacheEnvForwarding:
                 "https://github.com/owner/repo", "main", locked_sha=sha, env=sentinel
             )
 
-        # Every subprocess call should carry the sentinel env
+        # Every subprocess call should carry a sanitized copy of the sentinel env.
         assert mock_run.called
         for call in mock_run.call_args_list:
-            assert call.kwargs.get("env") is sentinel, (
+            child_env = call.kwargs.get("env", {})
+            assert all(child_env.get(key) == value for key, value in sentinel.items()), (
                 f"env not forwarded to: {call.args[0] if call.args else call.kwargs.get('args')}"
             )
+            assert child_env is not sentinel
 
 
 class TestCheckoutWriteDedup:
@@ -270,13 +276,15 @@ class TestCheckoutWriteDedup:
     and return immediately without doing any clone work themselves.
     """
 
-    def test_short_circuits_when_final_exists_under_lock(self, tmp_path: Path) -> None:
+    def test_short_circuits_when_final_exists_under_lock(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """If final_dir is already populated when the lock is acquired,
         no git subprocess is invoked."""
         from apm_cli.cache.url_normalize import cache_shard_key
 
         cache = GitCache(tmp_path)
-        url = "https://github.com/owner/repo"
+        url = "https://user:pass@github.com/owner/repo?access_token=SECRET123#main"
         sha = "1" * 40
         shard = cache_shard_key(url)
 
@@ -293,10 +301,13 @@ class TestCheckoutWriteDedup:
                 return_value=True,
             ) as mock_verify,
         ):
-            result = cache._create_checkout(url, shard, sha)
+            with caplog.at_level("DEBUG"):
+                result = cache._create_checkout(url, shard, sha)
             mock_run.assert_not_called()
             mock_verify.assert_called_with(final_dir, sha)
         assert result == final_dir
+        assert "SECRET123" not in caplog.text
+        assert "user:pass" not in caplog.text
 
     def test_proceeds_with_clone_when_final_missing(self, tmp_path: Path) -> None:
         """If final_dir does not exist on lock entry, clone happens."""

@@ -13,6 +13,7 @@ gate (deployed-files-present, content-integrity, drift).
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -730,6 +731,100 @@ def _known(name):
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     return KNOWN_TARGETS[name]
+
+
+def _seed_multiple_cowork_mounts(home: Path) -> None:
+    cloud_storage = home / "Library" / "CloudStorage"
+    for dirname in ("OneDrive-Org", "OneDrive-SharedLibraries-Team"):
+        (cloud_storage / dirname).mkdir(parents=True)
+
+
+def _isolate_cowork_config(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
+    from apm_cli import config
+
+    config_dir = home / ".apm"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
+    monkeypatch.delenv("ONEDRIVECOMMERCIAL", raising=False)
+    monkeypatch.delenv("ONEDRIVE", raising=False)
+    monkeypatch.setattr(config, "CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(config, "CONFIG_FILE", str(config_dir / "config.json"))
+    monkeypatch.setattr(config, "_config_cache", None)
+
+
+class TestInactiveExperimentalResolverGating:
+    def test_declared_profiles_skip_inactive_resolvers_with_multiple_mounts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from apm_cli.install.manifest_reconcile import declared_target_profiles
+        from apm_cli.utils.diagnostics import CATEGORY_INFO, DiagnosticCollector
+
+        home = tmp_path / "home"
+        _seed_multiple_cowork_mounts(home)
+        _isolate_cowork_config(monkeypatch, home)
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: inactive-resolver-consumer\n"
+            "version: 0.1.0\n"
+            "targets:\n"
+            "  - copilot\n"
+            "  - claude\n"
+            "  - codex\n",
+            encoding="utf-8",
+        )
+        diagnostics = DiagnosticCollector(verbose=True)
+
+        profiles = declared_target_profiles(
+            project,
+            user_scope=True,
+            active_targets=[_known("copilot"), _known("claude"), _known("codex")],
+            diagnostics=diagnostics,
+        )
+
+        names = {profile.name for profile in profiles or []}
+        assert {"copilot", "claude", "codex"} <= names
+        cowork_profile = next(
+            profile for profile in profiles or [] if profile.name == "copilot-cowork"
+        )
+        assert cowork_profile.resolved_deploy_root is None
+        info_messages = {
+            diagnostic.message for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
+        }
+        assert (
+            "Skipped inactive experimental resolver for target 'copilot-cowork' "
+            "during lockfile reconciliation."
+        ) in info_messages
+
+    def test_explicit_experimental_resolver_failure_is_not_silenced(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
+        from apm_cli.integration.targets import resolve_targets
+
+        home = tmp_path / "home"
+        _seed_multiple_cowork_mounts(home)
+        _isolate_cowork_config(monkeypatch, home)
+        config_dir = home / ".apm"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text(
+            '{"default_client":"vscode","experimental":{"copilot_cowork":true}}',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(
+            CoworkResolutionError,
+            match="Multiple OneDrive mounts detected",
+        ):
+            resolve_targets(
+                tmp_path,
+                user_scope=True,
+                explicit_target="copilot-cowork",
+            )
 
 
 class TestInactiveTargetGhostDrop:

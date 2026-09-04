@@ -5,11 +5,12 @@ critical findings and allows deployment on warnings/clean, and that
 install exits non-zero when packages are blocked.
 """
 
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 
 import pytest
 
 from apm_cli.commands.install import _pre_deploy_security_scan
+from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.security.content_scanner import ContentScanner
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -93,20 +94,30 @@ class TestDiagnosticsSecurityRendering:
 # ── Pre-deploy security scan tests ───────────────────────────────
 
 
+def _all_files_plan(root: Path) -> DeployableSourcePlan:
+    """Build an explicit test-only plan for direct gate behavior."""
+    return DeployableSourcePlan(
+        root,
+        frozenset(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()),
+    )
+
+
 class TestPreDeploySecurityScan:
     """Tests for _pre_deploy_security_scan() — the pre-deployment gate."""
 
     def test_clean_package_allows_deploy(self, tmp_path):
         (tmp_path / "prompt.md").write_text("Clean content\n", encoding="utf-8")
         diag = DiagnosticCollector()
-        assert _pre_deploy_security_scan(tmp_path, diag, package_name="pkg") is True
+        assert (
+            _pre_deploy_security_scan(_all_files_plan(tmp_path), diag, package_name="pkg") is True
+        )
         assert diag.security_count == 0
 
     def test_critical_chars_block_deploy(self, tmp_path):
         (tmp_path / "evil.md").write_text("hidden\U000e0001tag\n", encoding="utf-8")
         diag = DiagnosticCollector()
         result = _pre_deploy_security_scan(
-            tmp_path,
+            _all_files_plan(tmp_path),
             diag,
             package_name="pkg",
             force=False,
@@ -118,7 +129,7 @@ class TestPreDeploySecurityScan:
         (tmp_path / "evil.md").write_text("hidden\U000e0001tag\n", encoding="utf-8")
         diag = DiagnosticCollector()
         result = _pre_deploy_security_scan(
-            tmp_path,
+            _all_files_plan(tmp_path),
             diag,
             package_name="pkg",
             force=True,
@@ -130,7 +141,7 @@ class TestPreDeploySecurityScan:
         (tmp_path / "warn.md").write_text("zero\u200bwidth\n", encoding="utf-8")
         diag = DiagnosticCollector()
         result = _pre_deploy_security_scan(
-            tmp_path,
+            _all_files_plan(tmp_path),
             diag,
             package_name="pkg",
         )
@@ -145,7 +156,7 @@ class TestPreDeploySecurityScan:
         (sub / "deep.md").write_text("tag\U000e0041char\n", encoding="utf-8")
         diag = DiagnosticCollector()
         result = _pre_deploy_security_scan(
-            tmp_path,
+            _all_files_plan(tmp_path),
             diag,
             package_name="pkg",
             force=False,
@@ -154,13 +165,13 @@ class TestPreDeploySecurityScan:
 
     def test_empty_package_allows_deploy(self, tmp_path):
         diag = DiagnosticCollector()
-        assert _pre_deploy_security_scan(tmp_path, diag) is True
+        assert _pre_deploy_security_scan(_all_files_plan(tmp_path), diag) is True
         assert diag.security_count == 0
 
     def test_package_name_in_diagnostic(self, tmp_path):
         (tmp_path / "x.md").write_text("z\u200bw\n", encoding="utf-8")
         diag = DiagnosticCollector()
-        _pre_deploy_security_scan(tmp_path, diag, package_name="my-pkg")
+        _pre_deploy_security_scan(_all_files_plan(tmp_path), diag, package_name="my-pkg")
         items = diag.by_category().get("security", [])
         assert len(items) == 1
         assert items[0].package == "my-pkg"
@@ -182,7 +193,7 @@ class TestPreDeploySecurityScan:
             pytest.skip("symlinks not supported on this platform")
 
         diag = DiagnosticCollector()
-        result = _pre_deploy_security_scan(pkg, diag, package_name="test")
+        result = _pre_deploy_security_scan(_all_files_plan(pkg), diag, package_name="test")
         # Should allow deploy — the evil file is behind a symlink
         assert result is True
         assert diag.security_count == 0

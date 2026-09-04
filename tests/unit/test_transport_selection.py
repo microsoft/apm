@@ -17,6 +17,7 @@ Covers the selection matrix from issue microsoft/apm#778:
 
 from __future__ import annotations
 
+import os
 from typing import Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import patch
 
@@ -61,6 +62,9 @@ class FakeInsteadOfResolver:
             if candidate_url.startswith(prefix):
                 return replacement + candidate_url[len(prefix) :]
         return None
+
+    def has_exact_rule(self, candidate_url: str) -> bool:
+        return candidate_url in self._rewrites
 
 
 def _dep(spec: str) -> DependencyReference:
@@ -115,6 +119,53 @@ class TestExplicitSchemeStrict:
         assert _scheme_labels(plan) == ["https"]
         assert plan.attempts[0].use_token is False
 
+    def test_explicit_https_reports_effective_file_rewrite(self):
+        candidate = "https://github.com/owner/repo.git"
+        selector = TransportSelector(
+            insteadof_resolver=FakeInsteadOfResolver({"https://github.com/": "file:///mirror/"})
+        )
+
+        plan = selector.select(
+            dep_ref=_dep(candidate),
+            has_token=True,
+            candidate_url=candidate,
+        )
+
+        assert _scheme_labels(plan) == ["file"]
+        assert plan.attempts[0].use_token is False
+        assert plan.attempts[0].requested_url == candidate
+        assert plan.attempts[0].effective_url == "file:///mirror/owner/repo.git"
+
+    def test_rewrite_does_not_duplicate_dot_git_suffix(self):
+        resolver = FakeInsteadOfResolver(
+            {"https://github.com/owner/repo": "file:///tmp/mirror/repo.git"}
+        )
+
+        plan = TransportSelector(insteadof_resolver=resolver).select(
+            dep_ref=_dep("https://github.com/owner/repo.git"),
+            candidate_url="https://github.com/owner/repo.git",
+        )
+
+        assert plan.attempts[0].requested_url == "https://github.com/owner/repo"
+        assert plan.attempts[0].effective_url == "file:///tmp/mirror/repo.git"
+        assert resolver.calls == [
+            "https://github.com/owner/repo.git",
+            "https://github.com/owner/repo",
+        ]
+
+    def test_exact_dot_git_rule_is_never_substituted(self):
+        candidate = "https://github.com/owner/repo.git"
+        resolver = FakeInsteadOfResolver({candidate: "file:///tmp/exact/repo.git.git"})
+
+        plan = TransportSelector(insteadof_resolver=resolver).select(
+            dep_ref=_dep(candidate),
+            candidate_url=candidate,
+        )
+
+        assert plan.attempts[0].requested_url == candidate
+        assert plan.attempts[0].effective_url == "file:///tmp/exact/repo.git.git"
+        assert resolver.calls == [candidate]
+
     def test_explicit_http_is_strict_and_never_uses_token(self):
         sel = TransportSelector(insteadof_resolver=FakeInsteadOfResolver())
         plan = sel.select(
@@ -153,7 +204,69 @@ class TestShorthandWithInsteadOf:
             has_token=True,
         )
         assert _scheme_labels(plan) == ["ssh"]
+        assert plan.attempts[0].requested_url == "https://github.com/owner/repo"
+        assert plan.attempts[0].effective_url == "git@github.com:owner/repo"
+        assert plan.attempts[0].use_token is False
         assert plan.strict is True
+
+    def test_web_fallback_preserves_exact_dot_git_rewrite(self):
+        resolver = FakeInsteadOfResolver(
+            {"https://github.com/owner/repo.git": "file:///tmp/mirror/repo.git"}
+        )
+
+        plan = TransportSelector(insteadof_resolver=resolver).select(
+            dep_ref=_dep("owner/repo"),
+            candidate_url="owner/repo",
+            allow_fallback=True,
+            has_token=True,
+        )
+
+        assert plan.attempts[-1].requested_url == "https://github.com/owner/repo.git"
+        assert plan.attempts[-1].effective_url == "file:///tmp/mirror/repo.git"
+
+    def test_canonical_candidate_preserves_custom_port_and_suffix(self):
+        candidate = "https://git.example.test:8443/acme/repo.git"
+        resolver = FakeInsteadOfResolver(
+            {"https://git.example.test:8443/": "ssh://git@git.example.test:8443/"}
+        )
+        plan = TransportSelector(insteadof_resolver=resolver).select(
+            dep_ref=_dep("git.example.test:8443/acme/repo"),
+            candidate_url=candidate,
+        )
+
+        assert resolver.calls == [candidate]
+        assert plan.attempts[0].requested_url == candidate
+        assert plan.attempts[0].effective_url == "ssh://git@git.example.test:8443/acme/repo.git"
+
+    def test_https_preference_reports_effective_ssh_rewrite(self):
+        candidate = "https://github.com/owner/repo"
+        plan = TransportSelector(
+            insteadof_resolver=FakeInsteadOfResolver({"https://github.com/": "git@github.com:"})
+        ).select(
+            dep_ref=_dep("owner/repo"),
+            cli_pref=ProtocolPreference.HTTPS,
+            has_token=True,
+            candidate_url=candidate,
+        )
+
+        assert _scheme_labels(plan) == ["ssh"]
+        assert plan.attempts[0].use_token is False
+        assert plan.attempts[0].requested_url == candidate
+
+    def test_rewrite_deduplicates_equivalent_web_fallbacks(self):
+        candidate = "https://github.com/owner/repo"
+        plan = TransportSelector(
+            insteadof_resolver=FakeInsteadOfResolver({"https://github.com/": "git@github.com:"})
+        ).select(
+            dep_ref=_dep("owner/repo"),
+            allow_fallback=True,
+            has_token=True,
+            candidate_url=candidate,
+        )
+
+        assert _scheme_labels(plan) == ["ssh"]
+        assert plan.strict is True
+        assert "git config --show-origin" in (plan.fallback_hint or "")
 
     def test_no_insteadof_defaults_to_https_strict(self):
         sel = TransportSelector(insteadof_resolver=FakeInsteadOfResolver())
@@ -345,35 +458,45 @@ class TestGitConfigInsteadOfResolver:
     def test_lookup_cached_per_instance(self):
         """`git config --get-regexp` is shelled out at most once per instance."""
         resolver = GitConfigInsteadOfResolver()
-        with patch("apm_cli.deps.transport_selection.subprocess.run") as run:
+        with patch("apm_cli.utils.git_env._git_config_run") as run:
             # Simulate one rewrite rule: https://github.com/ -> git@github.com:
             run.return_value.returncode = 0
-            run.return_value.stdout = "url.git@github.com:.insteadof https://github.com/\n"
+            run.return_value.stdout = (
+                b"command\0url.git@github.com:.insteadof\nhttps://github.com/\0"
+            )
             resolver.resolve("https://github.com/owner/repo")
             resolver.resolve("https://github.com/other/proj")
             resolver.resolve("https://gitlab.com/acme/lib")
             assert run.call_count == 1
 
-    def test_uses_normal_env_not_locked_down(self):
-        """The resolver MUST use the process env so user .gitconfig is visible.
+    def test_uses_sanitized_normal_env(self):
+        """The resolver keeps user config while removing repository state.
 
         The downloader's locked-down git_env sets GIT_CONFIG_GLOBAL=/dev/null,
         which would suppress user insteadOf rewrites. Issue #328 stays broken
-        unless the resolver runs with the normal env (no env= override).
+        unless the resolver starts from the normal environment.
         """
         resolver = GitConfigInsteadOfResolver()
-        with patch("apm_cli.deps.transport_selection.subprocess.run") as run:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GIT_CONFIG_GLOBAL": "/home/test/.gitconfig",
+                    "GIT_DIR": "/hook/repo.git",
+                },
+            ),
+            patch("apm_cli.utils.git_env._git_config_run") as run,
+        ):
             run.return_value.returncode = 0
-            run.return_value.stdout = ""
+            run.return_value.stdout = b""
             resolver.resolve("https://github.com/owner/repo")
             _args, kwargs = run.call_args
-            # subprocess.run must be called WITHOUT env override so the
-            # user's normal git config is visible.
-            assert "env" not in kwargs or kwargs["env"] is None
+            assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == "/home/test/.gitconfig"
+            assert "GIT_DIR" not in kwargs["env"]
 
     def test_resolve_returns_none_when_no_rewrites(self):
         resolver = GitConfigInsteadOfResolver()
-        with patch("apm_cli.deps.transport_selection.subprocess.run") as run:
+        with patch("apm_cli.utils.git_env._git_config_run") as run:
             run.return_value.returncode = 0
-            run.return_value.stdout = ""
+            run.return_value.stdout = b""
             assert resolver.resolve("https://github.com/owner/repo") is None

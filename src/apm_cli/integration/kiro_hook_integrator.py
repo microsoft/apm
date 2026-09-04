@@ -18,7 +18,6 @@ from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_MAP,
     HookIntegrationResult,
     _emit_hook_event_diagnostics,
-    _filter_hook_files_for_target,
 )
 from apm_cli.integration.hook_ir import HookBinding, HookHandler
 from apm_cli.integration.hook_native_formats import _entries_to_ir
@@ -199,6 +198,8 @@ def _copy_scripts(
     diagnostics,
     target_paths: list[Path],
     hook_descriptor_files: set[Path],
+    source_plan=None,
+    selected_bundle_files: frozenset[Path] | None = None,
 ) -> tuple[int, int]:
     """Copy Kiro hook scripts and return copied/adopted counts."""
     copy_result = copy_deployed_hook_bundle(
@@ -212,6 +213,8 @@ def _copy_scripts(
         diagnostics=diagnostics,
         target_paths=target_paths,
         hook_descriptor_files=hook_descriptor_files,
+        source_plan=source_plan,
+        selected_bundle_files=selected_bundle_files,
     )
     return copy_result.scripts_copied, copy_result.files_adopted
 
@@ -226,6 +229,7 @@ def integrate_kiro_hooks(
     diagnostics=None,
     target=None,
     user_scope: bool = False,
+    source_plan=None,
 ) -> HookIntegrationResult:
     """Integrate hooks as one Kiro JSON file per hook action."""
     root_dir = target.root_dir if target else ".kiro"
@@ -233,18 +237,13 @@ def integrate_kiro_hooks(
     if not target_dir.exists():
         return HookIntegrationResult(0, 0, 0, [])
 
-    hook_files = integrator.find_hook_files(package_info.install_path)
     package_name = integrator._get_package_name(package_info, project_root)
-    # Per-file target routing always runs; a dep-level ``targets:`` list narrows
-    # the active target set upstream but must not disable per-file routing (see
-    # HookIntegrator.integrate_package_hooks for the full rationale).
-    hook_files = _filter_hook_files_for_target(
-        hook_files,
+    hook_sources = integrator.select_hook_sources_for_target(
+        package_info,
         "kiro",
-        package_name=package_name,
-        warned_packages=integrator._deprecated_hook_routing_warnings,
-        package_identity=package_info.get_canonical_dependency_string(),
+        source_plan=source_plan,
     )
+    hook_files = hook_sources.descriptors_for("kiro")
     if not hook_files:
         return HookIntegrationResult(0, 0, 0, [])
 
@@ -301,6 +300,8 @@ def integrate_kiro_hooks(
             diagnostics,
             target_paths,
             set(hook_files),
+            source_plan,
+            hook_sources.bundle_for("kiro"),
         )
         scripts_copied += copied
         scripts_adopted += adopted_scripts

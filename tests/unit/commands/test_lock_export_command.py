@@ -133,8 +133,41 @@ def test_export_timestamp_is_reproducible(runner, tmp_path):
         _seed(Path.cwd())
         first = runner.invoke(cli, ["lock", "export", "--timestamp", "2030-01-01T00:00:00+00:00"])
         second = runner.invoke(cli, ["lock", "export", "--timestamp", "2030-01-01T00:00:00+00:00"])
+        utc_designator = runner.invoke(
+            cli, ["lock", "export", "--timestamp", "2030-01-01T00:00:00Z"]
+        )
         assert first.output == second.output
         assert "2030-01-01T00:00:00+00:00" in first.output
+        assert utc_designator.exit_code == 0
+        assert "2030-01-01T00:00:00+00:00" in utc_designator.output
+
+
+@pytest.mark.parametrize("timestamp", ["not-a-date", "2024-06-01T12:00:00"])
+def test_export_invalid_timestamp_exits_2(runner, tmp_path, timestamp):
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        _seed(Path.cwd())
+        result = runner.invoke(cli, ["lock", "export", "--timestamp", timestamp])
+        assert result.exit_code == 2
+        assert "Expected timezone-aware ISO 8601 format" in result.stderr
+
+
+def test_export_without_generated_at_uses_fixed_epoch(runner, tmp_path, monkeypatch):
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        _seed(Path.cwd())
+        lock_path = Path("apm.lock.yaml")
+        lock_text = lock_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        lock_path.write_text(
+            lock_text.replace('generated_at: "2024-01-01T00:00:00+00:00"\n', ""),
+            encoding="utf-8",
+            newline="",
+        )
+        assert "generated_at" not in lock_path.read_text(encoding="utf-8")
+
+        result = runner.invoke(cli, ["lock", "export"])
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["metadata"]["timestamp"] == ("1970-01-01T00:00:00+00:00")
 
 
 def test_export_undeclared_omits_licenses(runner, tmp_path):

@@ -93,6 +93,20 @@ class FrozenInstallError(RuntimeError):
         self.reasons = list(reasons or [])
 
 
+def frozen_install_tip(error: FrozenInstallError) -> str:
+    """Return recovery guidance tailored to package or MCP lock drift."""
+    has_mcp_drift = any("MCP server" in reason for reason in error.reasons)
+    has_package_drift = any("MCP server" not in reason for reason in error.reasons)
+    if has_mcp_drift and has_package_drift:
+        return (
+            "Tip: run 'apm outdated' to inspect package drift, then run "
+            "'apm install' without --frozen to repair package and MCP lock state."
+        )
+    if has_mcp_drift:
+        return "Tip: run 'apm install' without --frozen to create or repair MCP lock state."
+    return "Tip: run 'apm outdated' to see what changed, then 'apm update'."
+
+
 class PolicyViolationError(RuntimeError):
     """Raised when org-policy enforcement halts an install.
 

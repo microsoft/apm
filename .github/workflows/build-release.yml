@@ -14,13 +14,7 @@ on:
   schedule:
     # Run daily at 04:00 UTC (6 AM CEST)
     - cron: '0 4 * * *'
-  workflow_dispatch:
-    inputs:
-      test_build:
-        description: 'Test build (uploads as workflow artifacts instead of release assets)'
-        required: false
-        default: true
-        type: boolean
+  workflow_dispatch: {}
 
 # Restrict default GITHUB_TOKEN permissions for all jobs (principle of least privilege)
 permissions:
@@ -54,15 +48,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
 
@@ -99,6 +93,7 @@ jobs:
       - name: Run smoke tests
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: uv run pytest tests/integration/test_runtime_smoke.py -v
@@ -132,7 +127,7 @@ jobs:
           uv run pwsh scripts/windows/sign-binary.ps1
 
       - name: Upload binary as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.binary_name }}
           path: |
@@ -152,7 +147,7 @@ jobs:
   # Intel runners are plentiful (<1 min queue) so this runs on every push for
   # early macOS build-regression feedback. Integration and release-validation
   # phases are conditional on tag/schedule/dispatch.
-  # Root node — runs its own unit tests instead of waiting for build-and-test.
+  # Root node - runs its own unit tests instead of waiting for build-and-test.
   build-and-validate-macos-intel:
     name: Build & Validate (macOS x86_64)
     runs-on: macos-15-intel
@@ -161,15 +156,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -182,7 +177,7 @@ jobs:
         run: brew install upx
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
 
@@ -192,7 +187,7 @@ jobs:
       - name: Run unit tests
         run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
 
-      # ── PHASE 1: BUILD BINARY ──
+      # PHASE 1: BUILD BINARY
       - name: Build binary
         run: |
           chmod +x scripts/build-binary.sh
@@ -210,7 +205,7 @@ jobs:
             -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: apm-darwin-x86_64
           path: |
@@ -223,11 +218,12 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── PHASE 2: FOCUSED INTEGRATION TESTS (tag/schedule/dispatch only) ──
+      # PHASE 2: FOCUSED INTEGRATION TESTS (tag/schedule/dispatch only)
       - name: Run focused Intel integration tests
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           # Intel validates the promoted lifecycle subset against its native
           # binary. Live credential acceptance belongs to auth-acceptance.yml.
@@ -239,7 +235,7 @@ jobs:
           uv run ./scripts/test-integration.sh
         timeout-minutes: 30
 
-      # ── PHASE 3: RELEASE VALIDATION (tag/schedule/dispatch only) ──
+      # PHASE 3: RELEASE VALIDATION (tag/schedule/dispatch only)
       - name: Prepare isolated release-validation environment
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
@@ -253,12 +249,13 @@ jobs:
           cd /tmp/apm-isolated-test
           chmod +x ./dist/apm-darwin-x86_64/apm
           ln -s "$(pwd)/dist/apm-darwin-x86_64/apm" "$(pwd)/apm"
-          echo "/tmp/apm-isolated-test" >> $GITHUB_PATH
+          echo "/tmp/apm-isolated-test" >> "$GITHUB_PATH"
 
       - name: Run release validation tests
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd /tmp/apm-isolated-test
@@ -267,11 +264,11 @@ jobs:
         timeout-minutes: 20
 
   # Consolidated macOS ARM build + validation.
-  # ARM runners (macos-latest) are extremely scarce — 2-4+ hour queue waits are
+  # ARM runners (macos-latest) are extremely scarce - 2-4+ hour queue waits are
   # common. This job is gated to tag/schedule/dispatch only so push-to-main never
   # blocks on ARM availability. All phases run unconditionally since the job itself
   # is already release-gated.
-  # Root node — runs its own unit tests instead of waiting for build-and-test.
+  # Root node - runs its own unit tests instead of waiting for build-and-test.
   build-and-validate-macos-arm:
     name: Build & Validate (macOS arm64)
     if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -281,15 +278,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -297,7 +294,7 @@ jobs:
         run: brew install upx
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
 
@@ -307,7 +304,7 @@ jobs:
       - name: Run unit tests
         run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
 
-      # ── PHASE 1: BUILD BINARY ──
+      # PHASE 1: BUILD BINARY
       - name: Build binary
         run: |
           chmod +x scripts/build-binary.sh
@@ -325,7 +322,7 @@ jobs:
             -vv -ra --tb=short
 
       - name: Upload binary as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: apm-darwin-arm64
           path: |
@@ -338,10 +335,11 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── PHASE 2: INTEGRATION TESTS ──
+      # PHASE 2: INTEGRATION TESTS
       - name: Run integration tests
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           # Scarce ARM runners force the full suite onto one runner, so
           # parallelise the non-live corpus in-process with xdist.
@@ -353,9 +351,9 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 30
+        timeout-minutes: 60
 
-      # ── PHASE 3: RELEASE VALIDATION ──
+      # PHASE 3: RELEASE VALIDATION
       - name: Prepare isolated release-validation environment
         run: |
           mkdir -p /tmp/apm-isolated-test/dist
@@ -368,11 +366,12 @@ jobs:
           cd /tmp/apm-isolated-test
           chmod +x ./dist/apm-darwin-arm64/apm
           ln -s "$(pwd)/dist/apm-darwin-arm64/apm" "$(pwd)/apm"
-          echo "/tmp/apm-isolated-test" >> $GITHUB_PATH
+          echo "/tmp/apm-isolated-test" >> "$GITHUB_PATH"
 
       - name: Run release validation tests
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd /tmp/apm-isolated-test
@@ -386,7 +385,10 @@ jobs:
   # Run on tags (release gate), schedule (regression), and dispatch (manual).
   integration-tests:
     name: Integration Tests
-    if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >
+      always() &&
+      (github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name == 'schedule' || needs.build-and-test.result == 'success')
     needs: [build-and-test]
     strategy:
       matrix:
@@ -410,36 +412,54 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download APM binary from build artifacts
-        uses: actions/download-artifact@v4
+        continue-on-error: ${{ github.event_name == 'schedule' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ matrix.binary_name }}
           path: ./
 
+      - name: Check downloaded binary artifact
+        id: artifact
+        if: always()
+        shell: bash
+        run: |
+          if [ -d "./dist/${{ matrix.binary_name }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No ${{ matrix.binary_name }} artifact; skipping scheduled integration validation for this platform."
+          fi
+
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
 
       - name: Install test dependencies
+        if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
         run: uv sync --frozen --extra dev
 
       - name: Run integration tests (Unix)
-        if: matrix.platform != 'windows'
+        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}    # Primary: APM module access
           # The tag gate runs the non-live corpus on one runner. Four workers stay
           # below the merge gate's aggregate width while loadgroup preserves
@@ -449,13 +469,14 @@ jobs:
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 30
+        timeout-minutes: 60
 
       - name: Run integration tests (Windows)
-        if: matrix.platform == 'windows'
+        if: matrix.platform == 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           uv run pwsh scripts/windows/test-integration.ps1 -SkipBuild
@@ -465,7 +486,11 @@ jobs:
   # macOS release validation runs inside the consolidated macOS jobs.
   release-validation:
     name: Release Validation
-    if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >
+      always() &&
+      (github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      (github.event_name == 'schedule' ||
+        (needs.build-and-test.result == 'success' && needs.integration-tests.result == 'success'))
     needs: [build-and-test, integration-tests]
     strategy:
       matrix:
@@ -489,23 +514,47 @@ jobs:
 
     steps:
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Download APM binary from build artifacts
-        uses: actions/download-artifact@v4
+        continue-on-error: ${{ github.event_name == 'schedule' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ matrix.binary_name }}
           path: ${{ matrix.platform == 'windows' && 'D:\apm-isolated-test' || '/tmp/apm-isolated-test/' }}
 
+      - name: Check downloaded binary artifact (Unix)
+        id: artifact_unix
+        if: always() && matrix.platform != 'windows'
+        run: |
+          if [ -d "/tmp/apm-isolated-test/dist/${{ matrix.binary_name }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No ${{ matrix.binary_name }} artifact; skipping scheduled release validation for this platform."
+          fi
+
+      - name: Check downloaded binary artifact (Windows)
+        id: artifact_windows
+        if: always() && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          if (Test-Path "D:\apm-isolated-test\dist\${{ matrix.binary_name }}") {
+            "available=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            "available=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Warning "No ${{ matrix.binary_name }} artifact; skipping scheduled release validation for this platform."
+          }
+
       - name: Make binary executable and verify isolation (Unix)
-        if: matrix.platform != 'windows'
+        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact_unix.outputs.available == 'true')
         run: |
           cd /tmp/apm-isolated-test
 
@@ -518,14 +567,14 @@ jobs:
           chmod +x ./dist/${{ matrix.binary_name }}/apm
 
       - name: Create APM symlink for testing (Unix)
-        if: matrix.platform != 'windows'
+        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact_unix.outputs.available == 'true')
         run: |
           cd /tmp/apm-isolated-test
           ln -s "$(pwd)/dist/${{ matrix.binary_name }}/apm" "$(pwd)/apm"
-          echo "/tmp/apm-isolated-test" >> $GITHUB_PATH
+          echo "/tmp/apm-isolated-test" >> "$GITHUB_PATH"
 
       - name: Verify binary and add to PATH (Windows)
-        if: matrix.platform == 'windows'
+        if: matrix.platform == 'windows' && (github.event_name != 'schedule' || steps.artifact_windows.outputs.available == 'true')
         shell: pwsh
         run: |
           cd D:\apm-isolated-test
@@ -540,9 +589,10 @@ jobs:
           echo $binDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Run release validation tests (Unix)
-        if: matrix.platform != 'windows'
+        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact_unix.outputs.available == 'true')
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd /tmp/apm-isolated-test
@@ -551,21 +601,50 @@ jobs:
         timeout-minutes: 20
 
       - name: Run release validation tests (Windows)
-        if: matrix.platform == 'windows'
+        if: matrix.platform == 'windows' && (github.event_name != 'schedule' || steps.artifact_windows.outputs.available == 'true')
         shell: pwsh
         env:
           APM_E2E_TESTS: "1"
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd D:\apm-isolated-test
           .\scripts\windows\test-release-validation.ps1
         timeout-minutes: 20
 
+  daily-release-smoke-signal:
+    name: Daily Release Smoke Signal
+    needs:
+      - build-and-test
+      - build-and-validate-macos-intel
+      - build-and-validate-macos-arm
+      - integration-tests
+      - release-validation
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: File or recover daily smoke issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { main } = require('./scripts/daily-release-smoke-signal.cjs');
+            await main({ github, context, core });
+
 
   create-release:
     name: Create GitHub Release
     needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation]
-    if: github.ref_type == 'tag'  # All tags create GitHub releases
+    if: github.event_name == 'push' && github.ref_type == 'tag'  # Only pushed tags create GitHub releases
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Required for release creation
@@ -575,7 +654,7 @@ jobs:
 
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: ./dist
 
@@ -651,20 +730,20 @@ jobs:
           # Check if tag matches stable semver pattern (e.g., v1.2.3, v0.2.0)
           # Stable: starts with v, followed by digits.digits.digits, then end of string
           if [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
             echo "Detected stable release: $TAG_NAME"
           # Check PEP 440 prerelease patterns: v1.2.3a1, v1.2.3b1, v1.2.3rc1, etc.
           elif [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)[0-9]+$ ]]; then
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
             echo "Detected PEP 440 prerelease: $TAG_NAME"
           else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
             echo "Detected other prerelease: $TAG_NAME"
           fi
 
       - name: Create GitHub Release
         id: release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           generate_release_notes: true
           prerelease: ${{ steps.release_type.outputs.is_prerelease == 'true' }}
@@ -689,7 +768,7 @@ jobs:
   deploy-docs:
     name: Deploy Docs
     needs: [create-release]
-    if: github.ref_type == 'tag' && needs.create-release.outputs.is_prerelease != 'true'
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.create-release.outputs.is_prerelease != 'true'
     uses: ./.github/workflows/docs.yml
     permissions:
       contents: read
@@ -698,7 +777,7 @@ jobs:
     with:
       is_prerelease: false
 
-  # GH-AW Compatibility — validates the released binary works in the
+  # GH-AW Compatibility - validates the released binary works in the
   # exact flow GitHub Agentic Workflows uses (isolated install + pack, no token).
   # Informational: runs as continue-on-error because it depends on external services
   # (GitHub API, npm, microsoft/apm-action, microsoft/apm-sample-package) that can
@@ -706,12 +785,12 @@ jobs:
   gh-aw-compat:
     name: GH-AW Compatibility
     needs: [create-release]
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - name: Install and pack with apm-action
-        uses: microsoft/apm-action@v1
+        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
         id: pack
         with:
           dependencies: |
@@ -726,19 +805,19 @@ jobs:
       - name: Verify bundle
         run: |
           test -f "${{ steps.pack.outputs.bundle-path }}"
-          echo "✅ GH-AW compatibility test passed"
+          echo "[+] GH-AW compatibility test passed"
 
       - name: Warn on failure
         if: failure()
         run: |
-          echo "::warning::GH-AW compatibility test failed. This is informational — external dependency may be unavailable. Investigate before next release."
+          echo "::warning::GH-AW compatibility test failed. This is informational - external dependency may be unavailable. Investigate before next release."
 
   # Publish to PyPI (only stable releases from public repo)
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation, create-release]
-    if: github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
     environment:
       name: pypi
       url: https://pypi.org/p/apm-cli
@@ -748,10 +827,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -767,6 +846,6 @@ jobs:
         run: twine check dist/*
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           verbose: true

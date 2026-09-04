@@ -46,12 +46,15 @@ import time
 from functools import wraps
 from typing import TYPE_CHECKING
 
+from ..agent_plugins.errors import AgentPluginError
+from ..copilot_plugins.settings import CopilotSettingsCollisionError
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
 from .errors import AuthenticationError, DirectDependencyError, InstallFailureAlreadyRendered
+from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
 from .transaction import InstallTransaction
 
 if TYPE_CHECKING:
@@ -122,6 +125,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     """
     import subprocess as _sp
 
+    from ..utils.git_env import redact_git_diagnostic
     from ..utils.github_host import (
         is_ado_auth_failure_signal,
         is_azure_devops_hostname,
@@ -173,24 +177,13 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             dep.repo_url,
             use_ssh=_use_ssh,
             dep_ref=dep,
-            token=dep_ctx.token,
+            token="",
             auth_scheme=_auth_scheme,
         )
-        probe_env = auth_resolver.git_env_for_context(
+        probe_env = auth_resolver.git_env_for_remote(
             dep_ctx,
-            base_env=_dl.git_env,
+            probe_url,
         )
-        # GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM carve-out: GitAuthEnvBuilder
-        # forces an empty global gitconfig for ALL hosts to prevent a user's
-        # ~/.gitconfig insteadOf rewrites or credential helpers from leaking
-        # tokens during a clone. But for preflight probes (a single ls-remote
-        # against the same host the dep targets), the redirection surface is
-        # nil and killing the user's global config kills Git Credential
-        # Manager along with it. This carve-out applies only to generic hosts;
-        # ADO credentials come exclusively from AuthResolver.
-        if is_generic:
-            for _key in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ASKPASS"):
-                probe_env.pop(_key, None)
 
         endpoint = dep_ctx.host_info.display_name
         host_display = endpoint if not org else f"{endpoint}/{org}"
@@ -199,13 +192,13 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             # auth-delegated: invoked via _primary_op/_bearer_op below, both
             # routed through auth_resolver.execute_with_bearer_fallback.
             try:
-                return _sp.run(
-                    ["git", "ls-remote", "--heads", "--exit-code", url],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
+                from ..utils.git_env import git_remote_refs
+
+                return git_remote_refs(
+                    url,
                     timeout=30,
                     env=env,
+                    options=("--heads", "--exit-code"),
                 )
             except _sp.TimeoutExpired:
                 return None  # network timeout sentinel; treated as non-auth
@@ -292,7 +285,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                         f"    Ensure your SSH key is loaded in ssh-agent "
                         f"(ssh-add -l) and that the\n"
                         f"    public key is authorised on the server.\n\n"
-                        f"    git output: {stderr_text.strip()}\n\n"
+                        f"    git output: {redact_git_diagnostic(stderr_text.strip())}\n\n"
                         f"    No files were modified.\n"
                         f"    apm.yml, apm.lock.yaml, and apm_modules/ are unchanged."
                     ),
@@ -318,48 +311,6 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                 )
         else:
             _trace(f"Preflight: {host_display} -- accepted")
-
-
-def _enforce_require_hashes(ctx) -> None:
-    """Fail closed when ``security.integrity.require_hashes`` is enabled.
-
-    Reads the freshly-written lockfile and asserts every non-local entry has a
-    content hash. No-op when policy is disabled (``--no-policy``), no policy was
-    resolved, or the key is off -- preserving today's default behavior. Raises
-    :class:`~apm_cli.install.phases.policy_gate.PolicyViolationError` so the
-    failure routes through the pipeline's existing policy-violation handling.
-    """
-    if getattr(ctx, "no_policy", False):
-        return
-    policy_fetch = getattr(ctx, "policy_fetch", None)
-    policy = getattr(policy_fetch, "policy", None) if policy_fetch else None
-    if policy is None:
-        return
-    from .integrity import require_hashes_enabled
-
-    if not require_hashes_enabled(policy.security.integrity):
-        return
-
-    from ..deps.lockfile import LockFile, get_lockfile_path
-    from .integrity import enforce_require_hashes
-    from .phases.policy_gate import PolicyViolationError
-
-    apm_dir = getattr(ctx, "apm_dir", None) or ctx.project_root
-    lockfile_path = get_lockfile_path(apm_dir)
-    lockfile = LockFile.read(lockfile_path)
-    if lockfile is None:
-        # Fail closed: require_hashes is on but the freshly-written lockfile is
-        # missing or unreadable. Returning here would silently defeat the gate,
-        # so surface it as a policy violation instead of letting install pass.
-        raise PolicyViolationError(
-            "security.integrity.require_hashes is enabled but the lockfile at "
-            f"{lockfile_path} could not be read (missing or corrupt); "
-            "failing closed. Re-run 'apm install' to regenerate it."
-        )
-    try:
-        enforce_require_hashes(lockfile.get_package_dependencies(), enabled=True)
-    except RuntimeError as exc:
-        raise PolicyViolationError(str(exc)) from exc
 
 
 def _transactional_pipeline(run):
@@ -428,6 +379,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
+    trust_bin: bool | None = None,
     transaction: InstallTransaction | None = None,
 ):
     """Install APM package dependencies.
@@ -578,6 +530,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         legacy_skill_paths=legacy_skill_paths,
         refresh=refresh,
         lockfile_only=lockfile_only,
+        trust_bin=trust_bin,
         transaction=transaction,
     )
 
@@ -681,11 +634,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # --------------------------------------------------------------
         # Phase 2: Target detection + integrator initialization.
         # Skipped in lockfile_only mode -- no primitives are deployed.
+        #
+        # Phase 2.1 (native Copilot plugin registration capability) shares
+        # this guard: it publishes the capability so the Agent Plugin
+        # deployment boundary can admit a verified plugin (issue #2703). In
+        # lockfile_only mode no primitives are deployed, so no native plugin
+        # can be admitted and resolving the capability would be pure waste.
         # --------------------------------------------------------------
         if not lockfile_only:
+            from .phases import copilot_plugins as _copilot_plugins_phase
             from .phases import targets as _targets_phase
 
             _run_phase("targets", _targets_phase, ctx)
+            _run_phase("copilot_activate", _copilot_plugins_phase.ActivatePhase, ctx)
 
         # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)
@@ -956,12 +917,27 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
             except PolicyViolationError:
                 raise
 
+        # ------------------------------------------------------------------
+        # Phase: Native GitHub Copilot Agent Plugin registration (#2703).
+        # Runs LAST -- after the lockfile is canonical, after the require-hashes
+        # integrity gate, and after the content-audit gate -- so the APM-owned
+        # marketplace catalog, ownership ledger, and enabled-plugin settings
+        # entries are written only for an install those gates actually allowed
+        # to complete. Writing earlier would leave Copilot loading a plugin a
+        # later gate refused.
+        # ------------------------------------------------------------------
+        if not lockfile_only:
+            _run_phase("copilot_plugins", _copilot_plugins_phase, ctx)
+
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
 
         _perf_stats.render_summary(logger, project_root=str(ctx.project_root))
         return _run_phase("finalize", _finalize_phase, ctx)
 
+    except AgentPluginError:
+        # Preserve schema-routing and native-boundary diagnostics verbatim.
+        raise
     except AuthenticationError:
         # #1015: surface auth failures cleanly to the user. Same
         # pattern as PolicyViolationError -- re-raise so the typed
@@ -986,11 +962,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         raise
     except InstallFailureAlreadyRendered:
         raise
-    except (PathTraversalError, MaterializationPathCollisionError):
-        # Path-safety and package-directory collision errors already include
-        # actionable guidance; preserve them instead of adding generic wrappers.
+    except (PathTraversalError, MaterializationPathCollisionError, CopilotSettingsCollisionError):
+        # Path-safety, package-directory collision, and Copilot settings
+        # collision errors already include actionable guidance; re-raise them
+        # verbatim. A settings collision in particular means dependency
+        # resolution SUCCEEDED and the lockfile is written -- only the Copilot
+        # merge collided -- so wrapping it into "Failed to resolve APM
+        # dependencies: ..." would mis-attribute the failure and double-wrap
+        # once commands/install.py prefixes again.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
     finally:
+        from .phases import copilot_plugins as _copilot_plugins_cleanup
+
+        _copilot_plugins_cleanup.deactivate(ctx)
         ctx.tui.__exit__()

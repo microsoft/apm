@@ -153,9 +153,9 @@ class TestInitPlugin:
         """Underscores are not valid in plugin names."""
         assert _validate_plugin_name("my_plugin") is False
 
-    def test_name_validation_rejects_start_with_number(self):
-        """Names starting with numbers are invalid."""
-        assert _validate_plugin_name("1plugin") is False
+    def test_name_validation_allows_start_with_number(self):
+        """Agent Plugins canonical names allow a leading digit."""
+        assert _validate_plugin_name("1plugin") is True
 
     def test_name_validation_rejects_start_with_hyphen(self):
         """Names starting with hyphens are invalid."""
@@ -246,7 +246,9 @@ class TestInitPlugin:
             try:
                 result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
                 assert result.exit_code == 0, result.output
-                assert "apm pack" in result.output
+                assert "apm pack --format agent-plugin" in result.output
+                assert "apm pack --format claude-plugin" in result.output
+                assert "apm pack --plugin" not in result.output
             finally:
                 os.chdir(self.original_dir)
 

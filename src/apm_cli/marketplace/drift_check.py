@@ -24,7 +24,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from apm_cli.marketplace.builder import MarketplaceBuilder, ResolveResult
+from apm_cli.marketplace.builder import (
+    MarketplaceBuilder,
+    MetadataEnrichmentResult,
+    ResolveResult,
+)
 from apm_cli.marketplace.output_profiles import (
     MARKETPLACE_OUTPUTS,
     resolve_effective_output_path,
@@ -53,8 +57,9 @@ class DriftOutputReport:
 
     format: str
     path: str
-    status: str  # "unchanged" | "missing" | "drift"
+    status: str  # "unchanged" | "missing" | "drift" | "uncertifiable"
     differences: tuple[DriftDifference, ...] = ()
+    metadata_warnings: tuple[str, ...] = ()
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -62,7 +67,18 @@ class DriftOutputReport:
             "path": self.path,
             "status": self.status,
             "differences": [d.to_json_dict() for d in self.differences],
+            "metadata_warnings": list(self.metadata_warnings),
         }
+
+    def error_messages(self) -> tuple[str, ...]:
+        """Return the bounded error messages for this output."""
+        if self.status == "missing":
+            return (f"{self.path}: missing on disk (would be created)",)
+        if self.status == "drift":
+            return (f"{self.path}: {len(self.differences)} differences vs. regenerated output",)
+        if self.status == "uncertifiable":
+            return (f"{self.path}: remote metadata unavailable; regeneration is uncertifiable",)
+        return ()
 
 
 @dataclass(frozen=True)
@@ -71,6 +87,7 @@ class DriftReport:
 
     ok: bool
     outputs: tuple[DriftOutputReport, ...] = field(default_factory=tuple)
+    metadata_enrichment: MetadataEnrichmentResult = field(default_factory=MetadataEnrichmentResult)
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -79,14 +96,7 @@ class DriftReport:
         }
 
     def error_messages(self) -> list[str]:
-        msgs: list[str] = []
-        for out in self.outputs:
-            if out.status == "missing":
-                msgs.append(f"{out.path}: missing on disk (would be created)")
-            elif out.status == "drift":
-                count = len(out.differences)
-                msgs.append(f"{out.path}: {count} differences vs. regenerated output")
-        return msgs
+        return [message for output in self.outputs for message in output.error_messages()]
 
 
 def _format_path_segment(parent: str, key: str) -> str:
@@ -153,16 +163,20 @@ def check_marketplace_drift(
     config: MarketplaceConfig,
     project_root: Path,
     output_overrides: Mapping[str, str | Path] | None = None,
+    *,
+    resolve_result: ResolveResult | None = None,
 ) -> DriftReport:
     """Run the drift gate using *builder* (must be dry-run) and compare
     its composed output for each configured profile against the on-disk
     artifact at the profile's resolved output path.
     """
-    resolve_result: ResolveResult = builder.resolve()
+    if resolve_result is None:
+        resolve_result = builder.resolve()
 
     # Honor the configured outputs list (claude / codex / ...).
     configured = tuple(config.outputs) if config.outputs else ("claude",)
     output_reports: list[DriftOutputReport] = []
+    metadata_enrichment = MetadataEnrichmentResult()
 
     for name in configured:
         profile = MARKETPLACE_OUTPUTS.get(name)
@@ -181,6 +195,20 @@ def check_marketplace_drift(
         )
 
         remote_metadata = builder.remote_metadata_for_profile(profile, resolve_result.entries)
+        if remote_metadata is not None:
+            metadata_enrichment = remote_metadata
+        if remote_metadata is not None and not remote_metadata.certifiable:
+            # Do not compare two equally degraded documents. The builder owns
+            # whether the regenerated metadata may certify this output.
+            output_reports.append(
+                DriftOutputReport(
+                    format=profile.name,
+                    path=rel_display,
+                    status="uncertifiable",
+                    metadata_warnings=remote_metadata.warnings,
+                )
+            )
+            continue
         new_doc, _warnings, _diagnostics = builder.compose_output(
             profile, resolve_result.entries, remote_metadata=remote_metadata
         )
@@ -235,7 +263,11 @@ def check_marketplace_drift(
 
     output_reports.sort(key=lambda r: r.format)
     overall_ok = all(r.status == "unchanged" for r in output_reports)
-    return DriftReport(ok=overall_ok, outputs=tuple(output_reports))
+    return DriftReport(
+        ok=overall_ok,
+        outputs=tuple(output_reports),
+        metadata_enrichment=metadata_enrichment,
+    )
 
 
 def render_diff_lines(report: DriftOutputReport, limit: int = _MAX_DIFFS_RENDERED) -> list[str]:

@@ -360,10 +360,15 @@ class TestBuildGitEnvNoToken:
         assert env["GIT_ASKPASS"] == "echo"
         assert "GIT_TOKEN" not in env
 
-    def test_non_ado_bearer_with_token_falls_through_to_basic(self) -> None:
+    def test_github_bearer_token_uses_header_transport(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             env = AuthResolver._build_git_env("mytoken", scheme="bearer", host_kind="github")
-        assert env.get("GIT_TOKEN") == "mytoken"
+        assert "GIT_TOKEN" not in env
+        assert any(
+            value.startswith("Authorization: ")
+            for key, value in env.items()
+            if key.startswith("GIT_CONFIG_VALUE_")
+        )
 
 
 # ---------------------------------------------------------------------------

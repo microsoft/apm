@@ -189,7 +189,11 @@ class GitHubTokenManager:
 
     @staticmethod
     def resolve_credential_from_git(
-        host: str, port: int | None = None, path: str | None = None
+        host: str,
+        port: int | None = None,
+        path: str | None = None,
+        *,
+        env: dict[str, str] | None = None,
     ) -> str | None:
         """Resolve a credential from the git credential store.
 
@@ -228,7 +232,7 @@ class GitHubTokenManager:
                 encoding="utf-8",
                 timeout=GitHubTokenManager._get_credential_timeout(),
                 env={
-                    **os.environ,
+                    **(os.environ if env is None else env),
                     "GIT_TERMINAL_PROMPT": "0",
                     "GIT_ASKPASS": "" if sys.platform != "win32" else "echo",
                 },
