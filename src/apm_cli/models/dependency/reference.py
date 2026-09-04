@@ -950,6 +950,17 @@ class DependencyReference(ProviderCoordinateMixin):
         return "." not in last
 
     @classmethod
+    def reject_removed_collection_extension(cls, virtual_path: str) -> None:
+        """Raise the migration error for removed `.collection.yml` package paths."""
+        if any(virtual_path.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+            raise ValueError(
+                f".collection.yml is no longer supported. "
+                f"Convert '{virtual_path}' to an apm.yml with a "
+                f"'dependencies' section. "
+                f"See: https://microsoft.github.io/apm/guides/dependencies/"
+            )
+
+    @classmethod
     def parse_host_qualified_virtual_shorthand(
         cls,
         dependency_str: str,
@@ -961,11 +972,14 @@ class DependencyReference(ProviderCoordinateMixin):
         supported repo-boundary owner, raise a named error instead of folding
         the host into ``repo_url``.
         """
-        return _parse_host_qualified_virtual_shorthand(
+        parsed = _parse_host_qualified_virtual_shorthand(
             dependency_str,
             virtual_file_extensions=cls.VIRTUAL_FILE_EXTENSIONS,
             gitlab_repo_segment_count=cls._gitlab_shorthand_repo_segment_count,
         )
+        if parsed is not None:
+            cls.reject_removed_collection_extension(parsed.virtual_path)
+        return parsed
 
     @classmethod
     def split_gitlab_direct_shorthand_parts(

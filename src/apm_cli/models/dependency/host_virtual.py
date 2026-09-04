@@ -24,6 +24,10 @@ _HOST_QUALIFIED_VIRTUAL_ROOTS: frozenset[str] = frozenset(
         ".github",
         ".kiro",
         ".windsurf",
+    }
+)
+_UNCONFIGURED_PLATFORM_PACKAGE_ROOTS: frozenset[str] = frozenset(
+    {
         "agents",
         "collections",
         "contexts",
@@ -58,7 +62,8 @@ class UnsupportedHostQualifiedVirtualPackageError(ValueError):
             f"Configure '{host}' with GITHUB_HOST, GITLAB_HOST/APM_GITLAB_HOSTS, "
             "or ADO_HOST/APM_ADO_HOSTS, then re-run. Alternatively, use an "
             "explicit apm.yml object with 'git:' for the repository URL and "
-            "'path:' for the package subpath."
+            "'path:' for the package subpath.\n"
+            f"GitLab example: GITLAB_HOST={host} or APM_GITLAB_HOSTS={host}."
         )
 
 
@@ -177,6 +182,8 @@ def _unconfigured_platform_host_has_virtual_package_shape(
 ) -> bool:
     """Return whether an unconfigured platform host appears to carry a package path."""
     if virtual_start is not None or has_collection or has_virtual_ext:
+        return True
+    if any(segment in _UNCONFIGURED_PLATFORM_PACKAGE_ROOTS for segment in path_segments[2:]):
         return True
 
     labels = set(host.lower().split("."))
