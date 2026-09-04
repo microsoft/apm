@@ -11,6 +11,7 @@ import pytest
 
 from apm_cli.core.target_catalog import manifest_target_names
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.integration.test_required_lifecycle_state_machine import (
@@ -20,6 +21,7 @@ from tests.integration.test_required_lifecycle_state_machine import (
     _hook,
     _instruction,
     _new_scenario,
+    _result_evidence,
     _run_success,
     _skill,
 )
@@ -467,6 +469,149 @@ def _seed_unowned_mcp_config(project_root: Path, target: str) -> Path:
         encoding="utf-8",
     )
     return config
+
+
+def _write_claude_plugin_manifest(plugin_root: Path, manifest: Mapping[str, object]) -> None:
+    manifest_dir = plugin_root / ".claude-plugin"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "plugin.json").write_text(
+        json.dumps(dict(manifest), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _direct_install_args(plugin_root: Path, target: str) -> tuple[str, ...]:
+    return (
+        "install",
+        str(plugin_root),
+        "--target",
+        target,
+        "--no-policy",
+        "--parallel-downloads",
+        "0",
+        "--verbose",
+    )
+
+
+def _agent_classification_targets() -> tuple[TargetProfile, ...]:
+    """Derive the markdown agent classification targets from the live catalog."""
+    return tuple(
+        profile
+        for profile in KNOWN_TARGETS.values()
+        if (mapping := profile.primitives.get("agents")) is not None
+        and mapping.format_id in {"github_agent", "claude_agent"}
+        and profile.requires_flag is None
+    )
+
+
+def _prepare_target_root(project_root: Path, profile: TargetProfile) -> None:
+    if not profile.auto_create:
+        (project_root / profile.root_dir).mkdir(parents=True, exist_ok=True)
+
+
+def _agent_target_path(project_root: Path, profile: TargetProfile, source_name: str) -> Path:
+    mapping = profile.primitives["agents"]
+    target_root = project_root / (mapping.deploy_root or profile.root_dir)
+    target_name = AgentIntegrator().get_target_filename_for_target(
+        Path(source_name),
+        "classification-plugin",
+        profile,
+    )
+    return target_root / mapping.subdir / target_name
+
+
+def test_unrecognized_claude_plugin_schema_falls_back_to_legacy_structure(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A foreign schema declaration is a classification miss, not rejection."""
+    scenario = _new_scenario(tmp_path / "foreign-schema-plugin", apm_binary_path)
+    plugin_root = scenario.isolated.package_root / "schema-plugin"
+    plugin_root.mkdir(parents=True)
+    skill_bytes = b"---\nname: schema-skill\ndescription: Schema skill\n---\n# Schema skill\n"
+    (plugin_root / "SKILL.md").write_bytes(skill_bytes)
+    _write_claude_plugin_manifest(
+        plugin_root,
+        {
+            "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+            "name": "schema-plugin",
+            "version": "1.0.0",
+        },
+    )
+    project = scenario.consumers.create("schema-consumer")
+    claude = KNOWN_TARGETS["claude"]
+    _prepare_target_root(project.root, claude)
+
+    result = scenario.runner.run(
+        _direct_install_args(plugin_root, claude.name),
+        cwd=project.root,
+        env=scenario.environment,
+        scenario_id="foreign-schema-plugin-install",
+    )
+
+    skill_path = project.root / ".claude" / "skills" / "schema-plugin" / "SKILL.md"
+    assert skill_path.is_file(), _result_evidence(result)
+    assert skill_path.read_bytes() == skill_bytes
+    assert result.returncode == 0, _result_evidence(result)
+    assert "Unrecognized plugin manifest $schema" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "profile",
+    _agent_classification_targets(),
+    ids=lambda profile: profile.name,
+)
+def test_legacy_plugin_agent_source_classification_uses_declaration_before_path(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    profile: TargetProfile,
+) -> None:
+    """Only declared agents deploy; doc markdown and sibling assets are skipped."""
+    scenario = _new_scenario(tmp_path / f"agent-classification-{profile.name}", apm_binary_path)
+    plugin_root = scenario.isolated.package_root / "classification-plugin"
+    agent_root = plugin_root / "agents" / "my-agent"
+    (agent_root / "guides").mkdir(parents=True)
+    (agent_root / "scripts").mkdir(parents=True)
+    (agent_root / "templates").mkdir(parents=True)
+    agent_bytes = b"---\ndescription: Real agent\n---\n# Real agent\n"
+    doc_bytes = (
+        b"---\ntitle: Reference document\n---\nThis is documentation, not an invokable agent.\n"
+    )
+    helper_bytes = b"print('helper')\n"
+    starter_bytes = b"pptx-bytes\n"
+    (agent_root / "my-agent.agent.md").write_bytes(agent_bytes)
+    (agent_root / "guides" / "reference-doc.agent.md").write_bytes(doc_bytes)
+    (agent_root / "scripts" / "helper.py").write_bytes(helper_bytes)
+    (agent_root / "templates" / "starter.pptx").write_bytes(starter_bytes)
+    _write_claude_plugin_manifest(
+        plugin_root,
+        {
+            "name": "classification-plugin",
+            "version": "1.0.0",
+            "agents": ["./agents/my-agent"],
+        },
+    )
+    project = scenario.consumers.create(f"agent-consumer-{profile.name}")
+    _prepare_target_root(project.root, profile)
+
+    result = _run_success(
+        scenario,
+        project,
+        _direct_install_args(plugin_root, profile.name),
+        environment=scenario.environment,
+        scenario_id=f"agent-classification-{profile.name}-install",
+    )
+
+    deployed_agent = _agent_target_path(project.root, profile, "my-agent.agent.md")
+    deployed_doc = _agent_target_path(project.root, profile, "reference-doc.agent.md")
+    target_agents_dir = deployed_agent.parent
+    assert deployed_agent.read_bytes() == agent_bytes
+    assert not deployed_doc.exists()
+    assert not (target_agents_dir / "scripts" / "helper.py").exists()
+    assert not (target_agents_dir / "templates" / "starter.pptx").exists()
+    combined_output = result.stdout + result.stderr
+    assert "Skipped non-agent Markdown in agents source tree" in combined_output
+    assert "Skipped non-agent asset in agents source tree" in combined_output
 
 
 @pytest.mark.parametrize("case", _OWNERSHIP_CASES, ids=lambda case: case.id)

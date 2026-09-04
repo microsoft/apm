@@ -1,6 +1,6 @@
-"""Comprehensive unit tests for github_downloader.py — phase-3 coverage push.
+"""Comprehensive unit tests for github_downloader.py - phase-3 coverage push.
 
-Target: push coverage from ~54 % to ≥ 85 %.
+Target: push coverage from ~54 % to >= 85 %.
 
 All HTTP requests, git subprocess calls, and filesystem mutations are mocked so
 the suite is fully hermetic and requires no network access or git installation.
@@ -114,7 +114,7 @@ class TestDebug:
 class TestCloseRepo:
     def test_none_repo_is_a_no_op(self) -> None:
         """_close_repo(None) must not raise."""
-        _close_repo(None)  # no assertion needed — must not raise
+        _close_repo(None)  # no assertion needed - must not raise
 
     def test_repo_close_called(self) -> None:
         repo = MagicMock()
@@ -125,7 +125,7 @@ class TestCloseRepo:
         repo = MagicMock()
         repo.git.clear_cache.side_effect = OSError("locked")
         repo.close.side_effect = RuntimeError("already closed")
-        # Both exceptions must be suppressed — function must not raise.
+        # Both exceptions must be suppressed - function must not raise.
         _close_repo(repo)
 
     def test_exception_in_close_is_suppressed(self) -> None:
@@ -617,7 +617,7 @@ class TestValidateVirtualPackageExistsShim:
 
 
 # ---------------------------------------------------------------------------
-# download_virtual_file_package — error paths
+# download_virtual_file_package - error paths
 # ---------------------------------------------------------------------------
 
 
@@ -740,7 +740,7 @@ class TestDownloadVirtualFilePackageErrors:
 
 
 # ---------------------------------------------------------------------------
-# download_subdirectory_package — error paths
+# download_subdirectory_package - error paths
 # ---------------------------------------------------------------------------
 
 
@@ -911,7 +911,7 @@ class TestDownloadSubdirectoryPackageErrors:
             patch("apm_cli.utils.file_ops.robust_copy2"),
         ):
             pkg_info = downloader.download_subdirectory_package(dep, tmp_path / "out")
-        # ws2 path — resolved_commit comes from _materialize_from_bare, not Repo()
+        # ws2 path - resolved_commit comes from _materialize_from_bare, not Repo()
         assert pkg_info.resolved_reference.resolved_commit == sha
 
 
@@ -1161,10 +1161,10 @@ class TestDownloadPackage:
             result = downloader.download_package(dep, tmp_path / "pkg")
         assert result.package is pkg
 
-    def test_cache_hit_with_unsupported_schema_fails_instead_of_cloning(
+    def test_cache_hit_with_unrecognized_schema_falls_back_without_cloning(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        from apm_cli.agent_plugins import UnsupportedAgentPluginVersionError
+        from apm_cli.models.validation import PackageType
 
         dep = _make_dep()
         resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
@@ -1184,16 +1184,19 @@ class TestDownloadPackage:
         downloader.persistent_git_cache = cache
         clone = MagicMock()
 
+        target = tmp_path / "pkg"
         with (
             patch.object(downloader, "_is_artifactory_only", return_value=False),
             patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
             patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
             patch.object(downloader, "resolve_git_reference", return_value=resolved),
             patch.object(downloader, "_clone_with_fallback", clone),
-            pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"),
         ):
-            downloader.download_package(dep, tmp_path / "pkg")
+            result = downloader.download_package(dep, target)
 
+        assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+        assert result.package.name == "future.plugin"
+        assert (target / "apm.yml").exists()
         clone.assert_not_called()
 
     def test_native_agent_plugin_clone_returns_projected_package_without_apm_yml(
@@ -1235,10 +1238,10 @@ class TestDownloadPackage:
         assert result.package.agent_plugin is not None
         assert not (target / "apm.yml").exists()
 
-    def test_unsupported_agent_plugin_clone_fails_before_legacy_projection(
+    def test_unrecognized_agent_plugin_schema_clone_falls_back_to_legacy_projection(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        from apm_cli.agent_plugins import UnsupportedAgentPluginVersionError
+        from apm_cli.models.validation import PackageType
 
         dep = _make_dep()
         resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
@@ -1264,11 +1267,12 @@ class TestDownloadPackage:
             patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
             patch.object(downloader, "resolve_git_reference", return_value=resolved),
             patch.object(downloader, "_clone_with_fallback", side_effect=clone_unsupported),
-            pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"),
         ):
-            downloader.download_package(dep, target)
+            result = downloader.download_package(dep, target)
 
-        assert not (target / "apm.yml").exists()
+        assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+        assert result.package.name == "future.plugin"
+        assert (target / "apm.yml").exists()
 
     def test_git_command_error_auth_failure_raises_runtime(
         self, downloader: GitHubPackageDownloader, tmp_path: Path

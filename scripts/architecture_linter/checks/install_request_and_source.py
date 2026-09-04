@@ -37,6 +37,9 @@ _GUARD_OUTCOME = "install-deployment-outcome"
 _GUARD_SOURCE_PLAN = "install-deployment-source-plan"
 
 
+_GUARD_PRIMITIVE_CLASSIFICATION = "install-deployment-primitive-classification"
+
+
 _GUARD_REQUEST_DEFAULTS = "install-deployment-request-defaults"
 
 
@@ -399,6 +402,92 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
                     "Primitive materializers must consume the canonical deployable source plan",
                 )
             )
+    return tuple(findings)
+
+
+_PRIMITIVE_CLASSIFICATION_OWNER = "src/apm_cli/install/primitive_classification.py"
+_PRIMITIVE_CLASSIFICATION_CONSUMERS = (
+    "src/apm_cli/agent_plugins/loader.py",
+    "src/apm_cli/bundle/local_bundle.py",
+    "src/apm_cli/deps/plugin_parser.py",
+    "src/apm_cli/install/sources.py",
+    "src/apm_cli/integration/agent_integrator.py",
+)
+_SCHEMA_REJECTION_STRINGS = (
+    "Unsupported schema-bearing plugin manifest",
+    "Unsupported Agent Plugins manifest schema",
+)
+
+
+def check_primitive_classification(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Artifact kind decisions must route through primitive_classification.py."""
+    rule_id = _GUARD_PRIMITIVE_CLASSIFICATION
+    findings: list[Violation] = []
+    owner, owner_fail = _facts_for(provider, _PRIMITIVE_CLASSIFICATION_OWNER, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
+
+    required_owner_fragments = (
+        "def classify_plugin_manifest(",
+        "def classify_plugin_manifest_schema(",
+        "def plugin_manifest_schema_warning(",
+        "def classify_agent_source_file(",
+        "Unknown ``$schema`` values are identification misses",
+    )
+    missing = [fragment for fragment in required_owner_fragments if not _present(owner, fragment)]
+    if missing:
+        findings.append(
+            _summary(
+                rule_id,
+                _PRIMITIVE_CLASSIFICATION_OWNER,
+                "Primitive classification owner is missing required declaration-first APIs",
+            )
+        )
+
+    for consumer in _PRIMITIVE_CLASSIFICATION_CONSUMERS:
+        facts, fail = _facts_for(provider, consumer, rule_id)
+        if fail:
+            findings.extend(fail)
+            continue
+        text = "\n".join(_lines(facts))
+        for rejection in _SCHEMA_REJECTION_STRINGS:
+            if rejection in text:
+                findings.append(
+                    _summary(
+                        rule_id,
+                        consumer,
+                        "Plugin schema classification misses must not be local fatal rejections",
+                    )
+                )
+        if consumer == "src/apm_cli/integration/agent_integrator.py" and not _present(
+            facts,
+            "classify_agent_source_file(",
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    consumer,
+                    "AgentIntegrator must route agent source classification through the owner",
+                )
+            )
+        if consumer != _PRIMITIVE_CLASSIFICATION_OWNER and "plugin_manifest" in text:
+            if (
+                consumer
+                in {
+                    "src/apm_cli/agent_plugins/loader.py",
+                    "src/apm_cli/bundle/local_bundle.py",
+                    "src/apm_cli/deps/plugin_parser.py",
+                    "src/apm_cli/install/sources.py",
+                }
+                and "primitive_classification" not in text
+            ):
+                findings.append(
+                    _summary(
+                        rule_id,
+                        consumer,
+                        "Plugin manifest route consumers must import primitive_classification",
+                    )
+                )
     return tuple(findings)
 
 

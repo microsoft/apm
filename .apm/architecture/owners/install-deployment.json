@@ -65,6 +65,13 @@
       "guards": ["install-deployment-source-plan"]
     },
     {
+      "id": "primitive-kind-classification",
+      "decision": "Primitive artifact kind classification precedence",
+      "owner": "install/primitive_classification.py (classify_plugin_manifest, classify_agent_source_file)",
+      "selectors": ["src/apm_cli/install/primitive_classification.py"],
+      "guards": ["install-deployment-primitive-classification"]
+    },
+    {
       "id": "bundle-native-layout-lowering",
       "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout",
       "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name) consumed by install/local_bundle_paths.py (_lower_to_target)",

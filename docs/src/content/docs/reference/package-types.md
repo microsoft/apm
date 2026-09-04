@@ -15,8 +15,8 @@ Pick the form that matches the author's intent -- APM preserves it.
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Deploy each hook to the target's `hooks/` directory |
-| `plugin.json` (no `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
-| `plugin.json` with an Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
+| `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
 | Marketplace entry with inline `lspServers` or `mcpServers` | Catalog owns server metadata | Synthesize and validate `apm.yml`, then deploy servers |
 
 When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
@@ -215,10 +215,11 @@ metadata variant changes.
 
 ## Plugin collection (`plugin.json`)
 
-A Claude-native plugin layout. A `plugin.json` with no `$schema` field is
-detected as this layout. APM dissects the plugin artifacts and maps them into
-runtime directories. A schema-bearing manifest never falls through to this
-legacy route.
+A Claude-native plugin layout. A `plugin.json` with no `$schema` field, or with
+an unrecognized `$schema`, is detected by its structure as this layout. APM
+dissects the plugin artifacts and maps them into runtime directories. An
+unrecognized schema is a warning, not a rejection; only the recognized Agent
+Plugins schema selects the portable Agent Plugin route.
 
 ```
 my-plugin/
@@ -265,12 +266,10 @@ of `apm pack` and `apm plugin init`.
 
 ## Agent Plugin (`plugin.json` with an Agent Plugins schema)
 
-A `plugin.json` that declares `"$schema"` under the Agent Plugins v1 schema
-prefix is a distinct package type from the Claude plugin collection above.
-Only the exact `1.0.0` schema is recognized. Another Agent Plugins version is
-a typed unsupported-version error. A foreign or non-string `$schema` is a
-typed manifest error. Only a `plugin.json` with no `$schema` falls through to
-the Claude plugin collection above.
+A `plugin.json` that declares the exact Agent Plugins v1 `"$schema"` is a
+distinct package type from the Claude plugin collection above. Other schema
+identifiers are identification misses: APM warns, then classifies by structure.
+A non-string `$schema` remains a manifest error.
 
 ```
 my-plugin/

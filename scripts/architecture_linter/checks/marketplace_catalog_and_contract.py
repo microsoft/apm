@@ -164,6 +164,9 @@ _ASSETS = "src/apm_cli/agent_plugins/assets.py"
 _LOCAL_BUNDLE = "src/apm_cli/bundle/local_bundle.py"
 
 
+_PRIMITIVE_CLASSIFICATION = "src/apm_cli/install/primitive_classification.py"
+
+
 _FORMAT_DETECTION = "src/apm_cli/models/format_detection.py"
 
 
@@ -506,13 +509,23 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             provider,
             inv,
             _RID_CONTRACT,
-            _LOCAL_BUNDLE,
+            _PRIMITIVE_CLASSIFICATION,
             (
                 re.compile(r"^class PluginSchemaRoute\(Enum\):"),
                 re.compile(r"^def classify_plugin_manifest_schema\("),
-                re.compile(r"^def route_agent_plugin_package\("),
+                re.compile(r"^def classify_plugin_manifest\("),
             ),
-            "bundle/local_bundle.py must own plugin schema routing",
+            "primitive_classification.py must own plugin schema routing",
+        )
+    )
+    findings.extend(
+        _require_res(
+            provider,
+            inv,
+            _RID_CONTRACT,
+            _LOCAL_BUNDLE,
+            (re.compile(r"^def route_agent_plugin_package\("),),
+            "bundle/local_bundle.py must route package admission through the classifier",
         )
     )
     findings.extend(
@@ -520,11 +533,11 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             provider,
             inv,
             _RID_CONTRACT,
-            _LOCAL_BUNDLE,
+            _PRIMITIVE_CLASSIFICATION,
             (
                 "if schema_id == PLUGIN_SCHEMA_ID:",
-                "package_type, _ = detect_package_type(",
-                "if package_type != PackageType.AGENT_PLUGIN:",
+                "PluginSchemaRoute.AGENT_PLUGIN",
+                "PluginSchemaRoute.LEGACY",
             ),
             "plugin schema routing must select exact schema IDs",
         )
@@ -534,7 +547,7 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             provider,
             inv,
             _RID_CONTRACT,
-            (_LOCAL_BUNDLE,),
+            (_PRIMITIVE_CLASSIFICATION,),
             re.compile(
                 r"is_agent_plugin_schema_id|supports_plugin_schema_id|validate_plugin_manifest_document"
             ),
@@ -547,7 +560,7 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             provider,
             inv,
             _RID_CONTRACT,
-            (_LOCAL_BUNDLE,),
+            (_PRIMITIVE_CLASSIFICATION,),
             re.compile(
                 r"agent_plugin_(runtime|state)|install\.mcp|security\.executables|lockfile.*v3"
             ),
@@ -561,7 +574,7 @@ def _check_loader_ownership(provider: FactsProvider, inv: frozenset[str]) -> tup
             inv,
             _RID_CONTRACT,
             _LOADER,
-            (("sub", "classify_plugin_manifest_schema", 4, "ge"),),
+            (("sub", "classify_plugin_manifest", 4, "ge"),),
             "Agent Plugin loading and legacy admission must share the schema router",
         )
     )
