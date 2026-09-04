@@ -293,7 +293,8 @@ Behind `apm experimental enable registries`. Registry deps resolve over the
 REST [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
 alongside the Git resolver -- declare registries in `apm.yml` (or in
 `~/.apm/config.json`) and reference them from `dependencies.apm`. See
-`authentication.md` (Registry tokens) for `APM_REGISTRY_TOKEN_{NAME}`.
+`authentication.md` (Registry tokens) for the required user-owned URL
+binding and `APM_REGISTRY_TOKEN_{NAME}`.
 
 ```yaml
 registries:

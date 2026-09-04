@@ -273,7 +273,7 @@ class TestE2EErrorPaths:
 class TestE2EAuthHeader:
     """Confirm Bearer header is forwarded and observed by the server."""
 
-    def test_token_sent_when_env_set(self, tmp_path, monkeypatch):
+    def test_token_not_sent_over_loopback_http(self, tmp_path, monkeypatch):
         monkeypatch.setenv("APM_REGISTRY_TOKEN_CORP", "secret-token-123")
         data, digest = _build_apm_tarball()
         seen_headers: dict = {}
@@ -298,8 +298,8 @@ class TestE2EAuthHeader:
             base = f"http://{host}:{port}"
             resolver = RegistryPackageResolver({"corp": base})
             resolver.download_package(_make_dep(), tmp_path / "x")
-        assert seen_headers["versions"].get("Authorization") == "Bearer secret-token-123"
-        assert seen_headers["download"].get("Authorization") == "Bearer secret-token-123"
+        assert "Authorization" not in seen_headers["versions"]
+        assert "Authorization" not in seen_headers["download"]
 
     def test_anonymous_when_no_env(self, tmp_path, monkeypatch):
         monkeypatch.delenv("APM_REGISTRY_TOKEN_CORP", raising=False)
@@ -326,4 +326,4 @@ class TestE2EAuthHeader:
             base = f"http://{host}:{port}"
             resolver = RegistryPackageResolver({"corp": base})
             resolver.download_package(_make_dep(), tmp_path / "x")
-        assert seen_headers["versions"].get("Authorization") is None
+        assert "Authorization" not in seen_headers["versions"]

@@ -161,6 +161,20 @@ class TestBuildExecTrustContext:
         ctx = build_exec_trust_context(policy=None, project_data={})
         assert ctx.gate_enabled is False
 
+    def test_user_deny_alone_enables_gate(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "c.json")
+        monkeypatch.setattr(ex, "_legacy_approvals_path", lambda: tmp_path / "a.yml")
+        save_user_executables({}, {"owner/repo": {EXEC_TYPE_HOOKS: True}})
+        ctx = build_exec_trust_context(policy=None, project_data={})
+        assert ctx.gate_enabled is True
+
+    def test_user_allow_alone_does_not_enable_gate(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "c.json")
+        monkeypatch.setattr(ex, "_legacy_approvals_path", lambda: tmp_path / "a.yml")
+        save_user_executables({"owner/repo": {EXEC_TYPE_HOOKS: True}}, {})
+        ctx = build_exec_trust_context(policy=None, project_data={})
+        assert ctx.gate_enabled is False
+
     def test_user_consent_flows_into_context(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "c.json")
         monkeypatch.setattr(ex, "_legacy_approvals_path", lambda: tmp_path / "a.yml")

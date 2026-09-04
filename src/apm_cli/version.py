@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+from apm_cli.utils.git_env import get_git_executable
+
 # Build-time constants (will be injected during build)
 # This avoids TOML parsing overhead during runtime
 __BUILD_VERSION__ = None
@@ -83,7 +85,7 @@ def get_build_sha() -> str:
         try:
             repo_root = Path(__file__).parent.parent.parent
             result = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
+                [get_git_executable(), "rev-parse", "--short", "HEAD"],
                 cwd=repo_root,
                 capture_output=True,
                 text=True,

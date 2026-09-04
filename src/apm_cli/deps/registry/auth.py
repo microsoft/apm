@@ -121,14 +121,34 @@ def resolve_registry_basic(
     return user, pwd
 
 
-def make_auth_context(registry_name: str) -> RegistryAuthContext:
+def _credential_origin_matches(registry_name: str, target_url: str) -> bool:
+    """Return whether trusted user config binds *registry_name* to *target_url*."""
+    from ...config import get_registry_config
+
+    cfg = get_registry_config(registry_name)
+    configured_url = cfg.get("url") if isinstance(cfg, dict) else None
+    if not isinstance(configured_url, str) or not configured_url:
+        return False
+    target = _normalize_url_prefix(target_url)
+    configured = _normalize_url_prefix(configured_url)
+    return target == configured or target.startswith(configured + "/")
+
+
+def make_auth_context(
+    registry_name: str,
+    target_url: str | None = None,
+) -> RegistryAuthContext:
     """Build a ``RegistryAuthContext`` from env vars for *registry_name*.
 
     Reads both Bearer and Basic env vars; both can populate the context but
     Bearer wins at the header-rendering level (see ``auth_header``).
     """
-    token = resolve_registry_token(registry_name)
-    user, pwd = resolve_registry_basic(registry_name)
+    credential_allowed = target_url is None or _credential_origin_matches(
+        registry_name,
+        target_url,
+    )
+    token = resolve_registry_token(registry_name) if credential_allowed else None
+    user, pwd = resolve_registry_basic(registry_name) if credential_allowed else (None, None)
     return RegistryAuthContext(
         registry_name=registry_name,
         token=token,
@@ -147,7 +167,13 @@ def _normalize_url_prefix(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     scheme = parsed.scheme.lower()
     host = (parsed.hostname or "").lower()
-    port = f":{parsed.port}" if parsed.port else ""
+    if ":" in host:
+        host = f"[{host}]"
+    explicit_port = parsed.port
+    default_port = {"http": 80, "https": 443}.get(scheme)
+    port = (
+        f":{explicit_port}" if explicit_port is not None and explicit_port != default_port else ""
+    )
     path = parsed.path.rstrip("/")
     return f"{scheme}://{host}{port}{path}"
 
@@ -221,7 +247,7 @@ def resolve_for_url(target_url: str, registries: dict[str, str]) -> RegistryAuth
     name = lookup_name_for_url(target_url, registries)
     if name is None:
         return RegistryAuthContext(registry_name=None, token=None)
-    return make_auth_context(name)
+    return make_auth_context(name, target_url)
 
 
 def remediation_message(target_url: str) -> str:

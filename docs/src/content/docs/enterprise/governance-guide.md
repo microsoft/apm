@@ -342,7 +342,7 @@ Workarounds when the network is unreliable:
 
 - **Audit in CI is fully offline-capable** with `apm audit --ci --policy /path/to/vendored-policy.yml`. The `--policy` argument accepts a local file path and bypasses GitHub discovery entirely. Vendor your org policy into the repo (or a sidecar mount) and audit works in any air-gapped environment.
 - **Install does not have a `--policy <path>` flag.** This is a known gap (section 14). The current workaround is `extends: <internal-mirror-url>` from a reachable `<org>/.github/apm-policy.yml`, but the leaf is still fetched via the GitHub API.
-- **Cache prewarm** for repeatable offline builds. The cache lives at `<project_root>/apm_modules/.policy-cache/<key>.yml` where `<key>` is `sha256(repo_ref)[:16]`. Prewarming means stashing valid `<key>.yml` and `<key>.meta.json` files in that directory before install runs.
+- **Cache prewarm** for repeatable offline builds. The cache lives in the platform user cache at `apm/policy_v1/<project-key>/<key>.yml`, where `<project-key>` identifies the resolved project path and `<key>` is `sha256(repo_ref)[:16]`. Prewarming means stashing valid `<key>.yml` and `<key>.meta.json` files in that directory before install runs.
 - **Make policy fail-closed offline.** Set `policy.fetch_failure_default: block` in your project `apm.yml`. With this set, network failure or a malformed policy aborts install instead of warning. Combine with `policy.hash` to detect a tampered mirror.
 
 ---

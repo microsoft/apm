@@ -30,7 +30,6 @@ from .auth import (
     RegistryAuthContext,
     make_auth_context,
     remediation_message,
-    resolve_for_url,
 )
 from .client import RegistryClient, RegistryError, VersionEntry
 from .extractor import extract_archive
@@ -221,17 +220,7 @@ class RegistryPackageResolver:
         return url
 
     def _build_client(self, registry_name: str, base_url: str) -> RegistryClient:
-        auth = make_auth_context(registry_name)
-        return self._client_factory(base_url, auth)
-
-    def _build_client_for_url(self, base_url: str) -> RegistryClient:
-        """Build a client for a URL whose registry name we look up from config.
-
-        Used on the lockfile re-install path (§6.2): the URL is already
-        recorded; we walk the configured registries to find which name owns
-        that URL, then resolve its token. If no match, fall back to anonymous.
-        """
-        auth = resolve_for_url(base_url, self._registries)
+        auth = make_auth_context(registry_name, base_url)
         return self._client_factory(base_url, auth)
 
     def _pick_version(
@@ -372,7 +361,15 @@ class RegistryPackageResolver:
         locked version.  ``apm update`` bypasses this path entirely via
         ``update_refs=True``.
         """
-        client = self._build_client_for_url(resolved_url)
+        registry_name = dep_ref.registry_name
+        base_url = self._resolve_registry_url(registry_name)
+        client = self._build_client(registry_name, base_url)
+        owner, repo = _split_owner_repo(dep_ref.repo_url)
+        expected_url = client.archive_url(owner, repo, version)
+        if resolved_url != expected_url:
+            raise RegistryResolutionError(
+                "lockfile registry URL does not match the configured registry endpoint"
+            )
         try:
             archive_bytes, content_type = client.fetch_from_url(resolved_url)
         except RegistryError as exc:

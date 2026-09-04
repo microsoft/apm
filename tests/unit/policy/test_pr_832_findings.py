@@ -39,7 +39,6 @@ from apm_cli.policy.install_preflight import (
 from apm_cli.policy.models import CheckResult, CIAuditResult
 from apm_cli.policy.outcome_routing import route_discovery_outcome
 from apm_cli.policy.schema import ApmPolicy
-from apm_cli.utils.path_security import PathTraversalError
 
 # ──────────────────────────────────────────────────────────────────────
 # #2: PolicyBlockError is an alias of PolicyViolationError
@@ -256,16 +255,12 @@ class TestExtractDepRefContract:
 
 
 class TestCachePathContainment:
-    def test_normal_layout_returns_path_under_apm_modules(self, tmp_path):
-        # No symlinks: cache path lives under <project>/apm_modules.
-        (tmp_path / "apm_modules").mkdir()
+    def test_normal_layout_returns_user_owned_cache_path(self, tmp_path):
         cache_dir = _get_cache_dir(tmp_path)
-        assert cache_dir.parent.name == "apm_modules"
-        assert cache_dir.is_relative_to(tmp_path / "apm_modules")
+        assert cache_dir.parent.name == "policy_v1"
+        assert not cache_dir.is_relative_to(tmp_path)
 
-    def test_symlinked_apm_modules_outside_project_is_rejected(self, tmp_path):
-        # Set up an evil layout: <project>/apm_modules is a symlink
-        # pointing OUTSIDE the project tree.
+    def test_symlinked_apm_modules_does_not_affect_policy_cache(self, tmp_path):
         project = tmp_path / "project"
         evil = tmp_path / "elsewhere"
         project.mkdir()
@@ -276,8 +271,9 @@ class TestCachePathContainment:
         except (OSError, NotImplementedError):
             pytest.skip("symlink creation not supported on this platform")
 
-        with pytest.raises(PathTraversalError):
-            _get_cache_dir(project)
+        cache_dir = _get_cache_dir(project)
+        assert cache_dir.parent.name == "policy_v1"
+        assert not cache_dir.is_relative_to(evil)
 
     def test_unresolved_project_root_does_not_raise(self, tmp_path):
         # Regression for #886: on Windows, tempfile.mkdtemp() may return
@@ -293,7 +289,7 @@ class TestCachePathContainment:
             pytest.skip("symlink creation not supported on this platform")
 
         cache_dir = _get_cache_dir(link)
-        assert cache_dir.parent.name == "apm_modules"
+        assert cache_dir == _get_cache_dir(real)
 
 
 # ──────────────────────────────────────────────────────────────────────

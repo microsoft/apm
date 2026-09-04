@@ -693,7 +693,9 @@ registries:
     url: https://registry.example.com/apm/corp-main
 EOF
 
-# 3. Set a publish token (per-registry env var)
+# 3. Bind the destination in user config, then set a publish token
+apm config set registry.corp-main.url \
+  https://registry.example.com/apm/corp-main
 export APM_REGISTRY_TOKEN_CORP_MAIN=eyJ...
 
 # 4. Preview then publish

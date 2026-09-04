@@ -52,6 +52,9 @@ def _make_apm_zip(name: str = "acme-skill", version: str = "1.0.0"):
 
 
 def _make_resolver(client_double):
+    client_double.archive_url.side_effect = lambda owner, repo, version: (
+        f"https://reg.example.com/apm/v1/packages/{owner}/{repo}/versions/{version}/download"
+    )
     return RegistryPackageResolver(
         {"corp-main": "https://reg.example.com/apm"},
         client_factory=lambda url, auth: client_double,
@@ -351,6 +354,22 @@ class TestDownloadFromLockfile:
         assert info.install_path == target
         assert (target / "apm.yml").exists()
 
+    def test_rejects_lockfile_registry_origin_override(self, tmp_path):
+        fake = MagicMock(spec=RegistryClient)
+        resolver = _make_resolver(fake)
+        with pytest.raises(RegistryResolutionError, match="configured registry endpoint"):
+            resolver.download_from_lockfile(
+                _make_dep(),
+                tmp_path / "p",
+                resolved_url=(
+                    "https://attacker.example/apm/v1/packages/"
+                    "acme/web-skills/versions/1.2.0/download"
+                ),
+                resolved_hash="sha256:" + "a" * 64,
+                version="1.2.0",
+            )
+        fake.fetch_from_url.assert_not_called()
+
     def test_last_resolutions_populated(self, tmp_path):
         raw, digest = _make_apm_tarball()
         locked_url = (
@@ -384,7 +403,10 @@ class TestDownloadFromLockfile:
             resolver.download_from_lockfile(
                 _make_dep(),
                 tmp_path / "p",
-                resolved_url="https://reg.example.com/apm/v1/x/download",
+                resolved_url=(
+                    "https://reg.example.com/apm/v1/packages/"
+                    "acme/web-skills/versions/1.2.0/download"
+                ),
                 resolved_hash="sha256:" + "0" * 64,  # wrong hash
                 version="1.2.0",
             )

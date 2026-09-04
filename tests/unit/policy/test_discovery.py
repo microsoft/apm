@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 from urllib.parse import parse_qs, quote, urlparse, urlsplit
 
+from apm_cli.cache.paths import get_cache_root
 from apm_cli.core.auth import AuthResolver as _RealAuthResolver
 from apm_cli.policy._gitlab import (
     _fetch_from_gitlab_repo,
@@ -20,7 +21,7 @@ from apm_cli.policy._gitlab import (
     _gitlab_project_state_via_git,
 )
 from apm_cli.policy.discovery import (
-    CACHE_SCHEMA_VERSION,  # noqa: F401
+    CACHE_SCHEMA_VERSION,
     DEFAULT_CACHE_TTL,
     MAX_STALE_TTL,  # noqa: F401
     PolicyFetchResult,
@@ -166,7 +167,7 @@ class TestExtractOrgFromGitRemote(unittest.TestCase):
         result = _extract_org_from_git_remote(Path("/fake"))
         self.assertEqual(result, ("contoso", "github.com"))
         mock_run.assert_called_once_with(
-            ["git", "remote", "get-url", "origin"],
+            [ANY, "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -321,6 +322,36 @@ class TestCacheReadWrite(unittest.TestCase):
             result = _read_cache(repo_ref, root)
             self.assertIsNone(result)
 
+    def test_future_dated_cache_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+            _write_cache(repo_ref, _make_test_policy(), root)
+            meta_file = _get_cache_dir(root) / f"{_cache_key(repo_ref)}.meta.json"
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta["cached_at"] = time.time() + DEFAULT_CACHE_TTL
+            meta_file.write_text(json.dumps(meta), encoding="utf-8")
+            self.assertIsNone(_read_cache(repo_ref, root))
+
+    def test_project_local_policy_cache_is_not_read(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/forged"
+            legacy = root / "apm_modules" / ".policy-cache"
+            legacy.mkdir(parents=True)
+            key = _cache_key(repo_ref)
+            (legacy / f"{key}.yml").write_text(VALID_POLICY_YAML, encoding="utf-8")
+            (legacy / f"{key}.meta.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": CACHE_SCHEMA_VERSION,
+                        "cached_at": time.time() + DEFAULT_CACHE_TTL,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertIsNone(_read_cache(repo_ref, root))
+
     def test_missing_cache_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _read_cache("nonexistent/ref", Path(tmpdir))
@@ -354,10 +385,9 @@ class TestCacheReadWrite(unittest.TestCase):
 
     def test_get_cache_dir(self):
         root = Path("/fake/project")
-        # _get_cache_dir resolves project_root (#886), compare
-        # against the resolved form
-        expected = root.resolve() / "apm_modules" / ".policy-cache"
-        self.assertEqual(_get_cache_dir(root), expected)
+        cache_dir = _get_cache_dir(root)
+        self.assertEqual(cache_dir.parent.parent, get_cache_root())
+        self.assertEqual(cache_dir.parent.name, "policy_v1")
 
     def test_round_trip_preserves_none_deny_and_require(self):
         """Cache write->read must preserve deny=None/require=None (tri-state Fix 1).

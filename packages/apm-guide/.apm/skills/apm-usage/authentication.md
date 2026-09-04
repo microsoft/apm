@@ -260,6 +260,12 @@ a **separate** credential chain from the GitHub / ADO token chains above.
 Tokens are scoped per registry name as declared in `apm.yml`'s `registries:`
 block (or in `~/.apm/config.json`).
 
+Credentials are released only when `registry.<name>.url` in
+`~/.apm/config.json` matches the request destination. Configure this
+user-owned URL even when a project declares the same registry. Project-only
+registry declarations are anonymous, and credentials are never sent over
+HTTP.
+
 **Env-var naming:** `APM_REGISTRY_TOKEN_{NAME}` where `{NAME}` is the
 registry name uppercased, with `-` and `.` mapped to `_`.
 
@@ -287,6 +293,7 @@ Bearer wins when both forms are set.
 
 ```bash
 # Bearer token for registry "jf-skills"
+apm config set registry.jf-skills.url https://registry.example.com
 export APM_REGISTRY_TOKEN_JF_SKILLS=eyJ...
 
 # Or HTTP Basic

@@ -127,7 +127,7 @@ def publish_cmd(ctx, registry_name, package_id, zip_path, dry_run, verbose):
     from ..deps.registry.auth import make_auth_context
     from ..deps.registry.client import RegistryClient, RegistryError
 
-    auth = make_auth_context(registry_name)
+    auth = make_auth_context(registry_name, base_url)
     client = RegistryClient(base_url, auth)
 
     logger.info(f"Publishing {owner}/{repo}@{version} to {registry_name}...")

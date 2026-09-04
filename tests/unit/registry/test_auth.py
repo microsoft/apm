@@ -205,12 +205,27 @@ class TestResolveForUrl:
 
     def test_returns_token_when_url_matches(self, monkeypatch):
         monkeypatch.setenv("APM_REGISTRY_TOKEN_CORP", "tok-abc")
+        monkeypatch.setattr(
+            "apm_cli.config._config_cache",
+            {"registries": {"corp": {"url": "https://corp.example.com/apm"}}},
+        )
         regs = {"corp": "https://corp.example.com/apm"}
         ctx = resolve_for_url(
             "https://corp.example.com/apm/v1/packages/x/y/versions/1.0.0/tarball", regs
         )
         assert ctx.registry_name == "corp"
         assert ctx.token == "tok-abc"
+
+    def test_rebound_registry_name_does_not_receive_token(self, monkeypatch):
+        monkeypatch.setenv("APM_REGISTRY_TOKEN_CORP", "tok-abc")
+        monkeypatch.setattr(
+            "apm_cli.config._config_cache",
+            {"registries": {"corp": {"url": "https://corp.example.com/apm"}}},
+        )
+        regs = {"corp": "https://attacker.example/apm"}
+        ctx = resolve_for_url("https://attacker.example/apm/archive", regs)
+        assert ctx.registry_name == "corp"
+        assert ctx.token is None
 
     def test_url_match_without_env_returns_anonymous(self, monkeypatch):
         monkeypatch.delenv("APM_REGISTRY_TOKEN_CORP", raising=False)

@@ -260,7 +260,7 @@ def check_registry_locked_dep(
         )
 
     factory = client_factory or (lambda url, auth: RegistryClient(url, auth))
-    client = factory(base_url, make_auth_context(registry_name))
+    client = factory(base_url, make_auth_context(registry_name, base_url))
 
     try:
         version_entries = client.list_versions(owner, repo)

@@ -37,6 +37,8 @@ class _LockedDep:
     virtual_path: str | None = None
     source: str | None = None
     local_path: str | None = None
+    is_insecure: bool = False
+    allow_insecure: bool = False
     deployed_files: list[str] = field(default_factory=list)
 
     def get_unique_key(self) -> str:
@@ -406,8 +408,8 @@ class TestBuildDownloadRef(unittest.TestCase):
         # dep.reference is "main" (truthy) so the fallback should not apply
         self.assertEqual(result.reference, "main")
 
-    def test_non_proxy_host_difference_restores_host(self):
-        """Non-proxy deps also restore host if it differs from manifest."""
+    def test_non_proxy_host_difference_keeps_manifest_host(self):
+        """Lock state cannot redirect a non-proxy dependency."""
         dep = DependencyReference(repo_url="owner/repo", host="github.com")
         locked = _LockedDep(
             repo_url="owner/repo",
@@ -417,7 +419,22 @@ class TestBuildDownloadRef(unittest.TestCase):
         )
         lf = _LockFile(dependencies={"owner/repo": locked})
         result = build_download_ref(dep, lf, update_refs=False, ref_changed=False)
-        self.assertEqual(result.host, "enterprise.github.example.com")
+        self.assertEqual(result.host, "github.com")
+
+    def test_lockfile_cannot_enable_insecure_transport(self):
+        dep = DependencyReference(repo_url="owner/repo", host="github.com")
+        locked = _LockedDep(
+            repo_url="owner/repo",
+            host="attacker.example.com",
+            resolved_commit="sha123",
+            is_insecure=True,
+            allow_insecure=True,
+        )
+        lf = _LockFile(dependencies={"owner/repo": locked})
+        result = build_download_ref(dep, lf, update_refs=False, ref_changed=False)
+        self.assertEqual(result.host, "github.com")
+        self.assertFalse(result.is_insecure)
+        self.assertFalse(result.allow_insecure)
 
     def test_dep_key_not_in_lockfile_returns_dep_ref(self):
         """If dep key isn't in lockfile, return dep as-is."""

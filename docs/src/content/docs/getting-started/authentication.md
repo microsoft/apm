@@ -471,7 +471,10 @@ A misspelled env var is indistinguishable from a missing token — APM attempts 
 
 Token precedence (highest wins): `APM_REGISTRY_TOKEN_{NAME}` env var → `registry.<name>.token` in `~/.apm/config.json`.
 
+APM sends either credential only when `registry.<name>.url` in `~/.apm/config.json` matches the request destination. Configure that user-owned URL even when the project also declares the registry. Project-only registry declarations remain anonymous, and credentials are never sent over HTTP.
+
 ```bash
+apm config set registry.jf-skills.url https://registry.example.com
 export APM_REGISTRY_TOKEN_JF_SKILLS=eyJ...
 # or persist locally:
 apm config set registry.jf-skills.token eyJ...

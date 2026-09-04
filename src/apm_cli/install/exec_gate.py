@@ -42,34 +42,18 @@ def check_executable_approval(
         EXEC_TYPE_HOOKS,
         EXEC_TYPE_LSP,
         EXEC_TYPE_MCP,
-        build_approval_key,
         is_package_approved,
     )
 
-    # Build candidate keys: the dep-ref canonical key AND the name#version
-    # fallback so that approvals stored under either format are honoured. The
-    # version-blind name and the bare package name are also probed so that
-    # version-blind grants (org recommend, ``apm approve <name>``) match
-    # regardless of the installed version (#1873).
+    # Executable authorization is bound to the resolver-owned dependency
+    # identity. Package manifest metadata is display-only and must not become
+    # an alternate security principal.
     pkg_key = resolve_package_key(package_info, package_name)
     candidate_keys = [pkg_key]
 
     name_blind = pkg_key.split("#", 1)[0]
     if name_blind not in candidate_keys:
         candidate_keys.append(name_blind)
-    if package_name and package_name not in candidate_keys:
-        candidate_keys.append(package_name)
-
-    # Add name#version fallback when it differs from the primary key.
-    _pkg = getattr(package_info, "package", None)
-    if _pkg:
-        _name = getattr(_pkg, "name", package_name) or package_name
-        _ver = getattr(_pkg, "version", "") or ""
-        alt_key = build_approval_key(_name, _ver)
-        if alt_key != pkg_key:
-            candidate_keys.append(alt_key)
-        if _name and _name not in candidate_keys:
-            candidate_keys.append(_name)
 
     hooks_ok = any(
         is_package_approved(allow_executables, k, EXEC_TYPE_HOOKS) for k in candidate_keys
@@ -89,11 +73,12 @@ def check_executable_approval(
         from apm_cli.security.executables import scan_package_executables
 
         _install = Path(package_info.install_path)
-        _version = ""
-        _pkg = getattr(package_info, "package", None)
-        if _pkg:
-            _version = getattr(_pkg, "version", "") or ""
-        _decl = scan_package_executables(_install, package_name, _version)
+        _decl = scan_package_executables(
+            _install,
+            package_name,
+            "",
+            approval_identity=pkg_key,
+        )
         if _decl.has_executables and blocked:
             ctx.blocked_executables.append(_decl)
         if _decl.has_executables and needs_status:

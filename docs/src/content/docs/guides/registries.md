@@ -58,11 +58,11 @@ apm install
 
 On success, `apm.lock.yaml` records `source: registry`, `version`, `resolved_url`, and `resolved_hash` for each registry dep. A `404` usually means the package is not published or the `owner/repo` is wrong.
 
-Registry URLs MUST start with `https://` (or `http://` for local development). Registry names use lowercase letters, digits, `-`, and `.`. Unknown keys under a registry entry are rejected at parse time (typo guard).
+Registry URLs MUST start with `https://`. Anonymous `http://` access is limited to loopback addresses for local development. Credentials are never sent over HTTP. Registry names use lowercase letters, digits, `-`, and `.`. Unknown keys under a registry entry are rejected at parse time (typo guard).
 
 ## 2. Install from a private or self-hosted registry
 
-Add credentials. Everything from section 1 still applies; the only new step is setting `APM_REGISTRY_TOKEN_{NAME}`.
+Add a user-owned URL binding and credentials. The binding prevents a project from redirecting credentials associated with a registry name to another destination.
 
 ```yaml
 # apm.yml
@@ -81,6 +81,8 @@ dependencies:
 
 ```bash
 # Registry name "corp-main" -> APM_REGISTRY_TOKEN_CORP_MAIN
+apm config set registry.corp-main.url \
+  https://artifactory.corp.example.com/artifactory/api/apm/corp-main-local
 export APM_REGISTRY_TOKEN_CORP_MAIN=eyJ...
 
 apm experimental enable registries
@@ -117,6 +119,8 @@ Credentials stored in `~/.apm/config.json` are **user-scoped** and never committ
 
 APM reads credentials from environment variables named after the registry. `{NAME}` is the registry name uppercased, with `-` and `.` mapped to `_`.
 
+Credentials are used only when `registry.<name>.url` in `~/.apm/config.json` matches the request destination. A registry declared only by project files is accessed anonymously.
+
 | Env var | Auth method |
 |---|---|
 | `APM_REGISTRY_TOKEN_{NAME}` | `Authorization: Bearer <token>` |
@@ -147,7 +151,7 @@ Token precedence (highest wins):
 2. `registry.<name>.token` in `~/.apm/config.json`
 3. Unauthenticated (APM surfaces a remediation hint on `401` / `403`)
 
-Registry URL precedence (highest wins): `apm-policy.yml` -> project `apm.yml` -> workspace `~/.apm/apm.yml` -> `~/.apm/config.json`.
+Registry URL precedence (highest wins): `apm-policy.yml` -> project `apm.yml` -> workspace `~/.apm/apm.yml` -> `~/.apm/config.json`. If the selected URL differs from the user-configured URL, APM withholds credentials.
 
 Default registry precedence (highest wins): project `apm.yml` `registries.default` -> `registry.<name>.default true` in `~/.apm/config.json`.
 

@@ -185,7 +185,9 @@ def _write_policy_leaf(project_root: Path, strict_policy: Path) -> Path:
 
 def _policy_cache_bytes(project_root: Path) -> tuple[bytes, bytes]:
     """Return the sole persisted merged-policy and metadata byte images."""
-    cache_root = _owned_path(project_root, "apm_modules/.policy-cache")
+    from apm_cli.policy.discovery import _get_cache_dir
+
+    cache_root = _get_cache_dir(project_root)
     metadata_paths = tuple(cache_root.glob("*.meta.json"))
     policy_paths = tuple(cache_root.glob("*.yml"))
     assert len(metadata_paths) == 1

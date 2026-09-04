@@ -36,6 +36,7 @@ from ..utils.console import (
 )
 from ..utils.git_env import (
     checkout_git_worktree,
+    get_git_executable,
     git_no_hooks_args,
     git_subprocess_error_text,
     git_worktree_head,
@@ -1223,7 +1224,13 @@ class GitHubPackageDownloader:
                     )
                     if token is not None:
                         remote_result = subprocess.run(
-                            ["git", "remote", "set-url", "origin", authenticated_url],
+                            [
+                                get_git_executable(),
+                                "remote",
+                                "set-url",
+                                "origin",
+                                authenticated_url,
+                            ],
                             cwd=str(temp_clone_path),
                             env=git_env,
                             capture_output=True,
@@ -1239,7 +1246,7 @@ class GitHubPackageDownloader:
                                 stderr=remote_result.stderr,
                             )
                     fetch_result = subprocess.run(
-                        ["git", "fetch", "origin", ref or "HEAD", "--depth=1"],
+                        [get_git_executable(), "fetch", "origin", ref or "HEAD", "--depth=1"],
                         cwd=str(temp_clone_path),
                         env=git_env,
                         capture_output=True,
@@ -1267,7 +1274,7 @@ class GitHubPackageDownloader:
                     base_env=self.git_env,
                 )
                 checkout_result = subprocess.run(
-                    ["git", *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
+                    [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
                     cwd=str(temp_clone_path),
                     env=setup_env,
                     capture_output=True,
@@ -1320,12 +1327,12 @@ class GitHubPackageDownloader:
                 env=env,
                 timeout=120,
             )
-            fetch_cmd = ["git", "fetch", "origin"]
+            fetch_cmd = [get_git_executable(), "fetch", "origin"]
             fetch_cmd.append(ref or "HEAD")
             fetch_cmd.append("--depth=1")
             checkout_cmds = [
                 fetch_cmd,
-                ["git", *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
+                [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
             ]
 
             for cmd in checkout_cmds:

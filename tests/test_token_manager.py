@@ -351,10 +351,22 @@ class TestResolveCredentialFromGhCli:
 
     def test_success_returns_token(self):
         mock_result = MagicMock(returncode=0, stdout="gho_cli_token\n")
-        with patch("subprocess.run", return_value=mock_result) as mock_run:
+        with (
+            patch(
+                "apm_cli.core.token_manager.get_gh_executable",
+                return_value="/usr/bin/gh",
+            ),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+        ):
             token = GitHubTokenManager.resolve_credential_from_gh_cli("github.com")
             assert token == "gho_cli_token"
-            assert mock_run.call_args.args[0] == ["gh", "auth", "token", "--hostname", "github.com"]
+            assert mock_run.call_args.args[0] == [
+                "/usr/bin/gh",
+                "auth",
+                "token",
+                "--hostname",
+                "github.com",
+            ]
             kwargs = mock_run.call_args.kwargs
             assert kwargs["env"]["GH_PROMPT_DISABLED"] == "1"
             assert kwargs["env"]["GH_NO_UPDATE_NOTIFIER"] == "1"

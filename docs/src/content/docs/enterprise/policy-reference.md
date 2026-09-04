@@ -121,7 +121,7 @@ Consumers can opt into fail-closed semantics for the no-cache case from their `a
 
 ### `ttl`
 
-Time-to-live in seconds for the cached policy file. Default: `3600` (1 hour). The cache is stored in `apm_modules/.policy-cache/`.
+Time-to-live in seconds for the cached policy file. Default: `3600` (1 hour). The cache is stored in the platform user cache under `apm/policy_v1/<project-key>/`, not inside the project.
 
 ---
 
@@ -795,7 +795,7 @@ $ echo $?
 
 ### 9. Cache and offline behaviour
 
-Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
+Resolved effective policy is cached under the platform user cache at `apm/policy_v1/<project-key>/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
 
 ### 9.5. Network failure semantics
 

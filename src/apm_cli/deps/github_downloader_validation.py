@@ -48,7 +48,7 @@ from ..models.dependency.host_virtual import (
     dependency_repository_owner,
     repository_owner_and_repo,
 )
-from ..utils.git_env import git_subprocess_error_text
+from ..utils.git_env import get_git_executable, git_subprocess_error_text
 from ..utils.github_host import (
     default_host,
     is_ado_auth_failure_signal,
@@ -534,7 +534,7 @@ def _ref_exists_via_ls_remote(
         if result.returncode != 0:
             # auth-delegated: the validated AttemptSpec owns this credential choice.
             raise GitCommandError(
-                ["git", "ls-remote", *options, url, *patterns],
+                [get_git_executable(), "ls-remote", *options, url, *patterns],
                 result.returncode,
                 stderr=result.stderr,
             )

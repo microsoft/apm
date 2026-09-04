@@ -1372,8 +1372,9 @@ def build_exec_trust_context(
         project_data: Raw project ``apm.yml`` data (or ``None``).
 
     The gate is enabled when ANY layer opts in: the project declares an
-    ``executables``/``allowExecutables`` block (even empty), or the org policy
-    carries a non-empty ``executables`` block, or a legacy ``bin_deploy`` deny.
+    ``executables``/``allowExecutables`` block (even empty), the user has a
+    persisted decision, the org policy carries a non-empty ``executables``
+    block, or a legacy ``bin_deploy`` deny.
     """
     data = project_data or {}
     project_allow, project_deny, _alias = parse_project_executables(data)
@@ -1408,7 +1409,7 @@ def build_exec_trust_context(
             )
             org_signal = org_signal or org_bin_deny_all or bool(org_bin_deny)
 
-    gate_enabled = project_executables_gate_enabled(data) or org_signal
+    gate_enabled = project_executables_gate_enabled(data) or bool(user_deny) or org_signal
 
     return ExecTrustContext(
         gate_enabled=gate_enabled,

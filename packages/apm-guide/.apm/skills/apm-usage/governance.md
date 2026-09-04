@@ -567,7 +567,8 @@ equivalent to `APM_POLICY_DISABLE`.
 
 ### 9. Cache and offline behaviour
 
-Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default
+Resolved effective policy is cached under the platform user cache at
+`apm/policy_v1/<project-key>/`. Default
 TTL comes from the policy's `cache.ttl` (`3600` seconds). Beyond TTL, APM serves
 the stale cache on refresh failure with a loud warning, up to a hard ceiling
 of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch. Writes are

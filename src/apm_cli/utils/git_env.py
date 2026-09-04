@@ -34,6 +34,7 @@ from apm_cli.utils.subprocess_env import external_process_env
 
 # Module-level cached git executable path (successful resolutions only).
 _git_executable: str | None = None
+_gh_executable: str | None = None
 _git_init_run = subprocess.run
 
 # Variables that represent ambient git state -- strip these to avoid
@@ -218,10 +219,48 @@ def _run_git_config_probe(
     raise GitUrlRewriteProbeError(timeout_category)
 
 
+def _executable_exclusion_root() -> Path:
+    """Return the nearest repository or APM project root containing the cwd."""
+    cwd = Path.cwd().resolve()
+    ancestors = (cwd, *cwd.parents)
+    for directory in ancestors:
+        if (directory / ".git").exists():
+            return directory
+    for directory in ancestors:
+        if (directory / "apm.yml").is_file():
+            return directory
+    return cwd
+
+
+def _resolve_trusted_executable(name: str) -> str:
+    """Resolve an executable from PATH directories outside the project."""
+    exclusion_root = _executable_exclusion_root()
+    for entry in os.get_exec_path():
+        if not entry:
+            continue
+        directory = Path(entry).expanduser().resolve()
+        try:
+            if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+                continue
+        except (OSError, ValueError):
+            continue
+        candidate = shutil.which(str(directory / name))
+        if candidate is None:
+            continue
+        resolved = Path(candidate).resolve()
+        try:
+            if resolved == exclusion_root or resolved.is_relative_to(exclusion_root):
+                continue
+        except (OSError, ValueError):
+            continue
+        return str(resolved)
+    raise FileNotFoundError(f"{name} executable not found on trusted PATH directories")
+
+
 def get_git_executable() -> str:
     """Return the path to the git executable (cached after a successful lookup).
 
-    Uses ``shutil.which("git")`` to locate git on PATH.
+    Resolves explicit PATH entries and excludes the current working tree.
     Failed lookups are not cached because PATH can change within a
     long-lived process.
 
@@ -235,13 +274,21 @@ def get_git_executable() -> str:
     if _git_executable is not None:
         return _git_executable
 
-    resolved = shutil.which("git")
-    if resolved is None:
-        raise FileNotFoundError(
+    try:
+        _git_executable = _resolve_trusted_executable("git")
+    except FileNotFoundError:
+        raise FileNotFoundError(  # noqa: B904
             "git executable not found on PATH. Please install git: https://git-scm.com/downloads"
         )
-    _git_executable = resolved
     return _git_executable
+
+
+def get_gh_executable() -> str:
+    """Return a trusted absolute path to the GitHub CLI executable."""
+    global _gh_executable
+    if _gh_executable is None:
+        _gh_executable = _resolve_trusted_executable("gh")
+    return _gh_executable
 
 
 def git_subprocess_env(overrides: dict[str, object] | None = None) -> dict[str, str]:
@@ -1449,8 +1496,9 @@ def git_current_branch(
 
 def reset_git_cache() -> None:
     """Reset the cached git executable (for testing purposes only)."""
-    global _git_executable
+    global _gh_executable, _git_executable
     _git_executable = None
+    _gh_executable = None
 
 
 def git_long_paths_args() -> list[str]:

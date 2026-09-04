@@ -43,7 +43,7 @@ from ..models.dependency.host_virtual import (
     repository_owner,
     repository_path_segments,
 )
-from ..utils.git_env import git_subprocess_error_text
+from ..utils.git_env import get_git_executable, git_subprocess_error_text
 from ..utils.github_host import (
     default_host,
     is_ado_auth_failure_signal,
@@ -266,7 +266,7 @@ class GitReferenceResolver:
             if result.returncode != 0:
                 # auth-delegated: _primary_op and _bearer_op select this environment.
                 raise GitCommandError(
-                    ["git", "ls-remote", *ls_args, url],
+                    [get_git_executable(), "ls-remote", *ls_args, url],
                     result.returncode,
                     stderr=result.stderr,
                 )
