@@ -11,6 +11,7 @@ import pytest
 
 from src.apm_cli.deps.lockfile import LockedDependency
 from src.apm_cli.models.apm_package import DependencyReference
+from src.apm_cli.models.dependency.host_virtual import UnsupportedHostQualifiedVirtualPackageError
 from src.apm_cli.utils.github_host import (
     build_https_clone_url,
     build_ssh_url,
@@ -96,7 +97,7 @@ class TestGitLabHTTPS:
             DependencyReference.parse("https://gitlab.com/acme/coding-standards.git@my-rules")
 
     def test_gitlab_https_url_with_ref_and_alias_shorthand_not_parsed(self):
-        """Shorthand #ref@alias on HTTPS URLs — @ is no longer parsed as alias separator."""
+        """Shorthand #ref@alias on HTTPS URLs -- @ is no longer parsed as alias separator."""
         dep = DependencyReference.parse("https://gitlab.com/acme/coding-standards.git#main@rules")
         assert dep.host == "gitlab.com"
         assert dep.repo_url == "acme/coding-standards"
@@ -233,6 +234,88 @@ class TestGitHubFQDNVirtualPath:
         assert dep.is_virtual is True
 
 
+class TestHostQualifiedVirtualShorthand:
+    """Typed host-qualified virtual package parsing."""
+
+    @pytest.mark.parametrize(
+        "raw, host",
+        (
+            (
+                "github.corp.example.com/acme/internal-skills/.agents/skills/jdk-installer",
+                "github.corp.example.com",
+            ),
+            (
+                "ghe.example.com/org/repo/packages/skill",
+                "ghe.example.com",
+            ),
+            (
+                "gitlab.corp.example.com/group/subgroup/repo/.agents/skills/jdk-installer",
+                "gitlab.corp.example.com",
+            ),
+            (
+                "ado.corp.example.com/org/project/_git/repo/.agents/skills/jdk-installer",
+                "ado.corp.example.com",
+            ),
+        ),
+    )
+    def test_unconfigured_platform_host_virtual_path_raises_typed_error(
+        self,
+        raw,
+        host,
+        monkeypatch,
+    ):
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        monkeypatch.delenv("ADO_HOST", raising=False)
+        monkeypatch.delenv("APM_ADO_HOSTS", raising=False)
+
+        with pytest.raises(UnsupportedHostQualifiedVirtualPackageError) as excinfo:
+            DependencyReference.parse(raw)
+
+        assert excinfo.value.host == host
+        assert str(excinfo.value).splitlines()[0] == f"Unsupported package host: '{host}'."
+
+    def test_configured_ghes_hidden_agent_path_splits(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "github.corp.example.com")
+
+        dep = DependencyReference.parse(
+            "github.corp.example.com/acme/internal-skills/.agents/skills/jdk-installer"
+        )
+
+        assert dep.host == "github.corp.example.com"
+        assert dep.repo_url == "acme/internal-skills"
+        assert dep.virtual_path == ".agents/skills/jdk-installer"
+        assert dep.is_virtual is True
+
+    def test_configured_gitlab_hidden_agent_path_splits_after_nested_project(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("GITLAB_HOST", "gitlab.corp.example.com")
+
+        dep = DependencyReference.parse(
+            "gitlab.corp.example.com/group/subgroup/repo/.agents/skills/jdk-installer"
+        )
+
+        assert dep.host == "gitlab.corp.example.com"
+        assert dep.repo_url == "group/subgroup/repo"
+        assert dep.virtual_path == ".agents/skills/jdk-installer"
+        assert dep.is_virtual is True
+
+    def test_configured_ado_hidden_agent_path_splits_after_repo(self, monkeypatch):
+        monkeypatch.setenv("ADO_HOST", "ado.corp.example.com")
+
+        dep = DependencyReference.parse(
+            "ado.corp.example.com/org/project/_git/repo/.agents/skills/jdk-installer"
+        )
+
+        assert dep.host == "ado.corp.example.com"
+        assert dep.repo_url == "org/project/repo"
+        assert dep.virtual_path == ".agents/skills/jdk-installer"
+        assert dep.is_virtual is True
+
+
 class TestGitHubURLs:
     """Test that GitHub URLs still work correctly with generic support."""
 
@@ -304,7 +387,7 @@ class TestCustomPortParsing:
         assert dep.repo_url == "project/repo"
 
     def test_scp_shorthand_port_is_none(self):
-        """SCP shorthand ``git@host:path`` cannot carry a port — no behaviour change."""
+        """SCP shorthand ``git@host:path`` cannot carry a port -- no behaviour change."""
         dep = DependencyReference.parse("git@bitbucket.org:acme/rules.git")
         assert dep.host == "bitbucket.org"
         assert dep.port is None
@@ -357,7 +440,7 @@ class TestCustomPortParsing:
     def test_same_repo_different_ports_dedup_by_repo_url(self):
         """Two refs to the same logical repo via different ports still collide on repo_url.
 
-        Port is a transport detail, not an identity component — dedup stays on repo_url.
+        Port is a transport detail, not an identity component -- dedup stays on repo_url.
         """
         dep_a = DependencyReference.parse("ssh://git@bitbucket.domain.ext:7999/project/repo.git")
         dep_b = DependencyReference.parse("https://bitbucket.domain.ext:8443/project/repo")
@@ -1298,13 +1381,13 @@ class TestGHESFQDNSubpathParsing:
         assert dep.repo_url == "org/repo"
         assert dep.virtual_path == "skills/security/audit"
 
-    def test_generic_host_unchanged_without_ghes_env(self, monkeypatch):
-        """Without GITHUB_HOST, generic hosts still treat all segments as repo path."""
+    def test_unconfigured_ghes_subpath_fails_loudly(self, monkeypatch):
+        """Without GITHUB_HOST, GHES-like subpaths report the host."""
         monkeypatch.delenv("GITHUB_HOST", raising=False)
-        dep = DependencyReference.parse("ghe.example.com/org/repo/packages/skill")
-        assert dep.host == "ghe.example.com"
-        assert dep.repo_url == "org/repo/packages/skill"
-        assert dep.is_virtual is False
+        with pytest.raises(UnsupportedHostQualifiedVirtualPackageError) as excinfo:
+            DependencyReference.parse("ghe.example.com/org/repo/packages/skill")
+        assert excinfo.value.host == "ghe.example.com"
+        assert str(excinfo.value).splitlines()[0] == "Unsupported package host: 'ghe.example.com'."
 
     def test_existing_generic_host_unaffected_by_different_ghes(self, monkeypatch):
         """A generic host that is NOT GITHUB_HOST keeps all-segments-as-repo."""

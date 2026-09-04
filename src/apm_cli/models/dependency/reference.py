@@ -26,6 +26,12 @@ from ...utils.path_security import (
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
+from .host_virtual import (
+    HostQualifiedVirtualShorthand,
+)
+from .host_virtual import (
+    parse_host_qualified_virtual_shorthand as _parse_host_qualified_virtual_shorthand,
+)
 from .identity import (
     _DEFAULT_SCHEME_PORTS,
     _NON_ADO_PATH_SEGMENT_RE,
@@ -81,7 +87,7 @@ class DependencyReference(ProviderCoordinateMixin):
     declaring_parent: str | None = None
     anchored_local_path: str | None = None
 
-    # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
+    # Monorepo inheritance: { git: parent, path: ... } -- expanded in resolver
     is_parent_repo_inheritance: bool = False
 
     artifactory_prefix: str | None = None  # e.g., "artifactory/github" (repo key path)
@@ -111,7 +117,7 @@ class DependencyReference(ProviderCoordinateMixin):
     # the lockfile (which records source="local") agree on a local dep's source.
     # registry_name: name of the registry from apm.yml's registries: block when
     # source == "registry". Carried in-memory only; never serialized into the
-    # lockfile (the lockfile uses URL-based identity per design §6.1).
+    # lockfile (the lockfile uses URL-based identity per design section6.1).
     source: str | None = None
     registry_name: str | None = None
 
@@ -793,7 +799,7 @@ class DependencyReference(ProviderCoordinateMixin):
                 marketplace_version_spec=version_spec,
             )
 
-        # Object-form registry package — design §3.2.
+        # Object-form registry package -- design section3.2.
         # Discriminated by the ``registry:`` or ``id:`` key (``registry:`` is
         # optional when a ``registries.default:`` is configured).  Mutually
         # exclusive with ``git:``.
@@ -801,7 +807,7 @@ class DependencyReference(ProviderCoordinateMixin):
             if "git" in entry:
                 raise ValueError(
                     "Object-style dependency cannot mix 'registry:'/'id:' and 'git:' "
-                    "keys — choose one resolver."
+                    "keys -- choose one resolver."
                 )
             return cls._parse_registry_object_entry(entry)
 
@@ -942,6 +948,24 @@ class DependencyReference(ProviderCoordinateMixin):
             return True
         last = v.split("/")[-1]
         return "." not in last
+
+    @classmethod
+    def parse_host_qualified_virtual_shorthand(
+        cls,
+        dependency_str: str,
+    ) -> HostQualifiedVirtualShorthand | None:
+        """Parse ``host/repo/path`` virtual-package shorthand without fallback.
+
+        Returns ``None`` for non-virtual shorthand. If the string looks like a
+        host-qualified virtual package but the host is not configured as a
+        supported repo-boundary owner, raise a named error instead of folding
+        the host into ``repo_url``.
+        """
+        return _parse_host_qualified_virtual_shorthand(
+            dependency_str,
+            virtual_file_extensions=cls.VIRTUAL_FILE_EXTENSIONS,
+            gitlab_repo_segment_count=cls._gitlab_shorthand_repo_segment_count,
+        )
 
     @classmethod
     def split_gitlab_direct_shorthand_parts(
@@ -1117,7 +1141,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
     @classmethod
     def _parse_registry_object_entry(cls, entry: dict) -> "DependencyReference":
-        """Parse the object-form registry entry per §3.2. See ``registry_entry.py``."""
+        """Parse the object-form registry entry per section3.2. See ``registry_entry.py``."""
         from .registry_entry import parse_registry_object_entry
 
         return parse_registry_object_entry(cls, entry)
@@ -1129,6 +1153,10 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             (is_virtual_package, virtual_path, validated_host)
         """
+        host_virtual = cls.parse_host_qualified_virtual_shorthand(dependency_str)
+        if host_virtual is not None:
+            return True, host_virtual.virtual_path, host_virtual.host
+
         # Temporarily remove reference for path segment counting
         temp_str = dependency_str
         if "#" in temp_str:
@@ -1341,6 +1369,10 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             ``(host, repo_url)`` where *host* may be ``None``.
         """
+        host_virtual = cls.parse_host_qualified_virtual_shorthand(repo_url)
+        if host_virtual is not None:
+            return host_virtual.host, host_virtual.repo_url
+
         parts = repo_url.split("/")
 
         if "_git" in parts:
