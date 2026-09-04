@@ -353,7 +353,7 @@ check maps to specific lockfile fields:
 | `ref-consistency` | `resolved_ref` per entry vs. `apm.yml` |
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
 | `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
-| `skill-subset-consistency` | `skill_subset` per `skill_bundle` entry |
+| `skill-subset-consistency` | `skill_subset` per entry, matched against `apm.yml` and the resolved package tree |
 | `config-consistency` | `mcp_configs` and `mcp_config_provenance` |
 | `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
 

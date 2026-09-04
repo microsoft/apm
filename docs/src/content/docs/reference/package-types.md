@@ -135,6 +135,8 @@ installing N separate CLAUDE_SKILL packages.
 from the bundle (repeatable). The selection is **persisted** in `apm.yml`
 (as a `skills:` field) and `apm.lock.yaml` (as `skill_subset`), so
 subsequent bare `apm install` commands are deterministic.
+For nested skill bundles, the selector must match a deployable skill path;
+for example, use `productivity/grill-me`, not an invented prefix.
 Use `--skill '*'` to reset and install all skills. `--skill` is additive
 across separate installs (a later `--skill X` unions onto the existing pin
 and never removes already-deployed skills) -- see
@@ -231,8 +233,8 @@ my-plugin/
 
 **What gets installed:** each artifact listed in `plugin.json` is mapped to
 the appropriate runtime directory via `_map_plugin_artifacts`. Use `--skill`
-to cherry-pick plugin skills by leaf name or manifest path, such as
-`skills/productivity/grill-me`.
+to cherry-pick plugin skills by leaf name or a source-relative path under
+`skills/`, such as `productivity/grill-me`.
 
 A declared key is authoritative for its primitive: it replaces the default
 directory scan rather than adding to it. `"skills": ["./skills/search"]`
@@ -255,7 +257,7 @@ for manifest precedence, failure behavior, and a plugin-only example.
 Declared component paths are requirements, not hints. If an `agents`,
 `skills`, `commands`, or `hooks` entry is missing or escapes the plugin
 root, install exits non-zero before deployment or lockfile commit. Likewise,
-`--skill` exits non-zero when none of the manifest-declared skills match.
+`--skill` exits non-zero when none of the manifest-declared skill paths match.
 Omit an optional field or use an empty list when the plugin has no component
 of that type.
 

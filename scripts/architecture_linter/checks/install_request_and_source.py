@@ -29,7 +29,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
 from scripts.architecture_linter.checks.tree_index import FUNCTION_NODES, TreeIndex
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import EXEMPT_MARKER, violation
-from scripts.architecture_linter.models import Violation
+from scripts.architecture_linter.models import FileFacts, Violation
 
 _GUARD_OUTCOME = "install-deployment-outcome"
 
@@ -403,18 +403,29 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
 
 
 _OUTCOME_OWNER = "src/apm_cli/install/outcome.py"
+_OUTCOME_ADAPTERS = (
+    "src/apm_cli/commands/install.py",
+    "src/apm_cli/commands/update.py",
+    "src/apm_cli/commands/lock.py",
+)
 
 
 def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
     """Install adapters must route post-install outcome through install/outcome.py."""
     rule_id = _GUARD_OUTCOME
     findings: list[Violation] = []
-    adapter, adapter_fail = _facts_for(provider, _INSTALL_ADAPTER, rule_id)
     owner, owner_fail = _facts_for(provider, _OUTCOME_OWNER, rule_id)
-    if adapter_fail or owner_fail:
-        return tuple(list(adapter_fail) + list(owner_fail))
+    adapter_facts: dict[str, FileFacts] = {}
+    adapter_failures: list[Violation] = []
+    for adapter_path in _OUTCOME_ADAPTERS:
+        adapter, adapter_fail = _facts_for(provider, adapter_path, rule_id)
+        adapter_facts[adapter_path] = adapter
+        adapter_failures.extend(adapter_fail)
+    if adapter_failures or owner_fail:
+        return tuple(adapter_failures + list(owner_fail))
 
-    for number, line in enumerate(_lines(adapter), start=1):
+    install_adapter = adapter_facts[_INSTALL_ADAPTER]
+    for number, line in enumerate(_lines(install_adapter), start=1):
         if EXEMPT_MARKER in line:
             continue
         column = line.find("classify_post_install_result")
@@ -428,15 +439,29 @@ def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
                     column=column + 1,
                 )
             )
+    for adapter_path, adapter in adapter_facts.items():
+        if not (
+            _present(adapter, "apply_install_command_outcome(")
+            or _present(adapter, "render_install_result_failure_summary(")
+            or _present(adapter, "exit_unless_install_result_allows_success(")
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    adapter_path,
+                    "Install command adapters must route exit and success-summary gating through install/outcome.py",
+                )
+            )
     if not (
         _present(owner, "def result_from_install_context(")
         and _present(owner, "def finalize_install_result(")
+        and _present(owner, "def apply_install_command_outcome(")
     ):
         findings.append(
             _summary(
                 rule_id,
                 _OUTCOME_OWNER,
-                "Install outcome owner must define result_from_install_context and finalize_install_result",
+                "Install outcome owner must define result_from_install_context, finalize_install_result, and apply_install_command_outcome",
             )
         )
     return tuple(findings)

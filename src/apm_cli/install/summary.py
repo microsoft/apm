@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from apm_cli.commands._helpers import _rich_blank_line
 from apm_cli.install.outcome import (
+    InstallCommandOutcome,
+    apply_install_command_outcome,
     diagnostic_error_count,
     finalize_install_result,
 )
@@ -40,6 +42,42 @@ def classify_post_install_result(
         ),
         force=force,
     )
+
+
+def render_install_result_failure_summary(
+    *,
+    logger,
+    result: InstallResult,
+) -> InstallCommandOutcome:
+    """Render diagnostics and return the canonical outcome for failed adapters."""
+    outcome = apply_install_command_outcome(result)
+    if outcome.success_summary_allowed:
+        return outcome
+
+    if outcome.exit_code != 0:
+        diagnostics = result.diagnostics
+        if diagnostics is not None and getattr(diagnostics, "has_diagnostics", False):
+            diagnostics.render_summary()
+        logger.install_summary(
+            apm_count=result.installed_count,
+            mcp_count=0,
+            errors=diagnostic_error_count(diagnostics),
+            disposition=result.disposition,
+        )
+    return outcome
+
+
+def exit_unless_install_result_allows_success(
+    *,
+    logger,
+    result: InstallResult,
+    allow_neutral_outcome: bool = False,
+) -> InstallCommandOutcome:
+    """Exit before adapter-specific success output when install disposition failed."""
+    outcome = render_install_result_failure_summary(logger=logger, result=result)
+    if outcome.success_summary_allowed or (allow_neutral_outcome and outcome.exit_code == 0):
+        return outcome
+    raise SystemExit(outcome.exit_code)
 
 
 def render_post_install_summary(
@@ -86,6 +124,7 @@ def render_post_install_summary(
             apm_diagnostics=apm_diagnostics,
             force=force,
         )
+    apply_install_command_outcome(result)
     logger.install_summary(
         apm_count=apm_count,
         mcp_count=mcp_count,

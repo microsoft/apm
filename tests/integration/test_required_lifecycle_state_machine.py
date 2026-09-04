@@ -351,6 +351,49 @@ def _single_locked_dependency(project_root: Path) -> tuple[LockFile, object]:
     return lockfile, dependencies[0]
 
 
+def _publish_invalid_package_repository(
+    scenario: _Scenario,
+    name: str,
+) -> tuple[LocalGitRepository, str]:
+    """Publish a Git repository that cannot be classified as an APM package."""
+    source_root = scenario.isolated.package_root / name
+    source_root.mkdir()
+    (source_root / "README.md").write_text("# invalid package fixture\n", encoding="utf-8")
+    repository = scenario.repositories.create(name, source_tree=source_root)
+    scenario.repositories.commit(repository, message=f"seed invalid {name}")
+    return repository, f"https://github.com/{_OWNER}/{name}"
+
+
+def _publish_nested_plugin_repository(
+    scenario: _Scenario,
+    name: str,
+) -> tuple[LocalGitRepository, str]:
+    """Publish a plugin whose real skill selector is a source-relative path."""
+    source_root = scenario.isolated.package_root / name
+    skill_dir = source_root / "skills" / "productivity" / "grill-me"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(_skill("grill-me"), encoding="utf-8")
+    plugin_dir = source_root / ".claude-plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": name,
+                "version": "1.0.0",
+                "description": "Nested skill selector fixture",
+                "author": {"name": "APM Test"},
+                "license": "MIT",
+                "skills": ["./skills/productivity/grill-me"],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    repository = scenario.repositories.create(name, source_tree=source_root)
+    scenario.repositories.commit(repository, message=f"seed plugin {name}")
+    return repository, f"https://github.com/{_OWNER}/{name}"
+
+
 def _record_by_value(snapshot: LifecycleStateSnapshot, value: str):
     """Return the deployment record tracking one project-relative value."""
     for record in snapshot.deployment_records:
@@ -370,6 +413,141 @@ def _assert_same_state(
     assert actual.lsp_state_bytes == expected.lsp_state_bytes, "LSP state diverged"
     assert actual.files == expected.files, "materialized files diverged"
     assert actual.semantic_bytes == expected.semantic_bytes, "semantic state diverged"
+
+
+@pytest.mark.parametrize(
+    ("args", "success_summary"),
+    (
+        (("update", "--yes", "--parallel-downloads", "0"), "Updated 2 APM dependencies."),
+        (
+            (*_LOCK_ARGS, "--update", "--verbose"),
+            "Lockfile written to apm.lock.yaml",
+        ),
+    ),
+    ids=("update", "lock-update"),
+)
+def test_required_failed_dependency_outcome_tuple_matches_durable_state(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    args: tuple[str, ...],
+    success_summary: str,
+) -> None:
+    """Exit code, success summary, and lockfile state must agree on failure."""
+    scenario = _new_scenario(tmp_path / "truthful-command-outcomes", apm_binary_path)
+    child_repo, child_remote = _publish_invalid_package_repository(scenario, "missing-child")
+    parent = scenario.sources.create(
+        "truthful-parent",
+        dependencies=({"git": child_remote},),
+    )
+    scenario.sources.add_skill(parent, "parent-skill", _skill("parent-skill"))
+    parent_repo = scenario.repositories.create("truthful-parent", source_tree=parent.root)
+    scenario.repositories.commit(parent_repo, message="seed parent with invalid transitive dep")
+    parent_remote = f"https://github.com/{_OWNER}/truthful-parent"
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        (
+            (child_repo, child_remote),
+            (parent_repo, parent_remote),
+        )
+    )
+    consumer = scenario.consumers.create(
+        f"truthful-consumer-{args[0]}",
+        dependencies=({"git": parent_remote},),
+        targets=("claude",),
+    )
+
+    result = scenario.runner.run(
+        args,
+        scenario_id=f"truthful-command-outcomes-{args[0]}",
+        cwd=consumer.root,
+        env=environment,
+    )
+
+    assert (
+        result.returncode,
+        success_summary in result.stdout,
+        (consumer.root / "apm.lock.yaml").exists(),
+    ) == (1, False, False), _result_evidence(result)
+
+
+def test_required_invalid_skill_subset_never_reaches_manifest_or_lockfile(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A bogus prefixed skill selector must fail before durable state is written."""
+    scenario = _new_scenario(tmp_path / "invalid-skill-selector", apm_binary_path)
+    plugin_repo, plugin_remote = _publish_nested_plugin_repository(scenario, "nested-skills")
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        ((plugin_repo, plugin_remote),)
+    )
+    consumer = scenario.consumers.create("invalid-skill-consumer", targets=("claude",))
+    plugin_ref = plugin_repo.worktree.as_posix()
+    invalid_selector = "prod/grill-me"
+    valid_selector = "productivity/grill-me"
+
+    invalid_result = scenario.runner.run(
+        (
+            "install",
+            "--skill",
+            invalid_selector,
+            "--target",
+            "claude",
+            "--no-policy",
+            "--parallel-downloads",
+            "0",
+            plugin_ref,
+        ),
+        scenario_id="invalid-skill-selector-install",
+        cwd=consumer.root,
+        env=environment,
+    )
+    manifest_after_failure = consumer.manifest_path.read_text(encoding="utf-8")
+    lock_after_failure = consumer.root / "apm.lock.yaml"
+    lock_after_failure_contents = (
+        lock_after_failure.read_text(encoding="utf-8") if lock_after_failure.exists() else ""
+    )
+
+    assert invalid_selector not in manifest_after_failure
+    assert invalid_selector not in lock_after_failure_contents
+    assert not lock_after_failure.exists()
+    assert invalid_result.returncode == 1, _result_evidence(invalid_result)
+
+    _run_success(
+        scenario,
+        consumer,
+        (
+            "install",
+            "--skill",
+            valid_selector,
+            "--target",
+            "claude",
+            "--no-policy",
+            "--parallel-downloads",
+            "0",
+            plugin_ref,
+        ),
+        environment=environment,
+        scenario_id="valid-skill-selector-install",
+    )
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"][0]["skills"] = [invalid_selector]
+    dump_yaml(manifest, consumer.manifest_path)
+    lock_path = consumer.root / "apm.lock.yaml"
+    lock_document = load_yaml(lock_path)
+    lock_document["dependencies"][0]["skill_subset"] = [invalid_selector]
+    dump_yaml(lock_document, lock_path)
+
+    audit_result, audit = _audit(
+        scenario,
+        consumer,
+        environment=environment,
+        expected_returncode=1,
+        scenario_id="invalid-skill-selector-audit",
+    )
+    skill_subset_check = _check(audit, "skill-subset-consistency")
+
+    assert invalid_selector in consumer.manifest_path.read_text(encoding="utf-8")
+    assert invalid_selector in lock_path.read_text(encoding="utf-8")
+    assert skill_subset_check["passed"] is False, _result_evidence(audit_result)
 
 
 def test_required_lsp_only_dry_run_reports_plan_without_writing_state(

@@ -1702,7 +1702,10 @@ def install(  # noqa: PLR0913
             os.environ["APM_VERBOSE"] = _apm_verbose_prev
 
     if command_result is not None:
-        ctx.exit(command_result.exit_code)
+        from apm_cli.install.outcome import apply_install_command_outcome
+
+        outcome = apply_install_command_outcome(command_result)
+        ctx.exit(outcome.exit_code)
 
 
 def _install_apm_packages(ctx, outcome):
