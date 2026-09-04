@@ -786,17 +786,11 @@ class TestInactiveExperimentalResolverGating:
 
         names = {profile.name for profile in profiles or []}
         assert {"copilot", "claude", "codex"} <= names
-        cowork_profile = next(
-            profile for profile in profiles or [] if profile.name == "copilot-cowork"
-        )
-        assert cowork_profile.resolved_deploy_root is None
+        assert "copilot-cowork" not in names
         info_messages = {
             diagnostic.message for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
         }
-        assert (
-            "Skipped inactive experimental resolver for target 'copilot-cowork' "
-            "during lockfile reconciliation."
-        ) in info_messages
+        assert not any("copilot-cowork" in message for message in info_messages)
 
     @pytest.mark.windows_compat
     def test_explicit_experimental_resolver_failure_is_not_silenced(
