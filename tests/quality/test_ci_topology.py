@@ -60,10 +60,21 @@ REQUIRED_SHARD_ROOTS = (
 #
 # The full marker family stays merge-group covered while the required release
 # expression excludes explicitly merge-group-only contracts to remain bounded.
+#
+# LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES: the invariant is "the required lifecycle
+# gate keeps a hard cap so a regression toward slowness fails loudly", not any
+# one magic number. The cap moved 5 -> 10 because hosted evidence showed the
+# 5-minute cap firing during post-step cleanup *after* a fully successful run:
+# run 33910395389, job "Lifecycle Smoke (Linux)", logged
+# "136 passed, 1 skipped, 9355 deselected in 294.53s" and was then canceled
+# 0.8s later. A cap that cancels green runs reports infrastructure noise as a
+# test failure instead of catching real slowness, so it was widened to the
+# smallest value that still bounds an accidental network retry loop.
+# Keep this constant equal to ci.yml's lifecycle-smoke `timeout-minutes`.
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 5
+LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 10
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
