@@ -1,5 +1,6 @@
 """Regression tests for CLI help and output consistency."""
 
+import re
 from unittest.mock import patch
 
 import click
@@ -186,6 +187,12 @@ def test_deps_update_target_help_uses_current_catalog():
     assert "apm update" in help_text
 
 
+def _normalize_help_text(text: str) -> str:
+    """Normalize whitespace while preserving hyphenated target names split by wrapping."""
+    collapsed = " ".join(text.split())
+    return re.sub(r"(?<=\w)-\s+(?=\w)", "-", collapsed)
+
+
 def test_compile_target_all_exclusion_lists_agent_skills_and_intellij():
     """Regression for #2451: compile --target help must list the catalog-driven
     exclusion clause, including new explicit-only targets like copilot-cowork.
@@ -195,8 +202,7 @@ def test_compile_target_all_exclusion_lists_agent_skills_and_intellij():
     result = CliRunner().invoke(cli, ["compile", "--help"])
 
     assert result.exit_code == 0
-    help_text = result.output
-    normalized = " ".join(help_text.split()).replace("copilot- cowork", "copilot-cowork")
+    normalized = _normalize_help_text(result.output)
     expected_clause = target_all_exclusion_help()
     assert expected_clause in normalized
     assert "agent-skills" in normalized
@@ -298,20 +304,23 @@ def test_compile_and_deps_exclusion_clause_matches_catalog():
 
     expected_clause = target_all_exclusion_help()
 
+    install_result = CliRunner().invoke(cli, ["install", "--help"])
+    assert install_result.exit_code == 0
+    install_normalized = _normalize_help_text(install_result.output)
+    assert expected_clause in install_normalized, (
+        f"install --help exclusion clause mismatch; expected: {expected_clause!r}"
+    )
+
     compile_result = CliRunner().invoke(cli, ["compile", "--help"])
     assert compile_result.exit_code == 0
-    compile_normalized = " ".join(compile_result.output.split()).replace(
-        "copilot- cowork", "copilot-cowork"
-    )
+    compile_normalized = _normalize_help_text(compile_result.output)
     assert expected_clause in compile_normalized, (
         f"compile --help exclusion clause mismatch; expected: {expected_clause!r}"
     )
 
     deps_result = CliRunner().invoke(cli, ["deps", "update", "--help"])
     assert deps_result.exit_code == 0
-    deps_normalized = " ".join(deps_result.output.split()).replace(
-        "copilot- cowork", "copilot-cowork"
-    )
+    deps_normalized = _normalize_help_text(deps_result.output)
     assert expected_clause in deps_normalized, (
         f"deps update --help exclusion clause mismatch; expected: {expected_clause!r}"
     )
