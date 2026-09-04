@@ -842,6 +842,7 @@ class TestHookSync:
         if target_exists:
             assert outside_file.read_text(encoding="utf-8") == '{"outside": true}'
 
+    @pytest.mark.windows_compat
     @pytest.mark.parametrize("target_exists", [True, False])
     def test_sync_unlinks_absolute_final_managed_symlink_without_following_target(
         self,
@@ -882,6 +883,7 @@ class TestHookSync:
         if target_exists:
             assert outside_file.read_text(encoding="utf-8") == '{"outside": true}'
 
+    @pytest.mark.windows_compat
     def test_sync_rejects_absolute_managed_hook_parent_symlink(self, tmp_path: Path):
         """Absolute managed roots must reject symlinked hook parents."""
         from dataclasses import replace
