@@ -825,6 +825,21 @@ def _validate_marketplace_plugin(
     return result
 
 
+def validate_legacy_marketplace_plugin(
+    package_path: Path,
+    plugin_json_path: Path | None,
+    *,
+    source_path: Path | None = None,
+) -> ValidationResult:
+    """Normalize a detected legacy plugin without changing format precedence."""
+    return _validate_marketplace_plugin(
+        package_path,
+        plugin_json_path,
+        ValidationResult(),
+        source_path=source_path,
+    )
+
+
 def _validate_apm_package_with_yml(
     package_path: Path,
     apm_yml_path: Path,

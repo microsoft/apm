@@ -347,6 +347,7 @@ def test_aliased_output_path_preserves_hand_authored_root_agents(
     assert "Protected" in result.output
 
 
+@pytest.mark.windows_compat
 def test_case_variant_output_preserves_root_agents_on_insensitive_filesystem(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -367,7 +368,7 @@ def test_case_variant_output_preserves_root_agents_on_insensitive_filesystem(
 
     assert result.exit_code == 0, result.output
     assert canonical.read_text(encoding="utf-8") == _MANUAL_AGENTS
-    assert "Protected agents.md" in result.output
+    assert "protected agents.md" in result.output.lower()
 
 
 def test_case_variant_generated_agents_remains_replaceable_on_insensitive_filesystem(

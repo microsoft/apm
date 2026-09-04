@@ -219,9 +219,11 @@ class TestGitCacheEnvForwarding:
         sha = "d" * 40
         mock_run.return_value = MagicMock(returncode=0, stdout=f"{sha}\trefs/heads/main\n")
         cache._resolve_sha("https://github.com/owner/repo", "main", env=sentinel)
-        # Assert env was passed through verbatim
+        # The cache must preserve auth values while returning a sanitized copy.
         call_kwargs = mock_run.call_args.kwargs
-        assert call_kwargs.get("env") is sentinel
+        child_env = call_kwargs["env"]
+        assert all(child_env.get(key) == value for key, value in sentinel.items())
+        assert child_env is not sentinel
 
     @patch("subprocess.run")
     def test_env_forwarded_to_get_checkout_miss(self, mock_run: MagicMock, tmp_path: Path) -> None:
@@ -255,12 +257,14 @@ class TestGitCacheEnvForwarding:
                 "https://github.com/owner/repo", "main", locked_sha=sha, env=sentinel
             )
 
-        # Every subprocess call should carry the sentinel env
+        # Every subprocess call should carry a sanitized copy of the sentinel env.
         assert mock_run.called
         for call in mock_run.call_args_list:
-            assert call.kwargs.get("env") is sentinel, (
+            child_env = call.kwargs.get("env", {})
+            assert all(child_env.get(key) == value for key, value in sentinel.items()), (
                 f"env not forwarded to: {call.args[0] if call.args else call.kwargs.get('args')}"
             )
+            assert child_env is not sentinel
 
 
 class TestCheckoutWriteDedup:

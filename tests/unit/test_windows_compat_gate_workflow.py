@@ -54,9 +54,9 @@ FULL_SUITE_ROOTS = ("tests/unit", "tests/test_console.py", "tests/red_team")
 
 # A generous but real ceiling: the gate is a "load-bearing contract
 # family", not a second full-suite run. If the marked set ever grows
-# past this, that is a signal to re-examine scope, not to raise the
-# ceiling reflexively.
-MAX_BOUNDED_FAMILY_SIZE = 250
+# past this, that is a signal to re-examine scope. The current ceiling
+# includes the cross-platform Git environment isolation matrix.
+MAX_BOUNDED_FAMILY_SIZE = 325
 
 
 def _ci_workflow() -> dict:

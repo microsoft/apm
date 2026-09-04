@@ -165,10 +165,11 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
     net_ok = False
     net_detail = ""
     try:
-        result = subprocess.run(
-            ["git", "ls-remote", "https://github.com/git/git.git", "HEAD"],
-            capture_output=True,
-            text=True,
+        from ...utils.git_env import git_remote_refs
+
+        result = git_remote_refs(
+            "https://github.com/git/git.git",
+            "HEAD",
             timeout=5,
         )
         if result.returncode == 0:
@@ -186,8 +187,12 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
         net_detail = "Network check timed out (5s)"
     except FileNotFoundError:
         net_detail = "git not found; cannot test network"
+    except ValueError as exc:
+        net_detail = str(exc)
     except (subprocess.SubprocessError, OSError) as exc:
-        net_detail = str(exc)[:60]
+        from ...utils.git_env import git_subprocess_error_text
+
+        net_detail = git_subprocess_error_text(exc)[:60]
 
     checks.append(
         _DoctorCheck(

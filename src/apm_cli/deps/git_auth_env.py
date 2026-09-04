@@ -25,10 +25,8 @@ from a reference to the surrounding downloader's token manager and
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from typing import Any
-from urllib.parse import urlsplit
 
 
 class GitAuthEnvBuilder:
@@ -46,7 +44,9 @@ class GitAuthEnvBuilder:
         but does not write to the downloader's token-state attributes;
         the caller is responsible for those assignments.
         """
-        env = self._token_manager.setup_environment()
+        from ..utils.git_env import git_subprocess_env
+
+        env = git_subprocess_env(self._token_manager.setup_environment())
 
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = "echo"
@@ -113,53 +113,6 @@ class GitAuthEnvBuilder:
         env["GIT_CONFIG_VALUE_0"] = ""
 
     @staticmethod
-    def has_https_to_http_url_rewrite(remote_url: str, env: dict[str, str]) -> bool:
-        """Return whether Git configuration would downgrade *remote_url* to HTTP."""
-        if urlsplit(remote_url).scheme.lower() != "https":
-            return False
-
-        from ..utils.git_env import get_git_executable
-
-        try:
-            result = subprocess.run(
-                (
-                    get_git_executable(),
-                    "config",
-                    "--null",
-                    "--get-regexp",
-                    r"^url\..*\.insteadOf$",
-                ),
-                capture_output=True,
-                check=False,
-                env=env,
-                timeout=10,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise ValueError("Unable to verify HTTPS Git rewrite safety") from exc
-        if result.returncode not in {0, 1}:
-            raise ValueError("Unable to verify HTTPS Git rewrite safety")
-
-        for entry in result.stdout.split(b"\0"):
-            if not entry or b"\n" not in entry:
-                continue
-            key, prefix = entry.split(b"\n", 1)
-            try:
-                key_text = key.decode("utf-8")
-                prefix_text = prefix.decode("utf-8")
-            except UnicodeDecodeError:
-                continue
-            normalized_key = key_text.lower()
-            if not normalized_key.startswith("url.") or not normalized_key.endswith(".insteadof"):
-                continue
-            replacement = key_text[4 : -len(".insteadOf")]
-            if (
-                remote_url.startswith(prefix_text)
-                and urlsplit(replacement).scheme.lower() == "http"
-            ):
-                return True
-        return False
-
-    @staticmethod
     def noninteractive_env(
         base_git_env: dict[str, str],
         *,
@@ -186,7 +139,9 @@ class GitAuthEnvBuilder:
         credentials through user helpers on HTTPS/SSH fallbacks; removing
         step 2 would leak them over plaintext HTTP.
         """
-        env = dict(base_git_env)
+        from ..utils.git_env import git_subprocess_env
+
+        env = git_subprocess_env(base_git_env)
         env["GIT_TERMINAL_PROMPT"] = "0"
         env.pop("GIT_ASKPASS", None)
 

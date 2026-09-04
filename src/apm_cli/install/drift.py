@@ -427,7 +427,7 @@ def _build_package_info(
         PackageInfo,
         ResolvedReference,
     )
-    from apm_cli.models.validation import detect_package_type
+    from apm_cli.models.validation import PackageType, detect_package_type
 
     apm_yml = install_path / "apm.yml"
     if apm_yml.exists():
@@ -464,8 +464,8 @@ def _build_package_info(
         dependency_ref=lock_dep.to_dependency_ref(),
     )
     try:
-        pkg_type, _ = detect_package_type(install_path)
-        info.package_type = pkg_type
+        package_type = lock_dep.package_type or detect_package_type(install_path)[0].value
+        info.package_type = PackageType(package_type)
     except Exception:
         info.package_type = None
     return info

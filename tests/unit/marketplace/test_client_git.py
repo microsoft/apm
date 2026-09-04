@@ -30,6 +30,7 @@ from apm_cli.marketplace.client import (
 )
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
+from apm_cli.utils.git_env import GitUrlRewriteError
 
 
 def _git_source(url: str, name: str = "acme", ref: str = "main") -> MarketplaceSource:
@@ -305,11 +306,27 @@ def test_fetch_git_does_not_render_generic_exception_text(
     assert "apm marketplace update acme" in str(raised.value)
 
 
-def test_fetch_git_wraps_https_downgrade_rejection(fake_host_info, fake_auth_resolver) -> None:
+@pytest.mark.parametrize(
+    ("reason", "detail", "expected"),
+    (
+        ("https-downgrade", "HTTPS Git remote must not rewrite to insecure HTTP", "insecure"),
+        ("credentials", "Git URL rewrite replacement must not contain credentials", "credentials"),
+        (
+            "credential-origin",
+            "Authenticated Git remote must not rewrite to a different HTTPS origin",
+            "changes the remote origin",
+        ),
+    ),
+)
+def test_fetch_git_wraps_url_rewrite_rejection(
+    fake_host_info,
+    fake_auth_resolver,
+    reason: str,
+    detail: str,
+    expected: str,
+) -> None:
     """Transport-policy rejection keeps the actionable marketplace error shape."""
-    fake_auth_resolver.git_env_for_remote.side_effect = ValueError(
-        "HTTPS Git remote is configured to rewrite to insecure HTTP"
-    )
+    fake_auth_resolver.git_env_for_remote.side_effect = GitUrlRewriteError(reason, detail)
 
     with pytest.raises(MarketplaceFetchError) as raised:
         _fetch_git(
@@ -320,8 +337,39 @@ def test_fetch_git_wraps_https_downgrade_rejection(fake_host_info, fake_auth_res
         )
 
     message = str(raised.value)
-    assert "HTTPS Git remote was rejected" in message
+    assert expected in message
+    assert "git config --show-origin --get-regexp" in message
     assert "apm marketplace update acme" in message
+
+
+def test_fetch_git_preserves_cache_stage_rewrite_recovery(
+    tmp_path: Path,
+    fake_host_info,
+    fake_auth_resolver,
+) -> None:
+    """A target-scoped cache rejection keeps the rewrite-specific guidance."""
+    gitcache_mock = MagicMock()
+    gitcache_mock.get_checkout.side_effect = GitUrlRewriteError(
+        "https-downgrade",
+        "HTTPS Git remote must not rewrite to insecure HTTP",
+    )
+    with (
+        patch("apm_cli.cache.git_cache.GitCache", return_value=gitcache_mock),
+        patch("apm_cli.cache.paths.get_cache_root", return_value=tmp_path / "cache"),
+        pytest.raises(MarketplaceFetchError) as raised,
+    ):
+        _fetch_git(
+            _git_source("https://gitea.example.com/org/repo.git"),
+            "marketplace.json",
+            host_info=fake_host_info,
+            auth_resolver=fake_auth_resolver,
+        )
+
+    message = str(raised.value)
+    assert "rewrites it to insecure HTTP" in message
+    assert "git config --show-origin --get-regexp" in message
+    assert "Correct the matching Git configuration" in message
+    assert "verify the remote" not in message
 
 
 def test_fetchers_dispatch_table_routes_kinds_to_correct_callable() -> None:

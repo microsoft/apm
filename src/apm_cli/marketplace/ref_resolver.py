@@ -7,9 +7,8 @@ single subprocess call.
 
 Security notes
 --------------
-* Tokens embedded in ``https://x-access-token:<TOKEN>@`` URLs are
-  scrubbed from all error messages and exceptions before they leave
-  this module.
+* Managed credentials use process-scoped Authorization headers and stay out of
+  remote URLs. URL sanitization remains as defense for explicit userinfo.
 * The ``translate_git_stderr`` helper from ``git_stderr.py`` is used
   to classify failures and produce actionable hints.
 """
@@ -23,6 +22,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
+from ..utils.git_env import redact_git_diagnostic
 from ..utils.github_host import (
     build_ado_https_clone_url,
     build_ado_ssh_url,
@@ -33,7 +33,7 @@ from ..utils.github_host import (
     is_azure_devops_hostname,
     is_visualstudio_legacy_hostname,
 )
-from ._git_utils import redact_token as _redact_token
+from ._git_utils import redact_token as _redact_token  # noqa: F401
 from .errors import GitLsRemoteError, OfflineMissError
 from .git_stderr import translate_git_stderr
 
@@ -102,6 +102,16 @@ class RemoteRef:
 
     name: str  # e.g. "refs/tags/v1.2.0" or "refs/heads/main"
     sha: str  # 40-char hex SHA
+
+
+class _RemoteAttemptError(RuntimeError):
+    """Carry one failed ls-remote result through AuthResolver fallback."""
+
+    def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
+        self.result = result
+        super().__init__(
+            redact_git_diagnostic(result.stderr or f"git ls-remote exited {result.returncode}")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +227,7 @@ class RefResolver:
         transport_scheme: str = "https",
         ssh_user: str = "git",
         port: int | None = None,
+        unauth_first: bool = False,
     ) -> None:
         self._timeout = timeout_seconds
         self._offline = offline
@@ -230,6 +241,7 @@ class RefResolver:
         self._transport_scheme = transport_scheme
         self._ssh_user = ssh_user
         self._port = port
+        self._unauth_first = unauth_first
         self._cache = RefCache()
         self._lock = threading.Lock()
         # Per-remote locks to serialise calls to the same remote while
@@ -263,7 +275,6 @@ class RefResolver:
                 summary=f"Bearer authentication is not supported for host '{self._host}'.",
                 hint="Use bearer authentication only with an Azure DevOps host.",
             )
-        url_token = None if requested_bearer or use_ssh else self._token
         if use_ssh and ado_host:
             org, project, repo = _ado_coordinates_from_owner_repo(
                 host=self._host,
@@ -288,13 +299,17 @@ class RefResolver:
                 if ado_host
                 else None
             )
+            expected_path = (
+                expected_ado_path if ado_host else f"/{owner_repo.removesuffix('.git').strip('/')}"
+            )
+            expected_path = expected_path.removesuffix(".git").rstrip("/")
+            actual_path = parsed_remote.path.removesuffix(".git").rstrip("/")
             # urlparse lowercases hostname per RFC 3986 3.2.2; normalize both sides.
             if (
-                not ado_host
-                or parsed_remote.scheme != "https"
+                parsed_remote.scheme != "https"
                 or parsed_remote.hostname != self._host.lower()
                 or parsed_remote.port != self._port
-                or parsed_remote.path != expected_ado_path
+                or actual_path != expected_path
                 or parsed_remote.username is not None
                 or parsed_remote.password is not None
                 or parsed_remote.query
@@ -304,11 +319,10 @@ class RefResolver:
                     package=owner_repo,
                     summary=(
                         "The canonical remote URL does not match the configured host "
-                        "or Azure DevOps dependency coordinates."
+                        "or dependency coordinates."
                     ),
                     hint=(
-                        "Re-add the dependency with the original Azure DevOps URL "
-                        "to regenerate the lock entry."
+                        "Re-add the dependency with its original URL to regenerate the lock entry."
                     ),
                 )
             # ADO HTTPS intentionally keeps credentials out of the URL; auth
@@ -330,7 +344,7 @@ class RefResolver:
             url = build_https_clone_url(
                 self._host,
                 owner_repo,
-                token=url_token,
+                token=None,
                 port=self._port,
             )
         from apm_cli.core.auth import AuthResolver
@@ -352,7 +366,9 @@ class RefResolver:
                 base_env=env,
             )
         if use_ssh:
-            AuthResolver._clear_git_auth_env(env)
+            from ..utils.git_env import clear_git_auth_env
+
+            clear_git_auth_env(env)
             env.pop("GIT_ASKPASS", None)
         env["GIT_TERMINAL_PROMPT"] = "0"
         if not use_ssh:
@@ -403,14 +419,43 @@ class RefResolver:
                 raise OfflineMissError(package="", remote=cache_key)
 
             url, env = self._git_url_and_env(owner_repo, remote_url=remote_url)
-            try:
-                result = subprocess.run(
-                    ["git", "ls-remote", "--tags", "--heads", url],
-                    capture_output=True,
-                    text=True,
+
+            def _run_remote(run_env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+                from ..utils.git_env import git_remote_refs
+
+                return git_remote_refs(
+                    url,
                     timeout=self._timeout,
-                    env=env,
+                    env=run_env,
+                    options=("--tags", "--heads"),
                 )
+
+            try:
+                if self._unauth_first and self._auth_resolver is not None:
+
+                    def _attempt(
+                        _token: str | None,
+                        attempt_env: dict[str, str],
+                    ) -> subprocess.CompletedProcess[str]:
+                        attempt = _run_remote(attempt_env)
+                        if attempt.returncode != 0:
+                            raise _RemoteAttemptError(attempt)
+                        return attempt
+
+                    try:
+                        result = self._auth_resolver.try_with_fallback(
+                            self._host,
+                            _attempt,
+                            org=owner_repo.partition("/")[0],
+                            port=self._port,
+                            path=owner_repo,
+                            unauth_first=True,
+                            base_env=self._git_env,
+                        )
+                    except _RemoteAttemptError as exc:
+                        result = exc.result
+                else:
+                    result = _run_remote(env)
             except subprocess.TimeoutExpired:
                 raise GitLsRemoteError(  # noqa: B904
                     package="",
@@ -434,7 +479,7 @@ class RefResolver:
                 return fallback_refs
 
             if result.returncode != 0:
-                stderr = _redact_token(result.stderr)
+                stderr = redact_git_diagnostic(result.stderr)
                 if self._stderr_translator:
                     translated = translate_git_stderr(
                         stderr,
@@ -450,7 +495,7 @@ class RefResolver:
                 raise GitLsRemoteError(
                     package="",
                     summary=f"git ls-remote failed for '{owner_repo}' (exit {result.returncode}).",
-                    hint=_redact_token(stderr[:200]) if stderr else "No stderr output.",
+                    hint=redact_git_diagnostic(stderr[:200]) if stderr else "No stderr output.",
                 )
 
             refs = _parse_ls_remote_output(result.stdout)
@@ -560,10 +605,11 @@ class RefResolver:
         """
         url, env = self._git_url_and_env(owner_repo)
         try:
-            result = subprocess.run(
-                ["git", "ls-remote", url, ref],
-                capture_output=True,
-                text=True,
+            from ..utils.git_env import git_remote_refs
+
+            result = git_remote_refs(
+                url,
+                ref,
                 timeout=self._timeout,
                 env=env,
             )
@@ -581,7 +627,7 @@ class RefResolver:
             )
 
         if result.returncode != 0:
-            stderr = _redact_token(result.stderr)
+            stderr = redact_git_diagnostic(result.stderr)
             if self._stderr_translator:
                 translated = translate_git_stderr(
                     stderr,
@@ -597,7 +643,7 @@ class RefResolver:
             raise GitLsRemoteError(
                 package="",
                 summary=f"git ls-remote failed for '{owner_repo}' (exit {result.returncode}).",
-                hint=_redact_token(stderr[:200]) if stderr else "No stderr output.",
+                hint=redact_git_diagnostic(stderr[:200]) if stderr else "No stderr output.",
             )
 
         refs = _parse_ls_remote_output(result.stdout)

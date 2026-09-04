@@ -331,16 +331,22 @@ environment end-to-end; for local iteration prefer the direct
 **On PR and merge queue:**
 1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
 
-**On version tag releases:**
+**On pushed version tag releases:**
 1. Unit tests + Smoke tests
 2. Build binaries (cross-platform)
 3. **E2E golden scenario tests** (using built binaries). Linux and macOS Apple Silicon retain the full non-live integration corpus; macOS Intel runs the marker-bounded `lifecycle_smoke and not live` subset plus native startup and isolated release validation.
 4. Create GitHub Release
 5. Publish to PyPI 
 
+**Daily scheduled release smoke:**
+- Runs the same promotion validation path once per day.
+- If a build matrix leg fails, downstream Linux/Windows integration and release-validation jobs still run for any platform artifact that was produced.
+- Failing scheduled runs update one `ci/daily-smoke` tracking issue; a later recovered run closes it.
+- This signal is advisory and is not a required PR check.
+
 **Manual workflow dispatch:**
 - Test builds (uploads as workflow artifacts)
-- Allows testing the full build pipeline without creating a release
+- Allows testing the full build pipeline without creating a release, even when dispatched from a tag ref
 - Useful for validating changes before tagging
 
 ### GitHub Actions Authentication
@@ -387,26 +393,26 @@ Promotion integration tests run on:
 ## What the Tests Verify
 
 ### Smoke Tests Verify:
-- ✅ Runtime setup scripts execute successfully
-- ✅ Binaries are downloaded and installed correctly
-- ✅ Binaries respond to basic commands
-- ✅ APM can detect installed runtimes
-- ✅ Configuration files are created properly
-- ✅ Workflow compilation works (without execution)
+- [+] Runtime setup scripts execute successfully
+- [+] Binaries are downloaded and installed correctly
+- [+] Binaries respond to basic commands
+- [+] APM can detect installed runtimes
+- [+] Configuration files are created properly
+- [+] Workflow compilation works (without execution)
 
 ### E2E Tests Verify:
-- ✅ Complete golden scenario from README works
-- ✅ `apm runtime setup copilot` installs and configures GitHub Copilot CLI
-- ✅ `apm runtime setup codex` installs and configures Codex
-- ✅ `apm runtime setup llm` installs and configures LLM
-- ✅ `apm init my-hello-world` creates project correctly
-- ✅ `apm install` handles dependencies
-- ✅ `apm run start --param name="Tester"` executes successfully
-- ✅ Real API calls to GitHub Models work
-- ✅ Parameter substitution works correctly
-- ✅ MCP integration functions (GitHub tools)
-- ✅ Binary artifacts work across platforms
-- ✅ Release pipeline integrity (GitHub Release → PyPI)
+- [+] Complete golden scenario from README works
+- [+] `apm runtime setup copilot` installs and configures GitHub Copilot CLI
+- [+] `apm runtime setup codex` installs and configures Codex
+- [+] `apm runtime setup llm` installs and configures LLM
+- [+] `apm init my-hello-world` creates project correctly
+- [+] `apm install` handles dependencies
+- [+] `apm run start --param name="Tester"` executes successfully
+- [+] Real API calls to GitHub Models work
+- [+] Parameter substitution works correctly
+- [+] MCP integration functions (GitHub tools)
+- [+] Binary artifacts work across platforms
+- [+] Release pipeline integrity (GitHub Release -> PyPI)
 
 ### Lifecycle Smoke Verifies:
 - Install content-hash roundtrip (Consume contract)

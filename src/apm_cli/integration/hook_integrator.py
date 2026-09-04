@@ -1886,7 +1886,7 @@ class HookIntegrator(BaseIntegrator):
         if targets is not None:
             guard_targets = guard_targets + list(targets)
         hook_prefixes = [
-            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/"
+            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/".replace("\\", "/")
             for t in guard_targets
             if t.supports("hooks")
         ]
@@ -1899,7 +1899,7 @@ class HookIntegrator(BaseIntegrator):
             for rel_path in managed_files:
                 if not (normalized := rel_path.replace("\\", "/")).startswith(hook_prefix_tuple):
                     continue
-                cleanup_paths.add(normalized)
+                cleanup_paths.add(rel_path if Path(rel_path).is_absolute() else normalized)
 
             cleanup_diagnostics = DiagnosticCollector()
             cleanup = remove_stale_deployed_files(

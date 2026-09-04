@@ -1067,11 +1067,13 @@ class TestBuildGitEnvBearerIsolation:
         value_slots = [v for k, v in env.items() if k.startswith("GIT_CONFIG_VALUE_")]
         assert any("fresh-jwt-from-az-cli" in v for v in value_slots)
 
-    def test_basic_scheme_still_sets_git_token(self):
-        """Non-bearer path keeps the legacy GIT_TOKEN behaviour."""
+    def test_github_basic_scheme_uses_header(self):
+        """GitHub PATs stay out of argv-compatible raw token channels."""
         with patch.dict(os.environ, {}, clear=True):
             env = AuthResolver._build_git_env("a-pat", scheme="basic", host_kind="github")
-        assert env.get("GIT_TOKEN") == "a-pat"
+        assert "GIT_TOKEN" not in env
+        values = [value for key, value in env.items() if key.startswith("GIT_CONFIG_VALUE_")]
+        assert any(value.startswith("Authorization: Basic ") for value in values)
 
     def test_ado_git_env_strips_raw_github_token_sources(self):
         """Only the selected ADO credential reaches the git subprocess."""
@@ -1131,11 +1133,13 @@ class TestBuildGitEnvBearerIsolation:
         }
         with patch.dict(os.environ, inherited, clear=False):
             env = AuthResolver._build_git_env("fresh-jwt", scheme="bearer", host_kind="ado")
-        assert env["GIT_CONFIG_COUNT"] == "2"
+        assert env["GIT_CONFIG_COUNT"] == "3"
         assert env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
         assert env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
-        assert env["GIT_CONFIG_KEY_1"] == "http.extraheader"
-        assert env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer fresh-jwt"
+        assert env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert env["GIT_CONFIG_VALUE_1"] == ""
+        assert env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+        assert env["GIT_CONFIG_VALUE_2"] == "Authorization: Bearer fresh-jwt"
         assert not any("inherited-secret" in str(v) for v in env.values())
 
 

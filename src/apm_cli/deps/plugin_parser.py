@@ -353,6 +353,13 @@ def normalized_plugin_skill_sources(plugin_path: Path) -> tuple[dict[str, Path],
     return resolved, declared
 
 
+def has_normalized_plugin_skill_sources_receipt(plugin_path: Path) -> bool:
+    """Return whether parser-owned plugin skill membership is present."""
+    apm_dir = plugin_path.resolve() / ".apm"
+    receipt = apm_dir / _PLUGIN_SKILL_SOURCES_FILE
+    return not apm_dir.is_symlink() and receipt.is_file() and not receipt.is_symlink()
+
+
 def _write_plugin_skill_sources(
     plugin_path: Path,
     apm_dir: Path,

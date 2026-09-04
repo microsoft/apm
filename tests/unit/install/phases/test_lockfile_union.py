@@ -798,6 +798,7 @@ class TestInactiveExperimentalResolverGating:
             "during lockfile reconciliation."
         ) in info_messages
 
+    @pytest.mark.windows_compat
     def test_explicit_experimental_resolver_failure_is_not_silenced(
         self,
         tmp_path: Path,
@@ -815,10 +816,14 @@ class TestInactiveExperimentalResolverGating:
             '{"default_client":"vscode","experimental":{"copilot_cowork":true}}',
             encoding="utf-8",
         )
+        monkeypatch.setenv(
+            "APM_COPILOT_COWORK_SKILLS_DIR",
+            str(home / ".." / "outside-cowork" / "skills"),
+        )
 
         with pytest.raises(
             CoworkResolutionError,
-            match="Multiple OneDrive mounts detected",
+            match="contains a traversal sequence",
         ):
             resolve_targets(
                 tmp_path,

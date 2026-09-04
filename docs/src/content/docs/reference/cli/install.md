@@ -131,6 +131,15 @@ in `apm.yml`, then run `apm install` again.
   replacements to isolated staging paths and validate them before publication.
   If download, validation, or activation fails, APM keeps the previous package
   and lockfile active and exits non-zero with retry guidance.
+- **Git-hook isolation.** Dependency Git operations ignore repository-locating
+  hook variables, preserving the caller's branch and HEAD. APM allows safe URL
+  rewrites but rejects credentials, insecure transports including `http://` and
+  `git://`, remote-helper syntax such as `ext::` and `https::`, and cross-host
+  network targets for every host class. Credentials are resolved per
+  `(host, port, org)`; private `github.com` helper fallback also uses the
+  repository path. Managed and anonymous HTTPS auth is scoped to the effective
+  repository URL. See
+  [Git URL rewrite safety](../../../getting-started/authentication/#git-url-rewrite-safety).
 - **Instruction frontmatter preflight.** Malformed YAML always rejects the
   package before any of its primitives are deployed. Critical hidden characters
   decoded from metadata also prevent installation by default; `--force`

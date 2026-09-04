@@ -178,6 +178,14 @@ def git_transport_policy(host_kind: str, remote_url: str) -> GitTransportPolicy:
     AuthResolver preserve its noninteractive SSH command.
     """
     scheme = urllib.parse.urlsplit(remote_url).scheme.lower()
+    if host_kind == "ado":
+        return GitTransportPolicy(
+            use_resolved_credentials=scheme == "https",
+            allow_native_credential_lookup=False,
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+            reject_https_downgrade=scheme == "https",
+        )
     if scheme == "http":
         return GitTransportPolicy(
             use_resolved_credentials=False,

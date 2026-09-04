@@ -14,8 +14,10 @@ import pytest
 
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.utils.content_hash import compute_package_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
+from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_git_repository import (
@@ -37,6 +39,7 @@ _OWNER = "apm-fixture-org"
 _AUDIT_ARGS = ("audit", "--ci", "--no-policy", "--format", "json")
 _AUDIT_ALL_ARGS = ("audit", "--ci", "--no-policy", "--no-fail-fast", "--format", "json")
 _INSTALL_ARGS = ("install", "--no-policy", "--parallel-downloads", "0")
+_PARALLEL_INSTALL_ARGS = ("install", "--no-policy", "--parallel-downloads", "2")
 _LOCK_ARGS = ("lock", "--no-policy", "--parallel-downloads", "0")
 _EXTERNAL_USER_ROOT_ENV = {
     "claude": "CLAUDE_CONFIG_DIR",
@@ -181,6 +184,36 @@ def _publish(
         remote_url=remote_url,
         dependency=dependency,
         environment=environment,
+    )
+
+
+def _publish_legacy_plugin(
+    scenario: _Scenario,
+    name: str,
+    *,
+    skill: str,
+) -> _PublishedPackage:
+    package = scenario.sources.create(name)
+    scenario.sources.add_skill(package, skill, _skill(skill))
+    package.manifest_path.unlink()
+    (package.root / "plugin.json").write_text(
+        json.dumps({"name": package.name, "skills": ["./skills/"]}),
+        encoding="ascii",
+    )
+    repository = scenario.repositories.create(package.name, source_tree=package.root)
+    commit = scenario.repositories.commit(repository, message="publish legacy plugin")
+    remote_url = f"https://github.com/{_OWNER}/{package.name}"
+    return _PublishedPackage(
+        package=package,
+        repository=repository,
+        commit=commit,
+        remote_url=remote_url,
+        dependency={
+            "git": remote_url,
+            "ref": commit.sha,
+            "alias": package.name,
+        },
+        environment=scenario.repositories.url_rewrite_subprocess_env(repository, remote_url),
     )
 
 
@@ -1251,6 +1284,326 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
     assert audit["passed"] is True
 
 
+def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Upgrade a receipt-less 0.28 plugin without dropping prior skill claims."""
+    scenario = _new_scenario(tmp_path / "legacy-content-hash", apm_binary_path)
+    source = _publish_legacy_plugin(
+        scenario,
+        "legacy-hash-kit",
+        skill="legacy-hash",
+    )
+    package = source.package
+    consumer = scenario.consumers.create(
+        "legacy-hash-consumer",
+        dependencies=(source.dependency,),
+        targets=("claude", "codex"),
+    )
+    capture_args = {
+        "targets": ("claude", "codex"),
+        "config_paths": (
+            PurePosixPath(".claude/skills/legacy-hash/SKILL.md"),
+            PurePosixPath(".agents/skills/legacy-hash/SKILL.md"),
+        ),
+    }
+
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="legacy-content-hash-install-current",
+    )
+    installed = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    lock_path = consumer.root / "apm.lock.yaml"
+    lock_document = load_yaml(lock_path)
+    dependencies = lock_document["dependencies"]
+    assert len(dependencies) == 1
+    locked_dependency = dependencies[0]
+    current_content_hash = locked_dependency["content_hash"]
+    prior_source_identity = {
+        key: locked_dependency.get(key)
+        for key in ("repo_url", "materialization_repo_url", "resolved_commit", "resolved_ref")
+    }
+    prior_deployed_files = list(locked_dependency["deployed_files"])
+    prior_deployed_hashes = dict(locked_dependency["deployed_file_hashes"])
+
+    cached_package = consumer.root / "apm_modules" / package.name
+    receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
+    assert receipt.is_file()
+    receipt.unlink()
+    # APM 0.28 used the same tree-hash algorithm but did not write the
+    # parser-owned receipt, so hashing this receipt-less cache is its exact hash.
+    legacy_content_hash = compute_package_hash(cached_package)
+    assert legacy_content_hash != current_content_hash
+    lock_document["apm_version"] = "0.28.0"
+    locked_dependency["content_hash"] = legacy_content_hash
+    locked_dependency["package_type"] = "marketplace_plugin"
+    dump_yaml(lock_document, lock_path)
+
+    legacy = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    assert legacy.file(".claude/skills/legacy-hash/SKILL.md").kind == "file"
+    assert legacy.file(".agents/skills/legacy-hash/SKILL.md").kind == "file"
+    assert legacy.deployment_records == installed.deployment_records
+    _, legacy_dependency = _single_locked_dependency(consumer.root)
+    assert legacy_dependency.content_hash == legacy_content_hash
+    assert legacy_dependency.deployed_files == prior_deployed_files
+    assert legacy_dependency.deployed_file_hashes == prior_deployed_hashes
+    assert {
+        key: getattr(legacy_dependency, key)
+        for key in ("repo_url", "materialization_repo_url", "resolved_commit", "resolved_ref")
+    } == prior_source_identity
+
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="legacy-content-hash-upgrade",
+    )
+    upgraded = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    _, upgraded_dependency = _single_locked_dependency(consumer.root)
+
+    assert (
+        upgraded.file(".claude/skills/legacy-hash/SKILL.md").content
+        == installed.file(".claude/skills/legacy-hash/SKILL.md").content
+    )
+    assert (
+        upgraded.file(".agents/skills/legacy-hash/SKILL.md").content
+        == installed.file(".agents/skills/legacy-hash/SKILL.md").content
+    )
+    assert upgraded_dependency.content_hash == current_content_hash
+    assert upgraded_dependency.package_type == "marketplace_plugin"
+    assert upgraded_dependency.deployed_files == prior_deployed_files
+    assert upgraded_dependency.deployed_file_hashes == prior_deployed_hashes
+    assert upgraded.deployment_records == legacy.deployment_records
+    assert {
+        key: getattr(upgraded_dependency, key)
+        for key in ("repo_url", "materialization_repo_url", "resolved_commit", "resolved_ref")
+    } == prior_source_identity
+
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="legacy-content-hash-convergence",
+    )
+    converged = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+
+    _assert_same_state(upgraded, converged)
+
+
+@pytest.mark.lifecycle_merge_group
+def test_required_parallel_fresh_fetch_bypasses_legacy_cache_upgrade(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Fresh parallel downloads never enter the cached 0.28 compatibility path."""
+    scenario = _new_scenario(tmp_path / "parallel-fresh-plugin", apm_binary_path)
+    source = _publish_legacy_plugin(
+        scenario,
+        "parallel-fresh-plugin-kit",
+        skill="parallel-fresh",
+    )
+    branch_dependency = dict(source.dependency)
+    branch_dependency["ref"] = "main"
+    consumer = scenario.consumers.create(
+        "parallel-fresh-plugin-consumer",
+        dependencies=(branch_dependency,),
+        targets=("claude", "codex"),
+    )
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="parallel-fresh-plugin-establish",
+    )
+
+    cached_package = consumer.root / "apm_modules" / source.package.name
+    lock_path = consumer.root / "apm.lock.yaml"
+    lock_document = load_yaml(lock_path)
+    locked_dependency = lock_document["dependencies"][0]
+    receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
+    assert receipt.is_file()
+    receipt.unlink()
+    legacy_content_hash = compute_package_hash(cached_package)
+    lock_document["apm_version"] = "0.28.0"
+    locked_dependency["package_type"] = "marketplace_plugin"
+    locked_dependency["content_hash"] = legacy_content_hash
+    dump_yaml(lock_document, lock_path)
+    shutil.rmtree(cached_package)
+
+    _run_success(
+        scenario,
+        consumer,
+        _PARALLEL_INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="parallel-fresh-plugin-redownload",
+    )
+    refreshed = LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "codex"))
+    _, refreshed_dependency = _single_locked_dependency(consumer.root)
+    assert refreshed.file(".claude/skills/parallel-fresh/SKILL.md").kind == "file"
+    assert refreshed.file(".agents/skills/parallel-fresh/SKILL.md").kind == "file"
+    assert refreshed_dependency.package_type == "marketplace_plugin"
+    assert refreshed_dependency.resolved_commit == source.commit.sha
+
+    _run_success(
+        scenario,
+        consumer,
+        _PARALLEL_INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="parallel-fresh-plugin-convergence",
+    )
+    converged = LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "codex"))
+    _assert_same_state(refreshed, converged)
+
+
+@pytest.mark.parametrize(
+    "invalid_cache",
+    (
+        "plugin-path",
+        "missing-hash",
+        "missing-apm-yml",
+        "missing-apm-dir",
+        "apm-yml-symlink",
+        "apm-dir-symlink",
+        "package-root-symlink",
+    ),
+)
+@pytest.mark.lifecycle_merge_group
+def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    invalid_cache: str,
+) -> None:
+    """Reject invalid 0.28 cache state without mutating cache or deployments."""
+    scenario = _new_scenario(
+        tmp_path / f"invalid-legacy-cache-{invalid_cache}",
+        apm_binary_path,
+    )
+    source = _publish_legacy_plugin(
+        scenario,
+        "invalid-legacy-plugin-kit",
+        skill="legacy-skill",
+    )
+    consumer = scenario.consumers.create(
+        "invalid-legacy-plugin-consumer",
+        dependencies=(source.dependency,),
+        targets=("claude", "codex"),
+    )
+    _run_success(
+        scenario,
+        consumer,
+        _INSTALL_ARGS,
+        environment=source.environment,
+        scenario_id="invalid-legacy-plugin-establish",
+    )
+
+    cached_package = consumer.root / "apm_modules" / source.package.name
+    receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
+    assert receipt.is_file()
+    receipt.unlink()
+    lock_path = consumer.root / "apm.lock.yaml"
+    lock_document = load_yaml(lock_path)
+    locked_dependency = lock_document["dependencies"][0]
+    lock_document["apm_version"] = "0.28.0"
+    locked_dependency["package_type"] = "marketplace_plugin"
+
+    external_root: Path | None = None
+    if invalid_cache == "plugin-path":
+        external_root = cached_package.parent / "outside"
+        external_root.mkdir()
+        (external_root / "sentinel.txt").write_text("outside cache\n", encoding="ascii")
+        (cached_package / "plugin.json").write_text(
+            json.dumps({"name": source.package.name, "skills": ["../outside/"]}),
+            encoding="ascii",
+        )
+    elif invalid_cache == "missing-apm-yml":
+        (cached_package / "apm.yml").unlink()
+    elif invalid_cache == "missing-apm-dir":
+        shutil.rmtree(cached_package / ".apm")
+    elif invalid_cache == "apm-yml-symlink":
+        external_root = tmp_path / "external-apm-yml"
+        external_root.mkdir()
+        external_apm_yml = external_root / "apm.yml"
+        (cached_package / "apm.yml").rename(external_apm_yml)
+        try:
+            (cached_package / "apm.yml").symlink_to(external_apm_yml)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+    elif invalid_cache == "apm-dir-symlink":
+        external_root = tmp_path / "external-apm-dir"
+        external_root.mkdir()
+        external_apm_dir = external_root / ".apm"
+        (cached_package / ".apm").rename(external_apm_dir)
+        (external_apm_dir / "sentinel.txt").write_text("outside cache\n", encoding="ascii")
+        try:
+            (cached_package / ".apm").symlink_to(
+                external_apm_dir,
+                target_is_directory=True,
+            )
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+    elif invalid_cache == "package-root-symlink":
+        external_root = tmp_path / "external-package"
+        cached_package.rename(external_root)
+        try:
+            cached_package.symlink_to(external_root, target_is_directory=True)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+    if invalid_cache == "missing-hash":
+        locked_dependency.pop("content_hash", None)
+    elif invalid_cache == "package-root-symlink":
+        locked_dependency["content_hash"] = compute_package_hash(external_root)
+    else:
+        locked_dependency["content_hash"] = compute_package_hash(cached_package)
+    dump_yaml(lock_document, lock_path)
+
+    before_state = LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "codex"))
+    before_cache = ArtifactSnapshot.capture(cached_package)
+    before_external = ArtifactSnapshot.capture(external_root) if external_root is not None else None
+    package_link_target = (
+        cached_package.readlink() if invalid_cache == "package-root-symlink" else None
+    )
+
+    result = scenario.runner.run(
+        _INSTALL_ARGS,
+        scenario_id=f"invalid-legacy-plugin-{invalid_cache}",
+        cwd=consumer.root,
+        env=source.environment,
+    )
+    output = " ".join((result.stdout + result.stderr).split())
+
+    assert result.returncode != 0, _result_evidence(result)
+    assert source.package.name in output
+    assert str(cached_package) in "".join(output.split())
+    assert "apm deps clean --yes" in output
+    if invalid_cache == "plugin-path":
+        assert "is invalid" in output
+    elif invalid_cache == "missing-hash":
+        assert "no content hash" in output
+    elif invalid_cache == "missing-apm-yml":
+        assert "required apm.yml is missing" in output
+    elif invalid_cache == "missing-apm-dir":
+        assert "required .apm directory is missing" in output
+    else:
+        assert "cache metadata contains a symlink" in output
+
+    if package_link_target is not None:
+        assert cached_package.is_symlink()
+        assert cached_package.readlink() == package_link_target
+    assert_unchanged(before_cache, ArtifactSnapshot.capture(cached_package))
+    if before_external is not None and external_root is not None:
+        assert_unchanged(before_external, ArtifactSnapshot.capture(external_root))
+    after_state = LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "codex"))
+    _assert_same_state(before_state, after_state)
+
+
 def test_required_dependency_prune_then_uninstall_cascades_owned_state(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -1636,6 +1989,10 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     assert _check(package_removed_audit, "no-orphaned-packages")["passed"] is True
     assert _check(package_removed_audit, "deployed-files-present")["passed"] is True
     assert _check(package_removed_audit, "content-integrity")["passed"] is True
+    for check_name in ("config-consistency", "drift"):
+        message = str(_check(package_removed_audit, check_name)["message"])
+        assert "installed package materialization is missing" in message
+        assert "apm install --global" in message
     _assert_same_state(package_removed_before_audit, package_removed_after_audit)
     shutil.move(str(modules_backup), str(modules_dir))
     assert_clean("global-audit-after-package-restore")

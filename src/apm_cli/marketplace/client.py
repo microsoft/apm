@@ -572,8 +572,36 @@ def _fetch_git(
 
     from ..cache.git_cache import GitCache
     from ..cache.paths import get_cache_root
+    from ..utils.git_env import GitUrlRewriteError, GitUrlRewriteProbeError
 
     org = source.owner or None
+
+    def _rewrite_policy_error(exc: ValueError) -> MarketplaceFetchError:
+        reasons = {
+            "credentials": "Git URL rewrite contains credentials",
+            "credential-origin": "authenticated Git URL rewrite changes the remote origin",
+            "https-downgrade": (
+                "HTTPS Git remote was rejected because Git configuration "
+                "rewrites it to insecure HTTP"
+            ),
+            "insecure-transport": "HTTPS Git URL rewrite selects an insecure transport",
+        }
+        reason = (
+            reasons.get(exc.reason, "unsafe Git URL rewrite")
+            if isinstance(exc, GitUrlRewriteError)
+            else str(exc)
+        )
+        if isinstance(exc, GitUrlRewriteError):
+            reason = f"{reason}; {exc.recovery_hint}"
+        return MarketplaceFetchError(
+            source.name,
+            reason,
+            retry_hint=(
+                "Correct the matching Git configuration, then run "
+                f"'apm marketplace update {source.name}' to retry."
+            ),
+        )
+
     try:
         auth_ctx = (
             auth_resolver.resolve_for_remote(host_info.host, source.url, org, port=source.port)
@@ -587,19 +615,7 @@ def _fetch_git(
             source.name,
             type(exc).__name__,
         )
-        reason = (
-            "HTTPS Git remote was rejected because Git configuration rewrites it to insecure HTTP"
-            if str(exc) == "HTTPS Git remote is configured to rewrite to insecure HTTP"
-            else "unable to verify HTTPS Git rewrite safety"
-        )
-        raise MarketplaceFetchError(
-            source.name,
-            reason,
-            retry_hint=(
-                "Remove the matching Git url.*.insteadOf rewrite, then run "
-                f"'apm marketplace update {source.name}' to retry."
-            ),
-        ) from exc
+        raise _rewrite_policy_error(exc) from exc
 
     cache = GitCache(get_cache_root(), refresh=False)
     try:
@@ -610,6 +626,9 @@ def _fetch_git(
             env=git_env,
             sparse_paths=[file_path] if "/" in file_path else None,
         )
+    except (GitUrlRewriteError, GitUrlRewriteProbeError) as exc:
+        logger.debug("Generic-git rewrite policy rejected '%s'", source.name)
+        raise _rewrite_policy_error(exc) from exc
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
         # caller's _auto_detect_path probe can try the next candidate path.
@@ -911,14 +930,18 @@ def _fetch_local_via_git_show(
     source: MarketplaceSource, file_path: str, git_dir: Path
 ) -> dict | None:
     """Use ``git show <ref>:<file>`` against a bare repo or .git directory."""
-    from ..utils.git_env import git_subprocess_env
+    from ..utils.git_env import (
+        get_git_executable,
+        git_no_hooks_args,
+        git_subprocess_env,
+        redact_git_diagnostic,
+    )
 
     cmd = [
-        "git",
+        get_git_executable(),
         "--git-dir",
         str(git_dir),
-        "-c",
-        "core.hooksPath=/dev/null",
+        *git_no_hooks_args(),
         "show",
         f"{source.ref}:{file_path}",
     ]
@@ -942,7 +965,10 @@ def _fetch_local_via_git_show(
             or "fatal: path" in stderr.lower()
         ):
             return None
-        raise MarketplaceFetchError(source.name, f"git show failed: {stderr}")
+        raise MarketplaceFetchError(
+            source.name,
+            f"git show failed: {redact_git_diagnostic(stderr)}",
+        )
 
     try:
         return json.loads(result.stdout.decode("utf-8"))

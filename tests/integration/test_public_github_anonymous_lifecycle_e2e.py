@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from contextlib import ExitStack
 from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.git_credential_shim import (
     GitCredentialShim,
@@ -84,9 +86,14 @@ def _child_environment(
     environment["NO_PROXY"] = "127.0.0.1,localhost"
     environment["no_proxy"] = "127.0.0.1,localhost"
     environment["GIT_ALLOW_PROTOCOL"] = "file:http:https"
-    environment["GIT_CONFIG_COUNT"] = "1"
-    environment["GIT_CONFIG_KEY_0"] = "credential.interactive"
-    environment["GIT_CONFIG_VALUE_0"] = "never"
+    count = int(environment.get("GIT_CONFIG_COUNT", "0"))
+    if not any(
+        environment.get(f"GIT_CONFIG_KEY_{index}", "").lower() == "credential.interactive"
+        for index in range(count)
+    ):
+        environment["GIT_CONFIG_COUNT"] = str(count + 1)
+        environment[f"GIT_CONFIG_KEY_{count}"] = "credential.interactive"
+        environment[f"GIT_CONFIG_VALUE_{count}"] = "never"
     assert environment["HOME"] == str(isolated.home)
     return environment
 
@@ -97,11 +104,33 @@ def _remote_events(shim: GitCredentialShim) -> list[dict[str, object]]:
     ]
 
 
+def _locked_dependency(project_root: Path, repo_url: str) -> dict[str, object]:
+    """Return one dependency entry from the installed lifecycle lockfile."""
+    lockfile = load_yaml(project_root / "apm.lock.yaml")
+    assert lockfile is not None
+    dependencies = lockfile.get("dependencies", [])
+    if isinstance(dependencies, dict):
+        entry = dependencies.get(repo_url)
+        assert isinstance(entry, dict)
+        return entry
+    entry = next(
+        (
+            candidate
+            for candidate in dependencies
+            if isinstance(candidate, dict) and candidate.get("repo_url") == repo_url
+        ),
+        None,
+    )
+    assert isinstance(entry, dict)
+    return entry
+
+
 def _assert_anonymous_remote_event(event: dict[str, object]) -> None:
     assert event["github_token_env"] == []
     assert event["git_token_present"] is False
     assert event["auth_config_present"] is False
-    assert event["credential_helpers"] == [""]
+    assert event["credential_helpers"]
+    assert set(event["credential_helpers"]) == {""}
     assert event["credential_interactive"] in ([], ["never"])
     remotes = event["remotes"]
     assert isinstance(remotes, list)
@@ -175,7 +204,7 @@ def test_all_public_graph_lifecycle_never_resolves_or_leaks_credentials(
             "GITHUB_APM_PAT": "ambient-pat-must-be-stripped",
             "GITHUB_TOKEN": "ambient-actions-token-must-be-stripped",
             "GIT_CONFIG_COUNT": "2",
-            "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_KEY_0": "http.https://github.com/.extraHeader",
             "GIT_CONFIG_VALUE_0": "Authorization: Bearer ambient-header",
             "GIT_CONFIG_KEY_1": "credential.interactive",
             "GIT_CONFIG_VALUE_1": "never",
@@ -248,9 +277,18 @@ def test_all_public_graph_lifecycle_never_resolves_or_leaks_credentials(
         assert all(not observation.authorization_present for observation in repository_requests)
 
 
+@pytest.mark.parametrize(
+    ("reference", "include_virtual"),
+    (
+        pytest.param("main", True, id="branch"),
+        pytest.param("^1.0.0", False, id="semver"),
+    ),
+)
 def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
     tmp_path: Path,
     apm_binary_path: Path,
+    reference: str,
+    include_virtual: bool,
 ) -> None:
     """A localized private clone retries once with a path-scoped credential."""
     isolated = IsolatedApmEnvironment.create(
@@ -271,13 +309,24 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
         env=base_environment,
     )
     repository = repositories.create("private-package", source_tree=source.root)
-    repositories.commit(repository, message="seed private package")
+    commit = repositories.commit(repository, message="seed private package")
+    if reference == "^1.0.0":
+        repositories.tag(repository, "v1.0.0", commit)
+    public_source = packages.create("public-package", targets=("copilot",))
+    packages.add_skill(public_source, "public-package", _skill_source("public-package"))
+    public_repository = repositories.create("public-package", source_tree=public_source.root)
+    public_commit = repositories.commit(public_repository, message="seed public package")
+    repositories.tag(public_repository, "v2.0.0", public_commit)
+    dependencies = [f"{_PRIVATE_OWNER}/private-package#{reference}"]
+    if include_virtual:
+        dependencies.append(
+            f"{_PRIVATE_OWNER}/private-package/skills/private-subpackage#{reference}"
+        )
+    else:
+        dependencies.append(f"{_PUBLIC_OWNER}/public-package#^2.0.0")
     project = LocalPackageFactory(isolated.work_root).create(
         "private-consumer",
-        dependencies=(
-            f"{_PRIVATE_OWNER}/private-package#main",
-            f"{_PRIVATE_OWNER}/private-package/skills/private-subpackage#main",
-        ),
+        dependencies=tuple(dependencies),
         targets=("copilot",),
     )
 
@@ -286,16 +335,31 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
         real_git=_real_git(),
         env=base_environment,
     )
-    with server_factory.start(
-        (repository,),
-        private_repositories=(repository,),
-        password=_PRIVATE_TOKEN,
-    ) as server:
+    public_server_factory = LocalGitHttpServerFactory(
+        isolated.repository_root,
+        real_git=_real_git(),
+        env=base_environment,
+    )
+    with ExitStack() as stack:
+        server = stack.enter_context(
+            server_factory.start(
+                (repository,),
+                private_repositories=(repository,),
+                password=_PRIVATE_TOKEN,
+            )
+        )
+        public_server = stack.enter_context(
+            public_server_factory.start(
+                (public_repository,),
+                password="unused-public-password",
+            )
+        )
         shim = GitCredentialShimFactory(isolated.root / "shims").create(
             base_env=base_environment,
             real_git=_real_git(),
             remote_map={
                 f"{_PRIVATE_OWNER}/private-package": server.remote_url(repository),
+                f"{_PUBLIC_OWNER}/public-package": public_server.remote_url(public_repository),
             },
             credential=_PRIVATE_TOKEN,
         )
@@ -305,9 +369,10 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
             proxy_url=server.proxy_url,
         )
         environment["GIT_HTTP_EXTRAHEADER"] = "Authorization: Bearer ambient-must-not-leak"
+        scenario_kind = "semver" if reference == "^1.0.0" else "branch"
         result = ApmLifecycleRunner((str(apm_binary_path),)).run(
             (*_INSTALL_ARGS, "--verbose"),
-            scenario_id="private-github-scoped-fallback",
+            scenario_id=f"private-github-scoped-fallback-{scenario_kind}",
             cwd=project.root,
             env=environment,
         )
@@ -320,7 +385,10 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
         assert "Partial clone unavailable" not in result.stdout
         assert "Partial clone unavailable" not in result.stderr
         assert (project.root / ".agents/skills/private-package/SKILL.md").is_file()
-        assert (project.root / ".agents/skills/private-subpackage/SKILL.md").is_file()
+        if include_virtual:
+            assert (project.root / ".agents/skills/private-subpackage/SKILL.md").is_file()
+        else:
+            assert (project.root / ".agents/skills/public-package/SKILL.md").is_file()
 
         credential_events = [
             event for event in shim.events() if event.get("event") == "credential-fill"
@@ -341,7 +409,7 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
         assert all(event["language"] == "C" for event in remote_events)
         remote_attempts = [remote for event in remote_events for remote in event["remotes"]]
         assert remote_attempts[0]["authenticated_url"] is False
-        assert any(remote["authenticated_url"] is True for remote in remote_attempts)
+        assert all(remote["authenticated_url"] is False for remote in remote_attempts)
         header_authenticated_events = [
             event for event in remote_events if event["auth_config_present"] is True
         ]
@@ -364,6 +432,40 @@ def test_private_github_fallback_normalizes_locale_and_completes_lifecycle(
             observation.accepted and observation.authorization_present
             for observation in private_requests
         )
+        if reference == "^1.0.0":
+            private_locked = _locked_dependency(
+                project.root,
+                f"{_PRIVATE_OWNER}/private-package",
+            )
+            assert private_locked.get("constraint") == "^1.0.0"
+            assert private_locked.get("resolved_tag") == "v1.0.0"
+            assert private_locked.get("version") == "1.0.0"
+            assert private_locked.get("resolved_commit") == commit.sha
+            public_locked = _locked_dependency(
+                project.root,
+                f"{_PUBLIC_OWNER}/public-package",
+            )
+            assert public_locked.get("resolved_tag") == "v2.0.0"
+            assert public_locked.get("resolved_commit") == public_commit.sha
+            tag_discovery = [
+                observation
+                for observation in private_requests
+                if observation.path.endswith("/info/refs")
+            ]
+            assert len(tag_discovery) >= 2
+            assert tag_discovery[0].accepted is False
+            assert tag_discovery[0].authorization_present is False
+            assert tag_discovery[1].accepted is True
+            assert tag_discovery[1].authorization_present is True
+            assert _PRIVATE_TOKEN not in result.stdout
+            assert _PRIVATE_TOKEN not in result.stderr
+            public_requests = [
+                observation
+                for observation in public_server.observations
+                if public_repository.origin.name in observation.path
+            ]
+            assert public_requests
+            assert all(not observation.authorization_present for observation in public_requests)
 
         bare_cache = isolated.cache_root / "git" / "db_v1"
         bare_repositories = [path for path in bare_cache.iterdir() if path.is_dir()]

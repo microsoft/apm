@@ -203,8 +203,34 @@ The install command resolves the new entry, downloads it into
 `apm_modules/`, updates `apm.lock.yaml` with the resolved commit and
 content hash, and recompiles the deployed primitives for every target
 harness. Critical security findings block the install; pass `--force` only
-if you understand the risk. See [Reference -> CLI commands](../../reference/cli/install/)
-for the full flag list.
+if you understand the risk. See the [install reference](../../reference/cli/install/)
+for flags and [install behavior](../../reference/cli/install/#behavior) for the
+Git-hook isolation guarantee.
+
+## Transport selection
+
+APM selects one initial transport per dependency. Git then applies any matching
+safe `url.<base>.insteadOf` rule to that selected URL.
+
+| Dependency form | Initial transport |
+|---|---|
+| `ssh://...` or `git@host:...` | SSH |
+| `https://...` or `http://...` | The explicit HTTP(S) scheme |
+| Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
+| Other shorthand | HTTPS |
+
+An explicit scheme prevents APM from choosing another protocol unless
+cross-protocol fallback is enabled, but it does not disable your Git `insteadOf`
+configuration. Safe rules may select the same host over SSH or a local mirror.
+Unsafe credential, downgrade, remote-helper, and cross-host network rewrites fail
+before Git contacts the remote. See
+[Git URL rewrite safety](../../getting-started/authentication/#git-url-rewrite-safety).
+
+Cross-protocol retry is off by default. Use `--allow-protocol-fallback` or
+`APM_ALLOW_PROTOCOL_FALLBACK=1` only for a migration window. Save a shorthand
+preference with `apm config set prefer-ssh true`, or save the retry escape hatch
+with `apm config set allow-protocol-fallback true`. See the
+[`apm config` reference](../../reference/cli/config/).
 
 ## Pin a version
 

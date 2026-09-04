@@ -598,6 +598,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
         assert "failed to parse" in error
         assert "fix the manifest and rerun 'apm compile -g'" in error
 
+    @pytest.mark.windows_compat
     def test_invalid_target_name_has_global_manifest_recovery(self, tmp_path):
         """An unknown token identifies the manifest and global command."""
         from apm_cli.commands.compile.cli import _handle_global_flag
@@ -617,7 +618,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        error = str(logger.error.call_args).lower()
+        error = logger.error.call_args.args[0].lower()
         assert "unknown target 'not-a-harness'" in error
         assert str(source_root / "apm.yml").lower() in error
         assert "rerun 'apm compile -g'" in error
