@@ -40,9 +40,13 @@ from apm_cli.install.registry_wiring import (
     resolver_last_registry_resolution,
 )
 from apm_cli.install.source_helpers import (
-    format_package_type_label,
-    rebuild_cached_semver_resolution,
-    record_declared_license,
+    format_package_type_label as _format_package_type_label,
+)
+from apm_cli.install.source_helpers import (
+    rebuild_cached_semver_resolution as _rebuild_cached_semver_resolution,
+)
+from apm_cli.install.source_helpers import (
+    record_declared_license as _record_declared_license,
 )
 from apm_cli.models.dependency.host_virtual import (
     dependency_repository_owner,
@@ -264,7 +268,7 @@ class LocalDependencySource(DependencySource):
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
-        record_declared_license(ctx, dep_key, install_path)
+        _record_declared_license(ctx, dep_key, install_path)
 
         return Materialization(
             package_info=local_info,
@@ -523,11 +527,11 @@ class CachedDependencySource(DependencySource):
         # so re-writing the lockfile from cache preserves constraint /
         # resolved_tag / resolved_at instead of dropping them. The
         # lockfile-backed reconstruction is gated on ALL required fields
-        # being present (see ``rebuild_cached_semver_resolution`` and the
+        # being present (see ``_rebuild_cached_semver_resolution`` and the
         # PR #1496 review thread).
         _cached_semver = ctx.git_semver_resolutions.get(dep_key)
         if _cached_semver is None:
-            _cached_semver = rebuild_cached_semver_resolution(dep_locked_chk)
+            _cached_semver = _rebuild_cached_semver_resolution(dep_locked_chk)
 
         ctx.installed_packages.append(
             InstalledPackage(
@@ -551,7 +555,7 @@ class CachedDependencySource(DependencySource):
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
-        record_declared_license(ctx, dep_key, install_path)
+        _record_declared_license(ctx, dep_key, install_path)
         warn_unrecognized_plugin_schema(ctx.diagnostics, dep_key, install_path)
 
         # Return without deploying integration files when the target set is empty.
@@ -837,12 +841,12 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
-            record_declared_license(ctx, dep_key, install_path)
+            _record_declared_license(ctx, dep_key, install_path)
             warn_unrecognized_plugin_schema(diagnostics, dep_key, install_path)
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type
-                _type_label = format_package_type_label(package_type)
+                _type_label = _format_package_type_label(package_type)
                 if _type_label and logger:
                     logger.package_type_info(_type_label)
 
