@@ -48,6 +48,11 @@ def test_installed_global_rules_are_not_compiled_again(
         assert not (config / "CLAUDE.md").exists(), compiled.output
         assert body.strip() in (home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
         assert rule.read_bytes() == native_content
+
+        forced = runner.invoke(compile_cmd, ["-g", "--force-instructions"])
+        assert forced.exit_code == 0, forced.output
+        assert body.strip() in (config / "CLAUDE.md").read_text(encoding="utf-8")
+        assert rule.read_bytes() == native_content
     finally:
         clear_discovery_cache()
 

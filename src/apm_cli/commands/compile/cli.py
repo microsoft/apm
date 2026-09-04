@@ -404,7 +404,13 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
 
 
 @serialized_lifecycle_unless("dry_run")
-def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = False) -> int:
+def _handle_global_flag(
+    dry_run: bool,
+    logger: CommandLogger,
+    *,
+    clean: bool = False,
+    force_instructions: bool = False,
+) -> int:
     """Handle --global compilation of user-scope root context files.
 
     Returns 0 on success, 1 on error (for sys.exit).
@@ -475,6 +481,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         source_root,
         dry_run=dry_run,
         clean=clean,
+        force_instructions=force_instructions,
         logger=None,
     )
 
@@ -498,6 +505,8 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
     unchanged_count = 0
     removed_count = 0
     for entry in results:
+        for warning in getattr(entry, "warnings", ()):
+            logger.warning(warning)
         status = entry.status
         tname = entry.target
         path = entry.path
@@ -1370,7 +1379,7 @@ def compile(  # noqa: PLR0913 -- Click handler
     if global_:
         from click.core import ParameterSource
 
-        allowed_with_global = {"global_", "dry_run", "verbose", "clean"}
+        allowed_with_global = {"global_", "dry_run", "verbose", "clean", "no_dedup"}
         flag_names = {
             "chatmode": "--chatmode",
             "clean": "--clean",
@@ -1393,7 +1402,12 @@ def compile(  # noqa: PLR0913 -- Click handler
                 continue
             flag = flag_names.get(name, f"--{name.replace('_', '-')}")
             raise click.UsageError(f"--global is not valid with {flag}")
-        rc = _handle_global_flag(dry_run=dry_run, logger=logger, clean=clean)
+        rc = _handle_global_flag(
+            dry_run=dry_run,
+            logger=logger,
+            clean=clean,
+            force_instructions=no_dedup,
+        )
         if rc != 0:
             ctx.exit(rc)
         return

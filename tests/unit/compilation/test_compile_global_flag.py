@@ -32,6 +32,7 @@ def _make_result(
     status: str,
     *,
     has_critical_security: bool = False,
+    warnings: tuple[str, ...] = (),
 ) -> SimpleNamespace:
     """Create a result object as returned by compile_user_root_contexts."""
     return SimpleNamespace(
@@ -39,6 +40,7 @@ def _make_result(
         path=Path(path) if path else None,
         status=status,
         has_critical_security=has_critical_security,
+        warnings=warnings,
     )
 
 
@@ -279,6 +281,35 @@ class TestHandleGlobalFlag:
 
         assert rc == 1
 
+    def test_native_rule_warnings_are_rendered(self, tmp_path):
+        """Native verification warnings flow through CommandLogger."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = tmp_path / "source"
+        source_root.mkdir()
+        (source_root / "apm_modules").mkdir()
+
+        results = [
+            _make_result(
+                "claude",
+                str(tmp_path / ".claude/CLAUDE.md"),
+                "written",
+                warnings=("claude native rule could not be verified; retaining fallback",),
+            )
+        ]
+
+        logger = MagicMock()
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.compilation.compile_user_root_contexts", return_value=results),
+        ):
+            rc = _handle_global_flag(dry_run=False, logger=logger)
+
+        assert rc == 0
+        logger.warning.assert_any_call(
+            "claude native rule could not be verified; retaining fallback"
+        )
+
     def test_multiple_results_mixed_status(self, tmp_path):
         """Multiple results with different status values."""
         from apm_cli.commands.compile.cli import _handle_global_flag
@@ -394,6 +425,26 @@ class TestCompileGlobalCommand:
         assert "global" in result.output.lower()
         assert "output" in result.output.lower()
         assert "Usage:" in result.output
+
+    def test_global_with_force_instructions_is_allowed(self, tmp_path):
+        """--force-instructions remains the dedupe override in global mode."""
+        from apm_cli.commands.compile.cli import compile as compile_cmd
+
+        source_root = tmp_path / "source"
+        source_root.mkdir()
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch("apm_cli.commands.compile.cli._handle_global_flag", return_value=0) as handler,
+        ):
+            result = CliRunner().invoke(
+                compile_cmd,
+                ["--global", "--force-instructions"],
+                standalone_mode=False,
+            )
+
+        assert result.exit_code == 0
+        assert handler.call_args.kwargs["force_instructions"] is True
 
     def test_global_success_no_exit(self, tmp_path):
         """--global with successful _handle_global_flag -> returns normally."""

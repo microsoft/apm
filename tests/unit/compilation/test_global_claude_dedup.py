@@ -77,6 +77,44 @@ def test_full_native_coverage_never_creates_root(global_tree, clean: bool) -> No
     assert len(list((config / "rules").iterdir())) == 2
 
 
+def test_force_instructions_overrides_full_native_coverage(global_tree) -> None:
+    """The existing force flag can still create a root fallback in global mode."""
+    source, config, _ = global_tree
+    _native_rules(config)
+
+    results = compile_user_root_contexts(
+        [KNOWN_TARGETS["claude"]],
+        source,
+        force_instructions=True,
+    )
+
+    assert results[0].status == "written"
+    body = (config / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "Use alpha conventions." in body
+    assert "Use beta conventions." in body
+
+
+def test_full_native_coverage_still_blocks_critical_hidden_characters(global_tree) -> None:
+    """Security scanning runs even when native coverage suppresses the root write."""
+    source, config, _ = global_tree
+    instruction = (
+        source / "apm_modules" / "demo" / ".apm" / "instructions" / "alpha.instructions.md"
+    )
+    hidden = "Use alpha \u202e conventions.\n"
+    instruction.write_text("---\ndescription: alpha guidance\n---\n" + hidden, encoding="utf-8")
+    rules = config / "rules"
+    rules.mkdir(parents=True, exist_ok=True)
+    (rules / "alpha.md").write_text(hidden, encoding="utf-8")
+    (rules / "beta.md").write_text("Use beta conventions.\n", encoding="utf-8")
+    clear_discovery_cache()
+
+    result = compile_user_root_contexts([KNOWN_TARGETS["claude"]], source)[0]
+
+    assert result.status == "error:critical hidden characters in compiled output"
+    assert result.has_critical_security is True
+    assert not (config / "CLAUDE.md").exists()
+
+
 @pytest.mark.parametrize("dry_run", [False, True])
 @pytest.mark.parametrize("clean", [False, True])
 def test_existing_duplicate_requires_explicit_cleanup(

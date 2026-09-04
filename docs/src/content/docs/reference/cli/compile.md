@@ -157,7 +157,8 @@ For Claude, global compilation omits each instruction whose rendered content
 already matches its native user rule in `~/.claude/rules/` (or
 `$CLAUDE_CONFIG_DIR/rules/`). Missing, different, or unsafe rule files do not
 suppress that instruction. If all instructions are covered, no new `CLAUDE.md`
-is generated. Other targets still receive their compiled instructions.
+is generated. Pass `--force-instructions` with `-g` to create the root fallback
+anyway. Other targets still receive their compiled instructions.
 
 An existing redundant `CLAUDE.md` is retained unless you request cleanup:
 
