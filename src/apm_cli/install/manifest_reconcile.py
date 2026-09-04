@@ -53,35 +53,38 @@ def _profiles_by_name(
 
 def _has_gated_resolver(profile: TargetProfile) -> bool:
     """Return whether an inactive supplemental target must not resolve."""
-    return profile.requires_flag is not None and profile.user_root_resolver is not None
+    if profile.user_root_resolver is None:
+        return False
+    capability = getattr(profile, "capability", None)
+    explicit_only = getattr(capability, "explicit_only", False)
+    return profile.requires_flag is not None or explicit_only
 
 
 def _record_inactive_resolver_skip(
     profile: TargetProfile,
     diagnostics: DiagnosticCollector | None,
 ) -> None:
-    """Record the intentional skip of an inactive experimental resolver."""
+    """Record the intentional skip of an inactive resolver-backed target."""
     if diagnostics is None:
         return
     from apm_cli.utils.diagnostics import CATEGORY_INFO
 
     message = (
-        f"Skipped inactive experimental resolver for target '{profile.name}' "
-        "during lockfile reconciliation."
+        f"Skipped inactive resolver-backed target '{profile.name}' during lockfile reconciliation."
     )
     if any(
         diagnostic.message == message
         for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
     ):
         return
-    flag = profile.requires_flag or profile.name
-    diagnostics.info(
-        message,
-        detail=(
-            f"To include it, enable '{flag.replace('_', '-')}' and select "
-            f"target '{profile.name}' for this install."
-        ),
-    )
+    if profile.requires_flag is not None:
+        detail = (
+            f"To include it, enable '{profile.requires_flag.replace('_', '-')}' and "
+            f"select target '{profile.name}' for this install."
+        )
+    else:
+        detail = f"To include it, select target '{profile.name}' explicitly for this install."
+    diagnostics.info(message, detail=detail)
 
 
 def _scoped_known_targets_for_reconciliation(
