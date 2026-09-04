@@ -47,6 +47,7 @@ place and exits 0. See ``check_token``.
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from urllib.parse import quote
 
@@ -371,7 +372,7 @@ def run_auth(
         logger.warning(
             f"A macOS keychain entry for {host} may be shadowing newer "
             f"credentials. If authentication keeps failing, clear it with:\n"
-            f"    printf 'protocol=https\\nhost={host}\\n\\n' | "
+            f"    printf 'protocol=https\\nhost=%s\\n\\n' {shlex.quote(host)} | "
             f"git credential-osxkeychain erase"
         )
 

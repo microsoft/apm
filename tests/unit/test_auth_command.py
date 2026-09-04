@@ -5,6 +5,7 @@ import subprocess
 import sys
 import textwrap
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlparse
 
 from click.testing import CliRunner
 
@@ -40,20 +41,30 @@ class TestHostMapping:
         assert token_env_var("ado") is None
 
     def test_github_token_page(self):
-        url = token_page_url("github.com", "github", "apm-test")
-        assert url.startswith("https://github.com/settings/tokens/new")
-        assert "scopes=repo" in url
+        url = urlparse(token_page_url("github.com", "github", "apm-test"))
+        assert (url.scheme, url.hostname, url.path) == (
+            "https",
+            "github.com",
+            "/settings/tokens/new",
+        )
+        assert parse_qs(url.query)["scopes"] == ["repo"]
 
     def test_gitlab_token_page(self):
-        url = token_page_url("gitlab.com", "gitlab", "apm-test")
-        assert "/-/user_settings/personal_access_tokens" in url
-        assert "read_repository" in url
+        url = urlparse(token_page_url("gitlab.com", "gitlab", "apm-test"))
+        assert (url.scheme, url.hostname, url.path) == (
+            "https",
+            "gitlab.com",
+            "/-/user_settings/personal_access_tokens",
+        )
+        assert parse_qs(url.query)["scopes"] == ["read_repository,read_api"]
 
     def test_ghes_page_stays_on_the_enterprise_host(self):
         """Hardcoding github.com would send enterprise users to the wrong site."""
-        url = token_page_url("ghe.corp.example", "ghes", "apm-test")
-        assert url.startswith("https://ghe.corp.example/settings/tokens/new")
-        assert "github.com" not in url
+        url = urlparse(token_page_url("ghe.corp.example", "ghes", "apm-test"))
+        # Hostname equality, not "github.com not in url": the parsed form also
+        # rules out a look-alike host that a substring check would accept.
+        assert url.hostname == "ghe.corp.example"
+        assert url.path == "/settings/tokens/new"
 
 
 class TestCheckToken:
@@ -66,7 +77,8 @@ class TestCheckToken:
             verdict, status = check_token("ghp_x", "github.com", "github")
         assert (verdict, status) == ("ok", 200)
         assert get.call_args.kwargs["headers"]["Authorization"] == "token ghp_x"
-        assert "api.github.com/user" in get.call_args[0][0]
+        called = urlparse(get.call_args[0][0])
+        assert (called.hostname, called.path) == ("api.github.com", "/user")
 
     def test_gitlab_uses_private_token_header(self):
         with patch("requests.get") as get:
@@ -86,7 +98,9 @@ class TestCheckToken:
         with patch("requests.get") as get:
             get.return_value = MagicMock(status_code=200)
             check_token("ghp_x", "ghe.corp.example", "ghes")
-        assert "api.github.com" not in get.call_args[0][0]
+        called = urlparse(get.call_args[0][0])
+        assert called.hostname == "ghe.corp.example"
+        assert called.path == "/api/v3/user"
 
     def test_unreachable_api_is_indeterminate_not_rejected(self):
         """A plane / proxy / captive portal must not read as a bad token."""
@@ -282,7 +296,15 @@ class TestAuthFlow:
         'generic' until its env hint is set.
         """
         with patch("apm_cli.commands.auth.resolve_existing_token", return_value=(None, "none")):
-            result = self.runner.invoke(auth, ["ghe.corp.example"])
+            # 'generic' only holds while no env hint claims the host, and
+            # ghe.corp.example is the very value the docs tell people to
+            # export -- so a developer with it set would otherwise see this
+            # test fail for a reason that has nothing to do with the code.
+            result = self.runner.invoke(
+                auth,
+                ["ghe.corp.example"],
+                env={"GITHUB_HOST": None, "GITLAB_HOST": None, "APM_GITLAB_HOSTS": None},
+            )
         assert result.exit_code == 1
         assert "GITHUB_HOST=ghe.corp.example" in result.output
         assert "GITLAB_HOST=ghe.corp.example" in result.output
