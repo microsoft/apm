@@ -131,6 +131,7 @@ _SENSITIVE_HTTP_HEADER_PARTS = frozenset(
 _REMOTE_HELPER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*::")
 _SCP_HOST_RE = re.compile(r"^(?:[^/@:\s]+@)?(\[[^\]]+\]|[^/:@\s]+):")
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_GIT_CONFIG_PROBE_TIMEOUTS = (10, 30)
 
 _URL_REWRITE_RECOVERY = (
     "inspect matching rules with "
@@ -189,6 +190,32 @@ def _run_git_config(
 
 
 _git_config_run = _run_git_config
+
+
+def _run_git_config_probe(
+    command: Sequence[str],
+    *,
+    capture_output: bool,
+    check: bool,
+    cwd: str | None,
+    env: dict[str, str],
+    timeout_category: str,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run a bounded Git config probe with one retry for slow CI runners."""
+    for index, timeout in enumerate(_GIT_CONFIG_PROBE_TIMEOUTS):
+        try:
+            return _git_config_run(
+                command,
+                capture_output=capture_output,
+                check=check,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            if index == len(_GIT_CONFIG_PROBE_TIMEOUTS) - 1:
+                raise GitUrlRewriteProbeError(timeout_category) from exc
+    raise GitUrlRewriteProbeError(timeout_category)
 
 
 def get_git_executable() -> str:
@@ -465,16 +492,14 @@ def _read_effective_git_config(
         )
     )
     try:
-        result = _git_config_run(
+        result = _run_git_config_probe(
             command,
             capture_output=True,
             check=False,
             cwd=probe_cwd,
             env=probe_env,
-            timeout=10,
+            timeout_category="Git config probe timed out",
         )
-    except subprocess.TimeoutExpired as exc:
-        raise GitUrlRewriteProbeError("Git config probe timed out") from exc
     except OSError as exc:
         raise GitUrlRewriteProbeError("Git config probe could not start") from exc
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
@@ -559,7 +584,7 @@ def _urlmatched_header_group(
 
     git_executable = get_git_executable()
     try:
-        result = _git_config_run(
+        result = _run_git_config_probe(
             [
                 git_executable,
                 "config",
@@ -572,10 +597,8 @@ def _urlmatched_header_group(
             check=False,
             cwd=str(Path(git_executable).resolve().parent),
             env=probe_env,
-            timeout=10,
+            timeout_category="Git URL-match probe timed out",
         )
-    except subprocess.TimeoutExpired as exc:
-        raise GitUrlRewriteProbeError("Git URL-match probe timed out") from exc
     except OSError as exc:
         raise GitUrlRewriteProbeError("Git URL-match probe could not start") from exc
     if result.returncode == 1:

@@ -19,8 +19,8 @@
 # leaves the developer's existing apm install untouched.
 
 param(
-    [string]$PinnedVersion = "v0.14.0",
-    [string]$OlderVersion  = "v0.13.0"
+    [string]$PinnedVersion = "v0.29.0",
+    [string]$OlderVersion  = "v0.28.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -603,15 +603,14 @@ function Test-SameVersionReinstall {
 
 # ---------------------------------------------------------------------------
 # Test 5: Real `apm self-update` end-to-end. Install OlderVersion, then run
-# the installed apm.cmd's self-update command. The installed apm downloads
-# install.ps1 from aka.ms/apm-windows and runs it, exercising the whole
-# launch path that issue #1389 originally broke. The fresh apm.cmd must
-# report a version >= PinnedVersion afterwards.
+# the installed apm.cmd's self-update command pinned to PinnedVersion. The
+# installed apm downloads install.ps1 for that release and runs it, exercising
+# the whole launch path that issue #1389 originally broke. The fresh apm.cmd
+# must report PinnedVersion afterwards.
 #
-# Caveat: self-update fetches the install.ps1 currently published at
-# aka.ms/apm-windows (main branch), NOT the one in this PR. So this test
-# proves the *launch path* and *upgrade flow* work end-to-end on a clean
-# Windows runner. The new fixes in this PR are validated by Tests 1-4.
+# The VERSION pin keeps the installed version deterministic and skips the live
+# releases/latest lookup in supported release binaries. Retry remains here as a
+# guard against transient installer-script download latency.
 # ---------------------------------------------------------------------------
 
 function Test-SelfUpdateCommand {
@@ -627,7 +626,7 @@ function Test-SelfUpdateCommand {
         $ver1 = Get-ShimVersion -ShimPath $shim
         Assert-True ($ver1.Output -match $OlderVersion.TrimStart("v")) "Step 1: apm.cmd --version reports $OlderVersion (got: $($ver1.Output))"
 
-        Write-Info "Step 2: run apm self-update (downloads + dispatches install.ps1 from aka.ms/apm-windows)"
+        Write-Info "Step 2: run apm self-update pinned to $PinnedVersion"
         # Point the self-update temp file at our isolated prefix so we don't
         # litter the runner's %LOCALAPPDATA% and so the staged install.ps1
         # has a writable temp dir.
@@ -637,14 +636,32 @@ function Test-SelfUpdateCommand {
         # subprocess inherits these via os.environ -> external_process_env().
         $savedTempDir    = $env:APM_TEMP_DIR
         $savedInstallDir = $env:APM_INSTALL_DIR
+        $savedVersion    = $env:VERSION
         $env:APM_TEMP_DIR    = $prefix.TmpDir
         $env:APM_INSTALL_DIR = $prefix.BinDir
+        $env:VERSION         = $PinnedVersion
         try {
-            $output = & cmd.exe /c "`"$shim`" self-update" 2>&1
-            $selfUpdateExit = $LASTEXITCODE
+            $output = @()
+            $selfUpdateExit = 1
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                Write-Info "self-update attempt $attempt of 3"
+                $output = & cmd.exe /c "`"$shim`" self-update" 2>&1
+                $selfUpdateExit = $LASTEXITCODE
+                if ($selfUpdateExit -eq 0) {
+                    break
+                }
+                $outputText = ($output | Out-String)
+                if ($outputText -notmatch "Unable to fetch latest version from (GitHub|remote)" -and $outputText -notmatch "Update failed:") {
+                    break
+                }
+                if ($attempt -lt 3) {
+                    Start-Sleep -Seconds (5 * $attempt)
+                }
+            }
         } finally {
             if ($null -ne $savedTempDir)    { $env:APM_TEMP_DIR = $savedTempDir }       else { Remove-Item Env:APM_TEMP_DIR -ErrorAction SilentlyContinue }
             if ($null -ne $savedInstallDir) { $env:APM_INSTALL_DIR = $savedInstallDir } else { Remove-Item Env:APM_INSTALL_DIR -ErrorAction SilentlyContinue }
+            if ($null -ne $savedVersion)    { $env:VERSION = $savedVersion }            else { Remove-Item Env:VERSION -ErrorAction SilentlyContinue }
         }
 
         Write-Info "self-update output (last 20 lines):"
@@ -655,11 +672,7 @@ function Test-SelfUpdateCommand {
         $ver2 = Get-ShimVersion -ShimPath $shim
         Assert-True ($ver2.ExitCode -eq 0) "apm.cmd --version exits 0 after self-update"
 
-        # After self-update, version must have advanced past OlderVersion.
-        # We can't pin to PinnedVersion exactly because aka.ms/apm-windows
-        # always grabs the current latest, which may move ahead of this PR.
-        $oldNumeric = $OlderVersion.TrimStart("v")
-        Assert-True ($ver2.Output -notmatch [regex]::Escape($oldNumeric)) "apm.cmd --version no longer reports $OlderVersion after self-update (got: $($ver2.Output))"
+        Assert-True ($ver2.Output -match [regex]::Escape($PinnedVersion.TrimStart("v"))) "apm.cmd --version reports $PinnedVersion after self-update (got: $($ver2.Output))"
     } finally {
         Remove-Item -Recurse -Force $prefix.Root -ErrorAction SilentlyContinue
     }

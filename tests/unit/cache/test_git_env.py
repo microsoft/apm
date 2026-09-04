@@ -269,6 +269,39 @@ class TestGitSubprocessEnv:
         assert "--show-origin" in message
         assert "private config detail" not in message
 
+    def test_rewrite_probe_retries_once_after_timeout(self) -> None:
+        calls: list[int] = []
+
+        def fake_probe(args, **kwargs):
+            calls.append(kwargs["timeout"])
+            if len(calls) == 1:
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return subprocess.CompletedProcess(args, 0, stdout=b"", stderr=b"")
+
+        with patch("apm_cli.utils.git_env._git_config_run", side_effect=fake_probe):
+            env = git_network_env("https://git.example.com/acme/repo")
+
+        assert env["GIT_TRACE_REDACT"] == "1"
+        assert calls == [10, 30]
+
+    def test_rewrite_probe_still_fails_closed_after_retry_timeouts(self) -> None:
+        calls: list[int] = []
+
+        def fake_probe(args, **kwargs):
+            calls.append(kwargs["timeout"])
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+        with (
+            patch("apm_cli.utils.git_env._git_config_run", side_effect=fake_probe),
+            pytest.raises(GitUrlRewriteProbeError) as raised,
+        ):
+            git_network_env("https://git.example.com/acme/repo")
+
+        message = str(raised.value)
+        assert "Git config probe timed out" in message
+        assert "check Git configuration and retry" in message
+        assert calls == [10, 30]
+
     def test_clone_retains_url_rewrite_without_restoring_parent_auth(self, tmp_path) -> None:
         config = tmp_path / "gitconfig"
         config.write_text("", encoding="ascii")

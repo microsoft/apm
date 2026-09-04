@@ -498,11 +498,12 @@ jobs:
   # GITHUB_APM_PAT/ADO_APM_PAT env, so it is structurally unable to depend on
   # credentials.
   #
-  # Why timeout-minutes: 5
+  # Why timeout-minutes: 10
   # ------------------------
-  # Recent hosted runs of the current required selection complete in about
-  # three minutes. The 5-minute job cap includes checkout/setup/sync and
-  # still fails fast on accidental network retries or unreviewed marker growth.
+  # Hosted runners can spend nearly five minutes inside the required selection
+  # after checkout/setup/sync. The 10-minute job cap keeps accidental network
+  # retries bounded while leaving enough room for post-step cleanup to complete
+  # after a successful pytest run.
   # Hosted job duration is the release authority.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
@@ -513,7 +514,7 @@ jobs:
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
 
