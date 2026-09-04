@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   insecure, and cross-host network rewrites now fail before network use,
   and managed credentials stay out of Git URL arguments and stored remotes.
   (#2759)
+- `apm compile -g` no longer duplicates instructions already delivered by
+  matching Claude user rules. `--clean` can remove an unchanged, fully
+  redundant Claude root; edited files are retained. (by @cmyui; fixes #2792) (#2793)
 - Windows users no longer get repeated line-ending churn when APM rewrites
   `apm.yml`: install, uninstall, dependency resolution, and revision-pin
   updates now produce deterministic LF output. An `apm.yml` that already uses

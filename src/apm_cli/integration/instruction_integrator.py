@@ -39,6 +39,14 @@ class _PreparedInstruction:
     body: str
 
 
+def instruction_rule_filename(source: Path, extension: str) -> str:
+    """Return the native rule filename shared by installation and compilation."""
+    stem = source.name
+    if stem.endswith(".instructions.md"):
+        stem = stem[: -len(".instructions.md")]
+    return f"{stem}{extension}"
+
+
 class InstructionIntegrator(BaseIntegrator):
     """Handles integration of APM package instructions.
 
@@ -213,10 +221,7 @@ class InstructionIntegrator(BaseIntegrator):
         """Render every converted rule without writing target files."""
         plan: dict[Path, tuple[Path, str, int]] = {}
         for source_file in instruction_files:
-            stem = source_file.name
-            if stem.endswith(".instructions.md"):
-                stem = stem[: -len(".instructions.md")]
-            target_path = deploy_dir / f"{stem}{extension}"
+            target_path = deploy_dir / instruction_rule_filename(source_file, extension)
             ensure_path_within(target_path, deploy_dir)
             content, links_resolved = self._render_instruction(
                 source_file,

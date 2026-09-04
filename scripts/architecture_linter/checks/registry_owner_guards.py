@@ -119,6 +119,14 @@ _COMPILATION_PREFIX = "src/apm_cli/compilation/"
 _COMPILED_OUTPUT_OWNER = "src/apm_cli/compilation/output_writer.py"
 
 
+_INSTRUCTION_DEDUP_OWNER = "src/apm_cli/compilation/instruction_dedup.py"
+_INSTRUCTION_INTEGRATOR = "src/apm_cli/integration/instruction_integrator.py"
+_INSTRUCTION_DEDUP_CONSUMERS = (
+    "src/apm_cli/compilation/agents_compiler.py",
+    "src/apm_cli/compilation/user_root_context.py",
+)
+
+
 _COMPILED_WRITE_PATTERN = r'write_text_lf|atomic_write_text|\.write_text\(|open\([^)]*["\']w'
 
 
@@ -647,7 +655,70 @@ def _has_named_assignment(
     )
 
 
+def _check_instruction_deduplication(provider: FactsProvider) -> Iterable[Violation]:
+    """Keep native-rule coverage and rendering delegated to their shared owners."""
+    rule_id = "registry_delegation.instruction_deduplication"
+    facts, failures = _read_required(
+        provider,
+        rule_id,
+        (_INSTRUCTION_DEDUP_OWNER, _INSTRUCTION_INTEGRATOR, *_INSTRUCTION_DEDUP_CONSUMERS),
+    )
+    if failures:
+        return failures
+    required = {
+        _INSTRUCTION_DEDUP_OWNER: (
+            "def uncovered_instructions(",
+            "def detect_deployed_instructions(",
+            "def build_expected_rule_filenames(",
+            "instruction_rule_filename(",
+            "integrator.init_link_resolver(",
+            "integrator._render_instruction(",
+        ),
+        _INSTRUCTION_INTEGRATOR: (
+            "def instruction_rule_filename(",
+            "instruction_rule_filename(source_file, extension)",
+        ),
+        _INSTRUCTION_DEDUP_CONSUMERS[0]: (
+            "from .instruction_dedup import (",
+            "detect_deployed_instructions as _detect_deployed_instructions",
+            "build_expected_rule_filenames as _build_expected_rule_filenames",
+        ),
+        _INSTRUCTION_DEDUP_CONSUMERS[1]: (
+            "from .instruction_dedup import uncovered_instructions",
+            "uncovered_instructions(",
+        ),
+    }
+    defects = [
+        f"{path} is missing {fragment!r}"
+        for path, fragments in required.items()
+        for fragment in fragments
+        if fragment not in source_text(facts[path])
+    ]
+    findings = list(
+        line_pattern_violations(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(
+                provider, under=_COMPILATION_PREFIX, exclude=(_INSTRUCTION_DEDUP_OWNER,)
+            ),
+            pattern=r"^def _?(?:detect_deployed_instructions|build_expected_rule_filenames|uncovered_instructions)\(",
+            message="Native-rule coverage belongs in compilation/instruction_dedup.py",
+            exempt_marker=None,
+        )
+    )
+    if defects:
+        findings.append(violation(rule_id, _INSTRUCTION_DEDUP_OWNER, "; ".join(defects)))
+    return findings
+
+
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id="registry_delegation.instruction_deduplication",
+        group=GROUP,
+        guard_ids=("registry-delegation-instruction-deduplication",),
+        description="Project and user-root native-rule coverage must share an owner.",
+        check=_check_instruction_deduplication,
+    ),
     Rule(
         id="registry_delegation.runtime_descriptors",
         group=GROUP,

@@ -17,6 +17,8 @@ Files are ONLY written when:
 4. The existing file either does not exist OR carries the generated marker
 
 Hand-authored files (no marker) are left untouched.
+Claude instructions already delivered by equivalent native user rules are
+omitted. Explicit cleanup can remove an unchanged, fully redundant Claude root.
 """
 
 from __future__ import annotations
@@ -52,6 +54,7 @@ class UserRootCompileResult:
     path: Path | None
     status: str
     has_critical_security: bool = False
+    warnings: tuple[str, ...] = ()
 
 
 def _resolve_deploy_root(profile: TargetProfile) -> Path:
@@ -160,11 +163,102 @@ def discover_global_instructions(
     )
 
 
+def _handle_redundant_claude_root(
+    target: str,
+    path: Path,
+    expected_content: str,
+    *,
+    clean: bool,
+    dry_run: bool,
+    warnings: tuple[str, ...] = (),
+) -> UserRootCompileResult:
+    """Retain or explicitly clean an unchanged root now covered by native rules.
+
+    Global roots have no deployment hash ledger. Require the exact legacy
+    output of the current instruction set, not merely a generated marker,
+    before removal. Older or edited content is left for manual review.
+    """
+    from ..integration.cleanup import remove_stale_deployed_files
+    from ..utils.diagnostics import DiagnosticCollector
+    from .constants import AGENTS_MD_GENERATED_MARKER, has_generated_marker_header
+
+    security_error = _validate_compiled_output_policy(target, path, expected_content, warnings)
+    if security_error is not None:
+        return security_error
+    if path.is_symlink():
+        return UserRootCompileResult(target, path, "skipped-symlink", warnings=warnings)
+    if not path.exists():
+        return UserRootCompileResult(target, path, "skipped-native-rules", warnings=warnings)
+    try:
+        existing = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return UserRootCompileResult(
+            target, path, f"error:cannot read {path}: {exc}", warnings=warnings
+        )
+    if not has_generated_marker_header(existing, (AGENTS_MD_GENERATED_MARKER,)):
+        return UserRootCompileResult(target, path, "skipped-hand-authored", warnings=warnings)
+    if existing != expected_content:
+        return UserRootCompileResult(target, path, "skipped-modified", warnings=warnings)
+    if not clean:
+        return UserRootCompileResult(target, path, "retained-redundant", warnings=warnings)
+    if dry_run:
+        return UserRootCompileResult(target, path, "would-remove", warnings=warnings)
+
+    # Hash the expected generated output, not untrusted on-disk bytes. The
+    # cleanup owner rechecks it and refuses a replacement symlink or user edit.
+    expected_hash = "sha256:" + hashlib.sha256(expected_content.encode("utf-8")).hexdigest()
+    result = remove_stale_deployed_files(
+        [path.name],
+        path.parent,
+        dep_key="global-claude-root",
+        targets=[],
+        diagnostics=DiagnosticCollector(),
+        recorded_hashes={path.name: expected_hash},
+        allowed_prefixes=(path.name,),
+        allow_final_symlink=True,
+        failed_path_retained=False,
+    )
+    if result.failed or result.skipped_unmanaged:
+        return UserRootCompileResult(
+            target,
+            path,
+            f"error:could not remove {path}; inspect its access and path, then retry",
+            warnings=warnings,
+        )
+    if result.skipped_user_edit:
+        return UserRootCompileResult(target, path, "skipped-modified", warnings=warnings)
+    return UserRootCompileResult(target, path, "removed", warnings=warnings)
+
+
+def _validate_compiled_output_policy(
+    target: str,
+    path: Path,
+    content: str,
+    warnings: tuple[str, ...],
+) -> UserRootCompileResult | None:
+    """Run the compiled-output security gate even when no file will be written."""
+    from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
+
+    try:
+        CompiledOutputWriter().prepare({path: content})
+    except CompiledOutputPolicyError:
+        return UserRootCompileResult(
+            target,
+            path,
+            "error:critical hidden characters in compiled output",
+            has_critical_security=True,
+            warnings=warnings,
+        )
+    return None
+
+
 def compile_user_root_contexts(
     targets: Iterable[TargetProfile],
     source_root: Path,
     *,
     dry_run: bool = False,
+    clean: bool = False,
+    force_instructions: bool = False,
     logger: _logging_module.Logger | None = None,
 ) -> list[UserRootCompileResult]:
     """Compile user-scope root context files from global (apply_to-less) instructions.
@@ -183,6 +277,10 @@ def compile_user_root_contexts(
             e.g. ``Path.home() / ".apm"``.
         dry_run: When True, no files are written or directories created.
             The returned status values reflect what *would* happen.
+        clean: Remove an unchanged Claude root fully covered by native rules.
+            Other orphaned output and hand-authored or edited roots are retained.
+        force_instructions: Include Claude instructions in the root file even
+            when equivalent native rules are already present.
         logger: Optional logger.  Falls back to ``logging.getLogger(__name__)``.
 
     Returns:
@@ -195,6 +293,11 @@ def compile_user_root_contexts(
         * ``"would-write"``          -- dry_run; file would have been written
         * ``"skipped-no-instructions"`` -- no global instructions found
         * ``"skipped-hand-authored"`` -- existing file has no APM marker
+        * ``"skipped-native-rules"`` -- Claude rules already deliver all instructions
+        * ``"retained-redundant"``   -- redundant generated root needs explicit cleanup
+        * ``"skipped-modified"``    -- redundant root differs from expected output
+        * ``"skipped-symlink"``     -- redundant root is a user-owned symlink
+        * ``"removed"`` / ``"would-remove"`` -- explicit redundant-root cleanup
         * ``"error:<msg>"``          -- OS error during read or write
     """
     from ..utils.path_security import PathTraversalError, ensure_path_within
@@ -203,7 +306,7 @@ def compile_user_root_contexts(
     log = logger or logging.getLogger(__name__)
 
     results: list[UserRootCompileResult] = []
-    pending: list[tuple[int, str, Path, str]] = []
+    pending: list[tuple[int, str, Path, str, tuple[str, ...]]] = []
 
     apm_modules = source_root / "apm_modules"
     if not apm_modules.is_dir():
@@ -245,14 +348,42 @@ def compile_user_root_contexts(
 
         deploy_root = _resolve_deploy_root(scoped)
         root_filename = _ROOT_FILENAME[family]
+        lexical_output_path = deploy_root / root_filename
         try:
-            output_path = ensure_path_within(deploy_root / root_filename, deploy_root)
-        except PathTraversalError as exc:
+            output_path = ensure_path_within(lexical_output_path, deploy_root)
+        except (PathTraversalError, RuntimeError) as exc:
             log.warning("user_root_context: unsafe output path for %s: %s", scoped.name, exc)
             results.append(
                 UserRootCompileResult(scoped.name, deploy_root / root_filename, f"error:{exc}")
             )
             continue
+
+        if family == "claude":
+            from .instruction_dedup import uncovered_instructions
+
+            native_warnings: list[str] = []
+            if not force_instructions:
+                target_instructions = uncovered_instructions(
+                    "claude",
+                    target_instructions,
+                    deploy_root / "rules",
+                    deploy_root,
+                    native_warnings.append,
+                )
+            if not target_instructions:
+                results.append(
+                    _handle_redundant_claude_root(
+                        scoped.name,
+                        lexical_output_path,
+                        _generate_content(global_instructions),
+                        clean=clean,
+                        dry_run=dry_run,
+                        warnings=tuple(native_warnings),
+                    )
+                )
+                continue
+        else:
+            native_warnings = []
 
         content = _generate_content(
             target_instructions,
@@ -286,34 +417,47 @@ def compile_user_root_contexts(
 
         if dry_run:
             log.debug("user_root_context: [dry-run] would write %s", output_path)
-            results.append(UserRootCompileResult(scoped.name, output_path, "would-write"))
+            results.append(
+                UserRootCompileResult(
+                    scoped.name,
+                    output_path,
+                    "would-write",
+                    warnings=tuple(native_warnings),
+                )
+            )
             continue
 
         index = len(results)
-        results.append(UserRootCompileResult(scoped.name, output_path, "pending"))
-        pending.append((index, scoped.name, output_path, content))
+        warnings = tuple(native_warnings)
+        results.append(
+            UserRootCompileResult(scoped.name, output_path, "pending", warnings=warnings)
+        )
+        pending.append((index, scoped.name, output_path, content, warnings))
 
     if pending:
         from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
         try:
             verdict = CompiledOutputWriter().write_many(
-                {path: content for _, _, path, content in pending}
+                {path: content for _, _, path, content, _ in pending}
             )
         except CompiledOutputPolicyError:
-            for index, name, path, _ in pending:
+            for index, name, path, _, warnings in pending:
                 results[index] = UserRootCompileResult(
                     name,
                     path,
                     "error:critical hidden characters in compiled output",
                     has_critical_security=True,
+                    warnings=warnings,
                 )
         except OSError as exc:
             log.warning("user_root_context: failed to write output batch: %s", exc)
-            for index, name, path, _ in pending:
-                results[index] = UserRootCompileResult(name, path, f"error:{exc}")
+            for index, name, path, _, warnings in pending:
+                results[index] = UserRootCompileResult(
+                    name, path, f"error:{exc}", warnings=warnings
+                )
         else:
-            for index, name, path, _ in pending:
+            for index, name, path, _, warnings in pending:
                 findings = verdict.findings_by_file.get(str(path), [])
                 if findings:
                     log.warning(
@@ -324,6 +468,6 @@ def compile_user_root_contexts(
                         path,
                     )
                 log.debug("user_root_context: wrote %s", path)
-                results[index] = UserRootCompileResult(name, path, "written")
+                results[index] = UserRootCompileResult(name, path, "written", warnings=warnings)
 
     return results

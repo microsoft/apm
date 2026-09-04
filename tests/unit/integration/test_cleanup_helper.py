@@ -60,6 +60,96 @@ def test_happy_path_deletes_under_known_prefix(project_root, diagnostics, logger
     assert not target.exists()
 
 
+@pytest.mark.parametrize("allowed_prefixes", [None, ("CLAUDE.md",)])
+def test_explicit_root_prefix_only_removes_selected_file(
+    project_root: Path,
+    diagnostics: DiagnosticCollector,
+    allowed_prefixes: tuple[str, ...] | None,
+) -> None:
+    """A configured root can opt in without broadening normal cleanup."""
+    target = _make_managed_file(project_root, "CLAUDE.md")
+    sibling = _make_managed_file(project_root, "CLAUDE.md.backup")
+    result = remove_stale_deployed_files(
+        [target.name],
+        project_root,
+        dep_key="compiled-root",
+        targets=None,
+        diagnostics=diagnostics,
+        allowed_prefixes=allowed_prefixes,
+        recorded_hashes={target.name: compute_file_hash(target)},
+        allow_final_symlink=True,
+    )
+
+    assert target.exists() is (allowed_prefixes is None)
+    assert result.deleted == ([] if allowed_prefixes is None else [target.name])
+    assert result.skipped_unmanaged == ([target.name] if allowed_prefixes is None else [])
+    assert sibling.read_text(encoding="utf-8") == "hi\n"
+
+
+@pytest.mark.parametrize("entry_kind", ["edited", "directory", "symlink"])
+def test_explicit_root_prefix_preserves_provenance_and_entry_guards(
+    project_root: Path,
+    diagnostics: DiagnosticCollector,
+    entry_kind: str,
+) -> None:
+    """An explicit root prefix does not bypass the existing safety gates."""
+    source = _make_managed_file(project_root, "original.md")
+    recorded = {"CLAUDE.md": compute_file_hash(source)}
+    target = project_root / "CLAUDE.md"
+    if entry_kind == "edited":
+        target.write_text("user changes\n", encoding="utf-8")
+    elif entry_kind == "directory":
+        target.mkdir()
+        (target / "user.md").write_text("user changes\n", encoding="utf-8")
+    else:
+        target.symlink_to(source)
+
+    result = remove_stale_deployed_files(
+        [target.name],
+        project_root,
+        dep_key="compiled-root",
+        targets=None,
+        diagnostics=diagnostics,
+        allowed_prefixes=(target.name,),
+        recorded_hashes=recorded,
+        allow_final_symlink=True,
+    )
+
+    assert result.deleted == []
+    assert result.retained == [target.name]
+    assert target.exists()
+    assert source.read_text(encoding="utf-8") == "hi\n"
+
+
+def test_explicit_root_prefix_rejects_parent_symlink_escape(
+    project_root: Path,
+    diagnostics: DiagnosticCollector,
+) -> None:
+    """Even an allowed prefix cannot authorize deletion through a symlink."""
+    outside = project_root / "outside"
+    outside.mkdir()
+    source = _make_managed_file(outside, "CLAUDE.md")
+    deploy_root = project_root / "configured-root"
+    deploy_root.mkdir()
+    (deploy_root / "nested").symlink_to(outside, target_is_directory=True)
+    rel = "nested/CLAUDE.md"
+
+    result = remove_stale_deployed_files(
+        [rel],
+        deploy_root,
+        dep_key="compiled-root",
+        targets=None,
+        diagnostics=diagnostics,
+        allowed_prefixes=("nested/",),
+        recorded_hashes={rel: compute_file_hash(source)},
+        allow_final_symlink=True,
+    )
+
+    assert result.deleted == []
+    assert result.skipped_unmanaged == [rel]
+    assert source.read_text(encoding="utf-8") == "hi\n"
+
+
 def test_path_traversal_rejected(project_root, diagnostics, logger):
     """validate_deploy_path rejects '..' segments."""
     result = remove_stale_deployed_files(
