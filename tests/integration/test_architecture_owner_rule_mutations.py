@@ -366,6 +366,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Effective package-target authorization loses its single resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-primitive-classification",
+        rule_id="install-deployment-primitive-classification",
+        path="src/apm_cli/install/primitive_classification.py",
+        old="def classify_plugin_manifest_schema(",
+        new="def classify_plugin_manifest_schema_disabled(",
+        intent="Primitive classification loses a required declaration-first API.",
+    ),
+    MutationCase(
         guard_id="install-deployment-prospective-dry-run-plan",
         rule_id="install-deployment-prospective-dry-run-plan",
         path="src/apm_cli/install/presentation/dry_run.py",
