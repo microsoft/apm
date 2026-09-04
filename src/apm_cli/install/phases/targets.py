@@ -118,10 +118,11 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
 
     Reads ``targets:``/``target:`` from the consumer's ``apm.yml``, maps the
     canonical names to :class:`~apm_cli.integration.targets.TargetProfile`
-    instances scoped the same way ``ctx.targets`` is, and augments them with the
-    non-canonical gated/dynamic targets (see below). Returns ``None`` when the
-    manifest declares no targets (auto-detect or ``--target``-only consumers) --
-    the signal for lockfile reconciliation to fall back to legacy preserve-all.
+    instances scoped the same way ``ctx.targets`` is, and augments them with
+    non-canonical gated/dynamic target metadata without probing inactive roots
+    (see below). Returns ``None`` when the manifest declares no targets
+    (auto-detect or ``--target``-only consumers) -- the signal for lockfile
+    reconciliation to fall back to legacy preserve-all.
 
     Motivation (issue #2059): ``union_preserving`` must distinguish a target the
     consumer legitimately uses but did not install in THIS run (e.g. a
@@ -138,19 +139,17 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
         declared_target_profiles as profiles_for_project,
     )
 
-    try:
-        names = _read_yaml_targets(ctx)
-    except (AttributeError, KeyError, OSError, TypeError, ValueError):
-        # Any resolution error (missing apm_package, conflicting keys already
-        # surfaced by the targets phase) -> unknown universe, preserve-all.
-        return None
-    if not names:
-        return None
     is_user = getattr(ctx, "scope", None) is InstallScope.USER
-    package_path = getattr(ctx.apm_package, "package_path", None)
+    apm_package = getattr(ctx, "apm_package", None)
+    package_path = getattr(apm_package, "package_path", None)
     if package_path is None:
         return None
-    return profiles_for_project(Path(package_path), user_scope=is_user)
+    return profiles_for_project(
+        Path(package_path),
+        user_scope=is_user,
+        active_targets=getattr(ctx, "targets", None),
+        diagnostics=getattr(ctx, "diagnostics", None),
+    )
 
 
 def _create_target_dirs(

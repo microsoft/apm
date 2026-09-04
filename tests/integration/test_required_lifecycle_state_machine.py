@@ -1169,6 +1169,66 @@ def test_required_tamper_is_detected_and_repair_restores_last_good_state(
     assert clean_audit["passed"] is True
 
 
+def test_required_global_lock_ignores_inactive_experimental_resolver(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Global lockfile generation must not run inactive experimental resolvers."""
+    scenario = _new_scenario(tmp_path / "global-inactive-resolver", apm_binary_path)
+    source = _publish(scenario, "inactive-resolver-kit", skill="inactive-resolver")
+    cwd = scenario.isolated.work_root
+    cloud_storage = scenario.isolated.home / "Library" / "CloudStorage"
+    cowork_mounts = (
+        cloud_storage / "OneDrive-Org",
+        cloud_storage / "OneDrive-SharedLibraries-Team",
+    )
+    for mount in cowork_mounts:
+        mount.mkdir(parents=True)
+    targets = ("copilot", "claude", "codex")
+    scenario.isolated.config_root.mkdir(parents=True, exist_ok=True)
+    dump_yaml(
+        {
+            "name": "global-inactive-resolver-consumer",
+            "version": "0.1.0",
+            "dependencies": {"apm": [source.dependency]},
+            "targets": list(targets),
+        },
+        scenario.isolated.config_root / "apm.yml",
+    )
+
+    install = scenario.runner.run(
+        (
+            "install",
+            "--global",
+            "--no-policy",
+            "--parallel-downloads",
+            "0",
+        ),
+        scenario_id="global-inactive-resolver-install",
+        cwd=cwd,
+        env=source.environment,
+    )
+
+    assert install.returncode == 0, _result_evidence(install)
+    lockfile = LockFile.read(scenario.isolated.config_root / "apm.lock.yaml")
+    assert lockfile is not None
+    dependencies = lockfile.get_package_dependencies()
+    assert len(dependencies) == 1
+    deployed_files = dependencies[0].deployed_files
+    assert deployed_files
+    assert all(not path.startswith("cowork://") for path in deployed_files)
+    copilot_skill_path = (
+        scenario.isolated.home / ".agents" / "skills" / "inactive-resolver" / "SKILL.md"
+    )
+    claude_skill_path = (
+        scenario.isolated.home / ".claude" / "skills" / "inactive-resolver" / "SKILL.md"
+    )
+    assert copilot_skill_path.is_file()
+    assert claude_skill_path.is_file()
+    for mount in cowork_mounts:
+        assert not (mount / "Documents" / "Cowork" / "skills" / "inactive-resolver").exists()
+
+
 def test_required_global_audit_rule_matrix_for_external_roots(
     tmp_path: Path,
     apm_binary_path: Path,
