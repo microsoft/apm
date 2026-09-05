@@ -117,7 +117,7 @@ experimental flag.
 | `APM_DEBUG` | Any non-empty value enables low-level debug logging in download, file ops, and clone-cache paths. | unset | Verbose; use for troubleshooting only. |
 | `APM_LOG_LEVEL` | Override the CLI logging level. | implementation default | Debugging escape hatch. |
 | `APM_VERBOSE` | `1` enables verbose output for the install pipeline. APM also sets this internally when `--verbose` is passed. | unset | |
-| `APM_PROGRESS` | Force the install TUI on or off: `always`/`on`/`1`/`true`/`yes` to force on; `never`/`quiet`/`off`/`0`/`false`/`no` to force off; `auto` (default) lets APM decide based on `CI`, `TERM`, and TTY. | `auto` | The CLI sets `APM_PROGRESS=quiet` when `--quiet` is passed. |
+| `APM_PROGRESS` | Force the install TUI on or off: `always`/`on`/`1`/`true`/`yes` to force on; `never`/`quiet`/`off`/`0`/`false`/`no` to force off; `auto` (default) lets APM decide based on `CI`, `TERM`, and TTY. | `auto` | The CLI sets `APM_PROGRESS=quiet` when `--quiet` / `-q` is passed (mutually exclusive with `--verbose` / `-v`). |
 | `CI` | Standard CI marker. When truthy (`1`/`true`/`yes`), APM disables the install TUI and adjusts a few interactive defaults. | unset | Read; never written. |
 | `TERM` | Standard terminal type. `""` or `dumb` disables the install TUI. | OS-provided | Read; never written. |
 

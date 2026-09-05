@@ -145,16 +145,44 @@ def _configure_logging(verbose: bool = False) -> None:
     default=False,
     help="Enable debug-level logging (equivalent to APM_LOG_LEVEL=DEBUG).",
 )
+@click.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    default=False,
+    help=(
+        "Suppress install progress UI (sets APM_PROGRESS=quiet). Errors and warnings still print."
+    ),
+)
 @click.pass_context
-def cli(ctx, verbose: bool) -> None:
+def cli(ctx, verbose: bool, quiet: bool) -> None:
     """Main entry point for the APM CLI."""
+    if verbose and quiet:
+        raise click.UsageError("--quiet and --verbose are mutually exclusive.")
+
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
+    ctx.obj["quiet"] = quiet
     from apm_cli.core.output_mode import configure_output_mode, detect_output_mode
 
     output_mode = detect_output_mode(ctx.meta.get("apm_raw_args", sys.argv[1:]))
     configure_output_mode(output_mode)
     ctx.obj["output_mode"] = output_mode
+
+    if quiet:
+        previous_progress = os.environ.get("APM_PROGRESS")
+        from apm_cli.core.command_logger import configure_quiet_mode
+
+        def _restore_quiet_mode() -> None:
+            configure_quiet_mode(False)
+            if previous_progress is None:
+                os.environ.pop("APM_PROGRESS", None)
+            else:
+                os.environ["APM_PROGRESS"] = previous_progress
+
+        os.environ["APM_PROGRESS"] = "quiet"
+        configure_quiet_mode(True)
+        ctx.call_on_close(_restore_quiet_mode)
 
     if verbose:
         # Upgrade to DEBUG when the flag is set; env-var path runs in main().

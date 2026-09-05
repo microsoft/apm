@@ -89,7 +89,7 @@ class TestUpdateCheckSkippedOnInvalidCommand(unittest.TestCase):
         ctx.invoked_subcommand = "invalid"
 
         with ctx:
-            cli.callback(verbose=False)
+            cli.callback(verbose=False, quiet=False)
 
         mock_check.assert_not_called()
 
@@ -112,7 +112,7 @@ class TestUpdateCheckSkippedOnInvalidCommand(unittest.TestCase):
         ctx.invoked_subcommand = None
 
         with ctx:
-            cli.callback(verbose=False)
+            cli.callback(verbose=False, quiet=False)
 
         mock_check.assert_not_called()
 
