@@ -127,6 +127,8 @@ pip install apm-cli
 #### Windows
 
 ```powershell
+# WinGet
+winget install Microsoft.APM
 # Scoop
 scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
