@@ -92,6 +92,16 @@ class TestGetGitExecutable:
         assert get_git_executable() == "/usr/bin/git"
         assert mock_resolve.call_count == 2
 
+
+class TestGetGhExecutable:
+    """Test cached GitHub CLI binary lookup."""
+
+    def setup_method(self) -> None:
+        reset_git_cache()
+
+    def teardown_method(self) -> None:
+        reset_git_cache()
+
     @patch(
         "apm_cli.utils.git_env._resolve_trusted_executable",
         side_effect=FileNotFoundError,
