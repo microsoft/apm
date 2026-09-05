@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now preserves SSH transport for semver discovery, keeps
+  inactive hooks when targets are not declared in the manifest, and honors
+  explicitly configured HTTP registries during MCP integration. (#2814)
+- Abandoned install transactions now release their state-update lock without
+  releasing locks still owned by other operations. (#2817)
 - `apm install` now fails before state writes when a host-qualified package
   path uses an unknown platform host, and routes all host/reference coordinate
   parsing through one canonical parser. (#2800)
