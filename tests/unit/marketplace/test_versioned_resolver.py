@@ -154,6 +154,31 @@ class TestResolveMarketplacePlugin:
         """PluginNotFoundError when plugin is not in manifest."""
         from apm_cli.marketplace.errors import PluginNotFoundError
 
+        plugin = _make_plugin()
+        manifest = _make_manifest(plugin)
+        source = _make_source()
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=source,
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=manifest,
+            ),
+            pytest.raises(PluginNotFoundError) as exc_info,
+        ):
+            resolve_marketplace_plugin("my-plgin", "test-mkt")
+
+        err = exc_info.value
+        assert err.plugin_name == "my-plgin"
+        assert "Did you mean: my-plugin?" in str(err)
+        assert "apm marketplace browse test-mkt" in str(err)
+
+    def test_plugin_not_found_omits_suggestion_for_distant_name(self):
+        from apm_cli.marketplace.errors import PluginNotFoundError
+
         plugin = _make_plugin(name="existing")
         manifest = _make_manifest(plugin)
         source = _make_source()
@@ -167,9 +192,44 @@ class TestResolveMarketplacePlugin:
                 "apm_cli.marketplace.resolver.fetch_or_cache",
                 return_value=manifest,
             ),
-            pytest.raises(PluginNotFoundError),
+            pytest.raises(PluginNotFoundError) as exc_info,
         ):
-            resolve_marketplace_plugin("nonexistent", "test-mkt")
+            resolve_marketplace_plugin("zzzz-completely-unrelated-xyzqwerty", "test-mkt")
+
+        text = str(exc_info.value)
+        assert "Did you mean" not in text
+        assert "Similar plugins" not in text
+
+    def test_plugin_not_found_skips_suggestion_when_names_unreadable(self):
+        """A broken plugin list must not change the not-found error into a crash."""
+        from apm_cli.marketplace.errors import PluginNotFoundError
+
+        class BrokenManifest:
+            def find_plugin(self, _name):
+                return None
+
+            @property
+            def plugins(self):
+                raise RuntimeError("cache unreadable")
+
+        source = _make_source()
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=source,
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=BrokenManifest(),
+            ),
+            pytest.raises(PluginNotFoundError) as exc_info,
+        ):
+            resolve_marketplace_plugin("my-plgin", "test-mkt")
+
+        text = str(exc_info.value)
+        assert "Did you mean" not in text
+        assert "Plugin 'my-plgin' not found in marketplace 'test-mkt'" in text
 
     def test_semver_range_uses_custom_tag_pattern(self):
         """Semver range resolution passes plugin.tag_pattern to resolve_version_constraint."""

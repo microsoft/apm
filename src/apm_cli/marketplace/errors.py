@@ -28,13 +28,24 @@ class MarketplaceNotFoundError(MarketplaceError):
 class PluginNotFoundError(MarketplaceError):
     """Raised when a plugin is not found in a marketplace."""
 
-    def __init__(self, plugin_name: str, marketplace_name: str):
+    def __init__(
+        self,
+        plugin_name: str,
+        marketplace_name: str,
+        *,
+        suggestions: list[str] | None = None,
+    ):
         self.plugin_name = plugin_name
         self.marketplace_name = marketplace_name
-        super().__init__(
+        message = (
             f"Plugin '{plugin_name}' not found in marketplace '{marketplace_name}'. "
             f"Run 'apm marketplace browse {marketplace_name}' to see available plugins."
         )
+        if suggestions:
+            from ..utils.suggestions import format_close_match_hint
+
+            message += format_close_match_hint(suggestions, similar_label="Similar plugins")
+        super().__init__(message)
 
 
 class MarketplaceYmlError(MarketplaceError):
