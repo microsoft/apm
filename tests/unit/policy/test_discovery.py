@@ -13,6 +13,8 @@ from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 from urllib.parse import parse_qs, quote, urlparse, urlsplit
 
+import pytest
+
 from apm_cli.cache.paths import get_cache_root
 from apm_cli.core.auth import AuthResolver as _RealAuthResolver
 from apm_cli.policy._gitlab import (
@@ -47,6 +49,7 @@ from apm_cli.policy.discovery import (
 )
 from apm_cli.policy.parser import PolicyValidationError, load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy
+from apm_cli.utils.git_env import get_git_executable
 
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
@@ -1920,6 +1923,7 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
         self.assertFalse((root / ".apm").exists())
         mock_project_state.assert_called_once()
 
+    @pytest.mark.windows_compat
     @patch("apm_cli.policy._gitlab.subprocess.run")
     @patch("apm_cli.core.auth.AuthResolver")
     def test_git_reachability_probe_uses_bounded_auth_resolver_credentials(
@@ -1952,7 +1956,7 @@ class TestFetchFromGitlabRepo(unittest.TestCase):
         self.assertTrue(state)
         mock_run.assert_called_once()
         command = mock_run.call_args.args[0]
-        self.assertEqual(Path(command[0]).name, "git")
+        self.assertEqual(command[0], get_git_executable())
         self.assertEqual(
             command[1:],
             [

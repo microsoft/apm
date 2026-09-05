@@ -90,6 +90,7 @@ class TestGenericHostCloneErrorPort:
         prefix = _diagnostic_prefix(self._clone_error(dep))
         assert "For private repositories on bitbucket.example.com:7999," in prefix
 
+    @pytest.mark.windows_compat
     def test_https_custom_port_surfaces_in_error(self):
         """https://host:7990/... -> hint names host:7990."""
         dep = DependencyReference.parse("https://bitbucket.example.com:7990/project/repo.git")
@@ -98,6 +99,7 @@ class TestGenericHostCloneErrorPort:
         prefix = _diagnostic_prefix(self._clone_error(dep))
         assert "For private repositories on bitbucket.example.com:7990," in prefix
 
+    @pytest.mark.windows_compat
     def test_no_port_renders_bare_host(self):
         """Default-port dep has no port suffix -- no regression for common case."""
         dep = DependencyReference.parse("https://gitlab.example.com/team/repo.git")
