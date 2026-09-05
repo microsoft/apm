@@ -171,8 +171,13 @@ def semver_sort_key(name: str):
 
 def sort_remote_refs(refs: list[RemoteRef]) -> list[RemoteRef]:
     """Sort refs: tags first (semver descending), then branches alphabetically."""
-    tags = [r for r in refs if r.ref_type == GitReferenceType.TAG]
-    branches = [r for r in refs if r.ref_type == GitReferenceType.BRANCH]
+    tags: list[RemoteRef] = []
+    branches: list[RemoteRef] = []
+    for ref in refs:
+        if ref.ref_type == GitReferenceType.TAG:
+            tags.append(ref)
+        elif ref.ref_type == GitReferenceType.BRANCH:
+            branches.append(ref)
     tags.sort(key=lambda r: semver_sort_key(r.name))
     branches.sort(key=lambda r: r.name)
     return tags + branches
