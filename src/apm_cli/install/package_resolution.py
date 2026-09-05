@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
 from apm_cli.utils.github_host import build_ssh_url
+
+if TYPE_CHECKING:
+    from apm_cli.models.apm_package import APMPackage
 
 GIT_PARENT_USER_SCOPE_ERROR = (
     "git: parent dependencies are not supported at user scope. "
@@ -110,12 +113,15 @@ def resolve_parsed_dependency_reference(
     return dep_ref, False
 
 
-def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
+def user_scope_rejection_reason(
+    dep_ref: Any, scope: Any, *, parent_pkg: APMPackage | None = None
+) -> str | None:
     """Return a validation-fail reason if *dep_ref* is invalid at user scope.
 
-    Per #937, only relative local paths are rejected at user scope -- absolute
-    local paths are unambiguous and flow through the same _copy_local_package
-    code path as project scope.
+    Absolute local paths are unambiguous (#937). A relative transitive local
+    path also has an anchor when the resolver supplies its declaring local
+    package's original absolute source directory (#2815). Direct references
+    and unknown, remote, or unanchored parents retain the relative-path rejection.
     """
     if scope is None:
         return None
@@ -129,6 +135,18 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
         # which expanduser()s local paths before consuming them: `~/pkg` is
         # absolute after expansion and must NOT be rejected here.
         if not Path(local_path).expanduser().is_absolute():
+            from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+            if (
+                local_path
+                and dep_ref.declaring_parent
+                and parent_pkg is not None
+                and parent_pkg.source
+                and parent_pkg.source_path is not None
+                and parent_pkg.source_path.is_absolute()
+                and not APMDependencyResolver._is_remote_parent(parent_pkg)
+            ):
+                return None
             return (
                 "relative local paths are not supported at user scope (--global). "
                 "Use an absolute path or a remote reference (owner/repo) instead"

@@ -19,6 +19,12 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 `PACKAGE_REF` accepts: shorthand (`owner/repo`), HTTPS or SSH Git URLs, FQDN shorthand (`host/owner/repo`), local paths (`./path`, `/abs/path`, `~/path`), packed bundles (`./bundle.zip`, `./bundle.tar.gz`), and marketplace refs (`NAME@MARKETPLACE[#ref]`).
 
+With `--global`, direct local dependencies must use absolute paths (`~/path`
+also works). A local package can still declare a relative child such as
+`../child`: APM resolves it from that declaring package's original source
+directory, not the current working directory or `~/.apm/`. Direct or unanchored
+relative local references remain unsupported at user scope.
+
 :::caution
 `http://` dependencies are refused unless you pass `--allow-insecure` (direct) or `--allow-insecure-host HOSTNAME` (transitive).
 :::

@@ -22,6 +22,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _duplicate_definition_lines,
     _facts_for,
     _lines,
+    _name_calls_in,
     _present,
     _present_re,
     _summary,
@@ -45,12 +46,57 @@ _GUARD_REQUEST_DEFAULTS = "install-deployment-request-defaults"
 
 _GUARD_INSTALL_SCOPE = "install-deployment-install-scope-selection"
 
+_GUARD_LOCAL_SCOPE = "install-deployment-local-scope-admission"
+
 
 _REQUEST_OWNER = "src/apm_cli/install/request.py"
 _MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
 
 
 _ALLOWED_WRAPPER_DEFAULTS = frozenset({"update_refs", "verbose", "only_packages"})
+
+
+def check_local_scope_admission(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Local scope admission must delegate to one owner with parent context."""
+    owner_path = "src/apm_cli/install/package_resolution.py"
+    owner_name = "user_scope_rejection_reason"
+    owner, failures = _facts_for(provider, owner_path, _GUARD_LOCAL_SCOPE)
+    findings = list(failures)
+    if not failures and not _present(owner, f"def {owner_name}("):
+        findings.append(_summary(_GUARD_LOCAL_SCOPE, owner_path, "Missing local admission owner"))
+    consumers = (
+        (_INSTALL_ADAPTER, "_resolve_package_references", False),
+        ("src/apm_cli/install/phases/resolve.py", "download_callback", True),
+        ("src/apm_cli/install/sources.py", "acquire", True),
+    )
+    for path, function_name, needs_parent in consumers:
+        facts, failures = _facts_for(provider, path, _GUARD_LOCAL_SCOPE)
+        findings.extend(failures)
+        if failures:
+            continue
+        delegated = owner_name in _name_calls_in(facts, function_name)
+        if needs_parent:
+            index = provider.tree_index(path)
+            calls = (
+                _named_calls(tuple(index.walk(index.root)), owner_name)
+                if index is not None and index.root is not None
+                else []
+            )
+            delegated = (
+                delegated
+                and any(_has_name_keyword(call, "parent_pkg", "parent_pkg") for call in calls)
+                and not _present(facts, "scope is InstallScope.USER")
+            )
+        if not delegated:
+            findings.append(
+                _summary(
+                    _GUARD_LOCAL_SCOPE,
+                    path,
+                    "Local scope admission must call user_scope_rejection_reason "
+                    "and retain declaring-parent context instead of an inline scope predicate",
+                )
+            )
+    return tuple(findings)
 
 
 def _wrapper_default_args(index: TreeIndex) -> list[str]:

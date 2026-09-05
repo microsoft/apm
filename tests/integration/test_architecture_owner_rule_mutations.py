@@ -318,6 +318,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Config mutation stops routing through the canonical lifecycle lock.",
     ),
     MutationCase(
+        guard_id="install-deployment-local-scope-admission",
+        rule_id="install-deployment-local-scope-admission",
+        path="src/apm_cli/install/phases/resolve.py",
+        old="user_scope_rejection_reason(dep_ref, scope, parent_pkg=parent_pkg)",
+        new="user_scope_rejection_reason(dep_ref, scope, parent_pkg=None)",
+        intent="Resolution drops the declaring local parent's source context from admission.",
+    ),
+    MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
         rule_id="install-deployment-lsp-lifecycle",
         path="src/apm_cli/install/lsp/integration.py",

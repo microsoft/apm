@@ -118,9 +118,9 @@ class LocalDependencySource(DependencySource):
         from apm_cli.agent_plugins.errors import AgentPluginError
         from apm_cli.bundle.local_bundle import route_agent_plugin_package
         from apm_cli.constants import APM_YML_FILENAME
-        from apm_cli.core.scope import InstallScope
         from apm_cli.deps._shared import materialize_marketplace_manifest
         from apm_cli.deps.installed_package import InstalledPackage
+        from apm_cli.install.package_resolution import user_scope_rejection_reason
         from apm_cli.install.phases.local_content import _copy_local_package
         from apm_cli.models.apm_package import (
             APMPackage,
@@ -139,25 +139,24 @@ class LocalDependencySource(DependencySource):
         diagnostics = ctx.diagnostics
         logger = ctx.logger
 
-        # User scope: relative paths are project-relative and have no
-        # meaningful root outside a project, so reject them.  Absolute
-        # paths are unambiguous and supported.
-        if ctx.scope is InstallScope.USER:
+        parent_pkg = None
+        if dep_ref.declaring_parent:
+            node = ctx.dependency_graph.dependency_tree.get_node(dep_key)
+            if node is not None and node.parent is not None:
+                parent_pkg = node.parent.package
+        scope_reject = user_scope_rejection_reason(dep_ref, ctx.scope, parent_pkg=parent_pkg)
+        if scope_reject:
             local_path_str = dep_ref.local_path or ""
-            if not local_path_str or not Path(local_path_str).expanduser().is_absolute():
-                diagnostics.warn(
-                    f"Skipped local package '{local_path_str}' "
-                    "-- relative local paths are not supported at user scope "
-                    "(--global). Use an absolute path or a remote reference "
-                    "(owner/repo) instead.",
-                    package=local_path_str,
+            diagnostics.warn(
+                f"Skipped local package '{local_path_str}' -- {scope_reject}.",
+                package=local_path_str,
+            )
+            if logger:
+                logger.verbose_detail(
+                    f"  Skipping {local_path_str} (relative local paths "
+                    "are project-relative and have no root at user scope)"
                 )
-                if logger:
-                    logger.verbose_detail(
-                        f"  Skipping {local_path_str} (relative local paths "
-                        "are project-relative and have no root at user scope)"
-                    )
-                return None
+            return None
 
         # Determine the anchor for relative ``local_path`` (#857). For
         # direct deps from the root project this is ``ctx.source_root``

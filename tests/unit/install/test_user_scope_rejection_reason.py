@@ -6,9 +6,11 @@ This module pins the post-#937 / post-#1149 contract:
   * User scope, remote ref   -> NEVER reject (the happy path).
   * User scope, local *abs*  -> NEVER reject (an absolute path is unambiguous;
                                 see PR #937 commit message).
-  * User scope, local *rel*  -> ALWAYS reject (relative-to-cwd is ambiguous
+  * User scope, direct *rel* -> ALWAYS reject (relative-to-cwd is ambiguous
                                 outside a project; ``$HOME`` is not a project
                                 root).
+  * User scope, local child -> accept only with resolver-proven local parent
+                                provenance and an absolute source anchor.
   * User scope, ``git: parent`` inheritance -> ALWAYS reject (no monorepo
                                 root at user scope).
 
@@ -24,6 +26,7 @@ predicate fails one assertion in <10ms instead of one slow E2E in 14s.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -32,6 +35,7 @@ from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     user_scope_rejection_reason,
 )
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -145,6 +149,59 @@ def test_user_scope_handles_empty_local_path_defensively():
     reason = user_scope_rejection_reason(ref, scope=InstallScope.USER)
     assert reason is not None
     assert "relative" in reason.lower()
+
+
+@pytest.mark.parametrize("local_path", ["../child", "./nested/child"])
+def test_user_scope_accepts_proven_local_parent_anchor(tmp_path: Path, local_path: str) -> None:
+    """A resolver-proven local child is anchored, not relative to arbitrary CWD."""
+    parent = APMPackage(
+        name="parent", version="1.0.0", source="_local/parent", source_path=tmp_path
+    )
+    child = _local_ref(local_path)
+    child.declaring_parent = tmp_path.as_posix()
+
+    assert user_scope_rejection_reason(child, InstallScope.USER, parent_pkg=parent) is None
+
+
+@pytest.mark.parametrize(
+    ("source", "anchor", "declared", "local_path"),
+    [
+        ("_local/parent", "absolute", False, "../child"),
+        ("_local/parent", None, True, "../child"),
+        ("_local/parent", "relative", True, "../child"),
+        (None, "absolute", True, "../child"),
+        ("org/remote", "absolute", True, "../child"),
+        ("https://example.invalid/remote", "absolute", True, "../child"),
+        ("_local/parent", "absolute", True, ""),
+    ],
+    ids=[
+        "direct-ref",
+        "missing-anchor",
+        "relative-anchor",
+        "unknown-provenance",
+        "remote-shorthand",
+        "remote-url",
+        "empty-path",
+    ],
+)
+def test_user_scope_does_not_infer_local_parent_trust(
+    tmp_path: Path,
+    source: str | None,
+    anchor: str | None,
+    declared: bool,
+    local_path: str,
+) -> None:
+    """A root fallback or a remote staged directory cannot authorize local reads."""
+    source_path = tmp_path if anchor == "absolute" else Path("parent") if anchor else None
+    parent = APMPackage(name="parent", version="1.0.0", source=source, source_path=source_path)
+    child = _local_ref(local_path)
+    if declared:
+        child.declaring_parent = tmp_path.as_posix()
+
+    reason = user_scope_rejection_reason(child, InstallScope.USER, parent_pkg=parent)
+
+    assert reason is not None
+    assert "absolute path" in reason
 
 
 # ---------------------------------------------------------------------------

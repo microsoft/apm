@@ -52,12 +52,13 @@ install for manual inspection. Repository path casing remains
 identity-significant for unknown git hosts because a self-hosted backend may be
 case-sensitive.
 
-**Local-path anchor rule:** a `local_path` declared INSIDE another local
-package is resolved relative to THAT package's own directory (npm/pip/cargo
-parity). Sibling layouts that resolve outside the consuming project root
-(e.g. `../sibling-pkg` from a local dep at the project edge) are
-supported -- the consuming developer authored the manifest chain and
-already trusts the layout.
+**Local-path anchor rule:** a path declared inside another local package
+resolves from that package's original source directory, including at user
+scope (`--global`). Trusted sibling layouts outside the consumer project
+root, such as `../sibling-pkg`, are supported. Direct user-scope local
+dependencies must use absolute paths (`~/path` also works); a relative
+reference without a known local parent's absolute source anchor is rejected.
+Neither CWD nor `~/.apm/` substitutes for that anchor.
 
 Remote-cloned packages may declare a relative `path:` only when it resolves
 inside the same authenticated remote repo root. APM expands that path to the

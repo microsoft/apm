@@ -96,6 +96,13 @@
       "guards": ["install-deployment-install-scope-selection"]
     },
     {
+      "id": "local-dependency-scope-admission",
+      "decision": "Local dependency admission at user scope",
+      "owner": "install/package_resolution.py (user_scope_rejection_reason)",
+      "selectors": ["src/apm_cli/install/package_resolution.py"],
+      "guards": ["install-deployment-local-scope-admission"]
+    },
+    {
       "id": "mcp-registry-url-resolution",
       "decision": "MCP registry URL resolution precedence",
       "owner": "registry/client.py (resolve_mcp_registry_url)",
