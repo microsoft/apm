@@ -93,7 +93,7 @@ def _scoped_known_targets_for_reconciliation(
     active_targets: Iterable[TargetProfile],
     declared_targets: Iterable[TargetProfile] | None,
 ) -> dict[str, TargetProfile]:
-    """Return known targets without running inactive experimental resolvers."""
+    """Return known targets without resolving inactive gated targets."""
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     active_by_name = _profiles_by_name(active_targets)
@@ -105,7 +105,6 @@ def _scoped_known_targets_for_reconciliation(
             scoped_known_targets[name] = resolved
             continue
         if _has_gated_resolver(profile):
-            scoped_known_targets[name] = profile
             continue
         scoped = profile.for_scope(user_scope=user_scope)
         if scoped is not None:

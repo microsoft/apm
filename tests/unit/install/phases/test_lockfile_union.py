@@ -241,7 +241,7 @@ class TestCurrentInstallGovernance:
                 declared_targets=None,
             )
 
-        assert scoped["copilot-cowork"] is profile
+        assert "copilot-cowork" not in scoped
 
     def test_file_target_includes_root_and_primitive_deploy_roots(self, tmp_path):
         from apm_cli.install.manifest_reconcile import install_governance
