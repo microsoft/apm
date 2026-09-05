@@ -594,7 +594,23 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         user_scope=config.user_scope,
         explicit_target=explicit_target,
     )
-    targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
+    filtered_targets = _filter_targets(live_targets, config.targets)
+    from types import SimpleNamespace
+
+    from apm_cli.install.phases.targets import _gate_cowork_target
+
+    replay_ctx = SimpleNamespace(
+        logger=logger,
+        target_decision=None,
+        target_override=explicit_target,
+        target_override_source=None,
+    )
+    targets = [
+        replay_target(target)
+        for target in _gate_cowork_target(
+            replay_ctx, filtered_targets, explicit_target, config.user_scope
+        )
+    ]
     registries: dict[str, str] | None = None
     downloader = None
     registry_resolver = None
