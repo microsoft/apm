@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Write hash-bearing `agent-skills` test fixtures as UTF-8 bytes so their integrity checks pass on Windows. — by @dajiaohuang (#2830)
+
 ## [0.29.1] - 2026-09-05
 
 ### Security
