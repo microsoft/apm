@@ -213,7 +213,7 @@ descendants, are skipped.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm run SCRIPT` | Execute a named script | `-p name=value` (repeatable) |
+| `apm run SCRIPT` | Execute a named script (experimental; the interface may change, so do not depend on it in automation) | `-p name=value` (repeatable) |
 | `apm preview SCRIPT` | Preview script without running | `-p name=value` |
 | `apm list` | List available scripts | -- |
 
