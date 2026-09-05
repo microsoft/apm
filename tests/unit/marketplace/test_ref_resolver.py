@@ -7,7 +7,6 @@ import os
 import subprocess
 import time
 import urllib.parse
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,6 +19,7 @@ from apm_cli.marketplace.ref_resolver import (
     _parse_ls_remote_output,
     _redact_token,
 )
+from apm_cli.utils.git_env import get_git_executable
 
 # ---------------------------------------------------------------------------
 # _parse_ls_remote_output
@@ -464,6 +464,7 @@ class TestRefResolver:
         assert refs == []
         resolver.close()
 
+    @pytest.mark.windows_compat
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_correct_command_args(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout="")
@@ -471,7 +472,7 @@ class TestRefResolver:
         resolver.list_remote_refs("acme/tools")
         args, kwargs = mock_run.call_args
         cmd = args[0]
-        assert Path(cmd[0]).name == "git"
+        assert cmd[0] == get_git_executable()
         assert cmd[1:4] == ["ls-remote", "--tags", "--heads"]
         parsed = urllib.parse.urlparse(cmd[4])
         assert parsed.hostname == "github.com"
@@ -633,6 +634,7 @@ class TestResolveRefSha:
         assert sha == _SHA_A
         resolver.close()
 
+    @pytest.mark.windows_compat
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_resolves_specific_ref(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
@@ -644,7 +646,7 @@ class TestResolveRefSha:
         # Verify command uses the ref directly (no --tags --heads).
         args, kwargs = mock_run.call_args  # noqa: RUF059
         cmd = args[0]
-        assert Path(cmd[0]).name == "git"
+        assert cmd[0] == get_git_executable()
         assert cmd[1] == "ls-remote"
         assert cmd[-1] == "main"
         parsed = urllib.parse.urlparse(cmd[2])

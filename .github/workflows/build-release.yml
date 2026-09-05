@@ -82,10 +82,24 @@ jobs:
       # per push (~15 redundant runs/day). Smoke is gated to promotion boundaries
       # below (tag/schedule/dispatch) where it actually serves as a pre-ship gate.
       - name: Run unit tests
+        if: matrix.platform != 'windows'
         env:
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
+
+      # Named starts/outcomes identify unfinished tests without dumping captures.
+      # This bounds an opaque hang; it does not turn a timeout into success.
+      - name: Run unit tests (Windows diagnostics)
+        if: matrix.platform == 'windows'
+        timeout-minutes: 60
+        env:
+          PYTHONUNBUFFERED: "1"
+          GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+        run: >-
+          uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
+          -vv --tb=short --show-capture=no --no-showlocals
 
       # Smoke runs only at promotion boundaries:
       #   - tags (pre-ship release gate; only place tag-cut releases get smoke validation)

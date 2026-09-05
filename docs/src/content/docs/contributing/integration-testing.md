@@ -370,6 +370,18 @@ environment end-to-end; for local iteration prefer the direct
 - Allows testing the full build pipeline without creating a release, even when dispatched from a tag ref
 - Useful for validating changes before tagging
 
+### Windows unit hang diagnostics
+
+The Windows full-unit step in `.github/workflows/build-release.yml` runs:
+
+```sh
+uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal -vv --tb=short --show-capture=no --no-showlocals
+```
+
+`PYTHONUNBUFFERED=1` keeps named test starts and outcomes visible while the suite runs. Captured test output and local-variable dumps remain disabled. These diagnostics identify candidate unfinished tests, not stack frames or the exact blocked phase; an outcome can appear before fixture teardown completes.
+
+The 60-minute step limit fails closed on a hang; it is not proof that tests pass or a root-cause fix. Test selection and parallelism are unchanged. The PR-time `windows_compat` gate exercises live name visibility during setup, call, and teardown after a failed call.
+
 ### GitHub Actions Authentication
 
 E2E tests require proper GitHub Models API access:
