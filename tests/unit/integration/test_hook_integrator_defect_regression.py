@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -828,3 +829,135 @@ def test_reconcile_validates_survivor_targets_before_destructive_wipe(
 
     assert config.read_bytes() == config_bytes
     assert sidecar.read_bytes() == sidecar_bytes
+
+
+def _setup_plugin_manifest_hook_package(tmp_path: Path) -> PackageInfo:
+    """Build a package whose hook script reads its own plugin manifest."""
+    package_path = tmp_path / "codex"
+    (package_path / ".claude-plugin").mkdir(parents=True)
+    (package_path / "hooks").mkdir()
+    (package_path / "scripts" / "lib").mkdir(parents=True)
+    (package_path / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "codex", "version": "1.0.0"}),
+        encoding="utf-8",
+    )
+    (package_path / "scripts" / "stop-review-gate-hook.mjs").write_text(
+        'import "./lib/app-server.mjs";\n',
+        encoding="utf-8",
+    )
+    (package_path / "scripts" / "lib" / "app-server.mjs").write_text(
+        'import fs from "node:fs";\n'
+        'const url = new URL("../../.claude-plugin/plugin.json", import.meta.url);\n'
+        'export const manifest = JSON.parse(fs.readFileSync(url, "utf8"));\n',
+        encoding="utf-8",
+    )
+    (package_path / "hooks" / "hooks.json").write_text(
+        json.dumps(
+            _session_start_hook('node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-review-gate-hook.mjs"')
+        ),
+        encoding="utf-8",
+    )
+    return _package_info(package_path, "codex")
+
+
+def test_claude_deploys_plugin_manifest_at_hook_plugin_root(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    pkg_info = _setup_plugin_manifest_hook_package(tmp_path)
+
+    result = HookIntegrator().integrate_package_hooks_claude(pkg_info, project)
+
+    plugin_root = project / ".claude" / "hooks" / "codex"
+    deployed_manifest = plugin_root / ".claude-plugin" / "plugin.json"
+    assert (plugin_root / "scripts" / "stop-review-gate-hook.mjs").is_file()
+    assert (plugin_root / "scripts" / "lib" / "app-server.mjs").is_file()
+    assert json.loads(deployed_manifest.read_text(encoding="utf-8"))["name"] == "codex"
+    assert deployed_manifest in result.target_paths
+
+
+def test_deployed_plugin_manifest_is_removed_with_hook_bundle(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    integrator = HookIntegrator()
+    result = integrator.integrate_package_hooks_claude(
+        _setup_plugin_manifest_hook_package(tmp_path), project
+    )
+    deployed_manifest = project / ".claude" / "hooks" / "codex" / ".claude-plugin" / "plugin.json"
+    managed_files = {path.relative_to(project).as_posix() for path in result.target_paths}
+    assert ".claude/hooks/codex/.claude-plugin/plugin.json" in managed_files
+
+    integrator.sync_integration(None, project, managed_files=managed_files)
+
+    assert not deployed_manifest.exists()
+
+
+def test_source_plan_authorizes_plugin_manifest_for_claude_hooks_only(tmp_path: Path) -> None:
+    package_path = _setup_plugin_manifest_hook_package(tmp_path).install_path
+
+    def _plan(target_name: str) -> DeployableSourcePlan:
+        return DeployableSourcePlan.create(
+            SimpleNamespace(install_path=package_path),
+            [KNOWN_TARGETS[target_name]],
+            skill_subset=None,
+            hooks_approved=True,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+
+    assert ".claude-plugin/plugin.json" in _plan("claude").paths
+    assert ".claude-plugin/plugin.json" not in _plan("copilot").paths
+
+
+def test_copilot_hook_bundle_omits_plugin_manifest(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    (project / ".github").mkdir(parents=True)
+
+    HookIntegrator().integrate_package_hooks(_setup_plugin_manifest_hook_package(tmp_path), project)
+
+    scripts_base = project / ".github" / "hooks" / "scripts" / "codex"
+    assert (scripts_base / "scripts" / "stop-review-gate-hook.mjs").is_file()
+    assert not (scripts_base / ".claude-plugin" / "plugin.json").exists()
+
+
+def test_symlinked_plugin_manifest_directory_is_not_deployed(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    pkg_info = _setup_plugin_manifest_hook_package(tmp_path)
+    package_path = pkg_info.install_path
+    real_manifest_dir = package_path / "manifest-src"
+    real_manifest_dir.mkdir()
+    (real_manifest_dir / "plugin.json").write_text(json.dumps({"name": "codex"}), encoding="utf-8")
+    shutil.rmtree(package_path / ".claude-plugin")
+    try:
+        (package_path / ".claude-plugin").symlink_to(real_manifest_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    result = HookIntegrator().integrate_package_hooks_claude(pkg_info, project)
+
+    plugin_root = project / ".claude" / "hooks" / "codex"
+    assert (plugin_root / "scripts" / "stop-review-gate-hook.mjs").is_file()
+    assert not (plugin_root / ".claude-plugin").exists()
+    assert all(".claude-plugin" not in path.parts for path in result.target_paths)
+
+
+def test_plugin_manifest_resolving_outside_the_package_is_not_deployed(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    pkg_info = _setup_plugin_manifest_hook_package(tmp_path)
+    package_path = pkg_info.install_path
+    outside_manifest = tmp_path / "outside-plugin.json"
+    outside_manifest.write_text(json.dumps({"name": "attacker"}), encoding="utf-8")
+    manifest = package_path / ".claude-plugin" / "plugin.json"
+    manifest.unlink()
+    try:
+        manifest.symlink_to(outside_manifest)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    result = HookIntegrator().integrate_package_hooks_claude(pkg_info, project)
+
+    plugin_root = project / ".claude" / "hooks" / "codex"
+    assert (plugin_root / "scripts" / "stop-review-gate-hook.mjs").is_file()
+    assert not (plugin_root / ".claude-plugin" / "plugin.json").exists()
+    assert all(".claude-plugin" not in path.parts for path in result.target_paths)
