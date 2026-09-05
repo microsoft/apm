@@ -100,10 +100,18 @@ def _scoped_known_targets_for_reconciliation(
     declared_by_name = _profiles_by_name(declared_targets)
     scoped_known_targets: dict[str, TargetProfile] = {}
     for name, profile in KNOWN_TARGETS.items():
-        resolved = active_by_name.get(name) or declared_by_name.get(name)
-        if resolved is not None:
-            scoped_known_targets[name] = resolved
+        active_profile = active_by_name.get(name)
+        if active_profile is not None:
+            scoped_known_targets[name] = active_profile
             continue
+
+        declared_profile = declared_by_name.get(name)
+        if declared_profile is not None:
+            if _has_gated_resolver(profile):
+                continue
+            scoped_known_targets[name] = declared_profile
+            continue
+
         if _has_gated_resolver(profile):
             continue
         scoped = profile.for_scope(user_scope=user_scope)
