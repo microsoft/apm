@@ -31,6 +31,11 @@ def test_pypi_publisher_only_downloads_and_publishes() -> None:
     workflow = load_workflow(ROOT / ".github" / "workflows" / "build-release.yml")
     builder = workflow_job(workflow, "build-pypi-distributions")
     assert builder["permissions"] == {"contents": "read"}
+    sync = workflow_step(builder, "Install locked build dependencies")
+    assert sync["run"] == "uv sync --frozen --extra dev"
+    build = workflow_step(builder, "Build Python package")
+    assert build["run"] == "uv build --no-build-isolation --no-sources"
+    assert all("uvx" not in str(step.get("run", "")) for step in builder["steps"])
 
     publisher = workflow_job(workflow, "publish-pypi")
     assert publisher["permissions"] == {"actions": "read", "id-token": "write"}
