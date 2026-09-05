@@ -17,6 +17,7 @@ from apm_cli.utils.git_env import (
     _GitConfigSnapshot,
     _resolve_trusted_executable,
     clone_git_worktree,
+    get_gh_executable,
     get_git_executable,
     git_network_env,
     git_remote_refs,
@@ -90,6 +91,14 @@ class TestGetGitExecutable:
 
         assert get_git_executable() == "/usr/bin/git"
         assert mock_resolve.call_count == 2
+
+    @patch(
+        "apm_cli.utils.git_env._resolve_trusted_executable",
+        side_effect=FileNotFoundError,
+    )
+    def test_missing_gh_has_actionable_error(self, mock_resolve) -> None:
+        with pytest.raises(FileNotFoundError, match=r"Please install it"):
+            get_gh_executable()
 
 
 class TestResolveTrustedExecutable:

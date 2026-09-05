@@ -287,7 +287,13 @@ def get_gh_executable() -> str:
     """Return a trusted absolute path to the GitHub CLI executable."""
     global _gh_executable
     if _gh_executable is None:
-        _gh_executable = _resolve_trusted_executable("gh")
+        try:
+            _gh_executable = _resolve_trusted_executable("gh")
+        except FileNotFoundError:
+            raise FileNotFoundError(  # noqa: B904
+                "GitHub CLI executable not found on PATH. "
+                "Please install it: https://cli.github.com/"
+            )
     return _gh_executable
 
 

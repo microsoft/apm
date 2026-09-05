@@ -77,11 +77,12 @@ class TestUrlConstruction:
             "http://127.0.0.1:8080/apm",
             RegistryAuthContext(registry_name="x", token=None),
         )
-        with pytest.raises(ValueError, match="must not be sent over HTTP"):
-            RegistryClient(
-                "http://localhost:8080/apm",
-                RegistryAuthContext(registry_name="x", token="token-value"),
-            )
+        for host in ("localhost", "127.0.0.1"):
+            with pytest.raises(ValueError, match="must not be sent over HTTP"):
+                RegistryClient(
+                    f"http://{host}:8080/apm",
+                    RegistryAuthContext(registry_name="x", token="token-value"),
+                )
 
     def test_versions_url(self):
         session = _make_session(_make_response(json_body={"package": "a/b", "versions": []}))
