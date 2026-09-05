@@ -779,6 +779,24 @@ def resolve_plugin_root_placeholders(value: Any, plugin_path: Path) -> Any:
     return value
 
 
+def rebase_plugin_root_paths(value: Any, old_root: Path, new_root: Path) -> Any:
+    """Repoint already-substituted plugin-root paths at a new package root.
+
+    Exact inverse of :func:`resolve_plugin_root_placeholders`: the placeholder
+    may sit anywhere in a string and appear more than once, so every occurrence
+    of *old_root* is swapped rather than only a leading path prefix.
+    """
+    if isinstance(value, str):
+        return value.replace(str(old_root), str(new_root))
+    if isinstance(value, dict):
+        return {
+            key: rebase_plugin_root_paths(item, old_root, new_root) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [rebase_plugin_root_paths(item, old_root, new_root) for item in value]
+    return value
+
+
 def _mcp_servers_to_apm_deps(
     servers: dict[str, Any],
     plugin_path: Path,

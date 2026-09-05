@@ -7,7 +7,7 @@ import threading
 from collections import deque
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
@@ -1343,7 +1343,28 @@ class APMDependencyResolver:
             downloaded_candidate,
             live_path,
         )
+        self._remap_dependency_configs(package, downloaded_candidate, live_path)
         return package
+
+    @staticmethod
+    def _remap_dependency_configs(
+        package: APMPackage,
+        candidate: Path,
+        live_path: Path,
+    ) -> None:
+        """Repoint plugin-root paths that were substituted while staged."""
+        from apm_cli.deps.plugin_parser import rebase_plugin_root_paths
+
+        for group in (package.dependencies, package.dev_dependencies):
+            for entries in (group or {}).values():
+                for entry in entries or ():
+                    if not is_dataclass(entry) or isinstance(entry, type):
+                        continue
+                    for spec in fields(entry):
+                        current = getattr(entry, spec.name, None)
+                        rebased = rebase_plugin_root_paths(current, candidate, live_path)
+                        if rebased != current:
+                            setattr(entry, spec.name, rebased)
 
     @staticmethod
     def _raise_downloaded_package_error(

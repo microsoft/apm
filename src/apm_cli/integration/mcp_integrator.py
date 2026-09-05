@@ -44,6 +44,7 @@ from apm_cli.utils.console import (
     _rich_success,
     _rich_warning,
 )
+from apm_cli.utils.staging_guard import assert_no_staging_paths
 from apm_cli.utils.yaml_io import load_yaml, yaml_to_str
 
 if TYPE_CHECKING:
@@ -484,6 +485,7 @@ class MCPIntegrator:
         if dep.extra:
             info["_extra"] = dict(dep.extra)
 
+        assert_no_staging_paths(info, f"MCP client configuration for '{dep.name}'")
         return info
 
     @staticmethod
