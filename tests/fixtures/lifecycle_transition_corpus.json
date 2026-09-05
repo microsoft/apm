@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "covering_tour": {
+    "case_id": "phase1-covering-tour",
+    "fixture": "copilot-project-single-skill-v1",
+    "issue": null,
+    "sequence": ["dry_run", "install", "reinstall", "tamper", "audit_tampered", "repair", "audit_clean", "remove_declaration", "prune_removed", "readd_declaration", "install"],
+    "expected_laws": ["filesystem.open_world_observation", "ownership.preserve_unowned", "routing.authorized_targets_only", "source.ref_cache_coherent", "outcome.status_matches_state", "idempotency.byte_stable", "transaction.failed_command_preserves_state", "observation.read_only_preserves_state"]
+  },
+  "regressions": [
+    {
+      "case_id": "designed-declaration-roundtrip-before-install",
+      "fixture": "copilot-project-single-skill-v1",
+      "issue": null,
+      "sequence": ["remove_declaration", "readd_declaration", "dry_run", "install", "audit_clean"],
+      "expected_laws": ["filesystem.open_world_observation", "ownership.preserve_unowned", "routing.authorized_targets_only", "source.ref_cache_coherent", "outcome.status_matches_state", "observation.read_only_preserves_state"]
+    },
+    {
+      "case_id": "designed-tampered-declaration-roundtrip",
+      "fixture": "copilot-project-single-skill-v1",
+      "issue": null,
+      "sequence": ["install", "tamper", "remove_declaration", "readd_declaration", "audit_tampered", "repair", "reinstall"],
+      "expected_laws": ["filesystem.open_world_observation", "ownership.preserve_unowned", "routing.authorized_targets_only", "source.ref_cache_coherent", "outcome.status_matches_state", "idempotency.byte_stable", "transaction.failed_command_preserves_state"]
+    }
+  ]
+}

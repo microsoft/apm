@@ -264,6 +264,49 @@ def test_run_sequence_rejects_misaligned_expectations(tmp_path: Path) -> None:
         )
 
 
+def test_scenario_deadline_includes_interleaved_fixture_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("tests.utils.apm_lifecycle_runner.time.monotonic", lambda: clock[0])
+    runner = ApmLifecycleRunner((sys.executable, "-c", "pass"), scenario_timeout_seconds=5)
+    with pytest.raises(subprocess.TimeoutExpired, match="interleaved"):
+        with runner.scenario(scenario_id="interleaved"):
+            runner.run((), cwd=tmp_path, env=os.environ)
+            clock[0] = 6.0
+            runner.run((), cwd=tmp_path, env=os.environ)
+
+
+def test_scenario_checks_trailing_fixture_work_and_releases_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("tests.utils.apm_lifecycle_runner.time.monotonic", lambda: clock[0])
+    runner = ApmLifecycleRunner((sys.executable, "-c", "pass"), scenario_timeout_seconds=5)
+    with pytest.raises(subprocess.TimeoutExpired, match="trailing-fixture"):
+        with runner.scenario(scenario_id="trailing-fixture"):
+            runner.run((), cwd=tmp_path, env=os.environ)
+            clock[0] = 6.0
+    with runner.scenario(scenario_id="next-scenario"):
+        assert runner.run((), cwd=tmp_path, env=os.environ).returncode == 0
+
+
+def test_scenario_rejects_nesting_and_preserves_original_exception(tmp_path: Path) -> None:
+    runner = ApmLifecycleRunner((sys.executable, "-c", "pass"))
+    with runner.scenario(scenario_id="outer"):
+        with pytest.raises(RuntimeError, match="must not be nested"):
+            with runner.scenario(scenario_id="inner"):
+                pytest.fail("Nested scenario entered")
+        assert runner.run((), cwd=tmp_path, env=os.environ).returncode == 0
+    with pytest.raises(ValueError, match="original failure"):
+        with runner.scenario(scenario_id="failed"):
+            raise ValueError("original failure")
+    with runner.scenario(scenario_id="retry"):
+        assert runner.run((), cwd=tmp_path, env=os.environ).returncode == 0
+
+
 def test_command_result_is_immutable(tmp_path: Path) -> None:
     result = CommandResult(
         command=("command",),

@@ -186,6 +186,33 @@
       "properties": ["transaction.failed_command_preserves_state"],
       "bounded_by": "tests/integration/test_required_lifecycle_state_machine.py::test_required_failed_lock_write_bounds_partial_state_and_recovers",
       "next_decision": "Full install transaction expansion remains deferred with phases 2-4."
+    },
+    {
+      "id": "copilot-user-instruction-second-pass-convergence",
+      "summary": "The first repeated global Copilot instruction install adds a duplicate block under the lock identity before a third install converges.",
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned"],
+      "bounded_by": "tests/integration/test_primitive_target_covering_array.py::test_primitive_target_covering_array",
+      "next_decision": "Unify remote and lock identities for user-root instruction ownership in a focused production fix."
+    },
+    {
+      "id": "user-relative-transitive-silent-omission",
+      "issue": 2815,
+      "summary": "A global install of an absolute local parent silently omits its relative local child while exiting successfully.",
+      "properties": ["outcome.status_matches_state", "routing.authorized_targets_only"],
+      "bounded_by": "tests/integration/test_primitive_target_covering_array.py::test_local_transitive_command_scope_parity",
+      "regression_case": "tests/integration/test_primitive_target_covering_array.py::test_local_transitive_command_scope_parity[user-relative-regression]",
+      "interaction_case": null,
+      "next_decision": "Production work deferred by maintainer. Decide anchored transitive support versus an explicit nonzero rejection. Tracking this issue grants no CI or coverage exemption."
+    },
+    {
+      "id": "experimental-target-audit-replay-mismatch",
+      "issue": 2816,
+      "summary": "Audit replays a clean local grok-cloud skill into the Copilot skill tree when unrelated directory signals are present.",
+      "properties": ["routing.authorized_targets_only", "outcome.status_matches_state"],
+      "bounded_by": "tests/integration/test_primitive_target_covering_array.py::test_primitive_target_covering_array",
+      "regression_case": "tests/integration/test_primitive_target_covering_array.py::test_primitive_target_covering_array[interaction-b8852029871d9058]",
+      "interaction_case": "interaction-b8852029871d9058",
+      "next_decision": "Production work deferred by maintainer. Define consistent experimental-target intent across install and audit. Keep the failed row visible and uncredited."
     }
   ]
 }
