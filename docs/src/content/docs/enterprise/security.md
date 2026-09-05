@@ -119,6 +119,24 @@ surfaces:
   same host as an approved direct HTTP dependency. Additional transitive hosts
   require `--allow-insecure-host HOSTNAME`.
 
+`apm-policy.yml` has no `allow_insecure` key. Dependency allow and deny lists
+match scheme-free canonical repository refs, not the manifest flag or URL
+scheme. Use them to limit which repository identities are eligible:
+
+```yaml
+enforcement: block
+dependencies:
+  allow:
+    - "contoso/**"
+```
+
+For example, `http://mirror.example.com/contoso/tools` canonicalizes to
+`contoso/tools`, so it matches this allow list. Policy cannot distinguish the
+mirror hostname or HTTP from HTTPS; the manifest and CLI approvals above are
+the scheme- and host-aware HTTP controls. `registry_source.allow_non_registry`
+is a separate, experimental registry-routing control; it does not control HTTP
+Git transport.
+
 These controls make the decision visible, but they do **not** make HTTP safe:
 
 - HTTP has no transport encryption or server authentication. A machine-in-the-middle can modify repository contents or refs in transit.
@@ -565,7 +583,10 @@ For an org standardizing on APM:
 - Publish an `apm-policy.yml` from your `<org>/.github` repo with an allow list and an MCP transport restriction. See [Governance Guide](../governance-guide/).
 - Require signed commits on the source repos APM pulls from -- this is where the trust chain bottoms out.
 - Route dep traffic through an enterprise proxy with audit logging. See [Registry Proxy & Air-gapped](../registry-proxy/).
-- Forbid `allow_insecure: true` via the policy allow list, except where an air-gapped mirror demands it.
+- Reject manifest entries with `allow_insecure: true` unless an air-gapped
+  mirror requires HTTP. APM has no dedicated policy key for that field; see
+  [HTTP (insecure) dependencies](#http-insecure-dependencies) for the two
+  runtime gates and the policy boundary.
 - Scan committed `apm.yml` for literal secrets in `mcp.env` values -- APM assumes env-var indirection (`GITHUB_TOKEN: ${GITHUB_TOKEN}`) but does not enforce it. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
 
 ## Frequently asked questions
