@@ -1599,9 +1599,9 @@ class TestFetchFromAdoRepo(unittest.TestCase):
 class TestGetTokenForHost(unittest.TestCase):
     """Test _get_token_for_host delegation."""
 
-    @patch.dict(os.environ, {"GITHUB_TOKEN": "test-tok"}, clear=False)
+    @patch.dict(os.environ, {"GITHUB_TOKEN": "test-tok"}, clear=True)
     @patch(
-        "apm_cli.core.token_manager.GitHubTokenManager.get_token_with_credential_fallback",
+        "apm_cli.core.auth.AuthResolver.resolve",
         side_effect=Exception("simulated failure"),
     )
     def test_fallback_to_env_vars(self, _mock_method):
@@ -1613,10 +1613,10 @@ class TestGetTokenForHost(unittest.TestCase):
     @patch.dict(
         os.environ,
         {"GITHUB_TOKEN": "", "GITHUB_APM_PAT": "", "GH_TOKEN": ""},
-        clear=False,
+        clear=True,
     )
     @patch(
-        "apm_cli.core.token_manager.GitHubTokenManager.get_token_with_credential_fallback",
+        "apm_cli.core.auth.AuthResolver.resolve",
         side_effect=Exception("simulated failure"),
     )
     def test_no_token_available(self, _mock_method):
