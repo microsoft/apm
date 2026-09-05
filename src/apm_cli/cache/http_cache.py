@@ -70,7 +70,11 @@ class HttpCache:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(str(self._cache_dir), 0o700)
         cleanup_incomplete(self._cache_dir)
-        self._tracked_size: int | None = None
+        # A brand-new/empty cache is known to be size zero, so its first
+        # store can take the size-cap fast path. Existing caches retain the
+        # unknown sentinel and are measured before eviction can be skipped.
+        with os.scandir(str(self._cache_dir)) as entries:
+            self._tracked_size: int | None = None if next(entries, None) is not None else 0
 
     def get(self, url: str, headers: dict[str, str] | None = None) -> CacheEntry | None:
         """Look up a cached response for *url*.
