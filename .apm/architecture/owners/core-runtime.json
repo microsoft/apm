@@ -10,9 +10,12 @@
     },
     {
       "id": "effective-install-target-selection",
-      "decision": "Effective install target selection",
+      "decision": "Effective install and audit target selection",
       "owner": "core/target_detection.py (EffectiveTargetDecision)",
-      "selectors": ["src/apm_cli/core/target_detection.py"],
+      "selectors": [
+        "src/apm_cli/core/target_detection.py",
+        "src/apm_cli/install/audit_target_roots.py"
+      ],
       "guards": ["registry-delegation-install-target-selection"]
     },
     {

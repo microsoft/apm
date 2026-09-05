@@ -88,6 +88,7 @@ class ReplayConfig:
     scratch_root: Path | None = None
     modules_root: Path | None = None
     user_scope: bool = False
+    resolved_targets: tuple[TargetProfile, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -506,40 +507,11 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
-def _read_apm_yml_target(project_root: Path):
-    """Return the explicit target list from ``apm.yml`` if declared, else ``None``.
+def _read_apm_yml_target(project_root: Path) -> list[str] | None:
+    """Compatibility wrapper for the authoritative manifest target reader."""
+    from apm_cli.core.apm_yml import read_declared_target_names
 
-    Handles both the singular ``target:`` and plural ``targets:`` forms so
-    that the replay uses the same target set the install pipeline used.
-    Without this, a project with ``targets: [claude, codex]`` (no copilot)
-    that also has a ``.github/`` directory for unrelated CI workflows would
-    have copilot auto-detected during replay, producing false
-    ``unintegrated`` findings for ``.github/instructions/`` (#1924).
-    """
-    apm_yml = project_root / "apm.yml"
-    if not apm_yml.exists():
-        return None
-    try:
-        # Route through the merge/alias-bounded loader (not stock yaml.safe_load)
-        # so a hostile apm.yml shipped in a cloned repo cannot wedge the default-on
-        # ``apm audit`` drift replay with a billion-laughs merge/alias bomb.
-        from apm_cli.utils.yaml_io import load_yaml
-
-        data = load_yaml(apm_yml) or {}
-    except Exception:
-        # Manifest unreadable / corrupt: fall back to auto-detect rather
-        # than crashing the replay; the caller still surfaces a useful
-        # error elsewhere if the project is truly broken.
-        return None
-    # parse_targets_field handles both 'target:' (singular) and 'targets:'
-    # (plural list) and validates the tokens against the canonical set.
-    try:
-        from apm_cli.core.apm_yml import parse_targets_field
-
-        tokens = parse_targets_field(data)
-        return tokens if tokens else None
-    except Exception:
-        return None
+    return read_declared_target_names(project_root)
 
 
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
@@ -554,9 +526,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         Surfaced verbatim when a locked dep cannot be materialized.
     """
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.audit_target_roots import replay_target
+    from apm_cli.install.audit_target_roots import replay_target, resolve_audit_targets
     from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
-    from apm_cli.integration.targets import resolve_targets
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
     if not config.lockfile_path.exists():
@@ -583,16 +554,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     )
     live_modules_dir = project_root / "apm_modules"
 
-    # Honor apm.yml's ``target:`` field so multi-target projects replay
-    # into all governed roots (not just whichever directory happens to
-    # already exist via auto-detection). Without this, a project that
-    # targets ``copilot,claude,cursor`` would replay only the primary
-    # auto-detected target and report the others as ``orphaned``.
-    explicit_target = _read_apm_yml_target(project_root)
-    live_targets = resolve_targets(
-        project_root,
-        user_scope=config.user_scope,
-        explicit_target=explicit_target,
+    live_targets = (
+        config.resolved_targets
+        if config.resolved_targets is not None
+        else resolve_audit_targets(project_root, user_scope=config.user_scope)
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
     registries: dict[str, str] | None = None
@@ -887,18 +852,36 @@ def diff_scratch_against_project(
         absolute_only=absolute_claims_only,
         targets=tuple(targets),
     )
-    claimed_prefixes = _claimed_prefixes(
-        tracked,
-        set(
-            claims_for_root(
-                {path: "" for path in _collect_hashed_files(lockfile)},
-                project_root,
-                absolute_only=absolute_claims_only,
-                targets=tuple(targets),
-            )
-        ),
-        project_files,
+    hashed_files = set(
+        claims_for_root(
+            {path: "" for path in _collect_hashed_files(lockfile)},
+            project_root,
+            absolute_only=absolute_claims_only,
+            targets=tuple(targets),
+        )
     )
+    # A narrowed desired target set must not hide files still claimed under
+    # the old target. Claims widen comparison only, never source replay.
+    from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
+
+    for rel in tracked:
+        if rel not in project_files:
+            candidate = project_root / rel
+            if has_symlink_component(project_root, candidate):
+                continue
+            path = ensure_path_within(candidate, project_root)
+            if path.is_file():
+                project_files[rel] = path
+            elif path.is_dir() and rel not in hashed_files:
+                project_files.update(_walk_managed(project_root, {rel}))
+    claimed_prefixes = _claimed_prefixes(tracked, hashed_files, project_files)
+    prefix_set = set(claimed_prefixes)
+    prefix_owners = {
+        path.rstrip("/") + "/": owner
+        for path, owner in tracked.items()
+        if path.rstrip("/") + "/" in prefix_set
+    }
+    owner_prefixes = sorted(prefix_owners, key=len, reverse=True)
     # Hook merge targets are shared with the user and never claimed in
     # deployed_files, so they can never be "unrecorded". Their APM-owned slice
     # is compared through hook_ownership; sidecars remain byte-for-byte owned.
@@ -1006,12 +989,18 @@ def diff_scratch_against_project(
     for rel in sorted(project_files.keys()):
         if rel in scratch_files:
             continue
-        if rel in tracked:
+        owner = tracked.get(rel)
+        if owner is None:
+            owner = next(
+                (prefix_owners[prefix] for prefix in owner_prefixes if rel.startswith(prefix)),
+                None,
+            )
+        if owner is not None:
             findings.append(
                 DriftFinding(
                     path=rel,
                     kind="orphaned",
-                    package=tracked.get(rel, ""),
+                    package=owner,
                 )
             )
         # else: untracked governed file -- ignore (user authored).

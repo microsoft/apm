@@ -219,6 +219,13 @@ descendants, are skipped.
 
 ## Security and audit
 
+Audit replays current target intent: manifest `target(s)` > saved `apm config
+set target` > existing directory detection. An unsaved earlier `install
+--target` override is not recovered from ownership records. Experimental targets
+require their prerequisites and use saved configuration, not experimental
+manifest declarations. Changing targets does not exempt old claimed files or
+missing ownership from drift detection. Configuration is read-only during audit.
+
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm audit [PKG]` | Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations | `--file PATH`, `--strip`, `--dry-run`, `-v`, `-f [text\|json\|sarif\|md]`, `-o PATH`, `--ci`, `--policy SOURCE`, `--no-cache`, `--no-fail-fast`, `--no-drift`, `--external NAME` (experimental; ingest a third-party SARIF scanner, e.g. `skillspector`), `--external-sarif PATH`, `--external-llm/--no-external-llm`, `--external-args TEXT` |

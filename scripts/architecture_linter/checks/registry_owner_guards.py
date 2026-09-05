@@ -250,7 +250,7 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
     if failures:
         return failures
 
-    findings: list[Violation] = []
+    findings = list(_check_audit_target_selection(provider, rule_id))
     owner = facts_by_path[_EFFECTIVE_TARGET_OWNER]
     install = facts_by_path[_INSTALL_CMD]
     pipeline = facts_by_path[_INSTALL_PIPELINE]
@@ -330,6 +330,76 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
                 )
             )
     return findings
+
+
+def _check_audit_target_selection(provider: FactsProvider, rule_id: str) -> Iterable[Violation]:
+    """Audit adapts the canonical decision and never redetects scratch targets."""
+    adapter = "src/apm_cli/install/audit_target_roots.py"
+    required = {
+        adapter: {
+            "resolve_effective_target_decision",
+            "read_declared_target_names",
+            "resolve_targets",
+        },
+        "src/apm_cli/install/drift.py": {"resolve_audit_targets"},
+        "src/apm_cli/install/audit_replay.py": {"resolve_audit_targets"},
+        "src/apm_cli/policy/ci_checks.py": {"resolve_audit_targets"},
+    }
+    for path, expected_calls in required.items():
+        _facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            yield from failures
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            yield violation(rule_id, path, "audit target delegation has no parsed source")
+            continue
+        calls = [
+            node
+            for node in index.walk(index.root)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        ]
+        missing = expected_calls - {node.func.id for node in calls}
+        if missing:
+            yield violation(
+                rule_id,
+                path,
+                f"audit target delegation is missing calls: {', '.join(sorted(missing))}",
+            )
+        for call in calls:
+            if path != adapter and call.func.id in {"resolve_targets", "_read_apm_yml_target"}:
+                yield violation(
+                    rule_id,
+                    path,
+                    "audit consumers must use resolve_audit_targets",
+                    line=call.lineno,
+                )
+            if path == adapter and call.func.id in {
+                "resolve_effective_target_decision",
+                "resolve_targets",
+            }:
+                keywords = {keyword.arg: keyword.value for keyword in call.keywords}
+                value = keywords.get("create_config")
+                if not isinstance(value, ast.Constant) or value.value is not False:
+                    yield violation(
+                        rule_id,
+                        path,
+                        "audit target resolution must not create config",
+                        line=call.lineno,
+                    )
+        if path != adapter:
+            for node in index.walk(index.root):
+                if (
+                    isinstance(node, ast.ImportFrom)
+                    and (node.module or "").endswith("integration.targets")
+                    and any(alias.name == "resolve_targets" for alias in node.names)
+                ):
+                    yield violation(
+                        rule_id,
+                        path,
+                        "audit target consumers must not import a parallel resolver",
+                        line=node.lineno,
+                    )
 
 
 def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:

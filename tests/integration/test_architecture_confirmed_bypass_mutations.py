@@ -32,6 +32,43 @@ class BypassMutation:
 
 BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
     BypassMutation(
+        name="audit-canonical-target-owner",
+        rule_id="registry_delegation.install_target_selection",
+        path="src/apm_cli/install/audit_target_roots.py",
+        old="decision = resolve_effective_target_decision(",
+        new="decision = private_target_decision(",
+    ),
+    BypassMutation(
+        name="audit-read-only-config",
+        rule_id="registry_delegation.install_target_selection",
+        path="src/apm_cli/install/audit_target_roots.py",
+        old="create_config=False",
+        new="create_config=True",
+        replace_all=True,
+    ),
+    BypassMutation(
+        name="audit-warm-replay-private-targets",
+        rule_id="registry_delegation.install_target_selection",
+        path="src/apm_cli/install/drift.py",
+        old="else resolve_audit_targets(project_root, user_scope=config.user_scope)",
+        new="else private_target_profiles(project_root, user_scope=config.user_scope)",
+    ),
+    BypassMutation(
+        name="audit-cold-replay-scratch-detection",
+        rule_id="registry_delegation.install_target_selection",
+        path="src/apm_cli/install/audit_replay.py",
+        old="        targets=targets,\n    )",
+        new="        targets=resolve_targets(scratch_root),\n    )",
+    ),
+    BypassMutation(
+        name="audit-baseline-private-targets",
+        rule_id="registry_delegation.install_target_selection",
+        path="src/apm_cli/policy/ci_checks.py",
+        old="resolve_audit_targets(project_root, user_scope=user_scope)",
+        new="private_target_profiles(project_root, user_scope=user_scope)",
+        replace_all=True,
+    ),
+    BypassMutation(
         name="target-context-exemption",
         rule_id="registry_delegation.install_target_selection",
         path="src/apm_cli/commands/install.py",

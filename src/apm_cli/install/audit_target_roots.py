@@ -1,14 +1,57 @@
-"""Scratch projection helpers for audit target deployment roots."""
+"""Read-only target resolution and scratch deployment roots for audit."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
 
-from apm_cli.integration.targets import TargetProfile
+import click
+import yaml
+
+from apm_cli.integration.targets import TargetProfile, resolve_targets
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
 _EXTERNAL_REPLAY_ROOT = ".apm-audit-targets"
+
+
+class AuditTargetError(ValueError):
+    """Current audit target intent cannot be resolved safely."""
+
+
+def resolve_audit_targets(
+    project_root: Path, *, user_scope: bool = False
+) -> tuple[TargetProfile, ...]:
+    """Adapt the canonical current-intent decision to read-only audit profiles."""
+    from apm_cli.core.apm_yml import read_declared_target_names
+    from apm_cli.core.target_detection import resolve_effective_target_decision
+
+    try:
+        decision = resolve_effective_target_decision(
+            project_root,
+            explicit_target=None,
+            manifest_target=read_declared_target_names(project_root),
+            user_scope=user_scope,
+            auto_detect=False,
+            create_config=False,
+        )
+        selected_targets = decision.canonical_targets
+        targets = resolve_targets(
+            project_root,
+            user_scope=user_scope,
+            explicit_target=list(selected_targets) if selected_targets is not None else None,
+            create_config=False,
+        )
+    except (OSError, ValueError, yaml.YAMLError, click.ClickException) as exc:
+        raise AuditTargetError(str(exc)) from exc
+
+    unavailable = set(selected_targets or ()) - {target.name for target in targets}
+    if unavailable:
+        names = ", ".join(sorted(unavailable))
+        raise AuditTargetError(
+            f"Cannot audit selected target(s): {names}. Restore their experimental/runtime "
+            "prerequisites for this scope, or correct apm.yml / 'apm config set target'."
+        )
+    return tuple(targets)
 
 
 def replay_target(target: TargetProfile) -> TargetProfile:

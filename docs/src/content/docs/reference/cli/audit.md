@@ -179,6 +179,20 @@ For the full workflow, see [Enforce in CI](../../../enterprise/enforce-in-ci/).
 
 ### Drift detection
 
+Audit evaluates **current target intent**: `apm.yml target(s)` first, then
+[`apm config set target`](../config/), then existing directory detection.
+It does not reconstruct an earlier one-shot `apm install --target` override.
+Keep the intended target in the manifest or saved configuration; experimental
+targets such as `grok-cloud` use the saved configuration because manifest
+target declarations do not accept experimental names.
+
+Changing that intent changes the expected output. Old recorded deployments
+remain in the comparison, and missing ownership does not remove source-derived
+expectations. Experimental targets still require enablement and their runtime
+prerequisites; an unavailable selected target fails CI as `target-resolution`,
+rather than passing an empty replay. Audit reads configuration without creating
+or updating it.
+
 The default audit replays the install pipeline into a scratch tree and diffs
 the result against the working tree. It catches hand-edits, missing
 integrations, orphaned files, and `unrecorded` files. `unrecorded` applies when
