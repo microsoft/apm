@@ -152,7 +152,7 @@ jobs:
             ./scripts/windows/test-release-validation.ps1
             ./scripts/test-dependency-integration.sh
             ./scripts/windows/test-dependency-integration.ps1
-            ./scripts/github-token-helper.sh
+            ./src/apm_cli/runtime/scripts/github-token-helper.sh
             ./scripts/windows/github-token-helper.ps1
           include-hidden-files: true  # Required to include .apm directories
           retention-days: 30
@@ -228,7 +228,7 @@ jobs:
             ./dist/apm-darwin-x86_64.sha256
             ./scripts/test-release-validation.sh
             ./scripts/test-dependency-integration.sh
-            ./scripts/github-token-helper.sh
+            ./src/apm_cli/runtime/scripts/github-token-helper.sh
           include-hidden-files: true
           retention-days: 30
           if-no-files-found: error
@@ -254,12 +254,12 @@ jobs:
       - name: Prepare isolated release-validation environment
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
         run: |
-          mkdir -p /tmp/apm-isolated-test/dist
+          mkdir -p /tmp/apm-isolated-test/dist /tmp/apm-isolated-test/scripts /tmp/apm-isolated-test/src/apm_cli/runtime/scripts
           cp -R ./dist/apm-darwin-x86_64 /tmp/apm-isolated-test/dist/
           cp ./dist/apm-darwin-x86_64.sha256 /tmp/apm-isolated-test/dist/ 2>/dev/null || true
-          cp ./scripts/test-release-validation.sh /tmp/apm-isolated-test/
-          cp ./scripts/test-dependency-integration.sh /tmp/apm-isolated-test/ 2>/dev/null || true
-          cp ./scripts/github-token-helper.sh /tmp/apm-isolated-test/ 2>/dev/null || true
+          cp ./scripts/test-release-validation.sh /tmp/apm-isolated-test/scripts/
+          cp ./scripts/test-dependency-integration.sh /tmp/apm-isolated-test/scripts/ 2>/dev/null || true
+          cp ./src/apm_cli/runtime/scripts/github-token-helper.sh /tmp/apm-isolated-test/src/apm_cli/runtime/scripts/
 
           cd /tmp/apm-isolated-test
           chmod +x ./dist/apm-darwin-x86_64/apm
@@ -274,8 +274,8 @@ jobs:
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd /tmp/apm-isolated-test
-          chmod +x test-release-validation.sh
-          ./test-release-validation.sh
+          chmod +x ./scripts/test-release-validation.sh
+          ./scripts/test-release-validation.sh
         timeout-minutes: 20
 
   # Consolidated macOS ARM build + validation.
@@ -345,7 +345,7 @@ jobs:
             ./dist/apm-darwin-arm64.sha256
             ./scripts/test-release-validation.sh
             ./scripts/test-dependency-integration.sh
-            ./scripts/github-token-helper.sh
+            ./src/apm_cli/runtime/scripts/github-token-helper.sh
           include-hidden-files: true
           retention-days: 30
           if-no-files-found: error
@@ -371,12 +371,12 @@ jobs:
       # PHASE 3: RELEASE VALIDATION
       - name: Prepare isolated release-validation environment
         run: |
-          mkdir -p /tmp/apm-isolated-test/dist
+          mkdir -p /tmp/apm-isolated-test/dist /tmp/apm-isolated-test/scripts /tmp/apm-isolated-test/src/apm_cli/runtime/scripts
           cp -R ./dist/apm-darwin-arm64 /tmp/apm-isolated-test/dist/
           cp ./dist/apm-darwin-arm64.sha256 /tmp/apm-isolated-test/dist/ 2>/dev/null || true
-          cp ./scripts/test-release-validation.sh /tmp/apm-isolated-test/
-          cp ./scripts/test-dependency-integration.sh /tmp/apm-isolated-test/ 2>/dev/null || true
-          cp ./scripts/github-token-helper.sh /tmp/apm-isolated-test/ 2>/dev/null || true
+          cp ./scripts/test-release-validation.sh /tmp/apm-isolated-test/scripts/
+          cp ./scripts/test-dependency-integration.sh /tmp/apm-isolated-test/scripts/ 2>/dev/null || true
+          cp ./src/apm_cli/runtime/scripts/github-token-helper.sh /tmp/apm-isolated-test/src/apm_cli/runtime/scripts/
 
           cd /tmp/apm-isolated-test
           chmod +x ./dist/apm-darwin-arm64/apm
@@ -390,8 +390,8 @@ jobs:
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: |
           cd /tmp/apm-isolated-test
-          chmod +x test-release-validation.sh
-          ./test-release-validation.sh
+          chmod +x ./scripts/test-release-validation.sh
+          ./scripts/test-release-validation.sh
         timeout-minutes: 20
 
   # Integration tests with full source code access (Linux + Windows).
