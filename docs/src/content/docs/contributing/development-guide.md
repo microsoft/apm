@@ -195,6 +195,16 @@ bash scripts/lint-architecture-boundaries.sh
 The check fails closed when metadata is malformed, missing, or not listed in the
 index.
 
+`InstallTransaction` owns one acquisition of the shared lifecycle `FileLock`.
+Commit, rollback, and context exit are the normal release paths; explicit release
+invokes the same `weakref.finalize` callback used for abandoned transactions.
+This fallback releases only the transaction's outstanding acquisition, never
+runs filesystem rollback, and leaves other owners' acquisitions intact. Keep
+transaction lifetime and completion on the acquiring thread: filelock uses
+thread-local state, so there is no cross-thread lifecycle guarantee. In lifecycle
+release regression tests, retain the shared lock handle so `FileLock` destruction
+cannot mask a missed release.
+
 ### Optional: local pre-commit hooks
 
 For instant feedback before pushing, install the pre-commit hooks:
