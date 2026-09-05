@@ -271,20 +271,6 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             exempt=False,
         )
     )
-    findings.extend(
-        _forbid_scan(
-            provider,
-            inv,
-            _RID_GIT_CHILD_ENV,
-            _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
-            re.compile(
-                r"(?:subprocess\.(?:run|Popen|check_call|check_output)|"
-                r"(?:self\.)?_run)\s*\(\s*\[\s*['\"](?:git|gh)['\"]\s*,"
-            ),
-            "Git and GitHub CLI subprocesses must use the trusted executable resolver",
-            exempt=False,
-        )
-    )
     # Direct ado_token field reads are forbidden (legacy scan: no exemption filter).
     findings.extend(
         _forbid_scan(
@@ -501,6 +487,20 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
 def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
+            re.compile(
+                r"(?:subprocess\.(?:run|Popen|check_call|check_output)|"
+                r"(?:self\.)?_run)\s*\(\s*\[\s*['\"](?:git|gh)['\"]\s*,"
+            ),
+            "Git and GitHub CLI subprocesses must use the trusted executable resolver",
+            exempt=False,
+        )
+    )
     findings.extend(
         _require_subs(
             provider,

@@ -366,6 +366,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Effective package-target authorization loses its single resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-primitive-classification",
+        rule_id="install-deployment-primitive-classification",
+        path="src/apm_cli/install/primitive_classification.py",
+        old="def classify_agent_source_file(",
+        new="def classify_agent_source_file_disabled(",
+        intent="Primitive classification loses its canonical agent-source classifier.",
+    ),
+    MutationCase(
         guard_id="install-deployment-prospective-dry-run-plan",
         rule_id="install-deployment-prospective-dry-run-plan",
         path="src/apm_cli/install/presentation/dry_run.py",
@@ -910,6 +918,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A downloader reads an ADO token off the host instead of via AuthResolver.",
     ),
     MutationCase(
+        guard_id="transport-platform-host-reference-coordinates",
+        rule_id="transport-platform-host-reference-coordinates",
+        path="src/apm_cli/models/dependency/host_virtual.py",
+        old="def parse_host_qualified_reference(",
+        new="def parse_host_qualified_reference_disabled(",
+        intent="Host-qualified reference parsing loses its canonical coordinate owner.",
+    ),
+    MutationCase(
         guard_id="transport-platform-network-host-parsing",
         rule_id="transport-platform-network-host-parsing",
         path="src/apm_cli/install/mcp/warnings.py",
@@ -1071,6 +1087,28 @@ def test_owner_rules_report_nothing_before_mutation(
 ) -> None:
     """Every owner rule is clean at HEAD, so any violation below is the mutation."""
     assert baseline_violated_rule_ids == frozenset()
+
+
+def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> None:
+    """AC13 must retain the selected transport attempt as the requested-URL owner."""
+    path = "src/apm_cli/install/helpers/ref_reuse.py"
+    source = _source(path)
+    old = "    requested_url = selected_attempt.requested_url"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "    requested_url = None  # bypass selected attempt", 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(
+        ROOT,
+        ("transport-platform-git-semver-preflight",),
+        source_overrides={path: mutated},
+    )
+
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == "transport-platform-git-semver-preflight"
+        for violation in report.violations
+    )
 
 
 @pytest.mark.parametrize("case", MUTATIONS, ids=CASE_IDS)

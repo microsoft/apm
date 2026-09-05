@@ -7,6 +7,7 @@ intent).
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Sequence
 
@@ -158,9 +159,30 @@ _LOCAL_BUNDLE_HANDLER = "src/apm_cli/install/local_bundle_handler.py"
 _LOCAL_BUNDLE_PREFLIGHT_NEEDLES = (
     "from ..policy.install_preflight import run_policy_preflight",
     "policy_fetch, _enforcement_active = run_policy_preflight(",
-    "cache_only=True",
     "mcp_deps=bundle_mcp_deps",
 )
+
+
+def _has_cache_only_preflight(provider: FactsProvider) -> bool:
+    """Return whether the sole canonical preflight call explicitly runs cache-only."""
+    index = provider.tree_index(_LOCAL_BUNDLE_HANDLER)
+    if index is None:
+        return False
+    calls = tuple(
+        node
+        for node in index.nodes
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "run_policy_preflight"
+        )
+    )
+    return len(calls) == 1 and any(
+        keyword.arg == "cache_only"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+        for keyword in calls[0].keywords
+    )
 
 
 def check_local_bundle_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -169,7 +191,7 @@ def check_local_bundle_preflight(provider: FactsProvider) -> tuple[Violation, ..
     lines, failures = _configured(provider, _LOCAL_BUNDLE_HANDLER, rule_id)
     if failures:
         return failures
-    return tuple(
+    findings = list(
         _require_all(
             rule_id,
             _LOCAL_BUNDLE_HANDLER,
@@ -178,6 +200,15 @@ def check_local_bundle_preflight(provider: FactsProvider) -> tuple[Violation, ..
             "Local bundle installs must route policy through install_preflight.py",
         )
     )
+    if not _has_cache_only_preflight(provider):
+        findings.append(
+            _report(
+                rule_id,
+                _LOCAL_BUNDLE_HANDLER,
+                "Local bundle policy preflight must explicitly run cache-only",
+            )
+        )
+    return tuple(findings)
 
 
 _INSTALL_PIPELINE = "src/apm_cli/install/pipeline.py"

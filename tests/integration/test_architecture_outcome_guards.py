@@ -316,6 +316,8 @@ def test_staged_plugin_skill_is_not_promoted_after_empty_declaration(
         tmp_path,
         {"name": "staged-skills", "version": "1.0.0", "skills": []},
     )
+    # An eligible apm.yml plus .apm/ is an APM package, not a plugin.
+    (plugin / "apm.yml").unlink()
     staged = plugin / ".apm" / "skills" / "staged"
     staged.mkdir(parents=True)
     (staged / "SKILL.md").write_text(

@@ -651,11 +651,13 @@ Authentication and transport are independent decisions:
   select keys or override agent behavior -- whatever `git clone` would do
   on the same machine, APM does.
 
-APM picks one initial transport per dependency. An explicit URL scheme prevents
-APM from selecting another protocol, while Git still applies matching safe
-`url.<base>.insteadOf` rules afterward. Shorthand defaults to HTTPS unless a
-flag or configuration selects SSH. For the full matrix and fallback escape
-hatch, see [Manage dependencies: Transport selection](../../consumer/manage-dependencies/#transport-selection).
+APM picks one initial transport per dependency and uses it for clone/fetch and
+semver tag discovery. When `prefer-ssh` selects SSH, strict mode does not
+silently probe HTTPS. An explicit URL scheme prevents APM from selecting another
+protocol, while Git still applies matching safe `url.<base>.insteadOf` rules
+afterward. Shorthand defaults to HTTPS unless a flag or configuration selects
+SSH. For the full matrix and fallback escape hatch, see [Manage dependencies:
+Transport selection](../../consumer/manage-dependencies/#transport-selection).
 
 :::caution[Custom ports and cross-protocol fallback]
 When `--allow-protocol-fallback` is in effect, APM reuses the

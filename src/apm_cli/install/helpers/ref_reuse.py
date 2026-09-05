@@ -186,7 +186,31 @@ def maybe_resolve_git_semver(
         from apm_cli.deps.transport_selection import ProtocolPreference
 
         protocol_pref = ProtocolPreference.NONE
-    rewrite_candidate = dep_ref.to_github_url()
+    explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower()
+    candidate_uses_ssh = explicit_scheme == "ssh" or (
+        not explicit_scheme and getattr(protocol_pref, "value", None) == "ssh"
+    )
+    if candidate_uses_ssh:
+        if dep_ref.is_azure_devops():
+            from apm_cli.utils.github_host import build_ado_ssh_url
+
+            dep_ref.validate_provider_coordinates()
+            rewrite_candidate = build_ado_ssh_url(
+                dep_ref.ado_organization,
+                dep_ref.ado_project,
+                dep_ref.ado_repo,
+            )
+        else:
+            from apm_cli.utils.github_host import build_ssh_url
+
+            rewrite_candidate = build_ssh_url(
+                dep_ref.host or "github.com",
+                dep_ref.repo_url,
+                port=dep_ref.port,
+                user=dep_ref.ssh_user or "git",
+            )
+    else:
+        rewrite_candidate = dep_ref.to_github_url()
     if not dep_ref.is_azure_devops() and not rewrite_candidate.endswith(".git"):
         rewrite_candidate = f"{rewrite_candidate}.git"
     anonymous_selector = (
@@ -226,17 +250,16 @@ def maybe_resolve_git_semver(
         candidate_url=rewrite_candidate,
     )
     selected_attempt = transport_plan.attempts[0]
-    selected_scheme = selected_attempt.scheme
-    transport_scheme = (
-        "https"
-        if selected_attempt.requested_url is not None
-        else ("ssh" if selected_scheme == "ssh" else "https")
-    )
-    policy_url = selected_attempt.effective_url or (
-        rewrite_candidate
-        if selected_scheme != "ssh"
-        else f"ssh://{dep_ref.host or 'github.com'}/{dep_ref.repo_url}"
-    )
+    requested_url = selected_attempt.requested_url
+    if requested_url is not None:
+        from urllib.parse import urlsplit
+
+        requested_scheme = urlsplit(requested_url).scheme.lower()
+        requested_uses_ssh = requested_scheme == "ssh" or ("@" in requested_url.split(":", 1)[0])
+        transport_scheme = "ssh" if requested_uses_ssh else "https"
+    else:
+        transport_scheme = selected_attempt.scheme
+    policy_url = selected_attempt.effective_url or rewrite_candidate
     resolver_token, auth_scheme, _resolver_git_env = resolve_dep_auth(
         dep_ref,
         auth_resolver,
@@ -272,18 +295,20 @@ def maybe_resolve_git_semver(
         port=dep_ref.port,
         unauth_first=anonymous_first,
     )
+    remote_url = (
+        requested_url
+        if selected_attempt.requested_url is not None
+        else (
+            dep_ref.to_github_url()
+            if transport_scheme == "https" and dep_ref.is_azure_devops()
+            else None
+        )
+    )
     return GitSemverResolver(ref_resolver).resolve(
         owner_repo=owner_repo,
         package_name=package_name,
         constraint=constraint,
-        remote_url=(
-            selected_attempt.requested_url
-            or (
-                dep_ref.to_github_url()
-                if transport_scheme == "https" and dep_ref.is_azure_devops()
-                else None
-            )
-        ),
+        remote_url=remote_url,
     )
 
 

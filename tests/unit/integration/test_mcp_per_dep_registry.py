@@ -9,6 +9,8 @@ constructed with the correct ``registry_url`` kwarg.  Deps without a
 
 from unittest.mock import MagicMock, call, patch
 
+import pytest
+
 from apm_cli.models.dependency.mcp import MCPDependency
 
 # ---------------------------------------------------------------------------
@@ -133,6 +135,81 @@ class TestPerDepRegistryCreatesSeparateOperations:
 
         assert ops_cls.call_count == 1
         assert ops_cls.call_args == call(registry_url=canonical_url)
+
+    def test_matching_config_registry_preserves_deliberate_source(self):
+        """A persisted config URL remains trusted after manifest round-tripping."""
+        url = "http://127.0.0.1:8123"
+        dep = _make_dep("configured-server", registry=url)
+        ops_mock = _make_operations_mock(["configured-server"])
+
+        with (
+            patch(_OPS_PATH, return_value=ops_mock) as ops_cls,
+            patch(_INTEGRATOR_PATH) as integrator_mock,
+        ):
+            integrator_mock._apply_overlay.return_value = None
+            integrator_mock._detect_mcp_config_drift.return_value = []
+            integrator_mock._append_drifted_to_install_list.return_value = None
+            integrator_mock._install_for_runtime.return_value = True
+
+            from apm_cli.integration.mcp_integrator_install import (
+                _PrevalidatedRegistryServers,
+                run_mcp_install,
+            )
+
+            run_mcp_install(
+                mcp_deps=[dep],
+                runtime="copilot",
+                logger=MagicMock(),
+                prevalidated_registry_servers=_PrevalidatedRegistryServers(
+                    {"configured-server": {}},
+                    source="config",
+                    registry_url=f" {url}/ ",
+                ),
+            )
+
+        assert ops_cls.call_args == call(registry_url=url, registry_source="config")
+
+    @pytest.mark.parametrize(
+        ("server_name", "manifest_url"),
+        [
+            ("configured-server", "http://127.0.0.1:8124"),
+            ("manifest-server", "http://127.0.0.1:8123"),
+        ],
+    )
+    def test_different_manifest_registry_does_not_inherit_config_source(
+        self, server_name: str, manifest_url: str
+    ) -> None:
+        """Both the endpoint and server identity must match the validated result."""
+        dep = _make_dep(server_name, registry=manifest_url)
+        ops_mock = _make_operations_mock([server_name])
+
+        with (
+            patch(_OPS_PATH, return_value=ops_mock) as ops_cls,
+            patch(_INTEGRATOR_PATH) as integrator_mock,
+        ):
+            integrator_mock._apply_overlay.return_value = None
+            integrator_mock._detect_mcp_config_drift.return_value = []
+            integrator_mock._append_drifted_to_install_list.return_value = None
+            integrator_mock._install_for_runtime.return_value = True
+
+            from apm_cli.integration.mcp_integrator_install import (
+                _PrevalidatedRegistryServers,
+                run_mcp_install,
+            )
+
+            run_mcp_install(
+                mcp_deps=[dep],
+                runtime="copilot",
+                logger=MagicMock(),
+                prevalidated_registry_servers=_PrevalidatedRegistryServers(
+                    {"configured-server": {}},
+                    source="config",
+                    registry_url="http://127.0.0.1:8123",
+                ),
+            )
+
+        assert ops_cls.call_args == call(registry_url=manifest_url)
+        ops_mock.validate_servers_exist.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

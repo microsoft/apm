@@ -100,7 +100,9 @@ def _child_environment(
 
 def _remote_events(shim: GitCredentialShim) -> list[dict[str, object]]:
     return [
-        event for event in shim.events() if event.get("event") == "git" and event.get("remotes")
+        event
+        for event in shim.events()
+        if event.get("event") == "git" and event.get("command") != "config" and event.get("remotes")
     ]
 
 

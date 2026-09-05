@@ -7,6 +7,7 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.integration.lsp_integrator import LSPIntegrator
 
 
 def _write_lsp_manifest(project_root: Path) -> None:
@@ -59,8 +60,8 @@ dependencies:
     )
 
 
-def _write_unapproved_lsp_manifest(project_root: Path) -> None:
-    """Create a project with an unapproved LSP dependency."""
+def _write_project_lsp_with_executable_gate(project_root: Path) -> None:
+    """Create a project-owned LSP alongside an enabled package trust gate."""
     (project_root / "apm.yml").write_text(
         """
 name: lsp-dry-run
@@ -74,6 +75,41 @@ dependencies:
       command: pyright-langserver
       extensionToLanguage:
         .py: python
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+
+def _write_untrusted_package_lsp_fixture(project_root: Path) -> None:
+    """Seed a local package and its installed copy without trusted executables."""
+    package_manifest = """
+name: untrusted-lsp-package
+version: "1.0.0"
+dependencies:
+  lsp:
+    - name: package-pyright
+      command: pyright-langserver
+      extensionToLanguage:
+        .py: python
+""".lstrip()
+    source_package = project_root / "packages" / "untrusted-lsp-package"
+    source_package.mkdir(parents=True)
+    (source_package / "apm.yml").write_text(package_manifest, encoding="utf-8")
+
+    installed_package = project_root / "apm_modules" / "_local" / "untrusted-lsp-package"
+    installed_package.mkdir(parents=True)
+    (installed_package / "apm.yml").write_text(package_manifest, encoding="utf-8")
+
+    (project_root / "apm.yml").write_text(
+        """
+name: lsp-package-gate
+version: "1.0.0"
+targets:
+  - copilot
+allowExecutables: {}
+dependencies:
+  apm:
+    - ./packages/untrusted-lsp-package
 """.lstrip(),
         encoding="utf-8",
     )
@@ -161,23 +197,54 @@ def test_apm_only_dry_run_only_mcp_reports_selected_empty_plan(
 
 
 @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
-def test_lsp_dry_run_filters_unapproved_server_before_rendering(
+def test_lsp_dry_run_keeps_project_owned_server_when_package_gate_is_enabled(
     _mock_updates,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """Dry-run service counts use the same executable trust filter as install."""
-    _write_unapproved_lsp_manifest(tmp_path)
+    """The package trust gate does not hide a project-authored LSP server."""
+    _write_project_lsp_with_executable_gate(tmp_path)
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(cli, ["install", "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "Filtered 1 LSP server(s)" in result.output
-    assert "LSP servers to configure" not in result.output
-    assert "No dependencies found" in result.output
-    assert "would make no changes" in result.output
+    assert "Filtered" not in result.output
+    assert "LSP servers to configure (1):" in result.output
+    assert "pyright" in result.output
+    assert "would configure 1 LSP server" in result.output
     assert not (tmp_path / "apm.lock.yaml").exists()
+    assert not (tmp_path / ".github" / "lsp.json").exists()
+
+
+@patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
+def test_lsp_dry_run_filters_unapproved_dependency_server(
+    _mock_updates,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The CLI preview filters package-owned data at its model-loading boundary."""
+    _write_untrusted_package_lsp_fixture(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    dependencies = LSPIntegrator.collect_transitive(tmp_path / "apm_modules")
+    assert len(dependencies) == 1
+    assert dependencies[0].resolved_by == "_local/untrusted-lsp-package"
+    # Dry-run does not discover transitive services. Supply the real collector's
+    # ownership-bearing result at the existing package-model boundary instead.
+    with patch(
+        "apm_cli.models.apm_package.APMPackage.get_lsp_dependencies",
+        return_value=dependencies,
+    ):
+        result = CliRunner().invoke(cli, ["install", "--dry-run", "--no-policy"])
+
+    assert result.exit_code == 0, result.output
+    output = " ".join(result.output.split())
+    assert "Filtered 1 LSP server from '_local/untrusted-lsp-package'" in output
+    assert "declaring package is not trusted yet" in output
+    assert "LSP servers to configure" not in output
+    assert "package-pyright" not in output
+    assert not (tmp_path / "apm.lock.yaml").exists()
+    assert not (tmp_path / ".github" / "lsp.json").exists()
 
 
 @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)

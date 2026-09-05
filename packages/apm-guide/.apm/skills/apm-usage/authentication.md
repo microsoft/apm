@@ -57,6 +57,9 @@ sure its key is already available to SSH. Unlock a passphrase-protected key
 first (for example, with `ssh-add <key-file>`). In CI, load a dedicated deploy
 key non-interactively or use token-backed HTTPS.
 
+APM uses the selected transport for clone/fetch and semver tag discovery. When
+`prefer-ssh` selects SSH, strict mode does not silently probe HTTPS.
+
 ## Marketplace transport
 
 For in-repository plugins from GitLab and generic git marketplaces, an SSH
