@@ -328,9 +328,71 @@ class CodexMarketplaceMapper(MarketplaceOutputMapper):
         return MapperResult(doc, (), tuple(name_diagnostics))
 
 
+class CopilotMarketplaceMapper(MarketplaceOutputMapper):
+    """Map packages into GitHub Copilot CLI marketplace format."""
+
+    uses_remote_metadata = True
+
+    def compose(
+        self,
+        *,
+        config: MarketplaceConfig,
+        resolved: tuple[ResolvedPackage, ...],
+        remote_metadata: dict[str, dict[str, Any]] | None = None,
+    ) -> MapperResult:
+        remote_metadata = remote_metadata or {}
+        entry_by_name: dict[str, PackageEntry] = {e.name: e for e in config.packages}
+
+        doc: dict[str, Any] = OrderedDict()
+        sanitized, name_diagnostics = _sanitized_name_with_diagnostic(config.name)
+        doc["name"] = sanitized
+        owner: dict[str, Any] = OrderedDict({"name": config.owner.name})
+        if config.owner.email:
+            owner["email"] = config.owner.email
+        doc["owner"] = owner
+
+        metadata: dict[str, Any] = OrderedDict()
+        if config.description:
+            metadata["description"] = config.description
+        if config.version:
+            metadata["version"] = config.version
+        if metadata:
+            doc["metadata"] = metadata
+
+        plugins: list[dict[str, Any]] = []
+        for pkg in resolved:
+            entry = entry_by_name.get(pkg.name)
+            if entry is None:
+                continue
+            plugin: dict[str, Any] = OrderedDict({"name": pkg.name})
+            meta = remote_metadata.get(pkg.name, {})
+            plugin["description"] = entry.description or meta.get("description", "")
+            version = entry.version if entry.is_local else meta.get("version") or entry.version
+            if version:
+                plugin["version"] = version
+            plugin["source"] = _copilot_source(entry, pkg)
+            if entry.author:
+                plugin["author"] = dict(entry.author)
+            if entry.homepage:
+                plugin["homepage"] = entry.homepage
+            if entry.repository:
+                plugin["repository"] = entry.repository
+            if entry.license:
+                plugin["license"] = entry.license
+            if entry.category:
+                plugin["category"] = entry.category
+            if pkg.tags:
+                plugin["tags"] = list(pkg.tags)
+            plugins.append(plugin)
+
+        doc["plugins"] = plugins
+        return MapperResult(doc, (), tuple(name_diagnostics))
+
+
 MARKETPLACE_OUTPUT_MAPPERS: dict[str, MarketplaceOutputMapper] = {
     "claude": ClaudeMarketplaceMapper(),
     "codex": CodexMarketplaceMapper(),
+    "copilot": CopilotMarketplaceMapper(),
 }
 
 
@@ -381,6 +443,28 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
         source_obj["sha"] = pkg.sha
     _set_effective_tag_pattern(source_obj, pkg)
     return source_obj
+
+
+def _copilot_source(entry: PackageEntry, pkg: ResolvedPackage) -> str | dict[str, Any]:
+    """Return a Copilot CLI source while preserving remote pin information."""
+    if entry.is_local:
+        return entry.source
+
+    source: dict[str, Any] = OrderedDict()
+    remote_url = _remote_source_url(pkg)
+    if remote_url:
+        source["source"] = "url"
+        source["url"] = remote_url
+    else:
+        source["source"] = "github"
+        source["repo"] = pkg.source_repo
+    if pkg.ref:
+        source["ref"] = pkg.ref
+    if pkg.sha:
+        source["sha"] = pkg.sha
+    if pkg.subdir:
+        source["path"] = pkg.subdir
+    return source
 
 
 def _apply_field_with_precedence(
