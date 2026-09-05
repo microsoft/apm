@@ -113,7 +113,7 @@ class CommandLogger:
         noun = "server" if count == 1 else "servers"
         _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
 
-    def info(self, message: str, symbol: str = "info"):
+    def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         """Log static advisory / informational context.
 
         Distinct from :meth:`progress` only at the semantic level:
@@ -124,6 +124,9 @@ class CommandLogger:
         split exists so future quiet-mode policy can drop ``progress``
         without dropping advisory context.
         """
+        if soft_wrap:
+            _rich_info(message, symbol=symbol, soft_wrap=True)
+            return
         _rich_info(message, symbol=symbol)
 
     def success(self, message: str, symbol: str = "sparkles"):

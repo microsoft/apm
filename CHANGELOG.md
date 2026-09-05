@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration outside recorded runtime ownership. (by @lkshrk, #2655)
 - Plain `apm install` now uses the repository-pinned `copilot` target for
   deterministic contributor installs. (by @tillig, #2771)
+- Direct `apm install --mcp` misses in the default GitHub MCP catalog now show
+  a copyable command to retry the exact server name against the Official MCP
+  Registry without automatic fallback. (by @VedanthB, #2803)
 
 ### Fixed
 
