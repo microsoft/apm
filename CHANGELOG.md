@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm install -g` / `apm update -g` now deploy instructions to
+  `~/.cursor/rules/*.mdc` for the Cursor target. Previously they were skipped
+  based on an incorrect assumption that Cursor global rules were
+  Settings-UI-only. (#2506)
 - Hermes is now a stable explicit-only target, and state-mutating APM commands
   share one per-user cross-process lock to prevent concurrent updates from
   losing state. Global audit and cleanup now preserve same-named user

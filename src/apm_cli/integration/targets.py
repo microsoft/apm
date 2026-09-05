@@ -578,9 +578,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         hooks_config_display=".claude/settings.json",
     ),
-    # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
-    # and MCP.  Rules/instructions are managed via Cursor Settings UI only
-    # (not file-based), so "instructions" is excluded from user scope.
+    # Cursor -- at user scope, ~/.cursor/ supports instructions, skills,
+    # agents, commands, hooks, and MCP.  Rules are file-backed at user
+    # scope: Cursor loads ~/.cursor/rules/*.mdc in addition to the
+    # Settings UI "User Rules" surface.
     # Ref: https://cursor.com/docs/rules
     "cursor": TargetProfile(
         capability=TARGET_CAPABILITIES["cursor"],
@@ -615,9 +616,8 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         },
         auto_create=False,
         detect_by_dir=True,
-        user_supported="partial",
+        user_supported=True,
         user_root_dir=".cursor",
-        unsupported_user_primitives=("instructions",),
         hooks_config_display=".cursor/hooks.json",
     ),
     # Kiro IDE/CLI v3 -- spec-driven development editor.

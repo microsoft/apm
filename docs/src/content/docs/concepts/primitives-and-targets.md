@@ -85,7 +85,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field or on t
 | `copilot` | `.github/` (project), `~/.copilot/` (user scope) | vscode |
 | `claude` | `.claude/` | claude |
 | `grok-build` | `.grok/` | agents |
-| `cursor` | `.cursor/` | agents |
+| `cursor` | `.cursor/` (project), `~/.cursor/` (user scope) | agents |
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
 | `antigravity` | `.agents/` (project), `~/.gemini/` (user) | agents |
@@ -99,7 +99,7 @@ Notes per target:
 - **copilot** -- GitHub Copilot (CLI + IDE). User-scope partial: prompts and instructions are project-scope only.
 - **claude** -- Claude Code. Full user-scope support. Hooks merge into `.claude/settings.json` rather than living as separate files.
 - **grok-build** -- Grok Build. Rules, agents, commands, and skills use `.grok/`; compiled instructions also produce `AGENTS.md`.
-- **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Instructions are not deployable at user scope (Cursor exposes them via the Settings UI only).
+- **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Full user-scope support; instructions deploy to `~/.cursor/rules/*.mdc`.
 - **codex** -- Codex CLI. Agents and hooks use TOML; skills use the cross-tool `.agents/` directory.
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
 - **antigravity** -- Google Antigravity CLI (`agy`), successor to Gemini CLI. Explicit-only target (`--target antigravity`); the `.agents/` root is shared, so it is never auto-detected and is not part of `--target all`. Instructions deploy as rules under `.agents/rules/`. Skills use `.agents/skills/`. Hooks use Antigravity's native `.agents/hooks.json` schema. MCP servers write to a dedicated `.agents/mcp_config.json`. No commands primitive (legacy Gemini commands convert to skills upstream).

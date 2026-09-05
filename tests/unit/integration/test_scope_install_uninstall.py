@@ -507,12 +507,11 @@ class TestCursorInstallUninstallCycle:
             assert not (self.project_root / p).exists()
 
     def test_user_scope(self):
-        """Cursor user scope: instructions filtered, agents deploy to .cursor/."""
+        """Cursor user scope: instructions (.mdc) + agents deploy to .cursor/."""
         target = KNOWN_TARGETS["cursor"].for_scope(user_scope=True)
         assert target is not None
-        # No user_root_dir -> same root
         assert target.root_dir == ".cursor"
-        assert "instructions" not in target.primitives
+        assert "instructions" in target.primitives
         assert "agents" in target.primitives
 
         # auto_create=False: create dir
@@ -531,23 +530,32 @@ class TestCursorInstallUninstallCycle:
             target, pkg_info, self.project_root
         )
 
-        assert inst_result.files_integrated == 0  # filtered
+        assert inst_result.files_integrated >= 1
         assert agent_result.files_integrated >= 1
 
-        deployed = _posix_relpaths(self.project_root, agent_result.target_paths)
+        all_paths = inst_result.target_paths + agent_result.target_paths
+        deployed = _posix_relpaths(self.project_root, all_paths)
+
+        # cursor_rules format -> .cursor/rules/*.mdc (same as project scope)
+        assert any(p.startswith(".cursor/rules/") for p in deployed)
+        assert any(p.endswith(".mdc") for p in deployed)
         assert any(p.startswith(".cursor/agents/") for p in deployed)
+
         for p in deployed:
             assert (self.project_root / p).exists()
 
-        # .cursor/rules/ must NOT be created
-        assert not (self.project_root / ".cursor" / "rules").exists()
-
         # -- uninstall -----------------------------------------------------
-        sync = agent_integrator.sync_for_target(
+        inst_sync = inst_integrator.sync_for_target(
             target, pkg_info.package, self.project_root, managed_files=deployed
         )
-        assert sync["errors"] == 0
-        assert sync["files_removed"] == len(deployed)
+        agent_sync = agent_integrator.sync_for_target(
+            target, pkg_info.package, self.project_root, managed_files=deployed
+        )
+
+        assert inst_sync["errors"] == 0
+        assert agent_sync["errors"] == 0
+        total_removed = inst_sync["files_removed"] + agent_sync["files_removed"]
+        assert total_removed == len(deployed)
         for p in deployed:
             assert not (self.project_root / p).exists()
 
