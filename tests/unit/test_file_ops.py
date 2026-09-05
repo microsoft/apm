@@ -221,8 +221,8 @@ class TestRetryOnLock:
             )
         assert result == "ok"
 
-    def test_debug_output_when_apm_debug_set(self, capsys):
-        exc = OSError(errno.EBUSY, "busy")
+    def test_debug_output_omits_sensitive_details(self, capsys):
+        exc = OSError(errno.EBUSY, "SENSITIVE_ERROR_SENTINEL")
         attempt = 0
 
         def fail_once():
@@ -233,11 +233,12 @@ class TestRetryOnLock:
             return "ok"
 
         with patch("apm_cli.utils.file_ops.time.sleep"), patch.dict(os.environ, {"APM_DEBUG": "1"}):
-            _retry_on_lock(fail_once, "test op", max_retries=3)
+            _retry_on_lock(fail_once, "SENSITIVE_PATH_SENTINEL", max_retries=3)
 
         captured = capsys.readouterr()
-        assert "transient lock" in captured.err
-        assert "test op" in captured.err
+        assert "Transient file lock" in captured.err
+        assert "SENSITIVE_PATH_SENTINEL" not in captured.err
+        assert "SENSITIVE_ERROR_SENTINEL" not in captured.err
 
 
 # ---------------------------------------------------------------------------
