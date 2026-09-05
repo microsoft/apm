@@ -1330,12 +1330,15 @@ class GitHubPackageDownloader:
             fetch_cmd = [get_git_executable(), "fetch", "origin"]
             fetch_cmd.append(ref or "HEAD")
             fetch_cmd.append("--depth=1")
-            checkout_cmds = [
-                fetch_cmd,
-                [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
+            checkout_steps = [
+                ("fetch", fetch_cmd),
+                (
+                    "checkout",
+                    [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
+                ),
             ]
 
-            for cmd in checkout_cmds:
+            for step_name, cmd in checkout_steps:
                 result = subprocess.run(
                     cmd,
                     cwd=str(temp_clone_path),
@@ -1347,7 +1350,7 @@ class GitHubPackageDownloader:
                 )
                 if result.returncode != 0:
                     _debug(
-                        f"Sparse-checkout step failed ({' '.join(cmd)}): "
+                        f"Sparse-checkout {step_name} failed: "
                         f"{redact_git_diagnostic(result.stderr.strip())}"
                     )
                     return False
