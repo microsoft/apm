@@ -974,6 +974,8 @@ def clean(dry_run: bool, yes: bool):
         f"Target platform (comma-separated). {target_help_fragment('update')} "
         "'agent-skills' deploys to .agents/skills/ (cross-client). "
         "'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. "
+        "'copilot-cowork' deploys skills to the Microsoft 365 Copilot Cowork folder, "
+        "is explicit-only, user-scope only, and excluded from 'all'; use --global for user-scope deployment. "
         f"{target_all_exclusion_help()}; "
         "combine explicit-only targets when needed. "
         "Experimental targets require their feature flags. "

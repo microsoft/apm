@@ -53,35 +53,38 @@ def _profiles_by_name(
 
 def _has_gated_resolver(profile: TargetProfile) -> bool:
     """Return whether an inactive supplemental target must not resolve."""
-    return profile.requires_flag is not None and profile.user_root_resolver is not None
+    if profile.user_root_resolver is None:
+        return False
+    capability = getattr(profile, "capability", None)
+    explicit_only = getattr(capability, "explicit_only", False)
+    return profile.requires_flag is not None or explicit_only
 
 
 def _record_inactive_resolver_skip(
     profile: TargetProfile,
     diagnostics: DiagnosticCollector | None,
 ) -> None:
-    """Record the intentional skip of an inactive experimental resolver."""
+    """Record the intentional skip of an inactive resolver-backed target."""
     if diagnostics is None:
         return
     from apm_cli.utils.diagnostics import CATEGORY_INFO
 
     message = (
-        f"Skipped inactive experimental resolver for target '{profile.name}' "
-        "during lockfile reconciliation."
+        f"Skipped inactive resolver-backed target '{profile.name}' during lockfile reconciliation."
     )
     if any(
         diagnostic.message == message
         for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
     ):
         return
-    flag = profile.requires_flag or profile.name
-    diagnostics.info(
-        message,
-        detail=(
-            f"To include it, enable '{flag.replace('_', '-')}' and select "
-            f"target '{profile.name}' for this install."
-        ),
-    )
+    if profile.requires_flag is not None:
+        detail = (
+            f"To include it, enable '{profile.requires_flag.replace('_', '-')}' and "
+            f"select target '{profile.name}' for this install."
+        )
+    else:
+        detail = f"To include it, select target '{profile.name}' explicitly for this install."
+    diagnostics.info(message, detail=detail)
 
 
 def _scoped_known_targets_for_reconciliation(
@@ -90,19 +93,26 @@ def _scoped_known_targets_for_reconciliation(
     active_targets: Iterable[TargetProfile],
     declared_targets: Iterable[TargetProfile] | None,
 ) -> dict[str, TargetProfile]:
-    """Return known targets without running inactive experimental resolvers."""
+    """Return known targets without resolving inactive gated targets."""
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     active_by_name = _profiles_by_name(active_targets)
     declared_by_name = _profiles_by_name(declared_targets)
     scoped_known_targets: dict[str, TargetProfile] = {}
     for name, profile in KNOWN_TARGETS.items():
-        resolved = active_by_name.get(name) or declared_by_name.get(name)
-        if resolved is not None:
-            scoped_known_targets[name] = resolved
+        active_profile = active_by_name.get(name)
+        if active_profile is not None:
+            scoped_known_targets[name] = active_profile
             continue
+
+        declared_profile = declared_by_name.get(name)
+        if declared_profile is not None:
+            if _has_gated_resolver(profile):
+                continue
+            scoped_known_targets[name] = declared_profile
+            continue
+
         if _has_gated_resolver(profile):
-            scoped_known_targets[name] = profile
             continue
         scoped = profile.for_scope(user_scope=user_scope)
         if scoped is not None:

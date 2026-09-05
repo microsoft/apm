@@ -118,11 +118,10 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
 
     Reads ``targets:``/``target:`` from the consumer's ``apm.yml``, maps the
     canonical names to :class:`~apm_cli.integration.targets.TargetProfile`
-    instances scoped the same way ``ctx.targets`` is, and augments them with
-    non-canonical gated/dynamic target metadata without probing inactive roots
-    (see below). Returns ``None`` when the manifest declares no targets
-    (auto-detect or ``--target``-only consumers) -- the signal for lockfile
-    reconciliation to fall back to legacy preserve-all.
+    instances scoped the same way ``ctx.targets`` is, and augments them with the
+    non-canonical gated/dynamic targets (see below). Returns ``None`` when the
+    manifest declares no targets (auto-detect or ``--target``-only consumers) --
+    the signal for lockfile reconciliation to fall back to legacy preserve-all.
 
     Motivation (issue #2059): ``union_preserving`` must distinguish a target the
     consumer legitimately uses but did not install in THIS run (e.g. a
@@ -139,17 +138,19 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
         declared_target_profiles as profiles_for_project,
     )
 
+    try:
+        names = _read_yaml_targets(ctx)
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        # Any resolution error (missing apm_package, conflicting keys already
+        # surfaced by the targets phase) -> unknown universe, preserve-all.
+        return None
+    if not names:
+        return None
     is_user = getattr(ctx, "scope", None) is InstallScope.USER
-    apm_package = getattr(ctx, "apm_package", None)
-    package_path = getattr(apm_package, "package_path", None)
+    package_path = getattr(ctx.apm_package, "package_path", None)
     if package_path is None:
         return None
-    return profiles_for_project(
-        Path(package_path),
-        user_scope=is_user,
-        active_targets=getattr(ctx, "targets", None),
-        diagnostics=getattr(ctx, "diagnostics", None),
-    )
+    return profiles_for_project(Path(package_path), user_scope=is_user)
 
 
 def _create_target_dirs(
@@ -200,6 +201,15 @@ def _check_openclaw_flag_gate(
     _check_experimental_target_hint(explicit, targets, ctx, target_name="openclaw")
 
 
+def _check_hermes_flag_gate(
+    explicit: str | list[str] | None,
+    targets: list,
+    ctx: InstallContext,
+) -> None:
+    """Emit an enable-hint when the user asks for hermes but the flag is OFF."""
+    _check_experimental_target_hint(explicit, targets, ctx, target_name="hermes")
+
+
 def _check_grok_cloud_flag_gate(
     explicit: str | list[str] | None,
     targets: list,
@@ -237,12 +247,33 @@ def _check_experimental_target_hint(
 
     from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-    emit_disabled_experimental_target_hint(
-        target_name,
-        targets,
-        ctx.logger,
-        create_config=getattr(ctx, "create_config", True),
-    )
+    emit_disabled_experimental_target_hint(target_name, targets, ctx.logger)
+
+
+def _cowork_requested_via_cli(ctx: InstallContext) -> bool:
+    """Return ``True`` when ``copilot-cowork`` came from an explicit CLI ``--target``.
+
+    The effective target decision carries the same value for a CLI
+    ``--target``, an ``apm.yml`` ``targets:`` list, and an ``apm config
+    target`` default; only its ``source`` tells them apart.  Only a real CLI
+    selector counts as an explicit request, because that is the case where
+    the user asked for something impossible and deserves a hard error rather
+    than a warn-and-skip.
+    """
+    from apm_cli.core.target_detection import CLI_TARGET_FLAG_SOURCE
+
+    decision = getattr(ctx, "target_decision", None)
+    source = decision.source if decision is not None else ctx.target_override_source
+    if source != CLI_TARGET_FLAG_SOURCE:
+        return False
+    override = ctx.target_override
+    if not override:
+        return False
+    if isinstance(override, str):
+        parts = [token.strip() for token in override.split(",")]
+    else:
+        parts = [str(token).strip() for token in override]
+    return "copilot-cowork" in parts
 
 
 def _gate_cowork_target(
@@ -250,13 +281,18 @@ def _gate_cowork_target(
     targets: list,
     explicit: str | list[str] | None,
     is_user: bool,
-) -> None:
-    """Apply cowork-target gating rules.
+) -> list:
+    """Apply cowork-target gating rules and return the effective target list.
 
-    Checks whether the user explicitly requested copilot-cowork and, if so,
-    whether the experimental flag is enabled and the target resolved.
-    Also enforces the project-scope gate (cowork requires ``--global``).
-    May call ``raise SystemExit(1)`` when a gate condition is violated.
+    ``copilot-cowork`` is a GA explicit-only, user-scope-only target.  When
+    the user asked for it explicitly and it did not resolve, the OneDrive
+    path could not be located -- that is a hard error.
+
+    At project scope the target cannot deploy at all.  An explicit CLI
+    ``--target copilot-cowork`` is a hard error (the user asked for
+    something impossible); an implicit selection -- ``targets:`` in
+    ``apm.yml`` or ``apm config target`` -- warns once and drops cowork so
+    the remaining targets still install.
     """
     user_asked_cowork = False
     if explicit:
@@ -265,45 +301,45 @@ def _gate_cowork_target(
         else:
             user_asked_cowork = explicit == "copilot-cowork"
 
-    if user_asked_cowork:
-        _cowork_resolved = any(t.name == "copilot-cowork" for t in targets)
-        if not _cowork_resolved:
-            from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
+    # NOTE: no emit_disabled_experimental_target_hint() call here, unlike the
+    # other gated targets.  That helper short-circuits when a capability has
+    # no experimental_flag, so for a GA cowork it can only ever return False.
+    if user_asked_cowork and not any(t.name == "copilot-cowork" for t in targets):
+        import sys as _sys
 
-            if not emit_disabled_experimental_target_hint(
-                "copilot-cowork",
-                targets,
-                ctx.logger,
-                create_config=getattr(ctx, "create_config", True),
-            ):
-                import sys as _sys
+        if _sys.platform.startswith("linux"):
+            _cowork_msg = (
+                "Cowork has no auto-detection on Linux.\n"
+                "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
+                "apm config set copilot-cowork-skills-dir <path>"
+            )
+        else:
+            _cowork_msg = (
+                "Cowork: no OneDrive path detected.\n"
+                "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
+                "apm config set copilot-cowork-skills-dir <path>"
+            )
+        if ctx.logger:
+            ctx.logger.error(_cowork_msg, symbol="cross")
+        raise SystemExit(1)
 
-                if _sys.platform.startswith("linux"):
-                    _cowork_msg = (
-                        "Cowork has no auto-detection on Linux.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
-                    )
-                else:
-                    _cowork_msg = (
-                        "Cowork: no OneDrive path detected.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
-                    )
-                if ctx.logger:
-                    ctx.logger.error(_cowork_msg, symbol="cross")
-                raise SystemExit(1)
-
-    # Amendment 5: project-scope gate for cowork target.
-    if not is_user:
-        _cowork_in_set = any(t.name == "copilot-cowork" for t in targets)
-        if _cowork_in_set:
+    # Project-scope gate: cowork deploys to OneDrive at user scope only.
+    if not is_user and any(t.name == "copilot-cowork" for t in targets):
+        if _cowork_requested_via_cli(ctx):
             if ctx.logger:
                 ctx.logger.error(
                     "The 'copilot-cowork' target requires --global (user scope). "
                     "Run: apm install --target copilot-cowork --global"
                 )
             raise SystemExit(1)
+        if ctx.logger:
+            ctx.logger.warning(
+                "Skipping the 'copilot-cowork' target: it deploys at user scope only. "
+                "Run: apm install --target copilot-cowork --global"
+            )
+        return [t for t in targets if t.name != "copilot-cowork"]
+
+    return targets
 
 
 def _gate_copilot_app_target(
@@ -333,12 +369,7 @@ def _gate_copilot_app_target(
 
     from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-    if not emit_disabled_experimental_target_hint(
-        "copilot-app",
-        targets,
-        ctx.logger,
-        create_config=getattr(ctx, "create_config", True),
-    ):
+    if not emit_disabled_experimental_target_hint("copilot-app", targets, ctx.logger):
         _app_msg = (
             "GitHub Copilot desktop App not detected.\n"
             "Expected ~/.copilot/data.db but the file is missing.\n"
@@ -359,7 +390,7 @@ def _resolve_targets_by_scope(
 
     For project scope, applies the v2 resolution algorithm with signal-based
     provenance, replacing the legacy target list with the v2 list while
-    preserving any non-canonical targets (e.g. copilot-cowork).
+    preserving any non-canonical targets.
 
     For user scope, emits diagnostic logging and creates target directories
     via :func:`_create_target_dirs`.
@@ -414,6 +445,10 @@ def _resolve_targets_by_scope(
         # Multi-token CLI parsing returns runtime aliases; convert them before filtering.
         parts = _normalize_runtime_target_aliases(parts)
         parts = [p for p in parts if p in _CANONICAL]
+        # copilot-cowork is user-scope only. _gate_cowork_target() already
+        # warned (or hard-errored) before we got here, so drop it silently
+        # rather than let v2 resolution re-introduce it.
+        parts = [p for p in parts if p != "copilot-cowork"]
         if len(parts) == 1:
             _v2_flag = parts[0]
         elif len(parts) > 1:
@@ -425,6 +460,8 @@ def _resolve_targets_by_scope(
             _v2_yaml = _read_yaml_targets(ctx)
         except _click.UsageError as exc:
             _raise_target_usage_error(ctx, exc)
+        if _v2_yaml is not None:
+            _v2_yaml = [t for t in _v2_yaml if t != "copilot-cowork"] or None
 
     _skip_v2 = _v2_flag is None and _v2_yaml is None and ctx.target_override is not None
     if _skip_v2:
@@ -503,7 +540,6 @@ def run(ctx: InstallContext) -> None:
             manifest_target=config_target,
             user_scope=ctx.scope is InstallScope.USER,
             auto_detect=False,
-            create_config=getattr(ctx, "create_config", True),
         )
         ctx.target_decision = target_decision
         ctx.target_override = target_decision.value
@@ -545,10 +581,11 @@ def run(ctx: InstallContext) -> None:
             ctx.logger.error(str(exc), symbol="cross")
         raise SystemExit(1) from exc
 
-    # Target gating: cowork, copilot-app, openclaw, grok-cloud.
-    _gate_cowork_target(ctx, _targets, _explicit, _is_user)
+    # Target gating: cowork, copilot-app, openclaw, hermes, grok-cloud.
+    _targets = _gate_cowork_target(ctx, _targets, _explicit, _is_user)
     _gate_copilot_app_target(ctx, _targets, _explicit)
     _check_openclaw_flag_gate(_explicit, _targets, ctx)
+    _check_hermes_flag_gate(_explicit, _targets, ctx)
     _check_grok_cloud_flag_gate(_explicit, _targets, ctx)
 
     # Resolve v2 targets for project scope, or set up user-scope dirs.

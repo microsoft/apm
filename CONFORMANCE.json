@@ -1253,9 +1253,10 @@
       "keyword": "MUST",
       "section": "8.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_target_detection_predicate_binding"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_target_detection_predicate_binding",
+        "tests/spec_conformance/test_manifest_reqs.py::test_spec_explicit_only_targets_match_implementation"
       ]
     },
     {

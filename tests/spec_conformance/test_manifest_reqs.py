@@ -11,6 +11,7 @@ or (c) a real apm_cli loader call where the surface exists.
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,6 +39,7 @@ from tests.spec_conformance._helpers import (
     load_json_fixture,
     load_schema,
     load_yaml_fixture,
+    spec_text,
     validate_against,
     waive,
 )
@@ -80,11 +82,57 @@ def test_manifest_version_is_semver_2_0_0():
 
 @pytest.mark.req("req-mf-005")
 def test_manifest_target_enum_is_pinned():
-    """req-mf-005 says producer MUST reject unknown target values."""
-    assert_spec_contains(
-        "copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all"
+    """req-mf-005 says producer MUST reject unknown target values.
+
+    The spec list and the implementation's canonical set MUST agree.
+    Asserting only that the spec quotes its own list lets a new target
+    ship in `manifest_target_names()` without a spec amendment, which
+    makes req-mf-005 unenforceable: the producer accepts a value the
+    spec says it MUST reject. So compare the two directly.
+    """
+    from apm_cli.core.target_catalog import manifest_target_names
+
+    match = re.search(r"^copilot, claude, [a-z0-9, -]+, all$", spec_text(), re.MULTILINE)
+    assert match, "Section 4.2.1 canonical target list not found in the spec body"
+    spec_targets = {t.strip() for t in match.group(0).split(",")}
+    spec_targets.discard("all")  # a selector, not a registered target
+
+    impl_targets = set(manifest_target_names())
+    assert spec_targets == impl_targets, (
+        "Section 4.2.1 canonical target set has drifted from "
+        "manifest_target_names(). Missing from the spec: "
+        f"{sorted(impl_targets - spec_targets)}; listed in the spec but "
+        f"not registered: {sorted(spec_targets - impl_targets)}. Adding a "
+        "target to the catalog requires a spec amendment -- otherwise "
+        "req-mf-005 obliges producers to reject a value apm accepts."
     )
+
     assert_spec_contains("x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*")
+
+
+@pytest.mark.req("req-tg-001")
+def test_spec_explicit_only_targets_match_implementation():
+    """The `all` expansion excludes exactly the explicit-only targets.
+
+    req-tg-001 makes this normative, and Sections 4.2.1 and 8.4 both
+    name the v0.1 set by hand. Pin those prose lists to
+    EXPLICIT_ONLY_TARGETS so a new explicit-only target cannot silently
+    contradict the spec.
+    """
+    # EXPLICIT_ONLY_TARGETS also covers experimental targets, which are
+    # not in the canonical manifest set and so are out of scope here.
+    from apm_cli.core.target_catalog import manifest_target_names
+    from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+    expected = set(EXPLICIT_ONLY_TARGETS) & set(manifest_target_names())
+    for sentence in re.findall(
+        r"the explicit-only targets are (.+?)(?:, so |\.\s)", spec_text(), re.DOTALL
+    ):
+        named = set(re.findall(r"`([a-z0-9-]+)`", sentence))
+        assert named == expected, (
+            f"Spec names explicit-only targets {sorted(named)} but the "
+            f"catalog registers {sorted(expected)}."
+        )
 
 
 # --- req-mf-006..013, 016..020: consumer parsing -----------------------

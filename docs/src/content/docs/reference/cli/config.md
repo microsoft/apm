@@ -71,7 +71,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
 | `allow-protocol-fallback` | boolean | `false` | Enable the legacy cross-protocol fallback chain. When true, APM retries a failed clone with the opposite protocol (SSH -> HTTPS or HTTPS -> SSH). Equivalent to `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
 | `prefer-ssh` | boolean | `false` | Prefer SSH transport for shorthand (`owner/repo`) dependencies. Equivalent to `--ssh` or `APM_GIT_PROTOCOL=ssh`. |
-| `copilot-cowork-skills-dir` | absolute path | auto-detected | Override the resolved Cowork OneDrive skills directory. Requires the `copilot-cowork` experimental flag for `set`. |
+| `copilot-cowork-skills-dir` | absolute path | auto-detected | Override the resolved Cowork OneDrive skills directory. |
 | `audit-on-install` | enum | `off` | Default content-audit mode for `apm install`: `off` / `warn` / `block`. `warn` records findings in the install summary; `block` halts on critical findings. Overridable per-install with `--audit` / `--no-audit`; an org policy `security.audit.on_install` floor can raise it. Requires the `external-scanners` experimental flag for `set`. |
 | `external.<name>.llm` | boolean | unset | Opt a SARIF scanner into LLM-powered analysis (`<name>` validated against supported scanners). SkillSpector default is offline. LLM mode makes outbound API calls and needs `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`. Overridable per-run with `--external-llm` / `--no-external-llm`. Requires the `external-scanners` experimental flag. |
 | `external.<name>.args` | string | unset | Extra scanner CLI flags, stored shlex-split as a list (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter at run time. Overridable per-run with `--external-args`. Requires the `external-scanners` experimental flag. |
@@ -200,10 +200,9 @@ export APM_TEMP_DIR=/var/tmp/apm-work
 apm install
 ```
 
-Override the Cowork skills directory (experimental):
+Override the Cowork skills directory:
 
 ```bash
-apm experimental enable copilot-cowork
 apm config set copilot-cowork-skills-dir ~/Library/CloudStorage/OneDrive-Contoso/Cowork/skills
 apm config unset copilot-cowork-skills-dir
 ```
@@ -256,6 +255,6 @@ Internal JSON keys use snake_case (`auto_integrate`, `install_target`, `self_upd
 - [`apm install`](../install/) -- consumes `target`, `temp-dir`, and `allow-protocol-fallback` / `prefer-ssh`.
 - [`apm self-update`](../self-update/) -- consumes `self-update.channel` and `self-update.install-dir`.
 - [`apm compile`](../compile/) -- affected by `auto-integrate`.
-- [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
+- [`apm experimental`](../experimental/) -- gates the `registry.*` keys.
 - [Environment variables](../../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK`, `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys.
 - [Registries](../../../guides/registries/) -- full private registry setup guide.

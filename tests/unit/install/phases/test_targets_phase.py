@@ -71,6 +71,7 @@ def _make_ctx(
     ctx.project_root.mkdir(parents=True, exist_ok=True)
     ctx.scope = scope
     ctx.target_override = target_override
+    ctx.target_override_source = None
     ctx.target_decision = None
     ctx.apm_package = MagicMock()
     ctx.apm_package.target = None
@@ -248,14 +249,20 @@ def test_config_default_target_provenance_names_config_source(tmp_path: Path, ca
 
 
 class TestProjectScopeGateForCowork:
-    """Tests for the project-scope cowork gate in phases/targets.py."""
+    """Tests for the project-scope cowork gate in phases/targets.py.
 
-    def test_project_scope_with_cowork_raises_system_exit(
+    ``copilot-cowork`` is GA and explicit-only, but still deploys at user
+    scope only.  An explicit CLI ``--target copilot-cowork`` at project
+    scope is a hard error; an implicit selection (apm.yml ``targets:`` or
+    ``apm config target``) warns once and drops the target.
+    """
+
+    def test_project_scope_explicit_cli_cowork_raises_system_exit(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"copilot_cowork": True}})
+        inject_config({})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
-        ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
+        ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT, target_override="copilot-cowork")
 
         with (
             patch(
@@ -271,12 +278,12 @@ class TestProjectScopeGateForCowork:
 
             run(ctx)
 
-    def test_project_scope_with_cowork_logs_error_before_exit(
+    def test_project_scope_explicit_cli_cowork_logs_global_hint(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"copilot_cowork": True}})
+        inject_config({})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
-        ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
+        ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT, target_override="copilot-cowork")
 
         with (
             patch(
@@ -291,38 +298,151 @@ class TestProjectScopeGateForCowork:
             from apm_cli.install.phases.targets import run
 
             run(ctx)
-        # Check that the error was logged with --global hint
         error_calls = ctx.logger.error.call_args_list
         assert len(error_calls) >= 1
         msg = str(error_calls[0])
         assert "--global" in msg
 
-    def test_project_scope_with_cowork_no_mkdir_before_exit(
+    def test_project_scope_implicit_cowork_warns_and_drops(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"copilot_cowork": True}})
+        """apm.yml targets: [copilot-cowork, copilot] warns and keeps copilot."""
+        inject_config({})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
+        copilot = KNOWN_TARGETS["copilot"]
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
+        ctx.apm_package.target = ["copilot-cowork", "copilot"]
+
+        from apm_cli.core.target_detection import ResolvedTargets
+
+        _v2_result = ResolvedTargets(
+            targets=["copilot"],
+            source="apm.yml",
+            auto_create=True,
+        )
 
         with (
             patch(
                 "apm_cli.integration.targets.resolve_targets",
-                return_value=[cowork_target],
+                return_value=[cowork_target, copilot],
             ),
             patch(
                 "apm_cli.core.target_detection.detect_target",
             ),
-            pytest.raises(SystemExit),
+            patch(
+                "apm_cli.core.target_detection.resolve_targets",
+                return_value=_v2_result,
+            ),
+        ):
+            from apm_cli.install.phases.targets import run
+
+            run(ctx)  # must NOT raise
+
+        warning_msgs = " ".join(str(call) for call in ctx.logger.warning.call_args_list)
+        assert "copilot-cowork" in warning_msgs
+        assert "--global" in warning_msgs
+        assert "copilot-cowork" not in [t.name for t in ctx.targets]
+        assert "copilot" in [t.name for t in ctx.targets]
+
+    def test_project_scope_implicit_cowork_creates_no_directory(
+        self, tmp_path: Path, inject_config: Any
+    ) -> None:
+        inject_config({})
+        cowork_target = _make_cowork_target(tmp_path / "cowork")
+        copilot = KNOWN_TARGETS["copilot"]
+        ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
+        ctx.apm_package.target = ["copilot-cowork", "copilot"]
+
+        from apm_cli.core.target_detection import ResolvedTargets
+
+        _v2_result = ResolvedTargets(
+            targets=["copilot"],
+            source="apm.yml",
+            auto_create=True,
+        )
+
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork_target, copilot],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
+            patch(
+                "apm_cli.core.target_detection.resolve_targets",
+                return_value=_v2_result,
+            ),
         ):
             from apm_cli.install.phases.targets import run
 
             run(ctx)
         assert not (ctx.project_root / "copilot-cowork").exists()
 
+    def test_project_scope_v2_resolution_never_sees_cowork(
+        self, tmp_path: Path, inject_config: Any
+    ) -> None:
+        """v2 resolution must not re-introduce cowork after the gate dropped it.
+
+        Regression trap: ``_resolve_targets_by_scope`` re-reads ``apm.yml``
+        ``targets:`` independently of the gated list, so cowork has to be
+        filtered out of the v2 inputs as well or the provenance line and the
+        deploy roots both claim a Cowork deployment that never happened.
+        """
+        inject_config({})
+        cowork_target = _make_cowork_target(tmp_path / "cowork")
+        copilot = KNOWN_TARGETS["copilot"]
+        ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
+        ctx.apm_package.target = ["copilot-cowork", "copilot"]
+
+        from apm_cli.core.target_detection import ResolvedTargets
+
+        _v2_result = ResolvedTargets(
+            targets=["copilot"],
+            source="apm.yml",
+            auto_create=True,
+        )
+
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork_target, copilot],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
+            patch(
+                "apm_cli.core.target_detection.resolve_targets",
+                return_value=_v2_result,
+            ) as mock_v2,
+            patch(
+                "apm_cli.install.phases.targets._read_yaml_targets",
+                return_value=["copilot-cowork", "copilot"],
+            ),
+        ):
+            from apm_cli.install.phases.targets import run
+
+            run(ctx)
+
+        assert mock_v2.call_count == 1
+        # Assert the invariant, not the plumbing: cowork must not reach v2
+        # resolution by ANY route. It arrives either as the `flag` (when the
+        # manifest selection is carried on the effective target decision) or
+        # as `yaml_targets` (when read straight from apm.yml), and which one
+        # is used has changed before -- so check both.
+        _kwargs = mock_v2.call_args.kwargs
+        _flag = _kwargs.get("flag")
+        _flag_names = [_flag] if isinstance(_flag, str) else list(_flag or [])
+        _yaml_names = list(_kwargs.get("yaml_targets") or [])
+        assert "copilot-cowork" not in _flag_names
+        assert "copilot-cowork" not in _yaml_names
+        # ...and the surviving target is still passed through.
+        assert "copilot" in _flag_names + _yaml_names
+
     def test_user_scope_with_cowork_does_not_raise(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"copilot_cowork": True}})
+        inject_config({})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.USER)
 

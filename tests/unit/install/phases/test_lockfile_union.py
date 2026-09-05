@@ -25,9 +25,11 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
+from apm_cli.core.target_catalog import TargetCapability
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.integration.cleanup import CleanupResult
+from apm_cli.integration.targets import TargetProfile
 from apm_cli.utils.content_hash import compute_file_hash
 
 
@@ -206,6 +208,76 @@ class TestAttachDeployedFilesUnion:
 
 
 class TestCurrentInstallGovernance:
+    def test_scoped_known_targets_skip_explicit_only_resolver_targets(self):
+        from apm_cli.install import manifest_reconcile
+
+        def raise_on_resolve() -> None:
+            raise AssertionError("resolver should not run for inactive explicit-only targets")
+
+        capability = TargetCapability(
+            name="copilot-cowork",
+            aliases=(),
+            description="Cowork",
+            in_all=False,
+            explicit_only=True,
+            experimental_flag=None,
+            mcp_only=False,
+            primitive_profile=None,
+            compile_family=None,
+            runtimes=(),
+            commands=frozenset({"install"}),
+        )
+        profile = TargetProfile(
+            capability=capability,
+            root_dir="cowork",
+            primitives={},
+            user_root_resolver=raise_on_resolve,
+        )
+
+        with patch("apm_cli.integration.targets.KNOWN_TARGETS", {"copilot-cowork": profile}):
+            scoped = manifest_reconcile._scoped_known_targets_for_reconciliation(
+                user_scope=True,
+                active_targets=[],
+                declared_targets=None,
+            )
+
+        assert "copilot-cowork" not in scoped
+
+    def test_scoped_known_targets_skip_declared_explicit_only_resolver_targets(self):
+        from apm_cli.install import manifest_reconcile
+
+        def raise_on_resolve() -> None:
+            raise AssertionError("resolver should not run for inactive explicit-only targets")
+
+        capability = TargetCapability(
+            name="copilot-cowork",
+            aliases=(),
+            description="Cowork",
+            in_all=False,
+            explicit_only=True,
+            experimental_flag=None,
+            mcp_only=False,
+            primitive_profile=None,
+            compile_family=None,
+            runtimes=(),
+            commands=frozenset({"install"}),
+        )
+        profile = TargetProfile(
+            capability=capability,
+            root_dir="cowork",
+            primitives={},
+            user_root_resolver=raise_on_resolve,
+        )
+
+        with patch("apm_cli.integration.targets.KNOWN_TARGETS", {"copilot-cowork": profile}):
+            scoped = manifest_reconcile._scoped_known_targets_for_reconciliation(
+                user_scope=True,
+                active_targets=[],
+                declared_targets=[profile],
+            )
+
+        assert "copilot-cowork" not in scoped
+
     def test_file_target_includes_root_and_primitive_deploy_roots(self, tmp_path):
         from apm_cli.install.manifest_reconcile import install_governance
 
@@ -786,17 +858,11 @@ class TestInactiveExperimentalResolverGating:
 
         names = {profile.name for profile in profiles or []}
         assert {"copilot", "claude", "codex"} <= names
-        cowork_profile = next(
-            profile for profile in profiles or [] if profile.name == "copilot-cowork"
-        )
-        assert cowork_profile.resolved_deploy_root is None
+        assert "copilot-cowork" not in names
         info_messages = {
             diagnostic.message for diagnostic in diagnostics.by_category().get(CATEGORY_INFO, ())
         }
-        assert (
-            "Skipped inactive experimental resolver for target 'copilot-cowork' "
-            "during lockfile reconciliation."
-        ) in info_messages
+        assert not any("copilot-cowork" in message for message in info_messages)
 
     @pytest.mark.windows_compat
     def test_explicit_experimental_resolver_failure_is_not_silenced(

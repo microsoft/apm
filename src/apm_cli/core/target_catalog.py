@@ -205,7 +205,7 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
         _capability(
             "copilot-cowork",
             "Microsoft 365 Copilot Cowork native skills configuration",
-            experimental_flag="copilot_cowork",
+            explicit_only=True,
             primitive_profile="copilot-cowork",
         ),
         _capability(

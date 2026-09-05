@@ -82,13 +82,12 @@ def _valid_config_keys() -> str:
         "temp-dir",
         "allow-protocol-fallback",
         "prefer-ssh",
+        "copilot-cowork-skills-dir",
     ]
     if is_enabled("external_scanners"):
         keys.append("audit-on-install")
         keys.append("external.<name>.llm")
         keys.append("external.<name>.args")
-    if is_enabled("copilot_cowork"):
-        keys.append("copilot-cowork-skills-dir")
     if is_enabled("registries"):
         keys.append("registry.<name>.url")
         keys.append("registry.<name>.token")
@@ -144,14 +143,13 @@ def _show_all_user_config(logger: CommandLogger) -> None:
             if args is not None:
                 click.echo(f"  external.{scanner}.args: {' '.join(args)}")
 
-    if is_enabled("copilot_cowork"):
-        from ..config import get_copilot_cowork_skills_dir
+    from ..config import get_copilot_cowork_skills_dir
 
-        csd = get_copilot_cowork_skills_dir()
-        click.echo(
-            f"  copilot-cowork-skills-dir: "
-            f"{csd if csd is not None else 'Not set (using auto-detection)'}"
-        )
+    csd = get_copilot_cowork_skills_dir()
+    click.echo(
+        f"  copilot-cowork-skills-dir: "
+        f"{csd if csd is not None else 'Not set (using auto-detection)'}"
+    )
 
     mcp_url = get_mcp_registry_url()
     click.echo(
@@ -276,17 +274,14 @@ def config(ctx):
             if _prefer_ssh:
                 config_table.add_row("", "Prefer SSH Transport", "true")
 
-            from ..core.experimental import is_enabled as _is_enabled
+            from ..config import get_copilot_cowork_skills_dir as _get_csd
 
-            if _is_enabled("copilot_cowork"):
-                from ..config import get_copilot_cowork_skills_dir as _get_csd
-
-                _csd_val = _get_csd()
-                config_table.add_row(
-                    "",
-                    "Cowork Skills Dir",
-                    _csd_val if _csd_val else "Not set (using auto-detection)",
-                )
+            _csd_val = _get_csd()
+            config_table.add_row(
+                "",
+                "Cowork Skills Dir",
+                _csd_val if _csd_val else "Not set (using auto-detection)",
+            )
 
             console.print(config_table)
 
@@ -328,16 +323,12 @@ def config(ctx):
             click.echo(f"  allow-protocol-fallback: {str(_get_apf_fb()).lower()}")
             click.echo(f"  prefer-ssh: {str(_get_prefer_ssh_fb()).lower()}")
 
-            from ..core.experimental import is_enabled as _is_enabled_fb
+            from ..config import get_copilot_cowork_skills_dir as _get_csd_fb
 
-            if _is_enabled_fb("copilot_cowork"):
-                from ..config import get_copilot_cowork_skills_dir as _get_csd_fb
-
-                _csd_fb = _get_csd_fb()
-                click.echo(
-                    f"  Cowork Skills Dir: "
-                    f"{_csd_fb if _csd_fb else 'Not set (using auto-detection)'}"
-                )
+            _csd_fb = _get_csd_fb()
+            click.echo(
+                f"  Cowork Skills Dir: {_csd_fb if _csd_fb else 'Not set (using auto-detection)'}"
+            )
 
 
 @config.command(help="Set a configuration value")
@@ -418,14 +409,6 @@ def set(key, value):  # noqa: F811
         return
 
     if key == "copilot-cowork-skills-dir":
-        from ..core.experimental import is_enabled
-
-        if not is_enabled("copilot_cowork"):
-            logger.error(
-                "copilot-cowork-skills-dir requires the copilot-cowork experimental flag. "
-                "Run: apm experimental enable copilot-cowork"
-            )
-            sys.exit(1)
         from ..config import get_copilot_cowork_skills_dir, set_copilot_cowork_skills_dir
 
         try:

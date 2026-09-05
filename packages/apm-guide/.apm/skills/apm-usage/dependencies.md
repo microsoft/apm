@@ -404,9 +404,11 @@ dependency's target-scoped primitives. They compose via intersection. See
 
 - Type: list of target keys. Stable targets are `copilot`, `claude`, `grok-build`,
   `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`,
-  `opencode`, `agent-skills`, and `hermes`. Experimental targets are `openclaw`,
-  `copilot-cowork`, `copilot-app`, and `grok-cloud`. Use `copilot`, not the
+  `opencode`, `agent-skills`, and `copilot-cowork`. Experimental targets are
+  `openclaw`, `hermes`, `copilot-app`, and `grok-cloud`. Use `copilot`, not the
   target alias `vscode`, for Copilot-family dependency routing.
+  `copilot-cowork` is user-scope only: project-scope installs warn once
+  and skip it.
 - Default: omitted means all active install targets.
 - Semantics: effective reach is `install_targets INTERSECT dep_targets`.
   A non-empty list narrows reach; it never widens beyond what the install
@@ -576,27 +578,20 @@ Optional fields: `args`, `transport`, `env`, `initializationOptions`,
 `settings`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`,
 `restartOnCrash`, `maxRestarts`.
 
-`apm install` writes LSP config to the detected runtime targets. Claude Code
-project installs use the `lspServers` section in
-`.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs use
-`~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. GitHub Copilot CLI uses
-`.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI uses
-`fileExtensions` on disk;
-manifests continue to use `extensionToLanguage`. A dependency package's source
-`.lsp.json` may use either a flat server map or a
-`{ "lspServers": { ... } }` envelope; it is distinct from the Claude project
-plugin manifest that APM generates. Dependency-provided LSP commands require
-executable approval for the declaring package when a project or org
-`executables` block enables the gate; the compatibility default permits them
-when no layer opts in. For Copilot-dialect plugin input, APM accepts
-`fileExtensions` as an alias for `extensionToLanguage` and `warmupTimeoutMs` as
-an alias for `startupTimeout`; a non-null canonical value wins when both are
-supplied, while a null canonical value falls back to its alias. APM ignores the
-unsupported Copilot `cwd` field and warns that the consumer runtime chooses the
-working directory. Copilot output uses `fileExtensions` and `warmupTimeoutMs`;
-manifests and lockfiles retain `extensionToLanguage` and `startupTimeout`. APM
-records target-scoped LSP ownership in the lockfile so target changes and
-package uninstall revoke only entries it wrote.
+`apm install` writes LSP config to the detected runtime targets:
+Claude Code uses `.lsp.json` or `~/.claude.json`, and GitHub Copilot CLI
+uses `.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI
+uses `fileExtensions` on disk; manifests continue to use
+`extensionToLanguage`. Plugin `.lsp.json` files may use either a flat
+server map or a `{ "lspServers": { ... } }` envelope. For Copilot-dialect
+plugin input, APM accepts `fileExtensions` as an alias for
+`extensionToLanguage` and `warmupTimeoutMs` as an alias for
+`startupTimeout`; a non-null canonical value wins when both are supplied,
+while a null canonical value falls back to its alias. APM ignores the
+unsupported Copilot `cwd` field and warns that the consumer runtime chooses
+the working directory. Copilot output uses `fileExtensions` and
+`warmupTimeoutMs`; manifests and lockfiles retain `extensionToLanguage` and
+`startupTimeout`.
 
 ## Version pinning
 

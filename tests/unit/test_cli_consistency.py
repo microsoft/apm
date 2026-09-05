@@ -1,5 +1,6 @@
 """Regression tests for CLI help and output consistency."""
 
+import re
 from unittest.mock import patch
 
 import click
@@ -186,18 +187,26 @@ def test_deps_update_target_help_uses_current_catalog():
     assert "apm update" in help_text
 
 
-def test_compile_target_all_exclusion_lists_explicit_only_targets():
-    """Compile help lists stable explicit-only targets excluded from ``all``."""
+def _normalize_help_text(text: str) -> str:
+    """Normalize whitespace while preserving hyphenated target names split by wrapping."""
+    collapsed = " ".join(text.split())
+    return re.sub(r"(?<=\w)-\s+(?=\w)", "-", collapsed)
+
+
+def test_compile_target_all_exclusion_lists_agent_skills_and_intellij():
+    """Regression for #2451: compile --target help must list the catalog-driven
+    exclusion clause, including new explicit-only targets like copilot-cowork.
+    """
+    from apm_cli.core.target_catalog import target_all_exclusion_help
+
     result = CliRunner().invoke(cli, ["compile", "--help"])
 
     assert result.exit_code == 0
-    help_text = result.output
-    # Assert the full exclusion sentence (normalize whitespace from help-text wrapping)
-    normalized = " ".join(help_text.split())
-    assert (
-        "excludes agent-skills, antigravity, hermes, experimental targets, and intellij"
-        in normalized
-    )
+    normalized = _normalize_help_text(result.output)
+    expected_clause = target_all_exclusion_help()
+    assert expected_clause in normalized
+    assert "agent-skills" in normalized
+    assert "intellij" in normalized
 
 
 def test_mcp_install_help_lists_target_global_and_trust_transitive():
@@ -284,8 +293,8 @@ def test_deps_update_target_help_values_catalog_sorted():
         )
 
 
-def test_install_compile_and_deps_exclusion_clause_matches_catalog():
-    """Regression: 'all' exclusion clause in install, compile, and deps help must match
+def test_compile_and_deps_exclusion_clause_matches_catalog():
+    """Regression: 'all' exclusion clause in compile and deps help must match
     target_all_exclusion_help(), not a hand-maintained static string.
 
     Adding a new explicit-only or mcp-only target to the catalog must automatically
@@ -297,18 +306,21 @@ def test_install_compile_and_deps_exclusion_clause_matches_catalog():
 
     install_result = CliRunner().invoke(cli, ["install", "--help"])
     assert install_result.exit_code == 0
-    assert expected_clause in " ".join(install_result.output.split())
+    install_normalized = _normalize_help_text(install_result.output)
+    assert expected_clause in install_normalized, (
+        f"install --help exclusion clause mismatch; expected: {expected_clause!r}"
+    )
 
     compile_result = CliRunner().invoke(cli, ["compile", "--help"])
     assert compile_result.exit_code == 0
-    compile_normalized = " ".join(compile_result.output.split())
+    compile_normalized = _normalize_help_text(compile_result.output)
     assert expected_clause in compile_normalized, (
         f"compile --help exclusion clause mismatch; expected: {expected_clause!r}"
     )
 
     deps_result = CliRunner().invoke(cli, ["deps", "update", "--help"])
     assert deps_result.exit_code == 0
-    deps_normalized = " ".join(deps_result.output.split())
+    deps_normalized = _normalize_help_text(deps_result.output)
     assert expected_clause in deps_normalized, (
         f"deps update --help exclusion clause mismatch; expected: {expected_clause!r}"
     )
