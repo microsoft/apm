@@ -143,6 +143,8 @@ def _check_dependency_denylist(
 def _check_required_packages(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
+    *,
+    dep_names: set[str] | None = None,
 ) -> CheckResult:
     """Check 3: every required package is in manifest deps."""
     if not policy.effective_require:
@@ -152,7 +154,8 @@ def _check_required_packages(
             message="No required packages configured",
         )
 
-    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    if dep_names is None:
+        dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
     missing: list[str] = []
     for req in policy.effective_require:
         pkg_name = req.split("#")[0]
@@ -177,6 +180,8 @@ def _check_required_packages_deployed(
     deps: list[DependencyReference],
     lock: LockFile | None,
     policy: DependencyPolicy,
+    *,
+    dep_names: set[str] | None = None,
 ) -> CheckResult:
     """Check 4: required packages are PRESENT in the lockfile (issue #1873, Gap B).
 
@@ -195,7 +200,8 @@ def _check_required_packages_deployed(
             message="No required packages to verify deployment",
         )
 
-    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    if dep_names is None:
+        dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
     lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
     not_present: list[str] = []
     for req in policy.effective_require:
@@ -229,6 +235,8 @@ def _check_required_executable_untrusted(
     deps: list[DependencyReference],
     lock: LockFile | None,
     exec_policy: ExecutablesPolicy,
+    *,
+    dep_names: set[str] | None = None,
 ) -> CheckResult:
     """Check 4b: required-executable packages must be TRUSTED, not parked.
 
@@ -248,7 +256,8 @@ def _check_required_executable_untrusted(
 
     from ..security.executables import TRUST_DEPLOYED
 
-    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    if dep_names is None:
+        dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
     lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
     untrusted: list[str] = []
     for req in required:
@@ -1240,11 +1249,12 @@ def run_dependency_policy_checks(
         return result
     if _run(_check_dependency_denylist(deps_list, policy.dependencies)):
         return result
-    if _run(_check_required_packages(deps_list, policy.dependencies)):
+    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps_list}
+    if _run(_check_required_packages(deps_list, policy.dependencies, dep_names=dep_names)):
         return result
-    if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
+    if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies, dep_names=dep_names)):
         return result
-    if _run(_check_required_executable_untrusted(deps_list, lockfile, policy.executables)):
+    if _run(_check_required_executable_untrusted(deps_list, lockfile, policy.executables, dep_names=dep_names)):
         return result
     if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
         return result
