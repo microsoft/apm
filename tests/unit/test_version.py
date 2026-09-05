@@ -289,7 +289,7 @@ class TestGetBuildSha:
                 with patch("subprocess.run", return_value=mock_result) as mock_run:
                     get_build_sha()
         call_args = mock_run.call_args
-        assert Path(call_args[0][0][0]).name == "git"
+        assert Path(call_args[0][0][0]).stem == "git"
         assert call_args[0][0][1:] == ["rev-parse", "--short", "HEAD"]
         assert call_args[1].get("timeout") == 5
 

@@ -32,7 +32,7 @@ class TestGetBuildSha(unittest.TestCase):
         assert result == "d1630d1"
         mock_run.assert_called_once()
         args = mock_run.call_args
-        assert Path(args[0][0][0]).name == "git"
+        assert Path(args[0][0][0]).stem == "git"
         assert args[0][0][1:] == ["rev-parse", "--short", "HEAD"]
 
     @patch("apm_cli.version.__BUILD_SHA__", None)
