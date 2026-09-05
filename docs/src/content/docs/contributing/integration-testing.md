@@ -375,12 +375,12 @@ environment end-to-end; for local iteration prefer the direct
 The Windows full-unit step in `.github/workflows/build-release.yml` runs:
 
 ```sh
-uv run python -m pytest tests/unit tests/test_console.py -n auto --dist worksteal -vv --tb=short --show-capture=no --no-showlocals -p no:faulthandler -p tests.pytest_hang_diagnostics
+uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal -vv --tb=short --show-capture=no --no-showlocals
 ```
 
-The opt-in, test-only plugin uses a Python thread to dump process stacks every 300 seconds in the controller and workers, including collection and teardown after a failed call. Dumps contain filenames, functions, and line numbers, not locals or captured output. It replaces the built-in faulthandler plugin, whose per-test timer is canceled on failure. Dumps stop at `pytest_unconfigure`; later shutdown hangs and native code holding the GIL rely on the workflow timeout instead.
+`PYTHONUNBUFFERED=1` keeps named test starts and outcomes visible while the suite runs. Captured test output and local-variable dumps remain disabled. These diagnostics identify candidate unfinished tests, not stack frames or the exact blocked phase; an outcome can appear before fixture teardown completes.
 
-The 60-minute step limit fails closed on a hang; it is not proof that tests pass or a root-cause fix. Test selection and parallelism are unchanged. The PR-time `windows_compat` gate exercises live stack output during setup, call, and teardown after a failed call.
+The 60-minute step limit fails closed on a hang; it is not proof that tests pass or a root-cause fix. Test selection and parallelism are unchanged. The PR-time `windows_compat` gate exercises live name visibility during setup, call, and teardown after a failed call.
 
 ### GitHub Actions Authentication
 
