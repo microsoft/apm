@@ -24,6 +24,7 @@ from git.exc import GitCommandError
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.utils.git_env import _GitConfigSnapshot
 
 
 def _make_downloader():
@@ -71,6 +72,16 @@ class TestGenericHostCloneErrorPort:
                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
                 return_value=None,
             ),
+            # HTTPS policy inspection must not depend on a warmed Git cache
+            # after clear=True removes PATH on Windows.
+            patch(
+                "apm_cli.utils.git_env._read_effective_git_config",
+                return_value=_GitConfigSnapshot((), (), ()),
+            ),
+            patch(
+                "apm_cli.utils.git_env.get_git_executable",
+                side_effect=AssertionError("Diagnostic tests must not launch Git"),
+            ),
             patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
         ):
             MockRepo.clone_from.side_effect = _fake_clone
@@ -78,6 +89,7 @@ class TestGenericHostCloneErrorPort:
             try:
                 with pytest.raises(RuntimeError) as exc_info:
                     dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
+                MockRepo.clone_from.assert_called_once()
                 return str(exc_info.value)
             finally:
                 shutil.rmtree(target, ignore_errors=True)
