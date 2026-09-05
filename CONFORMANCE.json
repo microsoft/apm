@@ -279,9 +279,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::TestFinalLockfileTargetContraction::test_removes_dropped_target_instruction_file",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe"
       ]
     },
@@ -291,8 +292,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_dropped_target_merge_hook_state_reconciled_fail_safe"
       ]
     },
