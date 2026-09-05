@@ -865,7 +865,7 @@ class ContextOptimizer:
                 try:
                     # Resolve both paths to handle symlinks and path inconsistencies
                     resolved_file = file_path.resolve()
-                    rel_path = resolved_file.relative_to(self.base_dir.resolve())
+                    rel_path = resolved_file.relative_to(self.base_dir)
 
                     # Use cached glob results instead of repeated glob calls
                     matches = self._cached_glob(expanded_pattern)
@@ -1196,7 +1196,7 @@ class ContextOptimizer:
 
         # Convert to relative paths for easier analysis
         relative_dirs = [
-            d.resolve().relative_to(self.base_dir.resolve()) for d in matching_directories
+            d.resolve().relative_to(self.base_dir) for d in matching_directories
         ]
 
         # Find the lowest common ancestor that covers all directories
