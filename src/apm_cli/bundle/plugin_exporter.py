@@ -22,6 +22,7 @@ from ..deps.lockfile import (
 )
 from ..models.apm_package import APMPackage, DependencyReference
 from ..models.dependency.subsets import skill_subset_filter_tokens
+from ..utils.apmignore import ApmIgnoreSpec
 from ..utils.archive import (
     projected_archive_path,
     validate_archive_format,
@@ -147,26 +148,30 @@ def _collect_apm_components(apm_dir: Path) -> list[tuple[Path, str]]:
     if not apm_dir.is_dir():
         return components
 
+    ignore = ApmIgnoreSpec.load(apm_dir.parent)
+
     # agents/ -> agents/
-    _collect_flat(apm_dir / "agents", "agents", components)
+    _collect_flat(apm_dir / "agents", "agents", components, ignore=ignore)
 
     # skills/ -> skills/ (preserve sub-directory structure)
-    _collect_recursive(apm_dir / "skills", "skills", components)
+    _collect_recursive(apm_dir / "skills", "skills", components, ignore=ignore)
 
     # prompts/ -> commands/ (rename .prompt.md -> .md)
-    _collect_recursive(apm_dir / "prompts", "commands", components, rename=_rename_prompt)
+    _collect_recursive(
+        apm_dir / "prompts", "commands", components, rename=_rename_prompt, ignore=ignore
+    )
 
     # instructions/ -> instructions/
-    _collect_recursive(apm_dir / "instructions", "instructions", components)
+    _collect_recursive(apm_dir / "instructions", "instructions", components, ignore=ignore)
 
     # commands/ -> commands/
-    _collect_recursive(apm_dir / "commands", "commands", components)
+    _collect_recursive(apm_dir / "commands", "commands", components, ignore=ignore)
 
     # extensions/ -> extensions/ (canvas extensions, experimental Copilot-only).
     # Preserved verbatim so an offline bundle can carry a canvas; the files are
     # inert until the consumer enables the ``canvas`` experimental flag AND
     # approves the package via allowExecutables / ``apm approve`` at install time.
-    _collect_recursive(apm_dir / "extensions", "extensions", components)
+    _collect_recursive(apm_dir / "extensions", "extensions", components, ignore=ignore)
 
     return components
 
@@ -178,10 +183,11 @@ def _collect_root_plugin_components(project_root: Path) -> list[tuple[Path, str]
     ``skills/``, etc. at the repo root) have their files picked up here.
     """
     components: list[tuple[Path, str]] = []
+    ignore = ApmIgnoreSpec.load(project_root)
     for dir_name in PLUGIN_ROOT_DIRS:
         if dir_name == "hooks":
             continue
-        _collect_recursive(project_root / dir_name, dir_name, components)
+        _collect_recursive(project_root / dir_name, dir_name, components, ignore=ignore)
     return components
 
 
@@ -244,6 +250,7 @@ def _collect_bare_skill(
     slug = _normalize_bare_skill_slug(getattr(dep, "virtual_path", "") or "")
     if not slug:
         slug = dep.repo_url.rsplit("/", 1)[-1] if dep.repo_url else "skill"
+    ignore = ApmIgnoreSpec.load(install_path)
     for f in sorted(install_path.iterdir()):
         if (
             f.is_file()
@@ -254,6 +261,7 @@ def _collect_bare_skill(
                 "apm.lock.yaml",
                 "plugin.json",
             )
+            and not ignore.is_ignored(f, is_dir=False)
         ):
             out.append((f, f"skills/{slug}/{f.name}"))
 
@@ -267,12 +275,17 @@ def _collect_flat(
     out: list[tuple[Path, str]],
     *,
     rename=None,
+    ignore: ApmIgnoreSpec | None = None,
 ) -> None:
     """Add every regular non-symlink file directly inside *src_dir*."""
     if src_dir.is_symlink() or not src_dir.is_dir():
         return
     for f in sorted(src_dir.iterdir()):
-        if f.is_file() and not f.is_symlink():
+        if (
+            f.is_file()
+            and not f.is_symlink()
+            and not (ignore and ignore.is_ignored(f, is_dir=False))
+        ):
             name = rename(f.name) if rename else f.name
             out.append((f, f"{output_prefix}/{name}"))
 
@@ -283,12 +296,15 @@ def _collect_recursive(
     out: list[tuple[Path, str]],
     *,
     rename=None,
+    ignore: ApmIgnoreSpec | None = None,
 ) -> None:
     """Add every regular non-symlink file under *src_dir*, preserving hierarchy."""
     if src_dir.is_symlink() or not src_dir.is_dir():
         return
     for f in sorted(src_dir.rglob("*")):
         if not f.is_file() or f.is_symlink():
+            continue
+        if ignore is not None and ignore.is_ignored(f, is_dir=False):
             continue
         rel = f.relative_to(src_dir)
         name = rename(rel.name) if rename else rel.name
@@ -582,6 +598,7 @@ def _collect_explicit_local_components(
     components: list[tuple[Path, str]] = []
     hooks: dict = {}
     hooks_present = False
+    ignore = ApmIgnoreSpec.load(project_root)
     for declared_path in includes:
         parts = _deployed_path_parts(declared_path)
         candidate = project_root.joinpath(*parts)
@@ -610,6 +627,8 @@ def _collect_explicit_local_components(
                     f"{entry.name}. Remove the symlink or list a regular path."
                 )
         for file_path in (entry for entry in entries if entry.is_file()):
+            if ignore.is_ignored(file_path, is_dir=False):
+                continue
             try:
                 file_path = ensure_path_within(file_path, project_root)
             except PathTraversalError as exc:

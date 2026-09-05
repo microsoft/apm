@@ -29,6 +29,11 @@ required file; the four conventional subdirectories ship as-is when
 APM copies the skill to a target. Single-skill repositories may also
 place `SKILL.md` at the package root.
 
+A root `SKILL.md` package copies the whole tree on install. Put a
+`.apmignore` next to it (gitignore syntax) to keep maintainer-only
+paths such as `evals/` out of install, pack, and compile. You cannot
+ignore `SKILL.md` or `apm.yml`.
+
 ## Frontmatter contract
 
 ```yaml

@@ -71,9 +71,10 @@ def _build_deployable_copy_ignore(
     source_plan: "DeployableSourcePlan | None" = None,
     exclude_apm: bool = False,
     exclude_apm_yml: bool = False,
+    package_root: Path | None = None,
 ) -> Callable[[str, list[str]], list[str]]:
     """Build a copy filter constrained to the authorized source plan."""
-    base_ignore = build_copy_ignore(skip_bin=skip_bin)
+    base_ignore = build_copy_ignore(skip_bin=skip_bin, package_root=package_root)
     internal_names = (
         *((".apm",) if exclude_apm else ()),
         *(("apm.yml",) if exclude_apm_yml else ()),
@@ -365,7 +366,10 @@ def copy_skill_to_target(
         shutil.copytree(
             source_path,
             skill_dir,
-            ignore=_build_deployable_copy_ignore(source_plan=source_plan),
+            ignore=_build_deployable_copy_ignore(
+                source_plan=source_plan,
+                package_root=package_info.install_path,
+            ),
         )
         rewriter = SkillIntegrator()
         rewriter.init_link_resolver(package_info, target_base)
@@ -854,6 +858,9 @@ class SkillIntegrator(BaseIntegrator):
                 ignore=_build_deployable_copy_ignore(
                     skip_bin=skip_bin,
                     source_plan=source_plan,
+                    package_root=(
+                        source_plan.source_root if source_plan is not None else sub_skill_path
+                    ),
                 ),
             )
             if link_rewriter is not None:
@@ -1207,7 +1214,6 @@ class SkillIntegrator(BaseIntegrator):
                             _rich_warning(detail)
                 shutil.rmtree(target_skill_dir)
             target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-            target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
             from apm_cli.models.apm_package import PackageType as _PackageType
 
             shutil.copytree(
@@ -1218,6 +1224,7 @@ class SkillIntegrator(BaseIntegrator):
                     source_plan=source_plan,
                     exclude_apm=True,
                     exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
+                    package_root=package_path,
                 ),
             )
             self._resolve_markdown_links_in_skill_bundle(package_path, target_skill_dir)
@@ -1308,6 +1315,7 @@ class SkillIntegrator(BaseIntegrator):
             SkillIntegrationResult with all promoted skills.
         """
         self.init_link_resolver(package_info, project_root)
+        package_path = package_info.install_path
         if targets is None:
             from apm_cli.integration.targets import active_targets
 
@@ -1317,9 +1325,7 @@ class SkillIntegrator(BaseIntegrator):
         # which is just the repo/leaf name and collides across owners (see
         # _build_ownership_maps).
         _dep_ref = getattr(package_info, "dependency_ref", None)
-        parent_name = (
-            _dep_ref.get_unique_key() if _dep_ref is not None else package_info.install_path.name
-        )
+        parent_name = _dep_ref.get_unique_key() if _dep_ref is not None else package_path.name
         owned_by, lockfile_native_owners = self._build_ownership_maps(project_root)  # noqa: RUF059
 
         total_promoted = 0

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Packages can ship a `.apmignore` file (gitignore semantics, including nested
+  files and `!` negation) so `apm install`, `apm pack`, and `apm compile`
+  omit maintainer-only paths such as `evals/`. Root `SKILL.md` and `apm.yml`
+  cannot be ignored.
+
 ## [0.29.1] - 2026-09-05
 
 ### Security

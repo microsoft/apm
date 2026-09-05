@@ -63,6 +63,8 @@ my-pkg/
 +-- apm-policy.yml                # Optional org/repo policy. See enterprise docs.
 +-- scripts/                      # Optional helper scripts you author.
 +-- tests/                        # Optional tests for your primitives.
++-- .apmignore                    # Optional. Omit maintainer-only files from
+                                  # install, pack, and compile (gitignore syntax).
 ```
 
 Anything under `apm_modules/`, `.github/`, `.claude/`, `.cursor/`, or

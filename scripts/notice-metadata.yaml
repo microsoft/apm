@@ -294,3 +294,9 @@ components:
     spdx: MIT
     copyright_snippet: Copyright (c) 2022 Seth Michael Larson
     notes: Verifies HTTPS against the operating-system trust store by default so `apm` works behind a corporate CA / TLS-inspecting proxy.
+  - name: pathspec
+    pyproject_name: pathspec
+    upstream: https://github.com/cpburnz/python-pathspec
+    spdx: MPL-2.0
+    copyright_snippet: Copyright (c) Caleb P. Burns
+    notes: Used by ApmIgnoreSpec to match .apmignore files with gitignore semantics.

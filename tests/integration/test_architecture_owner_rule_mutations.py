@@ -84,6 +84,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Taxonomy inventory stops reading the canonical module-level pytestmark.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-apmignore-membership",
+        rule_id="contracts-tooling-apmignore-membership",
+        path="src/apm_cli/utils/apmignore.py",
+        old="class ApmIgnoreSpec:",
+        new="class ApmIgnoreSpecV2:",
+        intent="Package membership owner loses the one canonical ApmIgnoreSpec class.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-apply-to-placement",
         rule_id="contracts-tooling-apply-to-placement",
         path="src/apm_cli/primitives/parser.py",

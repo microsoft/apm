@@ -28,6 +28,7 @@ CLAUDE_MD_FILENAME = "CLAUDE.md"
 GITHUB_DIR = ".github"
 CLAUDE_DIR = ".claude"
 GITIGNORE_FILENAME = ".gitignore"
+APM_IGNORE_FILENAME = ".apmignore"
 APM_MODULES_GITIGNORE_PATTERN = "apm_modules/"
 
 

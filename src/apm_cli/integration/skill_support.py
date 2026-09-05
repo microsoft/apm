@@ -11,18 +11,25 @@ from apm_cli.core.deployment_state import MaterializationResult
 def build_copy_ignore(
     *,
     skip_bin: bool = False,
+    package_root: Path | None = None,
 ) -> Callable[[str, list[str]], list[str]]:
     """Build a ``shutil.copytree`` ignore function."""
     from apm_cli.security.gate import ignore_non_content
+    from apm_cli.utils.apmignore import ApmIgnoreSpec
 
-    if not skip_bin:
+    extras: list[Callable[[str, list[str]], list[str]]] = []
+    if skip_bin:
+        extras.append(shutil.ignore_patterns("bin"))
+    if package_root is not None:
+        return ApmIgnoreSpec.load(package_root).copytree_ignore(*extras)
+    if not extras:
         return ignore_non_content
-    bin_filter = shutil.ignore_patterns("bin")
 
     def combined(directory: str, contents: list[str]) -> list[str]:
-        return list(
-            set(ignore_non_content(directory, contents)) | set(bin_filter(directory, contents))
-        )
+        dropped = set(ignore_non_content(directory, contents))
+        for extra in extras:
+            dropped.update(extra(directory, contents))
+        return list(dropped)
 
     return combined
 

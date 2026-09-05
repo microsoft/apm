@@ -17,6 +17,9 @@ import ast
 import re
 from collections.abc import Sequence
 
+from scripts.architecture_linter.checks.contracts_apmignore import (
+    check_apmignore_membership,
+)
 from scripts.architecture_linter.checks.contracts_generation_footer import (
     check_generation_footer_authority,
 )
@@ -82,6 +85,9 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
+
+
+_GUARD_APMIGNORE = "contracts-tooling-apmignore-membership"
 
 
 _SRC_PREFIX = "src/apm_cli/"
@@ -1346,6 +1352,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_GENERATION_FOOTER,
         "Generated-content footer wording stays owned by compilation/footer.py.",
         lambda provider: check_generation_footer_authority(provider, _GUARD_GENERATION_FOOTER),
+    ),
+    _owner_rule(
+        _GUARD_APMIGNORE,
+        "Package ship/deploy/compile path membership stays owned by utils/apmignore.py.",
+        lambda provider: check_apmignore_membership(provider, _GUARD_APMIGNORE),
     ),
     _structural_rule(
         _CONTRACT_RULE_ID,

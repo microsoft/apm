@@ -602,6 +602,7 @@ contracts-tests-executable-contract-authorities
 contracts-tests-lifecycle-smoke-partition
 contracts-tests-taxonomy-classification
 contracts-tooling-ado-lock-coordinates
+contracts-tooling-apmignore-membership
 contracts-tooling-apply-to-placement
 contracts-tooling-cached-policy-shape
 contracts-tooling-dependency-identity

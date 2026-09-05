@@ -23,6 +23,10 @@ This is the producer side of [Deploy a local bundle](../../consumer/deploy-a-bun
 Consumers who receive the artifact run `apm install ./your-bundle` and skip
 the registry resolver entirely.
 
+To keep maintainer-only files such as `evals/` out of the bundle, add a
+`.apmignore` at the package root. The file uses gitignore syntax. `apm pack`,
+`apm install`, and `apm compile` all honor it.
+
 ## What `apm pack` produces
 
 By default `apm pack` writes a Claude Code plugin directory under `./build/`:

@@ -98,7 +98,10 @@ def clear_discovery_cache() -> None:
     from earlier runs (tests, REPL, long-lived processes) cannot leak
     into the next install's discovery results.
     """
+    from ..utils.apmignore import clear_apmignore_cache
+
     _DISCOVERY_CACHE.clear()
+    clear_apmignore_cache()
 
 
 def _discovery_cache_key(
@@ -447,6 +450,7 @@ def _scan_patterns(
     patterns: dict[str, list[str]],
     collection: PrimitiveCollection,
     source: str,
+    ignore: object | None = None,
     inventory: CompileInventory | None = None,
 ) -> None:
     """Walk *base_dir* once, match files against all patterns, parse and collect.
@@ -479,6 +483,8 @@ def _scan_patterns(
     files = inventory.files_within(base_dir)
 
     for file_path in files:
+        if ignore is not None and ignore.is_ignored(file_path, is_dir=False):
+            continue
         rel_path = file_path.relative_to(base_dir).as_posix()
         if not _matches_any_pattern(rel_path, all_patterns):
             continue
@@ -503,6 +509,10 @@ def scan_directory_with_source(
         collection (PrimitiveCollection): Collection to add primitives to.
         source (str): Source identifier for discovered primitives.
     """
+    from ..utils.apmignore import ApmIgnoreSpec
+
+    ignore = ApmIgnoreSpec.load(directory)
+
     # Scan .apm directory within the dependency
     apm_dir = directory / ".apm"
     if apm_dir.exists():
@@ -511,6 +521,7 @@ def scan_directory_with_source(
             DEPENDENCY_PRIMITIVE_PATTERNS,
             collection,
             source,
+            ignore=ignore,
             inventory=inventory,
         )
 
@@ -524,6 +535,7 @@ def scan_directory_with_source(
             DEPENDENCY_GITHUB_PRIMITIVE_PATTERNS,
             collection,
             source,
+            ignore=ignore,
             inventory=inventory,
         )
 
@@ -532,6 +544,7 @@ def scan_directory_with_source(
         directory,
         collection,
         source,
+        ignore=ignore,
         inventory=inventory,
     )
 
@@ -553,6 +566,11 @@ def _discover_local_skill(
         if should_exclude(skill_path, Path(base_dir), exclude_patterns):
             logger.debug("Excluded by pattern: %s", skill_path)
             return
+        from ..utils.apmignore import ApmIgnoreSpec
+
+        if ApmIgnoreSpec.load(Path(base_dir)).is_ignored(skill_path, is_dir=False):
+            logger.debug("Excluded by package ignore spec: %s", skill_path)
+            return
         try:
             skill = parse_skill_file(skill_path, source="local")
             collection.add_primitive(skill)
@@ -564,6 +582,7 @@ def _discover_skill_in_directory(
     directory: Path,
     collection: PrimitiveCollection,
     source: str,
+    ignore: object | None = None,
     inventory: CompileInventory | None = None,
 ) -> None:
     """Discover SKILL.md in a package directory.
@@ -572,10 +591,13 @@ def _discover_skill_in_directory(
         directory (Path): Package directory to check.
         collection (PrimitiveCollection): Collection to add skill to.
         source (str): Source identifier for the skill.
+        ignore: Optional package ignore spec.
     """
     if inventory is not None and inventory.nested_repository_root_for(directory) is not None:
         return
     skill_path = directory / "SKILL.md"
+    if ignore is not None and ignore.is_ignored(skill_path, is_dir=False):
+        return
     if not skill_path.is_symlink() and skill_path.exists() and _is_readable(skill_path):
         try:
             skill = parse_skill_file(skill_path, source=source)
@@ -676,6 +698,9 @@ def find_primitive_files(
 
     started = time.perf_counter()
     base_path = Path(base_dir).resolve()
+    from ..utils.apmignore import ApmIgnoreSpec
+
+    ignore = ApmIgnoreSpec.load(base_path)
     pattern_tuples: list[tuple[str, ...]] = [
         tuple(p for p in pat.split("/") if p) for pat in patterns
     ]
@@ -689,6 +714,7 @@ def find_primitive_files(
         pattern_tuples,
         exclude_patterns,
         started,
+        ignore=ignore,
     )
 
 
@@ -698,6 +724,7 @@ def _find_primitive_inventory_files(
     pattern_tuples: list[tuple[str, ...]],
     exclude_patterns: list[str] | None,
     started: float,
+    ignore: object | None = None,
 ) -> list[Path]:
     """Classify a compile inventory with the existing primitive glob grammar."""
     candidates = inventory.files_within(base_path)
@@ -710,6 +737,8 @@ def _find_primitive_inventory_files(
         if not any(_glob_match_parts(path_parts, pattern) for pattern in pattern_tuples):
             continue
         if exclude_patterns and should_exclude(file_path, base_path, exclude_patterns):
+            continue
+        if ignore is not None and ignore.is_ignored(file_path, is_dir=False):
             continue
         if file_path.is_file() and not file_path.is_symlink():
             valid_files.append(file_path)

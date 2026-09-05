@@ -79,6 +79,13 @@ my-package/
 
 ## Install-time discovery rules
 
+Add a `.apmignore` at the package root (gitignore syntax, including
+nested files and `!` negation) to keep maintainer-only files such as
+`evals/` out of `apm install`, `apm pack`, and `apm compile`. There
+are no built-in author patterns. `SKILL.md` and `apm.yml` cannot be
+ignored. The git checkout in `apm_modules/` stays complete; filtering
+happens at deploy, pack, and compile.
+
 When `.apm/` exists, `apm pack` sources local primitives and hooks from
 `.apm/`. Without `.apm/`, supported plugin-native root directories
 (`agents/`, `skills/`, `commands/`, `instructions/`, `extensions/`, and

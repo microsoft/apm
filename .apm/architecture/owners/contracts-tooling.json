@@ -61,6 +61,13 @@
       "owner": "compilation/footer.py (build_generation_footer)",
       "selectors": ["src/apm_cli/compilation/footer.py"],
       "guards": ["contracts-tooling-generation-footer"]
+    },
+    {
+      "id": "apmignore-membership",
+      "decision": "Package ship/deploy/compile path membership from .apmignore",
+      "owner": "utils/apmignore.py (ApmIgnoreSpec)",
+      "selectors": ["src/apm_cli/utils/apmignore.py"],
+      "guards": ["contracts-tooling-apmignore-membership"]
     }
   ]
 }

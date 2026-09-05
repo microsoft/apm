@@ -40,6 +40,7 @@ dependencies = [
     "ruamel.yaml>=0.18.0",
     "filelock>=3.12",
     "websockets>=12,<17",
+    "pathspec>=0.12.0",
 ]
 
 [project.optional-dependencies]
