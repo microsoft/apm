@@ -37,6 +37,10 @@ def _run_installer(
     auth_required: bool = False,
     github_host: str = "github.com",
     shell: str = "bash",
+    api_checksum: bool = False,
+    private_archive: bool = False,
+    asset_id: int | str = 123,
+    metadata_format: str = "pretty",
 ) -> tuple[subprocess.CompletedProcess[str], list[dict], Path]:
     """Run the worktree installer; only fixture-local marker execution is allowed."""
     for directory in ("bin", "home", "scratch"):
@@ -69,7 +73,31 @@ def _run_installer(
         "unavailable": "",
     }
     (tmp_path / "checksum").write_text(records[checksum], encoding="ascii")
-    (tmp_path / "latest.json").write_text('{"tag_name": "v0.29.0"}\n', encoding="ascii")
+    api_base = (
+        "https://api.github.com" if github_host == "github.com" else f"https://{github_host}/api/v3"
+    )
+    assets_url = f"{api_base}/repos/microsoft/apm/releases/assets"
+    release = {"tag_name": "v0.29.0"}
+    if api_checksum:
+        release["assets"] = [
+            {
+                "url": f"{assets_url}/122",
+                "id": 122,
+                "node_id": "archive",
+                "name": asset,
+            },
+            {
+                "url": "https://untrusted.invalid/never-use-metadata-url",
+                "uploader": {"id": 987, "name": asset + ".sha256"},
+                "name": asset + ".sha256",
+                "id": asset_id,
+            },
+            {"id": 999, "name": "another-archive.tar.gz.sha256"},
+        ]
+    (tmp_path / "latest.json").write_text(
+        json.dumps(release, indent=2 if metadata_format == "pretty" else None) + "\n",
+        encoding="ascii",
+    )
     base = (
         "https://mirror.invalid/apm"
         if mirror
@@ -78,12 +106,20 @@ def _run_installer(
     metadata = (
         "https://mirror.invalid/apm/latest.json"
         if mirror
-        else "https://api.github.com/repos/microsoft/apm/releases/latest"
+        else f"{api_base}/repos/microsoft/apm/releases/latest"
     )
     url = f"{base}/v0.29.0/{asset}"
     routes = {url: asset, metadata: "latest.json"}
     if checksum != "missing":
         routes[url + ".sha256"] = "unavailable" if checksum == "unavailable" else "checksum"
+    if api_checksum:
+        routes.pop(url + ".sha256", None)
+        routes[f"{api_base}/repos/microsoft/apm/releases/tags/v0.29.0"] = "latest.json"
+        if checksum != "missing":
+            routes[f"{assets_url}/123"] = "unavailable" if checksum == "unavailable" else "checksum"
+        if private_archive:
+            routes.pop(url)
+            routes[f"{assets_url}/122"] = asset
     (tmp_path / "routes.json").write_text(json.dumps(routes), encoding="ascii")
     tools = ("uname", "ldd", "mktemp", "rm", "curl", "tar", "chmod", *hash_tools, *DENIED_TOOLS)
     stub = ROOT / "tests/utils/unix_installer_stub.py"
@@ -203,7 +239,7 @@ def test_verification_precedes_archive_consumption(
     assert [url.path for url in parsed] == [
         f"{'/apm' if mirror else '/microsoft/apm/releases/download'}/v0.29.0/"
         f"apm-{platform}-x86_64.tar.gz{suffix}"
-        for suffix in ("", ".sha256")
+        for suffix in (".sha256", "")
     ]
     if mirror:
         assert {url.hostname for url in parsed} == {"mirror.invalid"}
@@ -229,7 +265,14 @@ def test_verification_precedes_archive_consumption(
 @pytest.mark.parametrize("mirror", [False, True])
 def test_invalid_sidecar_fails_closed(tmp_path: Path, checksum: str, mirror: bool) -> None:
     """Malformed, unbound, duplicate and unavailable sidecars are not verification."""
-    _assert_refused(*_run_installer(tmp_path, checksum=checksum, mirror=mirror))
+    result, trace, marker = _run_installer(tmp_path, checksum=checksum, mirror=mirror)
+    _assert_refused(result, trace, marker)
+    assert not any(
+        urlparse(arg).path.endswith(".tar.gz")
+        for event in trace
+        if event["tool"] == "curl"
+        for arg in event["args"]
+    )
 
 
 @pytest.mark.parametrize("hash_tools", [("shasum",), ("sha256sum",)])
@@ -268,6 +311,8 @@ def test_missing_or_failed_hash_capability_is_fatal(
     assert [e["tool"] for e in trace if e["tool"] in ("shasum", "sha256sum")] == list(
         hash_tools[:1]
     )
+    if not hash_tools:
+        assert not any(e["tool"] == "curl" for e in trace)
 
 
 @pytest.mark.parametrize("github_host", ["github.com", "ghe.invalid"])
@@ -279,6 +324,84 @@ def test_checksum_auth_retry_stays_on_configured_github_host(
     assert result.returncode == 95, result.stdout + result.stderr
     assert marker.exists()
     requests = [e for e in trace if e["tool"] == "curl" and "-H" in e["args"]]
-    assert len(requests) == 1
-    assert urlparse(requests[0]["args"][-3]).hostname == github_host
-    assert urlparse(requests[0]["args"][-3]).path.endswith(".tar.gz.sha256")
+    assert len(requests) == 2
+    assert urlparse(requests[-1]["args"][-3]).hostname == github_host
+    assert urlparse(requests[-1]["args"][-3]).path.endswith(".tar.gz.sha256")
+
+
+@pytest.mark.parametrize("github_host", ["github.com", "ghe.invalid"])
+@pytest.mark.parametrize("selection", ["latest", "pinned", "self-update"])
+@pytest.mark.parametrize("metadata_format", ["pretty", "compact"])
+def test_private_checksum_api_uses_canonical_selected_release(
+    tmp_path: Path, github_host: str, selection: str, metadata_format: str
+) -> None:
+    """Bind private checksums by asset ID, never metadata URLs or uploader IDs."""
+    result, trace, marker = _run_installer(
+        tmp_path,
+        github_host=github_host,
+        selection=selection,
+        api_checksum=True,
+        metadata_format=metadata_format,
+    )
+    assert result.returncode == 95, result.stdout + result.stderr
+    assert marker.exists()
+    requests = [e for e in trace if e["tool"] == "curl" and "-H" in e["args"]]
+    urls = [urlparse(arg) for e in requests for arg in e["args"] if urlparse(arg).scheme == "https"]
+    assert {url.hostname for url in urls} == {
+        "api.github.com" if github_host == "github.com" else github_host
+    }
+    prefix = "" if github_host == "github.com" else "/api/v3"
+    assert urls[-1].path == prefix + "/repos/microsoft/apm/releases/assets/123"
+    assert "Accept: application/octet-stream" in requests[-1]["args"]
+    if selection != "latest":
+        assert urls[0].path == prefix + "/repos/microsoft/apm/releases/tags/v0.29.0"
+    tools = [e["tool"] for e in trace]
+    assert tools.index("sha256sum") < tools.index("tar")
+
+
+def test_private_latest_archive_and_sidecar_use_api(tmp_path: Path) -> None:
+    """Exercise the private archive route which originally lost checksum access."""
+    result, trace, marker = _run_installer(
+        tmp_path, selection="latest", api_checksum=True, private_archive=True
+    )
+    assert result.returncode == 95, result.stdout + result.stderr
+    assert marker.exists()
+    api_downloads = [
+        urlparse(arg).path
+        for event in trace
+        if event["tool"] == "curl" and "Accept: application/octet-stream" in event["args"]
+        for arg in event["args"]
+        if urlparse(arg).scheme == "https"
+    ]
+    assert api_downloads == [
+        "/repos/microsoft/apm/releases/assets/123",
+        "/repos/microsoft/apm/releases/assets/122",
+    ]
+
+
+@pytest.mark.parametrize("asset_id", ["123", "123/../../evil", -1, 0])
+def test_private_checksum_rejects_nonpositive_or_nonnumeric_ids(
+    tmp_path: Path, asset_id: int | str
+) -> None:
+    """Invalid IDs cannot form authenticated API paths, even with valid sidecars."""
+    result, trace, marker = _run_installer(
+        tmp_path, selection="latest", api_checksum=True, asset_id=asset_id
+    )
+    _assert_refused(result, trace, marker)
+    assert not any(
+        event["tool"] == "curl" and "Accept: application/octet-stream" in event["args"]
+        for event in trace
+    )
+
+
+@pytest.mark.parametrize("checksum", ["missing", "unavailable", "wrong-asset", "mismatch"])
+@pytest.mark.parametrize("mirror", [False, True])
+def test_private_checksum_api_failure_never_downgrades(
+    tmp_path: Path, checksum: str, mirror: bool
+) -> None:
+    """Private API failure and mirror-provided API metadata never bypass integrity."""
+    _assert_refused(
+        *_run_installer(
+            tmp_path, selection="latest", api_checksum=True, checksum=checksum, mirror=mirror
+        )
+    )

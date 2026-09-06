@@ -105,9 +105,9 @@ jobs:
 
 ### Unix archive verification
 
-For every selected binary release, `install.sh` fetches `{tag}/{archive}.sha256` through the same release-asset URL routing and mirror as the archive. The sidecar must contain exactly one record: 64 hexadecimal SHA256 characters, two spaces (or a space and `*`), then the exact archive basename.
+For every selected Unix binary release, `install.sh` fetches `{tag}/{archive}.sha256` through the same release-asset route and mirror as the archive, retrying the canonical GitHub/GHES release-asset API only for GitHub/GHES direct URL misses. It parses the sidecar, checks hash-tool availability, and requires one record -- 64 hex SHA256 characters, two spaces (or space plus `*`), then the exact archive basename -- before downloading the archive.
 
-Before extraction or execution of the downloaded binary, the installer compares the archive hash using `sha256sum` or `shasum -a 256`, checking that hashing succeeds. Missing, malformed, unreachable, or mismatching checksums, or unavailable/failed hashing, stop installation. Integrity failures have no pip fallback or bypass flag.
+Before extraction or execution, the installer compares the archive hash using `sha256sum` or `shasum -a 256`. Missing, malformed, unreachable, or mismatching checksums, or unavailable/failed hashing, stop installation. Integrity failures have no pip fallback or bypass flag.
 
 Historical releases and custom mirrors without sidecars are refused. Upgrade the mirrored installer and publish matching original publisher sidecars beside the archives, or select a release with sidecars. Do not generate replacement checksums from untrusted downloads.
 
@@ -167,7 +167,7 @@ Homebrew and Scoop mirror support is docs-only in this v0: mirror the tap or buc
 
 Run this on a disposable Linux or macOS runner. It starts a local mirror and wraps `curl` and `pip` to reject public hosts.
 
-With [Unix archive verification](#unix-archive-verification), this fixture fails at checksum fetch because it has no `.sha256`, before extraction and without pip fallback.
+This fixture fails at checksum fetch because it has no `.sha256`, before archive download or extraction and without pip fallback.
 
 ```bash
 set -eu
@@ -262,15 +262,14 @@ Copy-Item -Path .\apm-windows-x86_64\* -Destination $installDir -Recurse -Force
 ```
 
 #### macOS / Linux
+
+Prefer the verified Unix installer; it selects the platform archive and checks the publisher `.sha256` before extracting:
+
 ```bash
-# Example: macOS Apple Silicon
-curl -L https://github.com/microsoft/apm/releases/latest/download/apm-darwin-arm64.tar.gz | tar -xz
-sudo mkdir -p /usr/local/lib/apm
-sudo cp -r apm-darwin-arm64/* /usr/local/lib/apm/
-sudo ln -sf /usr/local/lib/apm/apm /usr/local/bin/apm
+curl -sSL https://aka.ms/apm-unix | sh
 ```
 
-Replace `apm-darwin-arm64` with the archive name for your macOS or Linux platform:
+It chooses one of these archive basenames:
 
 | Platform            | Archive name          |
 |---------------------|-----------------------|

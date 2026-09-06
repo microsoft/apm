@@ -21,6 +21,11 @@ def _download(root: Path, args: list[str]) -> int:
         return 22
     if source == "unavailable":
         return 7
+    if "/releases/assets/" in urlparse(urls[0]).path:
+        assert "Authorization: token fixture-token" in args
+        assert "Accept: application/octet-stream" in args
+    if "/releases/tags/" in urlparse(urls[0]).path:
+        assert "Authorization: token fixture-token" in args
     if urls[0].endswith(".sha256") and os.environ.get("FIXTURE_AUTH_REQUIRED"):
         if "-H" not in args:
             return 22

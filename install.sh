@@ -431,6 +431,132 @@ fi
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# Integrity failures never enter the binary-compatibility pip fallback.
+checksum_error() {
+    printf '%b\n' "${RED}Error: $1${NC}"
+    printf '%s\n' "$2"
+    exit 1
+}
+
+download_checksum_with_auth() {
+    # Construct API URLs on the configured GitHub host, never a metadata URL.
+    if is_public_github_url; then
+        CHECKSUM_API="https://api.github.com/repos/$APM_REPO/releases"
+    else
+        CHECKSUM_API="${GITHUB_URL%/}/api/v3/repos/$APM_REPO/releases"
+    fi
+    CHECKSUM_RELEASE="${LATEST_RELEASE:-}"
+    if [ -z "$CHECKSUM_RELEASE" ]; then
+        if ! CHECKSUM_RELEASE=$(curl -L --fail --silent --show-error \
+            -H "Authorization: token $AUTH_HEADER_VALUE" \
+            "$CHECKSUM_API/tags/$TAG_NAME"); then
+            CHECKSUM_RELEASE=""
+        fi
+    fi
+    # Read only direct name/id fields of objects in the root assets array.
+    # Tokenize quoted strings so compact JSON and nested uploader IDs are safe.
+    CHECKSUM_ASSET_ID=$(printf '%s\n' "$CHECKSUM_RELEASE" | LC_ALL=C awk -v asset="$DOWNLOAD_BINARY.sha256" '
+        {
+            rest = $0
+            while (match(rest, /"([^"\\]|\\.)*"|[][{}:,]|[^][{}:,[:space:]]+/)) {
+                token = substr(rest, RSTART, RLENGTH)
+                rest = substr(rest, RSTART + RLENGTH)
+                if (token == "{" || token == "[") {
+                    if (token == "[" && depth == 1 && key[depth] == "\"assets\"")
+                        assets = depth + 1
+                    depth++
+                    kind[depth] = token
+                    key[depth] = ""
+                    want_key[depth] = (token == "{")
+                    if (assets && depth == assets + 1 && token == "{") {
+                        name = id = ""
+                        names = ids = 0
+                    }
+                } else if (token == "}" || token == "]") {
+                    if (assets && depth == assets + 1 && token == "}" &&
+                        name == "\"" asset "\"") {
+                        matches++
+                        if (names == 1 && ids == 1) selected = id
+                    }
+                    if (depth == assets) assets = 0
+                    depth--
+                } else if (token == ",") {
+                    want_key[depth] = (kind[depth] == "{")
+                } else if (token != ":") {
+                    if (want_key[depth]) {
+                        key[depth] = token
+                        want_key[depth] = 0
+                    } else if (assets && depth == assets + 1) {
+                        if (key[depth] == "\"name\"") { name = token; names++ }
+                        if (key[depth] == "\"id\"") {
+                            ids++
+                            id = (token ~ /^[1-9][0-9]*$/) ? token : ""
+                        }
+                    }
+                }
+            }
+        }
+        END { if (depth == 0 && matches == 1) printf "%s", selected }
+    ')
+    if [ -n "$CHECKSUM_ASSET_ID" ]; then
+        if curl -L --fail --silent --show-error \
+            -H "Authorization: token $AUTH_HEADER_VALUE" \
+            -H "Accept: application/octet-stream" \
+            "$CHECKSUM_API/assets/$CHECKSUM_ASSET_ID" -o "$CHECKSUM_PATH"; then
+            return 0
+        fi
+    fi
+    curl -L --fail --silent --show-error \
+        -H "Authorization: token $AUTH_HEADER_VALUE" \
+        "$CHECKSUM_URL" -o "$CHECKSUM_PATH"
+}
+
+if command -v sha256sum >/dev/null 2>&1; then
+    CHECKSUM_TOOL="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+    CHECKSUM_TOOL="shasum"
+else
+    checksum_error "SHA-256 verification is unavailable." \
+        "Install sha256sum (coreutils) or shasum (Perl Digest::SHA), then retry."
+fi
+
+if [ -n "$APM_RELEASE_BASE_URL" ]; then
+    CHECKSUM_REMEDIATION="Check mirror access. Ask the mirror operator to synchronize the original publisher archive and $TAG_NAME/$DOWNLOAD_BINARY.sha256 together, then retry."
+else
+    CHECKSUM_REMEDIATION="Check release access (and token permissions for private releases). Retry with a release that publishes $DOWNLOAD_BINARY.sha256; report missing or invalid sidecars to the release maintainer."
+fi
+CHECKSUM_URL=$(release_asset_url "$TAG_NAME" "$DOWNLOAD_BINARY.sha256")
+CHECKSUM_PATH="$TMP_DIR/$DOWNLOAD_BINARY.sha256"
+echo -e "${YELLOW}Fetching archive checksum...${NC}"
+if ! curl -L --fail --silent --show-error "$CHECKSUM_URL" -o "$CHECKSUM_PATH"; then
+    # Mirrors never receive GitHub auth or fall back to GitHub assets.
+    if [ -n "$AUTH_HEADER_VALUE" ] && [ -z "$APM_RELEASE_BASE_URL" ]; then
+        if ! download_checksum_with_auth; then
+            checksum_error "Could not download the release checksum." "$CHECKSUM_REMEDIATION"
+        fi
+    else
+        checksum_error "Could not download the release checksum." "$CHECKSUM_REMEDIATION"
+    fi
+fi
+
+# Accept one standard record bound to this basename, before the larger download.
+if ! EXPECTED_SHA256=$(LC_ALL=C awk -v asset="$DOWNLOAD_BINARY" '
+    {
+        sub(/\r$/, "")
+        digest = substr($0, 1, 64)
+        separator = substr($0, 65, 2)
+        if (NR != 1 || length(digest) != 64 || digest ~ /[^0-9a-fA-F]/ ||
+            (separator != "  " && separator != " *") || substr($0, 67) != asset)
+            exit 1
+    }
+    END {
+        if (NR != 1) exit 1
+        print tolower(digest)
+    }
+' "$CHECKSUM_PATH"); then
+    checksum_error "Malformed release checksum." "$CHECKSUM_REMEDIATION"
+fi
+
 # Download binary
 echo -e "${YELLOW}Downloading APM...${NC}"
 
@@ -529,60 +655,7 @@ else
 fi
 
 # Verify the exact release archive before extraction or any binary execution.
-# Integrity failures exit here, never through the binary-compatibility pip fallback.
-checksum_error() {
-    printf '%b\n' "${RED}Error: $1${NC}"
-    printf '%s\n' "$2"
-    exit 1
-}
-
-if command -v sha256sum >/dev/null 2>&1; then
-    CHECKSUM_TOOL="sha256sum"
-elif command -v shasum >/dev/null 2>&1; then
-    CHECKSUM_TOOL="shasum"
-else
-    checksum_error "SHA-256 verification is unavailable." \
-        "Install sha256sum (coreutils) or shasum (Perl Digest::SHA), then retry."
-fi
-
-CHECKSUM_URL=$(release_asset_url "$TAG_NAME" "$DOWNLOAD_BINARY.sha256")
-CHECKSUM_PATH="$TMP_DIR/$DOWNLOAD_BINARY.sha256"
 echo -e "${YELLOW}Verifying archive checksum...${NC}"
-if ! curl -L --fail --silent --show-error "$CHECKSUM_URL" -o "$CHECKSUM_PATH"; then
-    # Reuse the archive's host-scoped token; mirrors never receive GitHub auth.
-    if [ -n "$AUTH_HEADER_VALUE" ] && [ -z "$APM_RELEASE_BASE_URL" ]; then
-        if ! curl -L --fail --silent --show-error \
-            -H "Authorization: token $AUTH_HEADER_VALUE" \
-            "$CHECKSUM_URL" -o "$CHECKSUM_PATH"; then
-            checksum_error "Could not download the release checksum." \
-                "Check release access and publish $TAG_NAME/$DOWNLOAD_BINARY.sha256 beside the archive, then retry."
-        fi
-    else
-        checksum_error "Could not download the release checksum." \
-            "Check release or mirror access and publish $TAG_NAME/$DOWNLOAD_BINARY.sha256 beside the archive, then retry."
-    fi
-fi
-
-# Accept one standard sha256sum/shasum record, bound to this archive basename.
-# Do not let checksum-file paths choose which local file gets verified.
-if ! EXPECTED_SHA256=$(LC_ALL=C awk -v asset="$DOWNLOAD_BINARY" '
-    {
-        sub(/\r$/, "")
-        digest = substr($0, 1, 64)
-        separator = substr($0, 65, 2)
-        if (NR != 1 || length(digest) != 64 || digest ~ /[^0-9a-fA-F]/ ||
-            (separator != "  " && separator != " *") || substr($0, 67) != asset)
-            exit 1
-    }
-    END {
-        if (NR != 1) exit 1
-        print tolower(digest)
-    }
-' "$CHECKSUM_PATH"); then
-    checksum_error "Malformed release checksum." \
-        "Publish one SHA-256 record naming exactly $DOWNLOAD_BINARY in its .sha256 sidecar, then retry."
-fi
-
 if [ "$CHECKSUM_TOOL" = "sha256sum" ]; then
     if ! HASH_OUTPUT=$(sha256sum "$TMP_DIR/$DOWNLOAD_BINARY"); then
         checksum_error "SHA-256 hashing failed." "Check the downloaded archive and sha256sum installation, then retry."
@@ -594,8 +667,7 @@ else
 fi
 ACTUAL_SHA256=$(printf '%s\n' "$HASH_OUTPUT" | awk '{print tolower($1)}')
 if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-    checksum_error "Archive checksum verification failed." \
-        "The archive does not match its published SHA-256. Check the release or mirror contents and retry."
+    checksum_error "Archive checksum verification failed." "$CHECKSUM_REMEDIATION"
 fi
 echo -e "${GREEN}[+] Archive checksum verified${NC}"
 
