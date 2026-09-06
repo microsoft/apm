@@ -103,6 +103,16 @@ jobs:
 | `APM_NO_DIRECT_FALLBACK` | *(unset)* | Set to `1` to fail closed when a mirror is missing or unreachable instead of using public GitHub, `aka.ms`, or PyPI. |
 | `APM_SKIP_CHECKSUM` | *(unset)* | Windows only: set to `1` to skip `.sha256` verification on **pinned** installs (emergency only). |
 
+### Unix archive verification
+
+For every selected binary release, `install.sh` fetches `{tag}/{archive}.sha256` through the same release-asset URL routing and mirror as the archive. The sidecar must contain exactly one record: 64 hexadecimal SHA256 characters, two spaces (or a space and `*`), then the exact archive basename.
+
+Before extraction or execution of the downloaded binary, the installer compares the archive hash using `sha256sum` or `shasum -a 256`, checking that hashing succeeds. Missing, malformed, unreachable, or mismatching checksums, or unavailable/failed hashing, stop installation. Integrity failures have no pip fallback or bypass flag.
+
+Historical releases and custom mirrors without sidecars are refused. Upgrade the mirrored installer and publish matching original publisher sidecars beside the archives, or select a release with sidecars. Do not generate replacement checksums from untrusted downloads.
+
+This checks integrity against the same publisher's checksum, not independent provenance or a signature.
+
 ### Enterprise bootstrap mirror mode
 
 Mirror mode routes bootstrap traffic through internal hosts. Four URL variables point install and self-update at your mirror; `APM_NO_DIRECT_FALLBACK=1` fails closed so no request reaches a public host:
@@ -138,7 +148,9 @@ apm-releases/
   latest.json
   v0.19.0/
     apm-linux-x86_64.tar.gz
+    apm-linux-x86_64.tar.gz.sha256
     apm-darwin-arm64.tar.gz
+    apm-darwin-arm64.tar.gz.sha256
     apm-windows-x86_64.zip
     apm-windows-x86_64.zip.sha256
 ```
@@ -153,7 +165,9 @@ Homebrew and Scoop mirror support is docs-only in this v0: mirror the tap or buc
 
 ### No-egress smoke test
 
-Run this on a disposable Linux or macOS runner. It starts a local mirror, wraps both `curl` and `pip` with deny-lists for public hosts, and expects the installer to fail only after downloading the fake archive. Any request to GitHub, `aka.ms`, PyPI, Homebrew, or Scoop fails the smoke test immediately. The `pip` wrapper makes the PyPI egress path explicit: pip fallback is gated by `APM_NO_DIRECT_FALLBACK` + `APM_PYPI_INDEX_URL`, so the wrapper proves pip cannot reach public PyPI even if the binary path falls back to it.
+Run this on a disposable Linux or macOS runner. It starts a local mirror and wraps `curl` and `pip` to reject public hosts.
+
+With [Unix archive verification](#unix-archive-verification), this fixture fails at checksum fetch because it has no `.sha256`, before extraction and without pip fallback.
 
 ```bash
 set -eu

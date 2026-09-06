@@ -46,11 +46,13 @@ Some package-manager distributions (for example, Homebrew) disable self-update a
 
 `apm self-update` uses the same mirror contract as the installer scripts. See the [installation bootstrap mirror section](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode) for the canonical setup. When `APM_INSTALLER_BASE_URL` is set, it stays authoritative and APM appends only the platform script name. Otherwise, a resolved release uses its exact `v<version>` ref on GitHub or GHES; the `aka.ms` or current-ref fallback is used only when no release has been resolved.
 
+Unix self-update inherits [archive verification](../../../getting-started/installation/#unix-archive-verification) only when the selected release-tag or mirrored installer includes the guard. Older tagged scripts do not gain verification retroactively.
+
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `APM_RELEASE_METADATA_URL` | _(unset)_ | Exact URL for mirrored release metadata, usually a static `latest.json` with at least `{"tag_name":"vX.Y.Z"}`. Overrides GitHub release metadata lookup. |
 | `APM_INSTALLER_BASE_URL` | _(unset)_ | Authoritative base URL containing `install.sh` and `install.ps1`. APM appends only the platform script name, not a GitHub release ref. |
-| `APM_RELEASE_BASE_URL` | _(unset)_ | Base URL containing release assets at `{base}/{tag}/{asset}`. Used when self-update runs the installer to fetch binary archives. |
+| `APM_RELEASE_BASE_URL` | _(unset)_ | Base URL containing release archives and their `.sha256` sidecars at `{base}/{tag}/{asset}`. Used by the selected installer. |
 | `APM_PYPI_INDEX_URL` | _(unset)_ | PyPI-compatible index used by installer pip fallback. |
 | `APM_NO_DIRECT_FALLBACK` | _(unset)_ | Set to `1` to fail closed instead of using public GitHub, `aka.ms`, or PyPI fallback. |
 | `APM_SELF_UPDATE_CHANNEL` | `stable` | Invocation-scoped channel override: `stable` or `prerelease`. Overrides `apm config set self-update.channel ...`. |

@@ -50,6 +50,8 @@ curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 ```
 
+Unix binary installs require publisher `.sha256` sidecars, with no integrity-failure pip fallback or bypass. See [archive verification](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#unix-archive-verification) for requirements and mirror migration, and [self-update](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/reference/cli/self-update.md#enterprise-bootstrap-mirrors) for the release-tag installer caveat.
+
 ## Installer options (Windows PowerShell)
 
 Uses the same variables as `install.sh` where applicable (`GITHUB_URL`, `APM_REPO`, `VERSION`, `APM_INSTALL_DIR`). See the full variable table, Actions example, checksum rules, and canonical Windows `PATH` layout in [installation.md](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md).
@@ -69,7 +71,7 @@ irm https://aka.ms/apm-windows | iex
 
 ## Enterprise bootstrap mirrors
 
-Set `APM_INSTALLER_BASE_URL`, `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_PYPI_INDEX_URL`, and `APM_NO_DIRECT_FALLBACK=1` to install and update APM through an internal mirror while failing closed on public fallback. For verification, run the installer and `apm self-update --check` behind an egress proxy or wrappers that deny public GitHub, `aka.ms`, PyPI, Homebrew, and Scoop; only your mirror host should appear. The canonical setup, GHES scoping note, and full no-egress smoke recipe live in the [installation bootstrap mirror section](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#enterprise-bootstrap-mirror-mode).
+Use the variables below to install and update APM through an internal mirror. See the [installation bootstrap mirror section](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#enterprise-bootstrap-mirror-mode) for fail-closed scope, GHES behavior, and the no-egress smoke test.
 
 ```bash
 export APM_INSTALLER_BASE_URL="https://artifactory.mycorp.example/generic/apm-install"
