@@ -40,6 +40,7 @@ def installation(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[Path, 
         "grep",
         "sort",
         "head",
+        "tr",
         "uname",
         "mktemp",
         "sh",
@@ -93,7 +94,11 @@ def _run(
         )
         overrides["HISTORICAL_APM"] = str(root / "usr/local/bin/apm")
     elif pip_fallback or failure_stage is not None:
-        body = source.split("# Function to check Python availability and version\n", 1)[1]
+        support = source.split("is_truthy() {", 1)[1].split(
+            "# Function to check Python availability and version\n", 1
+        )[0]
+        body = "is_truthy() {" + support
+        body += source.split("# Function to check Python availability and version\n", 1)[1]
         body = body.split("# Early glibc compatibility check", 1)[0]
         if failure_stage == "binary":
             body += (
@@ -292,6 +297,47 @@ def _record_tool_calls(root: Path, name: str) -> None:
         encoding="ascii",
     )
     tool.chmod(0o755)
+
+
+def _stage_fake_python_pip(
+    root: Path,
+    *,
+    python_name: str = "python3",
+    query_exit: int = 0,
+    install_launcher: bool = False,
+) -> tuple[Path, Path]:
+    """Stage a selected Python and harmless pip module for fallback tests."""
+    fake_modules = root / "python-modules"
+    pip = fake_modules / "pip"
+    pip.mkdir(parents=True)
+    (pip / "__init__.py").touch()
+    install_body = ""
+    if install_launcher:
+        install_body = (
+            "    scripts = Path(os.environ['PYTHONUSERBASE']) / 'bin'\n"
+            "    scripts.mkdir(parents=True, exist_ok=True)\n"
+            "    launcher = scripts / 'apm'\n"
+            "    launcher.write_text('#!/bin/sh\\nprintf \"pip fixture\\\\n\"\\n', encoding='ascii')\n"
+            "    launcher.chmod(0o755)\n"
+        )
+    (pip / "__main__.py").write_text(
+        "import os, sys\nfrom pathlib import Path\n"
+        "if sys.argv[1:] == ['--version']:\n"
+        "    print('pip fixture')\n"
+        "else:\n"
+        "    Path(os.environ['PIP_LOG']).write_text('\\n'.join(sys.argv[1:]), encoding='ascii')\n"
+        f"{install_body}",
+        encoding="ascii",
+    )
+    python = root / "tools" / python_name
+    python.write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *get_preferred_scheme*) [ {query_exit} -eq 0 ] || exit {query_exit};; esac\n'
+        f'exec {shlex.quote(sys.executable)} "$@"\n',
+        encoding="ascii",
+    )
+    python.chmod(0o755)
+    return fake_modules, python
 
 
 def test_bundle_preflight_uses_one_linear_scan(installation: tuple[Path, dict[str, str]]) -> None:
@@ -501,6 +547,27 @@ def test_ancestor_walk_does_not_spawn_per_depth(installation: tuple[Path, dict[s
         assert result.returncode == 0, result.stderr
         counts.append(len(log.read_text(encoding="ascii").splitlines()))
         assert (target / "apm").is_file()
+    assert counts[0] == counts[1]
+
+
+def test_path_discovery_does_not_spawn_per_entry(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """A wider real PATH must not create one dirname process per candidate."""
+    root, env = installation
+    _record_tool_calls(root, "dirname")
+    counts = []
+    for width in (10, 100):
+        entries = [str(root / f"missing-path-{width}-{index}") for index in range(width)]
+        log = root / f"path-width-{width}.log"
+        result = _run(
+            installation,
+            APM_INSTALL_DIR=str(root / f"install-{width}/bin"),
+            PATH=":".join([*entries, env["PATH"]]),
+            TOOL_LOG=str(log),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        counts.append(log.read_text(encoding="ascii").splitlines().count("dirname"))
     assert counts[0] == counts[1]
 
 
@@ -788,24 +855,7 @@ def test_pip_fallback_uses_selected_python_user_scripts(
 ) -> None:
     """Use pip's interpreter and user scheme, with no guessed or unsafe export."""
     root, _ = installation
-    fake_modules = root / "python-modules"
-    pip = fake_modules / "pip"
-    pip.mkdir(parents=True)
-    (pip / "__init__.py").touch()
-    (pip / "__main__.py").write_text(
-        "import os, sys\nfrom pathlib import Path\n"
-        "if sys.argv[1:] != ['--version']:\n"
-        "    Path(os.environ['PIP_LOG']).write_text('\\n'.join(sys.argv[1:]))\n",
-        encoding="ascii",
-    )
-    python = root / "tools/python3"
-    python.write_text(
-        "#!/bin/sh\n"
-        f'case "$*" in *get_preferred_scheme*) [ {query_exit} -eq 0 ] || exit {query_exit};; esac\n'
-        f'exec {shlex.quote(sys.executable)} "$@"\n',
-        encoding="ascii",
-    )
-    python.chmod(0o755)
+    fake_modules, _ = _stage_fake_python_pip(root, query_exit=query_exit)
     standalone = root / "tools/pip3"
     standalone.write_text(
         f'#!/bin/sh\nprintf "called\\n" >> "$STANDALONE_PIP_LOG"\n'
@@ -831,12 +881,84 @@ def test_pip_fallback_uses_selected_python_user_scripts(
         assert not log.exists()
         assert "Installation complete!" not in result.stdout
     else:
-        assert log.read_text(encoding="ascii").splitlines()[:2] == ["install", "--user"]
-        export = f'export PATH={shlex.quote(str(user_base / "bin"))}:"$PATH"'
-        assert export in result.stdout
+        mirror = "https://mirror.invalid/simple"
+        assert log.read_text(encoding="ascii").splitlines() == [
+            "install",
+            "--user",
+            "--index-url",
+            mirror,
+            "apm-cli",
+        ]
+        assert mirror not in result.stdout + result.stderr
+        export = next(
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip().startswith("export PATH=")
+        )
+        executed = subprocess.run(
+            ["/bin/sh", "-c", export + '\nprintf "%s\\n" "$PATH"'],
+            cwd=root,
+            env=installation[1],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert executed.returncode == 0, executed.stderr
+        assert executed.stdout == f"{user_base / 'bin'}:{installation[1]['PATH']}\n"
         assert "No shell profiles were changed." in result.stdout
     assert not standalone_log.exists()
     assert not list((root / "home").iterdir())
+    assert not (root / "sudo.log").exists()
+
+
+@pytest.mark.parametrize("scripts_name", ["normal path", "colon:path", "line\nbreak"])
+def test_pip_fallback_printed_handoff_executes(
+    installation: tuple[Path, dict[str, str]], scripts_name: str
+) -> None:
+    """Printed pip PATH or absolute guidance must execute the installed launcher."""
+    root, env = installation
+    fake_modules, _ = _stage_fake_python_pip(root, install_launcher=True)
+    user_base = root / scripts_name
+    log = root / "pip-handoff.log"
+    result = _run(
+        installation,
+        pip_fallback=True,
+        PYTHONPATH=str(fake_modules),
+        PYTHONUSERBASE=str(user_base),
+        PIP_LOG=str(log),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if ":" in scripts_name or "\n" in scripts_name:
+        assert "export PATH=" not in result.stdout
+        instruction = (
+            result.stdout.split("Run APM using its absolute path:\n", 1)[1]
+            .split("\nFor PATH discovery,", 1)[0]
+            .strip()
+        )
+        run_hint = instruction.rsplit(" --version", 1)[0]
+    else:
+        instruction = next(
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip().startswith("export PATH=")
+        )
+        instruction += "\napm --version"
+        run_hint = "apm"
+    executed = subprocess.run(
+        ["/bin/sh", "-c", instruction],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert executed.returncode == 0, executed.stderr
+    assert executed.stdout == "pip fixture\n"
+    assert f"{run_hint} init my-app" in result.stdout
+    assert f"{run_hint} run" in result.stdout
+    assert "No shell profiles were changed." in result.stdout
     assert not (root / "sudo.log").exists()
 
 
@@ -850,6 +972,112 @@ def test_existing_install_cannot_fall_back_to_pip(
     assert result.returncode == 1
     assert "Pip fallback cannot preserve" in result.stderr
     assert (lib / "VERSION").read_text(encoding="ascii") == "old\n"
+
+
+@pytest.mark.parametrize("python_name", ["python3", "python"])
+@pytest.mark.parametrize("failure_stage", ["binary", "glibc"])
+def test_pip_recovery_guidance_uses_selected_python_command(
+    installation: tuple[Path, dict[str, str]],
+    python_name: str,
+    failure_stage: Literal["binary", "glibc"],
+) -> None:
+    """Eligible manual recovery must use the interpreter selected by the installer."""
+    root, _ = installation
+    python = root / "tools" / python_name
+    python.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-c" ]; then printf \'3.10\\n\'; exit 0; fi\n'
+        'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 1; fi\n'
+        "exit 1\n",
+        encoding="ascii",
+    )
+    python.chmod(0o755)
+    if failure_stage == "glibc":
+        ldd = root / "tools/ldd"
+        ldd.write_text("#!/bin/sh\nprintf 'ldd fixture 2.17\\n'\n", encoding="ascii")
+        ldd.chmod(0o755)
+    result = _run(installation, failure_stage=failure_stage)
+    assert result.returncode == 1
+    assert f"{python_name} -m pip install --user apm-cli" in result.stdout
+    assert not any(
+        line.strip().startswith(("pip install ", "pip3 install "))
+        for line in result.stdout.splitlines()
+    )
+
+
+@pytest.mark.parametrize("failure_stage", ["binary", "glibc"])
+def test_missing_python_recovery_does_not_invent_pip_command(
+    installation: tuple[Path, dict[str, str]],
+    failure_stage: Literal["binary", "glibc"],
+) -> None:
+    """Missing Python guidance must not invent an interpreter-backed command."""
+    root, _ = installation
+    if failure_stage == "glibc":
+        ldd = root / "tools/ldd"
+        ldd.write_text("#!/bin/sh\nprintf 'ldd fixture 2.17\\n'\n", encoding="ascii")
+        ldd.chmod(0o755)
+    result = _run(installation, failure_stage=failure_stage)
+    assert result.returncode == 1
+    assert "Install Python 3.10+ first" in result.stdout
+    assert "-m pip install" not in result.stdout
+    assert not any(
+        line.strip().startswith(("pip install ", "pip3 install "))
+        for line in result.stdout.splitlines()
+    )
+
+
+def test_fail_closed_pip_recovery_never_prints_public_command(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """Fail-closed recovery must require the configured mirror, not public PyPI."""
+    root, _ = installation
+    python = root / "tools/python3"
+    python.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-c" ]; then printf \'3.10\\n\'; exit 0; fi\n'
+        'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 1; fi\n'
+        "exit 1\n",
+        encoding="ascii",
+    )
+    python.chmod(0o755)
+    result = _run(
+        installation,
+        failure_stage="binary",
+        APM_NO_DIRECT_FALLBACK="1",
+    )
+    assert result.returncode == 1
+    assert "APM_PYPI_INDEX_URL" in result.stdout
+    assert "python3 -m pip install --user apm-cli" not in result.stdout
+    assert "Attempting installation via python3 -m pip" not in result.stdout
+
+
+@pytest.mark.parametrize("kind", ["existing", "custom", "administrator"])
+def test_ineligible_fallback_prints_no_pip_attempt_or_command(
+    installation: tuple[Path, dict[str, str]], kind: str
+) -> None:
+    """Refused ownership states must not announce an automatic pip attempt."""
+    root, _ = installation
+    options = {}
+    if kind == "existing":
+        _prior(root, "usr/local")
+    elif kind == "custom":
+        options["APM_INSTALL_DIR"] = str(root / "custom/bin")
+    else:
+        identity = root / "tools/id"
+        identity.unlink()
+        identity.write_text("#!/bin/sh\nprintf '0\\n'\n", encoding="ascii")
+        identity.chmod(0o755)
+        options["APM_INSTALL_DIR"] = str(root / "usr/local/bin")
+        options["APM_LIB_DIR"] = str(root / "usr/local/lib/apm")
+    result = _run(installation, failure_stage="binary", **options)
+    assert result.returncode == 1
+    assert "Pip fallback cannot preserve" in result.stderr
+    assert "Attempting automatic fallback to pip" not in result.stdout
+    assert "Attempting installation via pip" not in result.stdout
+    assert not any(
+        line.strip().startswith(("pip install ", "pip3 install ")) or " -m pip install " in line
+        for line in result.stdout.splitlines()
+    )
 
 
 @pytest.mark.parametrize("kind", ["existing", "custom", "fresh"])
@@ -880,24 +1108,21 @@ def test_binary_failure_advice_preserves_installation_ownership(
     elif kind == "custom":
         options["APM_INSTALL_DIR"] = str(root / "custom/bin")
     result = _run(installation, failure_stage=failure_stage, **options)
-    continues_to_download = (
-        kind == "fresh" and python_version == "3.10" and failure_stage == "glibc"
-    )
-    assert result.returncode == (0 if continues_to_download else 1)
+    assert result.returncode == 1
     if kind == "fresh":
-        if continues_to_download:
+        if python_version == "3.10":
             assert "pip is not available" in result.stdout
+            assert "python3 -m pip install --user apm-cli" in result.stdout
         else:
-            if python_version != "3.10":
-                assert "Python 3.10+" in result.stdout
-            assert (
-                "pip3 install --user apm-cli" in result.stdout
-                or "pip install --user apm-cli" in result.stdout
-            )
+            assert "Python 3.10+" in result.stdout
+            assert "-m pip install" not in result.stdout
+        assert not any(
+            line.strip().startswith(("pip install ", "pip3 install "))
+            for line in result.stdout.splitlines()
+        )
     else:
         assert "Pip fallback cannot preserve" in result.stderr
-        assert "pip3 install --user apm-cli" not in result.stdout
-        assert "pip install --user apm-cli" not in result.stdout
+        assert "-m pip install" not in result.stdout
         assert "Manual installation options" not in result.stdout
     if kind == "existing":
         assert (root / "usr/local/lib/apm/VERSION").read_text(encoding="ascii") == "old\n"

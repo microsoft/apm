@@ -86,6 +86,23 @@ apm_shell_quote() (
     done
 )
 
+apm_print_path_guidance() {
+    _apm_run_hint="apm"
+    case "$1" in
+        *:*|*[[:cntrl:]]*)
+            _apm_run_hint="$(apm_shell_quote "$1/apm")"
+            echo "Run APM using its absolute path:"
+            printf '  %s --version\n' "$_apm_run_hint"
+            echo "For PATH discovery, reinstall through its owner into a directory without ':' or control characters."
+            ;;
+        *)
+            echo "For this shell, run the following; add it to your shell profile only if desired:"
+            printf '  export PATH=%s:"$PATH"\n' "$(apm_shell_quote "$1")"
+            ;;
+    esac
+    echo "No shell profiles were changed."
+}
+
 apm_is_recognized_bundle() {
     [ -f "$1/apm" ] && [ ! -L "$1/apm" ] && {
         { [ -f "$1/.apm-installed" ] && [ ! -L "$1/.apm-installed" ]; } ||
@@ -95,7 +112,12 @@ apm_is_recognized_bundle() {
 }
 
 apm_probe_installation() {
-    _probe_parent="$(dirname "$1")"
+    case "$1" in
+        */*) _probe_parent="${1%/*}"
+             [ -n "$_probe_parent" ] || _probe_parent="/" ;;
+        *) _probe_parent="." ;;
+    esac
+    _probe_original_parent="$_probe_parent"
     while [ "$_probe_parent" != "/" ] && [ "$_probe_parent" != "." ]; do
         if [ -d "$_probe_parent" ] && [ ! -x "$_probe_parent" ]; then
             apm_install_error "Cannot inspect existing APM through $_probe_parent: directory is not searchable. Ask its owner to repair permissions before retrying."
@@ -109,7 +131,8 @@ apm_probe_installation() {
     [ -e "$1" ] || [ -L "$1" ] || return 0
     _candidate="$(apm_real_path "$1")" ||
         apm_install_error "Cannot resolve existing APM at $1. Repair this path before reinstalling."
-    _candidate_lib="$(dirname "$_candidate")"
+    _candidate_lib="${_candidate%/*}"
+    [ -n "$_candidate_lib" ] || _candidate_lib="/"
     if [ ! -f "$_candidate" ] || [ "${_candidate##*/}" != "apm" ]; then
         apm_install_error "Invalid existing APM launcher at $1. Repair it with its original installer before retrying."
     fi
@@ -125,8 +148,8 @@ apm_probe_installation() {
     fi
     _apm_existing_binary="$_candidate"
     _apm_existing_lib="$_candidate_lib"
-    if [ "$(apm_real_path "$(dirname "$1")")" != "$(apm_real_path "$_candidate_lib")" ]; then
-        _apm_existing_bin="$(dirname "$1")"
+    if [ "$(apm_real_path "$_probe_original_parent")" != "$(apm_real_path "$_candidate_lib")" ]; then
+        _apm_existing_bin="$_probe_original_parent"
     fi
 }
 
@@ -347,6 +370,7 @@ pip_index_args() {
 
 # Function to check Python availability and version
 check_python_requirements() {
+    PYTHON_CMD=""
     # Check if Python is available
     if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
         return 1  # Python not available
@@ -373,6 +397,42 @@ check_python_requirements() {
     fi
 }
 
+print_selected_pip_install_command() {
+    [ -n "$PYTHON_CMD" ] || return 1
+    if [ -n "$APM_PYPI_INDEX_URL" ]; then
+        printf '  %s -m pip install --user --index-url "%s" apm-cli\n' \
+            "$PYTHON_CMD" '$APM_PYPI_INDEX_URL'
+    elif is_truthy "$APM_NO_DIRECT_FALLBACK"; then
+        echo "  Set APM_PYPI_INDEX_URL to your internal PyPI proxy, then rerun this installer."
+    else
+        printf '  %s -m pip install --user apm-cli\n' "$PYTHON_CMD"
+    fi
+}
+
+print_pip_recovery_guidance() {
+    case "${PIP_FALLBACK_FAILURE:-python-unavailable}" in
+        python-unavailable)
+            echo -e "${YELLOW}Python 3.10+ is not available on this system.${NC}"
+            echo ""
+            echo "Install Python 3.10+ first, then rerun this installer:"
+            echo "  Ubuntu/Debian: sudo apt-get update && sudo apt-get install python3 python3-pip"
+            echo "  CentOS/RHEL: sudo yum install python3 python3-pip"
+            echo "  Alpine: apk add python3 py3-pip"
+            echo "  macOS: brew install python3"
+            ;;
+        pip-unavailable)
+            echo -e "${YELLOW}pip is not available for $PYTHON_CMD.${NC}"
+            echo "Install pip for that interpreter, then run:"
+            print_selected_pip_install_command
+            ;;
+        install-failed)
+            echo -e "${YELLOW}The selected Python pip installation failed.${NC}"
+            echo "After resolving the reported pip error, retry:"
+            print_selected_pip_install_command
+            ;;
+    esac
+}
+
 # Function to attempt pip installation
 try_pip_installation() {
     apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm
@@ -381,32 +441,38 @@ try_pip_installation() {
         apm_install_error "Pip fallback cannot preserve these installation destinations. Update with the original installer, or uninstall the existing installation before choosing pip."
     fi
     if ! check_python_requirements; then
+        PIP_FALLBACK_FAILURE="python-unavailable"
         return 1
     fi
-    echo -e "${BLUE}Attempting installation via pip...${NC}"
     
     # Query and invoke pip through the same interpreter, not an unrelated launcher.
     if ! "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
         echo -e "${RED}Error: pip is not available for $PYTHON_CMD${NC}"
+        PIP_FALLBACK_FAILURE="pip-unavailable"
         return 1
     fi
-    PIP_PATH_COMMAND="$("$PYTHON_CMD" -c 'import shlex, sysconfig; print("export PATH=" + shlex.quote(sysconfig.get_path("scripts", scheme=sysconfig.get_preferred_scheme("user"))) + ":\"$PATH\"")')" ||
+    PIP_SCRIPTS_DIR="$("$PYTHON_CMD" -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme=sysconfig.get_preferred_scheme("user")))')" ||
+        apm_install_error "Cannot determine the pip user-script directory. Repair this Python installation before retrying; no package was installed."
+    [ -n "$PIP_SCRIPTS_DIR" ] ||
         apm_install_error "Cannot determine the pip user-script directory. Repair this Python installation before retrying; no package was installed."
     
     # Try to install. In fail-closed mode, never fall back to public PyPI.
     if [ -n "$APM_PYPI_INDEX_URL" ]; then
+        echo -e "${BLUE}Attempting installation via $PYTHON_CMD -m pip...${NC}"
         echo -e "${BLUE}Using APM_PYPI_INDEX_URL mirror for pip install.${NC}"
         PIP_INSTALL_OK=0
         "$PYTHON_CMD" -m pip install --user --index-url "$APM_PYPI_INDEX_URL" apm-cli || PIP_INSTALL_OK=$?
     elif is_truthy "$APM_NO_DIRECT_FALLBACK"; then
         fail_closed_error APM_PYPI_INDEX_URL "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
     else
+        echo -e "${BLUE}Attempting installation via $PYTHON_CMD -m pip...${NC}"
         PIP_INSTALL_OK=0
         "$PYTHON_CMD" -m pip install --user apm-cli || PIP_INSTALL_OK=$?
     fi
 
     if [ "$PIP_INSTALL_OK" -eq 0 ]; then
         echo -e "${GREEN}[+] APM installed successfully via pip!${NC}"
+        _apm_run_hint="apm"
         
         # Check if apm is now available
         if command -v apm >/dev/null 2>&1; then
@@ -415,23 +481,22 @@ try_pip_installation() {
             echo -e "${BLUE}Location: $(which apm)${NC}"
         else
             echo -e "${YELLOW}[!] APM installed but not found in PATH${NC}"
-            echo "For this shell, add pip's user-script directory to PATH:"
-            printf '  %s\n' "$PIP_PATH_COMMAND"
-            echo "No shell profiles were changed."
+            apm_print_path_guidance "$PIP_SCRIPTS_DIR"
         fi
         
         echo ""
         echo -e "${GREEN}Installation complete!${NC}"
         echo ""
         echo -e "${BLUE}Quick start:${NC}"
-        echo "  apm init my-app          # Create a new APM project"
-        echo "  cd my-app && apm install # Install dependencies"
-        echo "  apm run                  # Run your first prompt"
+        printf '  %s init my-app          # Create a new APM project\n' "$_apm_run_hint"
+        printf '  cd my-app && %s install # Install dependencies\n' "$_apm_run_hint"
+        printf '  %s run                  # Run your first prompt\n' "$_apm_run_hint"
         echo ""
         echo -e "${BLUE}Documentation:${NC} $GITHUB_URL/$APM_REPO"
         return 0
     else
         echo -e "${RED}Error: pip installation failed${NC}"
+        PIP_FALLBACK_FAILURE="install-failed"
         return 1
     fi
 }
@@ -457,20 +522,13 @@ if [ "$PLATFORM" = "linux" ]; then
             
             if try_pip_installation; then
                 exit 0
-            elif ! check_python_requirements; then
-                echo -e "${RED}Python 3.10+ is not available on this system.${NC}"
-                echo ""
-                echo "To install APM, you need either:"
-                echo "  1. Python 3.10+ and pip: pip install --user apm-cli"
-                echo "  2. A system with glibc 2.35+ to use the prebuilt binary"
-                echo "  3. Build from source: git clone $GITHUB_URL/$APM_REPO.git && cd apm && uv sync && uv run pip install -e ."
-                echo ""
-                echo "To install Python 3.10+:"
-                echo "  Ubuntu/Debian: sudo apt-get update && sudo apt-get install python3 python3-pip"
-                echo "  CentOS/RHEL: sudo yum install python3 python3-pip"
-                echo "  Alpine: apk add python3 py3-pip"
-                exit 1
             fi
+            print_pip_recovery_guidance
+            echo ""
+            echo "Other installation options:"
+            echo "  1. Use a system with glibc 2.35+ for the prebuilt binary"
+            echo "  2. Build from source: git clone $GITHUB_URL/$APM_REPO.git && cd apm && uv sync && uv run pip install -e ."
+            exit 1
         fi
     fi
 fi
@@ -479,7 +537,7 @@ fi
 if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ] || grep -q "/docker/" /proc/1/cgroup 2>/dev/null; then
     echo -e "${YELLOW}[!] Container/Dev Container environment detected${NC}"
     echo -e "${YELLOW}Note: PyInstaller binaries may have compatibility issues in containers.${NC}"
-    echo -e "${YELLOW}If installation fails, consider using: pip install --user apm-cli${NC}"
+    echo -e "${YELLOW}The installer will test the binary before changing the installation.${NC}"
     echo ""
 fi
 
@@ -763,10 +821,6 @@ else
         echo ""
     fi
     
-    # Attempt automatic fallback to pip
-    echo -e "${BLUE}Attempting automatic fallback to pip installation...${NC}"
-    echo ""
-    
     if try_pip_installation; then
         exit 0
     fi
@@ -776,26 +830,12 @@ else
     echo -e "${BLUE}Manual installation options:${NC}"
     echo ""
     
-    if ! check_python_requirements; then
-        echo -e "${YELLOW}Note: Python 3.10+ is not available on your system${NC}"
-        echo ""
-        echo "Install Python first:"
-        echo "  Ubuntu/Debian: sudo apt-get update && sudo apt-get install python3 python3-pip"
-        echo "  CentOS/RHEL: sudo yum install python3 python3-pip"
-        echo "  Alpine: apk add python3 py3-pip"
-        echo "  macOS: brew install python3"
-        echo ""
-        echo "Then install APM:"
-        echo "  pip3 install --user apm-cli"
-        echo ""
-    else
-        echo "1. PyPI (recommended): pip3 install --user apm-cli"
-        echo ""
-    fi
-    
-    echo "2. Homebrew (macOS/Linux): brew install microsoft/apm/apm"
+    print_pip_recovery_guidance
     echo ""
-    echo "3. From source:"
+    
+    echo "1. Homebrew (macOS/Linux): brew install microsoft/apm/apm"
+    echo ""
+    echo "2. From source:"
     echo "   git clone $GITHUB_URL/$APM_REPO.git"
     echo "   cd apm && uv sync && uv run pip install -e ."
     echo ""
@@ -878,13 +918,6 @@ APM_BLOCKLIST_EOF
     return 0
 }
 
-apm_prepare_lib_parent() {
-    _apm_parent_dir="$(dirname "$1")"
-    if mkdir -p "$_apm_parent_dir" 2>/dev/null && [ -w "$_apm_parent_dir" ]; then
-        return 0
-    fi
-    return 1
-}
 # INSTALL_SAFETY_END -- extracted for testability; do not remove markers.
 
 _rc=0
@@ -940,19 +973,7 @@ if [ -n "$_apm_on_path" ] &&
     echo -e "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
 else
     echo -e "${YELLOW}[!] APM installed but not found in PATH${NC}"
-    case "$APM_INSTALL_DIR" in
-        *:*|*[[:cntrl:]]*)
-            _apm_run_hint="$(apm_shell_quote "$APM_INSTALL_DIR/$BINARY_NAME")"
-            echo "Run APM using its absolute path:"
-            printf '  %s --version\n' "$_apm_run_hint"
-            echo "For PATH discovery, reinstall through its owner into a directory without ':' or control characters."
-            ;;
-        *)
-            echo "For this shell, run the following; add it to your shell profile only if desired:"
-            printf '  export PATH=%s:"$PATH"\n' "$(apm_shell_quote "$APM_INSTALL_DIR")"
-            ;;
-    esac
-    echo "No shell profiles were changed."
+    apm_print_path_guidance "$APM_INSTALL_DIR"
 fi
 
 echo ""

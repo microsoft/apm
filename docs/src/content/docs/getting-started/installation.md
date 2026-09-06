@@ -340,7 +340,7 @@ apm --version
 
 ### `apm: command not found` (macOS / Linux)
 
-Run the POSIX-quoted `export PATH=...` command printed by the installer. For native installation destinations containing `:` or control characters, use the printed absolute-path command instead.
+Run the POSIX-quoted `export PATH=...` command printed by the installer. For native or pip script directories containing `:` or control characters, use the printed absolute-path command instead.
 
 ### Permission denied during install (macOS / Linux)
 
@@ -348,7 +348,7 @@ For existing installations, follow [ownership and migration](#unix-install-owner
 
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 
-Prebuilt Linux binaries require glibc 2.35+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or Python 3.10+ and pip. Automatic `pip install --user apm-cli` fallback follows the [ownership rules](#unix-install-ownership-and-migration). Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
+Prebuilt Linux binaries require glibc 2.35+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or Python 3.10+ and pip. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
 
 ### Authentication errors when installing packages
 

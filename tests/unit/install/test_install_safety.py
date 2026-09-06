@@ -125,27 +125,6 @@ apm_lib_dir_validate "$1"
     return proc.returncode
 
 
-def _run_prepare_parent(lib_dir: str, home: str | None = None) -> int:
-    """Return the parent-preparation helper exit code for ``lib_dir``."""
-    if home is None:
-        home = "/home/safe-user"
-    driver = f"""
-{_VALIDATOR_SRC}
-apm_prepare_lib_parent "$1"
-"""
-    with tempfile.TemporaryDirectory() as tmp:
-        proc = subprocess.run(
-            ["bash", "-c", driver, "--", lib_dir],
-            input="",
-            capture_output=True,
-            text=True,
-            env={**os.environ, "HOME": home, **_BASH_ENV_EXTRA},
-            cwd=tmp,
-            timeout=10,
-        )
-    return proc.returncode
-
-
 # ---------------------------------------------------------------------------
 # Guard 1: absolute path required
 # ---------------------------------------------------------------------------
@@ -354,29 +333,6 @@ class TestMarkerFileGuard:
 # ---------------------------------------------------------------------------
 # End-to-end scenarios
 # ---------------------------------------------------------------------------
-
-
-@requires_bash
-class TestUserLocalInstall:
-    def test_prepare_parent_creates_missing_user_local_lib_without_sudo(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            home = os.path.join(tmp, "home")
-            os.makedirs(os.path.join(home, ".local"))
-            target = os.path.join(home, ".local", "lib", "apm")
-
-            assert _run_prepare_parent(target, home=home) == 0
-            assert Path(home, ".local", "lib").is_dir()
-
-    def test_prepare_parent_falls_back_when_parent_unwritable(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            protected = Path(tmp, "protected")
-            protected.mkdir()
-            protected.chmod(0o555)
-            try:
-                target = str(protected / "lib" / "apm")
-                assert _run_prepare_parent(target, home=os.path.join(tmp, "home")) == 1
-            finally:
-                protected.chmod(0o755)
 
 
 @requires_bash

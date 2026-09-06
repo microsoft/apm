@@ -27,7 +27,7 @@ scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
 
 # pip (all platforms, requires Python 3.10+)
-pip install apm-cli
+python3 -m pip install apm-cli
 ```
 
 ## Verify
@@ -62,7 +62,7 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 
 Inspect unrecognized data without deleting it. For a fresh install, choose another empty dedicated bundle; otherwise use the original owner's uninstall process.
 
-Update or uninstall pip-owned installs with the owning Python's `-m pip`; uninstall before switching to the binary installer. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set. It prints that Python's user scripts directory when off `PATH` and never edits profiles.
+Update or uninstall pip-owned installs with the owning Python's `-m pip`; uninstall before switching to the binary installer. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set and uses the selected `python3 -m pip` or `python -m pip`. It prints a PATH command or, when one directory cannot be represented safely, an absolute launcher command. It never edits profiles.
 
 Root requires both `APM_INSTALL_DIR` and `APM_LIB_DIR`; one variable refuses the install. See the canonical [Unix ownership and migration procedure](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration).
 
@@ -101,6 +101,6 @@ For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PR
 
 ## Troubleshooting
 
-- **macOS/Linux "command not found":** run the printed POSIX-quoted PATH command; for native installation destinations containing `:` or control characters, use the printed absolute-path command.
+- **macOS/Linux "command not found":** run the printed POSIX-quoted PATH command; for native or pip script directories containing `:` or control characters, use the printed absolute-path command.
 - **Permission denied:** follow [ownership and migration](#unix-ownership-and-migration), not a destination override.
 - **Windows antivirus locks:** set `$env:APM_DEBUG = "1"` and retry.
