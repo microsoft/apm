@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import inspect
 import os
+import select
+import signal
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -156,11 +159,19 @@ def test_expired_scenario_deadline_reports_context_before_spawn(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group assertion")
-def test_timeout_terminates_descendant_process_tree(tmp_path: Path) -> None:
+@pytest.mark.parametrize("startup_delay", [0.0, 0.6], ids=["normal-start", "slow-start"])
+def test_timeout_terminates_descendant_process_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    startup_delay: float,
+) -> None:
     script = (
-        "import pathlib, subprocess, sys, time; "
-        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
-        "pathlib.Path('descendant.pid').write_text(str(child.pid)); "
+        "import subprocess, sys, time; "
+        f"time.sleep({startup_delay!r}); "
+        "child = subprocess.Popen("
+        "[sys.executable, '-c', 'import time; time.sleep(60)'], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "print(child.pid, flush=True); "
         "time.sleep(60)"
     )
     runner = ApmLifecycleRunner(
@@ -168,19 +179,50 @@ def test_timeout_terminates_descendant_process_tree(tmp_path: Path) -> None:
         timeout_seconds=0.3,
     )
 
-    with pytest.raises(subprocess.TimeoutExpired):
-        runner.run((), cwd=tmp_path, env=os.environ)
+    communicate = subprocess.Popen.communicate
+    descendant_pid: int | None = None
+    process: subprocess.Popen[str] | None = None
 
-    descendant_pid = int((tmp_path / "descendant.pid").read_text())
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        try:
+    def communicate_after_ready(
+        child: subprocess.Popen[str],
+        input: str | None = None,
+        timeout: float | None = None,
+    ) -> tuple[str, str]:
+        nonlocal descendant_pid, process
+        process = child
+        if timeout is not None:
+            # Startup is setup, not the timeout under test. Exercise the real
+            # communicate deadline only after a live descendant exists.
+            assert child.stdout is not None
+            ready, _, _ = select.select([child.stdout], [], [], 10.0)
+            assert ready, "process tree did not become ready within 10 seconds"
+            readiness = os.read(child.stdout.fileno(), 64)
+            assert readiness.endswith(b"\n"), "child exited or sent an incomplete readiness PID"
+            descendant_pid = int(readiness)
             os.kill(descendant_pid, 0)
-        except ProcessLookupError:
-            break
-        time.sleep(0.05)
-    else:
-        pytest.fail(f"descendant process {descendant_pid} survived timeout")
+        return communicate(child, input=input, timeout=timeout)
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", communicate_after_ready)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+            runner.run((), cwd=tmp_path, env=os.environ)
+
+        assert exc_info.value.timeout == 0.3
+        assert descendant_pid is not None
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(descendant_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail(f"descendant process {descendant_pid} survived timeout")
+    finally:
+        if process is not None:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            communicate(process)
 
 
 def test_run_sequence_preserves_order_and_results(tmp_path: Path) -> None:

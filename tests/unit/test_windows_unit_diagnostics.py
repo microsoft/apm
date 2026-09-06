@@ -136,6 +136,7 @@ def test_xdist_reports_names_while_blocked_without_capture_or_locals(
                 if (
                     (tmp_path / "entered").exists()
                     and "test_probe.py::test_diagnostic_probe" in output
+                    and (phase != "teardown" or "FAILED" in output)
                 ) or process.poll() is not None:
                     break
                 time.sleep(0.05)
@@ -158,3 +159,29 @@ def test_xdist_reports_names_while_blocked_without_capture_or_locals(
     assert "1 failed, 1 passed" in output
     assert "DO_NOT_DUMP_PROBE_LOCAL" not in output
     assert "DO_NOT_DUMP_PROBE_CAPTURE" not in output
+
+
+@pytest.mark.windows_compat
+def test_xdist_waits_for_failed_report_after_teardown_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker can enter teardown before the controller renders its call report."""
+    read_text = Path.read_text
+    delayed = False
+
+    def delayed_report(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        nonlocal delayed
+        output = read_text(path, encoding=encoding, errors=errors)
+        if (
+            path == tmp_path / "pytest.log"
+            and (tmp_path / "entered").exists()
+            and "test_probe.py::test_diagnostic_probe" in output
+            and not delayed
+        ):
+            delayed = True
+            return output.replace("FAILED", "")
+        return output
+
+    monkeypatch.setattr(Path, "read_text", delayed_report)
+    test_xdist_reports_names_while_blocked_without_capture_or_locals(tmp_path, "teardown")
+    assert delayed

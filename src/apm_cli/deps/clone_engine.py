@@ -21,10 +21,13 @@ unit-testable in isolation and mirrors the existing
 from __future__ import annotations
 
 import os
+import re
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
+from urllib.parse import urlsplit
 
 from git.exc import GitCommandError
 
@@ -44,6 +47,34 @@ if TYPE_CHECKING:
 _PROTOCOL_FALLBACK_DOCS_URL = (
     "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
 )
+
+
+def _is_connect_failure(error: GitCommandError | subprocess.CalledProcessError, url: str) -> bool:
+    """Recognize only Git's pre-connection HTTPS failure for this exact remote."""
+    remote = urlsplit(url)
+    if remote.scheme != "https" or not remote.hostname:
+        return False
+    stderr = error.stderr
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not isinstance(stderr, str):
+        return False
+    if isinstance(error, GitCommandError):
+        if error.status != 128:
+            return False
+        stderr = stderr.removeprefix("\n  stderr: '").removesuffix("'")
+    elif error.returncode != 128:
+        return False
+    return (
+        re.fullmatch(
+            r"(?:Cloning into [^\r\n]+\r?\n)?"
+            rf"fatal: unable to access '{re.escape(url.rstrip('/'))}/?': "
+            rf"Failed to connect to {re.escape(remote.hostname)} port {remote.port or 443}"
+            r" after [0-9]+ ms: Couldn't connect to server",
+            stderr.strip(),
+        )
+        is not None
+    )
 
 
 def _debug(msg: str) -> None:
@@ -149,6 +180,19 @@ class CloneEngine:
         host = self._host
         last_error: Exception | None = None
         is_ado = bool(dep_ref and dep_ref.is_azure_devops())
+
+        def _clone(url: str, env: dict[str, str], target: Path) -> None:
+            """Retry one failed connection without changing transport or credentials."""
+            try:
+                clone_action(url, env, target)
+            except (GitCommandError, subprocess.CalledProcessError) as exc:
+                if not _is_connect_failure(exc, url):
+                    raise
+                _debug("HTTPS connection failed; retrying the same Git action once in 1s")
+                # Clone callbacks own partial-target cleanup; fetch callbacks
+                # retain the existing bare repository. Never delete here.
+                time.sleep(1)
+                clone_action(url, env, target)
 
         dep_host = dep_ref.host if dep_ref else None
         is_github = is_github_hostname(dep_host) if dep_host else True
@@ -332,7 +376,7 @@ class CloneEngine:
                     token="",
                     auth_scheme="basic",
                 )
-                clone_action(winning_url, git_env, target_path)
+                _clone(winning_url, git_env, target_path)
 
             org = repository_owner(repo_url_base)
             host.auth_resolver.try_with_fallback(
@@ -403,7 +447,7 @@ class CloneEngine:
                         attempt_env: dict[str, str],
                     ) -> tuple[str, str | Exception]:
                         try:
-                            clone_action(attempt_url, attempt_env, target_path)
+                            _clone(attempt_url, attempt_env, target_path)
                             return "ok", attempt_url
                         except (
                             GitCommandError,
@@ -453,7 +497,7 @@ class CloneEngine:
                     url = str(outcome[1])
                     authenticated_fallback_used = fallback.bearer_attempted
                 else:
-                    clone_action(url, _env_for(attempt, url), target_path)
+                    _clone(url, _env_for(attempt, url), target_path)
                 if verbose_callback:
                     display = (
                         host._sanitize_git_error(url)

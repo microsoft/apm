@@ -57,7 +57,8 @@ FULL_SUITE_ROOTS = ("tests/unit", "tests/test_console.py", "tests/red_team")
 # past this, that is a signal to re-examine scope. The current ceiling
 # includes the Git environment matrix plus 19 release regressions:
 # eight failures, two unmocked credential lookups, and nine Azure CLI contracts.
-MAX_BOUNDED_FAMILY_SIZE = 344
+# Six staged plugin-root contracts preserve literal suffixes on Windows.
+MAX_BOUNDED_FAMILY_SIZE = 350
 
 
 def _ci_workflow() -> dict:

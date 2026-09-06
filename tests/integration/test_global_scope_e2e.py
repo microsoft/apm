@@ -337,7 +337,7 @@ class TestGlobalManifestPlacement:
         assert result.returncode == 0, combined
         assert "Dry run: Would create" in combined
         assert str(user_manifest) in unwrapped
-        assert local_package.name in combined
+        assert local_package.name in unwrapped
         assert not (fake_home / ".apm").exists()
         assert not (work_dir / "apm.yml").exists()
 
