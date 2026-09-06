@@ -9,6 +9,16 @@ from urllib.parse import urlparse
 def main() -> None:
     """Emit a scripted HTTP response with curl-compatible status/header output."""
     args = sys.argv[1:]
+    if (
+        not args
+        or args[0] != "-q"
+        or any(
+            arg.startswith("--location")
+            or (arg.startswith("-") and not arg.startswith("--") and "L" in arg)
+            for arg in args
+        )
+    ):
+        raise RuntimeError("Unexpected ambient configuration or redirect permission")
     urls = [arg for arg in args if arg.startswith("https://")]
     if len(urls) != 1 or "-o" in args:
         raise RuntimeError("Unexpected download or request")
@@ -35,7 +45,7 @@ def main() -> None:
         for key, value in response.get("headers", {}).items():
             print(f"{key}: {value}\r")
         print("\r")
-    print(json.dumps(response["body"]))
+    print(json.dumps(response["body"], indent=response.get("indent")))
     if "-w" in args:
         print(response["status"])
 

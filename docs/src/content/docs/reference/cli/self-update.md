@@ -134,7 +134,7 @@ The installer scripts accept a version pin via environment variable -- see [Quic
 
 ## Failure modes
 
-Release metadata failures make `apm self-update` (including `--check`) exit with code `1` and report actionable errors: authentication (refresh credentials), rate limits (wait before retrying), other HTTP errors (check the endpoint and status), network errors (check connectivity), or malformed JSON/metadata (verify the metadata source). See [Public release metadata](../../../getting-started/installation/#public-release-metadata) for retry restrictions. Download failures or non-zero installer exits also return `1` with mirror or manual update guidance. Your existing binary is unaffected.
+Release metadata failures exit `1`, including with `--check`: authentication (refresh credentials), rate limits (wait), HTTP/network errors (check endpoint/connectivity), or malformed JSON/metadata (verify source). Malformed `GITHUB_URL` produces a sanitized configuration diagnostic: use a valid HTTPS URL. HTTP 3xx reports that redirects are not followed, without echoing `Location`; see [mirror migration](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode). See [Public release metadata](../../../getting-started/installation/#public-release-metadata) for retry restrictions. Download failures or non-zero installer exits also return `1` with mirror or manual update guidance. Your existing binary is unaffected.
 
 ## Startup update notification
 

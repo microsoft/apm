@@ -59,8 +59,9 @@ FULL_SUITE_ROOTS = ("tests/unit", "tests/test_console.py", "tests/red_team")
 # eight failures, two unmocked credential lookups, and nine Azure CLI contracts.
 # Six staged plugin-root contracts preserve literal suffixes on Windows.
 # Add 33 native PowerShell metadata cases (rejected tokens, throttle headers,
-# mirror isolation and pinning). The measured gate stays below four minutes.
-MAX_BOUNDED_FAMILY_SIZE = 383
+# mirror isolation and pinning), plus five review/evidence cases for credential
+# defaults, caller strict mode, redirect diagnostics and stable-path consumption.
+MAX_BOUNDED_FAMILY_SIZE = 387
 
 
 def _ci_workflow() -> dict:

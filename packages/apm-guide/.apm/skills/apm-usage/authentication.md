@@ -2,7 +2,7 @@
 
 ## CLI bootstrap and release lookup
 
-CLI installation and update checks query public release metadata authenticated-first when an environment token is available. One anonymous retry follows a 401 or non-rate-limit 403 only for canonical public `microsoft/apm` metadata, never custom repositories/hosts, metadata mirrors, or no-direct mode. This does not change private-package credentials or anonymous-first public-package Git operations. See [Public release metadata](https://microsoft.github.io/apm/getting-started/installation/#public-release-metadata) for token precedence and retry restrictions.
+CLI bootstrap/update metadata recovery is separate from package authentication. See [Public release metadata](https://microsoft.github.io/apm/getting-started/installation/#public-release-metadata) for token precedence and bounded anonymous retry, and [mirror migration](https://microsoft.github.io/apm/getting-started/installation/#enterprise-bootstrap-mirror-mode) for final-endpoint configuration.
 
 ## Token precedence chain
 

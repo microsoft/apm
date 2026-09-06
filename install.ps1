@@ -200,31 +200,44 @@ function Invoke-GitHubJson {
         [string]$Uri,
         [hashtable]$Headers
     )
-    if ($Headers.Count -gt 0) {
-        return Invoke-RestMethod -Uri $Uri -Headers $Headers -MaximumRedirection 0 -TimeoutSec 30
+    # Isolate credential defaults in this function's scope; retain proxy settings
+    # and never mutate the caller's table. Wildcard parameter defaults count too.
+    $PSDefaultParameterValues = $PSDefaultParameterValues.Clone()
+    $credentialParameters = @("Credential", "UseDefaultCredentials", "Authentication", "Token", "WebSession")
+    foreach ($key in @($PSDefaultParameterValues.Keys)) {
+        $pattern = ($key -split ":", 2)[-1].Trim()
+        foreach ($parameter in $credentialParameters) {
+            if ($parameter -like $pattern) {
+                $PSDefaultParameterValues.Remove($key)
+                break
+            }
+        }
     }
-    return Invoke-RestMethod -Uri $Uri -MaximumRedirection 0 -TimeoutSec 30
+    return Invoke-RestMethod -Uri $Uri -Headers $Headers -MaximumRedirection 0 -TimeoutSec 30
 }
 
 function Get-MetadataFailureKind {
     param($Failure)
-    $status = [int]$Failure.Exception.Response.StatusCode
-    $responseHeaders = if ($Failure.Exception.Response) {
-        $Failure.Exception.Response.Headers.ToString()
+    $response = if ($Failure.Exception.PSObject.Properties["Response"]) { $Failure.Exception.Response } else { $null }
+    $status = if ($response) { [int]$response.StatusCode } else { 0 }
+    $responseHeaders = if ($response) {
+        $response.Headers.ToString()
     } else { "" }
-    $body = [string]$Failure.ErrorDetails.Message
+    $body = if ($Failure.ErrorDetails) { [string]$Failure.ErrorDetails.Message } else { "" }
     if ($status -eq 429 -or ($status -eq 403 -and (
         $responseHeaders -match '(?im)^x-ratelimit-remaining: *0\s*$|^retry-after: *[1-9][0-9]*\s*$' -or
         $body -match '(?i)API rate limit exceeded|secondary rate limit|abuse detection mechanism'
     ))) { return "rate-limit" }
     if ($status -eq 401 -or $status -eq 403) { return "auth" }
     if ($status -eq 0) { return "network" }
+    if ($status -ge 300 -and $status -lt 400) { return "redirect" }
     return "http"
 }
 
 function Write-MetadataFailure {
     param($Failure)
-    $status = [int]$Failure.Exception.Response.StatusCode
+    $response = if ($Failure.Exception.PSObject.Properties["Response"]) { $Failure.Exception.Response } else { $null }
+    $status = if ($response) { [int]$response.StatusCode } else { 0 }
     switch (Get-MetadataFailureKind -Failure $Failure) {
         "rate-limit" {
             Write-ErrorText "Release metadata rate limit (HTTP $status)."
@@ -237,6 +250,10 @@ function Write-MetadataFailure {
         "network" {
             Write-ErrorText "Release metadata network request failed."
             Write-Host "Check connectivity, proxy and TLS settings, then retry."
+        }
+        "redirect" {
+            Write-ErrorText "Release metadata redirects are not followed (HTTP $status)."
+            Write-Host "Set APM_RELEASE_METADATA_URL to the final JSON endpoint, or pin VERSION."
         }
         default {
             Write-ErrorText "Release metadata request failed (HTTP $status)."

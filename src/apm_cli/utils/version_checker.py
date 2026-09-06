@@ -90,8 +90,14 @@ def _get_github_token(github_url: str | None = None, repo: str | None = None) ->
     fallback avoids invoking gh or git credential helpers from the non-blocking
     startup update check while keeping the token precedence centralized.
     """
-    parsed = urlparse(github_url or _get_air_gap_github_url())
-    host = parsed.hostname or "github.com"
+    try:
+        parsed = urlparse(github_url or _get_air_gap_github_url())
+        host = parsed.hostname or "github.com"
+    except ValueError:
+        raise ReleaseMetadataError(
+            "configuration",
+            "Invalid release metadata host configuration. Check GITHUB_URL for a valid HTTPS URL.",
+        ) from None
     effective_repo = repo or _get_air_gap_repo()
     org = effective_repo.split("/", 1)[0] if "/" in effective_repo else None
     with _VERSION_CHECK_AUTH_RESOLVER_LOCK:
@@ -147,6 +153,12 @@ def _release_http_error(response: "requests.Response") -> ReleaseMetadataError |
             "auth",
             f"Release metadata authentication/authorization failed (HTTP {status}). "
             "Check the credential's validity and repository access, or pin VERSION.",
+        )
+    if 300 <= status < 400:
+        return ReleaseMetadataError(
+            "redirect",
+            f"Release metadata redirects are not followed (HTTP {status}). "
+            "Set APM_RELEASE_METADATA_URL to the final JSON endpoint, or pin VERSION.",
         )
     return ReleaseMetadataError(
         "http",

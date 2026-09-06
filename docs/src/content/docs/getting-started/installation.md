@@ -33,13 +33,15 @@ On Windows, the installer adds both `current` and `bin` to `PATH`, with the stab
 
 ### Public release metadata
 
-CLI bootstrap and update checks are separate from [package authentication](../authentication/). When a token is set, `install.sh` and `install.ps1` query release metadata authenticated-first: `GITHUB_APM_PAT` -> `GITHUB_TOKEN` -> `GH_TOKEN`. Python update checks and stable/prerelease `apm self-update` use AuthResolver's environment-only chain, including per-org tokens before these global variables, without invoking `gh` or Git credential helpers.
+CLI bootstrap and update checks are separate from [package authentication](../authentication/). Installers query metadata authenticated-first when a token is set: `GITHUB_APM_PAT` -> `GITHUB_TOKEN` -> `GH_TOKEN`. Python checks and stable/prerelease `apm self-update` use AuthResolver's environment-only chain, including per-org tokens before global variables, without invoking `gh` or Git credential helpers.
 
 An authenticated 401 or non-rate-limit 403 permits one anonymous retry, only at `https://api.github.com/repos/microsoft/apm/releases/latest` or `https://api.github.com/repos/microsoft/apm/releases?per_page=5` (prereleases). Primary/secondary rate limits (403 identified by headers or documented messages, or 429), network errors, other HTTP failures, and malformed metadata never trigger this retry.
 
-No anonymous recovery applies to private/custom repositories, GHES/custom hosts, explicit `APM_RELEASE_METADATA_URL` (even a canonical public URL), or `APM_NO_DIRECT_FALLBACK=1`. Metadata mirrors never receive GitHub tokens or fall back to public URLs. Setting `VERSION` skips installer metadata lookup.
+Anonymous recovery excludes private/custom repositories, GHES/custom hosts, explicit `APM_RELEASE_METADATA_URL` (even a canonical public URL), and `APM_NO_DIRECT_FALLBACK=1`. Mirrors never receive GitHub tokens or fall back to public URLs. `VERSION` skips installer metadata lookup.
 
-Explicit `apm self-update` reports distinct actionable authentication, rate-limit, HTTP, network, and JSON errors; automatic background update checks remain quiet.
+PowerShell metadata requests pass explicit headers and exclude `Credential`, `UseDefaultCredentials`, `Authentication`, `Token`, and `WebSession` defaults from a function-local copy of `$PSDefaultParameterValues`, retaining caller proxy configuration.
+
+See [self-update errors](../../reference/cli/self-update/#failure-modes) for diagnostics; background checks stay quiet.
 
 ### Installer options
 
@@ -115,7 +117,7 @@ jobs:
 
 ### Enterprise bootstrap mirror mode
 
-Mirror mode routes bootstrap traffic through internal hosts. Four URL variables point install and self-update at your mirror; `APM_NO_DIRECT_FALLBACK=1` fails closed so no request reaches a public host:
+Set these four mirror URLs for CLI install and self-update; `APM_NO_DIRECT_FALLBACK=1` blocks public fallback. Release metadata does not follow redirects: set `APM_RELEASE_METADATA_URL` to the final JSON endpoint, or pin `VERSION`.
 
 ```bash
 export APM_INSTALLER_BASE_URL="https://artifactory.mycorp.example/generic/apm-install"

@@ -154,18 +154,19 @@ fetch_release_metadata() {
     # -q ignores ambient curlrc auth/redirect settings. No redirects or token logging.
     CURL_EXIT_CODE=0
     if [ "$1" = "authenticated" ]; then
-        METADATA_RESPONSE=$(curl -q -sS -i --suppress-connect-headers --connect-timeout 10 --max-time 30 \
+        METADATA_RESPONSE=$(curl -q -s -i --suppress-connect-headers --connect-timeout 10 --max-time 30 \
             -w '\n%{http_code}' -H "Authorization: token $AUTH_HEADER_VALUE" "$LATEST_RELEASE_URL") || CURL_EXIT_CODE=$?
     else
-        METADATA_RESPONSE=$(curl -q -sS -i --suppress-connect-headers --connect-timeout 10 --max-time 30 \
+        METADATA_RESPONSE=$(curl -q -s -i --suppress-connect-headers --connect-timeout 10 --max-time 30 \
             -w '\n%{http_code}' "$LATEST_RELEASE_URL") || CURL_EXIT_CODE=$?
     fi
-    # curl includes informational 1xx blocks: only the final response owns status
-    # and rate-limit headers. Retain its body and trailing curl status together.
+    # Skip informational header blocks, then stream the final response unchanged.
+    # Never repeatedly concatenate the body: pretty-printed mirrors can be large.
     METADATA_RESPONSE=$(printf '%s\n' "$METADATA_RESPONSE" | awk '
-        /^HTTP\/[0-9.]+ [0-9][0-9][0-9]/ { response="" }
-        { response=response $0 "\n" }
-        END { printf "%s", response }')
+        BEGIN { headers=1 }
+        headers && /^HTTP\/[0-9.]+ [0-9][0-9][0-9]/ { interim=($2 >= 100 && $2 < 200) }
+        headers && /^\r?$/ && !interim { headers=0 }
+        !interim { print }')
     METADATA_STATUS=$(printf '%s\n' "$METADATA_RESPONSE" | tail -n 1)
     METADATA_HEADERS=$(printf '%s\n' "$METADATA_RESPONSE" | sed -n '1,/^\r\{0,1\}$/p')
     LATEST_RELEASE=$(printf '%s\n' "$METADATA_RESPONSE" | sed '1,/^\r\{0,1\}$/d' | sed '$d')
@@ -392,6 +393,10 @@ case "$METADATA_STATUS" in
     401|403)
         echo -e "${RED}Error: Release metadata authentication/authorization failed (HTTP $METADATA_STATUS).${NC}"
         echo "Check the credential's validity and repository access, or pin VERSION."
+        exit 1 ;;
+    3??)
+        echo -e "${RED}Error: Release metadata redirects are not followed (HTTP $METADATA_STATUS).${NC}"
+        echo "Set APM_RELEASE_METADATA_URL to the final JSON endpoint, or pin VERSION."
         exit 1 ;;
     *)
         echo -e "${RED}Error: Release metadata request failed (HTTP $METADATA_STATUS).${NC}"

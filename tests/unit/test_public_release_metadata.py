@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import statistics
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlparse
@@ -450,3 +452,184 @@ def test_windows_powershell_legacy_throttle_headers(
     assert not ok
     assert "rate limit" in output
     assert [call["authenticated"] for call in calls] == [True]
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
+@pytest.mark.parametrize("mirror", [False, True])
+def test_windows_metadata_ignores_caller_auth_defaults(mirror: bool, tmp_path: Path) -> None:
+    """Actual PowerShell binding cannot re-authenticate recovery or mirror traffic."""
+    env = {"GITHUB_TOKEN": TOKEN, "PS_METADATA_DEFAULTS": "1"}
+    if mirror:
+        env["APM_RELEASE_METADATA_URL"] = "https://mirror.example/latest.json"
+    ok, calls, output = run_lookup("windows", tmp_path, [response(401), response()], env)
+    assert ok, output
+    assert [call["authenticated"] for call in calls] == ([False] if mirror else [True, False])
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
+def test_windows_network_failure_survives_caller_strict_mode(tmp_path: Path) -> None:
+    """An exception without an HTTP Response still produces a safe network diagnostic."""
+    ok, calls, output = run_lookup(
+        "windows", tmp_path, [response(0)], {"PS_STRICT_METADATA": "1", "GITHUB_TOKEN": TOKEN}
+    )
+    assert not ok
+    assert "network request failed" in output
+    assert [call["authenticated"] for call in calls] == [True]
+
+
+@pytest.mark.windows_compat
+@pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
+def test_windows_stable_path_reaches_path_consumer(tmp_path: Path) -> None:
+    """The production promotion passes its stable executable directory to PATH unchanged."""
+    install_root = tmp_path / "APM Stable Path & Edge"
+    env = {
+        "PATH": os.defpath,
+        "HOME": str(tmp_path),
+        "TEST_ROOT": str(ROOT),
+        "TEST_INSTALL_ROOT": str(install_root),
+        "POWERSHELL_TELEMETRY_OPTOUT": "1",
+        "POWERSHELL_UPDATECHECK": "Off",
+        "PSModuleAnalysisCachePath": str(tmp_path / "ps-cache"),
+    }
+    if sys.platform == "win32":
+        env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+    result = subprocess.run(
+        [
+            PWSH,
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(FIXTURES / "stable-path.ps1"),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed == {
+        "current_dir": str(install_root / "current"),
+        "current_exe": str(install_root / "current" / "apm.exe"),
+        "junction_target": str(install_root / "releases" / "v99.0.0"),
+        "executable_checked": True,
+        "path_entries": [str(install_root / "current"), str(install_root / "bin")],
+    }
+    assert not install_root.exists()
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+def test_metadata_redirects_explain_final_endpoint(surface: str, tmp_path: Path) -> None:
+    """Never follow or echo an untrusted Location; name the operator's recovery action."""
+    ok, calls, output = run_lookup(
+        surface,
+        tmp_path,
+        [response(302, headers={"Location": f"https://user:{TOKEN}@redirect.example/latest.json"})],
+        {"GITHUB_TOKEN": TOKEN, "APM_RELEASE_METADATA_URL": "https://mirror.example/latest.json"},
+    )
+    assert not ok
+    assert "redirects are not followed" in output
+    assert "APM_RELEASE_METADATA_URL" in output
+    assert "final JSON endpoint" in output
+    assert TOKEN not in output
+    assert [call["authenticated"] for call in calls] == [False]
+
+
+@pytest.mark.parametrize("channel", ["stable", "prerelease"])
+def test_malformed_github_host_stays_quiet_or_structured(channel: str) -> None:
+    """The owner translates URL parsing errors before transport or token resolution."""
+    with (
+        patch.dict(os.environ, {"GITHUB_URL": "https://[invalid"}, clear=True),
+        patch("requests.get", side_effect=AssertionError("network forbidden")),
+    ):
+        assert get_latest_version_from_github(include_prerelease=channel == "prerelease") is None
+        with pytest.raises(ReleaseMetadataError, match="Check GITHUB_URL"):
+            get_latest_version_for_self_update(channel)
+
+
+def _metadata_helper() -> str:
+    """Load the production helper without running installation side effects."""
+    source = (ROOT / "install.sh").read_text(encoding="utf-8")
+    body = source.split("fetch_release_metadata() {", 1)[1].split(
+        "metadata_is_rate_limited() {", 1
+    )[0]
+    return "fetch_release_metadata() {" + body
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix shell installer")
+@pytest.mark.parametrize("mode", ["anonymous", "authenticated"])
+def test_real_curl_metadata_errors_never_expose_url_credentials(mode: str, tmp_path: Path) -> None:
+    """Real curl rejects a malformed URL with all network protocols disabled."""
+    curl = shutil.which("curl")
+    assert curl is not None
+    script = (
+        'curl() { "$REAL_CURL" -q --proto =file "$@"; }\n'
+        + _metadata_helper()
+        + '\nLATEST_RELEASE_URL="https://synthetic-user:$EXPECTED_TOKEN@mirror.example/["\n'
+        + 'AUTH_HEADER_VALUE="$EXPECTED_TOKEN"\n'
+        + f"fetch_release_metadata {mode}\n"
+        + 'printf "curl_exit=%s\\n" "$CURL_EXIT_CODE"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "-c", script],
+        env={"PATH": os.defpath, "HOME": str(tmp_path), "REAL_CURL": curl, "EXPECTED_TOKEN": TOKEN},
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "curl_exit=3\n"
+    assert result.stderr == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix shell installer")
+def test_large_multiline_metadata_preserves_final_response(tmp_path: Path) -> None:
+    """Streaming past interim headers must retain every line of a valid final body."""
+    payload = response()
+    payload.update({"interim": True, "indent": 2})
+    payload["body"]["notes"] = [f"release note {index}" for index in range(1000)]
+    ok, calls, output = run_lookup("unix", tmp_path, [payload], {"GITHUB_TOKEN": TOKEN})
+    assert ok, output
+    assert [call["authenticated"] for call in calls] == [True]
+
+
+@pytest.mark.benchmark
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix shell installer")
+def test_metadata_parser_scales_linearly(tmp_path: Path) -> None:
+    """Median tenfold-input scaling includes the actual production parser and shell pipes."""
+    script = (
+        "curl() { cat; }\n"
+        + _metadata_helper()
+        + "\nfetch_release_metadata anonymous\n"
+        + 'printf "%s\\n%s\\n%s\\n" "$METADATA_STATUS" "$METADATA_HEADERS" "$LATEST_RELEASE"\n'
+    )
+    timings = []
+    for count in (2000, 20000):
+        body = json.dumps({"tag_name": "v99.0.0", "notes": ["x" * 90] * count}, indent=2)
+        payload = (
+            "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\nHTTP/1.1 200 OK\r\n\r\n"
+            + body
+            + "\n200\n"
+        )
+        samples = []
+        for _ in range(5):
+            started = time.perf_counter()
+            result = subprocess.run(
+                ["/bin/bash", "-c", script],
+                input=payload,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+                env={"PATH": os.defpath, "HOME": str(tmp_path)},
+            )
+            samples.append(time.perf_counter() - started)
+            assert result.returncode == 0
+            assert result.stdout == "200\nHTTP/1.1 200 OK\n\n" + body + "\n"
+        timings.append(statistics.median(samples))
+    assert timings[1] / timings[0] < 15, timings
