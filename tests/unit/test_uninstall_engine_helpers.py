@@ -9,6 +9,7 @@ in existing integration-style uninstall tests:
 - _cleanup_stale_mcp
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,6 +18,7 @@ from apm_cli.commands.uninstall.engine import (
     MCPUninstallCleanupError,
     _build_children_index,
     _cleanup_stale_mcp,
+    _cleanup_transitive_orphans,
     _dry_run_uninstall,
     _parse_dependency_entry,
     _remove_packages_from_disk,
@@ -24,6 +26,7 @@ from apm_cli.commands.uninstall.engine import (
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.utils.path_security import PathTraversalError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -245,6 +248,23 @@ class TestRemovePackagesFromDisk:
 
         logger.error.assert_called_once()
 
+    def test_deletion_containment_refusal_names_package(self, tmp_path: Path) -> None:
+        """The deletion boundary must retain the operand in its diagnostic."""
+        modules = tmp_path / "apm_modules"
+        (modules / "org" / "repo").mkdir(parents=True)
+        logger = _make_logger()
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine.safe_rmtree",
+                side_effect=PathTraversalError("containment refused"),
+            ),
+            pytest.raises(PathTraversalError, match="containment refused"),
+        ):
+            _remove_packages_from_disk(["org/repo"], modules, logger)
+        logger.error.assert_called_once_with(
+            "Refusing to remove org/repo from apm_modules/: containment refused"
+        )
+
     def test_rmtree_exception_is_propagated(self, tmp_path):
         """A deletion error is logged and stops the caller's ownership release."""
         modules = tmp_path / "apm_modules"
@@ -263,6 +283,39 @@ class TestRemovePackagesFromDisk:
 
         assert pkg_dir.exists()
         logger.error.assert_called_once()
+
+
+@pytest.mark.parametrize("at_resolution", [True, False], ids=["resolve", "delete"])
+def test_orphan_containment_refusal_has_no_fallback(tmp_path: Path, at_resolution: bool) -> None:
+    """Containment refusals are not parse errors eligible for key-derived deletion."""
+    modules = tmp_path / "apm_modules"
+    orphan_path = modules / "org" / "orphan"
+    orphan_path.mkdir(parents=True)
+    payload = orphan_path / "payload"
+    payload.write_bytes(b"retain ownership")
+    logger = _make_logger()
+    lockfile = MagicMock()
+    reference = lockfile.get_dependency.return_value.to_dependency_ref.return_value
+    reference.get_install_path.return_value = orphan_path
+    if at_resolution:
+        reference.get_install_path.side_effect = PathTraversalError("containment refused")
+    with (
+        patch(
+            "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+            return_value=({"org/orphan"}, {}),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.engine.safe_rmtree",
+            side_effect=PathTraversalError("containment refused"),
+        ) as remove,
+        pytest.raises(PathTraversalError, match="containment refused"),
+    ):
+        _cleanup_transitive_orphans(lockfile, ["org/parent"], modules, None, logger)
+    assert payload.read_bytes() == b"retain ownership"
+    assert remove.call_count == (0 if at_resolution else 1)
+    logger.error.assert_called_once_with(
+        "Refusing to remove transitive dep org/orphan: containment refused"
+    )
 
 
 # ===========================================================================

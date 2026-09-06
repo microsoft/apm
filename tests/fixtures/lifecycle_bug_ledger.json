@@ -185,7 +185,10 @@
       "failure_modes": ["cleanup", "outcome", "ownership", "transaction"],
       "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
       "regression_tests": [
-        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_failed_package_deletion_retains_ownership_until_retry"
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_failed_package_deletion_retains_ownership_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_global_failed_package_deletion_preserves_user_scope_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_shared_local_slot_rename_failure_restores_original_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_user_edited_target_refusal_retains_ownership_after_package_deletion"
       ]
     }
   ],

@@ -419,12 +419,18 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             orphan_removed, actual_orphans = _cleanup_transitive_orphans(
                 lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
             )
-        except (OSError, PathTraversalError):
+        except (OSError, PathTraversalError) as exc:
+            recovery = "apm install --global" if scope is InstallScope.USER else "apm install"
+            cause = (
+                "Resolve the unsafe package path"
+                if isinstance(exc, PathTraversalError)
+                else "Resolve the filesystem error"
+            )
             logger.error(
                 "Uninstall incomplete: package deletion failed. "
                 "apm.yml and lockfile ownership were retained; some package files "
-                "may already have been removed. Resolve the filesystem error and "
-                "retry the same uninstall command, or run 'apm install' to restore "
+                f"may already have been removed. {cause} and "
+                f"retry the same uninstall command, or run '{recovery}' to restore "
                 "the declared packages."
             )
             sys.exit(1)

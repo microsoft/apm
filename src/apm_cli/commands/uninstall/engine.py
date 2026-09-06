@@ -295,11 +295,9 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     Seeds the forward reachability walk (see
     :func:`apm_cli.deps.reachability.compute_forward_reachable_keys`) with
     the project's SURVIVING direct dependencies. For the real uninstall
-    path *apm_yml_path* is already post-edit (Step 3 in ``cli.py`` runs
-    before ``_cleanup_transitive_orphans``), so the identity subtraction
-    below is a no-op there; for the ``--dry-run`` preview (called BEFORE
-    apm.yml is rewritten) it is what turns the pre-edit dependency list
-    into the correct post-removal survivor set, mirroring the identity
+    path and ``--dry-run`` preview, *apm_yml_path* is still pre-edit.
+    Identity subtraction turns the pre-edit dependency list into the
+    correct post-removal survivor set, mirroring the identity
     matching ``_validate_uninstall_packages`` already uses.
 
     Returns an empty list -- never raises -- if *apm_yml_path* is ``None``,
@@ -866,6 +864,9 @@ def _remove_packages_from_disk(
                 )
                 removed += 1
                 deleted_pkg_paths.append(package_path)
+            except PathTraversalError as e:
+                logger.error(f"Refusing to remove {package_label} from apm_modules/: {e}")
+                raise
             except OSError as e:
                 logger.error(f"Failed to remove {package_label} from apm_modules/: {e}")
                 raise
@@ -922,6 +923,9 @@ def _cleanup_transitive_orphans(
         try:
             orphan_ref = orphan_dep.to_dependency_ref()
             orphan_path = orphan_ref.get_install_path(apm_modules_dir)
+        except PathTraversalError as e:
+            logger.error(f"Refusing to remove transitive dep {orphan_key}: {e}")
+            raise
         except ValueError:
             parts = orphan_key.split("/")
             orphan_path = (
@@ -937,6 +941,9 @@ def _cleanup_transitive_orphans(
                 logger.verbose_detail(f"    Path: {portable_relpath(orphan_path, apm_modules_dir)}")
                 removed += 1
                 deleted_orphan_paths.append(orphan_path)
+            except PathTraversalError as e:
+                logger.error(f"Refusing to remove transitive dep {orphan_key}: {e}")
+                raise
             except OSError as e:
                 logger.error(f"Failed to remove transitive dep {orphan_key}: {e}")
                 raise

@@ -15,10 +15,9 @@ apm uninstall [OPTIONS] PACKAGES...
 
 ## Description
 
-`apm uninstall` is the inverse of `apm install <package>`. It deletes the
-package source from `apm_modules/`, prunes unused transitive dependencies,
-removes tracked files from configured targets, then updates the manifest and
-lockfile.
+`apm uninstall` is the inverse of `apm install <package>`. It removes selected
+packages and unused transitive dependencies from APM-managed state,
+including `apm_modules/`, configured targets, the manifest, and the lockfile.
 
 The command only deletes files tracked in the lockfile's `deployed_files` manifest, so hand-authored content in the same harness folders is left alone.
 
@@ -126,22 +125,21 @@ Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No
 matched package in the same invocation is removed. Fix the identifier and retry.
 
+If deletion of a requested or orphan materialized directory fails, or APM
+refuses an unsafe path that fails containment checks, uninstall exits 1 without
+printing `Uninstall complete`. These deletions precede all target cleanup and
+manifest or lockfile writes, so declarations, the on-disk lockfile, and deployed
+ownership remain. Earlier deletions are not rolled back.
+
+Fix permission or file-lock errors; for a containment refusal, correct the
+unsafe path instead. Retry the same `apm uninstall` command, or restore declared
+packages with `apm install` (`apm install --global` for user scope).
+
 If a target-scoped file owned only by a removed package was edited or cannot be
-deleted, uninstall lists the retained paths and exits before changing `apm.yml`,
-or `apm.lock.yaml`. Package directories were processed first and may already be
-gone. Resolve the listed files and retry.
-
-If any requested or transitive package directory cannot be deleted, uninstall
-stops with exit code 1 and does not print `Uninstall complete`. For the entire
-request, `apm.yml` declarations and on-disk lockfile ownership remain unchanged,
-and target deployment cleanup does not start. Directory deletion is not
-transactional: recursive deletion can be partial, and package directories
-processed earlier in the same request can already be gone. APM does not roll
-back filesystem changes.
-
-Resolve the reported permission problem or file lock, then retry the exact same
-`apm uninstall` command. Alternatively, run `apm install` to restore the
-packages that remain declared.
+deleted, uninstall lists the retained paths and exits before changing `apm.yml`
+or the on-disk `apm.lock.yaml`. Direct and orphan directories run first and may
+already be gone; declarations and deployed ownership remain. Resolve the listed
+files and retry the same uninstall command.
 
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the
