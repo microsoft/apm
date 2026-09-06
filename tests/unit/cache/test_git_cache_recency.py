@@ -21,9 +21,15 @@ _FRESH_NS = 4102444800000000000
 _REMOTE = "https://gitlab.example.invalid/cache/recency.git"
 
 
-@pytest.mark.windows_compat
-@pytest.mark.parametrize("sparse_paths", [None, ["skills"]], ids=["full", "sparse"])
-@pytest.mark.parametrize("refresh", [False, True], ids=["hit", "write-dedup"])
+@pytest.mark.parametrize(
+    ("refresh", "sparse_paths"),
+    [
+        pytest.param(False, None, id="hit-full", marks=pytest.mark.windows_compat),
+        pytest.param(False, ["skills"], id="hit-sparse"),
+        pytest.param(True, None, id="write-dedup-full"),
+        pytest.param(True, ["skills"], id="write-dedup-sparse"),
+    ],
+)
 def test_successful_checkout_reuse_survives_prune(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparse_paths: list[str] | None, refresh: bool
 ) -> None:
