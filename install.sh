@@ -17,11 +17,15 @@ set -e
 #     GITHUB_APM_PAT=$GITHUB_APM_PAT sh
 
 # Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+RED=$(printf '\033[0;31m')
+GREEN=$(printf '\033[0;32m')
+BLUE=$(printf '\033[0;34m')
+YELLOW=$(printf '\033[1;33m')
+NC=$(printf '\033[0m') # No Color
+
+apm_echo() {
+    printf '%s\n' "$*"
+}
 
 # Configuration (all overridable via environment variables)
 APM_REPO="${APM_REPO:-microsoft/apm}"
@@ -269,7 +273,7 @@ apm_bool_env_active() {
 }
 
 apm_has_controlling_tty() {
-    { : < /dev/tty; } >/dev/null 2>&1
+    ( : < /dev/tty ) >/dev/null 2>&1
 }
 
 apm_file_digest() {
@@ -435,6 +439,18 @@ apm_detect_current_shell() {
     printf 'unknown\n'
 }
 
+apm_detect_profile_shell() {
+    _apm_login_base="${SHELL##*/}"
+    _apm_login_base="${_apm_login_base#-}"
+    case "$_apm_login_base" in
+        bash|zsh|fish)
+            printf '%s\n' "$_apm_login_base"
+            return 0
+            ;;
+    esac
+    apm_detect_current_shell
+}
+
 apm_is_desktop_shell_setup_eligible() {
     [ -n "${APM_SELF_UPDATE_SOURCE:-}" ] && {
         _APM_SHELL_SETUP_SKIP_REASON="self-update never edits shell profiles"
@@ -466,7 +482,7 @@ apm_is_desktop_shell_setup_eligible() {
         _APM_SHELL_SETUP_SKIP_REASON="the install bin path cannot be represented safely in PATH"
         return 1
     }
-    _APM_DETECTED_SHELL="$(apm_detect_current_shell)"
+    _APM_DETECTED_SHELL="$(apm_detect_profile_shell)"
     case "$_APM_DETECTED_SHELL" in
         bash|zsh|fish) return 0 ;;
         *) _APM_SHELL_SETUP_SKIP_REASON="unsupported or unknown shell"; return 1 ;;
@@ -736,10 +752,10 @@ apm_fish_profile() {
 apm_record_shell_setup_not_configured() {
     if [ "$_APM_PREVIOUS_SHELL_RECEIPT_VALID" = "1" ]; then
         apm_write_shell_receipt "$_APM_PREVIOUS_SHELL_MODIFY_PATH" "$_APM_PREVIOUS_SHELL_HOOK_DIR" "$_APM_PREVIOUS_SHELL_HOOK_KIND" "$_APM_PREVIOUS_SHELL_HOOK_DIGEST" ||
-            echo -e "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
+            apm_echo "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
     elif [ -z "$_APM_PREVIOUS_SHELL_RECEIPT_PRESENT" ]; then
         apm_write_shell_receipt "managed" "none" "none" "none" ||
-            echo -e "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
+            apm_echo "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
     fi
 }
 
@@ -759,7 +775,7 @@ apm_configure_native_shell_path() {
             _apm_previous_hook_digest="$_APM_PREVIOUS_SHELL_HOOK_DIGEST"
         fi
         apm_write_shell_receipt "disabled" "$_apm_previous_hook_dir" "$_apm_previous_hook_kind" "$_apm_previous_hook_digest" ||
-            echo -e "${YELLOW}[!] APM installed, but shell setup preference could not be saved.${NC}"
+            apm_echo "${YELLOW}[!] APM installed, but shell setup preference could not be saved.${NC}"
         echo "APM_NO_MODIFY_PATH is set; no shell profiles were changed."
         echo "To remove existing APM shell setup, delete only blocks marked 'apm shell setup' from your shell profiles."
         apm_print_path_guidance "$APM_INSTALL_DIR"
@@ -769,7 +785,7 @@ apm_configure_native_shell_path() {
         [ "$_APM_PREVIOUS_SHELL_RECEIPT_VALID" = "1" ] &&
         [ "$_APM_PREVIOUS_SHELL_MODIFY_PATH" = "disabled" ]; then
         apm_write_shell_receipt "disabled" "$_APM_PREVIOUS_SHELL_HOOK_DIR" "$_APM_PREVIOUS_SHELL_HOOK_KIND" "$_APM_PREVIOUS_SHELL_HOOK_DIGEST" ||
-            echo -e "${YELLOW}[!] APM installed, but shell setup preference could not be saved.${NC}"
+            apm_echo "${YELLOW}[!] APM installed, but shell setup preference could not be saved.${NC}"
         echo "Shell PATH setup remains disabled by the previous APM installer preference."
         echo "To re-enable on a normal desktop shell, rerun with APM_NO_MODIFY_PATH=0."
         apm_print_path_guidance "$APM_INSTALL_DIR"
@@ -777,7 +793,7 @@ apm_configure_native_shell_path() {
     fi
     if ! apm_is_desktop_shell_setup_eligible; then
         apm_record_shell_setup_not_configured
-        echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: $_APM_SHELL_SETUP_SKIP_REASON.${NC}"
+        apm_echo "${YELLOW}[!] APM installed, but PATH was not configured automatically: $_APM_SHELL_SETUP_SKIP_REASON.${NC}"
         apm_print_path_guidance "$APM_INSTALL_DIR"
         return 0
     fi
@@ -787,7 +803,7 @@ apm_configure_native_shell_path() {
             _apm_hook="$_apm_hook_dir/fish.fish"
             _apm_profile="$(apm_fish_profile)" || {
                 apm_record_shell_setup_not_configured
-                echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: fish config location is ambiguous.${NC}"
+                apm_echo "${YELLOW}[!] APM installed, but PATH was not configured automatically: fish config location is ambiguous.${NC}"
                 apm_print_path_guidance "$APM_INSTALL_DIR"
                 return 0
             }
@@ -797,7 +813,7 @@ apm_configure_native_shell_path() {
             _apm_hook="$_apm_hook_dir/env"
             _apm_profile="$(apm_zsh_profile)" || {
                 apm_record_shell_setup_not_configured
-                echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: zsh config location is ambiguous.${NC}"
+                apm_echo "${YELLOW}[!] APM installed, but PATH was not configured automatically: zsh config location is ambiguous.${NC}"
                 apm_print_path_guidance "$APM_INSTALL_DIR"
                 return 0
             }
@@ -807,7 +823,7 @@ apm_configure_native_shell_path() {
             _apm_hook="$_apm_hook_dir/env"
             _apm_profile="$(apm_bash_login_profile)" || {
                 apm_record_shell_setup_not_configured
-                echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: bash login profile is not readable.${NC}"
+                apm_echo "${YELLOW}[!] APM installed, but PATH was not configured automatically: bash login profile is not readable.${NC}"
                 apm_print_path_guidance "$APM_INSTALL_DIR"
                 return 0
             }
@@ -816,7 +832,7 @@ apm_configure_native_shell_path() {
     esac
     if ! apm_write_generated_hook "$_apm_hook" "$_apm_kind"; then
         apm_record_shell_setup_not_configured
-        echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: existing hook is not owned by this installer.${NC}"
+        apm_echo "${YELLOW}[!] APM installed, but PATH was not configured automatically: existing hook is not owned by this installer.${NC}"
         apm_print_path_guidance "$APM_INSTALL_DIR"
         return 0
     fi
@@ -856,22 +872,31 @@ apm_configure_native_shell_path() {
     fi
     [ -z "$_apm_primary_backup" ] || rm -f "$_apm_primary_backup"
     if [ -n "$_apm_profile_failed" ]; then
-        echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: cannot safely update $_apm_profile_failed.${NC}"
+        apm_echo "${YELLOW}[!] APM installed, but PATH was not configured automatically: cannot safely update $_apm_profile_failed.${NC}"
         apm_write_shell_receipt "managed" "$_apm_hook_dir" "$_apm_kind" "$_APM_NEW_SHELL_HOOK_DIGEST" ||
-            echo -e "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
+            apm_echo "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
         apm_print_path_guidance "$APM_INSTALL_DIR"
         return 0
     fi
     _APM_NEW_SHELL_HOOK_DIR="$_apm_hook_dir"
     _APM_NEW_SHELL_HOOK_KIND="$_apm_kind"
     apm_write_shell_receipt "managed" "$_APM_NEW_SHELL_HOOK_DIR" "$_APM_NEW_SHELL_HOOK_KIND" "$_APM_NEW_SHELL_HOOK_DIGEST" ||
-        echo -e "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
-    echo -e "${GREEN}[+] Shell PATH configured for $_APM_DETECTED_SHELL: $_apm_configured_profiles.${NC}"
-    echo "Open a new terminal, or run this for the current shell:"
-    if [ "$_APM_DETECTED_SHELL" = "fish" ]; then
-        printf '  source %s\n' "$(apm_fish_quote "$_apm_hook")"
+        apm_echo "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
+    apm_echo "${GREEN}[+] Shell PATH configured for $_APM_DETECTED_SHELL: $_apm_configured_profiles.${NC}"
+    _apm_current_shell="$(apm_detect_current_shell)"
+    if [ "$_apm_current_shell" = "$_APM_DETECTED_SHELL" ]; then
+        echo "Open a new terminal, or run this for the current shell:"
     else
+        echo "Open a new $_APM_DETECTED_SHELL terminal, or run this for the current shell:"
+    fi
+    if [ "$_apm_current_shell" = "$_APM_DETECTED_SHELL" ] && [ "$_APM_DETECTED_SHELL" = "fish" ]; then
+        printf '  source %s\n' "$(apm_fish_quote "$_apm_hook")"
+    elif [ "$_apm_current_shell" = "$_APM_DETECTED_SHELL" ]; then
         printf '  . %s\n' "$(apm_shell_quote "$_apm_hook")"
+    elif [ "$_apm_current_shell" = "fish" ]; then
+        printf '  set -gx PATH %s $PATH\n' "$(apm_fish_quote "$APM_INSTALL_DIR")"
+    else
+        printf '  export PATH=%s:"$PATH"\n' "$(apm_shell_quote "$APM_INSTALL_DIR")"
     fi
 }
 
@@ -1050,12 +1075,12 @@ apm_require_owned_bundle() {
 # INSTALL_OWNERSHIP_END
 
 # Banner
-echo -e "${BLUE}"
+apm_echo "${BLUE}"
 echo "+--------------------------------------------------------------+"
 echo "|                         APM Installer                        |"
 echo "|              The NPM for AI-Native Development               |"
 echo "+--------------------------------------------------------------+"
-echo -e "${NC}"
+apm_echo "${NC}"
 
 # Platform detection
 OS=$(uname -s)
@@ -1070,7 +1095,7 @@ case $ARCH in
         ARCH="arm64"
         ;;
     *)
-        echo -e "${RED}Error: Unsupported architecture: $ARCH${NC}"
+        apm_echo "${RED}Error: Unsupported architecture: $ARCH${NC}"
         echo "Supported architectures: x86_64, arm64"
         exit 1
         ;;
@@ -1089,14 +1114,14 @@ case $OS in
         EXTRACTED_DIR="apm-linux-$ARCH"
         ;;
     *)
-        echo -e "${RED}Error: Unsupported operating system: $OS${NC}"
+        apm_echo "${RED}Error: Unsupported operating system: $OS${NC}"
         echo "Supported platforms: macOS (Darwin), Linux"
         exit 1
         ;;
 esac
 
-echo -e "${BLUE}Detected platform: $PLATFORM-$ARCH${NC}"
-echo -e "${BLUE}Target binary: $DOWNLOAD_BINARY${NC}"
+apm_echo "${BLUE}Detected platform: $PLATFORM-$ARCH${NC}"
+apm_echo "${BLUE}Target binary: $DOWNLOAD_BINARY${NC}"
 
 # Parse options: --prefix PATH / --prefix=PATH, @v1.2.3, or VERSION env var.
 apm_parse_installer_args "$@"
@@ -1116,7 +1141,7 @@ is_public_github_url() {
 
 fail_closed_error() {
     # $1 is a literal env var name from this script, not user input.
-    printf '%b\n' "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but $1 is not configured.${NC}"
+    apm_echo "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but $1 is not configured.${NC}"
     shift
     printf '%s\n' "$*"
     exit 1
@@ -1207,7 +1232,7 @@ print_selected_pip_install_command() {
 print_pip_recovery_guidance() {
     case "${PIP_FALLBACK_FAILURE:-python-unavailable}" in
         python-unavailable)
-            echo -e "${YELLOW}Python 3.10+ is not available on this system.${NC}"
+            apm_echo "${YELLOW}Python 3.10+ is not available on this system.${NC}"
             echo ""
             echo "Install Python 3.10+ first, then rerun this installer:"
             echo "  Ubuntu/Debian: sudo apt-get update && sudo apt-get install python3 python3-pip"
@@ -1216,12 +1241,12 @@ print_pip_recovery_guidance() {
             echo "  macOS: brew install python3"
             ;;
         pip-unavailable)
-            echo -e "${YELLOW}pip is not available for $PYTHON_CMD.${NC}"
+            apm_echo "${YELLOW}pip is not available for $PYTHON_CMD.${NC}"
             echo "Install pip for that interpreter, then run:"
             print_selected_pip_install_command
             ;;
         install-failed)
-            echo -e "${YELLOW}The selected Python pip installation failed.${NC}"
+            apm_echo "${YELLOW}The selected Python pip installation failed.${NC}"
             echo "After resolving the reported pip error, retry:"
             print_selected_pip_install_command
             ;;
@@ -1242,7 +1267,7 @@ try_pip_installation() {
     
     # Query and invoke pip through the same interpreter, not an unrelated launcher.
     if ! "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
-        echo -e "${RED}Error: pip is not available for $PYTHON_CMD${NC}"
+        apm_echo "${RED}Error: pip is not available for $PYTHON_CMD${NC}"
         PIP_FALLBACK_FAILURE="pip-unavailable"
         return 1
     fi
@@ -1253,44 +1278,44 @@ try_pip_installation() {
     
     # Try to install. In fail-closed mode, never fall back to public PyPI.
     if [ -n "$APM_PYPI_INDEX_URL" ]; then
-        echo -e "${BLUE}Attempting installation via $PYTHON_CMD -m pip...${NC}"
-        echo -e "${BLUE}Using APM_PYPI_INDEX_URL mirror for pip install.${NC}"
+        apm_echo "${BLUE}Attempting installation via $PYTHON_CMD -m pip...${NC}"
+        apm_echo "${BLUE}Using APM_PYPI_INDEX_URL mirror for pip install.${NC}"
         PIP_INSTALL_OK=0
         "$PYTHON_CMD" -m pip install --user --index-url "$APM_PYPI_INDEX_URL" apm-cli || PIP_INSTALL_OK=$?
     elif is_truthy "$APM_NO_DIRECT_FALLBACK"; then
         fail_closed_error APM_PYPI_INDEX_URL "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
     else
-        echo -e "${BLUE}Attempting installation via $PYTHON_CMD -m pip...${NC}"
+        apm_echo "${BLUE}Attempting installation via $PYTHON_CMD -m pip...${NC}"
         PIP_INSTALL_OK=0
         "$PYTHON_CMD" -m pip install --user apm-cli || PIP_INSTALL_OK=$?
     fi
 
     if [ "$PIP_INSTALL_OK" -eq 0 ]; then
-        echo -e "${GREEN}[+] APM installed successfully via pip!${NC}"
+        apm_echo "${GREEN}[+] APM installed successfully via pip!${NC}"
         _apm_run_hint="apm"
         
         # Check if apm is now available
         if command -v apm >/dev/null 2>&1; then
             INSTALLED_VERSION=$(apm --version 2>/dev/null || echo "unknown")
-            echo -e "${BLUE}Version: $INSTALLED_VERSION${NC}"
-            echo -e "${BLUE}Location: $(which apm)${NC}"
+            apm_echo "${BLUE}Version: $INSTALLED_VERSION${NC}"
+            apm_echo "${BLUE}Location: $(which apm)${NC}"
         else
-            echo -e "${YELLOW}[!] APM installed but not found in PATH${NC}"
+            apm_echo "${YELLOW}[!] APM installed but not found in PATH${NC}"
             apm_print_path_guidance "$PIP_SCRIPTS_DIR"
         fi
         
         echo ""
-        echo -e "${GREEN}Installation complete!${NC}"
+        apm_echo "${GREEN}Installation complete!${NC}"
         echo ""
-        echo -e "${BLUE}Quick start:${NC}"
+        apm_echo "${BLUE}Quick start:${NC}"
         printf '  %s init my-app          # Create a new APM project\n' "$_apm_run_hint"
         printf '  cd my-app && %s install # Install dependencies\n' "$_apm_run_hint"
         printf '  %s run                  # Run your first prompt\n' "$_apm_run_hint"
         echo ""
-        echo -e "${BLUE}Documentation:${NC} $GITHUB_URL/$APM_REPO"
+        apm_echo "${BLUE}Documentation:${NC} $GITHUB_URL/$APM_REPO"
         return 0
     else
-        echo -e "${RED}Error: pip installation failed${NC}"
+        apm_echo "${RED}Error: pip installation failed${NC}"
         PIP_FALLBACK_FAILURE="install-failed"
         return 1
     fi
@@ -1308,9 +1333,9 @@ if [ "$PLATFORM" = "linux" ]; then
     if [ -n "$GLIBC_VERSION" ]; then
         # Compare versions
         if [ "$(printf '%s\n' "$REQUIRED_GLIBC" "$GLIBC_VERSION" | sort -V | head -n1)" != "$REQUIRED_GLIBC" ]; then
-            echo -e "${YELLOW}[!] Compatibility Issue Detected${NC}"
-            echo -e "${YELLOW}Your glibc version: $GLIBC_VERSION${NC}"
-            echo -e "${YELLOW}Required version: $REQUIRED_GLIBC or newer${NC}"
+            apm_echo "${YELLOW}[!] Compatibility Issue Detected${NC}"
+            apm_echo "${YELLOW}Your glibc version: $GLIBC_VERSION${NC}"
+            apm_echo "${YELLOW}Required version: $REQUIRED_GLIBC or newer${NC}"
             echo ""
             echo "The prebuilt binary will not work on your system."
             echo ""
@@ -1330,9 +1355,9 @@ fi
 
 # Detect if running in a container and check compatibility
 if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ] || grep -q "/docker/" /proc/1/cgroup 2>/dev/null; then
-    echo -e "${YELLOW}[!] Container/Dev Container environment detected${NC}"
-    echo -e "${YELLOW}Note: PyInstaller binaries may have compatibility issues in containers.${NC}"
-    echo -e "${YELLOW}The installer will test the binary before changing the installation.${NC}"
+    apm_echo "${YELLOW}[!] Container/Dev Container environment detected${NC}"
+    apm_echo "${YELLOW}Note: PyInstaller binaries may have compatibility issues in containers.${NC}"
+    apm_echo "${YELLOW}The installer will test the binary before changing the installation.${NC}"
     echo ""
 fi
 
@@ -1353,13 +1378,13 @@ if [ -n "$VERSION" ]; then
         fail_closed_error APM_RELEASE_BASE_URL "Set APM_RELEASE_BASE_URL to a mirror containing $TAG_NAME/$DOWNLOAD_BINARY."
     fi
     DOWNLOAD_URL=$(release_asset_url "$TAG_NAME" "$DOWNLOAD_BINARY")
-    echo -e "${GREEN}Version: $TAG_NAME${NC}"
-    echo -e "${BLUE}Download URL: $(redact_url_credentials "$DOWNLOAD_URL")${NC}"
+    apm_echo "${GREEN}Version: $TAG_NAME${NC}"
+    apm_echo "${BLUE}Download URL: $(redact_url_credentials "$DOWNLOAD_URL")${NC}"
 fi
 
 if [ -z "$TAG_NAME" ]; then
 # Get latest release info
-echo -e "${YELLOW}Fetching latest release information...${NC}"
+apm_echo "${YELLOW}Fetching latest release information...${NC}"
 
 if is_truthy "$APM_NO_DIRECT_FALLBACK" && [ -z "$APM_RELEASE_METADATA_URL" ] && is_public_github_url; then
     fail_closed_error APM_RELEASE_METADATA_URL "Set APM_RELEASE_METADATA_URL to mirrored latest.json, or set VERSION to a pinned release."
@@ -1382,7 +1407,7 @@ fi
 CURL_EXIT_CODE=$?
 
 if [ -n "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ]; }; then
-    echo -e "${RED}Error: Failed to fetch release metadata from APM_RELEASE_METADATA_URL${NC}"
+    apm_echo "${RED}Error: Failed to fetch release metadata from APM_RELEASE_METADATA_URL${NC}"
     echo "Mirror URL: $(redact_url_credentials "$APM_RELEASE_METADATA_URL")"
     echo "Check that the mirror is reachable and publishes GitHub-compatible latest.json."
     exit 1
@@ -1393,18 +1418,18 @@ fi
 # Skip this retry entirely in mirror metadata mode: the GitHub token must not be sent to an
 # operator-configured mirror host (mirror failures already exited above with guidance).
 if [ -z "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ] || echo "$LATEST_RELEASE" | grep -q '"message".*"Not Found"'; }; then
-    echo -e "${BLUE}Repository appears to be private, trying with authentication...${NC}"
+    apm_echo "${BLUE}Repository appears to be private, trying with authentication...${NC}"
 
     # Check if we have GitHub token for private repo access
     AUTH_HEADER_VALUE=""
     if [ -n "$GITHUB_APM_PAT" ]; then
-        echo -e "${BLUE}Using GITHUB_APM_PAT for private repository access${NC}"
+        apm_echo "${BLUE}Using GITHUB_APM_PAT for private repository access${NC}"
         AUTH_HEADER_VALUE="$GITHUB_APM_PAT"
     elif [ -n "$GITHUB_TOKEN" ]; then
-        echo -e "${BLUE}Using GITHUB_TOKEN for private repository access${NC}"
+        apm_echo "${BLUE}Using GITHUB_TOKEN for private repository access${NC}"
         AUTH_HEADER_VALUE="$GITHUB_TOKEN"
     else
-        echo -e "${RED}Error: Repository is private but no authentication token found${NC}"
+        apm_echo "${RED}Error: Repository is private but no authentication token found${NC}"
         echo "Please set GITHUB_APM_PAT or GITHUB_TOKEN environment variable:"
         echo "  export GITHUB_APM_PAT=your_token_here"
         echo "  curl -sSL -H \"Authorization: token \$GITHUB_APM_PAT\" \\"
@@ -1419,7 +1444,7 @@ if [ -z "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$L
 fi
 
 if [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ]; then
-    echo -e "${RED}Error: Failed to fetch release information${NC}"
+    apm_echo "${RED}Error: Failed to fetch release information${NC}"
     echo "Please check your internet connection and try again."
     exit 1
 fi
@@ -1427,16 +1452,16 @@ fi
 # Check if we got a valid response (should contain tag_name)
 if ! echo "$LATEST_RELEASE" | grep -q '"tag_name":'; then
     if [ -n "$APM_RELEASE_METADATA_URL" ]; then
-        echo -e "${RED}Error: Invalid release metadata from APM_RELEASE_METADATA_URL${NC}"
+        apm_echo "${RED}Error: Invalid release metadata from APM_RELEASE_METADATA_URL${NC}"
         echo "Mirror URL: $(redact_url_credentials "$APM_RELEASE_METADATA_URL")"
         echo "Publish a GitHub-compatible JSON document with a tag_name field."
         exit 1
     fi
-    echo -e "${RED}Error: Invalid API response received${NC}"
+    apm_echo "${RED}Error: Invalid API response received${NC}"
 
     # Check if the response contains an error message
     if echo "$LATEST_RELEASE" | grep -q '"message"'; then
-        echo -e "${RED}GitHub API Error:${NC}"
+        apm_echo "${RED}GitHub API Error:${NC}"
         echo "$LATEST_RELEASE" | grep '"message"' | sed 's/.*"message": *"\([^"]*\)".*/\1/'
     fi
     exit 1
@@ -1458,8 +1483,8 @@ if [ -z "$APM_RELEASE_BASE_URL" ]; then
 fi
 
 if [ -z "$TAG_NAME" ]; then
-    echo -e "${RED}Error: Could not determine latest release version${NC}"
-    echo -e "${BLUE}Debug: Full API response:${NC}" >&2
+    apm_echo "${RED}Error: Could not determine latest release version${NC}"
+    apm_echo "${BLUE}Debug: Full API response:${NC}" >&2
     echo "$LATEST_RELEASE" >&2
     echo ""
     echo "This could mean:"
@@ -1470,8 +1495,8 @@ if [ -z "$TAG_NAME" ]; then
     exit 1
 fi
 
-echo -e "${GREEN}Latest version: $TAG_NAME${NC}"
-echo -e "${BLUE}Download URL: $(redact_url_credentials "$DOWNLOAD_URL")${NC}"
+apm_echo "${GREEN}Latest version: $TAG_NAME${NC}"
+apm_echo "${BLUE}Download URL: $(redact_url_credentials "$DOWNLOAD_URL")${NC}"
 fi
 
 # Create temporary directory
@@ -1479,33 +1504,33 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Download binary
-echo -e "${YELLOW}Downloading APM...${NC}"
+apm_echo "${YELLOW}Downloading APM...${NC}"
 
 # Try downloading without authentication first (for public repos)
 if curl -L --fail --progress-bar "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
-    echo -e "${GREEN}[+] Download successful${NC}"
+    apm_echo "${GREEN}[+] Download successful${NC}"
 else
     # If unauthenticated download fails, try with authentication if available.
     # Never attach the token in mirror mode: APM_RELEASE_BASE_URL points at an
     # operator-configured host, so a failed mirror download must fail closed below
     # (matches install.ps1, which leaves mirror asset downloads unauthenticated).
     if [ -n "$AUTH_HEADER_VALUE" ] && [ -z "$APM_RELEASE_BASE_URL" ]; then
-        echo -e "${BLUE}Download failed, retrying with authentication...${NC}"
+        apm_echo "${BLUE}Download failed, retrying with authentication...${NC}"
         
         # For private repositories, use GitHub API with proper headers
         if [ -n "$ASSET_URL" ]; then
-            echo -e "${BLUE}Using GitHub API for private repository access...${NC}"
+            apm_echo "${BLUE}Using GitHub API for private repository access...${NC}"
             if curl -L --fail --progress-bar \
                 -H "Authorization: token $AUTH_HEADER_VALUE" \
                 -H "Accept: application/octet-stream" \
                 "$ASSET_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
-                echo -e "${GREEN}[+] Download successful via GitHub API${NC}"
+                apm_echo "${GREEN}[+] Download successful via GitHub API${NC}"
             else
-                echo -e "${BLUE}GitHub API download failed, trying direct URL with auth...${NC}"
+                apm_echo "${BLUE}GitHub API download failed, trying direct URL with auth...${NC}"
                 if curl -L --fail --progress-bar -H "Authorization: token $AUTH_HEADER_VALUE" "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
-                    echo -e "${GREEN}[+] Download successful with authentication${NC}"
+                    apm_echo "${GREEN}[+] Download successful with authentication${NC}"
                 else
-                    echo -e "${RED}Error: Failed to download APM CLI even with authentication${NC}"
+                    apm_echo "${RED}Error: Failed to download APM CLI even with authentication${NC}"
                     echo "Direct URL: $(redact_url_credentials "$DOWNLOAD_URL")"
                     echo "API URL: $(redact_url_credentials "$ASSET_URL")"
                     echo "This might mean:"
@@ -1522,17 +1547,17 @@ else
                 fi
             fi
         else
-            echo -e "${BLUE}No API URL available, trying direct URL with auth...${NC}"
+            apm_echo "${BLUE}No API URL available, trying direct URL with auth...${NC}"
             if curl -L --fail --progress-bar -H "Authorization: token $AUTH_HEADER_VALUE" "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
-                echo -e "${GREEN}[+] Download successful with authentication${NC}"
+                apm_echo "${GREEN}[+] Download successful with authentication${NC}"
             else
                 if [ -n "$APM_RELEASE_BASE_URL" ]; then
-                    echo -e "${RED}Error: Failed to download APM CLI from APM_RELEASE_BASE_URL mirror${NC}"
+                    apm_echo "${RED}Error: Failed to download APM CLI from APM_RELEASE_BASE_URL mirror${NC}"
                     echo "Mirror URL: $(redact_url_credentials "$DOWNLOAD_URL")"
                     echo "Check that the mirror is reachable and contains $TAG_NAME/$DOWNLOAD_BINARY."
                     exit 1
                 fi
-                echo -e "${RED}Error: Failed to download APM CLI even with authentication${NC}"
+                apm_echo "${RED}Error: Failed to download APM CLI even with authentication${NC}"
                 echo "URL: $(redact_url_credentials "$DOWNLOAD_URL")"
                 echo "This might mean:"
                 echo "  1. No binary available for your platform ($PLATFORM-$ARCH)"
@@ -1549,12 +1574,12 @@ else
         fi
     else
         if [ -n "$APM_RELEASE_BASE_URL" ]; then
-            echo -e "${RED}Error: Failed to download APM CLI from APM_RELEASE_BASE_URL mirror${NC}"
+            apm_echo "${RED}Error: Failed to download APM CLI from APM_RELEASE_BASE_URL mirror${NC}"
             echo "Mirror URL: $(redact_url_credentials "$DOWNLOAD_URL")"
             echo "Check that the mirror is reachable and contains $TAG_NAME/$DOWNLOAD_BINARY."
             exit 1
         fi
-        echo -e "${RED}Error: Failed to download APM${NC}"
+        apm_echo "${RED}Error: Failed to download APM${NC}"
         echo "URL: $(redact_url_credentials "$DOWNLOAD_URL")"
         echo "This might mean:"
         echo "  1. No binary available for your platform ($PLATFORM-$ARCH)"
@@ -1576,11 +1601,11 @@ else
 fi
 
 # Extract binary from tar.gz
-echo -e "${YELLOW}Extracting binary...${NC}"
+apm_echo "${YELLOW}Extracting binary...${NC}"
 if tar -xzf "$TMP_DIR/$DOWNLOAD_BINARY" -C "$TMP_DIR"; then
-    echo -e "${GREEN}[+] Extraction successful${NC}"
+    apm_echo "${GREEN}[+] Extraction successful${NC}"
 else
-    echo -e "${RED}Error: Failed to extract binary from archive${NC}"
+    apm_echo "${RED}Error: Failed to extract binary from archive${NC}"
     exit 1
 fi
 
@@ -1591,7 +1616,7 @@ chmod +x "$TMP_DIR/$EXTRACTED_DIR/$BINARY_NAME"
 # Use if/else to capture exit code without triggering set -e.
 # When glibc is too old the binary exits 255 immediately;
 # we must survive that so the pip-fallback path below is reachable.
-echo -e "${YELLOW}Testing binary...${NC}"
+apm_echo "${YELLOW}Testing binary...${NC}"
 if BINARY_TEST_OUTPUT=$("$TMP_DIR/$EXTRACTED_DIR/$BINARY_NAME" --version 2>&1); then
     BINARY_TEST_EXIT_CODE=0
 else
@@ -1599,17 +1624,17 @@ else
 fi
 
 if [ $BINARY_TEST_EXIT_CODE -eq 0 ]; then
-    echo -e "${GREEN}[+] Binary test successful${NC}"
+    apm_echo "${GREEN}[+] Binary test successful${NC}"
 else
-    echo -e "${RED}Error: Downloaded binary failed to run${NC}"
-    echo -e "${YELLOW}Exit code: $BINARY_TEST_EXIT_CODE${NC}"
-    echo -e "${YELLOW}Error output:${NC}"
+    apm_echo "${RED}Error: Downloaded binary failed to run${NC}"
+    apm_echo "${YELLOW}Exit code: $BINARY_TEST_EXIT_CODE${NC}"
+    apm_echo "${YELLOW}Error output:${NC}"
     echo "$BINARY_TEST_OUTPUT"
     echo ""
     
     # Try to provide helpful context
     if echo "$BINARY_TEST_OUTPUT" | grep -q "GLIBC"; then
-        echo -e "${YELLOW}[!] glibc version incompatibility detected${NC}"
+        apm_echo "${YELLOW}[!] glibc version incompatibility detected${NC}"
         if [ -n "$GLIBC_VERSION" ]; then
             echo "Your system has glibc $GLIBC_VERSION but the binary requires glibc 2.35+"
         fi
@@ -1622,7 +1647,7 @@ else
     
     # If pip fallback failed, provide manual instructions
     echo ""
-    echo -e "${BLUE}Manual installation options:${NC}"
+    apm_echo "${BLUE}Manual installation options:${NC}"
     echo ""
     
     print_pip_recovery_guidance
@@ -1636,7 +1661,7 @@ else
     echo ""
     
     if [ "$PLATFORM" = "linux" ]; then
-        echo -e "${BLUE}Debug information:${NC}"
+        apm_echo "${BLUE}Debug information:${NC}"
         echo "Check missing libraries: ldd $TMP_DIR/$EXTRACTED_DIR/$BINARY_NAME"
         echo ""
     fi
@@ -1649,7 +1674,7 @@ fi
 apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm
 
 # Install binary directory structure
-echo -e "${YELLOW}Installing APM CLI to $APM_INSTALL_DIR...${NC}"
+apm_echo "${YELLOW}Installing APM CLI to $APM_INSTALL_DIR...${NC}"
 
 # --- APM_LIB_DIR safety validation ---
 # Prevent accidental data loss when APM_LIB_DIR is set to a broad/shared path.
@@ -1718,16 +1743,32 @@ APM_BLOCKLIST_EOF
 _rc=0
 apm_lib_dir_validate "$APM_LIB_DIR" || _rc=$?
 if [ "$_rc" -ne 0 ]; then
-    echo -e "${RED}+--------------------------------------------------------------+${NC}"
-    echo -e "${RED}|  REFUSING: APM_LIB_DIR=\"$APM_LIB_DIR\"${NC}"
-    echo -e "${RED}+--------------------------------------------------------------+${NC}"
+    apm_echo "${RED}+--------------------------------------------------------------+${NC}"
+    apm_echo "${RED}|  REFUSING: APM_LIB_DIR=\"$APM_LIB_DIR\"${NC}"
+    apm_echo "${RED}+--------------------------------------------------------------+${NC}"
     case $_rc in
-        11) echo -e "${RED}|  APM_LIB_DIR must be an absolute path.${NC}\n${RED}|  Relative paths are not accepted for safety.${NC}" ;;
-        12) echo -e "${RED}|  APM_LIB_DIR must end with /apm.${NC}\n${RED}|  This prevents accidental deletion of non-APM data.${NC}\n${RED}|  Example: APM_LIB_DIR=\$HOME/.local/lib/apm${NC}" ;;
-        13) echo -e "${RED}|  This path is a shared system directory. Installing here${NC}\n${RED}|  would delete non-APM data.${NC}\n${RED}|  Use a dedicated APM directory (e.g. /usr/local/lib/apm).${NC}" ;;
-        14) echo -e "${RED}|  This directory exists but does not appear to be a${NC}\n${RED}|  previous APM installation. Refusing to delete it.${NC}\n${RED}|  Inspect this directory with its original owner.${NC}\n${RED}|  For a fresh install, choose a different empty APM_LIB_DIR.${NC}" ;;
+        11)
+            apm_echo "${RED}|  APM_LIB_DIR must be an absolute path.${NC}"
+            apm_echo "${RED}|  Relative paths are not accepted for safety.${NC}"
+            ;;
+        12)
+            apm_echo "${RED}|  APM_LIB_DIR must end with /apm.${NC}"
+            apm_echo "${RED}|  This prevents accidental deletion of non-APM data.${NC}"
+            apm_echo "${RED}|  Example: APM_LIB_DIR=\$HOME/.local/lib/apm${NC}"
+            ;;
+        13)
+            apm_echo "${RED}|  This path is a shared system directory. Installing here${NC}"
+            apm_echo "${RED}|  would delete non-APM data.${NC}"
+            apm_echo "${RED}|  Use a dedicated APM directory (e.g. /usr/local/lib/apm).${NC}"
+            ;;
+        14)
+            apm_echo "${RED}|  This directory exists but does not appear to be a${NC}"
+            apm_echo "${RED}|  previous APM installation. Refusing to delete it.${NC}"
+            apm_echo "${RED}|  Inspect this directory with its original owner.${NC}"
+            apm_echo "${RED}|  For a fresh install, choose a different empty APM_LIB_DIR.${NC}"
+            ;;
     esac
-    echo -e "${RED}+--------------------------------------------------------------+${NC}"
+    apm_echo "${RED}+--------------------------------------------------------------+${NC}"
     exit 1
 fi
 
@@ -1815,28 +1856,28 @@ fi
 _apm_on_path="$(command -v apm || true)"
 _apm_run_hint="apm"
 if [ -n "${APM_SELF_UPDATE_SOURCE:-}" ]; then
-    echo -e "${GREEN}[+] APM installed successfully!${NC}"
-    echo -e "${BLUE}Version: $INSTALLED_VERSION${NC}"
-    echo -e "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
+    apm_echo "${GREEN}[+] APM installed successfully!${NC}"
+    apm_echo "${BLUE}Version: $INSTALLED_VERSION${NC}"
+    apm_echo "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
     echo "Self-update leaves existing shell PATH setup unchanged."
 elif [ -n "$_apm_on_path" ] &&
     [ "$(apm_real_path "$_apm_on_path")" = "$(apm_real_path "$APM_LIB_DIR/$BINARY_NAME")" ]; then
-    echo -e "${GREEN}[+] APM installed successfully!${NC}"
-    echo -e "${BLUE}Version: $INSTALLED_VERSION${NC}"
-    echo -e "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
+    apm_echo "${GREEN}[+] APM installed successfully!${NC}"
+    apm_echo "${BLUE}Version: $INSTALLED_VERSION${NC}"
+    apm_echo "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
     apm_configure_native_shell_path
 else
-    echo -e "${YELLOW}[!] APM installed but not found in PATH${NC}"
+    apm_echo "${YELLOW}[!] APM installed but not found in PATH${NC}"
     apm_configure_native_shell_path
 fi
 
 echo ""
-echo -e "${GREEN}Installation complete!${NC}"
+apm_echo "${GREEN}Installation complete!${NC}"
 echo ""
-echo -e "${BLUE}Quick start:${NC}"
+apm_echo "${BLUE}Quick start:${NC}"
 printf '  %s init my-app          # Create a new APM project\n' "$_apm_run_hint"
 printf '  cd my-app && %s install # Install dependencies\n' "$_apm_run_hint"
 printf '  %s run                  # Run your first prompt\n' "$_apm_run_hint"
 echo ""
-echo -e "${BLUE}Documentation:${NC} $GITHUB_URL/$APM_REPO"
-echo -e "${BLUE}Need help?${NC} Create an issue at $GITHUB_URL/$APM_REPO/issues"
+apm_echo "${BLUE}Documentation:${NC} $GITHUB_URL/$APM_REPO"
+apm_echo "${BLUE}Need help?${NC} Create an issue at $GITHUB_URL/$APM_REPO/issues"

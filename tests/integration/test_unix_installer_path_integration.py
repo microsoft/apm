@@ -332,7 +332,12 @@ def test_native_installer_enrolls_real_shell_startup(
     assert install.returncode == 0, install.stdout
     _assert_real_home_unchanged(before_real_home)
     assert case_id.split("-", 1)[0] in {"bash", "zsh", "fish"}
-    assert (home / profile_rel).is_file()
+    assert (home / profile_rel).is_file(), (
+        install.stdout
+        + install.stderr
+        + f"\ncase={case_id} shell={shell} expected_profile={home / profile_rel}\n"
+        + f"home_files={sorted(str(path.relative_to(home)) for path in home.rglob('*'))}\n"
+    )
     probe = subprocess.run(
         [shell, *startup_args, "command -v apm >/dev/null && apm --version"],
         cwd=tmp_path,
@@ -387,6 +392,70 @@ def test_headless_piped_sh_does_not_write_profiles(tmp_path: Path) -> None:
     assert not (home / ".bash_profile").exists()
     assert not (home / ".bashrc").exists()
     assert not (home / ".apm/shell").exists()
+
+
+def test_headless_piped_dash_does_not_exit_on_tty_probe(tmp_path: Path) -> None:
+    """dash headless redirection failures must be contained inside the TTY probe."""
+    shell = _require_shell("dash")
+    archive, tools = _stage_release(tmp_path)
+    installer_text = _harnessed_installer_text(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    prefix = tmp_path / "dash-headless-prefix"
+    login_shell = "/bin/bash"
+    env = _base_install_env(tmp_path, home=home, tools=tools, archive=archive, shell=login_shell)
+    result = subprocess.run(
+        [shell, "-s", "--", "--prefix", str(prefix)],
+        input=installer_text,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "no interactive terminal detected" in result.stdout
+    assert "\n-e" not in result.stdout
+    assert (prefix / "bin/apm").exists()
+    assert not (home / ".apm/shell").exists()
+
+
+def test_piped_sh_uses_declared_fish_login_shell_for_startup(tmp_path: Path) -> None:
+    """A fish login shell still gets fish startup setup when the pipe runs through sh."""
+    fish = _require_shell(
+        _first_existing(os.environ.get("APM_SHELL_RUNTIME_FISH", ""), shutil.which("fish") or "")
+        or "fish"
+    )
+    bash = _require_shell("/bin/bash")
+    archive, tools = _stage_release(tmp_path)
+    installer = _harnessed_installer(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    prefix = tmp_path / "fish-login-from-sh"
+    env = _base_install_env(tmp_path, home=home, tools=tools, archive=archive, shell=fish)
+    installer_cmd = (
+        f"env PATH={shlex.quote(env['PATH'])} cat {shlex.quote(str(installer))} | "
+        f"env PATH={shlex.quote(env['PATH'])} sh -s -- --prefix {shlex.quote(str(prefix))}"
+    )
+    install = _run_pty(
+        f"{shlex.quote(bash)} -lc {shlex.quote(installer_cmd)}", cwd=tmp_path, env=env
+    )
+    assert install.returncode == 0, install.stdout + install.stderr
+    profile = home / ".config/fish/conf.d/apm.fish"
+    assert profile.is_file(), install.stdout + install.stderr
+    assert not (home / ".bash_profile").exists()
+    probe = subprocess.run(
+        [fish, "-ic", "command -v apm >/dev/null && apm --version"],
+        cwd=tmp_path,
+        env={**env, "PATH": _BASE_PATH},
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stderr or probe.stdout
+    assert probe.stdout == "apm integration fixture\n"
 
 
 def test_fish_hook_quotes_mixed_literal_paths(tmp_path: Path) -> None:

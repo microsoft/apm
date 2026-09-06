@@ -24,6 +24,7 @@ def _unit_shell_setup_stubs(overrides: dict[str, str]) -> str:
     stubs: list[str] = []
     if "APM_UNIT_CURRENT_SHELL" in overrides:
         stubs.append("apm_detect_current_shell() { printf '%s\\n' \"$APM_UNIT_CURRENT_SHELL\"; }\n")
+        stubs.append("apm_detect_profile_shell() { printf '%s\\n' \"$APM_UNIT_CURRENT_SHELL\"; }\n")
     if overrides.get("APM_UNIT_NO_TTY") == "1":
         stubs.append("apm_has_controlling_tty() { return 1; }\n")
     elif overrides.get("APM_UNIT_ALLOW_PROFILE_SETUP") == "1":
