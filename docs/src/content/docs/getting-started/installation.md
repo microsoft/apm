@@ -21,7 +21,7 @@ Already use Homebrew on macOS? Install from Homebrew core (also available on Lin
 brew install apm
 ```
 
-No custom tap needed. Homebrew manages APM's installation, dependencies, and updates.
+No custom tap needed. Homebrew manages the APM CLI installation and updates.
 Package-manager ownership does not eliminate supply-chain risk.
 Use `brew upgrade apm`, not `apm self-update`; see the
 [Homebrew core update policy](../../reference/cli/self-update/#description).
@@ -249,20 +249,30 @@ standalone installs.
    brew --prefix
    brew list --formula --full-name
    brew list --pinned
-   brew list --versions apm
    ls -l "$(brew --prefix)/bin/apm"
-   brew info --formula homebrew/core/apm
    ```
 
    Confirm the list contains `microsoft/apm/apm`, APM is not pinned, and your
    shell resolves `apm` to that prefix's `bin/apm`, linked to its Homebrew-managed
    APM keg. If another installation owns or shadows the path, stop and resolve
-   ownership separately. Compare the installed version with core's available
-   version: reinstall can downgrade. If core is older, wait for it to catch up;
-   an older APM may not understand your configuration. Back up
+   ownership separately. Back up
    `~/.apm/config.json` using your normal process.
 
-2. Reinstall with the explicit core name:
+2. Compare the installed version with core's available version:
+
+   ```bash
+   brew list --versions apm
+   brew info --formula homebrew/core/apm
+   ```
+
+   :::caution[Stop if core is older]
+   Reinstall can downgrade without a separate warning. If core's version is
+   older than your installed version, stop and wait for core to catch up.
+   An older APM may not understand your configuration; preserving the file's
+   bytes does not prove runtime compatibility.
+   :::
+
+3. Reinstall with the explicit core name:
 
    ```bash
    brew reinstall homebrew/core/apm
@@ -271,7 +281,7 @@ standalone installs.
    Unqualified `brew reinstall apm` stays on the tap. No preliminary uninstall
    or tap removal is needed.
 
-3. Verify the receipt and active command:
+4. Verify the receipt and active command:
 
    ```bash
    brew list --formula --full-name
@@ -292,7 +302,7 @@ The migration leaves `~/.apm/config.json` unchanged on disk. Update through
 If linking fails on a conflicting file or symlink, core is already installed
 but unlinked; the tap installation is not restored. The conflicting file is
 preserved. Stop and do not use `--overwrite`. Have the file's owner resolve the
-conflict, then run `brew link homebrew/core/apm` and repeat step 3.
+conflict, then run `brew link homebrew/core/apm` and repeat step 4.
 :::
 
 :::note[Verification scope]

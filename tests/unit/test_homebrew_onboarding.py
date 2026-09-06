@@ -1,5 +1,6 @@
 """Exercise installer entrypoints without running a real package manager."""
 
+import re
 import shutil
 import subprocess
 import sys
@@ -71,9 +72,11 @@ def test_package_manager_failure_does_not_install_a_second_copy(tmp_path: Path) 
 def test_standalone_failure_recommends_homebrew_core(tmp_path: Path, platform: str) -> None:
     """Run the actual binary-failure branch, with no downloader or installer."""
     source = (ROOT / "install.sh").read_text(encoding="utf-8")
-    failure_branch = source.split("# Test the binary\n", 1)[1].split(
-        "# Install binary directory structure\n", 1
-    )[0]
+    begin = list(re.finditer(r"^# INSTALL_BINARY_CHECK_BEGIN$", source, re.MULTILINE))
+    end = list(re.finditer(r"^# INSTALL_BINARY_CHECK_END$", source, re.MULTILINE))
+    assert len(begin) == len(end) == 1, "Expected exactly one pair of binary-check sentinels"
+    assert begin[0].end() < end[0].start(), "Binary-check sentinels must be ordered"
+    failure_branch = source[begin[0].end() : end[0].start()]
     binary = tmp_path / "apm"
     binary.write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
     binary.chmod(0o755)
@@ -95,5 +98,7 @@ def test_standalone_failure_recommends_homebrew_core(tmp_path: Path, platform: s
     )
 
     assert result.returncode == 1
-    assert "2. Homebrew (macOS/Linux): brew install apm" in result.stdout.splitlines()
+    assert (
+        "2. Homebrew (macOS/Linux): brew install apm (no tap needed)" in result.stdout.splitlines()
+    )
     assert "  pip3 install --user apm-cli" in result.stdout.splitlines()
