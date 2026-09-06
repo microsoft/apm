@@ -58,15 +58,13 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 
 ### Unix ownership and migration
 
-An existing nonempty Unix bundle is recognized only when its bundle-identity entries are not symlinks: a regular `apm` file plus either a regular `.apm-installed` file or both a regular `VERSION` file and a real `_internal` directory. Discovery and pre-delete validation use this same rule; `VERSION` alone, `.apm-installed` alone, or `apm.cmd` alone never authorizes deletion. Recognized current and legacy layouts update in place.
+`install.sh` preserves recognized installations and refuses shadow installs, package-managed or unrecognized launchers, foreign-owned bundles, unsafe destinations, and destination changes.
 
-Preflight requires absolute, normalized launcher and bundle destinations; the bundle must end in `/apm`. It rejects blocked shared directories, overlaps, an `APM_LIB_DIR` symlink, conflicts, unknown/package-managed installations, and ownership or permission failures. Before removal, every bundle entry must be caller-owned, and every directory must be writable and searchable.
+Inspect unrecognized data without deleting it. For a fresh install, choose another empty dedicated bundle; otherwise use the original owner's uninstall process.
 
-After installing the bundle and launcher, `install.sh` runs the launcher at its destination with `--version` before reporting completion, even when it is off `PATH`; failure stops with guidance to retry the same destinations or ask the installation owner to repair it.
+Update or uninstall pip-owned installs with the owning Python's `-m pip`; uninstall before switching to the binary installer. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set. It prints that Python's user scripts directory when off `PATH` and never edits profiles.
 
-Ask the original administrator/package manager to update system/custom installs. To migrate, uninstall through that owner first. Pip fallback requires a fresh ordinary-user install with neither destination variable set; it uses one selected Python 3.10+ interpreter for both `-m pip` and the `sysconfig` user scripts path. A failed scheme query stops before installation. When needed, run the exact safely quoted current-shell `PATH` command printed by the installer; it respects `PYTHONUSERBASE` and framework layouts and does not edit profiles.
-
-Root requires both `APM_INSTALL_DIR` and `APM_LIB_DIR`; setting only one refuses the install. See the canonical [ownership rules and reviewed-script administrator invocation](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#unix-install-ownership-and-migration).
+Root requires both `APM_INSTALL_DIR` and `APM_LIB_DIR`; one variable refuses the install. See the canonical [Unix ownership and migration procedure](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration).
 
 ## Installer options (Windows PowerShell)
 
@@ -103,6 +101,6 @@ For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PR
 
 ## Troubleshooting
 
-- **macOS/Linux "command not found":** run the exact export command printed by the installer, or invoke the launcher by its absolute path.
+- **macOS/Linux "command not found":** run the printed POSIX-quoted PATH command; for native installation destinations containing `:` or control characters, use the printed absolute-path command.
 - **Permission denied:** follow [ownership and migration](#unix-ownership-and-migration), not a destination override.
 - **Windows antivirus locks:** set `$env:APM_DEBUG = "1"` and retry.

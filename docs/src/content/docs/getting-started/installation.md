@@ -117,17 +117,27 @@ Preflight requires absolute, normalized launcher and bundle destinations; the bu
 
 Before removal, every existing bundle entry must be caller-owned, and every directory must be writable and searchable by the caller. A failure stops the update without removing files. Conflicting installations or destination overrides, inaccessible discovery paths, unknown/package-managed launchers, and unwritable destinations also fail with repair guidance.
 
+If a fresh install finds unrelated or unrecognized data, inspect it without deleting anything. Choose a different empty, dedicated bundle and launcher destination, or use the original owner's uninstall process.
+
 After installing the bundle and launcher, `install.sh` runs the launcher at its destination with `--version` before reporting completion, even when it is off `PATH`; failure stops with guidance to retry the same destinations or ask the installation owner to repair it.
 
 **Migration:** ask the original administrator or package manager to update system/custom installs. To migrate deliberately, uninstall through that owner first, then install fresh. Destination overrides never migrate an install. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set; existing/custom installs receive terminal owner guidance even when Python is unavailable.
 
 Pip fallback uses the selected Python 3.10+ interpreter for both `-m pip` and its `sysconfig` user scheme. If that scheme query fails, installation stops before package installation. If the installed launcher is off `PATH`, the installer prints a safely shell-quoted command for the current shell using that interpreter's actual scripts directory, including `PYTHONUSERBASE` and framework layouts. It never modifies shell profiles.
 
-After saving and reviewing `install.sh`, invoke it explicitly as administrator:
+After [saving and reviewing `install.sh`](#macos--linux), set both destinations. From an ordinary shell:
 
 ```bash
 sudo env APM_INSTALL_DIR=/usr/local/bin APM_LIB_DIR=/usr/local/lib/apm sh ./install.sh
 ```
+
+Already root or in a container without `sudo`:
+
+```bash
+env APM_INSTALL_DIR=/usr/local/bin APM_LIB_DIR=/usr/local/lib/apm sh ./install.sh
+```
+
+Root without both variables fails closed. The installer never elevates privileges.
 
 ### Enterprise bootstrap mirror mode
 
@@ -168,6 +178,8 @@ apm-releases/
     apm-windows-x86_64.zip
     apm-windows-x86_64.zip.sha256
 ```
+
+Unix release assets are `apm-linux-x86_64.tar.gz`, `apm-linux-arm64.tar.gz`, `apm-darwin-x86_64.tar.gz`, and `apm-darwin-arm64.tar.gz`.
 
 `APM_NO_DIRECT_FALLBACK=1` makes missing mirror settings and unreachable mirrors hard failures. It does not replace package-install proxying; keep using `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY=1` for `apm install` dependencies.
 
@@ -250,10 +262,17 @@ scoop install apm
 ## pip install
 
 ```bash
-pip install apm-cli
+python3 -m pip install apm-cli
 ```
 
-Requires Python 3.10+.
+Requires Python 3.10+. Update or uninstall with the Python interpreter that owns the installation:
+
+```bash
+python3 -m pip install --upgrade apm-cli
+python3 -m pip uninstall apm-cli
+```
+
+Replace `python3` with the owning interpreter when needed. Uninstall before switching to the binary installer; `install.sh` refuses package-managed launchers.
 
 ## Manual binary install
 
@@ -321,7 +340,7 @@ apm --version
 
 ### `apm: command not found` (macOS / Linux)
 
-Run the exact `export PATH=...` command printed by the installer, or invoke the launcher by its absolute path.
+Run the POSIX-quoted `export PATH=...` command printed by the installer. For native installation destinations containing `:` or control characters, use the printed absolute-path command instead.
 
 ### Permission denied during install (macOS / Linux)
 
@@ -329,7 +348,7 @@ For existing installations, follow [ownership and migration](#unix-install-owner
 
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 
-Prebuilt Linux binaries require glibc 2.35+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or Python 3.10+ and pip. Automatic `pip install --user apm-cli` fallback follows the [ownership rules](#unix-install-ownership-and-migration).
+Prebuilt Linux binaries require glibc 2.35+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or Python 3.10+ and pip. Automatic `pip install --user apm-cli` fallback follows the [ownership rules](#unix-install-ownership-and-migration). Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
 
 ### Authentication errors when installing packages
 

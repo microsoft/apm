@@ -2,8 +2,8 @@
 
 | Problem | Fix |
 |---------|-----|
-| `apm: command not found` | Run the exact current-shell `PATH` command printed by the installer, then see [installation and PATH setup](./installation.md#quick-install-recommended). Pip fallback derives it safely from the selected Python's user scheme, including `PYTHONUSERBASE` and framework layouts; profiles remain unchanged. |
-| Unix install/self-update ownership, destination, or pip fallback refusal | Ask the original administrator/package manager to update it; do not redirect. Uninstall through that owner before migrating; see [ownership rules](./installation.md#unix-ownership-and-migration). |
+| `apm: command not found` | Run the printed POSIX-quoted `PATH` command. For native installation destinations containing `:` or control characters, use the printed absolute-path command. Pip fallback derives its user-script directory from the selected Python's user scheme, including `PYTHONUSERBASE` and framework layouts; profiles remain unchanged. See [installation and PATH setup](./installation.md#quick-install-recommended). |
+| Unix install/self-update ownership, destination, or pip fallback refusal | Use the owning Python's `-m pip` or original owner. Inspect unknown data without deleting it. For a fresh install choose another empty dedicated bundle; otherwise use the owner's uninstall before migration. See [ownership rules](./installation.md#unix-ownership-and-migration). |
 | Authentication errors (401/403) | Set the correct token. Run `apm install --verbose` to see which token source is used. See [Authentication](./authentication.md). |
 | File collision on install | A local file conflicts with a dependency file. Use `--force` to overwrite, or rename the local file. |
 | Stale dependencies | Run `apm install --update` to refresh to latest refs. |

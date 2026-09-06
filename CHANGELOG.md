@@ -9,15 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Unix installation defaults to user-local directories without profile edits or implicit `sudo`; recognized existing installations retain their destinations, while conflicts fail with owner-directed repair guidance. For migration, ask the original administrator or package manager to update or uninstall first; see [Unix install ownership and migration](docs/src/content/docs/getting-started/installation.md#unix-install-ownership-and-migration). (#2844)
-- `apm install` now keeps transitive plugin MCP launchers usable after
-  publication and cached replay by resolving plugin-root placeholders from the
-  published package directory. Lockfile writes and self-defined MCP
-  configuration construction reject remaining resolution-staging references
-  without echoing configuration values. (by @lkshrk, #2827)
-- Git dependency downloads retry one narrowly classified HTTPS connection failure without changing credentials or transport; lifecycle timeout tests now wait for descendant readiness before exercising process-tree termination.
+- Unix installation defaults to user-local directories without profile edits or implicit `sudo`. Existing destinations are preserved, but ordinary users cannot replace root-owned or package-managed installs; ask the original administrator or package manager to update or uninstall before migrating. See [Unix install ownership and migration](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration). (#2844)
 
-## [0.29.1] - 2026-09-05
 ## [0.29.1] - 2026-09-06
 
 ### Security

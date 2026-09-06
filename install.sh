@@ -68,6 +68,24 @@ apm_install_error() {
     exit 1
 }
 
+# Produce one POSIX shell word without adding a Python dependency.
+apm_shell_quote() (
+    _rest="$1"
+    printf "'"
+    while :; do
+        case "$_rest" in
+            *"'"*)
+                printf "%s'\\\\''" "${_rest%%"'"*}"
+                _rest="${_rest#*"'"}"
+                ;;
+            *)
+                printf "%s'" "$_rest"
+                return
+                ;;
+        esac
+    done
+)
+
 apm_is_recognized_bundle() {
     [ -f "$1/apm" ] && [ ! -L "$1/apm" ] && {
         { [ -f "$1/.apm-installed" ] && [ ! -L "$1/.apm-installed" ]; } ||
@@ -879,7 +897,7 @@ if [ "$_rc" -ne 0 ]; then
         11) echo -e "${RED}|  APM_LIB_DIR must be an absolute path.${NC}\n${RED}|  Relative paths are not accepted for safety.${NC}" ;;
         12) echo -e "${RED}|  APM_LIB_DIR must end with /apm.${NC}\n${RED}|  This prevents accidental deletion of non-APM data.${NC}\n${RED}|  Example: APM_LIB_DIR=\$HOME/.local/lib/apm${NC}" ;;
         13) echo -e "${RED}|  This path is a shared system directory. Installing here${NC}\n${RED}|  would delete non-APM data.${NC}\n${RED}|  Use a dedicated APM directory (e.g. /usr/local/lib/apm).${NC}" ;;
-        14) echo -e "${RED}|  This directory exists but does not appear to be a${NC}\n${RED}|  previous APM installation. Refusing to delete it.${NC}\n${RED}|  If you are sure, remove it manually first:${NC}\n${RED}|    rm -rf \"$APM_LIB_DIR\"${NC}" ;;
+        14) echo -e "${RED}|  This directory exists but does not appear to be a${NC}\n${RED}|  previous APM installation. Refusing to delete it.${NC}\n${RED}|  Inspect this directory with its original owner.${NC}\n${RED}|  For a fresh install, choose a different empty APM_LIB_DIR.${NC}" ;;
     esac
     echo -e "${RED}+--------------------------------------------------------------+${NC}"
     exit 1
@@ -914,6 +932,7 @@ if ! INSTALLED_VERSION=$("$APM_INSTALL_DIR/$BINARY_NAME" --version); then
     apm_install_error "Installed APM at $APM_INSTALL_DIR/$BINARY_NAME failed its --version check. Retry with the same destinations or ask its owner to repair this installation."
 fi
 _apm_on_path="$(command -v apm || true)"
+_apm_run_hint="apm"
 if [ -n "$_apm_on_path" ] &&
     [ "$(apm_real_path "$_apm_on_path")" = "$(apm_real_path "$APM_LIB_DIR/$BINARY_NAME")" ]; then
     echo -e "${GREEN}[+] APM installed successfully!${NC}"
@@ -921,9 +940,18 @@ if [ -n "$_apm_on_path" ] &&
     echo -e "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
 else
     echo -e "${YELLOW}[!] APM installed but not found in PATH${NC}"
-    echo "You may need to add $APM_INSTALL_DIR to your PATH environment variable."
-    echo "For this shell, run the following; add it to your shell profile only if desired:"
-    echo "  export PATH=\"$APM_INSTALL_DIR:\$PATH\""
+    case "$APM_INSTALL_DIR" in
+        *:*|*[[:cntrl:]]*)
+            _apm_run_hint="$(apm_shell_quote "$APM_INSTALL_DIR/$BINARY_NAME")"
+            echo "Run APM using its absolute path:"
+            printf '  %s --version\n' "$_apm_run_hint"
+            echo "For PATH discovery, reinstall through its owner into a directory without ':' or control characters."
+            ;;
+        *)
+            echo "For this shell, run the following; add it to your shell profile only if desired:"
+            printf '  export PATH=%s:"$PATH"\n' "$(apm_shell_quote "$APM_INSTALL_DIR")"
+            ;;
+    esac
     echo "No shell profiles were changed."
 fi
 
@@ -931,9 +959,9 @@ echo ""
 echo -e "${GREEN}Installation complete!${NC}"
 echo ""
 echo -e "${BLUE}Quick start:${NC}"
-echo "  apm init my-app          # Create a new APM project"
-echo "  cd my-app && apm install # Install dependencies"
-echo "  apm run                  # Run your first prompt"
+printf '  %s init my-app          # Create a new APM project\n' "$_apm_run_hint"
+printf '  cd my-app && %s install # Install dependencies\n' "$_apm_run_hint"
+printf '  %s run                  # Run your first prompt\n' "$_apm_run_hint"
 echo ""
 echo -e "${BLUE}Documentation:${NC} $GITHUB_URL/$APM_REPO"
 echo -e "${BLUE}Need help?${NC} Create an issue at $GITHUB_URL/$APM_REPO/issues"

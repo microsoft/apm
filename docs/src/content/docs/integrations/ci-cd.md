@@ -106,11 +106,13 @@ APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](htt
 
 ## Azure Pipelines
 
+Set both HOME-local destinations so fresh root and non-root runners need no `sudo`.
+
 ```yaml
 steps:
   - script: |
-      curl -sSL https://aka.ms/apm-unix | sh
-      export PATH="$HOME/.apm/bin:$PATH"
+      curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR="$HOME/.local/bin" APM_LIB_DIR="$HOME/.local/lib/apm" sh
+      export PATH="$HOME/.local/bin:$PATH"
       apm install
       # Optional: only if targeting Codex, Gemini, or similar tools
       # apm compile
@@ -132,8 +134,8 @@ steps:
       scriptType: bash
       scriptLocation: inlineScript
       inlineScript: |
-        curl -sSL https://aka.ms/apm-unix | sh
-        export PATH="$HOME/.apm/bin:$PATH"
+        curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR="$HOME/.local/bin" APM_LIB_DIR="$HOME/.local/lib/apm" sh
+        export PATH="$HOME/.local/bin:$PATH"
         apm install
 ```
 

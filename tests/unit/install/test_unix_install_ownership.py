@@ -205,9 +205,63 @@ def test_writable_custom_install(installation: tuple[Path, dict[str, str]]) -> N
     assert result.returncode == 0, result.stderr
     assert (target / "apm").resolve() == root / "custom/lib/apm/apm"
     assert (root / "custom/lib/apm/.apm-installed").is_file()
-    assert f'export PATH="{target}:$PATH"' in result.stdout
+    assert f"export PATH='{target}':\"$PATH\"" in result.stdout
     assert list((root / "home").iterdir()) == []
     assert not (root / "sudo.log").exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "plain",
+        "space dir",
+        'double"quote',
+        "single'quote",
+        "dollar$literal",
+        "bin$(touch injected)",
+        "bin`touch injected`",
+        "colon:dir",
+        "line\nbreak",
+    ],
+)
+def test_native_path_instruction_preserves_literal_destination(
+    installation: tuple[Path, dict[str, str]], name: str
+) -> None:
+    """Execute printed guidance; quotes and substitutions must remain path data."""
+    root, env = installation
+    target = root / name / "bin"
+    result = _run(installation, APM_INSTALL_DIR=str(target))
+    assert result.returncode == 0, result.stdout + result.stderr
+    if ":" in name or "\n" in name:
+        assert "export PATH=" not in result.stdout
+        instruction = (
+            result.stdout.split("Run APM using its absolute path:\n", 1)[1]
+            .split("\nFor PATH discovery,", 1)[0]
+            .strip()
+        )
+        expected = "apm fixture\n"
+    else:
+        instruction = next(
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip().startswith("export PATH=")
+        )
+        instruction += '\nprintf "%s\\n" "$PATH"\n'
+        expected = f"{target}:{env['PATH']}\n"
+    executed = subprocess.run(
+        ["/bin/sh", "-c", instruction],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert executed.returncode == 0, executed.stderr
+    assert executed.stdout == expected
+    assert not (root / "injected").exists()
+    assert not list((root / "home").iterdir())
+    assert "No shell profiles were changed." in result.stdout
 
 
 def _prior(root: Path, prefix: str = "prior", *, legacy: bool = False) -> tuple[Path, Path]:
@@ -361,10 +415,49 @@ def test_unrecognized_bundle_data_is_preserved(
     if marker is not None:
         (target / marker).write_text("unrelated-v1\n", encoding="ascii")
     result = _run(installation)
-    assert result.returncode == 1, result.stdout + result.stderr
     assert keep.read_bytes() == payload
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "rm -rf" not in result.stdout + result.stderr
+    if marker != "apm":
+        assert "Inspect this directory" in result.stdout
     assert not (root / "home/.local/bin/apm").exists()
     assert not (root / "sudo.log").exists()
+
+
+def test_symlinked_bundle_executable_preserves_external_data(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """A symlinked executable is not bundle identity, even with real markers."""
+    root, _ = installation
+    bindir, lib = _prior(root)
+    external = root / "external-apm"
+    (lib / "apm").rename(external)
+    (lib / "apm").symlink_to(external)
+    keep = lib / "unrelated-data"
+    keep.write_bytes(b"unrelated\n")
+    before = external.read_bytes()
+    launcher_inode = (bindir / "apm").lstat().st_ino
+    result = _run(installation, APM_INSTALL_DIR=str(bindir), APM_LIB_DIR=str(lib))
+    assert result.returncode == 1
+    assert keep.read_bytes() == b"unrelated\n"
+    assert external.read_bytes() == before
+    assert (bindir / "apm").lstat().st_ino == launcher_inode
+    assert (lib / "apm").is_symlink()
+    assert not (root / "sudo.log").exists()
+    source = INSTALLER.read_text(encoding="ascii")
+    identity = source.split("# INSTALL_OWNERSHIP_BEGIN", 1)[1].split("# INSTALL_OWNERSHIP_END", 1)[
+        0
+    ]
+    probe = subprocess.run(
+        ["/bin/sh", "-c", identity + '\napm_is_recognized_bundle "$1"\n', "--", str(lib)],
+        cwd=root,
+        env=installation[1],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert probe.returncode == 1
 
 
 @pytest.mark.parametrize("marker", [".apm-installed", "VERSION", "_internal"])

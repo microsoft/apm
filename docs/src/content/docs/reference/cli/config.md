@@ -51,7 +51,7 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 - `temp-dir` must be an existing, writable directory. The path is expanded (`~`) and stored absolute.
 - `target` must be a valid install target token (or comma-separated list), using the same validator as `apm install --target`.
 - `self-update.channel` must be `stable` or `prerelease`.
-- `self-update.install-dir` is expanded and stored absolute, then passed as `APM_INSTALL_DIR` when the environment variable is absent. During a Unix update, the installer treats it as a preservation preference: it must match the existing launcher, while unset preserves the detected installation. Windows behavior is unchanged.
+- `self-update.install-dir` is optional on Unix. When set, it is expanded and stored absolute, then passed as `APM_INSTALL_DIR` when the environment variable is absent. It must match the existing launcher; leaving it unset preserves the detected installation. Windows behavior is unchanged.
 - `copilot-cowork-skills-dir` must be absolute after expansion; the directory itself does not need to exist.
 - `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. Embedded credentials, invalid ports, query strings, fragments, and other schemes are rejected. Configured `http://` endpoints require `MCP_REGISTRY_ALLOW_HTTP=1` when used.
 - Boolean keys reject anything outside the accepted truthy/falsy strings.
@@ -67,7 +67,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
 | `target` | target token | unset | Default target for package, MCP, and LSP phases of `apm install` and `apm update` when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
 | `self-update.channel` | enum | `stable` | Default release channel for `apm self-update`: `stable` selects the latest stable release; `prerelease` selects the newest non-draft prerelease. Both pass the selected release to the installer as one normalized `VERSION`. `APM_SELF_UPDATE_CHANNEL` overrides config. |
-| `self-update.install-dir` | path | unset | Launcher preference; `APM_INSTALL_DIR` overrides it. On Unix, a set value must match the existing launcher and unset preserves it; neither migrates. Windows uses the installer destination/default. |
+| `self-update.install-dir` | path | unset | Optional launcher preference; `APM_INSTALL_DIR` overrides it. On Unix, a set value must match the existing launcher and unset preserves it; neither migrates. Windows uses the installer destination/default. |
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
 | `allow-protocol-fallback` | boolean | `false` | Enable the legacy cross-protocol fallback chain. When true, APM retries a failed clone with the opposite protocol (SSH -> HTTPS or HTTPS -> SSH). Equivalent to `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
 | `prefer-ssh` | boolean | `false` | Prefer SSH transport for shorthand (`owner/repo`) dependencies. Equivalent to `--ssh` or `APM_GIT_PROTOCOL=ssh`. |
@@ -159,7 +159,7 @@ apm install                    # no --target needed: deploys to claude
 apm config unset target        # clear it (back to auto-detection)
 ```
 
-For a Unix bundle already installed at `~/.local/bin`, persist a matching self-update preservation preference (substitute the original launcher directory for other installs):
+On Unix, leaving `self-update.install-dir` unset already preserves the detected launcher. Optionally persist a matching directory for an existing installation:
 
 ```bash
 apm config set self-update.channel prerelease
