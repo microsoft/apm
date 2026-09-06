@@ -12,6 +12,7 @@ from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...install.locking import serialized_lifecycle
 from ...models.apm_package import APMPackage
+from ...utils.path_security import PathTraversalError
 from .engine import (
     IntegrationCleanupOutcome,
     MCPUninstallCleanupError,
@@ -402,6 +403,32 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
             return
 
+        # Remove package content before releasing declarations or ownership.
+        # A failed recursive delete can be partial; retain metadata for retry,
+        # rather than claiming that already-deleted files were rolled back.
+        refreshed_survivor_keys = builtins.set()
+        try:
+            removed_from_modules = _remove_packages_from_disk(
+                packages_to_remove,
+                modules_dir,
+                logger,
+                staged_refreshes=staged_local_refreshes,
+                refreshed_survivor_keys=refreshed_survivor_keys,
+            )
+            orphan_removed, actual_orphans = _cleanup_transitive_orphans(
+                lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
+            )
+        except (OSError, PathTraversalError):
+            logger.error(
+                "Uninstall incomplete: package deletion failed. "
+                "apm.yml and lockfile ownership were retained; some package files "
+                "may already have been removed. Resolve the filesystem error and "
+                "retry the same uninstall command, or run 'apm install' to restore "
+                "the declared packages."
+            )
+            sys.exit(1)
+        removed_from_modules += orphan_removed
+
         # Step 3: Remove target-scoped files while their lockfile ownership is
         # still recoverable. The post-removal manifest can omit a removed
         # package's target, so its target must not be reconstructed from it.
@@ -461,22 +488,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         _pre_uninstall_mcp_servers = (
             builtins.set(lockfile.mcp_servers) if lockfile else builtins.set()
         )
-
-        # Step 6: Remove packages from disk
-        refreshed_survivor_keys = builtins.set()
-        removed_from_modules = _remove_packages_from_disk(
-            packages_to_remove,
-            modules_dir,
-            logger,
-            staged_refreshes=staged_local_refreshes,
-            refreshed_survivor_keys=refreshed_survivor_keys,
-        )
-
-        # Step 7: Cleanup transitive orphans
-        orphan_removed, actual_orphans = _cleanup_transitive_orphans(
-            lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
-        )
-        removed_from_modules += orphan_removed
 
         # Step 8: Collect deployed files for removed packages (before lockfile mutation)
         removed_keys.update(actual_orphans)
@@ -566,7 +577,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Step 11: MCP cleanup
         from ...adapters.client.intellij import IntelliJConfigError
-        from ...utils.path_security import PathTraversalError
 
         mcp_cleanup_error = None
         mcp_cleanup_fatal = False

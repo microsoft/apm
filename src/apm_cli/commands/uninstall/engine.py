@@ -820,7 +820,7 @@ def _remove_packages_from_disk(
     staged_refreshes=None,
     refreshed_survivor_keys=None,
 ):
-    """Remove direct packages from apm_modules/ and return removal count."""
+    """Remove direct packages, stopping on failure before ownership is released."""
     removed = 0
     if not apm_modules_dir.exists():
         return removed
@@ -834,7 +834,7 @@ def _remove_packages_from_disk(
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except PathTraversalError as e:
             logger.error(f"Refusing to remove {package_label}: {e}")
-            continue
+            raise
         except (ValueError, TypeError, AttributeError, KeyError):
             package_str = package if isinstance(package, str) else str(package)
             repo_parts = package_str.split("/")
@@ -866,8 +866,9 @@ def _remove_packages_from_disk(
                 )
                 removed += 1
                 deleted_pkg_paths.append(package_path)
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Failed to remove {package_label} from apm_modules/: {e}")
+                raise
         else:
             logger.warning(f"Package {package_label} not found in apm_modules/")
 
@@ -936,8 +937,9 @@ def _cleanup_transitive_orphans(
                 logger.verbose_detail(f"    Path: {portable_relpath(orphan_path, apm_modules_dir)}")
                 removed += 1
                 deleted_orphan_paths.append(orphan_path)
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Failed to remove transitive dep {orphan_key}: {e}")
+                raise
 
     from ...integration.base_integrator import BaseIntegrator as _BI
 

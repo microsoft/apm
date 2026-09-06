@@ -15,7 +15,10 @@ apm uninstall [OPTIONS] PACKAGES...
 
 ## Description
 
-`apm uninstall` is the inverse of `apm install <package>`. It strips a package from the manifest, deletes its source from `apm_modules/`, prunes any transitive dependencies that nothing else depends on, and removes every tracked file the package deployed to configured targets.
+`apm uninstall` is the inverse of `apm install <package>`. It deletes the
+package source from `apm_modules/`, prunes unused transitive dependencies,
+removes tracked files from configured targets, then updates the manifest and
+lockfile.
 
 The command only deletes files tracked in the lockfile's `deployed_files` manifest, so hand-authored content in the same harness folders is left alone.
 
@@ -90,13 +93,24 @@ apm uninstall https://github.com/acme/my-package.git
 
 What gets removed, in order:
 
-1. Target-scoped files owned only by the removed packages, while ownership state is still available for safe cleanup.
-2. The package entry in `apm.yml` under `dependencies.apm` or `devDependencies.apm`.
-3. The package folder under `apm_modules/owner/repo/`.
-4. Transitive dependencies that no remaining package depends on (npm-style pruning, computed from `apm.lock.yaml`). A transitive dependency still declared by any surviving package is preserved, even when two packages share it (a diamond-shaped install). If a surviving package's manifest can't be read, APM keeps every remaining candidate for that run rather than guessing -- re-run with `--verbose` to see which manifest failed, then fix or restore it and re-run to complete cleanup.
-5. Every remaining file in the lockfile's `deployed_files` for the removed packages and pruned orphans, across configured target-owned folders such as `.github/`, `.claude/`, `.grok/`, and `.agents/`.
-6. Hook entries inside `.claude/settings.json`, `.cursor/hooks.json`, `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages contributed. Remaining packages -- including transitive dependencies still required by another package -- have their hook entries rebuilt from the post-removal lockfile.
-7. MCP and LSP servers contributed only by the removed packages. For current
+1. Package folders under `apm_modules/`, including requested packages and
+   transitive dependencies that no remaining package needs. A transitive
+   dependency still required by a surviving package is preserved, including
+   shared diamond dependencies. If a surviving package's manifest cannot be
+   read, APM keeps every remaining candidate rather than guessing. Run again
+   with `--verbose`, fix or restore the reported manifest, then retry.
+2. Target-scoped files owned only by the removed packages, while lockfile
+   ownership is still available for safe cleanup.
+3. Package declarations in `apm.yml`.
+4. Remaining files in the lockfile's `deployed_files` for the removed packages
+   and pruned orphans, across target-owned folders such as `.github/`,
+   `.claude/`, `.grok/`, and `.agents/`.
+5. Hook entries inside `.claude/settings.json`, `.cursor/hooks.json`,
+   `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages
+   contributed. Remaining packages -- including transitive dependencies still
+   required by another package -- have their hook entries rebuilt from the
+   post-removal lockfile.
+6. MCP and LSP servers contributed only by the removed packages. For current
    lockfiles, MCP cleanup touches only the runtimes recorded as owners in
    `mcp_target_servers`. An explicitly empty ownership map is a no-op. Older
    lockfiles adopt only self-defined entries that exactly match their stored
@@ -105,8 +119,8 @@ What gets removed, in order:
    shared entry. Cleanup attempts every owning runtime before exiting nonzero on
    failure. Fix the reported configs, then run `apm install` to reconcile stale
    entries.
-8. The lockfile entries themselves. If no dependencies remain, `apm.lock.yaml` is deleted.
-9. Empty parent directories left behind by the cleanup.
+7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
+8. Empty parent directories left behind by the cleanup.
 
 Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No
@@ -114,7 +128,21 @@ matched package in the same invocation is removed. Fix the identifier and retry.
 
 If a target-scoped file owned only by a removed package was edited or cannot be
 deleted, uninstall lists the retained paths and exits before changing `apm.yml`,
-`apm.lock.yaml`, or package modules. Resolve the listed files and retry.
+or `apm.lock.yaml`. Package directories were processed first and may already be
+gone. Resolve the listed files and retry.
+
+If any requested or transitive package directory cannot be deleted, uninstall
+stops with exit code 1 and does not print `Uninstall complete`. For the entire
+request, `apm.yml` declarations and on-disk lockfile ownership remain unchanged,
+and target deployment cleanup does not start. Directory deletion is not
+transactional: recursive deletion can be partial, and package directories
+processed earlier in the same request can already be gone. APM does not roll
+back filesystem changes.
+
+Resolve the reported permission problem or file lock, then retry the exact same
+`apm uninstall` command. Alternatively, run `apm install` to restore the
+packages that remain declared.
+
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the
 command exits nonzero because hook cleanup is incomplete. Inspect or repair the

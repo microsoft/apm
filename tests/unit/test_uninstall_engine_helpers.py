@@ -223,7 +223,7 @@ class TestRemovePackagesFromDisk:
         assert removed == 2
 
     def test_path_traversal_is_rejected(self, tmp_path):
-        """PathTraversalError during dep resolution is caught and logged."""
+        """Path traversal stops removal before the caller can release ownership."""
         from apm_cli.utils.path_security import PathTraversalError
 
         modules = tmp_path / "apm_modules"
@@ -234,29 +234,34 @@ class TestRemovePackagesFromDisk:
         bad_ref = MagicMock()
         bad_ref.get_install_path.side_effect = PathTraversalError("traversal")
 
-        with patch(
-            "apm_cli.commands.uninstall.engine._parse_dependency_entry",
-            return_value=bad_ref,
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine._parse_dependency_entry",
+                return_value=bad_ref,
+            ),
+            pytest.raises(PathTraversalError, match="traversal"),
         ):
-            removed = _remove_packages_from_disk(["../evil"], modules, logger)
+            _remove_packages_from_disk(["../evil"], modules, logger)
 
-        assert removed == 0
         logger.error.assert_called_once()
 
-    def test_rmtree_exception_is_caught(self, tmp_path):
-        """Exception during safe_rmtree is logged without crashing."""
+    def test_rmtree_exception_is_propagated(self, tmp_path):
+        """A deletion error is logged and stops the caller's ownership release."""
         modules = tmp_path / "apm_modules"
         pkg_dir = modules / "org" / "repo"
         pkg_dir.mkdir(parents=True)
         logger = _make_logger()
 
-        with patch(
-            "apm_cli.commands.uninstall.engine.safe_rmtree",
-            side_effect=OSError("permission denied"),
+        with (
+            patch(
+                "apm_cli.commands.uninstall.engine.safe_rmtree",
+                side_effect=OSError("permission denied"),
+            ),
+            pytest.raises(OSError, match="permission denied"),
         ):
-            removed = _remove_packages_from_disk(["org/repo"], modules, logger)
+            _remove_packages_from_disk(["org/repo"], modules, logger)
 
-        assert removed == 0
+        assert pkg_dir.exists()
         logger.error.assert_called_once()
 
 
