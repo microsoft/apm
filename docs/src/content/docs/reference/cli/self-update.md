@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-Self-update the APM CLI binary to the latest GitHub release.
+Update a standalone APM CLI installation to the latest GitHub release.
 
 ## Synopsis
 
@@ -15,7 +15,15 @@ apm self-update [--check]
 
 ## Description
 
-`apm self-update` upgrades the **APM CLI itself** to the latest version published on GitHub releases. It downloads the official platform installer (`install.sh` on macOS/Linux, `install.ps1` on Windows) and runs it in place.
+Use `apm self-update` for **standalone installs**. It downloads and runs the official
+platform installer (`install.sh` on macOS/Linux, `install.ps1` on Windows).
+
+:::note[Homebrew core]
+The Homebrew core formula disables self-update, including `--check`, and startup
+update notices. `apm self-update` prints a message directing you to
+`brew upgrade apm` and exits without running the installer. For pip, Scoop, or
+other package-manager installs, use the owning manager's upgrade command.
+:::
 
 :::caution[Looking for dependency updates?]
 This command does **not** update the packages declared in your `apm.yml`. To re-resolve your dependencies against the latest matching versions or Git refs, run:
@@ -37,10 +45,6 @@ Self-update can read two non-secret installer preferences from `apm config`:
 `APM_SELF_UPDATE_CHANNEL` and `APM_INSTALL_DIR` override config. An explicit `VERSION` pins the release. Otherwise, either channel passes its selected release to the installer as one normalized `v<version>` value.
 
 Credentials, registry tokens, mirror URLs, commands, and installer arguments are **not** persisted in self-update config. Tokens still resolve through the existing auth path; enterprise mirror URLs remain environment variables.
-
-:::note
-Some package-manager distributions (for example, Homebrew) disable self-update at build time. In those builds, `apm self-update` prints a distributor-defined message (such as `brew upgrade apm`) and exits without running the installer. The startup update notification is also suppressed in those builds.
-:::
 
 ## Enterprise bootstrap mirrors
 
