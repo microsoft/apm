@@ -194,6 +194,11 @@ def _build_self_update_installer_env(
     if _ENV_SELF_UPDATE_CHANNEL not in env:
         env[_ENV_SELF_UPDATE_CHANNEL] = channel
     env[_ENV_VERSION] = release.tag
+    if not _is_windows_platform():
+        # Pass identity, not a second destination policy: install.sh owns routing.
+        env["APM_SELF_UPDATE_SOURCE"] = os.path.abspath(
+            sys.executable if getattr(sys, "frozen", False) else sys.argv[0]
+        )
     return env
 
 
@@ -352,7 +357,7 @@ def self_update(check: bool) -> None:
 
             # Note: We don't capture output so the installer can prompt when needed.
             # Sanitise the environment so the installer (and the system binaries
-            # it spawns -- curl, tar, sudo) do not inherit the PyInstaller
+            # it spawns -- curl and tar) do not inherit the PyInstaller
             # bootloader's LD_LIBRARY_PATH / DYLD_* overrides, which would
             # otherwise redirect system linkers at this binary's bundled
             # _internal directory.  See issue #894.

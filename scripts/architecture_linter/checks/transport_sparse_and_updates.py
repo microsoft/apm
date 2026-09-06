@@ -131,6 +131,74 @@ _SELF_UPDATE_DEFS = re.compile(
     r"^class _ResolvedSelfUpdateRelease:|^def _resolve_self_update_release\("
 )
 
+_RID_UNIX_INSTALL = "transport-platform-unix-install-ownership"
+
+
+def _check_unix_install_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep destination policy and unprivileged replacement in the Unix installer."""
+    inv = frozenset(provider.inventory)
+    findings = list(
+        _count_checks(
+            provider,
+            inv,
+            _RID_UNIX_INSTALL,
+            "install.sh",
+            (
+                ("re", r"^apm_resolve_install_paths\(\)", 1, "eq"),
+                (
+                    "sub",
+                    "apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm",
+                    2,
+                    "eq",
+                ),
+                ("re", r"^apm_require_owned_bundle$", 1, "eq"),
+                ("sub", 'apm_require_writable_directory "$APM_INSTALL_DIR"', 1, "eq"),
+                ("sub", 'apm_require_writable_directory "$(dirname "$APM_LIB_DIR")"', 1, "eq"),
+            ),
+            "Unix bootstrap and pip fallback must route through installer ownership preflight",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_UNIX_INSTALL,
+            ("install.sh",),
+            re.compile(r"^\s*(?:(?:command|env)\s+)?sudo\s"),
+            "Unix installation must never invoke sudo automatically",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_UNIX_INSTALL,
+            tuple(
+                path
+                for path in provider.inventory
+                if (path.startswith("src/") and path.endswith(".py"))
+                or (path.endswith(".sh") and path != "install.sh")
+            ),
+            re.compile(
+                r"^(?:def )?apm_(?:resolve_install_paths|probe_installation|require_owned_bundle)\("
+            ),
+            "Unix installation destination and ownership decisions belong only to install.sh",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_UNIX_INSTALL,
+            _SELF_UPDATE_OWNER,
+            ('env["APM_SELF_UPDATE_SOURCE"] = os.path.abspath(',),
+            "Self-update must pass running identity to the installer destination owner",
+        )
+    )
+    return tuple(findings)
+
 
 def _check_self_update_resolution(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
@@ -194,6 +262,13 @@ def _check_self_update_resolution(provider: FactsProvider) -> tuple[Violation, .
 
 
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_RID_UNIX_INSTALL,
+        group=GROUP,
+        guard_ids=(_RID_UNIX_INSTALL,),
+        description="Unix installer owns destination selection and unprivileged replacement.",
+        check=_check_unix_install_ownership,
+    ),
     Rule(
         id=_RID_SPARSE,
         group=GROUP,

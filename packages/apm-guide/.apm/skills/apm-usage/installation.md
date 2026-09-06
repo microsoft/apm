@@ -10,6 +10,12 @@ curl -sSL https://aka.ms/apm-unix | sh
 irm https://aka.ms/apm-windows | iex
 ```
 
+Fresh ordinary-user Unix installs use `~/.local/bin/apm` and `~/.local/lib/apm`, without `sudo` or profile edits. Set current-shell `PATH` if needed; optionally add this to your profile yourself:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 ## Package managers
 
 ```bash
@@ -43,12 +49,20 @@ apm self-update --check  # check for updates without installing
 # Specific version
 curl -sSL https://aka.ms/apm-unix | sh -s -- @v1.2.3
 
-# Custom install dir
-curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
+# Custom fresh install (bundle: $HOME/tools/lib/apm)
+curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR="$HOME/tools/bin" sh
 
 # Air-gapped / GHE mirror - VERSION is required (skips GitHub API)
 GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 ```
+
+### Unix ownership and migration
+
+Marked or legacy PyInstaller bundles keep their launcher/bundle destinations on update. Conflicts, unknown/package-managed installations, symlinked bundles, or ownership/permission failures stop installation, without `sudo` or a second copy.
+
+Ask the original administrator/package manager to update system/custom installs. To migrate, uninstall through that owner first. Pip fallback requires a fresh ordinary-user install with neither destination variable set.
+
+Root requires both `APM_INSTALL_DIR` and `APM_LIB_DIR`. See the canonical [ownership rules and reviewed-script administrator invocation](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#unix-install-ownership-and-migration).
 
 ## Installer options (Windows PowerShell)
 
@@ -85,6 +99,6 @@ For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PR
 
 ## Troubleshooting
 
-- **macOS/Linux "command not found":** ensure your install directory (default `/usr/local/bin`) is in `$PATH`.
-- **Permission denied:** use `APM_INSTALL_DIR=$HOME/.local/bin` to install without sudo.
+- **macOS/Linux "command not found":** use the [PATH setup](#quick-install-recommended), substituting the existing launcher directory for upgrades.
+- **Permission denied:** follow [ownership and migration](#unix-ownership-and-migration), not a destination override.
 - **Windows antivirus locks:** set `$env:APM_DEBUG = "1"` and retry.

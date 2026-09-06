@@ -2,7 +2,8 @@
 
 | Problem | Fix |
 |---------|-----|
-| `apm: command not found` | Install APM: `curl -sSL https://aka.ms/apm-unix \| sh` (macOS/Linux) or `irm https://aka.ms/apm-windows \| iex` (Windows). Ensure `/usr/local/bin` is in `$PATH`. |
+| `apm: command not found` | See [installation and PATH setup](./installation.md#quick-install-recommended). Fresh Unix installs use `~/.local/bin`; existing installs keep their launcher directory. |
+| Unix install/self-update ownership, destination, or pip fallback refusal | Ask the original administrator/package manager to update it; do not redirect. Uninstall through that owner before migrating; see [ownership rules](./installation.md#unix-ownership-and-migration). |
 | Authentication errors (401/403) | Set the correct token. Run `apm install --verbose` to see which token source is used. See [Authentication](./authentication.md). |
 | File collision on install | A local file conflicts with a dependency file. Use `--force` to overwrite, or rename the local file. |
 | Stale dependencies | Run `apm install --update` to refresh to latest refs. |

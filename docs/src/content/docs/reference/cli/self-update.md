@@ -5,8 +5,6 @@ sidebar:
   order: 5
 ---
 
-Self-update the APM CLI binary to the latest GitHub release.
-
 ## Synopsis
 
 ```bash
@@ -15,7 +13,7 @@ apm self-update [--check]
 
 ## Description
 
-`apm self-update` upgrades the **APM CLI itself** to the latest version published on GitHub releases. It downloads the official platform installer (`install.sh` on macOS/Linux, `install.ps1` on Windows) and runs it in place.
+`apm self-update` upgrades the **APM CLI itself** to the latest version published on GitHub releases.
 
 :::caution[Looking for dependency updates?]
 This command does **not** update the packages declared in your `apm.yml`. To re-resolve your dependencies against the latest matching versions or Git refs, run:
@@ -32,7 +30,7 @@ The command compares the installed version against the latest GitHub release and
 Self-update can read two non-secret installer preferences from `apm config`:
 
 - `self-update.channel`: `stable` (default) selects the newest stable release; `prerelease` selects the newest non-draft prerelease.
-- `self-update.install-dir`: default target directory passed to the installer as `APM_INSTALL_DIR`.
+- `self-update.install-dir`: launcher directory passed as `APM_INSTALL_DIR`; on Unix it must match the existing installation, not redirect it.
 
 `APM_SELF_UPDATE_CHANNEL` and `APM_INSTALL_DIR` override config. An explicit `VERSION` pins the release. Otherwise, either channel passes its selected release to the installer as one normalized `v<version>` value.
 
@@ -54,7 +52,7 @@ Some package-manager distributions (for example, Homebrew) disable self-update a
 | `APM_PYPI_INDEX_URL` | _(unset)_ | PyPI-compatible index used by installer pip fallback. |
 | `APM_NO_DIRECT_FALLBACK` | _(unset)_ | Set to `1` to fail closed instead of using public GitHub, `aka.ms`, or PyPI fallback. |
 | `APM_SELF_UPDATE_CHANNEL` | `stable` | Invocation-scoped channel override: `stable` or `prerelease`. Overrides `apm config set self-update.channel ...`. |
-| `APM_INSTALL_DIR` | installer default | Invocation-scoped install target directory. Overrides `apm config set self-update.install-dir ...`. |
+| `APM_INSTALL_DIR` | existing Unix launcher directory / Windows installer default | Overrides `self-update.install-dir`, but cannot redirect an existing Unix installation. |
 | `GITHUB_URL` | `https://github.com` | Legacy GitHub/GHES base URL. When the installer mirror is unset, a resolved release downloads the raw script from this host at its exact tag. |
 | `APM_REPO` | `microsoft/apm` | Repository in `owner/repo` form for GitHub/GHES metadata and raw installer paths. |
 | `VERSION` | _(unset)_ | Pin a release tag and skip release metadata lookup. |
@@ -94,25 +92,23 @@ Install the latest release:
 apm self-update
 ```
 
-Persist non-secret self-update defaults:
+Persist a release channel:
 
 ```bash
 apm config set self-update.channel prerelease
-apm config set self-update.install-dir ~/.local/bin
 apm self-update
 apm config unset self-update.channel
-apm config unset self-update.install-dir
 ```
 
 ## Behavior
 
-**Version check.** Fetches the latest release tag from GitHub and compares it to `apm --version`. If the installed version is current, the command exits with a success message and does nothing else.
-
-**Download.** When an update is available (and `--check` is not set), the platform installer is downloaded into APM's temp directory, made executable, and invoked as a subprocess. The installer's stdout and stderr stream directly to your terminal so it can prompt for elevation when needed.
+When an update is available, APM downloads the platform installer into its temp directory and runs it as a subprocess, streaming output to your terminal. On Unix, it passes the running executable's identity so the installer preserves that installation. Neither command invokes `sudo`.
 
 ## Where the new binary lands
 
-The installer writes to the same location the install script uses -- by default `/usr/local/bin/apm` on macOS/Linux. On Windows, self-update advances the stable executable path described in [Installation](../../../getting-started/installation/). Existing configuration under `~/.apm/` and your project files are untouched.
+Recognized Unix bundles retain their launcher/bundle directories; fresh-install defaults do not relocate them. Conflicting overrides fail. See [ownership and migration](../../../getting-started/installation/#unix-install-ownership-and-migration) for permission checks, administrator updates, and pip fallback restrictions.
+
+On Windows, self-update advances the [stable executable path](../../../getting-started/installation/). Configuration under `~/.apm/` and project files are untouched.
 
 ## After update
 
@@ -120,21 +116,11 @@ Restart your terminal (or re-resolve `apm` on `PATH`) and run `apm --version` to
 
 ## Rollback
 
-APM does not keep previous binaries. To roll back, reinstall a specific version using the manual installer:
-
-```bash
-# macOS / Linux
-curl -sSL https://aka.ms/apm-unix | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -c "irm https://aka.ms/apm-windows | iex"
-```
-
-The installer scripts accept a version pin via environment variable -- see [Quickstart](../../../quickstart/).
+APM does not keep previous binaries. Reinstall with a [version pin](../../../getting-started/installation/#installer-options), retaining the original Unix destinations. For package-managed installs, use the original package manager.
 
 ## Failure modes
 
-If GitHub or a configured mirror is unreachable, the download fails, or the installer exits non-zero, `apm self-update` exits with code `1` and prints the next mirror or manual update action. Your existing binary is unaffected.
+Download or installer failures exit with code `1`. Unix ownership/destination refusals leave the existing installation untouched; follow the reported administrator/package-manager update action.
 
 ## Startup update notification
 

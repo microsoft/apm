@@ -4,7 +4,7 @@ set -e
 # APM CLI Installer Script
 # Usage: curl -sSL https://aka.ms/apm-unix | sh
 # Specific version:     curl -sSL https://aka.ms/apm-unix | sh -s -- @v1.2.3   (or VERSION=v1.2.3)
-# Custom install dir:   curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
+# Custom install dir:   curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/tools/bin sh
 # Custom repository:    APM_REPO=ghe-org/apm sh install.sh
 # GitHub Enterprise:    GITHUB_URL=https://gh.corp.com sh install.sh
 # Enterprise mirror:    APM_RELEASE_BASE_URL=https://mirror.example/apm VERSION=v1.2.3 sh install.sh
@@ -24,7 +24,10 @@ NC='\033[0m' # No Color
 
 # Configuration (all overridable via environment variables)
 APM_REPO="${APM_REPO:-microsoft/apm}"
-APM_INSTALL_DIR="${APM_INSTALL_DIR:-/usr/local/bin}"
+_APM_INSTALL_DIR_SET="${APM_INSTALL_DIR:+1}"
+_APM_LIB_DIR_SET="${APM_LIB_DIR:+1}"
+APM_INSTALL_DIR="${APM_INSTALL_DIR:-$HOME/.local/bin}"
+APM_LIB_DIR="${APM_LIB_DIR:-$(dirname "$APM_INSTALL_DIR")/lib/apm}"
 BINARY_NAME="apm"
 GITHUB_URL="${GITHUB_URL:-https://github.com}"
 APM_RELEASE_BASE_URL="${APM_RELEASE_BASE_URL:-}"
@@ -32,6 +35,163 @@ APM_RELEASE_METADATA_URL="${APM_RELEASE_METADATA_URL:-}"
 APM_INSTALLER_BASE_URL="${APM_INSTALLER_BASE_URL:-}"
 APM_PYPI_INDEX_URL="${APM_PYPI_INDEX_URL:-}"
 APM_NO_DIRECT_FALLBACK="${APM_NO_DIRECT_FALLBACK:-}"
+
+# INSTALL_OWNERSHIP_BEGIN
+# Resolve symlink targets portably, including on macOS without readlink -f.
+apm_real_path() (
+    _path="$1"
+    case "$_path" in /*) ;; *) _path="$PWD/$_path" ;; esac
+    _links=0
+    while [ -L "$_path" ]; do
+        _links=$((_links + 1))
+        [ "$_links" -le 40 ] || return 1
+        _link="$(readlink "$_path")" || return 1
+        case "$_link" in
+            /*) _path="$_link" ;;
+            *) _path="$(dirname "$_path")/$_link" ;;
+        esac
+    done
+    _parent="$(dirname "$_path")"
+    _leaf="${_path##*/}"
+    while [ ! -d "$_parent" ]; do
+        [ "$_parent" != "/" ] || return 1
+        _leaf="${_parent##*/}/$_leaf"
+        _parent="$(dirname "$_parent")"
+    done
+    _parent="$(cd -P "$_parent" && pwd)" || return 1
+    printf '%s/%s\n' "${_parent%/}" "$_leaf"
+)
+
+apm_install_error() {
+    printf '%s\n' "[x] $*" >&2
+    exit 1
+}
+
+apm_probe_installation() {
+    _probe_parent="$(dirname "$1")"
+    while [ "$_probe_parent" != "/" ] && [ "$_probe_parent" != "." ]; do
+        if [ -d "$_probe_parent" ] && [ ! -x "$_probe_parent" ]; then
+            apm_install_error "Cannot inspect existing APM through $_probe_parent: directory is not searchable. Ask its owner to repair permissions before retrying."
+        fi
+        _probe_parent="$(dirname "$_probe_parent")"
+    done
+    [ -e "$1" ] || [ -L "$1" ] || return 0
+    _candidate="$(apm_real_path "$1")" ||
+        apm_install_error "Cannot resolve existing APM at $1. Repair this path before reinstalling."
+    _candidate_lib="$(dirname "$_candidate")"
+    if [ ! -f "$_candidate" ] || [ "${_candidate##*/}" != "apm" ]; then
+        apm_install_error "Invalid existing APM launcher at $1. Repair it with its original installer before retrying."
+    fi
+    case "$_candidate" in
+        */Cellar/*|*/Caskroom/*|*/.linuxbrew/*)
+            apm_install_error "Package-manager installation at $1. Update or uninstall it with its package manager; the installer will not replace it." ;;
+    esac
+    if [ ! -f "$_candidate_lib/.apm-installed" ] &&
+        { [ ! -f "$_candidate_lib/VERSION" ] || [ ! -d "$_candidate_lib/_internal" ]; }; then
+        apm_install_error "Unrecognized or package-manager installation at $1. Update or uninstall it with its original installer; refusing a second installation."
+    fi
+    if [ -n "$_apm_existing_binary" ] && [ "$_candidate" != "$_apm_existing_binary" ]; then
+        apm_install_error "Conflicting APM installations at $_apm_existing_binary and $1. Remove the unwanted installation with its owner before retrying."
+    fi
+    _apm_existing_binary="$_candidate"
+    _apm_existing_lib="$_candidate_lib"
+    if [ "$(apm_real_path "$(dirname "$1")")" != "$(apm_real_path "$_candidate_lib")" ]; then
+        _apm_existing_bin="$(dirname "$1")"
+    fi
+}
+
+# One destination/ownership authority for bootstrap and self-update.
+# Arguments are historical system entry points, also checked when absent from PATH.
+apm_resolve_install_paths() {
+    _apm_existing_binary=""
+    _apm_existing_lib=""
+    _apm_existing_bin=""
+    while [ "$APM_INSTALL_DIR" != "/" ] && [ "${APM_INSTALL_DIR%/}" != "$APM_INSTALL_DIR" ]; do
+        APM_INSTALL_DIR="${APM_INSTALL_DIR%/}"
+    done
+    while [ "$APM_LIB_DIR" != "/" ] && [ "${APM_LIB_DIR%/}" != "$APM_LIB_DIR" ]; do
+        APM_LIB_DIR="${APM_LIB_DIR%/}"
+    done
+    for _dir in "$APM_INSTALL_DIR" "$APM_LIB_DIR"; do
+        case "$_dir" in
+            /*) ;;
+            *) apm_install_error "Install destinations must be absolute paths. Set APM_INSTALL_DIR and APM_LIB_DIR to absolute paths." ;;
+        esac
+        case "/$_dir/" in
+            */../*|*/./*) apm_install_error "Install destinations must not contain dot segments. Supply normalized absolute paths." ;;
+        esac
+    done
+    if [ "$(id -u)" -eq 0 ] &&
+        { [ -z "$_APM_INSTALL_DIR_SET" ] || [ -z "$_APM_LIB_DIR_SET" ]; }; then
+        apm_install_error "Administrator installation requires explicit APM_INSTALL_DIR and APM_LIB_DIR. Run as an ordinary user for ~/.local defaults."
+    fi
+    apm_probe_installation "$APM_INSTALL_DIR/apm"
+    apm_probe_installation "$APM_LIB_DIR/apm"
+    apm_probe_installation "$HOME/.local/bin/apm"
+    apm_probe_installation "$HOME/.local/lib/apm/apm"
+    for _entry in "$@"; do
+        apm_probe_installation "$_entry"
+    done
+    # Parse PATH without word splitting or glob expansion (paths may contain spaces).
+    _remaining_path="$PATH:"
+    while [ -n "$_remaining_path" ]; do
+        _entry="${_remaining_path%%:*}"
+        _remaining_path="${_remaining_path#*:}"
+        apm_probe_installation "${_entry:-.}/apm"
+    done
+    if [ -n "${APM_SELF_UPDATE_SOURCE:-}" ]; then
+        [ -f "$APM_SELF_UPDATE_SOURCE" ] ||
+            apm_install_error "The running APM installation is missing. Reinstall with its original installer."
+        apm_probe_installation "$APM_SELF_UPDATE_SOURCE"
+        [ -n "$_apm_existing_binary" ] ||
+            apm_install_error "The running APM installation is missing. Reinstall with its original installer."
+    fi
+    if [ -n "$_apm_existing_binary" ]; then
+        if [ -z "$_APM_INSTALL_DIR_SET" ]; then
+            [ -n "$_apm_existing_bin" ] ||
+                apm_install_error "Cannot locate the existing APM launcher. Set APM_INSTALL_DIR and APM_LIB_DIR to its original destinations."
+            APM_INSTALL_DIR="$_apm_existing_bin"
+        fi
+        if [ -z "$_APM_LIB_DIR_SET" ]; then
+            APM_LIB_DIR="$_apm_existing_lib"
+        fi
+        if [ "$(apm_real_path "$APM_INSTALL_DIR/apm")" != "$_apm_existing_binary" ] ||
+            [ "$(apm_real_path "$APM_LIB_DIR")" != "$_apm_existing_lib" ]; then
+            apm_install_error "Requested destinations conflict with existing APM at $_apm_existing_binary. Keep its original destinations or uninstall it with its owner before migrating."
+        fi
+    fi
+    _apm_bin_real="$(apm_real_path "$APM_INSTALL_DIR")" ||
+        apm_install_error "Cannot resolve APM_INSTALL_DIR. Supply a valid absolute destination."
+    _apm_lib_real="$(apm_real_path "$APM_LIB_DIR")" ||
+        apm_install_error "Cannot resolve APM_LIB_DIR. Supply a valid absolute destination."
+    case "$_apm_bin_real/" in
+        "$_apm_lib_real/"*) apm_install_error "APM_INSTALL_DIR overlaps the bundle. Choose separate launcher and bundle destinations." ;;
+    esac
+    case "$_apm_lib_real/" in
+        "$_apm_bin_real/apm/"*) apm_install_error "APM_LIB_DIR overlaps the launcher. Choose separate launcher and bundle destinations." ;;
+    esac
+}
+
+apm_require_writable_directory() {
+    if ! mkdir -p "$1" 2>/dev/null || [ ! -w "$1" ] || [ ! -x "$1" ]; then
+        apm_install_error "Destination $1 is not writable. Choose user-owned APM_INSTALL_DIR and APM_LIB_DIR for a fresh install, or ask the installation owner to update it. The installer never runs sudo."
+    fi
+}
+
+apm_require_owned_bundle() {
+    [ ! -L "$APM_LIB_DIR" ] ||
+        apm_install_error "APM_LIB_DIR is a symlink. Supply the original bundle directory, not a symlink."
+    if [ -d "$APM_LIB_DIR" ]; then
+        _foreign="$(find "$APM_LIB_DIR" ! -user "$(id -u)" -print)" ||
+            apm_install_error "Cannot inspect bundle ownership. Ask its owner to repair or update $APM_LIB_DIR."
+        _readonly="$(find "$APM_LIB_DIR" -type d \( ! -exec test -w {} \; -o ! -exec test -x {} \; \) -print)" ||
+            apm_install_error "Cannot inspect bundle permissions. Ask its owner to repair or update $APM_LIB_DIR."
+        if [ -n "$_foreign" ] || [ -n "$_readonly" ]; then
+            apm_install_error "Existing bundle $APM_LIB_DIR is not writable, searchable, or owned by this user. Ask its owner to update it; no files were removed."
+        fi
+    fi
+}
+# INSTALL_OWNERSHIP_END
 
 # Banner
 echo -e "${BLUE}"
@@ -179,6 +339,12 @@ check_python_requirements() {
 
 # Function to attempt pip installation
 try_pip_installation() {
+    apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm
+    if [ -n "$_apm_existing_binary" ] || [ -n "$_APM_INSTALL_DIR_SET" ] ||
+        [ -n "$_APM_LIB_DIR_SET" ] || [ "$(id -u)" -eq 0 ]; then
+        echo "Pip fallback cannot preserve these installation destinations. Update with the original installer, or uninstall the existing installation before choosing pip." >&2
+        return 1
+    fi
     echo -e "${BLUE}Attempting installation via pip...${NC}"
     
     # Determine pip command
@@ -281,12 +447,6 @@ if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ] || grep -q "/docker/" /pr
     echo -e "${YELLOW}Note: PyInstaller binaries may have compatibility issues in containers.${NC}"
     echo -e "${YELLOW}If installation fails, consider using: pip install --user apm-cli${NC}"
     echo ""
-fi
-
-# Check if we have permission to install to the configured directory.
-# Only warn if the dir already exists; mkdir -p later handles non-existent dirs.
-if [ -e "$APM_INSTALL_DIR" ] && [ ! -w "$APM_INSTALL_DIR" ]; then
-    echo -e "${YELLOW}Note: Will need sudo permissions to install to $APM_INSTALL_DIR${NC}"
 fi
 
 # Resolve auth token (needed for both API and download paths)
@@ -618,11 +778,11 @@ else
     exit 1
 fi
 
+# Resolve before either installation path can create a competing installation.
+apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm
+
 # Install binary directory structure
 echo -e "${YELLOW}Installing APM CLI to $APM_INSTALL_DIR...${NC}"
-
-# APM installation directory (for the complete bundle)
-APM_LIB_DIR="${APM_LIB_DIR:-$(dirname "$APM_INSTALL_DIR")/lib/apm}"
 
 # --- APM_LIB_DIR safety validation ---
 # Prevent accidental data loss when APM_LIB_DIR is set to a broad/shared path.
@@ -715,13 +875,10 @@ if [ "$_rc" -ne 0 ]; then
     exit 1
 fi
 
-# Prepare the parent directory once so user-local installs do not fall into sudo
-# just because the derived lib parent (for example, $HOME/.local/lib) is absent.
-if apm_prepare_lib_parent "$APM_LIB_DIR"; then
-    APM_LIB_USE_SUDO=0
-else
-    APM_LIB_USE_SUDO=1
-fi
+# Check both destinations and the entire old bundle before removing anything.
+apm_require_owned_bundle
+apm_require_writable_directory "$(dirname "$APM_LIB_DIR")"
+apm_require_writable_directory "$APM_INSTALL_DIR"
 
 # Remove any existing installation (safety-validated above)
 if [ -d "$APM_LIB_DIR" ]; then
@@ -731,43 +888,31 @@ if [ -d "$APM_LIB_DIR" ]; then
         echo -e "${RED}Error: APM_LIB_DIR became unsafe before removal; refusing to delete.${NC}"
         exit 1
     fi
-    if [ "$APM_LIB_USE_SUDO" -eq 0 ]; then
-        rm -rf "$APM_LIB_DIR"
-    else
-        sudo rm -rf "$APM_LIB_DIR"
-    fi
+    rm -rf "$APM_LIB_DIR"
 fi
 
 # Create installation directory
-if [ "$APM_LIB_USE_SUDO" -eq 0 ]; then
-    mkdir -p "$APM_LIB_DIR"
-    cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$APM_LIB_DIR/"
-    touch "$APM_LIB_DIR/.apm-installed"
-else
-    sudo mkdir -p "$APM_LIB_DIR"
-    sudo cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$APM_LIB_DIR/"
-    sudo touch "$APM_LIB_DIR/.apm-installed"
-fi
+mkdir -p "$APM_LIB_DIR"
+cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$APM_LIB_DIR/"
+touch "$APM_LIB_DIR/.apm-installed"
 
 # Create symlink pointing to the actual binary
-if mkdir -p "$APM_INSTALL_DIR" 2>/dev/null && [ -w "$APM_INSTALL_DIR" ]; then
-    ln -sf "$APM_LIB_DIR/$BINARY_NAME" "$APM_INSTALL_DIR/$BINARY_NAME"
-else
-    sudo mkdir -p "$APM_INSTALL_DIR"
-    sudo ln -sf "$APM_LIB_DIR/$BINARY_NAME" "$APM_INSTALL_DIR/$BINARY_NAME"
-fi
+ln -sf "$APM_LIB_DIR/$BINARY_NAME" "$APM_INSTALL_DIR/$BINARY_NAME"
 
 # Verify installation
-if command -v apm >/dev/null 2>&1; then
-    INSTALLED_VERSION=$(apm --version 2>/dev/null || echo "unknown")
+_apm_on_path="$(command -v apm || true)"
+if [ -n "$_apm_on_path" ] &&
+    [ "$(apm_real_path "$_apm_on_path")" = "$(apm_real_path "$APM_LIB_DIR/$BINARY_NAME")" ]; then
+    INSTALLED_VERSION=$("$APM_INSTALL_DIR/$BINARY_NAME" --version)
     echo -e "${GREEN}[+] APM installed successfully!${NC}"
     echo -e "${BLUE}Version: $INSTALLED_VERSION${NC}"
     echo -e "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
 else
     echo -e "${YELLOW}[!] APM installed but not found in PATH${NC}"
     echo "You may need to add $APM_INSTALL_DIR to your PATH environment variable."
-    echo "Add this line to your shell profile (.bashrc, .zshrc, etc.):"
+    echo "For this shell, run the following; add it to your shell profile only if desired:"
     echo "  export PATH=\"$APM_INSTALL_DIR:\$PATH\""
+    echo "No shell profiles were changed."
 fi
 
 echo ""

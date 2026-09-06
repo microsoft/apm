@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -26,11 +27,13 @@ _SELF_UPDATE_ENV = (
     "APM_E2E_TESTS",
     "APM_INSTALLER_BASE_URL",
     "APM_INSTALL_DIR",
+    "APM_LIB_DIR",
     "APM_NO_DIRECT_FALLBACK",
     "APM_RELEASE_BASE_URL",
     "APM_RELEASE_METADATA_URL",
     "APM_REPO",
     "APM_SELF_UPDATE_CHANNEL",
+    "APM_SELF_UPDATE_SOURCE",
     "GITHUB_URL",
     "VERSION",
 )
@@ -282,4 +285,61 @@ def test_installer_failure_preserves_existing_binary_state(
     else:
         assert not observed_version.exists()
     assert list(isolated.temp_root.iterdir()) == []
+    assert server.requested_paths == [metadata_path, installer_path]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Unix installer source-identity contract")
+def test_off_path_self_update_passes_identity_and_persisted_destination(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A real off-PATH binary preserves its configured destination at installer launch."""
+    metadata_path = "/mirror/latest.json"
+    installer_path = "/mirror/installers/install.sh"
+    installer = _installer_script() + (
+        '\nprintf "%s" "$APM_SELF_UPDATE_SOURCE" > "$APM_INSTALL_DIR/observed-source.txt"\n'
+    )
+    # The shared script's final exit is useful to failure tests, but this fixture
+    # must record identity after the release fields before it exits.
+    installer = installer.replace("exit 0\n", "")
+    routes = {
+        metadata_path: (200, "application/json", json.dumps({"tag_name": "v95.0.0"})),
+        installer_path: (200, "text/plain", installer),
+    }
+    with _serve(routes) as server:
+        isolated, environment, install_dir = _scenario(
+            tmp_path,
+            name="off-path-identity",
+            server=server,
+            overrides={
+                "APM_INSTALLER_BASE_URL": f"{server.base_url}/mirror/installers",
+                "APM_NO_DIRECT_FALLBACK": "1",
+                "APM_RELEASE_METADATA_URL": f"{server.base_url}{metadata_path}",
+            },
+        )
+        environment.pop("APM_INSTALL_DIR")
+        bundle = isolated.root / "custom/lib/apm"
+        shutil.copytree(apm_binary_path.parent, bundle)
+        binary = bundle / "apm"
+        (install_dir / "apm").symlink_to(binary)
+        runner = ApmLifecycleRunner((str(binary),))
+        configured = runner.run(
+            ("config", "set", "self-update.install-dir", str(install_dir)),
+            scenario_id="self-update-persist-destination",
+            cwd=isolated.work_root,
+            env=environment,
+        )
+        assert configured.returncode == 0, configured.stderr or configured.stdout
+        result = runner.run(
+            ("self-update",),
+            scenario_id="self-update-off-path-identity",
+            cwd=isolated.work_root,
+            env=environment,
+        )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert Path((install_dir / "observed-source.txt").read_text(encoding="utf-8")) == binary
+    assert (install_dir / "observed-version.txt").read_text(encoding="utf-8") == "v95.0.0"
+    home = Path(environment["HOME"])
+    assert not (home / ".local/bin/apm").exists()
+    assert not (home / ".local/lib/apm").exists()
     assert server.requested_paths == [metadata_path, installer_path]
