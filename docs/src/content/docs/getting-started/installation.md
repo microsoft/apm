@@ -45,6 +45,9 @@ On Windows, the installer adds both `current` and `bin` to `PATH`, with the stab
 # Install a specific version
 curl -sSL https://aka.ms/apm-unix | sh -s -- @v1.2.3
 
+# Install under one root (launcher: $HOME/.local/bin, bundle: $HOME/.local/lib/apm)
+curl -sSL https://aka.ms/apm-unix | sh -s -- --prefix "$HOME/.local"
+
 # Custom directory for a fresh install (bundle: $HOME/tools/lib/apm)
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR="$HOME/tools/bin" sh
 
@@ -97,8 +100,9 @@ jobs:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APM_INSTALL_DIR` | `~/.local/bin` (fresh ordinary-user Unix install) / `%LOCALAPPDATA%\Programs\apm\bin` (Windows) | Unix launcher or Windows shim directory. Unix upgrades preserve the existing destination; overrides cannot redirect them. |
-| `APM_LIB_DIR` | `~/.local/lib/apm` (fresh default Unix install) | Unix bundle; otherwise `lib/apm` under the install directory's parent, or preserved on upgrade. Must be absolute, end with `/apm`, and not be a symlink or shared directory. |
+| `--prefix PATH` | *(unset)* | Unix `install.sh` option. Selects one root and derives `PATH/bin` for the launcher plus `PATH/lib/apm` for the bundle. Accepts both `--prefix PATH` and `--prefix=PATH`; the value must be an absolute, normalized path. Counts as explicitly setting both Unix destinations for administrator-run installs. |
+| `APM_INSTALL_DIR` | `~/.local/bin` (fresh ordinary-user Unix install) / `%LOCALAPPDATA%\Programs\apm\bin` (Windows) | Unix launcher or Windows shim directory. Unix upgrades preserve the existing destination; overrides cannot redirect them. When `--prefix` is present on Unix, this may be set only to the matching derived `PATH/bin`. |
+| `APM_LIB_DIR` | `~/.local/lib/apm` (fresh default Unix install) | Unix bundle; otherwise `lib/apm` under the install directory's parent, or preserved on upgrade. Must be absolute, end with `/apm`, and not be a symlink or shared directory. When `--prefix` is present on Unix, this may be set only to the matching derived `PATH/lib/apm`. |
 | `GITHUB_URL` | `https://github.com` | Base GitHub URL (asset downloads **and** API host: `api.github.com` on github.com, `{GITHUB_URL}/api/v3` on GHES). Must be `https://` on Windows. |
 | `APM_REPO` | `microsoft/apm` | Repository as `owner/name` |
 | `VERSION` | *(latest)* | Pin a release tag (skips the **releases/latest** HTTP API). Must look like `v1.2.3` or `1.2.3`. |
@@ -115,6 +119,8 @@ jobs:
 
 Preflight requires absolute, normalized launcher and bundle destinations; the bundle must end in `/apm`. It rejects blocked shared directories, destination overlaps, and an `APM_LIB_DIR` symlink before replacement. Root must set both `APM_INSTALL_DIR` and `APM_LIB_DIR`; setting only one refuses the install instead of filling the other from a default.
 
+`--prefix PATH` is a destination selector, not a privilege flag. It derives `PATH/bin` and `PATH/lib/apm` in the same ownership/path-selection authority as the environment variables. Contradictory `APM_INSTALL_DIR` or `APM_LIB_DIR` values fail before download or writes; redundant matching values are accepted. The installer never runs `sudo`.
+
 Before removal, every existing bundle entry must be caller-owned, and every directory must be writable and searchable by the caller. A failure stops the update without removing files. Conflicting installations or destination overrides, inaccessible discovery paths, unknown/package-managed launchers, and unwritable destinations also fail with repair guidance.
 
 If a fresh install finds unrelated or unrecognized data, inspect it without deleting anything. Choose a different empty, dedicated bundle and launcher destination, or use the original owner's uninstall process.
@@ -125,19 +131,19 @@ After installing the bundle and launcher, `install.sh` runs the launcher at its 
 
 Pip fallback uses the selected Python 3.10+ interpreter for both `-m pip` and its `sysconfig` user scheme. If that scheme query fails, installation stops before package installation. If the installed launcher is off `PATH`, the installer prints a safely shell-quoted command for the current shell using that interpreter's actual scripts directory, including `PYTHONUSERBASE` and framework layouts. It never modifies shell profiles.
 
-After [saving and reviewing `install.sh`](#macos--linux), set both destinations. From an ordinary shell:
+After [saving and reviewing `install.sh`](#macos--linux), select the system root explicitly. From an ordinary shell:
 
 ```bash
-sudo env APM_INSTALL_DIR=/usr/local/bin APM_LIB_DIR=/usr/local/lib/apm sh ./install.sh
+sudo sh ./install.sh --prefix /usr/local
 ```
 
 Already root or in a container without `sudo`:
 
 ```bash
-env APM_INSTALL_DIR=/usr/local/bin APM_LIB_DIR=/usr/local/lib/apm sh ./install.sh
+sh ./install.sh --prefix /usr/local
 ```
 
-Root without both variables fails closed. The installer never elevates privileges.
+Root without both destinations, or without one `--prefix`, fails closed. The installer never elevates privileges.
 
 ### Enterprise bootstrap mirror mode
 
@@ -344,7 +350,7 @@ Run the POSIX-quoted `export PATH=...` command printed by the installer. For nat
 
 ### Permission denied during install (macOS / Linux)
 
-For existing installations, follow [ownership and migration](#unix-install-ownership-and-migration). Fresh destinations must be writable, absolute paths without dot segments.
+For existing installations, follow [ownership and migration](#unix-install-ownership-and-migration). Fresh destinations, including `--prefix`, must be writable, absolute paths without dot segments.
 
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 

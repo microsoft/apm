@@ -49,6 +49,9 @@ apm self-update --check  # check for updates without installing
 # Specific version
 curl -sSL https://aka.ms/apm-unix | sh -s -- @v1.2.3
 
+# Prefix root for a fresh install (launcher: $HOME/.local/bin, bundle: $HOME/.local/lib/apm)
+curl -sSL https://aka.ms/apm-unix | sh -s -- --prefix "$HOME/.local"
+
 # Custom fresh install (bundle: $HOME/tools/lib/apm)
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR="$HOME/tools/bin" sh
 
@@ -64,7 +67,9 @@ Inspect unrecognized data without deleting it. For a fresh install, choose anoth
 
 Update or uninstall pip-owned installs with the owning Python's `-m pip`; uninstall before switching to the binary installer. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set and uses the selected `python3 -m pip` or `python -m pip`. It prints a PATH command or, when one directory cannot be represented safely, an absolute launcher command. It never edits profiles.
 
-Root requires both `APM_INSTALL_DIR` and `APM_LIB_DIR`; one variable refuses the install. See the canonical [Unix ownership and migration procedure](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration).
+`--prefix PATH` is an explicit Unix destination selector. It derives `PATH/bin` and `PATH/lib/apm`, counts as both destinations for root, and refuses contradictory `APM_INSTALL_DIR` or `APM_LIB_DIR` values before downloads or writes.
+
+Root requires both `APM_INSTALL_DIR` and `APM_LIB_DIR`, or one `--prefix`; one destination variable refuses the install. See the canonical [Unix ownership and migration procedure](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration).
 
 ## Installer options (Windows PowerShell)
 

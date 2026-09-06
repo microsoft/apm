@@ -77,6 +77,7 @@ def _run(
     bootstrap: bool = False,
     pip_fallback: bool = False,
     failure_stage: Literal["binary", "glibc"] | None = None,
+    script_args: tuple[str, ...] = (),
     **overrides: str,
 ) -> subprocess.CompletedProcess[str]:
     """Run unchanged configuration and installation code from this checkout."""
@@ -122,20 +123,59 @@ def _run(
         )
         overrides["HISTORICAL_APM"] = str(root / "usr/local/bin/apm")
     else:
-        body = 'apm_resolve_install_paths "$1" "$2" "$3"\n'
+        if script_args:
+            body = 'apm_parse_installer_args "$@"\napm_resolve_install_paths "$HISTORICAL_APM"\n'
+            overrides["HISTORICAL_APM"] = str(root / "usr/local/bin/apm")
+        else:
+            body = 'apm_resolve_install_paths "$1" "$2" "$3"\n'
         body += source[source.index("# Install binary directory structure\n") :]
+    args = (
+        list(script_args)
+        if script_args
+        else [
+            str(root / "usr/local/bin/apm"),
+            str(root / "opt/homebrew/bin/apm"),
+            str(root / "usr/local/lib/apm/apm"),
+        ]
+    )
     return subprocess.run(
         [
             env["TEST_SHELL"],
             "-c",
             config + body,
             "--",
-            str(root / "usr/local/bin/apm"),
-            str(root / "opt/homebrew/bin/apm"),
-            str(root / "usr/local/lib/apm/apm"),
+            *args,
         ],
         cwd=root,
         env={**env, **overrides},
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+
+def _run_arg_probe(
+    installation: tuple[Path, dict[str, str]], *args: str, **overrides: str
+) -> subprocess.CompletedProcess[str]:
+    """Exercise the production argument parser and path owner without writes."""
+    root, env = installation
+    source = INSTALLER.read_text(encoding="ascii")
+    config = source.split("# Banner\n", 1)[0]
+    body = (
+        'apm_parse_installer_args "$@"\n'
+        'apm_resolve_install_paths "$HISTORICAL_APM"\n'
+        'printf "VERSION=%s\\nAPM_INSTALL_DIR=%s\\nAPM_LIB_DIR=%s\\n" '
+        '"$VERSION" "$APM_INSTALL_DIR" "$APM_LIB_DIR"\n'
+    )
+    return subprocess.run(
+        [env["TEST_SHELL"], "-c", config + body, "--", *args],
+        cwd=root,
+        env={
+            **env,
+            "HISTORICAL_APM": str(root / "usr/local/bin/apm"),
+            **overrides,
+        },
         capture_output=True,
         text=True,
         timeout=15,
@@ -154,7 +194,179 @@ def test_fresh_defaults_are_user_owned(installation: tuple[Path, dict[str, str]]
     ]
 
 
-@pytest.mark.parametrize("invalid", ["root", "relative", "dot-segment", "overlap"])
+@pytest.mark.parametrize("syntax", ["split", "equals"])
+def test_prefix_derives_launcher_and_bundle_destinations(
+    installation: tuple[Path, dict[str, str]], syntax: str
+) -> None:
+    """--prefix is the single explicit selector for both Unix destinations."""
+    root, _ = installation
+    prefix = root / "selected prefix"
+    args = ("--prefix", str(prefix)) if syntax == "split" else (f"--prefix={prefix}",)
+    result = _run(installation, script_args=args)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (prefix / "bin/apm").resolve() == prefix / "lib/apm/apm"
+    assert (prefix / "lib/apm/.apm-installed").is_file()
+    assert not (root / "home/.local").exists()
+    assert not (root / "sudo.log").exists()
+
+
+@pytest.mark.parametrize(
+    ("args", "expected_version"),
+    [
+        (("@v1.2.3", "--prefix", "PREFIX"), "v1.2.3"),
+        (("--prefix=PREFIX", "@v1.2.3"), "v1.2.3"),
+        (("1.2.3", "--prefix", "PREFIX"), "1.2.3"),
+    ],
+)
+def test_prefix_and_version_arguments_are_order_independent(
+    installation: tuple[Path, dict[str, str]], args: tuple[str, ...], expected_version: str
+) -> None:
+    """The new option must not steal the historical positional version."""
+    root, _ = installation
+    prefix = root / "order"
+    expanded = tuple(
+        str(prefix) if arg == "PREFIX" else arg.replace("PREFIX", str(prefix)) for arg in args
+    )
+    result = _run_arg_probe(installation, *expanded)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        f"VERSION={expected_version}",
+        f"APM_INSTALL_DIR={prefix / 'bin'}",
+        f"APM_LIB_DIR={prefix / 'lib/apm'}",
+    ]
+
+
+def test_prefix_counts_as_both_root_destinations(installation: tuple[Path, dict[str, str]]) -> None:
+    """Root identity accepts --prefix because it explicitly selects both paths."""
+    root, _ = installation
+    identity = root / "tools/id"
+    identity.unlink()
+    identity.write_text("#!/bin/sh\nprintf '0\\n'\n", encoding="ascii")
+    identity.chmod(0o755)
+    prefix = root / "usr/local"
+    result = _run(installation, script_args=("--prefix", str(prefix)))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (prefix / "bin/apm").is_symlink()
+    assert (prefix / "bin/apm").resolve() == prefix / "lib/apm/apm"
+    assert not (root / "home/.local").exists()
+    assert not (root / "sudo.log").exists()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--prefix",),
+        ("--prefix", ""),
+        ("--prefix", "--help"),
+        ("--prefix=",),
+        ("--prefix", "relative"),
+        ("--prefix", "../escape"),
+        ("--prefix", "/opt/../apm"),
+        ("--prefix", "/opt/apm", "--prefix", "/other"),
+        ("--unknown",),
+        ("@not-a-version",),
+        ("not-a-version",),
+    ],
+)
+def test_prefix_argument_errors_are_explicit_and_preflighted(
+    installation: tuple[Path, dict[str, str]], args: tuple[str, ...]
+) -> None:
+    """Malformed command-line input fails before creating destinations."""
+    root, _ = installation
+    result = _run_arg_probe(installation, *args)
+    assert result.returncode == 1
+    assert "[x]" in result.stderr
+    assert not (root / "home/.local").exists()
+    assert not (root / "opt").exists()
+
+
+@pytest.mark.parametrize(
+    ("extra_env", "accepted"),
+    [
+        ({"APM_INSTALL_DIR": "PREFIX/bin"}, True),
+        ({"APM_LIB_DIR": "PREFIX/lib/apm"}, True),
+        ({"APM_INSTALL_DIR": "PREFIX/bin", "APM_LIB_DIR": "PREFIX/lib/apm"}, True),
+        ({"APM_INSTALL_DIR": "PREFIX/other-bin"}, False),
+        ({"APM_LIB_DIR": "PREFIX/other-lib/apm"}, False),
+    ],
+)
+def test_prefix_redundant_destinations_must_match(
+    installation: tuple[Path, dict[str, str]], extra_env: dict[str, str], accepted: bool
+) -> None:
+    """Prefix plus env destinations is accepted only when exactly redundant."""
+    root, _ = installation
+    prefix = root / "matching"
+    env = {key: value.replace("PREFIX", str(prefix)) for key, value in extra_env.items()}
+    result = _run_arg_probe(installation, "--prefix", str(prefix), **env)
+    assert result.returncode == (0 if accepted else 1)
+    if accepted:
+        assert f"APM_INSTALL_DIR={prefix / 'bin'}" in result.stdout
+        assert f"APM_LIB_DIR={prefix / 'lib/apm'}" in result.stdout
+    else:
+        assert "Use one destination selector" in result.stderr
+        assert not (root / "matching").exists()
+
+
+def test_prefix_prints_shell_safe_path_guidance(installation: tuple[Path, dict[str, str]]) -> None:
+    """PATH handoff for a prefixed install preserves spaces and quotes."""
+    root, env = installation
+    prefix = root / "quote ' prefix"
+    result = _run(installation, script_args=("--prefix", str(prefix)))
+    assert result.returncode == 0, result.stdout + result.stderr
+    instruction = next(
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip().startswith("export PATH=")
+    )
+    executed = subprocess.run(
+        ["/bin/sh", "-c", instruction + '\nprintf "%s\\n" "$PATH"'],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert executed.returncode == 0, executed.stderr
+    assert executed.stdout == f"{prefix / 'bin'}:{env['PATH']}\n"
+    assert "No shell profiles were changed." in result.stdout
+
+
+def test_prefix_does_not_migrate_existing_installation(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """A new prefix cannot redirect an owner-managed existing installation."""
+    root, env = installation
+    bindir, lib = _prior(root)
+    prefix = root / "new-prefix"
+    result = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        script_args=("--prefix", str(prefix)),
+    )
+    assert result.returncode == 1
+    assert "conflict with existing APM" in result.stderr
+    assert (lib / "VERSION").read_text(encoding="ascii") == "old\n"
+    assert not prefix.exists()
+    assert not (root / "sudo.log").exists()
+
+
+def test_help_documents_prefix_without_resolving_destinations(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """User-visible help names the derived paths and privilege model."""
+    result = _run_arg_probe(installation, "--help")
+    assert result.returncode == 0
+    assert "--prefix PATH" in result.stdout
+    assert "PATH/bin" in result.stdout
+    assert "PATH/lib/apm" in result.stdout
+    assert "never runs sudo" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["root", "relative", "dot-segment", "overlap", "prefix-relative", "prefix-conflict"],
+)
 def test_invalid_bootstrap_request_never_fetches_or_extracts(
     installation: tuple[Path, dict[str, str]], invalid: str
 ) -> None:
@@ -184,6 +396,11 @@ def test_invalid_bootstrap_request_never_fetches_or_extracts(
         options["APM_INSTALL_DIR"] = "relative/bin"
     elif invalid == "dot-segment":
         options["APM_INSTALL_DIR"] = str(root / "invalid/../bin")
+    elif invalid == "prefix-relative":
+        options["script_args"] = ("--prefix", "relative")
+    elif invalid == "prefix-conflict":
+        options["script_args"] = ("--prefix", str(root / "conflict-prefix"))
+        options["APM_INSTALL_DIR"] = str(root / "conflict-prefix/other-bin")
     else:
         options["APM_INSTALL_DIR"] = str(root / "nested/apm/bin")
         options["APM_LIB_DIR"] = str(root / "nested/apm")

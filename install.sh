@@ -4,6 +4,7 @@ set -e
 # APM CLI Installer Script
 # Usage: curl -sSL https://aka.ms/apm-unix | sh
 # Specific version:     curl -sSL https://aka.ms/apm-unix | sh -s -- @v1.2.3   (or VERSION=v1.2.3)
+# Prefix install:       curl -sSL https://aka.ms/apm-unix | sh -s -- --prefix "$HOME/.local"
 # Custom install dir:   curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/tools/bin sh
 # Custom repository:    APM_REPO=ghe-org/apm sh install.sh
 # GitHub Enterprise:    GITHUB_URL=https://gh.corp.com sh install.sh
@@ -26,6 +27,8 @@ NC='\033[0m' # No Color
 APM_REPO="${APM_REPO:-microsoft/apm}"
 _APM_INSTALL_DIR_SET="${APM_INSTALL_DIR:+1}"
 _APM_LIB_DIR_SET="${APM_LIB_DIR:+1}"
+_APM_PREFIX_SET=""
+APM_INSTALL_PREFIX=""
 APM_INSTALL_DIR="${APM_INSTALL_DIR:-$HOME/.local/bin}"
 APM_LIB_DIR="${APM_LIB_DIR:-$(dirname "$APM_INSTALL_DIR")/lib/apm}"
 BINARY_NAME="apm"
@@ -67,6 +70,89 @@ apm_install_error() {
     printf '%s\n' "[x] $*" >&2
     exit 1
 }
+
+apm_print_usage() {
+    printf '%s\n' \
+        "Usage: sh install.sh [--prefix PATH] [@vVERSION]" \
+        "" \
+        "Options:" \
+        "  --prefix PATH     Install launcher at PATH/bin and bundle at PATH/lib/apm." \
+        "  --prefix=PATH     Same as --prefix PATH." \
+        "  -h, --help        Show this help." \
+        "" \
+        "Environment:" \
+        "  APM_INSTALL_DIR   Explicit launcher directory when --prefix is absent." \
+        "  APM_LIB_DIR       Explicit Unix bundle directory when --prefix is absent." \
+        "  VERSION           Release tag to install, equivalent to @vVERSION." \
+        "" \
+        "The installer never runs sudo. Run the shell with the privileges needed for" \
+        "the selected destination."
+}
+
+apm_set_cli_version() {
+    [ -n "$1" ] || apm_install_error "Version argument is empty. Use @v1.2.3 or VERSION=v1.2.3."
+    if [ -n "$VERSION" ] && [ "$VERSION" != "$1" ]; then
+        apm_install_error "VERSION is already set to $VERSION. Remove the positional version argument or make it match."
+    fi
+    VERSION="$1"
+}
+
+apm_parse_installer_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                apm_print_usage
+                exit 0
+                ;;
+            --prefix=*)
+                [ -z "$_APM_PREFIX_SET" ] ||
+                    apm_install_error "--prefix may be provided only once."
+                APM_INSTALL_PREFIX="${1#--prefix=}"
+                [ -n "$APM_INSTALL_PREFIX" ] ||
+                    apm_install_error "Missing value for --prefix. Use --prefix PATH or --prefix=PATH."
+                _APM_PREFIX_SET=1
+                ;;
+            --prefix)
+                [ -z "$_APM_PREFIX_SET" ] ||
+                    apm_install_error "--prefix may be provided only once."
+                shift
+                [ "$#" -gt 0 ] ||
+                    apm_install_error "Missing value for --prefix. Use --prefix PATH or --prefix=PATH."
+                case "$1" in
+                    -*) apm_install_error "Missing value for --prefix. Use --prefix PATH or --prefix=PATH." ;;
+                esac
+                APM_INSTALL_PREFIX="$1"
+                [ -n "$APM_INSTALL_PREFIX" ] ||
+                    apm_install_error "Missing value for --prefix. Use --prefix PATH or --prefix=PATH."
+                _APM_PREFIX_SET=1
+                ;;
+            --*)
+                apm_install_error "Unknown option: $1. Run install.sh --help for usage."
+                ;;
+            @v[0-9]*|@[0-9]*)
+                apm_set_cli_version "${1#@}"
+                ;;
+            @*)
+                apm_install_error "Invalid version argument: $1. Use @v1.2.3."
+                ;;
+            v[0-9]*|[0-9]*)
+                apm_set_cli_version "$1"
+                ;;
+            *)
+                apm_install_error "Unknown argument: $1. Use @v1.2.3 for a version or --prefix PATH for destinations."
+                ;;
+        esac
+        shift
+    done
+}
+
+apm_trim_trailing_slashes() (
+    _path="$1"
+    while [ "$_path" != "/" ] && [ "${_path%/}" != "$_path" ]; do
+        _path="${_path%/}"
+    done
+    printf '%s\n' "$_path"
+)
 
 # Produce one POSIX shell word without adding a Python dependency.
 apm_shell_quote() (
@@ -159,12 +245,37 @@ apm_resolve_install_paths() {
     _apm_existing_binary=""
     _apm_existing_lib=""
     _apm_existing_bin=""
-    while [ "$APM_INSTALL_DIR" != "/" ] && [ "${APM_INSTALL_DIR%/}" != "$APM_INSTALL_DIR" ]; do
-        APM_INSTALL_DIR="${APM_INSTALL_DIR%/}"
-    done
-    while [ "$APM_LIB_DIR" != "/" ] && [ "${APM_LIB_DIR%/}" != "$APM_LIB_DIR" ]; do
-        APM_LIB_DIR="${APM_LIB_DIR%/}"
-    done
+    APM_INSTALL_DIR="$(apm_trim_trailing_slashes "$APM_INSTALL_DIR")"
+    APM_LIB_DIR="$(apm_trim_trailing_slashes "$APM_LIB_DIR")"
+    if [ -n "$_APM_PREFIX_SET" ]; then
+        APM_INSTALL_PREFIX="$(apm_trim_trailing_slashes "$APM_INSTALL_PREFIX")"
+        case "$APM_INSTALL_PREFIX" in
+            /*) ;;
+            *) apm_install_error "--prefix must be an absolute path. Use --prefix /path/to/root." ;;
+        esac
+        case "/$APM_INSTALL_PREFIX/" in
+            */../*|*/./*) apm_install_error "--prefix must not contain dot segments. Supply a normalized absolute path." ;;
+        esac
+        if [ "$APM_INSTALL_PREFIX" = "/" ]; then
+            _apm_prefix_install_dir="/bin"
+            _apm_prefix_lib_dir="/lib/apm"
+        else
+            _apm_prefix_install_dir="$APM_INSTALL_PREFIX/bin"
+            _apm_prefix_lib_dir="$APM_INSTALL_PREFIX/lib/apm"
+        fi
+        if [ -n "$_APM_INSTALL_DIR_SET" ] &&
+            [ "$APM_INSTALL_DIR" != "$_apm_prefix_install_dir" ]; then
+            apm_install_error "--prefix derives APM_INSTALL_DIR=$_apm_prefix_install_dir, but APM_INSTALL_DIR=$APM_INSTALL_DIR was also provided. Use one destination selector."
+        fi
+        if [ -n "$_APM_LIB_DIR_SET" ] &&
+            [ "$APM_LIB_DIR" != "$_apm_prefix_lib_dir" ]; then
+            apm_install_error "--prefix derives APM_LIB_DIR=$_apm_prefix_lib_dir, but APM_LIB_DIR=$APM_LIB_DIR was also provided. Use one destination selector."
+        fi
+        APM_INSTALL_DIR="$_apm_prefix_install_dir"
+        APM_LIB_DIR="$_apm_prefix_lib_dir"
+        _APM_INSTALL_DIR_SET=1
+        _APM_LIB_DIR_SET=1
+    fi
     for _dir in "$APM_INSTALL_DIR" "$APM_LIB_DIR"; do
         case "$_dir" in
             /*) ;;
@@ -176,7 +287,7 @@ apm_resolve_install_paths() {
     done
     if [ "$(id -u)" -eq 0 ] &&
         { [ -z "$_APM_INSTALL_DIR_SET" ] || [ -z "$_APM_LIB_DIR_SET" ]; }; then
-        apm_install_error "Administrator installation requires explicit APM_INSTALL_DIR and APM_LIB_DIR. Run as an ordinary user for ~/.local defaults."
+        apm_install_error "Administrator installation requires explicit APM_INSTALL_DIR and APM_LIB_DIR, or --prefix PATH. Run as an ordinary user for ~/.local defaults."
     fi
     apm_probe_installation "$APM_INSTALL_DIR/apm"
     apm_probe_installation "$APM_LIB_DIR/apm"
@@ -301,11 +412,8 @@ esac
 echo -e "${BLUE}Detected platform: $PLATFORM-$ARCH${NC}"
 echo -e "${BLUE}Target binary: $DOWNLOAD_BINARY${NC}"
 
-# Parse version: @v1.2.3 as arg, or VERSION env var
-# Usage: sh install.sh @v1.2.3  or  VERSION=v1.2.3 sh install.sh
-if [ -z "$VERSION" ] && [ -n "$1" ]; then
-    VERSION="${1#@}"
-fi
+# Parse options: --prefix PATH / --prefix=PATH, @v1.2.3, or VERSION env var.
+apm_parse_installer_args "$@"
 
 # Enterprise bootstrap mirror helpers
 is_truthy() {
