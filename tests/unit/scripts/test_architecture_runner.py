@@ -710,6 +710,7 @@ registry_delegation.runtime_descriptors
 registry_delegation.target_vocabulary
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
+transport-platform-clone-connect-retry
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
