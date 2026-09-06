@@ -21,6 +21,7 @@ from tests.utils.artifact_snapshot import (
     ArtifactSnapshot,
     ArtifactSnapshotSet,
     assert_only_snapshot_paths_changed,
+    assert_snapshot_changes_within,
     assert_unchanged,
 )
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -1703,6 +1704,132 @@ def test_required_dependency_prune_then_uninstall_cascades_owned_state(
     assert not after_uninstall.deployment_records
     assert _hook_commands(settings) == []
     assert uninstall_audit["passed"] is True
+
+
+@pytest.mark.parametrize("first_parent", ["root-a", "root-b"])
+def test_required_diamond_uninstall_preserves_shared_instructions_until_last_parent(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    first_parent: str,
+) -> None:
+    """Guard #2852's already-correct survivor rebuild across sequential uninstalls."""
+    scenario = _new_scenario(tmp_path / "diamond-uninstall", apm_binary_path)
+    shared = scenario.consumers.create("shared")
+    source_instruction = scenario.consumers.add_instruction(
+        shared, "shared", _instruction("shared")
+    )
+    parents = [
+        scenario.consumers.create(name, dependencies=({"path": "../shared"},))
+        for name in ("root-a", "root-b")
+    ]
+    consumer = scenario.consumers.create(
+        "diamond-consumer",
+        dependencies=tuple({"path": f"../{parent.name}"} for parent in parents),
+        targets=("copilot",),
+    )
+    deployed_instruction = ".github/instructions/shared.instructions.md"
+    user_note = consumer.root / ".github" / "instructions" / "user-notes.txt"
+    user_note.parent.mkdir(parents=True)
+    user_note.write_bytes(b"Keep this user-authored note.\n")
+    capture_args = {
+        "targets": ("copilot",),
+        "config_paths": (PurePosixPath(deployed_instruction),),
+    }
+    roots = {
+        "project": consumer.root,
+        "user": scenario.isolated.home,
+        "shared-source": shared.root,
+        **{parent.name: parent.root for parent in parents},
+    }
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "copilot"),
+        environment=scenario.environment,
+        scenario_id="diamond-install",
+    )
+    installed = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    assert installed.file(deployed_instruction).content == source_instruction.read_bytes()
+    assert installed.lockfile_bytes is not None
+    lock = LockFile.from_yaml(installed.lockfile_bytes.decode("utf-8"))
+    dependencies = {dep.repo_url: dep for dep in lock.get_package_dependencies()}
+    assert set(dependencies) == {"_local/root-a", "_local/root-b", "_local/shared"}
+    # Empty parent deployment claims are the legacy-cleanup trigger in #2852.
+    assert dependencies["_local/root-a"].deployed_files == []
+    assert dependencies["_local/root-b"].deployed_files == []
+    shared_record = next(
+        record
+        for record in installed.deployment_records
+        if record.locator.value == deployed_instruction
+    )
+    assert shared_record.owners == (f"local:{shared.root.as_posix()}",)
+    assert shared_record.active_owner == f"local:{shared.root.as_posix()}"
+    assert deployed_instruction in dependencies["_local/shared"].deployed_files
+    modules = consumer.root / "apm_modules"
+    installed_sources = {
+        name: dep.to_dependency_ref().get_install_path(modules)
+        for name, dep in dependencies.items()
+    }
+    source_snapshots = {
+        name: ArtifactSnapshot.capture(path) for name, path in installed_sources.items()
+    }
+    for path in installed_sources.values():
+        assert (path / "apm.yml").is_file()
+
+    last_parent = "root-b" if first_parent == "root-a" else "root-a"
+    for index, parent_name in enumerate((first_parent, last_parent)):
+        before = ArtifactSnapshotSet.capture(roots)
+        _run_success(
+            scenario,
+            consumer,
+            ("uninstall", f"../{parent_name}"),
+            environment=scenario.environment,
+            scenario_id=f"diamond-uninstall-{parent_name}",
+        )
+        after = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+        assert_snapshot_changes_within(
+            before,
+            ArtifactSnapshotSet.capture(roots),
+            exact_paths={
+                "project": {
+                    "apm.yml",
+                    "apm.lock.yaml",
+                    ".github",
+                    ".github/instructions",
+                    deployed_instruction,
+                }
+            },
+            tree_prefixes={"project": {"apm_modules"}},
+        )
+        assert not installed_sources[f"_local/{parent_name}"].exists()
+        manifest_dependencies = (
+            load_yaml(consumer.manifest_path).get("dependencies", {}).get("apm", [])
+        )
+        if index == 0:
+            assert manifest_dependencies == [{"path": f"../{last_parent}"}]
+            assert after.file(deployed_instruction) == installed.file(deployed_instruction)
+            assert after.deployment_records == installed.deployment_records
+            assert after.lockfile_bytes is not None
+            survivor_lock = LockFile.from_yaml(after.lockfile_bytes.decode("utf-8"))
+            survivors = {dep.repo_url: dep for dep in survivor_lock.get_package_dependencies()}
+            assert set(survivors) == {f"_local/{last_parent}", "_local/shared"}
+            shared_survivor = survivors["_local/shared"]
+            assert shared_survivor.resolved_by == f"_local/{last_parent}"
+            assert shared_survivor.deployed_files == dependencies["_local/shared"].deployed_files
+            assert (
+                shared_survivor.deployed_file_hashes
+                == dependencies["_local/shared"].deployed_file_hashes
+            )
+            for name in survivors:
+                assert_unchanged(
+                    source_snapshots[name], ArtifactSnapshot.capture(installed_sources[name])
+                )
+        else:
+            assert manifest_dependencies == []
+            assert after.file(deployed_instruction).kind == "missing"
+            assert after.lockfile_bytes is None
+            assert after.deployment_records == ()
+            assert not list(modules.glob("**/apm.yml"))
 
 
 def test_required_tamper_is_detected_and_repair_restores_last_good_state(
