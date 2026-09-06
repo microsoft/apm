@@ -51,6 +51,12 @@
       "law": "Exit status and diagnostics truthfully describe the durable outcome."
     },
     {
+      "id": "cache.successful_reads_refresh_recency",
+      "phase": 0,
+      "oracle_tier": "outcome",
+      "law": "Successful fresh HTTP cache reads protect entries from eviction without extending response TTL or causing a refetch."
+    },
+    {
       "id": "auth.credentials_isolated",
       "phase": 0,
       "oracle_tier": "outcome",
@@ -176,6 +182,18 @@
       "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
+      ]
+    },
+    {
+      "issue": 2851,
+      "fixed_in": "Unreleased",
+      "summary": "Successful MCP HTTP cache hits did not refresh LRU recency and were evicted before cold entries.",
+      "failure_modes": ["cache"],
+      "properties": ["cache.successful_reads_refresh_recency"],
+      "regression_tests": [
+        "tests/integration/test_http_cache_recency_lifecycle.py::test_mcp_show_hit_survives_cache_pressure_without_refetch",
+        "tests/unit/cache/test_http_cache.py::TestHttpCacheSizeCap::test_successful_hit_protects_entry_from_eviction",
+        "tests/unit/cache/test_http_cache.py::TestHttpCacheHitMiss::test_hit_updates_recency_without_rewriting_response"
       ]
     }
   ],

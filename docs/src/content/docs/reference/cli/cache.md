@@ -23,8 +23,15 @@ root. The cache holds two independent stores:
 
 - **Git cache** -- bare repository databases plus per-SHA worktree
   checkouts, keyed by resolved commit.
-- **HTTP cache** -- conditional-GET responses for the GitHub release
-  and API endpoints APM polls during install.
+- **HTTP cache** -- conditional-GET responses for MCP registry
+  endpoints.
+
+A fresh, integrity-verified HTTP cache hit updates only the entry
+directory's `mtime`. This recency marker drives LRU eviction; it does
+not rewrite stored metadata or extend the response TTL. If the
+`mtime` update fails, APM logs the failure at debug level and returns
+the verified cached response. Stores and successful 304 refreshes
+also update the directory `mtime`.
 
 The cache is purely a performance optimization. Removing it never
 breaks correctness; the next `apm install` re-fetches whatever it
