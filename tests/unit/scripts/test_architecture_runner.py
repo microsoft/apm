@@ -724,6 +724,7 @@ transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
 transport-platform-tls-trust-injection
+transport-platform-unix-install-ownership
 transport-platform-url-path-security
 transport-platform-windows-stable-path
 """
