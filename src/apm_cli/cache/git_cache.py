@@ -16,6 +16,7 @@ Resolution flow:
 On every cache HIT:
 - Run integrity check (verify HEAD == expected SHA)
 - Mismatch -> evict shard, fall through to fresh fetch, log warning
+- Refresh the SHA directory's access timestamp after successful validation
 
 Concurrency:
 - Per-shard file locks (via filelock) for atomic operations
@@ -195,11 +196,8 @@ class GitCache:
             if verify_checkout_sha(checkout_dir, sha):
                 _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 with shard_lock(checkout_dir):
-                    return self._finalize_sparse_checkout(
-                        url,
-                        checkout_dir,
-                        sparse_paths,
-                        env=env,
+                    return self._record_checkout_access(
+                        self._finalize_sparse_checkout(url, checkout_dir, sparse_paths, env=env)
                     )
             else:
                 # Integrity failure -- evict
@@ -225,6 +223,12 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _record_checkout_access(self, checkout_dir: Path) -> Path:
+        """Record successful reuse of a finalized checkout under its shard lock."""
+        # Pruning ages the shared SHA root, not individual checkout variants.
+        os.utime(checkout_dir.parent, None)
+        return checkout_dir
 
     def _finalize_sparse_checkout(
         self,
@@ -600,11 +604,8 @@ class GitCache:
                     sha[:12],
                     variant,
                 )
-                return self._finalize_sparse_checkout(
-                    url,
-                    final_dir,
-                    sparse_paths,
-                    env=env,
+                return self._record_checkout_access(
+                    self._finalize_sparse_checkout(url, final_dir, sparse_paths, env=env)
                 )
 
             staged = stage_path(final_dir)
@@ -889,7 +890,8 @@ class GitCache:
     def prune(self, *, max_age_days: int = 30) -> int:
         """Remove checkout entries older than *max_age_days*.
 
-        Uses mtime of the checkout directory as the access indicator.
+        Uses mtime of the shared SHA directory as the access indicator.
+        Successfully reusing any checkout variant refreshes that timestamp.
 
         Returns:
             Number of entries pruned.

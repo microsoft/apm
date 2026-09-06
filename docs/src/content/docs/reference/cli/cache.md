@@ -86,8 +86,10 @@ Use `prune` when you only want to reclaim space from stale entries.
 
 ### `apm cache prune`
 
-Remove git-cache checkouts whose filesystem `mtime` is older than
-`--days N`. Defaults to 30 days. The HTTP cache is not touched.
+Remove git-cache SHA groups whose shared `mtime` is older than `--days N`.
+Reusing any full or sparse variant refreshes the group timestamp, retaining
+all variants for that SHA. Pruning a stale group removes all its variants.
+Defaults to 30 days. The HTTP cache is not touched.
 
 ```bash
 apm cache prune              # default: older than 30 days
@@ -96,14 +98,14 @@ apm cache prune --days 7     # tighter window
 
 | Flag | Description |
 |---|---|
-| `--days N` | Remove entries not accessed within this many days. Default: `30`. |
+| `--days N` | Remove SHA groups not accessed within this many days. Default: `30`. |
 
 :::caution[Lockfile-blind]
-`prune` does not consult any project's `apm.lock.yaml`. It can evict a
-per-SHA checkout that a plain or frozen install would otherwise reuse. If the
-remaining bare repository cannot rebuild that checkout, the next install
-requires remote access. Freshness-required commands require upstream ref
-resolution regardless of retained cache entries.
+`prune` does not consult any project's `apm.lock.yaml`. It can evict all
+variants for a SHA that a plain or frozen install would otherwise reuse. If
+the remaining bare repository cannot rebuild the needed checkout, the next
+install requires remote access. Freshness-required commands require upstream
+ref resolution regardless of retained cache entries.
 :::
 
 ## Cache layout
