@@ -98,6 +98,12 @@ apm cache prune --days 7     # tighter window
 |---|---|
 | `--days N` | Remove entries not accessed within this many days. Default: `30`. |
 
+`prune` counts only successfully deleted checkouts and continues attempting
+other stale entries after removal errors. It reports completed and failed counts
+with each failed path and cause, then exits `1` if any failed; successful
+deletions are not rolled back, so fix permissions or release locks and rerun the
+command.
+
 :::caution[Lockfile-blind]
 `prune` does not consult any project's `apm.lock.yaml`. It can evict a
 per-SHA checkout that a plain or frozen install would otherwise reuse. If the

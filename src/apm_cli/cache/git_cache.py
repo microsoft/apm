@@ -50,6 +50,15 @@ _FALLBACK_REFSPECS = (
 )
 
 
+class CachePruneError(OSError):
+    """Incomplete prune with completed-removal count and per-entry failures."""
+
+    def __init__(self, pruned: int, failures: list[tuple[Path, OSError]]) -> None:
+        self.pruned = pruned
+        self.failures = tuple(failures)
+        super().__init__(f"Pruned {pruned} checkout(s); {len(failures)} failed.")
+
+
 def _safe_git_args() -> list[str]:
     """Return hardening ``-c`` args prepended to every git subprocess.
 
@@ -892,7 +901,12 @@ class GitCache:
         Uses mtime of the checkout directory as the access indicator.
 
         Returns:
-            Number of entries pruned.
+            Number of entries successfully removed.
+
+        Raises:
+            CachePruneError: Some entries could not be inspected or removed.
+                Other stale entries are still attempted. Completed removals
+                and partially deleted entries are not rolled back.
         """
         import time
 
@@ -900,6 +914,7 @@ class GitCache:
 
         cutoff = time.time() - (max_age_days * 86400)
         pruned = 0
+        failures: list[tuple[Path, OSError]] = []
 
         if not self._checkouts_root.is_dir():
             return 0
@@ -913,11 +928,13 @@ class GitCache:
                 try:
                     stat = sha_entry.stat(follow_symlinks=False)
                     if stat.st_mtime < cutoff:
-                        robust_rmtree(Path(sha_entry.path), ignore_errors=True)
+                        robust_rmtree(Path(sha_entry.path))
                         pruned += 1
-                except OSError:
-                    continue
+                except OSError as exc:
+                    failures.append((Path(sha_entry.path), exc))
 
+        if failures:
+            raise CachePruneError(pruned, failures)
         return pruned
 
 

@@ -105,24 +105,31 @@ def prune(days: int) -> None:
     referenced by project lockfiles are NOT exempt -- freshness is
     determined solely by filesystem timestamps.
     """
-    from ..cache.git_cache import GitCache
+    from ..cache.git_cache import CachePruneError, GitCache
     from ..cache.paths import get_cache_root
-    from ..utils.console import _rich_info, _rich_success
+    from ..core.command_logger import CommandLogger
+
+    logger = CommandLogger("cache prune")
 
     try:
         root = get_cache_root()
     except (ValueError, OSError) as exc:
-        from ..utils.console import _rich_error
-
-        _rich_error(f"Cannot resolve cache root: {exc}", symbol="error")
+        logger.error(f"Cannot resolve cache root: {exc}")
         raise SystemExit(1) from exc
 
-    _rich_info(f"Pruning entries older than {days} days...", symbol="gear")
+    logger.start(f"Pruning entries older than {days} days...", symbol="gear")
 
     git_cache = GitCache(root)
-    pruned = git_cache.prune(max_age_days=days)
+    try:
+        pruned = git_cache.prune(max_age_days=days)
+    except CachePruneError as exc:
+        logger.error(str(exc))
+        for path, error in exc.failures:
+            logger.error(f"Could not prune {path}: {error}")
+        logger.error("Check permissions or close programs using the cache, then retry.")
+        raise SystemExit(1) from exc
 
-    _rich_success(f"Pruned {pruned} checkout(s).", symbol="check")
+    logger.success(f"Pruned {pruned} checkout(s).", symbol="check")
 
 
 def _format_size(size_bytes: int) -> str:

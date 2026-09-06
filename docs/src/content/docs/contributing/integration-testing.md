@@ -300,6 +300,13 @@ system install:
 2. `./dist/apm-<os>-<arch>/apm` (the layout produced by `scripts/build-binary.sh`)
 3. `shutil.which("apm")`
 
+`apm_engine_command` is the canonical fixture for narrowly scoped Python
+filesystem-boundary fault injection: it returns `(sys.executable, "-m",
+"apm_cli.cli")` so `ApmLifecycleRunner` executes the installed Python engine.
+This is an explicit engine contract, not packaged-binary coverage, and it is
+independent of `APM_BINARY_PATH` so frozen CI cannot bypass the instrumentation.
+Packaged executable tests must continue to use `apm_binary_path`.
+
 ### Adding an integration test that needs a precondition
 
 1. Apply the marker at module or test level:

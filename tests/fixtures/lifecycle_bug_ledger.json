@@ -177,6 +177,21 @@
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
       ]
+    },
+    {
+      "issue": 2854,
+      "fixed_in": "Unreleased",
+      "summary": "Cache prune counted failed removals as successful and exited zero.",
+      "failure_modes": ["cache", "cleanup", "outcome", "idempotency"],
+      "properties": [
+        "outcome.status_matches_state",
+        "filesystem.open_world_observation",
+        "idempotency.byte_stable"
+      ],
+      "regression_tests": [
+        "tests/integration/test_cache_prune_outcome_lifecycle.py::test_prune_failure_retry_and_convergence",
+        "tests/unit/cache/test_git_cache.py::test_prune_reports_only_completed_deletions"
+      ]
     }
   ],
   "known_gaps": [
