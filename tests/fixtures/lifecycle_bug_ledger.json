@@ -177,6 +177,17 @@
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
       ]
+    },
+    {
+      "issue": 2855,
+      "fixed_in": "Unreleased",
+      "summary": "Prune reported success after orphan deletion failed, including partially completed batches.",
+      "failure_modes": ["cleanup", "outcome", "idempotency"],
+      "properties": ["outcome.status_matches_state", "filesystem.open_world_observation", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_prune_failure_lifecycle.py::test_prune_failure_reports_partial_state_and_retry_converges",
+        "tests/integration/test_prune_failure_lifecycle.py::test_prune_mixed_failure_reconciles_only_successful_owners"
+      ]
     }
   ],
   "known_gaps": [
