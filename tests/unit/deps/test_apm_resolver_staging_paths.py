@@ -7,14 +7,22 @@ recorded at its published ``apm_modules/<owner>/<repo>`` location, never at the
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+from unittest.mock import Mock
 
+import pytest
 import yaml
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.plugin_parser import (
+    rebase_plugin_root_paths,
+    resolve_plugin_root_placeholders,
+)
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.staging_guard import STAGING_DIR_NAME
+
+pytestmark = pytest.mark.windows_compat
 
 _ROOT = "${CLAUDE_PLUGIN_ROOT}"
 _MANIFEST = {
@@ -76,7 +84,7 @@ def test_staged_download_records_published_mcp_args(tmp_path: Path) -> None:
     servers = package.get_all_mcp_dependencies()
     assert [server.name for server in servers] == ["toolsrv"]
     server = servers[0]
-    assert server.args[0] == str(live_path / "start.mjs")
+    assert server.args[0] == f"{live_path}/start.mjs"
     assert Path(server.args[0]).exists()
     assert server.env["TOOL_HOME"] == str(live_path)
 
@@ -96,3 +104,29 @@ def test_staged_download_leaves_no_staging_reference(tmp_path: Path) -> None:
     server = package.get_all_mcp_dependencies()[0]
     rendered = [*server.args, *server.env.values(), str(package.package_path)]
     assert not [value for value in rendered if STAGING_DIR_NAME in value]
+
+
+def test_windows_root_substitution_preserves_literal_argument_suffixes() -> None:
+    staged = PureWindowsPath(r"C:\cache\.apm-resolution-staging\tool")
+    published = PureWindowsPath(r"C:\project\apm_modules\acme\tool")
+    root = Mock(spec=Path)
+    root.resolve.return_value = staged
+    manifest = {
+        "command": f"{_ROOT}/server",
+        "args": [f"{_ROOT}/start.mjs", f"--search={_ROOT}/a:{_ROOT}/b", r"--literal=a/b\c"],
+    }
+
+    resolved = resolve_plugin_root_placeholders(manifest, root)
+    rebased = rebase_plugin_root_paths(resolved, staged, published)
+
+    assert resolved["command"] == f"{staged}/server"
+    assert rebased == {
+        "command": f"{published}/server",
+        "args": [
+            f"{published}/start.mjs",
+            f"--search={published}/a:{published}/b",
+            r"--literal=a/b\c",
+        ],
+    }
+    assert PureWindowsPath(rebased["args"][0]) == published / "start.mjs"
+    assert manifest["command"] == f"{_ROOT}/server"
