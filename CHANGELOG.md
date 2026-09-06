@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Git dependency downloads retry one narrowly classified HTTPS connection failure without changing credentials or transport; lifecycle timeout tests now wait for descendant readiness before exercising process-tree termination.
+
 ## [0.29.1] - 2026-09-05
 
 ### Security

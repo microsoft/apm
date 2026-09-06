@@ -89,6 +89,13 @@
       "guards": ["transport-platform-self-update-resolution"]
     },
     {
+      "id": "git-clone-connect-retry",
+      "decision": "Bounded same-action HTTPS connection retry below auth and protocol selection",
+      "owner": "deps/clone_engine.py (CloneEngine)",
+      "selectors": ["src/apm_cli/deps/clone_engine.py"],
+      "guards": ["transport-platform-clone-connect-retry"]
+    },
+    {
       "id": "github-api-throttle-classification",
       "decision": "GitHub API throttle classification",
       "owner": "deps/github_rate_limit.py",
