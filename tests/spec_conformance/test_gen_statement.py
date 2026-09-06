@@ -6,12 +6,11 @@ import json
 import subprocess
 import sys
 
-from tests.spec_conformance._manifest import REPO_ROOT
+from tests.spec_conformance._manifest import REPO_ROOT, selected_assessment
 from tests.spec_conformance.gen_statement import (
     CONFORMANCE_JSON,
     CONFORMANCE_MD,
     GENERATOR,
-    SPEC_VERSION,
     USER_SCOPE_DISCLOSURE,
 )
 
@@ -51,7 +50,7 @@ def test_gen_statement_emits_ascii_only():
 def test_gen_statement_md_advertises_spec_version_and_generator():
     _run_gen()
     md = CONFORMANCE_MD.read_text(encoding="ascii")
-    assert SPEC_VERSION in md, f"missing '{SPEC_VERSION}' in CONFORMANCE.md"
+    assert selected_assessment().version in md
     assert GENERATOR in md, f"missing '{GENERATOR}' in CONFORMANCE.md"
 
 

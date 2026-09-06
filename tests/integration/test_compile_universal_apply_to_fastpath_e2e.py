@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -263,3 +264,61 @@ def test_compile_literal_roots_preserve_generated_artifacts_against_full_fallbac
 
     assert _agents_snapshot(project_root) == literal_artifacts
     assert set(literal_artifacts) == {"src/AGENTS.md"}
+
+
+def test_compile_does_not_re_resolve_context_optimizer_base_dir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Compile must reuse the optimizer's constructor-resolved base path."""
+    project_root = tmp_path
+    _write_literal_scope_fixture(project_root, "src/**/*.py")
+    entered_methods: list[str] = []
+    base_resolve_callers: list[str] = []
+
+    original_resolve = Path.resolve
+    original_file_matches = ContextOptimizer._file_matches_pattern
+    original_minimal_placement = ContextOptimizer._find_minimal_coverage_placement
+
+    def spy_resolve(path: Path, strict: bool = False) -> Path:
+        caller = sys._getframe(1).f_code.co_name
+        if path == project_root:
+            base_resolve_callers.append(caller)
+        return original_resolve(path, strict=strict)
+
+    def spy_file_matches(
+        self: ContextOptimizer,
+        file_path: Path,
+        pattern: str,
+    ) -> bool:
+        entered_methods.append("_file_matches_pattern")
+        return original_file_matches(self, file_path, pattern)
+
+    def spy_minimal_placement(
+        self: ContextOptimizer,
+        matching_directories: set[Path],
+    ) -> Path | None:
+        entered_methods.append("_find_minimal_coverage_placement")
+        return original_minimal_placement(self, matching_directories)
+
+    monkeypatch.chdir(project_root)
+    with (
+        patch.object(Path, "resolve", spy_resolve),
+        patch.object(ContextOptimizer, "_file_matches_pattern", spy_file_matches),
+        patch.object(
+            ContextOptimizer,
+            "_find_minimal_coverage_placement",
+            spy_minimal_placement,
+        ),
+    ):
+        result = CliRunner().invoke(
+            cli,
+            ["compile", "--target", "agents"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "_file_matches_pattern" in entered_methods
+    assert "_find_minimal_coverage_placement" in entered_methods
+    assert "_file_matches_pattern" not in base_resolve_callers
+    assert "_find_minimal_coverage_placement" not in base_resolve_callers

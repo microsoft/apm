@@ -13,17 +13,24 @@ Covers:
 
 from __future__ import annotations
 
-from typing import List, Optional  # noqa: F401, UP035
+from unittest.mock import patch
 
-import pytest  # noqa: F401
+import pytest
 
+from apm_cli.models.dependency import DependencyReference
 from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
-from apm_cli.policy.policy_checks import run_dependency_policy_checks
+from apm_cli.policy.policy_checks import (
+    _check_required_executable_untrusted,
+    _check_required_packages,
+    _check_required_packages_deployed,
+    run_dependency_policy_checks,
+)
 from apm_cli.policy.schema import (
     ApmPolicy,
     CompilationPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    ExecutablesPolicy,
     McpPolicy,
     McpTransportPolicy,
     RegistrySourcePolicy,
@@ -178,6 +185,108 @@ class TestRequiredPackages:
             )
             result = run_dependency_policy_checks(deps, policy=policy)
             assert not result.passed, f"Expected block for missing required with {strategy}"
+
+
+class TestSharedDependencyNames:
+    """Exercise the real runner and helpers without replacing policy checks."""
+
+    @pytest.mark.parametrize(
+        "require_packages,require_executables,has_lock",
+        [(True, True, True), (True, False, True), (True, False, False), (False, True, True)],
+    )
+    def test_runner_projects_names_once(
+        self, require_packages: bool, require_executables: bool, has_lock: bool
+    ) -> None:
+        deps = _make_dep_refs(["org/pkg#v1", "org/other#v2", "org/third"])
+        lock = _make_lockfile(
+            [{"repo_url": "org/pkg", "resolved_ref": "v1", "exec_status": "deployed"}]
+        )
+        policy = ApmPolicy(
+            dependencies=DependencyPolicy(require=("org/pkg",) if require_packages else ()),
+            executables=ExecutablesPolicy(require=("org/pkg",) if require_executables else ()),
+        )
+        with patch.object(
+            DependencyReference,
+            "get_canonical_dependency_string",
+            autospec=True,
+            side_effect=DependencyReference.get_canonical_dependency_string,
+        ) as canonical:
+            result = run_dependency_policy_checks(
+                iter(deps), lockfile=lock if has_lock else None, policy=policy
+            )
+
+        # Allow/deny, registry-source and pinned-constraint checks are inactive.
+        assert canonical.call_count == len(deps)
+        assert [call.args[0] for call in canonical.call_args_list] == deps
+        assert result.passed
+        assert _check_names(result)[2:5] == [
+            "required-packages",
+            "required-packages-deployed",
+            "required-executable-untrusted",
+        ]
+
+    @pytest.mark.parametrize(
+        "require_executables,has_lock", [(False, False), (False, True), (True, False)]
+    )
+    def test_runner_skips_unused_projection(
+        self, require_executables: bool, has_lock: bool
+    ) -> None:
+        deps = _make_dep_refs(["org/pkg#v1", "org/other#v2", "org/third"])
+        policy = ApmPolicy(
+            executables=ExecutablesPolicy(require=("org/pkg",) if require_executables else ())
+        )
+        with patch.object(
+            DependencyReference,
+            "get_canonical_dependency_string",
+            autospec=True,
+            side_effect=DependencyReference.get_canonical_dependency_string,
+        ) as canonical:
+            result = run_dependency_policy_checks(
+                deps, lockfile=_make_lockfile([]) if has_lock else None, policy=policy
+            )
+
+        canonical.assert_not_called()
+        assert result.passed
+        assert [check.message for check in result.checks[2:5]] == [
+            "No required packages configured",
+            "No required packages to verify deployment",
+            "No required executables to verify",
+        ]
+
+    @pytest.mark.parametrize("helper", ["manifest", "deployed", "executable"])
+    @pytest.mark.parametrize(
+        "names", [None, set(), {"org/pkg"}], ids=["omitted", "empty", "populated"]
+    )
+    def test_helper_reuses_supplied_names_or_computes_fallback(
+        self, helper: str, names: set[str] | None
+    ) -> None:
+        deps = _make_dep_refs(["org/pkg#v1"])
+        lock = _make_lockfile([])
+        dependency_policy = DependencyPolicy(require=("org/pkg",))
+        executable_policy = ExecutablesPolicy(require=("org/pkg",))
+        kwargs = {} if names is None else {"dep_names": names}
+
+        with patch.object(
+            DependencyReference,
+            "get_canonical_dependency_string",
+            autospec=True,
+            side_effect=DependencyReference.get_canonical_dependency_string,
+        ) as canonical:
+            if helper == "manifest":
+                result = _check_required_packages(deps, dependency_policy, **kwargs)
+            elif helper == "deployed":
+                result = _check_required_packages_deployed(deps, lock, dependency_policy, **kwargs)
+            else:
+                result = _check_required_executable_untrusted(
+                    deps, lock, executable_policy, **kwargs
+                )
+
+        assert canonical.call_count == (len(deps) if names is None else 0)
+        present = names is None or "org/pkg" in names
+        assert result.passed == (present if helper == "manifest" else not present)
+        assert result.details == ([] if result.passed else ["org/pkg"])
+        if names is not None:
+            assert names == ({"org/pkg"} if present else set())
 
 
 # -- Required version + project-wins semantics ---------------------

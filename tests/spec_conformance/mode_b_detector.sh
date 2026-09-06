@@ -24,8 +24,9 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 PATHS_FILE="tests/spec_conformance/critical_paths.txt"
-SPEC_BODY="docs/src/content/docs/specs/openapm-v0.1.md"
-SPEC_MANIFEST="docs/public/specs/manifests/openapm-v0.1.requirements.yml"
+SPEC_PATHS="$("${PYTHON:-python}" -m tests.spec_conformance._manifest)" || exit 2
+SPEC_BODY="$(printf '%s\n' "$SPEC_PATHS" | sed -n '1p')"
+SPEC_MANIFEST="$(printf '%s\n' "$SPEC_PATHS" | sed -n '2p')"
 BASE="${BASE_REF:-origin/main}"
 THRESHOLD="${MODE_B_THRESHOLD:-20}"
 
@@ -135,7 +136,7 @@ echo ""
 echo "Critical paths touched (added/removed by file):"
 git diff --find-renames=90% --stat "$MB"...HEAD -- "${CRIT[@]}" | sed 's/^/  /'
 echo ""
-echo "OpenAPM v0.1 requires that net-new behaviour under normative"
+echo "The selected OpenAPM revision requires that net-new behaviour under normative"
 echo "critical paths (manifest parser, lockfile writer, resolver,"
 echo "policy engine, registry resolution, runtime, install,"
 echo "integration) land WITH:"

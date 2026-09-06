@@ -480,8 +480,8 @@ if __name__ == "__main__":
 # ===========================================================================
 
 
-class TestIsRemoteParentHeuristic(unittest.TestCase):
-    """_is_remote_parent must NOT misclassify _local/<name> as remote (#940)."""
+class TestIsRemoteParentProvenance(unittest.TestCase):
+    """Explicit acquisition provenance, not location spelling, controls the backstop."""
 
     def setUp(self):
         from apm_cli.deps.apm_resolver import APMDependencyResolver
@@ -493,6 +493,7 @@ class TestIsRemoteParentHeuristic(unittest.TestCase):
 
         pkg = APMPackage(name="specialized", version="1.0.0")
         pkg.source = "_local/specialized"
+        pkg.proven_source_kind = "local"
         self.assertFalse(self.resolver._is_remote_parent(pkg))
 
     def test_owner_repo_slash_is_remote(self):
@@ -502,11 +503,11 @@ class TestIsRemoteParentHeuristic(unittest.TestCase):
         pkg.source = "microsoft/apm-sample-package"
         self.assertTrue(self.resolver._is_remote_parent(pkg))
 
-    def test_no_source_is_local(self):
+    def test_no_provenance_requires_backstop(self):
         from apm_cli.models.apm_package import APMPackage
 
         pkg = APMPackage(name="root", version="1.0.0")
-        self.assertFalse(self.resolver._is_remote_parent(pkg))
+        self.assertTrue(self.resolver._is_remote_parent(pkg))
 
 
 class TestSignatureFallback(unittest.TestCase):
@@ -591,6 +592,7 @@ class TestRemoteParentLocalPathFailClosed(unittest.TestCase):
             resolver = APMDependencyResolver(apm_modules_dir=Path(tmpdir))
             local_parent = APMPackage(name="specialized", version="1.0.0")
             local_parent.source = "_local/specialized"
+            local_parent.proven_source_kind = "local"
 
             local_dep = DependencyReference(
                 repo_url="",

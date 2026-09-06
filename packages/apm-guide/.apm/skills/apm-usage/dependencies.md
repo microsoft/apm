@@ -52,18 +52,40 @@ install for manual inspection. Repository path casing remains
 identity-significant for unknown git hosts because a self-hosted backend may be
 case-sensitive.
 
-**Local-path anchor rule:** a `local_path` declared INSIDE another local
-package is resolved relative to THAT package's own directory (npm/pip/cargo
-parity). Sibling layouts that resolve outside the consuming project root
-(e.g. `../sibling-pkg` from a local dep at the project edge) are
-supported -- the consuming developer authored the manifest chain and
-already trusts the layout.
+**Local-path anchor rule:** a path declared inside another local package
+resolves from that package's original source directory, including at user
+scope (`--global`). Trusted sibling layouts outside the consumer project
+root, such as `../sibling-pkg`, are supported. Direct user-scope local
+dependencies must use absolute paths (`~/path` also works); a relative
+reference without a known local parent's absolute source anchor is rejected.
+Neither CWD nor `~/.apm/` substitutes for that anchor.
+APM does not search another installation scope's installed packages to resolve
+a missing local source. Local source selection is a trust decision, not a
+guarantee that the package content is safe.
 
 Remote-cloned packages may declare a relative `path:` only when it resolves
 inside the same authenticated remote repo root. APM expands that path to the
 parent's remote host/repo/ref and fetches the sibling from the same origin.
 Absolute paths, paths that escape the repo root, and cross-repo local paths
 are rejected.
+This remote expansion runs before operator-local user-scope admission: an
+accepted sibling remains a Git dependency, including during a global install.
+APM establishes that origin from acquisition context, not repository spelling;
+a remote repository named `_local/parent` is still remote. Missing provenance
+does not authorize a transitive local filesystem read.
+
+Local lock replay still needs the original declaring-source context. Relative
+spelling alone is not source identity or read authorization, and an absolute
+local path is not automatically portable to another machine. The
+`declaring_parent` and `anchored_local_path` fields are APM-specific metadata,
+not standardized portable local-source coordinates.
+
+After a local source directory is selected and resolved, symlinks inside that
+package must resolve within that same directory. Internal links are copied as
+content; broken, cyclic, or escaping links fail materialization. Selecting a
+source-directory path that itself resolves through a symlink is a separate
+operation. These checks do not make an entire install atomic or protect against
+all concurrent filesystem changes.
 
 **GitLab `path:` fetch transport:** GitLab `path:` files are fetched over git
 transport, not the REST API, so self-hosted instances with the API disabled

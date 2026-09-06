@@ -423,9 +423,10 @@ Avoid these anti-patterns:
 - Do not read `is_enabled()` at module import time.
 - Do not persist flag state anywhere other than `~/.apm/config.json` via `update_config`.
 
-## Adding or changing a normative requirement (OpenAPM v0.1)
+## Adding or changing a normative requirement (OpenAPM)
 
-The OpenAPM v0.1 spec (`docs/src/content/docs/specs/openapm-v0.1.md`)
+The selected OpenAPM spec (`tests/spec_conformance/_manifest.py` owns
+the active artifact and exact revision)
 and APM the implementation are co-evolved in this repo. APM is the
 sole implementation of the spec. To prevent the spec from rotting
 into a document of lies, every normative change MUST land as three
@@ -438,8 +439,8 @@ Three-step ritual:
 1. **Spec edit.** Add or change a `<a id="req-XXX"></a>` anchor with
    prose in the spec body. Add or change the matching Appendix C row.
 2. **Manifest edit.** Add or change the entry in
-   `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`
-   so it stays a byte-equivalent projection of the canonical anchors.
+   selected informative manifest under `docs/public/specs/manifests/`
+   so its IDs, keywords, sections, and classes match the canonical anchors.
 3. **Test edit.** Add or extend a `@pytest.mark.req("req-XXX")` test
    under `tests/spec_conformance/`. If a real assertion is not yet
    possible, call `waive("...")` from `_helpers.py` with a one-line
@@ -453,7 +454,10 @@ uv run --extra dev python -m tests.spec_conformance.gen_statement
 ```
 
 and commit the resulting `CONFORMANCE.{md,json}` at repo root. CI
-gates a clean diff.
+gates a clean diff. Generation collects the full selected suite afresh and
+records static bindings, not runtime pass results. Run the suite separately
+and retain execution evidence. The retained previous minor is a preservation
+artifact, not an alternative edit target for the active assessment.
 
 Common modes the ritual catches:
 

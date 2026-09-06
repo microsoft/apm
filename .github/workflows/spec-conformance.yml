@@ -1,6 +1,6 @@
 name: Spec conformance
 
-# Enforces the OpenAPM v0.1 spec-vs-implementation 4-way bind:
+# Enforces the selected OpenAPM revision's spec-vs-implementation 4-way bind:
 #   spec body anchors == requirements manifest == Appendix C rows == pytest req markers
 # Then runs the conformance suite, regenerates CONFORMANCE.{json,md},
 # and gates on a clean git diff so contributors must commit any
@@ -11,6 +11,7 @@ on:
     branches: [ main ]
     paths:
       - 'docs/src/content/docs/specs/**'
+      - 'docs/public/specs/**'
       - 'tests/fixtures/spec-conformance/**'
       - 'tests/spec_conformance/**'
       - 'src/apm_cli/**'
@@ -46,7 +47,7 @@ jobs:
         env:
           BASE_REF: origin/${{ github.event.pull_request.base.ref || 'main' }}
           GH_PR_BODY: ${{ github.event.pull_request.body }}
-        run: bash tests/spec_conformance/mode_b_detector.sh
+        run: uv run --frozen --extra dev bash tests/spec_conformance/mode_b_detector.sh
 
       - name: Conformance test suite
         run: |

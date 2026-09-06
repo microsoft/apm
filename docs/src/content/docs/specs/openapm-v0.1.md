@@ -3845,6 +3845,26 @@ renumbering of conformance classes.
 
 ## Appendix D. Revision history
 
+<!-- BEGIN INFORMATIVE V0.2.0 ANNOUNCEMENT -->
+### Corrective v0.2.0 preparation notice (informative)
+
+A separate [OpenAPM v0.2.0 draft](../openapm-v020/) is being prepared
+for the local-source provenance/anchoring and audit current-intent/read-only
+corrections. Its changed req-mf-016 and new audit obligation apply only
+to that separately versioned contract. This notice does not modify this
+minor's operative requirements, requirements manifest, schemas, or
+conformance interpretation. This minor remains available and supported
+indefinitely; no removal date is set.
+
+Prepared on 2026-09-06; this is not an announcement or publication date.
+The publication owner will record the actual announcement and review/
+ratification evidence when publication occurs. Section 9.5's 90-day
+minimum is between announcement and removal, not between announcement
+and parallel publication. No migration exception is claimed. The
+maintainer waived only the public-comment period for the corrective
+publication; this notice does not assert completed review or ratification.
+<!-- END INFORMATIVE V0.2.0 ANNOUNCEMENT -->
+
 | Version | Date       | Changes                                                  |
 |---------|------------|----------------------------------------------------------|
 | 0.1     | 2026-05-10 | Initial editor's Working Draft.                          |

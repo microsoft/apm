@@ -612,6 +612,7 @@ contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
 contracts-tooling-project-yaml-write-delegation
+contracts-tooling-spec-assessment
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
@@ -629,6 +630,7 @@ install-deployment-incomplete-chain-routing
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
+install-deployment-local-scope-admission
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-lifecycle
 install-deployment-lsp-target-contract

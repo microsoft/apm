@@ -1,4 +1,4 @@
-"""Current-intent CLI controls awaiting the coordinated v0.2 requirement binding."""
+"""Current-intent and read-only CLI controls bound to the corrective assessment."""
 
 from __future__ import annotations
 
@@ -101,6 +101,7 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Audi
     yield case
 
 
+@pytest.mark.req("req-lk-023")
 @pytest.mark.parametrize("cold", [False, True], ids=["warm", "cold"])
 def test_saved_target_drives_read_only_source_replay(installed: _AuditProject, cold: bool) -> None:
     """An unrelated detection signal must not replace the saved current target."""
@@ -112,6 +113,7 @@ def test_saved_target_drives_read_only_source_replay(installed: _AuditProject, c
     assert not (installed.project / ".agents/skills/intent").exists()
 
 
+@pytest.mark.req("req-lk-023")
 def test_user_scope_replay_keeps_user_target_bytes(
     installed: _AuditProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -131,6 +133,7 @@ def test_user_scope_replay_keeps_user_target_bytes(
     assert all(check["passed"] for check in user.audit(0).values())
 
 
+@pytest.mark.req("req-lk-023")
 def test_full_audit_does_not_recreate_absent_configuration(
     installed: _AuditProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -146,6 +149,7 @@ def test_full_audit_does_not_recreate_absent_configuration(
     assert not config_path.exists()
 
 
+@pytest.mark.req("req-lk-023")
 @pytest.mark.parametrize("invalid", ["claudee", [], 42, None])
 @pytest.mark.parametrize("manifest_wins", [False, True])
 def test_malformed_saved_intent_fails_only_when_selected(
@@ -164,6 +168,7 @@ def test_malformed_saved_intent_fails_only_when_selected(
         assert checks["target-resolution"]["passed"] is False
 
 
+@pytest.mark.req("req-lk-023")
 def test_native_workflow_replay_fails_before_writer(
     installed: _AuditProject, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -194,6 +199,7 @@ def test_native_workflow_replay_fails_before_writer(
     assert "scratch replay" in checks["drift"]["message"]
 
 
+@pytest.mark.req("req-lk-023")
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -309,6 +315,7 @@ def test_native_user_skill_replay_preserves_layout_and_comparison(
         assert neighbor.read_bytes() == b"untouched neighbor"
 
 
+@pytest.mark.req("req-lk-023")
 @pytest.mark.parametrize("intent", ["manifest", "config", "detection"])
 def test_current_intent_overrides_old_target_ownership(
     installed: _AuditProject, intent: str
@@ -334,6 +341,7 @@ def test_current_intent_overrides_old_target_ownership(
         assert (installed.project / _DEPLOYED_SKILL).read_bytes() == installed.source.read_bytes()
 
 
+@pytest.mark.req("req-lk-023")
 @pytest.mark.parametrize("invalid", ["disabled", "manifest"])
 def test_invalid_current_selection_cannot_pass_empty_replay(
     installed: _AuditProject, invalid: str
@@ -352,6 +360,7 @@ def test_invalid_current_selection_cannot_pass_empty_replay(
         assert "Unknown target 'grok-cloud'" in result.output
 
 
+@pytest.mark.req("req-lk-023")
 @pytest.mark.parametrize("mutation", ["content", "missing-claim"])
 def test_configured_target_keeps_integrity_and_membership_checks(
     installed: _AuditProject, mutation: str
@@ -376,6 +385,7 @@ def test_configured_target_keeps_integrity_and_membership_checks(
     assert f"{kind}: {_DEPLOYED_SKILL}" in checks["drift"]["details"]
 
 
+@pytest.mark.req("req-pl-016")
 def test_configured_target_does_not_authorize_invalid_owners(installed: _AuditProject) -> None:
     """Current target intent cannot bless an owner missing from the dependency set."""
     path = installed.project / "apm.lock.yaml"

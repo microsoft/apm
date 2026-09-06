@@ -363,7 +363,6 @@ def _resolve_dependencies(
     """Resolve dependencies and populate the resolution fields on ``ctx``."""
     import threading as _threading
 
-    from apm_cli.core.scope import InstallScope
     from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.install.insecure_policy import (
         _check_insecure_dependencies,
@@ -371,6 +370,7 @@ def _resolve_dependencies(
         _guard_transitive_insecure_dependencies,
         _warn_insecure_dependencies,
     )
+    from apm_cli.install.package_resolution import user_scope_rejection_reason
     from apm_cli.install.phases.local_content import _copy_local_package
 
     # 3b. Dedicated registry resolver (design §3.1, §8)
@@ -553,15 +553,7 @@ def _resolve_dependencies(
 
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
-                if (
-                    scope is InstallScope.USER
-                    and not Path(dep_ref.local_path).expanduser().is_absolute()
-                ):
-                    # At user scope, relative local paths have no meaningful
-                    # root (cwd is arbitrary, $HOME is not a project).  Only
-                    # absolute paths are unambiguous; reject relative refs.
-                    # Note: callback_failures is a set (see line ~105),
-                    # so use .add() rather than dict-style assignment.
+                if user_scope_rejection_reason(dep_ref, scope, parent_pkg=parent_pkg):
                     with callback_lock:
                         callback_failures.add(dep_ref.get_unique_key())
                     _tui = getattr(ctx, "tui", None)

@@ -73,6 +73,10 @@ export default defineConfig({
 		'/spec': '/apm/specs/openapm-v01/',
 		'/spec/latest': '/apm/specs/openapm-v01/',
 		'/spec/v0.1': '/apm/specs/openapm-v01/',
+		// Exact revision slug is pinned; a later patch needs a distinct artifact.
+		// Keep /spec and /spec/latest unchanged until actual ratification.
+		'/spec/v0.2': '/apm/specs/openapm-v020/',
+		'/spec/v0.2.0': '/apm/specs/openapm-v020/',
 	},
 	integrations: [
 		sitemap(),
@@ -295,6 +299,7 @@ export default defineConfig({
 						// (/spec, /spec/v0.1, /spec/latest) bridge this in the
 						// redirects block above for external citers.
 						{ label: 'OpenAPM v0.1', slug: 'specs/openapm-v01' },
+						{ label: 'OpenAPM v0.2.0 (draft)', slug: 'specs/openapm-v020' },
 						{ label: 'Conformance', slug: 'specs/conformance' },
 					],
 				},

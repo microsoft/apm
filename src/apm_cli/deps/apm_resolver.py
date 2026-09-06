@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields, is_dataclass, replace
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
+from typing import TYPE_CHECKING, Literal, NoReturn, Optional, Protocol
 
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..models.apm_package import APMPackage, DependencyReference
@@ -500,8 +500,16 @@ class APMDependencyResolver:
         child_dep: DependencyReference,
     ) -> DependencyReference | None:
         """Expand eligible remote ``path:`` deps, otherwise fail closed."""
-        if not (child_dep.is_local and child_dep.local_path and self._is_remote_parent(parent_pkg)):
+        if not (child_dep.is_local and child_dep.local_path):
             return child_dep
+        kind = self._source_kind_for_dependency(parent_dep)
+        if kind == "local":
+            return child_dep
+        if kind is None:
+            self._reject_remote_parent_local_path(
+                child_dep, parent_pkg, "declaring dependency has no established source kind."
+            )
+            return None
         try:
             return self._expand_remote_parent_local_path(parent_dep, parent_pkg, child_dep)
         except PathTraversalError as exc:
@@ -641,6 +649,8 @@ class APMDependencyResolver:
                 tree = DependencyTree(root_package=empty_package)
                 return tree
 
+        # Root selection is explicit local context, not manifest-provided provenance.
+        root_package = replace(root_package, proven_source_kind="local")
         # Initialize the tree
         tree = DependencyTree(root_package=root_package)
 
@@ -1224,6 +1234,7 @@ class APMDependencyResolver:
                 validation.package,
                 downloaded_candidate,
                 had_existing_install,
+                dep_ref,
             )
 
         package_type, _ = detect_package_type(install_path)
@@ -1252,6 +1263,7 @@ class APMDependencyResolver:
                 validation.package,
                 downloaded_candidate,
                 had_existing_install,
+                dep_ref,
             )
 
         # Look for apm.yml in the install path
@@ -1273,6 +1285,7 @@ class APMDependencyResolver:
                     package,
                     downloaded_candidate,
                     had_existing_install,
+                    dep_ref,
                 )
             # No manifest found
             self._raise_downloaded_package_error(
@@ -1312,6 +1325,7 @@ class APMDependencyResolver:
             package,
             downloaded_candidate,
             had_existing_install,
+            dep_ref,
         )
 
     def _activate_validated_package(
@@ -1319,8 +1333,11 @@ class APMDependencyResolver:
         package: APMPackage,
         downloaded_candidate: Path | None,
         had_existing_install: bool,
+        dep_ref: DependencyReference,
     ) -> APMPackage:
         """Publish one validated candidate and remap its package paths."""
+        # from_apm_yml caches package objects; provenance belongs to this acquisition.
+        package = replace(package, proven_source_kind=self._source_kind_for_dependency(dep_ref))
         if downloaded_candidate is None or self._activation_callback is None:
             return package
         try:
@@ -1404,35 +1421,22 @@ class APMDependencyResolver:
         return live_path / relative
 
     @staticmethod
+    def _source_kind_for_dependency(
+        dep_ref: DependencyReference,
+    ) -> Literal["local", "git", "registry"] | None:
+        """Classify the actual acquisition route, never the repository spelling."""
+        if dep_ref.source == "registry":
+            return "registry"
+        if dep_ref.source not in {"git", "local"}:
+            return None
+        if dep_ref.is_local:
+            return "local" if dep_ref.local_path else None
+        return "git" if dep_ref.source == "git" else None
+
+    @staticmethod
     def _is_remote_parent(parent_pkg: APMPackage | None) -> bool:
-        """Return True if *parent_pkg* is a REMOTE package (i.e. fetched via
-        git URL or pinned by ref/path).
-
-        Used to gate ``local_path`` deps: only the root project and other
-        local packages may legitimately declare them. Remote packages
-        declaring a local_path is a path-confusion vector.
-
-        SECURITY NOTE: this is a heuristic on the ``source`` field. A
-        sufficiently adversarial remote could spoof a local-looking source.
-        The downstream containment check via ``ensure_path_within`` is the
-        actual security boundary; this gate just produces the user-facing
-        error early.
-        """
-        if parent_pkg is None or not parent_pkg.source:
-            return False
-        src = str(parent_pkg.source)
-        # Local deps get ``source = "_local/<name>"`` (see DependencyReference
-        # construction for is_local=True). Treat that prefix as definitively
-        # local even though it contains a slash.
-        if src.startswith("_local/"):
-            return False
-        # Remote sources look like URLs or owner/repo refs. Local sources
-        # are filesystem paths the user typed in their apm.yml.
-        return (
-            src.startswith(("http://", "https://", "git@", "ssh://", "git+"))
-            or "://" in src
-            or (src.count("/") >= 1 and not src.startswith((".", "/", "~")))
-        )
+        """Require the remote-path backstop for non-local or unknown parent origins."""
+        return parent_pkg is not None and parent_pkg.proven_source_kind != "local"
 
     @staticmethod
     def _compute_dep_source_path(

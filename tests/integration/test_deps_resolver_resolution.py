@@ -549,7 +549,12 @@ class TestResolverIsRemoteParent:
         from apm_cli.deps.apm_resolver import APMDependencyResolver
         from apm_cli.models.apm_package import APMPackage
 
-        pkg = APMPackage(name="local-pkg", version="1.0.0", source="_local/local-pkg")
+        pkg = APMPackage(
+            name="local-pkg",
+            version="1.0.0",
+            source="_local/local-pkg",
+            proven_source_kind="local",
+        )
         assert APMDependencyResolver._is_remote_parent(pkg) is False
 
     def test_https_url_source_is_remote(self) -> None:
@@ -577,7 +582,9 @@ class TestResolverIsRemoteParent:
         from apm_cli.deps.apm_resolver import APMDependencyResolver
         from apm_cli.models.apm_package import APMPackage
 
-        pkg = APMPackage(name="local", version="1.0.0", source="./path/to/pkg")
+        pkg = APMPackage(
+            name="local", version="1.0.0", source="./path/to/pkg", proven_source_kind="local"
+        )
         assert APMDependencyResolver._is_remote_parent(pkg) is False
 
 
