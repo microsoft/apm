@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.29.1] - 2026-09-06
 ### Fixed
 
-- CLI bootstrap and update checks retry once anonymously after a selected token's 401/non-rate-limit 403 only for canonical public APM metadata; metadata redirects require `APM_RELEASE_METADATA_URL` at the final JSON endpoint or a `VERSION` pin. (#2843)
+- Public CLI release discovery can recover from a rejected environment token: one anonymous retry after a selected token's 401/non-rate-limit 403 only for canonical public APM metadata; metadata redirects require `APM_RELEASE_METADATA_URL` at the final JSON endpoint or a `VERSION` pin. (#2843)
 - `apm install` now keeps transitive plugin MCP launchers usable after
   publication and cached replay by resolving plugin-root placeholders from the
   published package directory. Lockfile writes and self-defined MCP
