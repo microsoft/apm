@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -36,6 +37,9 @@ def installation(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[Path, 
         "find",
         "id",
         "test",
+        "grep",
+        "sort",
+        "head",
     ):
         executable = shutil.which(name, path="/usr/bin:/bin")
         assert executable is not None
@@ -67,6 +71,7 @@ def _run(
     *,
     defaults: bool = False,
     pip_fallback: bool = False,
+    failure_stage: Literal["binary", "glibc"] | None = None,
     **overrides: str,
 ) -> subprocess.CompletedProcess[str]:
     """Run unchanged configuration and installation code from this checkout."""
@@ -76,17 +81,29 @@ def _run(
     if defaults:
         body = next(line for line in source.splitlines() if line.startswith('APM_LIB_DIR="'))
         body += '\nprintf "%s\\n%s\\n" "$APM_INSTALL_DIR" "$APM_LIB_DIR"\n'
-    elif pip_fallback:
-        body = source.split("# Function to attempt pip installation\n", 1)[1].split(
-            "# Early glibc compatibility check", 1
-        )[0]
+    elif pip_fallback or failure_stage is not None:
+        body = source.split("# Function to check Python availability and version\n", 1)[1]
+        body = body.split("# Early glibc compatibility check", 1)[0]
+        if failure_stage == "binary":
+            body += (
+                "\nBINARY_TEST_EXIT_CODE=1\nBINARY_TEST_OUTPUT='fixture binary failure'\n"
+                "GLIBC_VERSION=''\nPLATFORM=darwin\n"
+            )
+            failure_branch = source.index("if [ $BINARY_TEST_EXIT_CODE -eq 0 ]; then")
+            body += source[failure_branch:].split("# Resolve before either installation path", 1)[0]
+        elif failure_stage == "glibc":
+            body += "\nPLATFORM=linux\n"
+            body += source.split("# Early glibc compatibility check for Linux\n", 1)[1].split(
+                "# Detect if running in a container", 1
+            )[0]
+        else:
+            body += "\ntry_pip_installation\n"
         # Exercise the same fallback consumer, with its historical path arguments
         # redirected to fixture paths rather than inspecting the host's installs.
         body = body.replace(
             "apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm",
             'apm_resolve_install_paths "$HISTORICAL_APM"',
         )
-        body += "\ntry_pip_installation\n"
         overrides["HISTORICAL_APM"] = str(root / "usr/local/bin/apm")
     else:
         body = 'apm_resolve_install_paths "$1" "$2" "$3"\n'
@@ -212,6 +229,37 @@ def test_fresh_install_uses_defaults(installation: tuple[Path, dict[str, str]]) 
     assert (root / "home/.local/bin/apm").resolve() == root / "home/.local/lib/apm/apm"
     assert not (root / "sudo.log").exists()
     assert not list((root / "home").glob(".*rc"))
+
+
+@pytest.mark.parametrize("on_path", [False, True])
+@pytest.mark.parametrize("exit_code", [0, 67])
+def test_copied_launcher_is_checked_before_completion(
+    installation: tuple[Path, dict[str, str]], on_path: bool, exit_code: int
+) -> None:
+    """Both PATH branches must verify the installed launcher and explain failure."""
+    root, env = installation
+    binary = Path(env["TMP_DIR"]) / env["EXTRACTED_DIR"] / "apm"
+    binary.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$0" >> "$SMOKE_LOG"\n'
+        f'printf "apm fixture\\n"\nexit {exit_code}\n',
+        encoding="ascii",
+    )
+    bindir = root / "home/.local/bin"
+    log = root / "smoke.log"
+    result = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}" if on_path else env["PATH"],
+        SMOKE_LOG=str(log),
+    )
+    assert log.is_file()
+    assert log.read_text(encoding="ascii").splitlines() == [str(bindir / "apm")]
+    assert result.returncode == (1 if exit_code else 0)
+    if exit_code:
+        assert "failed its --version check" in result.stderr
+        assert "same destinations" in result.stderr
+        assert "Installation complete!" not in result.stdout
+    else:
+        assert "Installation complete!" in result.stdout
 
 
 @pytest.mark.parametrize("prefix", ["prior", "usr/local", "custom path"])
@@ -461,6 +509,51 @@ def test_existing_install_cannot_fall_back_to_pip(
     assert result.returncode == 1
     assert "Pip fallback cannot preserve" in result.stderr
     assert (lib / "VERSION").read_text(encoding="ascii") == "old\n"
+
+
+@pytest.mark.parametrize("kind", ["existing", "custom", "fresh"])
+@pytest.mark.parametrize("python_available", [False, True])
+@pytest.mark.parametrize("failure_stage", ["binary", "glibc"])
+def test_binary_failure_advice_preserves_installation_ownership(
+    installation: tuple[Path, dict[str, str]],
+    kind: str,
+    python_available: bool,
+    failure_stage: Literal["binary", "glibc"],
+) -> None:
+    """The real failure caller must not recommend a second install after refusal."""
+    root, _ = installation
+    if failure_stage == "glibc":
+        ldd = root / "tools/ldd"
+        ldd.write_text("#!/bin/sh\nprintf 'ldd fixture 2.17\\n'\n", encoding="ascii")
+        ldd.chmod(0o755)
+    if python_available:
+        python = root / "tools/python3"
+        python.write_text("#!/bin/sh\nprintf '3.13\\n'\n", encoding="ascii")
+        python.chmod(0o755)
+    options = {}
+    if kind == "existing":
+        _prior(root, "usr/local")
+    elif kind == "custom":
+        options["APM_INSTALL_DIR"] = str(root / "custom/bin")
+    result = _run(installation, failure_stage=failure_stage, **options)
+    continues_to_download = kind == "fresh" and python_available and failure_stage == "glibc"
+    assert result.returncode == (0 if continues_to_download else 1)
+    if kind == "fresh":
+        if continues_to_download:
+            assert "pip is not available" in result.stdout
+        else:
+            assert (
+                "pip3 install --user apm-cli" in result.stdout
+                or "pip install --user apm-cli" in result.stdout
+            )
+    else:
+        assert "Pip fallback cannot preserve" in result.stderr
+        assert "pip3 install --user apm-cli" not in result.stdout
+        assert "pip install --user apm-cli" not in result.stdout
+        assert "Manual installation options" not in result.stdout
+    if kind == "existing":
+        assert (root / "usr/local/lib/apm/VERSION").read_text(encoding="ascii") == "old\n"
+    assert not (root / "home/.local").exists()
 
 
 @pytest.mark.skipif(

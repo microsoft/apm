@@ -346,7 +346,9 @@ try_pip_installation() {
     apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm
     if [ -n "$_apm_existing_binary" ] || [ -n "$_APM_INSTALL_DIR_SET" ] ||
         [ -n "$_APM_LIB_DIR_SET" ] || [ "$(id -u)" -eq 0 ]; then
-        echo "Pip fallback cannot preserve these installation destinations. Update with the original installer, or uninstall the existing installation before choosing pip." >&2
+        apm_install_error "Pip fallback cannot preserve these installation destinations. Update with the original installer, or uninstall the existing installation before choosing pip."
+    fi
+    if ! check_python_requirements; then
         return 1
     fi
     echo -e "${BLUE}Attempting installation via pip...${NC}"
@@ -420,14 +422,9 @@ if [ "$PLATFORM" = "linux" ]; then
             echo "The prebuilt binary will not work on your system."
             echo ""
             
-            # Check if Python/pip are available
-            if check_python_requirements; then
-                echo -e "${BLUE}Python 3.9+ detected. Installing via pip instead...${NC}"
-                echo ""
-                if try_pip_installation; then
-                    exit 0
-                fi
-            else
+            if try_pip_installation; then
+                exit 0
+            elif ! check_python_requirements; then
                 echo -e "${RED}Python 3.9+ is not available on this system.${NC}"
                 echo ""
                 echo "To install APM, you need either:"
@@ -737,10 +734,8 @@ else
     echo -e "${BLUE}Attempting automatic fallback to pip installation...${NC}"
     echo ""
     
-    if check_python_requirements; then
-        if try_pip_installation; then
-            exit 0
-        fi
+    if try_pip_installation; then
+        exit 0
     fi
     
     # If pip fallback failed, provide manual instructions
@@ -904,10 +899,12 @@ touch "$APM_LIB_DIR/.apm-installed"
 ln -sf "$APM_LIB_DIR/$BINARY_NAME" "$APM_INSTALL_DIR/$BINARY_NAME"
 
 # Verify installation
+if ! INSTALLED_VERSION=$("$APM_INSTALL_DIR/$BINARY_NAME" --version); then
+    apm_install_error "Installed APM at $APM_INSTALL_DIR/$BINARY_NAME failed its --version check. Retry with the same destinations or ask its owner to repair this installation."
+fi
 _apm_on_path="$(command -v apm || true)"
 if [ -n "$_apm_on_path" ] &&
     [ "$(apm_real_path "$_apm_on_path")" = "$(apm_real_path "$APM_LIB_DIR/$BINARY_NAME")" ]; then
-    INSTALLED_VERSION=$("$APM_INSTALL_DIR/$BINARY_NAME" --version)
     echo -e "${GREEN}[+] APM installed successfully!${NC}"
     echo -e "${BLUE}Version: $INSTALLED_VERSION${NC}"
     echo -e "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"

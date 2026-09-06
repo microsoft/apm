@@ -60,7 +60,9 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 
 Marked or legacy PyInstaller bundles keep their launcher/bundle destinations on update. Conflicts, unknown/package-managed installations, symlinked bundles, or ownership/permission failures stop installation, without `sudo` or a second copy.
 
-Ask the original administrator/package manager to update system/custom installs. To migrate, uninstall through that owner first. Pip fallback requires a fresh ordinary-user install with neither destination variable set.
+After installing the bundle and launcher, `install.sh` runs the launcher at its destination with `--version` before reporting completion, even when it is off `PATH`; failure stops with guidance to retry the same destinations or ask the installation owner to repair it.
+
+Ask the original administrator/package manager to update system/custom installs. To migrate, uninstall through that owner first. Pip fallback requires a fresh ordinary-user install with neither destination variable set; existing/custom installs receive terminal owner guidance even when Python is unavailable.
 
 Root requires both `APM_INSTALL_DIR` and `APM_LIB_DIR`. See the canonical [ownership rules and reviewed-script administrator invocation](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#unix-install-ownership-and-migration).
 

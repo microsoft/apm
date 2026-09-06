@@ -113,9 +113,11 @@ jobs:
 
 `install.sh` checks `PATH`, `$APM_INSTALL_DIR/apm`, `$APM_LIB_DIR/apm`, user-default destinations, historical `/usr/local/bin/apm`, `/opt/homebrew/bin/apm`, and `/usr/local/lib/apm/apm`, plus self-update's running binary. Recognized bundles contain `apm` plus `.apm-installed` or legacy PyInstaller `VERSION` and `_internal`. Updates preserve their launcher/bundle destinations.
 
+After installing the bundle and launcher, `install.sh` runs the launcher at its destination with `--version` before reporting completion, even when it is off `PATH`; failure stops with guidance to retry the same destinations or ask the installation owner to repair it.
+
 Conflicting installations or redirection, inaccessible discovery paths, unknown/package-managed launchers, symlinked `APM_LIB_DIR`, and bundles not owned by the caller or with any unwritable/unsearchable directory fail with repair guidance.
 
-**Migration:** ask the original administrator or package manager to update system/custom installs. To migrate deliberately, uninstall through that owner first, then install fresh. Destination overrides never migrate an install. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set; existing/custom installs cannot switch to pip.
+**Migration:** ask the original administrator or package manager to update system/custom installs. To migrate deliberately, uninstall through that owner first, then install fresh. Destination overrides never migrate an install. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set; existing/custom installs receive terminal owner guidance even when Python is unavailable.
 
 Root requires both destination variables. After saving and reviewing `install.sh`, invoke it explicitly as administrator:
 
