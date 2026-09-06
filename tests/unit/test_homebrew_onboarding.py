@@ -68,6 +68,25 @@ def test_package_manager_failure_does_not_install_a_second_copy(tmp_path: Path) 
     assert "APM installed successfully!" not in result.stdout.splitlines()
 
 
+def test_no_package_manager_found_is_a_hard_failure(tmp_path: Path) -> None:
+    """A missing package manager must not be reported as a successful install."""
+    result = subprocess.run(
+        [BASH, str(ROOT / "scripts/install.sh")],
+        env={"HOME": str(tmp_path), "PATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "Error: No supported package manager found (brew, uv, or pip)."
+        in result.stdout.splitlines()
+    )
+    assert "APM installed successfully!" not in result.stdout.splitlines()
+
+
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
 def test_standalone_failure_recommends_homebrew_core(tmp_path: Path, platform: str) -> None:
     """Run the actual binary-failure branch, with no downloader or installer."""
