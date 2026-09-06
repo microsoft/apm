@@ -262,12 +262,23 @@ def test_symlinked_deploy_root_never_scans_outside_project(
 
     audit = _run(
         lifecycle,
-        _CI_AUDIT,
+        (*_CI_AUDIT, "--format", "json"),
         expected=1,
         scenario_id="symlinked-deploy-root-contained",
     )
     assert _UNRECORDED not in audit.stdout
-    assert audit.stderr == "Error: Refusing deployment through symlinked target root: .claude\n"
+    report = json.loads(audit.stdout)
+    failures = [check for check in report["checks"] if not check["passed"]]
+    assert report["passed"] is False
+    assert failures == [
+        {
+            "name": "target-resolution",
+            "passed": False,
+            "message": "Refusing deployment through symlinked target root: .claude",
+            "details": [],
+        }
+    ]
+    assert audit.stderr == ""
     assert payload.read_bytes() == _BIDI_BYTES
 
 

@@ -170,9 +170,10 @@ def cli(ctx, verbose: bool) -> None:
     warnings.filterwarnings("ignore", category=AgentsTargetDeprecationWarning)
 
     # Check for updates only for known commands; skip on invalid input to fail fast.
+    # Read-only audit also excludes the update check's cache/configuration writes.
     if (
         not ctx.resilient_parsing
-        and ctx.invoked_subcommand is not None
+        and ctx.invoked_subcommand not in (None, "audit")
         and ctx.command.get_command(ctx, ctx.invoked_subcommand) is not None
     ):
         _check_and_notify_updates()

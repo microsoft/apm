@@ -1251,10 +1251,14 @@ current target intent, independently of deployment ownership records. It MUST
 NOT use those records to recover an earlier unsaved `install --target`
 override or to suppress an expected file whose ownership is missing. Changing
 current intent MUST NOT remove existing claimed files under a formerly
-selected target from drift comparison; directory claims retain their existing
-membership semantics and containment boundaries. Claims widen installed-file
-comparison only, not expected output. An unavailable recorded native root
-MUST produce a failing comparison result rather than silently exclude its claims.
+selected target from drift comparison. For installed-file comparison, a
+directory claim covers its contained descendant files. A file-shaped claim,
+including one identified by a recorded hash, does not become a directory-prefix
+claim merely because its live path becomes a directory. Membership remains
+within the applicable deployment-root containment boundary. Claims widen
+installed-file comparison only, not expected output. An unavailable recorded
+native root MUST produce a failing comparison result rather than silently
+exclude its claims.
 
 Replay and comparison MUST NOT modify the live manifest, lockfile, saved
 configuration, or deployed bytes, including native databases and sidecars.
@@ -1263,6 +1267,15 @@ report an unsupported-replay failure before invoking its live writer.
 Successful target selection alone does not imply replay support. This does
 not authorize repair operations or weaken [req-sc-001](#req-sc-001)
 content-integrity checks or [req-pl-016](#req-pl-016) invalid-owner failures.
+
+**Local-content composition (informative).** Replay under
+[req-lk-023](#req-lk-023) derives expected output from content admitted under
+[req-mf-016](#req-mf-016) clause (d), then applies the
+[req-sc-015](#req-sc-015) source plan to that admitted content. An internal
+resource link correctly dereferenced into a regular file during acquisition
+is not obsolete merely because its original representation was a symlink.
+This does not authorize following symlinks in the target source plan or
+relaxing archive-link rejection.
 
 **Result and exit scope (informative).** A failing target-resolution,
 replay, or comparison result is not a successful empty replay, even when
@@ -1408,6 +1421,16 @@ working tree at `resolved_commit` and MUST fail closed when the
 recomputed value differs from the recorded value. The diagnostic
 MUST name the entry, the expected envelope, and the observed
 envelope.
+
+> **Retained interoperability limits (informative).** The canonical Git-tree
+> definition does not explicitly settle symlink blob bytes versus dereferenced
+> contents, gitlinks/submodules with mode `160000`, or raw Git blobs versus
+> CRLF/LFS-filtered checkout bytes. This corrective revision supplies no new
+> cross-platform canonical-tree evidence resolving those boundaries.
+> [req-lk-015](#req-lk-015) and the digest construction above remain unchanged;
+> these limitations are not exemptions. Trusted-local dereferencing semantics
+> are not imported into Git hashing. A canonical-byte clarification and
+> cross-platform fixtures require separately scoped work.
 
 > **Editorial note.** `resolved_commit` is a SHA-1 identifier. The
 > git project's SHA-1-to-SHA-256 object-format transition is
@@ -2502,7 +2525,10 @@ signal MAY substitute for, or augment, the registered predicate.
 A target registered without a detection predicate
 MUST NOT be auto-detected and MUST be excluded from the expansion of
 `all`; such an **explicit-only** target MUST be selected explicitly
-via `--target <name>` or via the manifest's `target:` field. In this revision
+via `--target <name>`, via the manifest's `target:` field, or, for audit replay,
+via a valid saved user target configuration selected under
+[req-lk-023](#req-lk-023). That saved audit selection constitutes explicit
+selection, not auto-detection. In this revision
 the explicit-only targets are `agent-skills` and `antigravity`. When
 no detection signal fires, the consumer MAY fall back to a `minimal`
 profile that emits `AGENTS.md` only.
@@ -3792,7 +3818,7 @@ the assessed specification revision.
 ## Citing this specification
 
 External documents, tooling, and conformance statements MUST cite
-this specification using a stable URL. Three shortlinks are
+this specification using a stable URL. The following shortlinks are
 prepared under the docs site; draft availability does not imply ratification:
 
 | URL                                                  | Resolves to                  | Use when |
@@ -3808,7 +3834,7 @@ A) are themselves identified by the `$id` URL embedded in each
 schema. Toolchains MUST pin to the `$id` URL verbatim; the schema
 files are byte-immortal at those URLs for the lifetime of this
 version. The exact v0.2.0 content route is `/specs/openapm-v020/`.
-Any future patch needs a distinct artifact and exact route; it must not
+Any future patch needs a distinct artifact and exact route; it MUST NOT
 replace this artifact at that route. The existing `latest` and `/spec`
 aliases are unchanged during preparation and may advance only at actual
 ratification.
@@ -3847,6 +3873,17 @@ without normative effect.
 Where a JSON Schema and the prose of this specification disagree,
 the **prose** is authoritative and the schema is treated as an
 errata candidate.
+
+**Retained schema limitations (informative).** The manifest schema has a
+known source-key discriminator limitation: it rejects `git` entries with a
+`path` modifier and `id` entries with an explicit `registry` modifier.
+Those forms remain governed by [Section 4.3.2](#432-object-form). Separately,
+the schema types `policy.hash` as a string without validating its digest
+envelope; the applicable requirements in [req-mf-018](#req-mf-018) and
+[req-lk-016](#req-lk-016) remain in force. Schema validation
+alone is not a complete acceptance or conformance oracle for these cases.
+This note does not waive semantic validation or change any preserved schema
+file or identity; schema repairs require separately versioned artifacts.
 
 ---
 

@@ -205,6 +205,8 @@ class GitHubPackageDownloader:
         transport_selector: TransportSelector | None = None,
         protocol_pref: ProtocolPreference | None = None,
         allow_fallback: bool | None = None,
+        *,
+        create_config: bool = True,
     ):
         """Initialize the GitHub package downloader.
 
@@ -221,6 +223,8 @@ class GitHubPackageDownloader:
                 ``APM_ALLOW_PROTOCOL_FALLBACK`` env var, then
                 ``allow-protocol-fallback`` in ``~/.apm/config.json``,
                 then ``False``.
+            create_config: Whether transport preference reads may initialize
+                missing user configuration. Read-only replay passes False.
         """
         self.auth_resolver = auth_resolver or AuthResolver()
         self.token_manager = self.auth_resolver._token_manager  # Backward compat
@@ -235,7 +239,7 @@ class GitHubPackageDownloader:
             from ..config import get_apm_protocol_pref as _get_pref
             from .transport_selection import ProtocolPreference
 
-            _pref_str = _get_pref()
+            _pref_str = _get_pref(create_config=create_config)
             self._protocol_pref = ProtocolPreference.from_str(_pref_str)
         if allow_fallback is not None:
             self._allow_fallback = allow_fallback
@@ -243,7 +247,7 @@ class GitHubPackageDownloader:
             # Config-aware helper (env > apm config > False).
             from ..config import get_apm_allow_protocol_fallback as _get_fallback
 
-            self._allow_fallback = _get_fallback()
+            self._allow_fallback = _get_fallback(create_config=create_config)
         # Dedup set for the issue #786 cross-protocol port warning: one install
         # run calls _clone_with_fallback multiple times per dep (ref-resolution
         # clone, then the actual dep clone). We want the warning exactly once

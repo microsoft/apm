@@ -191,6 +191,18 @@ def test_consumer_restricts_policy_hash_algorithm_to_strong_set():
     assert set(enum) == {"sha256", "sha384", "sha512"}
 
 
+@pytest.mark.req("req-mf-018")
+@pytest.mark.parametrize("digest", ["not-a-digest", "sha256:" + "a" * 63])
+def test_retained_schema_accepts_invalid_policy_hash_without_semantic_evidence(
+    digest: str,
+) -> None:
+    """Structural acceptance is a schema limitation, not consumer hash enforcement."""
+    document = load_yaml_fixture("manifest", "valid-minimal.yml")
+    document["policy"] = {"hash_algorithm": "sha256", "hash": digest}
+    validate_against("manifest-v0.1.schema.json", document)
+    assert_spec_contains('id="req-mf-018"', 'id="req-lk-016"', "`policy.hash`")
+
+
 @pytest.mark.req("req-mf-019")
 def test_consumer_supports_default_host_field():
     schema = load_schema("manifest-v0.1.schema.json")

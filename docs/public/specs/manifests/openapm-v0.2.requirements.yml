@@ -229,7 +229,7 @@ requirements:
     keyword: MUST
     section: "5.5"
     conformance_class: consumer
-    notes: "Current manifest then selected saved configuration then detection determines source-derived replay; prior claims widen comparison only. Live project/user configuration, deployment bytes, native databases and sidecars stay unchanged. Unsupported native replay fails before its writer. test_audit_current_intent_contract.py carries 29 genuine replay/current-intent cases; its separate invalid-owner case binds req-pl-016."
+    notes: "Current manifest then selected saved configuration then detection determines source-derived replay; prior claims widen comparison only. Live project/user configuration, deployment bytes, native databases and sidecars stay unchanged. Unsupported native replay fails before its writer. test_audit_current_intent_contract.py preserves the original 29 replay/current-intent cases and adds explicit-only selection, historical native ownership refusal, and narrowly expected-failing internal-link replay companions; its separate invalid-owner case binds req-pl-016."
   - id: req-pl-001
     keyword: MUST
     section: "6.1"

@@ -572,7 +572,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         from apm_cli.deps.registry.resolver import RegistryPackageResolver
         from apm_cli.models.apm_package import APMPackage
 
-        downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+        downloader = GitHubPackageDownloader(auth_resolver=AuthResolver(), create_config=False)
         apm_yml = project_root / "apm.yml"
         if apm_yml.exists():
             manifest = APMPackage.from_apm_yml(apm_yml, create_config=False)

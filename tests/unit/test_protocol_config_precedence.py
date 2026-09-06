@@ -6,10 +6,68 @@ they focus exclusively on the precedence resolution so each layer of the chain
 can be validated in isolation.
 """
 
+import json
 import os
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+
+@pytest.mark.parametrize(
+    ("create_config", "stored", "use_env", "expected_pref", "expected_fallback"),
+    [
+        (False, False, False, None, False),
+        (True, False, False, None, False),
+        (False, True, False, "ssh", True),
+        (False, True, True, "https", False),
+    ],
+    ids=["read-only-defaults", "install-bootstrap", "read-only-stored", "read-only-env"],
+)
+def test_downloader_config_bootstrap_preserves_transport_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    create_config: bool,
+    stored: bool,
+    use_env: bool,
+    expected_pref: str | None,
+    expected_fallback: bool,
+) -> None:
+    """Skipping initialization changes no configured or environment transport choice."""
+    from apm_cli import config
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.deps.transport_selection import ProtocolPreference
+
+    config_path = tmp_path / ".apm/config.json"
+    monkeypatch.setattr(config, "CONFIG_DIR", str(config_path.parent))
+    monkeypatch.setattr(config, "CONFIG_FILE", str(config_path))
+    monkeypatch.setattr(config, "_config_cache", None)
+    for key in ("APM_GIT_PROTOCOL", "APM_ALLOW_PROTOCOL_FALLBACK"):
+        monkeypatch.delenv(key, raising=False)
+    if stored:
+        config_path.parent.mkdir()
+        config_path.write_text(
+            json.dumps({"prefer_ssh": True, "allow_protocol_fallback": True}), encoding="utf-8"
+        )
+    if use_env:
+        monkeypatch.setenv("APM_GIT_PROTOCOL", "https")
+        monkeypatch.setenv("APM_ALLOW_PROTOCOL_FALLBACK", "0")
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    if create_config:
+        downloader = GitHubPackageDownloader(auth_resolver=MagicMock())
+    else:
+        downloader = GitHubPackageDownloader(auth_resolver=MagicMock(), create_config=False)
+
+    assert downloader._protocol_pref is ProtocolPreference.from_str(expected_pref)
+    assert downloader._allow_fallback is expected_fallback
+    if create_config:
+        assert json.loads(config_path.read_text(encoding="utf-8")) == {"default_client": "vscode"}
+    else:
+        assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
+
 
 # ---------------------------------------------------------------------------
 # Helpers

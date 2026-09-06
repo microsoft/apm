@@ -228,6 +228,8 @@ set target` > existing directory detection. A selected malformed saved target
 fails resolution; a valid manifest target overrides irrelevant invalid saved
 configuration. Audit does not recover unsaved historical `install --target`
 overrides or create missing user configuration.
+Audit skips startup update checks and their cache writes; use
+`apm self-update --check` separately.
 
 Saved target names do not guarantee scratch replay support. Native nonfilesystem
 targets without an isolated filesystem backend (currently `copilot-app`) fail
@@ -237,6 +239,10 @@ old native claims remain comparison-only, and unavailable former roots fail
 closed. Missing ownership never removes source-derived expectations. See the
 [audit reference](https://microsoft.github.io/apm/reference/cli/audit/#drift-detection)
 for target prerequisites and replay boundaries.
+
+Known replay limitation: an internal local resource link copied as a regular
+file during install can be falsely reported as `orphaned` by unchanged CI audit.
+Escaping resource links remain rejected; this is not a containment exception.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|

@@ -25,6 +25,12 @@ The native Cowork audit controls use a controlled pre-existing standalone-skill 
 
 A selected native runtime without an isolated replay backend is reported as unsupported before its live writer. No new native database scratch backend or hosted-runtime evidence is supplied by this inventory.
 
+A source-only coupled probe shows that local acquisition dereferences an admitted internal resource symlink, but inherited replay plans from the original source representation and can falsely report the deployed regular file as orphaned during unchanged CI audit. The narrowly expected-failing regression separately verifies content integrity and unchanged live state; an escaping-link refusal control remains unsuppressed. This is a replay limitation, not evidence of an escape, external-file read or security bypass.
+
+The retained manifest schema rejects git entries with a path modifier and id entries with an explicit registry modifier. It also accepts malformed or wrong-length policy.hash strings structurally. Schema acceptance is not evidence of Consumer digest-envelope enforcement under req-mf-018 or req-lk-016.
+
+Inherited Git-tree boundaries for symlink blobs, gitlinks/submodules and CRLF/LFS-filtered checkout bytes lack cross-platform execution evidence in this assessment. The req-lk-015 obligation and digest construction remain unchanged.
+
 ## Consumer user-scope disclosure
 
 - Manifest: `~/.apm/apm.yml`
@@ -70,7 +76,7 @@ A selected native runtime without an isolated replay backend is reported as unsu
 | [req-lk-020](docs/src/content/docs/specs/openapm-v0.2.md#req-lk-020) | MUST | 5.2 | consumer | active | 3 | - |
 | [req-lk-021](docs/src/content/docs/specs/openapm-v0.2.md#req-lk-021) | MUST | 5.2 | consumer | active | 2 | - |
 | [req-lk-022](docs/src/content/docs/specs/openapm-v0.2.md#req-lk-022) | MUST | 5.2 | consumer | active | 4 | - |
-| [req-lk-023](docs/src/content/docs/specs/openapm-v0.2.md#req-lk-023) | MUST | 5.5 | consumer | active | 29 | - |
+| [req-lk-023](docs/src/content/docs/specs/openapm-v0.2.md#req-lk-023) | MUST | 5.5 | consumer | active | 34 | - |
 | [req-mf-001](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-001) | MUST | 4.1 | producer | active | 1 | - |
 | [req-mf-002](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-002) | MUST | 4.1 | producer | active | 1 | - |
 | [req-mf-003](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-003) | MUST | 4.1 | producer | active | 1 | - |
@@ -86,9 +92,9 @@ A selected native runtime without an isolated replay backend is reported as unsu
 | [req-mf-013](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-013) | MUST | 4.5 | consumer | active | 1 | - |
 | [req-mf-014](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-014) | MUST | 4.2.3 | producer | active | 1 | - |
 | [req-mf-015](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-015) | MUST | 4.2.3 | producer | active | 1 | - |
-| [req-mf-016](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-016) | MUST | 4.3.5 | consumer | active | 46 | - |
+| [req-mf-016](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-016) | MUST | 4.3.5 | consumer | active | 47 | - |
 | [req-mf-017](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-017) | MUST | 4.7 | producer | active | 1 | - |
-| [req-mf-018](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-018) | MUST | 4.6.1 | consumer | active | 1 | - |
+| [req-mf-018](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-018) | MUST | 4.6.1 | consumer | active | 3 | - |
 | [req-mf-019](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-019) | MUST | 4.2.4 | consumer | active | 1 | - |
 | [req-mf-020](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-020) | MUST | 4.1 | consumer | active | 1 | - |
 | [req-mf-021](docs/src/content/docs/specs/openapm-v0.2.md#req-mf-021) | MUST | 4.8 | producer | active | 1 | - |

@@ -52,6 +52,20 @@ ASSESSMENT_LIMITATIONS = [
     "A selected native runtime without an isolated replay backend is reported as "
     "unsupported before its live writer. No new native database scratch backend "
     "or hosted-runtime evidence is supplied by this inventory.",
+    "A source-only coupled probe shows that local acquisition dereferences an admitted "
+    "internal resource symlink, but inherited replay plans from the original source "
+    "representation and can falsely report the deployed regular file as orphaned "
+    "during unchanged CI audit. The narrowly expected-failing regression separately "
+    "verifies content integrity and unchanged live state; an escaping-link refusal "
+    "control remains unsuppressed. This is a replay limitation, not evidence of an "
+    "escape, external-file read or security bypass.",
+    "The retained manifest schema rejects git entries with a path modifier and id "
+    "entries with an explicit registry modifier. It also accepts malformed or "
+    "wrong-length policy.hash strings structurally. Schema acceptance is not evidence "
+    "of Consumer digest-envelope enforcement under req-mf-018 or req-lk-016.",
+    "Inherited Git-tree boundaries for symlink blobs, gitlinks/submodules and "
+    "CRLF/LFS-filtered checkout bytes lack cross-platform execution evidence in this "
+    "assessment. The req-lk-015 obligation and digest construction remain unchanged.",
 ]
 
 

@@ -257,3 +257,48 @@ def test_configured_grok_cloud_user_scope_audit(tmp_path: Path, apm_binary_path:
     before_home = ArtifactSnapshot.capture(scenario.isolated.home)
     assert user.audit()["passed"] is True
     assert_unchanged(before_home, ArtifactSnapshot.capture(scenario.isolated.home))
+
+
+@pytest.mark.parametrize("failed_replay", [False, True], ids=["clean", "unsupported-native"])
+@pytest.mark.parametrize("cold_cache", [False, True], ids=["warm", "cold"])
+def test_audit_startup_leaves_fresh_home_unchanged_outside_test_mode(
+    tmp_path: Path, apm_binary_path: Path, failed_replay: bool, cold_cache: bool
+) -> None:
+    """The real entry point stays read-only without test-only update suppression."""
+    scenario = _install_grok(tmp_path, apm_binary_path)
+    manifest_path = scenario.project / "apm.yml"
+    manifest = load_yaml(manifest_path)
+    manifest["targets"] = ["grok-build"]
+    dump_yaml(manifest, manifest_path)
+    (scenario.isolated.config_root / "config.json").unlink()
+    if cold_cache:
+        shutil.rmtree(scenario.project / "apm_modules")
+    if failed_replay:
+        lock_path = scenario.project / "apm.lock.yaml"
+        document = load_yaml(lock_path)
+        document["dependencies"][0]["deployed_files"].append(
+            "copilot-app-db://workflows/audit-startup-fixture"
+        )
+        dump_yaml(document, lock_path)
+
+    environment = scenario.isolated.subprocess_env()
+    environment.pop("PYTEST_CURRENT_TEST", None)
+    environment.pop("APM_E2E_TESTS", None)
+    before_project = ArtifactSnapshot.capture(scenario.project)
+    before_home = ArtifactSnapshot.capture(scenario.isolated.home)
+    result = scenario.runner.run(
+        _AUDIT_ARGS,
+        scenario_id="audit-without-test-mode",
+        cwd=scenario.project,
+        env=environment,
+    )
+    assert result.returncode == int(failed_replay), result.stdout + result.stderr
+    checks = {row["name"]: row for row in json.loads(result.stdout)["checks"]}
+    assert checks["content-integrity"]["passed"] is True
+    if failed_replay:
+        assert checks["drift"]["passed"] is False
+        assert "no isolated filesystem scratch replay backend" in checks["drift"]["message"]
+    else:
+        assert all(check["passed"] for check in checks.values())
+    assert_unchanged(before_project, ArtifactSnapshot.capture(scenario.project))
+    assert_unchanged(before_home, ArtifactSnapshot.capture(scenario.isolated.home))

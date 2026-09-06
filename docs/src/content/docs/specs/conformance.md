@@ -38,4 +38,18 @@ Current local-source cases assess the corrective req-mf-016 only. They do not pr
 
 The audit cases bind current target intent and read-only replay to req-lk-023. They do not erase inherited integrity requirements: the CLI's bare content audit uses source-derived drift, while its stored-hash and full-SHA consistency baselines run in CI/conformance audit. The unqualified audit obligation in req-lk-017 remains an explicit bare-mode conformance limitation. Native Cowork cases use pre-existing fixture state, not a successful native install round trip.
 
+One coupled source-level case is a strict expected failure: local installation
+correctly dereferences an internal resource link, but unchanged CI audit can
+report that deployed regular file as orphaned. The case still checks content
+integrity and unchanged project/HOME state; escaping links have a separate,
+unsuppressed refusal control. This limitation is not a conformance pass or a
+symlink-containment exception.
+
+The retained manifest schema is also incomplete as an acceptance oracle: it
+rejects some source-plus-modifier forms and structurally accepts invalid
+`policy.hash` strings. Those schema probes do not prove runtime digest
+enforcement. Git symlink, submodule and checkout-filter hashing boundaries lack
+cross-platform execution evidence here. The normative obligations remain intact;
+the generated inventory lists these limitations rather than waiving them.
+
 For the broader drift-detection story (how the spec authors prevent the spec from rotting relative to the only implementation), see [`CONTRIBUTING.md` -- Spec amendment workflow](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#spec-amendment-workflow).
