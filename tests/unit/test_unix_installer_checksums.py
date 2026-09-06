@@ -94,7 +94,8 @@ def _run_installer(
             encoding="ascii",
         )
         wrapper.chmod(0o755)
-    for tool in ("grep", "sed", "awk", "tr", "sort", "head", "dirname", "readlink"):
+    # GNU tar spawns gzip; BSD tar decompresses internally.
+    for tool in ("grep", "sed", "awk", "tr", "sort", "head", "dirname", "readlink", "gzip"):
         native = shutil.which(tool)
         assert native is not None, tool
         (tmp_path / "bin" / tool).symlink_to(native)
