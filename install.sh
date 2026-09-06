@@ -326,14 +326,14 @@ check_python_requirements() {
         PYTHON_CMD="python"
     fi
     
-    # Check Python version (need 3.9+)
+    # Check Python version (need 3.10+)
     PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
     if [ -z "$PYTHON_VERSION" ]; then
         return 1
     fi
     
-    # Compare version (need >= 3.9)
-    REQUIRED_VERSION="3.9"
+    # Compare version (need >= 3.10)
+    REQUIRED_VERSION="3.10"
     if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$PYTHON_VERSION" | sort -V | head -n1)" = "$REQUIRED_VERSION" ]; then
         return 0  # Python version is sufficient
     else
@@ -406,6 +406,9 @@ try_pip_installation() {
     fi
 }
 
+# Reject invalid requests before compatibility checks or external work.
+apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm
+
 # Early glibc compatibility check for Linux
 if [ "$PLATFORM" = "linux" ]; then
     # Get glibc version
@@ -425,14 +428,14 @@ if [ "$PLATFORM" = "linux" ]; then
             if try_pip_installation; then
                 exit 0
             elif ! check_python_requirements; then
-                echo -e "${RED}Python 3.9+ is not available on this system.${NC}"
+                echo -e "${RED}Python 3.10+ is not available on this system.${NC}"
                 echo ""
                 echo "To install APM, you need either:"
-                echo "  1. Python 3.9+ and pip: pip install --user apm-cli"
+                echo "  1. Python 3.10+ and pip: pip install --user apm-cli"
                 echo "  2. A system with glibc 2.35+ to use the prebuilt binary"
                 echo "  3. Build from source: git clone $GITHUB_URL/$APM_REPO.git && cd apm && uv sync && uv run pip install -e ."
                 echo ""
-                echo "To install Python 3.9+:"
+                echo "To install Python 3.10+:"
                 echo "  Ubuntu/Debian: sudo apt-get update && sudo apt-get install python3 python3-pip"
                 echo "  CentOS/RHEL: sudo yum install python3 python3-pip"
                 echo "  Alpine: apk add python3 py3-pip"
@@ -744,7 +747,7 @@ else
     echo ""
     
     if ! check_python_requirements; then
-        echo -e "${YELLOW}Note: Python 3.9+ is not available on your system${NC}"
+        echo -e "${YELLOW}Note: Python 3.10+ is not available on your system${NC}"
         echo ""
         echo "Install Python first:"
         echo "  Ubuntu/Debian: sudo apt-get update && sudo apt-get install python3 python3-pip"

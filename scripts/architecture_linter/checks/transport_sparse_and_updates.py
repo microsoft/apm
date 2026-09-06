@@ -148,14 +148,14 @@ def _check_unix_install_ownership(provider: FactsProvider) -> tuple[Violation, .
                 (
                     "sub",
                     "apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm",
-                    2,
+                    3,
                     "eq",
                 ),
                 ("re", r"^apm_require_owned_bundle$", 1, "eq"),
                 ("sub", 'apm_require_writable_directory "$APM_INSTALL_DIR"', 1, "eq"),
                 ("sub", 'apm_require_writable_directory "$(dirname "$APM_LIB_DIR")"', 1, "eq"),
             ),
-            "Unix bootstrap and pip fallback must route through installer ownership preflight",
+            "Unix early bootstrap, pip fallback and replacement must route through ownership preflight",
         )
     )
     findings.extend(

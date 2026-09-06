@@ -338,6 +338,8 @@ def test_off_path_self_update_passes_identity_and_persisted_destination(
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert Path((install_dir / "observed-source.txt").read_text(encoding="utf-8")) == binary
+    assert "Please restart your terminal" not in result.stdout
+    assert "run 'apm --version'" not in result.stdout
     assert (install_dir / "observed-version.txt").read_text(encoding="utf-8") == "v95.0.0"
     home = Path(environment["HOME"])
     assert not (home / ".local/bin/apm").exists()

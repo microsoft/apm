@@ -40,6 +40,8 @@ def installation(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[Path, 
         "grep",
         "sort",
         "head",
+        "uname",
+        "mktemp",
     ):
         executable = shutil.which(name, path="/usr/bin:/bin")
         assert executable is not None
@@ -70,6 +72,7 @@ def _run(
     installation: tuple[Path, dict[str, str]],
     *,
     defaults: bool = False,
+    bootstrap: bool = False,
     pip_fallback: bool = False,
     failure_stage: Literal["binary", "glibc"] | None = None,
     **overrides: str,
@@ -81,6 +84,13 @@ def _run(
     if defaults:
         body = next(line for line in source.splitlines() if line.startswith('APM_LIB_DIR="'))
         body += '\nprintf "%s\\n%s\\n" "$APM_INSTALL_DIR" "$APM_LIB_DIR"\n'
+    elif bootstrap:
+        config = ""
+        body = source.replace(
+            "apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm",
+            'apm_resolve_install_paths "$HISTORICAL_APM"',
+        )
+        overrides["HISTORICAL_APM"] = str(root / "usr/local/bin/apm")
     elif pip_fallback or failure_stage is not None:
         body = source.split("# Function to check Python availability and version\n", 1)[1]
         body = body.split("# Early glibc compatibility check", 1)[0]
@@ -136,6 +146,54 @@ def test_fresh_defaults_are_user_owned(installation: tuple[Path, dict[str, str]]
         str(root / "home/.local/bin"),
         str(root / "home/.local/lib/apm"),
     ]
+
+
+@pytest.mark.parametrize("invalid", ["root", "relative", "dot-segment", "overlap"])
+def test_invalid_bootstrap_request_never_fetches_or_extracts(
+    installation: tuple[Path, dict[str, str]], invalid: str
+) -> None:
+    """The complete bootstrap must reject local errors before external work."""
+    root, _ = installation
+    for name in ("curl", "tar", "ldd"):
+        tool = root / "tools" / name
+        tool.write_text(
+            f'#!/bin/sh\nprintf "{name}\\n" >> "$OPERATION_LOG"\nexit 97\n',
+            encoding="ascii",
+        )
+        tool.chmod(0o755)
+    uname = root / "tools/uname"
+    uname.unlink()
+    uname.write_text(
+        '#!/bin/sh\ncase "$1" in -s) printf "Linux\\n";; -m) printf "x86_64\\n";; esac\n',
+        encoding="ascii",
+    )
+    uname.chmod(0o755)
+    options = {}
+    if invalid == "root":
+        identity = root / "tools/id"
+        identity.unlink()
+        identity.write_text("#!/bin/sh\nprintf '0\\n'\n", encoding="ascii")
+        identity.chmod(0o755)
+    elif invalid == "relative":
+        options["APM_INSTALL_DIR"] = "relative/bin"
+    elif invalid == "dot-segment":
+        options["APM_INSTALL_DIR"] = str(root / "invalid/../bin")
+    else:
+        options["APM_INSTALL_DIR"] = str(root / "nested/apm/bin")
+        options["APM_LIB_DIR"] = str(root / "nested/apm")
+    log = root / "external-operations.log"
+    result = _run(
+        installation,
+        bootstrap=True,
+        VERSION="v1.2.3",
+        TMPDIR=str(root),
+        OPERATION_LOG=str(log),
+        **options,
+    )
+    assert result.returncode == 1
+    assert not log.exists()
+    assert "[x]" in result.stderr
+    assert not (root / "home/.local").exists()
 
 
 def test_writable_custom_install(installation: tuple[Path, dict[str, str]]) -> None:
@@ -512,12 +570,12 @@ def test_existing_install_cannot_fall_back_to_pip(
 
 
 @pytest.mark.parametrize("kind", ["existing", "custom", "fresh"])
-@pytest.mark.parametrize("python_available", [False, True])
+@pytest.mark.parametrize("python_version", [None, "3.9", "3.10"])
 @pytest.mark.parametrize("failure_stage", ["binary", "glibc"])
 def test_binary_failure_advice_preserves_installation_ownership(
     installation: tuple[Path, dict[str, str]],
     kind: str,
-    python_available: bool,
+    python_version: str | None,
     failure_stage: Literal["binary", "glibc"],
 ) -> None:
     """The real failure caller must not recommend a second install after refusal."""
@@ -526,9 +584,9 @@ def test_binary_failure_advice_preserves_installation_ownership(
         ldd = root / "tools/ldd"
         ldd.write_text("#!/bin/sh\nprintf 'ldd fixture 2.17\\n'\n", encoding="ascii")
         ldd.chmod(0o755)
-    if python_available:
+    if python_version is not None:
         python = root / "tools/python3"
-        python.write_text("#!/bin/sh\nprintf '3.13\\n'\n", encoding="ascii")
+        python.write_text(f"#!/bin/sh\nprintf '{python_version}\\n'\n", encoding="ascii")
         python.chmod(0o755)
     options = {}
     if kind == "existing":
@@ -536,12 +594,16 @@ def test_binary_failure_advice_preserves_installation_ownership(
     elif kind == "custom":
         options["APM_INSTALL_DIR"] = str(root / "custom/bin")
     result = _run(installation, failure_stage=failure_stage, **options)
-    continues_to_download = kind == "fresh" and python_available and failure_stage == "glibc"
+    continues_to_download = (
+        kind == "fresh" and python_version == "3.10" and failure_stage == "glibc"
+    )
     assert result.returncode == (0 if continues_to_download else 1)
     if kind == "fresh":
         if continues_to_download:
             assert "pip is not available" in result.stdout
         else:
+            if python_version != "3.10":
+                assert "Python 3.10+" in result.stdout
             assert (
                 "pip3 install --user apm-cli" in result.stdout
                 or "pip install --user apm-cli" in result.stdout

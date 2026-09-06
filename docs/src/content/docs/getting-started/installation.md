@@ -113,6 +113,8 @@ jobs:
 
 `install.sh` checks `PATH`, `$APM_INSTALL_DIR/apm`, `$APM_LIB_DIR/apm`, user-default destinations, historical `/usr/local/bin/apm`, `/opt/homebrew/bin/apm`, and `/usr/local/lib/apm/apm`, plus self-update's running binary. Recognized bundles contain `apm` plus `.apm-installed` or legacy PyInstaller `VERSION` and `_internal`. Updates preserve their launcher/bundle destinations.
 
+The same resolver rejects missing administrator destinations, relative paths, dot segments, and overlaps before the Linux compatibility probe, metadata lookup, download, or extraction. It runs again before replacement; full bundle-safety, ownership, and writability checks still run before removal.
+
 After installing the bundle and launcher, `install.sh` runs the launcher at its destination with `--version` before reporting completion, even when it is off `PATH`; failure stops with guidance to retry the same destinations or ask the installation owner to repair it.
 
 Conflicting installations or redirection, inaccessible discovery paths, unknown/package-managed launchers, symlinked `APM_LIB_DIR`, and bundles not owned by the caller or with any unwritable/unsearchable directory fail with repair guidance.
@@ -317,7 +319,7 @@ apm --version
 
 ### `apm: command not found` (macOS / Linux)
 
-Use the [current-shell PATH command](#quick-install-recommended) for a fresh install, or substitute your existing launcher directory.
+Run the exact `export PATH=...` command printed by the installer, or invoke the launcher by its absolute path.
 
 ### Permission denied during install (macOS / Linux)
 

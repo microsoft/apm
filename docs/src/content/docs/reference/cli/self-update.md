@@ -102,7 +102,7 @@ apm config unset self-update.channel
 
 ## Behavior
 
-When an update is available, APM downloads the platform installer into its temp directory and runs it as a subprocess, streaming output to your terminal. On Unix, it passes the running executable's identity so the installer preserves that installation. Neither command invokes `sudo`.
+When an update is available, APM downloads and runs the platform installer, streaming its output. On Unix, Python passes the running executable's identity and destination preferences without independently resolving destinations; `install.sh` remains the destination and ownership authority. Neither layer invokes `sudo`.
 
 ## Where the new binary lands
 
@@ -112,7 +112,9 @@ On Windows, self-update advances the [stable executable path](../../../getting-s
 
 ## After update
 
-Restart your terminal (or re-resolve `apm` on `PATH`) and run `apm --version` to confirm the new version is active.
+On Unix, follow the installer's final output. If the launcher is off `PATH`, run the exact `export PATH=...` command it prints or continue using the absolute launcher path.
+
+On Windows, restart your terminal or run `apm --version` to verify the update.
 
 ## Rollback
 

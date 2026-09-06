@@ -378,7 +378,8 @@ def self_update(check: bool) -> None:
                 logger.success(
                     f"Successfully updated to version {release.version}!",
                 )
-                logger.progress("Please restart your terminal or run 'apm --version' to verify")
+                if _is_windows_platform():
+                    logger.progress("Please restart your terminal or run 'apm --version' to verify")
             else:
                 logger.error("Installation failed - see output above for details")
                 sys.exit(1)

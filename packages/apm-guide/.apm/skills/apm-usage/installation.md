@@ -60,6 +60,8 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 
 Marked or legacy PyInstaller bundles keep their launcher/bundle destinations on update. Conflicts, unknown/package-managed installations, symlinked bundles, or ownership/permission failures stop installation, without `sudo` or a second copy.
 
+The same resolver rejects missing administrator destinations, relative paths, dot segments, and overlaps before the Linux compatibility probe, downloads, or extraction. Full preflight still runs before replacement.
+
 After installing the bundle and launcher, `install.sh` runs the launcher at its destination with `--version` before reporting completion, even when it is off `PATH`; failure stops with guidance to retry the same destinations or ask the installation owner to repair it.
 
 Ask the original administrator/package manager to update system/custom installs. To migrate, uninstall through that owner first. Pip fallback requires a fresh ordinary-user install with neither destination variable set; existing/custom installs receive terminal owner guidance even when Python is unavailable.
@@ -101,6 +103,6 @@ For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PR
 
 ## Troubleshooting
 
-- **macOS/Linux "command not found":** use the [PATH setup](#quick-install-recommended), substituting the existing launcher directory for upgrades.
+- **macOS/Linux "command not found":** run the exact export command printed by the installer, or invoke the launcher by its absolute path.
 - **Permission denied:** follow [ownership and migration](#unix-ownership-and-migration), not a destination override.
 - **Windows antivirus locks:** set `$env:APM_DEBUG = "1"` and retry.
