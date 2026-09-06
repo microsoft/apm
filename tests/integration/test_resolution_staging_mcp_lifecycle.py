@@ -79,7 +79,7 @@ def _publish_plugin(tmp_path: Path) -> tuple[Path, DependencyReference, APMPacka
 def _assert_published_server(package: APMPackage, live_path: Path) -> dict[str, object]:
     server = package.get_all_mcp_dependencies()[0]
     assert server.args == [
-        str(live_path / "start.mjs"),
+        f"{live_path}/start.mjs",
         f"--root={live_path}/data",
     ]
     assert server.env == {"TOOL_HOME": str(live_path)}
@@ -160,7 +160,7 @@ def test_replayed_plugin_writes_lock_claude_and_codex_configs(tmp_path: Path) ->
     claude_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
     codex_config = tomlkit.parse((project / ".codex" / "config.toml").read_text(encoding="utf-8"))
     lock_data = load_yaml(lock_path)
-    expected_script = str(live_path / "start.mjs")
+    expected_script = f"{live_path}/start.mjs"
     expected_home = str(live_path)
 
     lock_server = lock_data["mcp_configs"]["toolsrv"]["_raw_stdio"]

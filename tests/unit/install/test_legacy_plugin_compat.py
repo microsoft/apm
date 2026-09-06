@@ -319,6 +319,7 @@ def test_failed_normalization_does_not_partially_mutate_cache(tmp_path: Path) ->
     assert_unchanged(before_external, ArtifactSnapshot.capture(external_prompts))
 
 
+@pytest.mark.windows_compat
 def test_normalization_persists_portable_plugin_root_paths(tmp_path: Path) -> None:
     package = _legacy_cache(tmp_path)
     (package / "plugin.json").write_text(
@@ -343,7 +344,7 @@ def test_normalization_persists_portable_plugin_root_paths(tmp_path: Path) -> No
     assert ".apm-resolution-staging" not in manifest
     assert "${CLAUDE_PLUGIN_ROOT}/server" in manifest
     server = result.get_all_mcp_dependencies()[0]
-    assert server.command == str(package.resolve() / "server")
+    assert server.command == f"{package.resolve()}/server"
 
 
 def test_fresh_hash_accepts_only_the_parser_receipt_delta(tmp_path: Path) -> None:
