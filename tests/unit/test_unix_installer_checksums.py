@@ -229,6 +229,12 @@ def test_verification_precedes_archive_consumption(
     )
     if checksum == "mismatch":
         _assert_refused(result, trace, marker)
+        assert "Do not bypass verification." in result.stdout
+        if mirror:
+            assert "mirror operator" in result.stdout
+        else:
+            assert "Retry once" in result.stdout
+            assert "token permissions" not in result.stdout
     else:
         assert result.returncode == 95, result.stdout + result.stderr
         assert marker.read_text(encoding="ascii") == "executed:--version\n"

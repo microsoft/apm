@@ -667,7 +667,12 @@ else
 fi
 ACTUAL_SHA256=$(printf '%s\n' "$HASH_OUTPUT" | awk '{print tolower($1)}')
 if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-    checksum_error "Archive checksum verification failed." "$CHECKSUM_REMEDIATION"
+    if [ -n "$APM_RELEASE_BASE_URL" ]; then
+        CHECKSUM_REMEDIATION="Ask the mirror operator to resynchronize the original publisher archive and sidecar together. Do not bypass verification."
+    else
+        CHECKSUM_REMEDIATION="Retry once; if the mismatch repeats, report it to the release maintainer. Do not bypass verification."
+    fi
+    checksum_error "Archive checksum verification failed for $DOWNLOAD_BINARY." "$CHECKSUM_REMEDIATION"
 fi
 echo -e "${GREEN}[+] Archive checksum verified${NC}"
 

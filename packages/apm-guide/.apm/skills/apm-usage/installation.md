@@ -46,11 +46,12 @@ curl -sSL https://aka.ms/apm-unix | sh -s -- @v1.2.3
 # Custom install dir
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 
-# Air-gapped / GHE mirror - VERSION is required (skips GitHub API)
+# GHES release host (not a generic air-gap mirror). VERSION skips
+# releases/latest; private checksum retries can still query the exact tag.
 GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 ```
 
-Unix binary installs require publisher `.sha256` sidecars, with no integrity-failure pip fallback or bypass. See [archive verification](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#unix-archive-verification) for requirements and mirror migration, and [self-update](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/reference/cli/self-update.md#enterprise-bootstrap-mirrors) for the release-tag installer caveat.
+Unix binary installs require publisher `.sha256` sidecars, with no integrity-failure pip fallback or bypass. For true bootstrap mirrors, use the [enterprise mirror recipe](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#enterprise-bootstrap-mirror-mode): sync the updated `install.sh` plus each original archive and matching `.sha256` sidecar together. See [archive verification](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#unix-archive-verification) for requirements and [self-update](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/reference/cli/self-update.md#enterprise-bootstrap-mirrors) for the release-tag installer caveat.
 
 ## Installer options (Windows PowerShell)
 

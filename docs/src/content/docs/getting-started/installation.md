@@ -42,7 +42,8 @@ curl -sSL https://aka.ms/apm-unix | sh -s -- @v1.2.3
 # Custom install directory
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 
-# Air-gapped / GitHub Enterprise mirror
+# GHES release host (not a generic air-gap mirror). VERSION skips
+# releases/latest; private checksum retries can still query the exact tag.
 GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 ```
 
@@ -51,8 +52,8 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 Air-gapped hosts should **save `install.ps1` locally** (the `irm` one-liner needs reachability to the script URL).
 
 ```powershell
-# Pin a version (skips GitHub API - required for many air-gapped / GHES setups)
-# Pinned installs verify SHA256 from the matching .sha256 unless you set:
+# Pin a version (skips releases/latest - required for many air-gapped / GHES setups)
+# Pinned installs verify SHA-256 from the matching .sha256 unless you set:
 #   $env:APM_SKIP_CHECKSUM = "1"   # emergency only
 $env:VERSION = "v1.2.3"; irm https://aka.ms/apm-windows | iex
 
@@ -105,7 +106,7 @@ jobs:
 
 ### Unix archive verification
 
-For every selected Unix binary release, `install.sh` fetches `{tag}/{archive}.sha256` through the same release-asset route and mirror as the archive, retrying the canonical GitHub/GHES release-asset API only for GitHub/GHES direct URL misses. It parses the sidecar, checks hash-tool availability, and requires one record -- 64 hex SHA256 characters, two spaces (or space plus `*`), then the exact archive basename -- before downloading the archive.
+For every selected Unix binary release, `install.sh` fetches `{tag}/{archive}.sha256` through the same release-asset route and mirror as the archive, retrying the canonical GitHub/GHES release-asset API only for GitHub/GHES direct URL misses. It parses the sidecar, checks hash-tool availability, and requires one record -- 64 hex SHA-256 characters, two spaces (or space plus `*`), then the exact archive basename -- before downloading the archive.
 
 Before extraction or execution, the installer compares the archive hash using `sha256sum` or `shasum -a 256`. Missing, malformed, unreachable, or mismatching checksums, or unavailable/failed hashing, stop installation. Integrity failures have no pip fallback or bypass flag.
 
@@ -263,20 +264,81 @@ Copy-Item -Path .\apm-windows-x86_64\* -Destination $installDir -Recurse -Force
 
 #### macOS / Linux
 
-Prefer the verified Unix installer; it selects the platform archive and checks the publisher `.sha256` before extracting:
+The automated path is `install.sh`; it selects the platform archive and checks the publisher `.sha256` before extracting:
 
 ```bash
 curl -sSL https://aka.ms/apm-unix | sh
 ```
 
-It chooses one of these archive basenames:
+For a manual install that avoids pipe-to-shell, choose an exact release tag that publishes both the archive and its `.sha256` sidecar. Set `ARCHIVE` to one value from the table, then run:
 
-| Platform            | Archive name          |
-|---------------------|-----------------------|
-| macOS Apple Silicon | `apm-darwin-arm64`    |
-| macOS Intel         | `apm-darwin-x86_64`   |
-| Linux x86_64        | `apm-linux-x86_64`    |
-| Linux ARM64         | `apm-linux-arm64`     |
+```bash
+(
+set -eu
+TAG=v0.29.1          # replace with a release that publishes ARCHIVE and ARCHIVE.sha256
+ARCHIVE=apm-linux-x86_64.tar.gz
+BASE_URL=https://github.com/microsoft/apm/releases/download
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/apm-manual.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+cd "$tmp"
+
+curl -fL --proto '=https' --tlsv1.2 -o "$ARCHIVE.sha256" "$BASE_URL/$TAG/$ARCHIVE.sha256"
+expected=$(LC_ALL=C awk -v asset="$ARCHIVE" '
+  {
+    sub(/\r$/, "")
+    digest = substr($0, 1, 64)
+    separator = substr($0, 65, 2)
+    name = substr($0, 67)
+    if (length(digest) == 64 && digest !~ /[^0-9a-fA-F]/ &&
+        (separator == "  " || separator == " *") && name == asset) {
+      matches++
+      found = tolower(digest)
+    } else {
+      bad = 1
+    }
+  }
+  END {
+    if (bad || matches != 1 || NR != 1) exit 1
+    print found
+  }
+' "$ARCHIVE.sha256")
+
+curl -fL --proto '=https' --tlsv1.2 -o "$ARCHIVE" "$BASE_URL/$TAG/$ARCHIVE"
+if command -v sha256sum >/dev/null 2>&1; then
+  hash_line=$(sha256sum "$ARCHIVE")
+elif command -v shasum >/dev/null 2>&1; then
+  hash_line=$(shasum -a 256 "$ARCHIVE")
+else
+  echo "Install sha256sum or shasum before extracting." >&2
+  exit 1
+fi
+actual=$(printf '%s\n' "$hash_line" | awk '{print tolower($1)}')
+if [ "$actual" != "$expected" ]; then
+  echo "Archive checksum verification failed." >&2
+  exit 1
+fi
+
+tar -xzf "$ARCHIVE"
+bundle=${ARCHIVE%.tar.gz}
+"./$bundle/apm" --version
+
+sudo mkdir -p /usr/local/lib/apm
+sudo cp -R "$bundle"/. /usr/local/lib/apm/
+sudo ln -sf /usr/local/lib/apm/apm /usr/local/bin/apm
+)
+```
+
+`tar` and the install steps run only after the SHA-256 comparison succeeds. If `/usr/local/bin` is not on `PATH`, add it in your shell profile after installation.
+
+Use one of these archive names:
+
+| Platform            | `ARCHIVE` value             |
+|---------------------|-----------------------------|
+| macOS Apple Silicon | `apm-darwin-arm64.tar.gz`   |
+| macOS Intel         | `apm-darwin-x86_64.tar.gz`  |
+| Linux x86_64        | `apm-linux-x86_64.tar.gz`   |
+| Linux ARM64         | `apm-linux-arm64.tar.gz`    |
 
 ## From source (contributors)
 

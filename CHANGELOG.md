@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.29.1] - 2026-09-06
 ### Security
 
-- Unix binary installs now verify original publisher SHA256 sidecars before
+- Unix binary installs now verify original publisher SHA-256 sidecars before
   extraction or execution, refuse historical or mirrored archives without
   sidecars, and never fall back to pip after integrity failures. (#2842)
 
