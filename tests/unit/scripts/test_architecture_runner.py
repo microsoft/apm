@@ -719,6 +719,7 @@ transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
+transport-platform-release-metadata-discovery
 transport-platform-revision-pin-outcome
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution

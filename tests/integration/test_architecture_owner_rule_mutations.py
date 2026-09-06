@@ -950,6 +950,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Ref seeding makes a parallel freshness decision outside RefFreshnessPolicy.",
     ),
     MutationCase(
+        guard_id="transport-platform-release-metadata-discovery",
+        rule_id="transport-platform-release-metadata-discovery",
+        path="src/apm_cli/utils/version_checker.py",
+        old="and effective_repo == _DEFAULT_REPO",
+        new="and True",
+        intent="Release metadata recovery drops the exact public repository boundary.",
+    ),
+    MutationCase(
         guard_id="transport-platform-revision-pin-outcome",
         rule_id="transport-platform-revision-pin-outcome",
         path="src/apm_cli/commands/update.py",

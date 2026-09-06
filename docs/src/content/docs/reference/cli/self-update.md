@@ -134,7 +134,7 @@ The installer scripts accept a version pin via environment variable -- see [Quic
 
 ## Failure modes
 
-If GitHub or a configured mirror is unreachable, the download fails, or the installer exits non-zero, `apm self-update` exits with code `1` and prints the next mirror or manual update action. Your existing binary is unaffected.
+Release metadata failures make `apm self-update` (including `--check`) exit with code `1` and report actionable errors: authentication (refresh credentials), rate limits (wait before retrying), other HTTP errors (check the endpoint and status), network errors (check connectivity), or malformed JSON/metadata (verify the metadata source). See [Public release metadata](../../../getting-started/installation/#public-release-metadata) for retry restrictions. Download failures or non-zero installer exits also return `1` with mirror or manual update guidance. Your existing binary is unaffected.
 
 ## Startup update notification
 
@@ -145,7 +145,7 @@ A new version of APM is available: 0.7.0 (current: 0.6.3)
 Run apm self-update to upgrade
 ```
 
-The check is cached and non-blocking. It is suppressed in distributions that disable self-update.
+The check is cached and non-blocking. Lookup, network, and metadata failures stay quiet. It is suppressed in distributions that disable self-update.
 
 ## Related
 
