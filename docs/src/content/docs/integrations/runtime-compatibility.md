@@ -22,11 +22,10 @@ APM acts as a runtime package manager, downloading and configuring LLM runtimes 
 ## Quick Setup
 
 ### Install APM and Setup Runtime
-```bash
-# 1. Install APM
-curl -sSL https://aka.ms/apm-unix | sh
 
-# 2. Setup AI runtime (downloads and configures automatically)
+Choose an [APM installation method](../../getting-started/installation/), then set up a runtime:
+
+```bash
 apm runtime setup copilot
 ```
 

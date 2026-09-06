@@ -35,7 +35,16 @@ APM is a dependency manager for AI agents. Declare the skills, prompts, instruct
 ## Install APM
 
 <Tabs syncKey="os">
-  <TabItem label="macOS / Linux" icon="apple">
+  <TabItem label="macOS (Homebrew)" icon="apple">
+    Already use Homebrew?
+
+    ```bash
+    brew install apm
+    ```
+
+    No custom tap needed. Update with `brew upgrade apm`.
+  </TabItem>
+  <TabItem label="Linux / macOS (no Homebrew)">
     ```bash
     curl -sSL https://aka.ms/apm-unix | sh
     ```
@@ -46,6 +55,9 @@ APM is a dependency manager for AI agents. Declare the skills, prompts, instruct
     ```
   </TabItem>
 </Tabs>
+
+Homebrew is optional. See [all installation options](./getting-started/installation/)
+for pip, Scoop, and manual installs.
 
 Then try it on a sample package:
 
