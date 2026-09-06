@@ -249,16 +249,18 @@ standalone installs.
    brew --prefix
    brew list --formula --full-name
    brew list --pinned
+   brew list --versions apm
    ls -l "$(brew --prefix)/bin/apm"
-   brew info --formula microsoft/apm/apm homebrew/core/apm
+   brew info --formula homebrew/core/apm
    ```
 
    Confirm the list contains `microsoft/apm/apm`, APM is not pinned, and your
    shell resolves `apm` to that prefix's `bin/apm`, linked to its Homebrew-managed
    APM keg. If another installation owns or shadows the path, stop and resolve
-   ownership separately. Compare tap/core versions before switching: a
-   downgrade can remove features. Back up `~/.apm/config.json` using your normal
-   process.
+   ownership separately. Compare the installed version with core's available
+   version: reinstall can downgrade. If core is older, wait for it to catch up;
+   an older APM may not understand your configuration. Back up
+   `~/.apm/config.json` using your normal process.
 
 2. Reinstall with the explicit core name:
 
@@ -294,8 +296,8 @@ conflict, then run `brew link homebrew/core/apm` and repeat step 3.
 :::
 
 :::note[Verification scope]
-Homebrew 6.0.22 (`29b882c`) was exercised on macOS with isolated, same-version
-0.29.0 fixture bottles. The pinned
+Homebrew 6.0.22 (`29b882c`) was exercised on macOS with isolated fixture bottles,
+covering same-version replacement, upgrades, downgrades, and link conflicts. The pinned
 [tap](https://github.com/microsoft/homebrew-apm/blob/421e62fae382774648ac7bf0103d98c686b117af/Formula/apm.rb)
 and [core](https://github.com/Homebrew/homebrew-core/blob/99c61d24d4d3ade034b6542761977fed5cd1cc62/Formula/a/apm.rb)
 formulas have no config-removal hooks. Production APM/Python bottles and
