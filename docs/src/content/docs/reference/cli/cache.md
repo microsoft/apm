@@ -75,8 +75,14 @@ apm cache clean --yes        # alias for --force
 
 | Flag | Description |
 |---|---|
-| `--force`, `-f` | Skip the confirmation prompt. |
+| `--force`, `-f` | Skip the confirmation prompt. Does not suppress deletion failures or make the command succeed. |
 | `--yes`, `-y` | Alias for `--force`. Use in CI scripts so the command never blocks on stdin. |
+
+If an entry can't be deleted -- a locked file, a permissions error --
+`clean` still removes every other entry, then reports the incomplete
+cleanup with the affected paths and exits non-zero. Successful
+removals are not rolled back. Close the process holding the lock or
+fix permissions, then retry.
 
 :::caution
 `clean` removes every cached commit and every cached HTTP response.

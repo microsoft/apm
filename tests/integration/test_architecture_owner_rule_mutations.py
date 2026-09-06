@@ -681,6 +681,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Direct Artifactory entry requests regain ambient netrc credentials.",
     ),
     MutationCase(
+        guard_id="transport-platform-cache-cleanup-outcome",
+        rule_id="transport-platform-cache-cleanup-outcome",
+        path="src/apm_cli/cache/git_cache.py",
+        old="return clean_cache_buckets((self._db_root, self._checkouts_root))",
+        new="return [str(entry) for entry in self._db_root.iterdir()]",
+        intent="GitCache reintroduces its own traversal and outcome authority.",
+    ),
+    MutationCase(
         guard_id="transport-platform-clone-connect-retry",
         rule_id="transport-platform-clone-connect-retry",
         path="src/apm_cli/deps/clone_engine.py",

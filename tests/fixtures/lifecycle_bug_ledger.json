@@ -177,6 +177,16 @@
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
       ]
+    },
+    {
+      "issue": 2853,
+      "fixed_in": "Unreleased",
+      "summary": "Cache clean reported success despite failed Git db, checkout, or HTTP removal.",
+      "failure_modes": ["cache", "cleanup", "outcome"],
+      "properties": ["outcome.status_matches_state", "filesystem.open_world_observation", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_cache_clean_lifecycle.py::test_cache_clean_status_matches_residual_state"
+      ]
     }
   ],
   "known_gaps": [
