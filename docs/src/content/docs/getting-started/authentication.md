@@ -6,6 +6,10 @@ sidebar:
 
 APM works without tokens for public packages on github.com. Authentication is needed for private repositories, enterprise hosts (`*.ghe.com`, GHES), GitLab (private or API access), and Azure DevOps.
 
+## CLI bootstrap and release lookup
+
+Installing or updating the CLI queries public release metadata authenticated-first when an environment token is available, with narrowly scoped anonymous recovery for a rejected token. This is separate from private-package authentication and anonymous-first public-package Git operations. See [Public release metadata](../installation/#public-release-metadata) for token precedence and retry restrictions.
+
 ## How APM resolves authentication
 
 Public `github.com` packages need no token configuration. APM tries HTTPS repository operations anonymously before resolving credentials.

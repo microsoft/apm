@@ -1,5 +1,9 @@
 # Authentication
 
+## CLI bootstrap and release lookup
+
+CLI installation and update checks query public release metadata authenticated-first when an environment token is available. One anonymous retry follows a 401 or non-rate-limit 403 only for canonical public `microsoft/apm` metadata, never custom repositories/hosts, metadata mirrors, or no-direct mode. This does not change private-package credentials or anonymous-first public-package Git operations. See [Public release metadata](https://microsoft.github.io/apm/getting-started/installation/#public-release-metadata) for token precedence and retry restrictions.
+
 ## Token precedence chain
 
 For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.

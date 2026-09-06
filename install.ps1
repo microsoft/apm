@@ -189,6 +189,9 @@ function Get-AuthHeader {
     if ($env:GITHUB_TOKEN) {
         return @{ Authorization = "token $($env:GITHUB_TOKEN)" }
     }
+    if ($env:GH_TOKEN) {
+        return @{ Authorization = "token $($env:GH_TOKEN)" }
+    }
     return @{}
 }
 
@@ -198,9 +201,48 @@ function Invoke-GitHubJson {
         [hashtable]$Headers
     )
     if ($Headers.Count -gt 0) {
-        return Invoke-RestMethod -Uri $Uri -Headers $Headers
+        return Invoke-RestMethod -Uri $Uri -Headers $Headers -MaximumRedirection 0 -TimeoutSec 30
     }
-    return Invoke-RestMethod -Uri $Uri
+    return Invoke-RestMethod -Uri $Uri -MaximumRedirection 0 -TimeoutSec 30
+}
+
+function Get-MetadataFailureKind {
+    param($Failure)
+    $status = [int]$Failure.Exception.Response.StatusCode
+    $responseHeaders = if ($Failure.Exception.Response) {
+        $Failure.Exception.Response.Headers.ToString()
+    } else { "" }
+    $body = [string]$Failure.ErrorDetails.Message
+    if ($status -eq 429 -or ($status -eq 403 -and (
+        $responseHeaders -match '(?im)^x-ratelimit-remaining: *0\s*$|^retry-after: *[1-9][0-9]*\s*$' -or
+        $body -match '(?i)API rate limit exceeded|secondary rate limit|abuse detection mechanism'
+    ))) { return "rate-limit" }
+    if ($status -eq 401 -or $status -eq 403) { return "auth" }
+    if ($status -eq 0) { return "network" }
+    return "http"
+}
+
+function Write-MetadataFailure {
+    param($Failure)
+    $status = [int]$Failure.Exception.Response.StatusCode
+    switch (Get-MetadataFailureKind -Failure $Failure) {
+        "rate-limit" {
+            Write-ErrorText "Release metadata rate limit (HTTP $status)."
+            Write-Host "Wait for the limit to reset; for anonymous shared-IP limits, configure an accepted GitHub token."
+        }
+        "auth" {
+            Write-ErrorText "Release metadata authentication/authorization failed (HTTP $status)."
+            Write-Host "Check the credential's validity and repository access, or pin VERSION."
+        }
+        "network" {
+            Write-ErrorText "Release metadata network request failed."
+            Write-Host "Check connectivity, proxy and TLS settings, then retry."
+        }
+        default {
+            Write-ErrorText "Release metadata request failed (HTTP $status)."
+            Write-Host "Check the configured host/repository or metadata mirror, or pin VERSION."
+        }
+    }
 }
 
 function Add-ToUserPath {
@@ -494,35 +536,30 @@ if ($pinnedVersion) {
         $metadataError = $_
     }
 
-    if ($releaseMetadataUrl -and (-not $release -or -not $release.tag_name)) {
-        Write-ErrorText "Failed to fetch release metadata from APM_RELEASE_METADATA_URL."
-        Write-Host "Mirror URL: $(Redact-UrlCredentials -Url $releaseMetadataUrl)"
-        if ($metadataError) { Write-Host "Details: $(Redact-UrlCredentials -Url $metadataError)" }
-        Write-Host "Publish a GitHub-compatible latest.json document with a tag_name field."
-        exit 1
-    }
-
-    if (-not $release -or -not $release.tag_name) {
-        Write-Info "Unauthenticated request failed or returned no data. Retrying with authentication..."
-        $headers = Get-AuthHeader
-        if ($headers.Count -eq 0) {
-            Write-ErrorText "Repository may be private but no authentication token found."
-            Write-Host "Set GITHUB_APM_PAT or GITHUB_TOKEN and retry."
-            Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
-            exit 1
-        }
+    if ($metadataError -and $headers.Count -gt 0 -and
+        -not $releaseMetadataUrl -and -not $noDirectFallback -and
+        $githubUrl -ceq "https://github.com" -and $apmRepo -ceq "microsoft/apm" -and
+        (Get-MetadataFailureKind -Failure $metadataError) -eq "auth") {
+        Write-Info "Credential rejected for public APM metadata; retrying once anonymously."
+        $headers = @{}
+        $metadataError = $null
         try {
             $release = Invoke-GitHubJson -Uri $latestUri -Headers $headers
         } catch {
-            Write-ErrorText "Failed to fetch release information: $_"
-            Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
-            exit 1
+            $metadataError = $_
         }
     }
 
-    if (-not $release.tag_name) {
-        Write-ErrorText "Could not determine the latest release tag."
-        Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+    if ($metadataError) {
+        Write-MetadataFailure -Failure $metadataError
+        exit 1
+    }
+    if (-not $release -or -not $release.tag_name) {
+        Write-ErrorText "Invalid release metadata; expected a tag_name field."
+        if ($releaseMetadataUrl) {
+            Write-Host "Mirror URL: $(Redact-UrlCredentials -Url $releaseMetadataUrl)"
+        }
+        Write-Host "Publish a GitHub-compatible latest.json document or pin VERSION to a known release."
         exit 1
     }
 

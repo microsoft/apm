@@ -170,7 +170,9 @@ def get_latest_version_for_self_update(channel: str) -> str | None:
     """Return the latest version for a supported self-update channel."""
     from ..utils.version_checker import get_latest_version_from_github
 
-    return get_latest_version_from_github(include_prerelease=(channel == "prerelease"))
+    return get_latest_version_from_github(
+        include_prerelease=(channel == "prerelease"), raise_errors=True
+    )
 
 
 def _build_self_update_installer_env(
@@ -266,7 +268,13 @@ def self_update(check: bool) -> None:
             sys.exit(1)
 
         # Check for latest version
-        latest_version = get_latest_version_for_self_update(_channel)
+        from ..utils.version_checker import ReleaseMetadataError
+
+        try:
+            latest_version = get_latest_version_for_self_update(_channel)
+        except ReleaseMetadataError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
 
         if not latest_version:
             if _pinned:
