@@ -198,6 +198,7 @@ jobs:
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
           tests/quality/test_lifecycle_bug_ledger.py \
+          tests/quality/test_lifecycle_interaction_coverage.py \
           tests/quality/test_ci_topology.py
 
     - name: Run bounded architecture scaling gate

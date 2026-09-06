@@ -4,7 +4,8 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,6 +67,43 @@ class ApmLifecycleRunner:
         self._command = tuple(command)
         self._timeout_seconds = timeout_seconds
         self._scenario_timeout_seconds = scenario_timeout_seconds
+        self._scenario_deadline: float | None = None
+        self._scenario_id: str | None = None
+        self._last_result: CommandResult | None = None
+
+    @contextmanager
+    def scenario(self, *, scenario_id: str) -> Iterator[None]:
+        """Bound interleaved commands and fixture actions by one monotonic deadline."""
+        if self._scenario_deadline is not None:
+            raise RuntimeError("Lifecycle scenario contexts must not be nested")
+        self._scenario_id = scenario_id
+        self._scenario_deadline = time.monotonic() + self._scenario_timeout_seconds
+        self._last_result = None
+        try:
+            yield
+            result = self._last_result
+            self._remaining_timeout(
+                result.command if result is not None else self._command,
+                result.cwd if result is not None else Path.cwd(),
+            )
+        finally:
+            self._scenario_deadline = None
+            self._scenario_id = None
+            self._last_result = None
+
+    def _remaining_timeout(self, command: tuple[str, ...], cwd: Path) -> float:
+        if self._scenario_deadline is None:
+            return self._timeout_seconds
+        remaining = self._scenario_deadline - time.monotonic()
+        if remaining <= 0:
+            raise _LifecycleTimeoutExpired(
+                command,
+                0,
+                scenario_id=self._scenario_id or "scenario",
+                cwd=cwd,
+                budget_seconds=self._scenario_timeout_seconds,
+            )
+        return min(self._timeout_seconds, remaining)
 
     def run(
         self,
@@ -75,14 +113,21 @@ class ApmLifecycleRunner:
         cwd: Path,
         env: Mapping[str, str],
     ) -> CommandResult:
-        return self._run_with_timeout(
+        timeout = self._remaining_timeout((*self._command, *args), cwd)
+        result = self._run_with_timeout(
             args,
             cwd=cwd,
             env=env,
-            timeout_seconds=self._timeout_seconds,
-            scenario_id=scenario_id,
-            budget_seconds=self._timeout_seconds,
+            timeout_seconds=timeout,
+            scenario_id=self._scenario_id or scenario_id,
+            budget_seconds=(
+                self._scenario_timeout_seconds
+                if self._scenario_deadline is not None
+                else self._timeout_seconds
+            ),
         )
+        self._last_result = result
+        return result
 
     def _run_with_timeout(
         self,
@@ -139,39 +184,28 @@ class ApmLifecycleRunner:
         if len(commands) != len(expected_returncodes):
             raise ValueError("commands and expected_returncodes must have equal length")
 
-        deadline = time.monotonic() + self._scenario_timeout_seconds
         results: list[CommandResult] = []
-        for command, expected_returncode in zip(
-            commands,
-            expected_returncodes,
-            strict=True,
-        ):
-            remaining_seconds = deadline - time.monotonic()
-            if remaining_seconds <= 0:
-                raise _LifecycleTimeoutExpired(
-                    (*self._command, *command),
-                    0,
-                    scenario_id=scenario_id,
+        with self.scenario(scenario_id=scenario_id):
+            for command, expected_returncode in zip(
+                commands,
+                expected_returncodes,
+                strict=True,
+            ):
+                result = self.run(
+                    command,
                     cwd=cwd,
-                    budget_seconds=self._scenario_timeout_seconds,
+                    env=env,
+                    scenario_id=scenario_id,
                 )
-            result = self._run_with_timeout(
-                command,
-                cwd=cwd,
-                env=env,
-                timeout_seconds=min(self._timeout_seconds, remaining_seconds),
-                scenario_id=scenario_id,
-                budget_seconds=self._scenario_timeout_seconds,
-            )
-            results.append(result)
-            if result.returncode != expected_returncode:
-                raise AssertionError(
-                    _unexpected_result_evidence(
-                        result,
-                        scenario_id=scenario_id,
-                        expected_returncode=expected_returncode,
+                results.append(result)
+                if result.returncode != expected_returncode:
+                    raise AssertionError(
+                        _unexpected_result_evidence(
+                            result,
+                            scenario_id=scenario_id,
+                            expected_returncode=expected_returncode,
+                        )
                     )
-                )
         return tuple(results)
 
 
