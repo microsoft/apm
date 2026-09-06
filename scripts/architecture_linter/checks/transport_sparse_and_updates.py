@@ -181,7 +181,8 @@ def _check_unix_install_ownership(provider: FactsProvider) -> tuple[Violation, .
                 or (path.endswith(".sh") and path != "install.sh")
             ),
             re.compile(
-                r"^(?:def )?apm_(?:resolve_install_paths|probe_installation|require_owned_bundle)\("
+                r"^\s*(?:(?:async\s+)?def\s+|function\s+)?"
+                r"apm_(?:resolve_install_paths|probe_installation|require_owned_bundle)\s*[({]"
             ),
             "Unix installation destination and ownership decisions belong only to install.sh",
             exempt=False,

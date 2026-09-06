@@ -24,6 +24,14 @@ rolling APM out across an org, start with the
 curl -sSL https://aka.ms/apm-unix | sh
 ```
 
+If the installer reports that `apm` is not on `PATH`, follow its printed
+export command for the current shell. For a fresh ordinary-user install
+with default destinations, that command is:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 **Windows (PowerShell):**
 
 ```powershell

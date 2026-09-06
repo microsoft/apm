@@ -28,6 +28,27 @@ def test_unix_install_owner_registered_and_clean() -> None:
             "src/apm_cli/commands/self_update.py",
             "\ndef apm_resolve_install_paths():\n    return '/usr/local/bin'\n",
         ),
+        (
+            "src/apm_cli/commands/self_update.py",
+            "\nclass CompetingOwner:\n    def apm_resolve_install_paths(self):\n        pass\n",
+        ),
+        (
+            "scripts/lint-auth-signals.sh",
+            "\nif true; then\n    apm_probe_installation() { :; }\nfi\n",
+        ),
+        (
+            "src/apm_cli/commands/self_update.py",
+            "\nasync def apm_require_owned_bundle():\n    pass\n",
+        ),
+        (
+            "scripts/lint-auth-signals.sh",
+            "\nfunction apm_require_owned_bundle () { :; }\n",
+        ),
+        pytest.param(
+            "scripts/lint-auth-signals.sh",
+            "\nfunction apm_require_owned_bundle { :; }\n",
+            id="bash-function-without-parentheses",
+        ),
     ],
 )
 def test_unix_install_boundary_rejects_elevation_or_second_owner(path: str, mutation: str) -> None:

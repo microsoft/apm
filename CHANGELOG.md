@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Unix installation defaults to user-local directories without implicit `sudo`; self-update preserves existing destinations and refuses ownership conflicts or migration to a second binary/pip install. (#2844)
+- Unix installation defaults to user-local directories without profile edits or implicit `sudo`; recognized existing installations retain their destinations, while conflicts fail with owner-directed repair guidance. For migration, ask the original administrator or package manager to update or uninstall first; see [Unix install ownership and migration](docs/src/content/docs/getting-started/installation.md#unix-install-ownership-and-migration). (#2844)
 - `apm install` now keeps transitive plugin MCP launchers usable after
   publication and cached replay by resolving plugin-root placeholders from the
   published package directory. Lockfile writes and self-defined MCP

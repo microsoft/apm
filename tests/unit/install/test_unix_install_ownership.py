@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -149,6 +150,58 @@ def _prior(root: Path, prefix: str = "prior", *, legacy: bool = False) -> tuple[
         (lib / ".apm-installed").touch()
     (bindir / "apm").symlink_to("../lib/apm/apm")
     return bindir, lib
+
+
+def _record_tool_calls(root: Path, name: str) -> None:
+    """Record subprocess counts while forwarding to the real filesystem tool."""
+    tool = root / "tools" / name
+    executable = tool.resolve()
+    tool.unlink()
+    tool.write_text(
+        f'#!/bin/sh\nprintf "{name}\\n" >> "$TOOL_LOG"\nexec {shlex.quote(str(executable))} "$@"\n',
+        encoding="ascii",
+    )
+    tool.chmod(0o755)
+
+
+def test_bundle_preflight_uses_one_linear_scan(installation: tuple[Path, dict[str, str]]) -> None:
+    """Growing the prior tree must not repeat traversal or skip directory checks."""
+    root, _ = installation
+    for tool in ("find", "test"):
+        _record_tool_calls(root, tool)
+    for width in (10, 100):
+        bindir, lib = _prior(root, f"tree-{width}")
+        for index in range(width):
+            directory = lib / f"directory-{index}"
+            directory.mkdir()
+            (directory / "file").touch()
+        log = root / f"tree-{width}.log"
+        result = _run(
+            installation,
+            APM_INSTALL_DIR=str(bindir),
+            APM_LIB_DIR=str(lib),
+            TOOL_LOG=str(log),
+        )
+        assert result.returncode == 0, result.stderr
+        calls = log.read_text(encoding="ascii").splitlines()
+        assert calls.count("find") == 1
+        assert calls.count("test") == 2 * (width + 1)
+        assert (lib / "VERSION").read_text(encoding="ascii") == "new\n"
+
+
+def test_ancestor_walk_does_not_spawn_per_depth(installation: tuple[Path, dict[str, str]]) -> None:
+    """Tenfold path depth must not increase dirname process count."""
+    root, _ = installation
+    _record_tool_calls(root, "dirname")
+    counts = []
+    for depth in (2, 20):
+        target = root / f"depth-{depth}" / Path(*(["nested"] * depth)) / "bin"
+        log = root / f"depth-{depth}.log"
+        result = _run(installation, APM_INSTALL_DIR=str(target), TOOL_LOG=str(log))
+        assert result.returncode == 0, result.stderr
+        counts.append(len(log.read_text(encoding="ascii").splitlines()))
+        assert (target / "apm").is_file()
+    assert counts[0] == counts[1]
 
 
 def test_fresh_install_uses_defaults(installation: tuple[Path, dict[str, str]]) -> None:

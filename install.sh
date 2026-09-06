@@ -56,7 +56,8 @@ apm_real_path() (
     while [ ! -d "$_parent" ]; do
         [ "$_parent" != "/" ] || return 1
         _leaf="${_parent##*/}/$_leaf"
-        _parent="$(dirname "$_parent")"
+        _parent="${_parent%/*}"
+        [ -n "$_parent" ] || _parent="/"
     done
     _parent="$(cd -P "$_parent" && pwd)" || return 1
     printf '%s/%s\n' "${_parent%/}" "$_leaf"
@@ -73,7 +74,11 @@ apm_probe_installation() {
         if [ -d "$_probe_parent" ] && [ ! -x "$_probe_parent" ]; then
             apm_install_error "Cannot inspect existing APM through $_probe_parent: directory is not searchable. Ask its owner to repair permissions before retrying."
         fi
-        _probe_parent="$(dirname "$_probe_parent")"
+        case "$_probe_parent" in
+            */*) _probe_parent="${_probe_parent%/*}"
+                 [ -n "$_probe_parent" ] || _probe_parent="/" ;;
+            *) _probe_parent="." ;;
+        esac
     done
     [ -e "$1" ] || [ -L "$1" ] || return 0
     _candidate="$(apm_real_path "$1")" ||
@@ -182,11 +187,10 @@ apm_require_owned_bundle() {
     [ ! -L "$APM_LIB_DIR" ] ||
         apm_install_error "APM_LIB_DIR is a symlink. Supply the original bundle directory, not a symlink."
     if [ -d "$APM_LIB_DIR" ]; then
-        _foreign="$(find "$APM_LIB_DIR" ! -user "$(id -u)" -print)" ||
-            apm_install_error "Cannot inspect bundle ownership. Ask its owner to repair or update $APM_LIB_DIR."
-        _readonly="$(find "$APM_LIB_DIR" -type d \( ! -exec test -w {} \; -o ! -exec test -x {} \; \) -print)" ||
-            apm_install_error "Cannot inspect bundle permissions. Ask its owner to repair or update $APM_LIB_DIR."
-        if [ -n "$_foreign" ] || [ -n "$_readonly" ]; then
+        _unmanageable="$(find "$APM_LIB_DIR" \( ! -user "$(id -u)" -o \
+            \( -type d \( ! -exec test -w {} \; -o ! -exec test -x {} \; \) \) \) -print)" ||
+            apm_install_error "Cannot inspect bundle ownership or permissions. Ask its owner to repair or update $APM_LIB_DIR."
+        if [ -n "$_unmanageable" ]; then
             apm_install_error "Existing bundle $APM_LIB_DIR is not writable, searchable, or owned by this user. Ask its owner to update it; no files were removed."
         fi
     fi

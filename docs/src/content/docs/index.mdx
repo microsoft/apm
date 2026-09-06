@@ -47,6 +47,14 @@ APM is a dependency manager for AI agents. Declare the skills, prompts, instruct
   </TabItem>
 </Tabs>
 
+If the Unix installer reports that `apm` is not on `PATH`, follow its
+printed export command for the current shell. For a fresh ordinary-user
+install with default destinations, that command is:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 Then try it on a sample package:
 
 ```bash
