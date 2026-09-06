@@ -247,6 +247,26 @@ def _base_install_env(
     return env
 
 
+def _installer_env_prefix(env: dict[str, str]) -> str:
+    """Return explicit env assignments for the piped installer process."""
+    keys = [
+        "APM_FIXTURE_ARCHIVE",
+        "APM_RELEASE_BASE_URL",
+        "CI",
+        "GITHUB_ACTIONS",
+        "HOME",
+        "LC_ALL",
+        "PATH",
+        "SHELL",
+        _HARNESS_HISTORICAL_ENV,
+        "VERSION",
+        "XDG_CONFIG_HOME",
+        "ZDOTDIR",
+    ]
+    assignments = [shlex.quote(f"{key}={env[key]}") for key in keys if key in env]
+    return "env " + " ".join(assignments)
+
+
 def _run_piped_installer_with_pty(
     *,
     tmp_path: Path,
@@ -256,9 +276,10 @@ def _run_piped_installer_with_pty(
     env: dict[str, str],
 ) -> subprocess.CompletedProcess[str]:
     """Run actual installer bytes through `sh -s --` with a controlling TTY."""
+    installer_env = _installer_env_prefix(env)
     installer_cmd = (
         f"env PATH={shlex.quote(env['PATH'])} cat {shlex.quote(str(installer))} | "
-        f"env PATH={shlex.quote(env['PATH'])} sh -s -- --prefix {shlex.quote(str(prefix))}"
+        f"{installer_env} sh -s -- --prefix {shlex.quote(str(prefix))}"
     )
     return _run_pty(
         f"{shlex.quote(shell)} -lc {shlex.quote(installer_cmd)}",
@@ -434,9 +455,10 @@ def test_piped_sh_uses_declared_fish_login_shell_for_startup(tmp_path: Path) -> 
     home.mkdir()
     prefix = tmp_path / "fish-login-from-sh"
     env = _base_install_env(tmp_path, home=home, tools=tools, archive=archive, shell=fish)
+    installer_env = _installer_env_prefix(env)
     installer_cmd = (
         f"env PATH={shlex.quote(env['PATH'])} cat {shlex.quote(str(installer))} | "
-        f"env PATH={shlex.quote(env['PATH'])} sh -s -- --prefix {shlex.quote(str(prefix))}"
+        f"{installer_env} sh -s -- --prefix {shlex.quote(str(prefix))}"
     )
     install = _run_pty(
         f"{shlex.quote(bash)} -lc {shlex.quote(installer_cmd)}", cwd=tmp_path, env=env
