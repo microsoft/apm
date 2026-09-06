@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git dependency downloads retry one narrowly classified HTTPS connection failure without changing credentials or transport; lifecycle timeout tests now wait for descendant readiness before exercising process-tree termination.
 
 ## [0.29.1] - 2026-09-05
+## [0.29.1] - 2026-09-06
 
 ### Security
 
@@ -39,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now keeps transitive plugin MCP launchers usable after publication and cached replay by resolving plugin-root placeholders from the published package directory. Lockfiles and MCP configurations reject remaining resolution-staging paths without echoing configuration values. (by @lkshrk, #2827)
+- Git dependency downloads retry one narrowly classified HTTPS connection failure without changing credentials or transport. (#2839)
 - `apm install` now preserves SSH transport for semver discovery, keeps
   inactive hooks when targets are not declared in the manifest, and honors
   explicitly configured HTTP registries during MCP integration. (#2814)
