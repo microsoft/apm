@@ -15,6 +15,7 @@ from ...models.apm_package import APMPackage
 from ...utils.path_security import PathTraversalError
 from .engine import (
     IntegrationCleanupOutcome,
+    LocalSurvivorRefreshError,
     MCPUninstallCleanupError,
     _cleanup_staged_local_refreshes,
     _cleanup_stale_mcp,
@@ -182,6 +183,34 @@ def _abort_if_retained_target_cleanup_paths(retained_cleanup_paths: set[Any], lo
             logger.error(f"  - {path}")
         logger.error("Resolve or remove the listed files, then retry uninstall.")
         sys.exit(1)
+
+
+def _report_package_removal_failure(
+    logger: CommandLogger,
+    error: OSError | PathTraversalError | LocalSurvivorRefreshError,
+    *,
+    user_scope: bool,
+) -> None:
+    """Explain recoverable metadata without promising filesystem rollback."""
+    recovery = "apm install --global" if user_scope else "apm install"
+    failure = (
+        "shared-slot refresh failed"
+        if isinstance(error, LocalSurvivorRefreshError)
+        else "package deletion failed"
+    )
+    cause = (
+        "Resolve the unsafe package path"
+        if isinstance(error, PathTraversalError)
+        else "Resolve the filesystem error"
+    )
+    logger.error(
+        f"Uninstall incomplete: {failure}. "
+        "apm.yml and lockfile ownership were retained; some package files "
+        f"may already have been removed. {cause} and "
+        f"retry the same uninstall command, or run '{recovery}' to restore "
+        "the declared packages."
+    )
+    logger.verbose_detail(traceback.format_exc().rstrip())
 
 
 @click.command(
@@ -419,20 +448,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             orphan_removed, actual_orphans = _cleanup_transitive_orphans(
                 lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
             )
-        except (OSError, PathTraversalError) as exc:
-            recovery = "apm install --global" if scope is InstallScope.USER else "apm install"
-            cause = (
-                "Resolve the unsafe package path"
-                if isinstance(exc, PathTraversalError)
-                else "Resolve the filesystem error"
-            )
-            logger.error(
-                "Uninstall incomplete: package deletion failed. "
-                "apm.yml and lockfile ownership were retained; some package files "
-                f"may already have been removed. {cause} and "
-                f"retry the same uninstall command, or run '{recovery}' to restore "
-                "the declared packages."
-            )
+        except (OSError, PathTraversalError, LocalSurvivorRefreshError) as exc:
+            _report_package_removal_failure(logger, exc, user_scope=scope is InstallScope.USER)
             sys.exit(1)
         removed_from_modules += orphan_removed
 

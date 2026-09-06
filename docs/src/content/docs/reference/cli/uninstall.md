@@ -98,6 +98,7 @@ What gets removed, in order:
    shared diamond dependencies. If a surviving package's manifest cannot be
    read, APM keeps every remaining candidate rather than guessing. Run again
    with `--verbose`, fix or restore the reported manifest, then retry.
+   Now-empty `apm_modules/` parent directories are cleaned at this step.
 2. Target-scoped files owned only by the removed packages, while lockfile
    ownership is still available for safe cleanup.
 3. Package declarations in `apm.yml`.
@@ -119,7 +120,6 @@ What gets removed, in order:
    failure. Fix the reported configs, then run `apm install` to reconcile stale
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
-8. Empty parent directories left behind by the cleanup.
 
 Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No
@@ -134,6 +134,11 @@ ownership remain. Earlier deletions are not rolled back.
 Fix permission or file-lock errors; for a containment refusal, correct the
 unsafe path instead. Retry the same `apm uninstall` command, or restore declared
 packages with `apm install` (`apm install --global` for user scope).
+
+If replacing a shared local install slot fails, uninstall also retains manifest
+and lockfile ownership. Resolve the filesystem problem and retry the same
+command; `--verbose` includes the underlying error. Earlier deletions in a
+multi-package request are not rolled back.
 
 If a target-scoped file owned only by a removed package was edited or cannot be
 deleted, uninstall lists the retained paths and exits before changing `apm.yml`

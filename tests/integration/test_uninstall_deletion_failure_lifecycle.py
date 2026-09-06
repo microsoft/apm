@@ -307,6 +307,10 @@ def test_shared_local_slot_rename_failure_restores_original_until_retry(
     output = failed.stdout + failed.stderr
     assert failed.returncode != 0, output
     assert "Uninstall complete" not in output
+    normalized_output = " ".join(output.split())
+    assert "Uninstall incomplete: shared-slot refresh failed" in normalized_output
+    assert "lockfile ownership were retained" in normalized_output
+    assert "retry the same uninstall command" in normalized_output
     after = LifecycleStateSnapshot.capture(project.root, targets=("copilot",))
     _assert_same_lifecycle_state(before, after)
     assert_unchanged(original_materialized, ArtifactSnapshot.capture(materialized))
