@@ -90,13 +90,13 @@ def clean(force: bool, yes: bool) -> None:
     _rich_success("Cache cleaned.", symbol="check")
 
 
-@cache.command(help="Remove cache entries older than N days")
+@cache.command(help="Remove Git checkout SHA groups older than N days")
 @click.option(
     "--days",
     type=int,
     default=30,
     show_default=True,
-    help="Remove entries not accessed within this many days",
+    help="Remove SHA groups not accessed within this many days",
 )
 def prune(days: int) -> None:
     """Remove stale cache entries based on last access time.

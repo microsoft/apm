@@ -68,6 +68,13 @@ class TestCacheClean:
 class TestCachePrune:
     """Test `apm cache prune` command."""
 
+    def test_help_names_git_sha_groups(self, runner: CliRunner) -> None:
+        result = runner.invoke(cache, ["prune", "--help"])
+        assert result.exit_code == 0
+        output = " ".join(result.output.split())
+        assert "Remove Git checkout SHA groups older than N days" in output
+        assert "Remove SHA groups not accessed within this many days" in output
+
     @patch("apm_cli.cache.paths.get_cache_root")
     def test_prune_default_days(
         self, mock_root: MagicMock, runner: CliRunner, tmp_path: Path
