@@ -1,6 +1,6 @@
 ---
 title: apm self-update
-description: Self-update the APM CLI binary to the latest GitHub release.
+description: Update a standalone APM CLI installation to the latest GitHub release.
 sidebar:
   order: 5
 ---
