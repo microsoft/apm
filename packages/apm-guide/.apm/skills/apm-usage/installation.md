@@ -1,12 +1,25 @@
 # Installation
 
-## Quick install (recommended)
+## macOS with Homebrew (recommended)
 
 ```bash
-# macOS / Linux
-curl -sSL https://aka.ms/apm-unix | sh
+brew install apm
+```
 
-# Windows (PowerShell)
+No custom tap is required. Homebrew owns installation and updates in its
+managed environment; it does not eliminate supply-chain risk.
+
+## Linux / macOS without Homebrew
+
+Homebrew is optional. Use the standalone installer or pip below.
+
+```bash
+curl -sSL https://aka.ms/apm-unix | sh
+```
+
+## Windows (PowerShell)
+
+```powershell
 irm https://aka.ms/apm-windows | iex
 ```
 
@@ -14,7 +27,7 @@ irm https://aka.ms/apm-windows | iex
 
 ```bash
 # Homebrew (macOS / Linux)
-brew install microsoft/apm/apm
+brew install apm
 
 # Scoop (Windows)
 scoop bucket add apm https://github.com/microsoft/scoop-apm
@@ -31,6 +44,22 @@ apm --version
 ```
 
 ## Update
+
+Use the same tool that installed APM:
+
+| Installation | Update command |
+|--------------|----------------|
+| Homebrew core | `brew upgrade apm` |
+| pip | `pip install --upgrade apm-cli` |
+| Scoop | `scoop update apm` |
+| Standalone installer | `apm self-update` |
+
+Homebrew core disables `apm self-update` and its startup update notification.
+Do not run the standalone installer over a package-manager-owned installation.
+For an existing `microsoft/apm` tap installation, follow the
+[tap-to-core migration guide](https://microsoft.github.io/apm/getting-started/installation/#migrate-from-the-microsoft-tap).
+
+For standalone installs only:
 
 ```bash
 apm self-update          # update APM itself
@@ -85,6 +114,6 @@ For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PR
 
 ## Troubleshooting
 
-- **macOS/Linux "command not found":** ensure your install directory (default `/usr/local/bin`) is in `$PATH`.
+- **macOS/Linux "command not found":** for Homebrew, follow `brew shellenv` guidance from your Homebrew installation; for standalone installs, ensure your install directory is in `$PATH`.
 - **Permission denied:** use `APM_INSTALL_DIR=$HOME/.local/bin` to install without sudo.
 - **Windows antivirus locks:** set `$env:APM_DEBUG = "1"` and retry.
