@@ -172,10 +172,11 @@ def _cleanup_stale_lsp(
 
 
 def _abort_if_retained_target_cleanup_paths(retained_cleanup_paths: set[Any], logger: Any) -> None:
-    """Stop uninstall before package state mutates when owned target files remain."""
+    """Stop before ownership release when owned target files remain."""
     if retained_cleanup_paths:
         logger.error(
-            "Uninstall could not remove tracked target files; package state was preserved."
+            "Uninstall could not remove tracked target files; manifest and lockfile "
+            "ownership were preserved. Package directories may already have been removed."
         )
         for path in sorted(retained_cleanup_paths):
             logger.error(f"  - {path}")
