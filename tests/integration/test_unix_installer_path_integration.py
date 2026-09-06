@@ -241,6 +241,7 @@ def _base_install_env(
         "LC_ALL": "C",
         "PATH": f"{tools}:{_BASE_PATH}",
         "SHELL": shell,
+        "XDG_CONFIG_HOME": str(home / ".config"),
         _HARNESS_HISTORICAL_ENV: str(tmp_path / "missing-historical/apm"),
         "VERSION": "v0.0.0",
     }
