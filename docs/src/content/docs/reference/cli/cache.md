@@ -98,6 +98,12 @@ apm cache prune --days 7     # tighter window
 |---|---|
 | `--days N` | Remove entries not accessed within this many days. Default: `30`. |
 
+:::note
+`--days` accepts a nonnegative integer. Negative values are rejected
+before the cache is touched. `0` makes every past entry eligible for
+removal.
+:::
+
 :::caution[Lockfile-blind]
 `prune` does not consult any project's `apm.lock.yaml`. It can evict a
 per-SHA checkout that a plain or frozen install would otherwise reuse. If the

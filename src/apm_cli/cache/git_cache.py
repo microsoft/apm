@@ -893,10 +893,16 @@ class GitCache:
 
         Returns:
             Number of entries pruned.
+
+        Raises:
+            ValueError: If max_age_days is negative.
         """
         import time
 
         from ..utils.file_ops import robust_rmtree
+
+        if max_age_days < 0:
+            raise ValueError("max_age_days must be nonnegative; use 0 or a positive number of days")
 
         cutoff = time.time() - (max_age_days * 86400)
         pruned = 0

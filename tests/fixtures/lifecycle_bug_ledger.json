@@ -177,6 +177,20 @@
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
       ]
+    },
+    {
+      "issue": 2856,
+      "fixed_in": "Unreleased",
+      "summary": "Negative cache-prune ages deleted fresh installed Git checkouts.",
+      "failure_modes": ["cache", "cleanup", "transaction", "outcome"],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "filesystem.open_world_observation",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_cache_prune_age_lifecycle.py::test_negative_prune_preserves_installed_cache_and_valid_ages"
+      ]
     }
   ],
   "known_gaps": [
