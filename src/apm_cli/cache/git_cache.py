@@ -227,7 +227,16 @@ class GitCache:
     def _record_checkout_access(self, checkout_dir: Path) -> Path:
         """Record successful reuse of a finalized checkout under its shard lock."""
         # Pruning ages the shared SHA root, not individual checkout variants.
-        os.utime(checkout_dir.parent, None)
+        try:
+            os.utime(checkout_dir.parent, None)
+        except PermissionError as exc:
+            _log.warning(
+                "[!] Cannot update Git cache recency for %s: %s. "
+                "Continuing with validated checkout; cache prune may evict it. "
+                "Check cache permissions or set APM_CACHE_DIR to a writable directory.",
+                checkout_dir.parent,
+                exc,
+            )
         return checkout_dir
 
     def _finalize_sparse_checkout(

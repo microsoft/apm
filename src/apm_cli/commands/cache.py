@@ -117,12 +117,12 @@ def prune(days: int) -> None:
         _rich_error(f"Cannot resolve cache root: {exc}", symbol="error")
         raise SystemExit(1) from exc
 
-    _rich_info(f"Pruning entries older than {days} days...", symbol="gear")
+    _rich_info(f"Pruning SHA groups older than {days} days...", symbol="gear")
 
     git_cache = GitCache(root)
     pruned = git_cache.prune(max_age_days=days)
 
-    _rich_success(f"Pruned {pruned} checkout(s).", symbol="check")
+    _rich_success(f"Pruned {pruned} SHA group(s).", symbol="check")
 
 
 def _format_size(size_bytes: int) -> str:

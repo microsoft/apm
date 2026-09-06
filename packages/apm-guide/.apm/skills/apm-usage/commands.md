@@ -30,6 +30,7 @@
 | `apm outdated` | Check locked deps against authenticated upstream state via SHA/semver comparison; stale bare-cache refs are never reported as current, and unavailable remotes report `unknown` | `-g` global, `-v` verbose, `-j N` parallel checks |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
+| `apm cache prune` | Remove Git checkout SHA groups outside the retention window; all full and sparse variants share recency and eviction | `--days N` (default `30`) |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
 For `apm install -g --mcp`, mixed target selections warn and skip

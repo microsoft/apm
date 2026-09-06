@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import errno
+import logging
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -21,19 +25,10 @@ _FRESH_NS = 4102444800000000000
 _REMOTE = "https://gitlab.example.invalid/cache/recency.git"
 
 
-@pytest.mark.parametrize(
-    ("refresh", "sparse_paths"),
-    [
-        pytest.param(False, None, id="hit-full", marks=pytest.mark.windows_compat),
-        pytest.param(False, ["skills"], id="hit-sparse"),
-        pytest.param(True, None, id="write-dedup-full"),
-        pytest.param(True, ["skills"], id="write-dedup-sparse"),
-    ],
-)
-def test_successful_checkout_reuse_survives_prune(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparse_paths: list[str] | None, refresh: bool
-) -> None:
-    """Access refreshes the shared SHA root, not merely its variant directory."""
+def _populated_cache(
+    tmp_path: Path, sparse_paths: list[str] | None
+) -> tuple[GitCache, dict[str, str], tuple[Path, Path, Path]]:
+    """Populate three real revisions in an isolated Git cache."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     repositories = LocalGitRepositoryFactory(
         isolated.repository_root, env=isolated.subprocess_env()
@@ -53,6 +48,23 @@ def test_successful_checkout_reuse_survives_prune(
         )
         for commit in commits
     )
+    return cache, environment, (used, stale, fresh)
+
+
+@pytest.mark.parametrize(
+    ("refresh", "sparse_paths"),
+    [
+        pytest.param(False, None, id="hit-full", marks=pytest.mark.windows_compat),
+        pytest.param(False, ["skills"], id="hit-sparse"),
+        pytest.param(True, None, id="write-dedup-full"),
+        pytest.param(True, ["skills"], id="write-dedup-sparse"),
+    ],
+)
+def test_successful_checkout_reuse_survives_prune(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparse_paths: list[str] | None, refresh: bool
+) -> None:
+    """Access refreshes the shared SHA root, not merely its variant directory."""
+    cache, environment, (used, stale, fresh) = _populated_cache(tmp_path, sparse_paths)
     original_inode = used.stat().st_ino
     lock_path = Path(shard_lock(used).lock_file)
     lock_path.touch()
@@ -70,8 +82,8 @@ def test_successful_checkout_reuse_survives_prune(
         os.utime(checkout.parent, ns=(_STALE_NS, _STALE_NS))
     os.utime(fresh.parent, ns=(_FRESH_NS, _FRESH_NS))
 
-    reused = GitCache(isolated.cache_root, refresh=refresh).get_checkout(
-        _REMOTE, None, locked_sha=commits[0].sha, env=environment, sparse_paths=sparse_paths
+    reused = GitCache(cache._cache_root, refresh=refresh).get_checkout(
+        _REMOTE, None, locked_sha=used.parent.name, env=environment, sparse_paths=sparse_paths
     )
 
     assert reused == used
@@ -84,23 +96,125 @@ def test_successful_checkout_reuse_survives_prune(
     assert fresh.is_dir()
 
 
+@pytest.mark.parametrize("refresh", [False, True], ids=["hit", "write-dedup"])
+@pytest.mark.parametrize("error_type", [ValueError, PermissionError])
 def test_failed_sparse_validation_does_not_refresh_access(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refresh: bool, error_type: type[Exception]
 ) -> None:
     """A rejected sparse hit must not become recent merely by being inspected."""
-    cache = GitCache(tmp_path)
+    cache = GitCache(tmp_path, refresh=refresh)
     sha = "a" * 40
     checkout = cache._checkouts_root / cache_shard_key(_REMOTE) / sha / _variant_key(["skills"])
     (checkout / ".git").mkdir(parents=True)
     (checkout / ".git/HEAD").write_text(sha, encoding="ascii")
 
     def reject_sparse(*args: object, **kwargs: object) -> Path:
-        raise ValueError("Invalid sparse symlink")
+        raise error_type("Invalid sparse symlink")
 
+    monkeypatch.setattr(cache, "_ensure_bare_repo", MagicMock())
     monkeypatch.setattr(cache, "_finalize_sparse_checkout", reject_sparse)
     record_access = MagicMock(wraps=cache._record_checkout_access)
     monkeypatch.setattr(cache, "_record_checkout_access", record_access)
-    with pytest.raises(ValueError, match="Invalid sparse symlink"):
+    with pytest.raises(error_type, match="Invalid sparse symlink"):
         cache.get_checkout(_REMOTE, None, locked_sha=sha, sparse_paths=["skills"])
 
     record_access.assert_not_called()
+
+
+@pytest.mark.parametrize("refresh", [False, True], ids=["hit", "write-dedup"])
+@pytest.mark.parametrize("sparse_paths", [None, ["skills"]], ids=["full", "sparse"])
+@pytest.mark.parametrize(
+    ("error_type", "error_number", "message"),
+    [
+        pytest.param(PermissionError, errno.EACCES, "Permission denied", id="permission"),
+        pytest.param(FileNotFoundError, errno.ENOENT, "Missing checkout", id="missing"),
+        pytest.param(OSError, errno.EIO, "Input/output error", id="io-error"),
+    ],
+)
+def test_checkout_recency_error_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    refresh: bool,
+    sparse_paths: list[str] | None,
+    error_type: type[OSError],
+    error_number: int,
+    message: str,
+) -> None:
+    """Only denied recency metadata is non-fatal, with a visible recovery hint."""
+    cache, environment, (used, _stale, _fresh) = _populated_cache(tmp_path, sparse_paths)
+    error = error_type(error_number, message)
+    original_inode = used.stat().st_ino
+    original_utime = os.utime
+
+    def fail_recency(path: Path, *args: object, **kwargs: object) -> None:
+        if Path(path) == used.parent:
+            raise error
+        original_utime(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "utime", fail_recency)
+    reader = GitCache(cache._cache_root, refresh=refresh)
+    with caplog.at_level(logging.WARNING, logger="apm_cli.cache.git_cache"):
+        if isinstance(error, PermissionError):
+            reused = reader.get_checkout(
+                _REMOTE,
+                None,
+                locked_sha=used.parent.name,
+                env=environment,
+                sparse_paths=sparse_paths,
+            )
+            assert reused == used
+            assert reused.stat().st_ino == original_inode
+            assert (reused / "skills/content.txt").read_text(encoding="ascii") == "used"
+            assert str(used.parent) in caplog.text
+            assert "Permission denied" in caplog.text
+            assert "cache prune may evict" in caplog.text
+            assert "Check cache permissions or set APM_CACHE_DIR" in caplog.text
+        else:
+            with pytest.raises(type(error)) as raised:
+                reader.get_checkout(
+                    _REMOTE,
+                    None,
+                    locked_sha=used.parent.name,
+                    env=environment,
+                    sparse_paths=sparse_paths,
+                )
+            assert raised.value is error
+            assert not caplog.records
+
+
+def test_recency_permission_warning_reaches_default_cli_stderr(tmp_path: Path) -> None:
+    """The real CLI logging configuration exposes the backend warning by default."""
+    cache, environment, (used, _stale, _fresh) = _populated_cache(tmp_path, None)
+    environment.pop("APM_LOG_LEVEL", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from pathlib import Path
+from unittest.mock import patch
+from apm_cli.cache.git_cache import GitCache
+from apm_cli.cli import _configure_logging
+
+_configure_logging()
+with patch("apm_cli.cache.git_cache.os.utime", side_effect=PermissionError("Denied timestamp")):
+    checkout = GitCache(Path(sys.argv[1])).get_checkout(sys.argv[2], None, locked_sha=sys.argv[3])
+print(checkout)
+""",
+            str(cache._cache_root),
+            _REMOTE,
+            used.parent.name,
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert str(used) in result.stdout
+    assert "[!] Cannot update Git cache recency" in result.stderr
+    assert "Denied timestamp" in result.stderr
+    assert "cache prune may evict" in result.stderr
+    assert "APM_CACHE_DIR" in result.stderr

@@ -1,5 +1,6 @@
 """Tests for apm cache CLI commands."""
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -78,7 +79,8 @@ class TestCachePrune:
 
         result = runner.invoke(cache, ["prune"])
         assert result.exit_code == 0
-        assert "pruned" in result.output.lower()
+        assert "Pruning SHA groups older than 30 days..." in result.output
+        assert "Pruned 0 SHA group(s)." in result.output
 
     @patch("apm_cli.cache.paths.get_cache_root")
     def test_prune_custom_days(
@@ -88,6 +90,13 @@ class TestCachePrune:
         (tmp_path / "git" / "db_v1").mkdir(parents=True)
         (tmp_path / "git" / "checkouts_v1").mkdir(parents=True)
         (tmp_path / "http_v1").mkdir(parents=True)
+        stale = tmp_path / "git/checkouts_v1/shard/stale"
+        (stale / "full").mkdir(parents=True)
+        (stale / "sparse-variant").mkdir()
+        os.utime(stale, ns=(946684800000000000, 946684800000000000))
 
         result = runner.invoke(cache, ["prune", "--days", "7"])
         assert result.exit_code == 0
+        assert "Pruning SHA groups older than 7 days..." in result.output
+        assert "Pruned 1 SHA group(s)." in result.output
+        assert not stale.exists()

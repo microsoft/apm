@@ -30,13 +30,11 @@ The cache is purely a performance optimization. Removing it never
 breaks correctness; the next `apm install` re-fetches whatever it
 needs.
 
-Plain and frozen installs can replay locked SHAs and reuse local bare
-repositories or per-SHA checkouts when upstream is unavailable. Commands that
-report or change current state -- `apm install --update`, `apm install
---refresh`, `apm update` (including `--force`), `apm lock --update`, and `apm outdated` -- do not
-accept a persistent bare-repository ref as evidence of current upstream state.
-After establishing a fresh SHA, update may still reuse content cached for that
-SHA. `--refresh` is stronger: it also bypasses cached content.
+Plain and frozen installs can reuse locked SHAs when upstream is unavailable.
+Commands that require current state -- `apm install --update`, `apm install
+--refresh`, `apm update` (including `--force`), `apm lock --update`, and `apm
+outdated` -- resolve upstream first. Update may reuse content for the resolved
+SHA; `--refresh` bypasses it.
 
 ## Subcommands
 
@@ -86,26 +84,40 @@ Use `prune` when you only want to reclaim space from stale entries.
 
 ### `apm cache prune`
 
-Remove git-cache SHA groups whose shared `mtime` is older than `--days N`.
-Reusing any full or sparse variant refreshes the group timestamp, retaining
-all variants for that SHA. Pruning a stale group removes all its variants.
-Defaults to 30 days. The HTTP cache is not touched.
+Remove Git-cache SHA groups whose shared `mtime` is older than `--days N`.
+Reusing a full or sparse variant refreshes the group timestamp; pruning removes
+all variants. The default is 30 days. The HTTP cache is not touched.
 
 ```bash
 apm cache prune              # default: older than 30 days
 apm cache prune --days 7     # tighter window
 ```
 
+Output counts SHA groups, not checkout variants:
+
+```text
+Pruning SHA groups older than 30 days...
+Pruned 2 SHA group(s).
+```
+
 | Flag | Description |
 |---|---|
 | `--days N` | Remove SHA groups not accessed within this many days. Default: `30`. |
 
+A recency-only permission error after successful checkout validation is
+non-fatal:
+
+```text
+[!] Cannot update Git cache recency for <sha-root>: <cause>. Continuing with validated checkout; cache prune may evict it. Check cache permissions or set APM_CACHE_DIR to a writable directory.
+```
+
+Other filesystem errors and validation failures remain fatal.
+
 :::caution[Lockfile-blind]
-`prune` does not consult any project's `apm.lock.yaml`. It can evict all
-variants for a SHA that a plain or frozen install would otherwise reuse. If
-the remaining bare repository cannot rebuild the needed checkout, the next
-install requires remote access. Freshness-required commands require upstream
-ref resolution regardless of retained cache entries.
+`prune` does not consult project lockfiles. It can evict every variant for a
+locked SHA. If the bare repository cannot rebuild the checkout, the next
+install requires remote access. Freshness-required commands resolve upstream
+regardless of retained cache entries.
 :::
 
 ## Cache layout
