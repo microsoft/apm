@@ -284,7 +284,7 @@ trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
 
 curl -fL --proto '=https' --tlsv1.2 -o "$ARCHIVE.sha256" "$BASE_URL/$TAG/$ARCHIVE.sha256"
-expected=$(LC_ALL=C awk -v asset="$ARCHIVE" '
+if ! expected=$(LC_ALL=C awk -v asset="$ARCHIVE" '
   {
     sub(/\r$/, "")
     digest = substr($0, 1, 64)
@@ -302,7 +302,10 @@ expected=$(LC_ALL=C awk -v asset="$ARCHIVE" '
     if (bad || matches != 1 || NR != 1) exit 1
     print found
   }
-' "$ARCHIVE.sha256")
+' "$ARCHIVE.sha256"); then
+  echo "Malformed checksum sidecar: choose a release with a valid $ARCHIVE.sha256." >&2
+  exit 1
+fi
 
 curl -fL --proto '=https' --tlsv1.2 -o "$ARCHIVE" "$BASE_URL/$TAG/$ARCHIVE"
 if command -v sha256sum >/dev/null 2>&1; then
