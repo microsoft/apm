@@ -90,10 +90,13 @@ def _assert_no_local_refresh_artifacts(local_root: Path) -> None:
 
 
 @pytest.mark.parametrize("partial_delete", [False, True], ids=["blocked", "partial"])
-@pytest.mark.parametrize("package_count", [1, 2], ids=["single", "batch"])
-@pytest.mark.parametrize("transitive", [False, True], ids=["direct", "transitive"])
+@pytest.mark.parametrize(
+    ("package_count", "transitive", "cross_parent"),
+    [(1, False, False), (2, False, False), (1, True, False), (2, True, False), (2, False, True)],
+    ids=["direct-single", "direct-batch", "transitive-single", "transitive-batch", "cross-parent"],
+)
 def test_failed_package_deletion_retains_ownership_until_retry(
-    tmp_path: Path, partial_delete: bool, package_count: int, transitive: bool
+    tmp_path: Path, partial_delete: bool, package_count: int, transitive: bool, cross_parent: bool
 ) -> None:
     """Installed -> failed removal -> retry keeps recoverable ownership, not rollback."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=os.environ)
@@ -109,17 +112,24 @@ def test_failed_package_deletion_retains_ownership_until_retry(
         )
         for index in range(package_count)
     ]
+    owners = {
+        package.name: f"apm-fixture-{index}" if cross_parent else owner
+        for index, package in enumerate(packages)
+    }
     consumer = factory.create(
         "consumer",
         targets=("copilot",),
-        dependencies=tuple(f"{owner}/{package.name}" for package in packages) if transitive else (),
+        dependencies=tuple(f"{owners[package.name]}/{package.name}" for package in packages)
+        if transitive or cross_parent
+        else (),
     )
-    if not transitive:
+    if not transitive and not cross_parent:
         for package in packages:
             factory.add_relative_dependency(consumer, package)
     blocked_source = packages[-1]
     if transitive:
         blocked_source = factory.create("transitive")
+        owners[blocked_source.name] = owner
     sources = [*packages, *([blocked_source] if transitive else [])]
     for package in sources:
         (package.root / "payload.txt").write_bytes(b"owned package payload\n")
@@ -129,13 +139,15 @@ def test_failed_package_deletion_retains_ownership_until_retry(
             package.name,
             f"---\nname: {package.name}\ndescription: Recovery fixture\n---\n# Recovery\n",
         )
-    if transitive:
+    if transitive or cross_parent:
         repositories = LocalGitRepositoryFactory(isolated.repository_root, env=env)
         rewrites = []
         for package in sources:
             repository = repositories.create(package.name, source_tree=package.root)
             repositories.commit(repository, message=f"Seed {package.name}")
-            rewrites.append((repository, f"https://github.com/{owner}/{package.name}"))
+            rewrites.append(
+                (repository, f"https://github.com/{owners[package.name]}/{package.name}")
+            )
         env = repositories.url_rewrite_subprocess_env_many(rewrites)
     runner = ApmLifecycleRunner((sys.executable, "-c", _ENTRYPOINT))
     installed = runner.run(
@@ -149,10 +161,12 @@ def test_failed_package_deletion_retains_ownership_until_retry(
     before_tree = ArtifactSnapshot.capture(consumer.root)
     assert before.lockfile_bytes is not None
     assert before.deployment_records
-    materialized = [consumer.root / "apm_modules" / owner / package.name for package in packages]
-    blocked = consumer.root / "apm_modules" / owner / blocked_source.name
+    materialized = [
+        consumer.root / "apm_modules" / owners[package.name] / package.name for package in packages
+    ]
+    blocked = consumer.root / "apm_modules" / owners[blocked_source.name] / blocked_source.name
     assert (blocked / "payload.txt").read_bytes() == b"owned package payload\n"
-    args = ("uninstall", *(f"{owner}/{package.name}" for package in packages))
+    args = ("uninstall", *(f"{owners[package.name]}/{package.name}" for package in packages))
     failed = runner.run(
         args,
         scenario_id="deletion-failure-uninstall",
@@ -185,6 +199,8 @@ def test_failed_package_deletion_retains_ownership_until_retry(
     assert final.deployment_records == ()
     assert all(not path.exists() for path in materialized)
     assert not blocked.exists()
+    if cross_parent:
+        assert all(not path.parent.exists() for path in materialized)
 
 
 def test_global_failed_package_deletion_preserves_user_scope_until_retry(
@@ -311,6 +327,7 @@ def test_shared_local_slot_rename_failure_restores_original_until_retry(
     assert "Uninstall incomplete: shared-slot refresh failed" in normalized_output
     assert "lockfile ownership were retained" in normalized_output
     assert "retry the same uninstall command" in normalized_output
+    assert "--verbose" in normalized_output
     after = LifecycleStateSnapshot.capture(project.root, targets=("copilot",))
     _assert_same_lifecycle_state(before, after)
     assert_unchanged(original_materialized, ArtifactSnapshot.capture(materialized))

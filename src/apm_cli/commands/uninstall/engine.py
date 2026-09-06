@@ -825,57 +825,58 @@ def _remove_packages_from_disk(
 
     deleted_pkg_paths = []
     activated_refresh_paths: set[Path] = set()
-    for package in packages_to_remove:
-        package_label = _dependency_public_label(package)
-        try:
-            dep_ref = _parse_dependency_entry(package)
-            package_path = dep_ref.get_install_path(apm_modules_dir)
-        except PathTraversalError as e:
-            logger.error(f"Refusing to remove {package_label}: {e}")
-            raise
-        except (ValueError, TypeError, AttributeError, KeyError):
-            package_str = package if isinstance(package, str) else str(package)
-            repo_parts = package_str.split("/")
-            if len(repo_parts) >= 2:
-                package_path = apm_modules_dir.joinpath(*repo_parts)
-            else:
-                package_path = apm_modules_dir / package_str
+    from ...integration.base_integrator import BaseIntegrator
 
-        refresh = (staged_refreshes or {}).get(package_path)
-        if refresh is not None:
-            if package_path in activated_refresh_paths:
-                continue
-            _activate_staged_local_refresh(refresh, apm_modules_dir)
-            activated_refresh_paths.add(package_path)
-            if refreshed_survivor_keys is not None:
-                refreshed_survivor_keys.update(refresh.survivor_keys)
-            logger.progress(
-                f"Refreshed {package_label} in apm_modules/ for "
-                f"{len(refresh.survivor_keys)} surviving declaration(s)"
-            )
-            continue
-
-        if package_path.exists():
+    try:
+        for package in packages_to_remove:
+            package_label = _dependency_public_label(package)
             try:
-                safe_rmtree(package_path, apm_modules_dir)
-                logger.progress(f"Removed {package_label} from apm_modules/")
-                logger.verbose_detail(
-                    f"    Path: {portable_relpath(package_path, apm_modules_dir)}"
-                )
-                removed += 1
-                deleted_pkg_paths.append(package_path)
+                dep_ref = _parse_dependency_entry(package)
+                package_path = dep_ref.get_install_path(apm_modules_dir)
             except PathTraversalError as e:
-                logger.error(f"Refusing to remove {package_label} from apm_modules/: {e}")
+                logger.error(f"Refusing to remove {package_label}: {e}")
                 raise
-            except OSError as e:
-                logger.error(f"Failed to remove {package_label} from apm_modules/: {e}")
-                raise
-        else:
-            logger.warning(f"Package {package_label} not found in apm_modules/")
+            except (ValueError, TypeError, AttributeError, KeyError):
+                package_str = package if isinstance(package, str) else str(package)
+                repo_parts = package_str.split("/")
+                if len(repo_parts) >= 2:
+                    package_path = apm_modules_dir.joinpath(*repo_parts)
+                else:
+                    package_path = apm_modules_dir / package_str
 
-    from ...integration.base_integrator import BaseIntegrator as _BI2
+            refresh = (staged_refreshes or {}).get(package_path)
+            if refresh is not None:
+                if package_path in activated_refresh_paths:
+                    continue
+                _activate_staged_local_refresh(refresh, apm_modules_dir)
+                activated_refresh_paths.add(package_path)
+                if refreshed_survivor_keys is not None:
+                    refreshed_survivor_keys.update(refresh.survivor_keys)
+                logger.progress(
+                    f"Refreshed {package_label} in apm_modules/ for "
+                    f"{len(refresh.survivor_keys)} surviving declaration(s)"
+                )
+                continue
 
-    _BI2.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
+            if package_path.exists():
+                try:
+                    safe_rmtree(package_path, apm_modules_dir)
+                    logger.progress(f"Removed {package_label} from apm_modules/")
+                    logger.verbose_detail(
+                        f"    Path: {portable_relpath(package_path, apm_modules_dir)}"
+                    )
+                    removed += 1
+                    deleted_pkg_paths.append(package_path)
+                except PathTraversalError as e:
+                    logger.error(f"Refusing to remove {package_label} from apm_modules/: {e}")
+                    raise
+                except OSError as e:
+                    logger.error(f"Failed to remove {package_label} from apm_modules/: {e}")
+                    raise
+            else:
+                logger.warning(f"Package {package_label} not found in apm_modules/")
+    finally:
+        BaseIntegrator.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
     return removed
 
 
@@ -916,41 +917,44 @@ def _cleanup_transitive_orphans(
 
     removed = 0
     deleted_orphan_paths = []
-    for orphan_key in actual_orphans:
-        orphan_dep = lockfile.get_dependency(orphan_key)
-        if not orphan_dep:
-            continue
-        try:
-            orphan_ref = orphan_dep.to_dependency_ref()
-            orphan_path = orphan_ref.get_install_path(apm_modules_dir)
-        except PathTraversalError as e:
-            logger.error(f"Refusing to remove transitive dep {orphan_key}: {e}")
-            raise
-        except ValueError:
-            parts = orphan_key.split("/")
-            orphan_path = (
-                apm_modules_dir.joinpath(*parts)
-                if len(parts) >= 2
-                else apm_modules_dir / orphan_key
-            )
+    from ...integration.base_integrator import BaseIntegrator
 
-        if orphan_path.exists():
+    try:
+        for orphan_key in actual_orphans:
+            orphan_dep = lockfile.get_dependency(orphan_key)
+            if not orphan_dep:
+                continue
             try:
-                safe_rmtree(orphan_path, apm_modules_dir)
-                logger.progress(f"Removed transitive dependency {orphan_key} from apm_modules/")
-                logger.verbose_detail(f"    Path: {portable_relpath(orphan_path, apm_modules_dir)}")
-                removed += 1
-                deleted_orphan_paths.append(orphan_path)
+                orphan_ref = orphan_dep.to_dependency_ref()
+                orphan_path = orphan_ref.get_install_path(apm_modules_dir)
             except PathTraversalError as e:
                 logger.error(f"Refusing to remove transitive dep {orphan_key}: {e}")
                 raise
-            except OSError as e:
-                logger.error(f"Failed to remove transitive dep {orphan_key}: {e}")
-                raise
+            except ValueError:
+                parts = orphan_key.split("/")
+                orphan_path = (
+                    apm_modules_dir.joinpath(*parts)
+                    if len(parts) >= 2
+                    else apm_modules_dir / orphan_key
+                )
 
-    from ...integration.base_integrator import BaseIntegrator as _BI
-
-    _BI.cleanup_empty_parents(deleted_orphan_paths, stop_at=apm_modules_dir)
+            if orphan_path.exists():
+                try:
+                    safe_rmtree(orphan_path, apm_modules_dir)
+                    logger.progress(f"Removed transitive dependency {orphan_key} from apm_modules/")
+                    logger.verbose_detail(
+                        f"    Path: {portable_relpath(orphan_path, apm_modules_dir)}"
+                    )
+                    removed += 1
+                    deleted_orphan_paths.append(orphan_path)
+                except PathTraversalError as e:
+                    logger.error(f"Refusing to remove transitive dep {orphan_key}: {e}")
+                    raise
+                except OSError as e:
+                    logger.error(f"Failed to remove transitive dep {orphan_key}: {e}")
+                    raise
+    finally:
+        BaseIntegrator.cleanup_empty_parents(deleted_orphan_paths, stop_at=apm_modules_dir)
     return removed, actual_orphans
 
 

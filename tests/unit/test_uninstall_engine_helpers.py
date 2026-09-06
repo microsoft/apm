@@ -9,6 +9,7 @@ in existing integration-style uninstall tests:
 - _cleanup_stale_mcp
 """
 
+import errno
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -27,6 +28,7 @@ from apm_cli.commands.uninstall.engine import (
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.path_security import PathTraversalError
+from apm_cli.utils.path_security import safe_rmtree as real_safe_rmtree
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -316,6 +318,62 @@ def test_orphan_containment_refusal_has_no_fallback(tmp_path: Path, at_resolutio
     logger.error.assert_called_once_with(
         "Refusing to remove transitive dep org/orphan: containment refused"
     )
+
+
+@pytest.mark.parametrize("removal_kind", ["direct", "orphan"])
+def test_partial_failure_cleans_deleted_package_parents_for_retry(
+    tmp_path: Path, removal_kind: str
+) -> None:
+    """A later deletion failure must not strand an earlier package's owner directory."""
+    modules = tmp_path / "apm_modules"
+    first = modules / "org1" / "a"
+    second = modules / "org2" / "b"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    logger = _make_logger()
+    packages = ["org1/a", "org2/b"]
+    lockfile = LockFile()
+    for package in packages:
+        lockfile.add_dependency(
+            LockedDependency(repo_url=package, resolved_commit=f"{package}-commit")
+        )
+
+    def remove_with_second_failure(path: Path, root: Path) -> None:
+        if path == second:
+            raise PermissionError(errno.EACCES, "permission denied", path)
+        real_safe_rmtree(path, root)
+
+    def remove() -> None:
+        if removal_kind == "direct":
+            _remove_packages_from_disk(packages, modules, logger)
+        else:
+            _cleanup_transitive_orphans(lockfile, ["org/parent"], modules, None, logger)
+
+    with (
+        patch(
+            "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+            return_value=(packages, {}),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.engine.safe_rmtree",
+            side_effect=remove_with_second_failure,
+        ),
+        pytest.raises(PermissionError, match="permission denied"),
+    ):
+        remove()
+
+    assert not (modules / "org1").exists()
+    assert second.exists()
+
+    with patch(
+        "apm_cli.commands.uninstall.engine._project_transitive_orphans",
+        return_value=(packages, {}),
+    ):
+        remove()
+
+    assert modules.exists()
+    assert not (modules / "org1").exists()
+    assert not (modules / "org2").exists()
 
 
 # ===========================================================================

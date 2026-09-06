@@ -208,7 +208,7 @@ def _report_package_removal_failure(
         "apm.yml and lockfile ownership were retained; some package files "
         f"may already have been removed. {cause} and "
         f"retry the same uninstall command, or run '{recovery}' to restore "
-        "the declared packages."
+        "the declared packages. Run with --verbose for detailed diagnostics."
     )
     logger.verbose_detail(traceback.format_exc().rstrip())
 
