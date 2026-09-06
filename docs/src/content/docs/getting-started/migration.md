@@ -39,6 +39,23 @@ git commit -m "Add APM manifest"
 
 Your teammates run `apm install` and get the same setup. No more copy-pasting configuration between repositories.
 
+## Import what you already have
+
+If the project already carries hand-authored agent configuration (`CLAUDE.md`,
+`.claude/`, `.cursor/rules`, `.github/instructions`, hooks, MCP configs), let APM
+inventory it and propose a manifest:
+
+```bash
+apm init --discover            # read-only report: tool, kind, importability, ownership
+apm init --discover --apply    # import into .apm/ and create or merge apm.yml
+apm install --target codex     # replay the same context on another harness
+```
+
+Originals are never modified; credentials in MCP configs become `${VAR}`
+placeholders; files carrying literal secrets are refused. See
+[`apm init`](../../reference/cli/init/#discover-existing-agent-context) and
+[Brownfield Adoption](../../concepts/brownfield-adoption/).
+
 ## What happens to your existing files?
 
 They continue to work. APM-managed files coexist with manually-created ones. There is no conflict and no takeover.

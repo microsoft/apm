@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-_MACHINE_FORMATS = frozenset({"json", "sarif"})
+_MACHINE_FORMATS = frozenset({"json", "sarif", "yaml"})
 
 
 @dataclass(frozen=True)

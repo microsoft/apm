@@ -36,6 +36,7 @@ from ._helpers import (
     _rich_blank_line,
     _validate_plugin_name,
 )
+from .discover import DISCOVER_HELP, discover_options, run_discover
 
 
 def _detect_agentrc(project_root: Path) -> tuple[bool, bool]:
@@ -91,10 +92,25 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     default=None,
     help="Comma-separated target list (skip prompt, write directly)",
 )
+@click.option("--discover", is_flag=True, help=DISCOVER_HELP)
+@discover_options
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
 @serialized_lifecycle
-def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+def init(
+    ctx,
+    project_name,
+    yes,
+    plugin,
+    marketplace_flag,
+    target_flag,
+    discover,
+    write,
+    output_format,
+    global_,
+    include_hook_scripts,
+    verbose,
+):
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
@@ -104,6 +120,25 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
     --marketplace flags on 'apm init' are kept for backward
     compatibility and will be removed in v0.16.
     """
+    if write or output_format != "text" or global_ or include_hook_scripts:
+        if not discover:
+            raise click.UsageError(
+                "--apply, --format, --global and --include-hook-scripts require --discover"
+            )
+    if discover:
+        if project_name not in (None, "."):
+            raise click.UsageError("--discover scans the current directory; omit PROJECT_NAME")
+        run_discover(
+            write=write,
+            output_format=output_format,
+            global_=global_,
+            include_hook_scripts=include_hook_scripts,
+            target_flag=target_flag,
+            yes=yes,
+            verbose=verbose,
+        )
+        return
+
     # Soft deprecation warnings -- legacy flags still work.
     if plugin:
         click.echo(
