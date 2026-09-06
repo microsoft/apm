@@ -2,7 +2,7 @@
 
 | Problem | Fix |
 |---------|-----|
-| `apm: command not found` | See [installation and PATH setup](./installation.md#quick-install-recommended). Fresh Unix installs use `~/.local/bin`; existing installs keep their launcher directory. |
+| `apm: command not found` | Run the exact current-shell `PATH` command printed by the installer, then see [installation and PATH setup](./installation.md#quick-install-recommended). Pip fallback derives it safely from the selected Python's user scheme, including `PYTHONUSERBASE` and framework layouts; profiles remain unchanged. |
 | Unix install/self-update ownership, destination, or pip fallback refusal | Ask the original administrator/package manager to update it; do not redirect. Uninstall through that owner before migrating; see [ownership rules](./installation.md#unix-ownership-and-migration). |
 | Authentication errors (401/403) | Set the correct token. Run `apm install --verbose` to see which token source is used. See [Authentication](./authentication.md). |
 | File collision on install | A local file conflicts with a dependency file. Use `--force` to overwrite, or rename the local file. |

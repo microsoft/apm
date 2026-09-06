@@ -68,6 +68,14 @@ apm_install_error() {
     exit 1
 }
 
+apm_is_recognized_bundle() {
+    [ -f "$1/apm" ] && [ ! -L "$1/apm" ] && {
+        { [ -f "$1/.apm-installed" ] && [ ! -L "$1/.apm-installed" ]; } ||
+            { [ -f "$1/VERSION" ] && [ ! -L "$1/VERSION" ] &&
+                [ -d "$1/_internal" ] && [ ! -L "$1/_internal" ]; }
+    }
+}
+
 apm_probe_installation() {
     _probe_parent="$(dirname "$1")"
     while [ "$_probe_parent" != "/" ] && [ "$_probe_parent" != "." ]; do
@@ -91,8 +99,7 @@ apm_probe_installation() {
         */Cellar/*|*/Caskroom/*|*/.linuxbrew/*)
             apm_install_error "Package-manager installation at $1. Update or uninstall it with its package manager; the installer will not replace it." ;;
     esac
-    if [ ! -f "$_candidate_lib/.apm-installed" ] &&
-        { [ ! -f "$_candidate_lib/VERSION" ] || [ ! -d "$_candidate_lib/_internal" ]; }; then
+    if ! apm_is_recognized_bundle "$_candidate_lib"; then
         apm_install_error "Unrecognized or package-manager installation at $1. Update or uninstall it with its original installer; refusing a second installation."
     fi
     if [ -n "$_apm_existing_binary" ] && [ "$_candidate" != "$_apm_existing_binary" ]; then
@@ -187,8 +194,15 @@ apm_require_owned_bundle() {
     [ ! -L "$APM_LIB_DIR" ] ||
         apm_install_error "APM_LIB_DIR is a symlink. Supply the original bundle directory, not a symlink."
     if [ -d "$APM_LIB_DIR" ]; then
-        _unmanageable="$(find "$APM_LIB_DIR" \( ! -user "$(id -u)" -o \
-            \( -type d \( ! -exec test -w {} \; -o ! -exec test -x {} \; \) \) \) -print)" ||
+        # Pass directory names as arguments; shell builtins check each batch.
+        _unmanageable="$(find "$APM_LIB_DIR" ! -user "$(id -u)" -print -o \
+            -type d -exec sh -c '
+                for _dir do
+                    if [ ! -w "$_dir" ] || [ ! -x "$_dir" ]; then
+                        printf "%s\n" "$_dir"
+                    fi
+                done
+            ' apm-permission-check {} +)" ||
             apm_install_error "Cannot inspect bundle ownership or permissions. Ask its owner to repair or update $APM_LIB_DIR."
         if [ -n "$_unmanageable" ]; then
             apm_install_error "Existing bundle $APM_LIB_DIR is not writable, searchable, or owned by this user. Ask its owner to update it; no files were removed."
@@ -353,27 +367,24 @@ try_pip_installation() {
     fi
     echo -e "${BLUE}Attempting installation via pip...${NC}"
     
-    # Determine pip command
-    PIP_CMD=""
-    if command -v pip3 >/dev/null 2>&1; then
-        PIP_CMD="pip3"
-    elif command -v pip >/dev/null 2>&1; then
-        PIP_CMD="pip"
-    else
-        echo -e "${RED}Error: pip is not available${NC}"
+    # Query and invoke pip through the same interpreter, not an unrelated launcher.
+    if ! "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
+        echo -e "${RED}Error: pip is not available for $PYTHON_CMD${NC}"
         return 1
     fi
+    PIP_PATH_COMMAND="$("$PYTHON_CMD" -c 'import shlex, sysconfig; print("export PATH=" + shlex.quote(sysconfig.get_path("scripts", scheme=sysconfig.get_preferred_scheme("user"))) + ":\"$PATH\"")')" ||
+        apm_install_error "Cannot determine the pip user-script directory. Repair this Python installation before retrying; no package was installed."
     
     # Try to install. In fail-closed mode, never fall back to public PyPI.
     if [ -n "$APM_PYPI_INDEX_URL" ]; then
         echo -e "${BLUE}Using APM_PYPI_INDEX_URL mirror for pip install.${NC}"
         PIP_INSTALL_OK=0
-        $PIP_CMD install --user --index-url "$APM_PYPI_INDEX_URL" apm-cli || PIP_INSTALL_OK=$?
+        "$PYTHON_CMD" -m pip install --user --index-url "$APM_PYPI_INDEX_URL" apm-cli || PIP_INSTALL_OK=$?
     elif is_truthy "$APM_NO_DIRECT_FALLBACK"; then
         fail_closed_error APM_PYPI_INDEX_URL "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
     else
         PIP_INSTALL_OK=0
-        $PIP_CMD install --user apm-cli || PIP_INSTALL_OK=$?
+        "$PYTHON_CMD" -m pip install --user apm-cli || PIP_INSTALL_OK=$?
     fi
 
     if [ "$PIP_INSTALL_OK" -eq 0 ]; then
@@ -386,8 +397,9 @@ try_pip_installation() {
             echo -e "${BLUE}Location: $(which apm)${NC}"
         else
             echo -e "${YELLOW}[!] APM installed but not found in PATH${NC}"
-            echo "You may need to add ~/.local/bin to your PATH:"
-            echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            echo "For this shell, add pip's user-script directory to PATH:"
+            printf '  %s\n' "$PIP_PATH_COMMAND"
+            echo "No shell profiles were changed."
         fi
         
         echo ""
@@ -788,10 +800,10 @@ echo -e "${YELLOW}Installing APM CLI to $APM_INSTALL_DIR...${NC}"
 
 # --- APM_LIB_DIR safety validation ---
 # Prevent accidental data loss when APM_LIB_DIR is set to a broad/shared path.
-# Four guards: absolute path, suffix, blocklist, marker file.
+# Four guards: absolute path, suffix, blocklist, recognized bundle identity.
 # INSTALL_SAFETY_BEGIN
 # Extracted for testability; do not remove the begin/end markers.
-# Extract with:  sed -n '/^# INSTALL_SAFETY_BEGIN/,/^# INSTALL_SAFETY_END/p' install.sh
+# Source with INSTALL_OWNERSHIP for the shared bundle identity predicate.
 apm_lib_dir_validate() {
     _apm_lib_dir="$1"
     while [ "$_apm_lib_dir" != "/" ] && [ "${_apm_lib_dir%/}" != "$_apm_lib_dir" ]; do
@@ -838,13 +850,9 @@ APM_BLOCKLIST_EOF
         return 13
     fi
 
-    # 4. Marker-file guard: for existing non-empty directories,
-    #    require evidence of a prior APM installation before deleting.
+    # 4. Reuse discovery's bundle identity before deleting a non-empty directory.
     if [ -d "$_apm_lib_dir" ] && [ "$(ls -A "$_apm_lib_dir" 2>/dev/null)" ]; then
-        if [ ! -f "$_apm_lib_dir/apm" ] \
-            && [ ! -f "$_apm_lib_dir/apm.cmd" ] \
-            && [ ! -f "$_apm_lib_dir/VERSION" ] \
-            && [ ! -f "$_apm_lib_dir/.apm-installed" ]; then
+        if ! apm_is_recognized_bundle "$_apm_lib_dir"; then
             return 14
         fi
     fi

@@ -4,7 +4,7 @@
     {
       "id": "unix-install-ownership",
       "decision": "Unix installer destinations, prior-install ownership and unprivileged replacement",
-      "owner": "install.sh (apm_resolve_install_paths, apm_require_owned_bundle)",
+      "owner": "install.sh (apm_is_recognized_bundle, apm_resolve_install_paths, apm_require_owned_bundle)",
       "selectors": ["install.sh"],
       "guards": ["transport-platform-unix-install-ownership"]
     },

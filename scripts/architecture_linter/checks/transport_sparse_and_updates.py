@@ -22,10 +22,12 @@ from scripts.architecture_linter.checks.transport_platform_shared import (
     GROUP,
     _count_checks,
     _forbid_scan,
+    _load,
     _require_subs,
     _src_python,
 )
 from scripts.architecture_linter.facts import FactsProvider
+from scripts.architecture_linter.groups.common import violation
 from scripts.architecture_linter.models import Rule, Violation
 
 _RID_SPARSE = "transport-platform-sparse-symlink-validation"
@@ -134,6 +136,169 @@ _SELF_UPDATE_DEFS = re.compile(
 _RID_UNIX_INSTALL = "transport-platform-unix-install-ownership"
 
 
+_UNIX_INSTALL_OWNER = "install.sh"
+
+
+_BUNDLE_IDENTITY_DEFINITION = re.compile(
+    r"^\s*(?:(?:async\s+)?def\s+|function\s+)?"
+    r"apm_is_recognized_bundle\s*(?:\(\s*[^)]*\))?\s*(?:\{|:)"
+)
+
+
+_CANONICAL_BUNDLE_IDENTITY = (
+    '[ -f "$1/apm" ] && [ ! -L "$1/apm" ] && { '
+    '{ [ -f "$1/.apm-installed" ] && [ ! -L "$1/.apm-installed" ]; } || '
+    '{ [ -f "$1/VERSION" ] && [ ! -L "$1/VERSION" ] && '
+    '[ -d "$1/_internal" ] && [ ! -L "$1/_internal" ]; } }'
+)
+
+
+_LOCAL_BUNDLE_IDENTITY = re.compile(
+    r"\$_(?:candidate_lib|apm_lib_dir)/(?:\.apm-installed|VERSION|_internal)"
+)
+
+
+def _shell_function_body(
+    lines: tuple[str, ...], name: str
+) -> tuple[int, int, tuple[str, ...]] | None:
+    """Return a top-level shell function's line range and body."""
+    definition = re.compile(rf"^{re.escape(name)}\(\)\s*\{{\s*$")
+    for start, line in enumerate(lines):
+        if definition.search(line) is None:
+            continue
+        for end in range(start + 1, len(lines)):
+            if re.fullmatch(r"}\s*", lines[end]) is not None:
+                return start, end, lines[start + 1 : end]
+        return None
+    return None
+
+
+def _normalized_shell(lines: tuple[str, ...]) -> str:
+    """Collapse shell layout while preserving the predicate's exact tokens."""
+    return " ".join(" ".join(lines).split())
+
+
+def _check_unix_bundle_identity(
+    provider: FactsProvider, inventory: frozenset[str]
+) -> tuple[Violation, ...]:
+    """Keep recognition semantics canonical across discovery and deletion."""
+    facts, failures = _load(
+        provider,
+        inventory,
+        _RID_UNIX_INSTALL,
+        _UNIX_INSTALL_OWNER,
+    )
+    if failures:
+        return failures
+
+    lines = facts.lines
+    findings: list[Violation] = []
+    helper_definitions = [
+        number
+        for number, line in enumerate(lines, start=1)
+        if _BUNDLE_IDENTITY_DEFINITION.search(line) is not None
+    ]
+    if len(helper_definitions) != 1:
+        findings.append(
+            violation(
+                _RID_UNIX_INSTALL,
+                _UNIX_INSTALL_OWNER,
+                "Unix bundle identity must have exactly one canonical "
+                "apm_is_recognized_bundle definition",
+            )
+        )
+
+    helper = _shell_function_body(lines, "apm_is_recognized_bundle")
+    probe = _shell_function_body(lines, "apm_probe_installation")
+    validator = _shell_function_body(lines, "apm_lib_dir_validate")
+    ownership_begin = [
+        index for index, line in enumerate(lines) if line.strip() == "# INSTALL_OWNERSHIP_BEGIN"
+    ]
+    ownership_end = [
+        index for index, line in enumerate(lines) if line.strip() == "# INSTALL_OWNERSHIP_END"
+    ]
+
+    if (
+        helper is None
+        or probe is None
+        or len(ownership_begin) != 1
+        or len(ownership_end) != 1
+        or not (
+            ownership_begin[0] < helper[0] < probe[0] < ownership_end[0]
+            and helper[1] < ownership_end[0]
+        )
+    ):
+        findings.append(
+            violation(
+                _RID_UNIX_INSTALL,
+                _UNIX_INSTALL_OWNER,
+                "apm_is_recognized_bundle must stay inside INSTALL_OWNERSHIP "
+                "before apm_probe_installation",
+            )
+        )
+
+    if helper is not None and _normalized_shell(helper[2]) != _CANONICAL_BUNDLE_IDENTITY:
+        findings.append(
+            violation(
+                _RID_UNIX_INSTALL,
+                _UNIX_INSTALL_OWNER,
+                "apm_is_recognized_bundle must preserve regular launcher plus "
+                "regular marker-or-legacy VERSION/internal identity semantics",
+                line=helper[0] + 1,
+            )
+        )
+
+    discovery_route = 'if ! apm_is_recognized_bundle "$_candidate_lib"; then'
+    if probe is None or sum(line.strip() == discovery_route for line in probe[2]) != 1:
+        findings.append(
+            violation(
+                _RID_UNIX_INSTALL,
+                _UNIX_INSTALL_OWNER,
+                "apm_probe_installation must route bundle identity through "
+                "apm_is_recognized_bundle",
+            )
+        )
+
+    nonempty_guard = 'if [ -d "$_apm_lib_dir" ] && [ "$(ls -A "$_apm_lib_dir" 2>/dev/null)" ]; then'
+    deletion_route = 'if ! apm_is_recognized_bundle "$_apm_lib_dir"; then'
+    validator_lines = () if validator is None else validator[2]
+    guarded_route = any(
+        line.strip() == nonempty_guard
+        and index + 1 < len(validator_lines)
+        and validator_lines[index + 1].strip() == deletion_route
+        for index, line in enumerate(validator_lines)
+    )
+    if not guarded_route:
+        findings.append(
+            violation(
+                _RID_UNIX_INSTALL,
+                _UNIX_INSTALL_OWNER,
+                "apm_lib_dir_validate must route non-empty deletion identity "
+                "through apm_is_recognized_bundle",
+            )
+        )
+
+    helper_range = range(helper[0], helper[1] + 1) if helper is not None else range(0)
+    helper_line_indexes = frozenset(helper_range)
+    for index, line in enumerate(lines):
+        if index in helper_line_indexes:
+            continue
+        match = _LOCAL_BUNDLE_IDENTITY.search(line)
+        if match is not None:
+            findings.append(
+                violation(
+                    _RID_UNIX_INSTALL,
+                    _UNIX_INSTALL_OWNER,
+                    "Discovery and deletion must not re-derive or special-case "
+                    "bundle identity outside apm_is_recognized_bundle",
+                    line=index + 1,
+                    column=match.start() + 1,
+                )
+            )
+
+    return tuple(findings)
+
+
 def _check_unix_install_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
     """Keep destination policy and unprivileged replacement in the Unix installer."""
     inv = frozenset(provider.inventory)
@@ -158,6 +323,7 @@ def _check_unix_install_ownership(provider: FactsProvider) -> tuple[Violation, .
             "Unix early bootstrap, pip fallback and replacement must route through ownership preflight",
         )
     )
+    findings.extend(_check_unix_bundle_identity(provider, inv))
     findings.extend(
         _forbid_scan(
             provider,
@@ -182,7 +348,8 @@ def _check_unix_install_ownership(provider: FactsProvider) -> tuple[Violation, .
             ),
             re.compile(
                 r"^\s*(?:(?:async\s+)?def\s+|function\s+)?"
-                r"apm_(?:resolve_install_paths|probe_installation|require_owned_bundle)\s*[({]"
+                r"apm_(?:is_recognized_bundle|resolve_install_paths|probe_installation|"
+                r"require_owned_bundle)\s*[({]"
             ),
             "Unix installation destination and ownership decisions belong only to install.sh",
             exempt=False,

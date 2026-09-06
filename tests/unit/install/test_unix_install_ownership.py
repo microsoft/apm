@@ -42,6 +42,7 @@ def installation(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[Path, 
         "head",
         "uname",
         "mktemp",
+        "sh",
     ):
         executable = shutil.which(name, path="/usr/bin:/bin")
         assert executable is not None
@@ -242,12 +243,12 @@ def _record_tool_calls(root: Path, name: str) -> None:
 def test_bundle_preflight_uses_one_linear_scan(installation: tuple[Path, dict[str, str]]) -> None:
     """Growing the prior tree must not repeat traversal or skip directory checks."""
     root, _ = installation
-    for tool in ("find", "test"):
+    for tool in ("find", "test", "sh"):
         _record_tool_calls(root, tool)
     for width in (10, 100):
         bindir, lib = _prior(root, f"tree-{width}")
         for index in range(width):
-            directory = lib / f"directory-{index}"
+            directory = lib / f"directory-{index} with spaces\nand newline"
             directory.mkdir()
             (directory / "file").touch()
         log = root / f"tree-{width}.log"
@@ -260,8 +261,139 @@ def test_bundle_preflight_uses_one_linear_scan(installation: tuple[Path, dict[st
         assert result.returncode == 0, result.stderr
         calls = log.read_text(encoding="ascii").splitlines()
         assert calls.count("find") == 1
-        assert calls.count("test") == 2 * (width + 1)
+        assert calls.count("test") == 0
+        assert calls.count("sh") == 1
         assert (lib / "VERSION").read_text(encoding="ascii") == "new\n"
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="Real permission proof requires an ordinary user",
+)
+@pytest.mark.parametrize("mode", [0o555, 0o666])
+def test_batched_permissions_preserve_late_unmanageable_directory(
+    installation: tuple[Path, dict[str, str]], mode: int
+) -> None:
+    """A late, unusually named directory must retain both permission checks."""
+    root, _ = installation
+    bindir, lib = _prior(root)
+    for index in range(100):
+        (lib / f"directory-{index}").mkdir()
+    blocked = lib / "last directory\nwith spaces"
+    blocked.mkdir()
+    blocked.chmod(mode)
+    try:
+        result = _run(installation, APM_INSTALL_DIR=str(bindir), APM_LIB_DIR=str(lib))
+        assert result.returncode == 1
+        assert (lib / "VERSION").read_bytes() == b"old\n"
+        assert not (root / "sudo.log").exists()
+    finally:
+        if blocked.exists():
+            blocked.chmod(0o755)
+
+
+def test_permission_batch_failure_preserves_bundle(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """A failed permission worker cannot look like a successful empty scan."""
+    root, _ = installation
+    bindir, lib = _prior(root)
+    worker = root / "tools/sh"
+    worker.unlink()
+    worker.write_text("#!/bin/sh\nexit 57\n", encoding="ascii")
+    worker.chmod(0o755)
+    result = _run(installation, APM_INSTALL_DIR=str(bindir), APM_LIB_DIR=str(lib))
+    assert result.returncode == 1
+    assert (lib / "VERSION").read_bytes() == b"old\n"
+    assert not (root / "sudo.log").exists()
+
+
+def test_recognized_symlink_bundle_preserves_original_destinations(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """Recognized identity does not authorize replacing a symlinked bundle."""
+    root, _ = installation
+    bindir, lib = _prior(root)
+    alias = root / "apm"
+    alias.symlink_to(lib, target_is_directory=True)
+    result = _run(installation, APM_INSTALL_DIR=str(bindir), APM_LIB_DIR=str(alias))
+    assert result.returncode == 1
+    assert "APM_LIB_DIR is a symlink" in result.stderr
+    assert alias.is_symlink()
+    assert (lib / "VERSION").read_bytes() == b"old\n"
+    assert (bindir / "apm").resolve() == lib / "apm"
+    assert not (root / "sudo.log").exists()
+
+
+def test_bundle_scan_does_not_follow_external_symlink(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """Replacing an owned bundle never traverses or removes a symlink's target."""
+    root, _ = installation
+    bindir, lib = _prior(root)
+    external = root / "external"
+    external.mkdir()
+    keep = external / "unrelated"
+    keep.write_bytes(b"external\n")
+    (lib / "linked-directory").symlink_to(external, target_is_directory=True)
+    external.chmod(0o555)
+    try:
+        result = _run(installation, APM_INSTALL_DIR=str(bindir), APM_LIB_DIR=str(lib))
+        assert result.returncode == 0, result.stderr
+        assert keep.read_bytes() == b"external\n"
+        assert (lib / "VERSION").read_bytes() == b"new\n"
+        assert not (root / "sudo.log").exists()
+    finally:
+        external.chmod(0o755)
+
+
+@pytest.mark.parametrize("marker", [None, "VERSION", ".apm-installed", "apm.cmd", "apm"])
+def test_unrecognized_bundle_data_is_preserved(
+    installation: tuple[Path, dict[str, str]], marker: str | None
+) -> None:
+    """A generic file is not permission to recursively delete unrelated data."""
+    root, _ = installation
+    target = root / "home/.local/lib/apm"
+    target.mkdir(parents=True)
+    payload = b"unrelated\x00bytes\n"
+    keep = target / "unrelated-data"
+    keep.write_bytes(payload)
+    if marker is not None:
+        (target / marker).write_text("unrelated-v1\n", encoding="ascii")
+    result = _run(installation)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert keep.read_bytes() == payload
+    assert not (root / "home/.local/bin/apm").exists()
+    assert not (root / "sudo.log").exists()
+
+
+@pytest.mark.parametrize("marker", [".apm-installed", "VERSION", "_internal"])
+def test_symlinked_bundle_identity_is_not_authorization(
+    installation: tuple[Path, dict[str, str]], marker: str
+) -> None:
+    """External identity entries cannot authorize replacement of unrelated bytes."""
+    root, _ = installation
+    bindir, lib = _prior(root, legacy=marker != ".apm-installed")
+    keep = lib / "unrelated-data"
+    keep.write_bytes(b"unrelated\x00bytes\n")
+    original_launcher = (bindir / "apm").lstat().st_ino
+    external = root / "external-identity"
+    entry = lib / marker
+    if marker == "_internal":
+        entry.rmdir()
+        external.mkdir()
+        entry.symlink_to(external, target_is_directory=True)
+    else:
+        entry.unlink()
+        external.write_bytes(b"external identity\n")
+        entry.symlink_to(external)
+    result = _run(installation, APM_INSTALL_DIR=str(bindir), APM_LIB_DIR=str(lib))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert keep.read_bytes() == b"unrelated\x00bytes\n"
+    assert (bindir / "apm").lstat().st_ino == original_launcher
+    assert entry.is_symlink()
+    assert external.exists()
+    assert not (root / "sudo.log").exists()
 
 
 def test_ancestor_walk_does_not_spawn_per_depth(installation: tuple[Path, dict[str, str]]) -> None:
@@ -531,9 +663,9 @@ def test_self_update_environment_routes_through_production_installer(
     assert not (root / "home/.local").exists()
 
 
-@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("explicit", ["neither", "install-only", "lib-only", "both"])
 def test_administrator_requires_both_destinations(
-    installation: tuple[Path, dict[str, str]], explicit: bool
+    installation: tuple[Path, dict[str, str]], explicit: str
 ) -> None:
     """Simulate only root identity; all writes remain ordinary-user fixture writes."""
     root, _ = installation
@@ -542,18 +674,76 @@ def test_administrator_requires_both_destinations(
     identity.write_text("#!/bin/sh\nprintf '0\\n'\n", encoding="ascii")
     identity.chmod(0o755)
     options = {}
-    if explicit:
-        options = {
-            "APM_INSTALL_DIR": str(root / "usr/local/bin"),
-            "APM_LIB_DIR": str(root / "usr/local/lib/apm"),
-        }
+    if explicit in ("install-only", "both"):
+        options["APM_INSTALL_DIR"] = str(root / "usr/local/bin")
+    if explicit in ("lib-only", "both"):
+        options["APM_LIB_DIR"] = str(root / "usr/local/lib/apm")
     result = _run(installation, **options)
-    assert result.returncode == (0 if explicit else 1), result.stderr
-    if explicit:
+    assert result.returncode == (0 if explicit == "both" else 1), result.stderr
+    if explicit == "both":
         assert (root / "usr/local/bin/apm").is_symlink()
     else:
         assert "requires explicit" in result.stderr
         assert not (root / "home/.local").exists()
+        assert not (root / "usr").exists()
+    assert not (root / "sudo.log").exists()
+
+
+@pytest.mark.parametrize("query_exit", [0, 61])
+def test_pip_fallback_uses_selected_python_user_scripts(
+    installation: tuple[Path, dict[str, str]], query_exit: int
+) -> None:
+    """Use pip's interpreter and user scheme, with no guessed or unsafe export."""
+    root, _ = installation
+    fake_modules = root / "python-modules"
+    pip = fake_modules / "pip"
+    pip.mkdir(parents=True)
+    (pip / "__init__.py").touch()
+    (pip / "__main__.py").write_text(
+        "import os, sys\nfrom pathlib import Path\n"
+        "if sys.argv[1:] != ['--version']:\n"
+        "    Path(os.environ['PIP_LOG']).write_text('\\n'.join(sys.argv[1:]))\n",
+        encoding="ascii",
+    )
+    python = root / "tools/python3"
+    python.write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *get_preferred_scheme*) [ {query_exit} -eq 0 ] || exit {query_exit};; esac\n'
+        f'exec {shlex.quote(sys.executable)} "$@"\n',
+        encoding="ascii",
+    )
+    python.chmod(0o755)
+    standalone = root / "tools/pip3"
+    standalone.write_text(
+        f'#!/bin/sh\nprintf "called\\n" >> "$STANDALONE_PIP_LOG"\n'
+        f'exec {shlex.quote(sys.executable)} -m pip "$@"\n',
+        encoding="ascii",
+    )
+    standalone.chmod(0o755)
+    user_base = root / "python user 'base"
+    log = root / "pip.log"
+    standalone_log = root / "standalone-pip.log"
+    result = _run(
+        installation,
+        pip_fallback=True,
+        PYTHONPATH=str(fake_modules),
+        PYTHONUSERBASE=str(user_base),
+        PIP_LOG=str(log),
+        STANDALONE_PIP_LOG=str(standalone_log),
+        APM_PYPI_INDEX_URL="https://mirror.invalid/simple",
+    )
+    assert result.returncode == (1 if query_exit else 0), result.stdout + result.stderr
+    if query_exit:
+        assert "user-script directory" in result.stderr
+        assert not log.exists()
+        assert "Installation complete!" not in result.stdout
+    else:
+        assert log.read_text(encoding="ascii").splitlines()[:2] == ["install", "--user"]
+        export = f'export PATH={shlex.quote(str(user_base / "bin"))}:"$PATH"'
+        assert export in result.stdout
+        assert "No shell profiles were changed." in result.stdout
+    assert not standalone_log.exists()
+    assert not list((root / "home").iterdir())
     assert not (root / "sudo.log").exists()
 
 
@@ -586,7 +776,10 @@ def test_binary_failure_advice_preserves_installation_ownership(
         ldd.chmod(0o755)
     if python_version is not None:
         python = root / "tools/python3"
-        python.write_text(f"#!/bin/sh\nprintf '{python_version}\\n'\n", encoding="ascii")
+        python.write_text(
+            f'#!/bin/sh\n[ "$1" = "-c" ] || exit 1\nprintf "{python_version}\\n"\n',
+            encoding="ascii",
+        )
         python.chmod(0o755)
     options = {}
     if kind == "existing":
@@ -633,8 +826,7 @@ def test_unwritable_destination_never_elevates(
     lib_parent.mkdir(parents=True)
     lib = lib_parent / "apm"
     if prior:
-        lib.mkdir()
-        (lib / ".apm-installed").touch()
+        _prior(root, "system")
         (lib / "keep").write_text("old\n", encoding="ascii")
     lib_parent.chmod(0o555)
     try:

@@ -8,10 +8,10 @@ set ``APM_LIB_DIR=$HOME/.local/share`` while trying to install to
 ``$HOME/.local/bin`` lost unrelated application data (Atuin's local history DB
 in the reported incident).
 
-The fix wraps the four guards -- absolute path, suffix, blocklist, marker file
+The fix wraps the four guards -- absolute path, suffix, blocklist, bundle identity
 -- in a callable function ``apm_lib_dir_validate()`` and refuses unsafe paths
 before any ``rm -rf``. These tests exercise the function directly via the
-sentinel-bounded source block in install.sh.
+sentinel-bounded source blocks in install.sh, including the shared identity owner.
 
 Note: the test file does not import any production Python code. It treats
 ``install.sh`` as a shell source so the function-under-test is the same code
@@ -93,7 +93,8 @@ def _load_validator():
     assert match_begin is not None, "INSTALL_SAFETY_BEGIN sentinel missing in install.sh"
     start = match_begin.end()
     end = match_end.start()
-    block = text[start:end]
+    ownership = text.split("# INSTALL_OWNERSHIP_BEGIN", 1)[1].split("# INSTALL_OWNERSHIP_END", 1)[0]
+    block = ownership + text[start:end]
     return block
 
 
@@ -279,7 +280,7 @@ class TestBlocklistGuard:
 
 
 # ---------------------------------------------------------------------------
-# Guard 4: marker-file check (existing non-empty directories)
+# Guard 4: recognized bundle identity (existing non-empty directories)
 # ---------------------------------------------------------------------------
 
 
@@ -287,8 +288,7 @@ class TestBlocklistGuard:
 class TestMarkerFileGuard:
     """Guard 4 only fires when the directory exists and is non-empty. The
     Python harness stages directories under a tempdir and calls the validator
-    against them; absence of a marker file on a non-empty directory must
-    return 14.
+    against them; an incomplete identity on a non-empty directory must return 14.
     """
 
     def test_accepts_empty_dir(self):
@@ -297,33 +297,43 @@ class TestMarkerFileGuard:
             os.makedirs(target)
             assert _run_validator(target) == 0
 
-    def test_accepts_dir_with_apm_marker(self):
+    def test_rejects_dir_with_only_apm_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = os.path.join(tmp, "apm")
             os.makedirs(target)
             Path(target, "apm").touch()
-            assert _run_validator(target) == 0
+            assert _run_validator(target) == 14
 
-    def test_accepts_dir_with_version_marker(self):
+    def test_rejects_dir_with_only_version_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = os.path.join(tmp, "apm")
             os.makedirs(target)
             Path(target, "VERSION").write_text("0.18.0\n")
-            assert _run_validator(target) == 0
+            assert _run_validator(target) == 14
 
     def test_accepts_dir_with_apm_installed_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = os.path.join(tmp, "apm")
             os.makedirs(target)
+            Path(target, "apm").touch()
             Path(target, ".apm-installed").touch()
             assert _run_validator(target) == 0
 
-    def test_accepts_dir_with_apm_cmd_marker(self):
+    def test_rejects_dir_with_only_apm_cmd_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = os.path.join(tmp, "apm")
             os.makedirs(target)
             Path(target, "apm.cmd").touch()
-            assert _run_validator(target) == 0
+            assert _run_validator(target) == 14
+
+    def test_accepts_recognized_legacy_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp, "apm")
+            target.mkdir()
+            (target / "apm").touch()
+            (target / "VERSION").write_text("0.18.0\n", encoding="ascii")
+            (target / "_internal").mkdir()
+            assert _run_validator(str(target)) == 0
 
     def test_rejects_nonempty_dir_without_marker(self):
         with tempfile.TemporaryDirectory() as tmp:

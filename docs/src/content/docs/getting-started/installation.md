@@ -111,17 +111,19 @@ jobs:
 
 ### Unix install ownership and migration
 
-`install.sh` checks `PATH`, `$APM_INSTALL_DIR/apm`, `$APM_LIB_DIR/apm`, user-default destinations, historical `/usr/local/bin/apm`, `/opt/homebrew/bin/apm`, and `/usr/local/lib/apm/apm`, plus self-update's running binary. Recognized bundles contain `apm` plus `.apm-installed` or legacy PyInstaller `VERSION` and `_internal`. Updates preserve their launcher/bundle destinations.
+`install.sh` checks `PATH`, `$APM_INSTALL_DIR/apm`, `$APM_LIB_DIR/apm`, user-default destinations, historical `/usr/local/bin/apm`, `/opt/homebrew/bin/apm`, and `/usr/local/lib/apm/apm`, plus self-update's running binary. It recognizes a nonempty Unix bundle only when its bundle-identity entries are not symlinks: a regular `apm` file plus either a regular `.apm-installed` file or both a regular `VERSION` file and a real `_internal` directory. Discovery and pre-delete validation use this same rule; `VERSION` alone, `.apm-installed` alone, or `apm.cmd` alone never authorizes deletion. Recognized current and legacy layouts update in place, preserving their launcher and bundle destinations.
 
-The same resolver rejects missing administrator destinations, relative paths, dot segments, and overlaps before the Linux compatibility probe, metadata lookup, download, or extraction. It runs again before replacement; full bundle-safety, ownership, and writability checks still run before removal.
+Preflight requires absolute, normalized launcher and bundle destinations; the bundle must end in `/apm`. It rejects blocked shared directories, destination overlaps, and an `APM_LIB_DIR` symlink before replacement. Root must set both `APM_INSTALL_DIR` and `APM_LIB_DIR`; setting only one refuses the install instead of filling the other from a default.
+
+Before removal, every existing bundle entry must be caller-owned, and every directory must be writable and searchable by the caller. A failure stops the update without removing files. Conflicting installations or destination overrides, inaccessible discovery paths, unknown/package-managed launchers, and unwritable destinations also fail with repair guidance.
 
 After installing the bundle and launcher, `install.sh` runs the launcher at its destination with `--version` before reporting completion, even when it is off `PATH`; failure stops with guidance to retry the same destinations or ask the installation owner to repair it.
 
-Conflicting installations or redirection, inaccessible discovery paths, unknown/package-managed launchers, symlinked `APM_LIB_DIR`, and bundles not owned by the caller or with any unwritable/unsearchable directory fail with repair guidance.
-
 **Migration:** ask the original administrator or package manager to update system/custom installs. To migrate deliberately, uninstall through that owner first, then install fresh. Destination overrides never migrate an install. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set; existing/custom installs receive terminal owner guidance even when Python is unavailable.
 
-Root requires both destination variables. After saving and reviewing `install.sh`, invoke it explicitly as administrator:
+Pip fallback uses the selected Python 3.10+ interpreter for both `-m pip` and its `sysconfig` user scheme. If that scheme query fails, installation stops before package installation. If the installed launcher is off `PATH`, the installer prints a safely shell-quoted command for the current shell using that interpreter's actual scripts directory, including `PYTHONUSERBASE` and framework layouts. It never modifies shell profiles.
+
+After saving and reviewing `install.sh`, invoke it explicitly as administrator:
 
 ```bash
 sudo env APM_INSTALL_DIR=/usr/local/bin APM_LIB_DIR=/usr/local/lib/apm sh ./install.sh

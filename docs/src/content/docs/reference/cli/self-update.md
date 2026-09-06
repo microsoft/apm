@@ -30,7 +30,7 @@ The command compares the installed version against the latest GitHub release and
 Self-update can read two non-secret installer preferences from `apm config`:
 
 - `self-update.channel`: `stable` (default) selects the newest stable release; `prerelease` selects the newest non-draft prerelease.
-- `self-update.install-dir`: launcher directory passed as `APM_INSTALL_DIR`; on Unix it must match the existing installation, not redirect it.
+- `self-update.install-dir`: launcher directory passed as `APM_INSTALL_DIR`. On Unix, it is a preservation preference: it must match the existing launcher, while unset preserves the detected installation. Windows behavior is unchanged.
 
 `APM_SELF_UPDATE_CHANNEL` and `APM_INSTALL_DIR` override config. An explicit `VERSION` pins the release. Otherwise, either channel passes its selected release to the installer as one normalized `v<version>` value.
 
@@ -52,7 +52,7 @@ Some package-manager distributions (for example, Homebrew) disable self-update a
 | `APM_PYPI_INDEX_URL` | _(unset)_ | PyPI-compatible index used by installer pip fallback. |
 | `APM_NO_DIRECT_FALLBACK` | _(unset)_ | Set to `1` to fail closed instead of using public GitHub, `aka.ms`, or PyPI fallback. |
 | `APM_SELF_UPDATE_CHANNEL` | `stable` | Invocation-scoped channel override: `stable` or `prerelease`. Overrides `apm config set self-update.channel ...`. |
-| `APM_INSTALL_DIR` | existing Unix launcher directory / Windows installer default | Overrides `self-update.install-dir`, but cannot redirect an existing Unix installation. |
+| `APM_INSTALL_DIR` | preserve detected Unix installation / Windows installer default | Overrides `self-update.install-dir`. On Unix it must match the existing launcher directory and cannot redirect the installation. |
 | `GITHUB_URL` | `https://github.com` | Legacy GitHub/GHES base URL. When the installer mirror is unset, a resolved release downloads the raw script from this host at its exact tag. |
 | `APM_REPO` | `microsoft/apm` | Repository in `owner/repo` form for GitHub/GHES metadata and raw installer paths. |
 | `VERSION` | _(unset)_ | Pin a release tag and skip release metadata lookup. |
@@ -106,7 +106,7 @@ When an update is available, APM downloads and runs the platform installer, stre
 
 ## Where the new binary lands
 
-Recognized Unix bundles retain their launcher/bundle directories; fresh-install defaults do not relocate them. Conflicting overrides fail. See [ownership and migration](../../../getting-started/installation/#unix-install-ownership-and-migration) for permission checks, administrator updates, and pip fallback restrictions.
+Recognized Unix bundles retain their launcher/bundle directories whether `self-update.install-dir` is set to the matching launcher directory or left unset. Conflicting overrides fail; this setting does not migrate an installation. See [ownership and migration](../../../getting-started/installation/#unix-install-ownership-and-migration) for bundle recognition, permission checks, administrator updates, and pip fallback restrictions.
 
 On Windows, self-update advances the [stable executable path](../../../getting-started/installation/). Configuration under `~/.apm/` and project files are untouched.
 
