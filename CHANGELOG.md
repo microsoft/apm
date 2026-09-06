@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## [0.29.1] - 2026-09-06
+### Changed
+
+- macOS onboarding now recommends Homebrew core (`brew install apm`, no tap) for existing Homebrew users, with `brew upgrade apm` for updates and visible standalone alternatives.
+
+### Fixed
+
+- `apm install` now keeps transitive plugin MCP launchers usable after
+  publication and cached replay by resolving plugin-root placeholders from the
+  published package directory. Lockfile writes and self-defined MCP
+  configuration construction reject remaining resolution-staging references
+  without echoing configuration values. (by @lkshrk, #2827)
+- Git dependency downloads retry one narrowly classified HTTPS connection failure without changing credentials or transport; lifecycle timeout tests now wait for descendant readiness before exercising process-tree termination.
+
+## [0.29.1] - 2026-09-05
 
 ### Security
 

@@ -98,7 +98,16 @@ apm-policy.yml governs what gets installed; your agent harness governs what runs
 
 ## Get Started
 
-#### Linux / macOS
+#### macOS with Homebrew
+
+```bash
+brew install apm
+```
+
+No custom tap is required. Homebrew manages installation and updates:
+use `brew upgrade apm`, not `apm self-update`.
+
+#### Linux / macOS without Homebrew
 
 ```bash
 curl -sSL https://aka.ms/apm-unix | sh
@@ -110,17 +119,17 @@ curl -sSL https://aka.ms/apm-unix | sh
 irm https://aka.ms/apm-windows | iex
 ```
 
-Native release binaries are published for macOS, Linux, and Windows x86_64. `apm self-update` reuses the matching platform installer.
+Native release binaries are published for macOS, Linux, and Windows x86_64.
+For standalone installations, `apm self-update` reuses the matching platform installer.
+You do not need Homebrew to use APM.
 
 <details>
-<summary>Other install methods</summary>
+<summary>Other install methods: pip and Scoop</summary>
 
 #### Linux / macOS
 
 ```bash
-# Homebrew
-brew install microsoft/apm/apm
-# pip
+# pip (Python 3.10+)
 pip install apm-cli
 ```
 
@@ -135,6 +144,9 @@ pip install apm-cli
 ```
 
 </details>
+
+Already using the Microsoft Homebrew tap? See the
+[migration guide](https://microsoft.github.io/apm/getting-started/installation/#migrate-from-the-microsoft-tap).
 
 Then start adding packages:
 
