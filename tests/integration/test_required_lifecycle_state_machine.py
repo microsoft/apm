@@ -1748,6 +1748,7 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
         environment=scenario.environment,
         scenario_id="diamond-install",
     )
+    assert user_note.read_bytes() == b"Keep this user-authored note.\n"
     installed = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
     assert installed.file(deployed_instruction).content == source_instruction.read_bytes()
     assert installed.lockfile_bytes is not None
