@@ -433,7 +433,7 @@ def _build_package_info(
     apm_yml = install_path / "apm.yml"
     if apm_yml.exists():
         try:
-            pkg = APMPackage.from_apm_yml(apm_yml, source_path=install_path)
+            pkg = APMPackage.from_apm_yml(apm_yml, source_path=install_path, create_config=False)
         except Exception:
             pkg = APMPackage(
                 name=install_path.name,
@@ -559,7 +559,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         if config.resolved_targets is not None
         else resolve_audit_targets(project_root, user_scope=config.user_scope)
     )
-    targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
+    targets = [
+        replay_target(target, scratch_root)
+        for target in _filter_targets(live_targets, config.targets)
+    ]
     registries: dict[str, str] | None = None
     downloader = None
     registry_resolver = None
@@ -572,7 +575,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
         apm_yml = project_root / "apm.yml"
         if apm_yml.exists():
-            manifest = APMPackage.from_apm_yml(apm_yml)
+            manifest = APMPackage.from_apm_yml(apm_yml, create_config=False)
             registries = getattr(manifest, "registries", None) or {}
             if registries:
                 registry_resolver = RegistryPackageResolver(registries)

@@ -76,7 +76,7 @@ def prepare_ci_audit_replay(
             f"lockfile not found at {lockfile_path}; run 'apm install' to generate it"
         )
 
-    manifest = APMPackage.from_apm_yml(project_root / "apm.yml")
+    manifest = APMPackage.from_apm_yml(project_root / "apm.yml", create_config=False)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
         raise CiAuditReplayError(f"lockfile at {lockfile_path} is empty or unreadable")

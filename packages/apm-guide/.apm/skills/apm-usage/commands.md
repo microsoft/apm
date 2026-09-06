@@ -220,22 +220,43 @@ descendants, are skipped.
 ## Security and audit
 
 Audit replays current target intent: manifest `target(s)` > saved `apm config
-set target` > existing directory detection. An unsaved earlier `install
---target` override is not recovered from ownership records. Experimental targets
-require their prerequisites and use saved configuration, not experimental
-manifest declarations. Changing targets does not exempt old claimed files or
-missing ownership from drift detection. Configuration is read-only during audit.
+set target` > existing directory detection. A selected malformed saved target
+fails resolution; a valid manifest target overrides irrelevant invalid saved
+configuration. Audit does not recover unsaved historical `install --target`
+overrides or create missing user configuration.
+
+Saved target names do not guarantee scratch replay support. Native nonfilesystem
+targets without an isolated filesystem backend (currently `copilot-app`) fail
+replay explicitly without invoking the live workflow writer or changing its
+database or sidecars. Filesystem-backed native layouts are rebased into scratch;
+old native claims remain comparison-only, and unavailable former roots fail
+closed. Missing ownership never removes source-derived expectations. See the
+[audit reference](https://microsoft.github.io/apm/reference/cli/audit/#drift-detection)
+for target prerequisites and replay boundaries.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm audit [PKG]` | Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations | `--file PATH`, `--strip`, `--dry-run`, `-v`, `-f [text\|json\|sarif\|md]`, `-o PATH`, `--ci`, `--policy SOURCE`, `--no-cache`, `--no-fail-fast`, `--no-drift`, `--external NAME` (experimental; ingest a third-party SARIF scanner, e.g. `skillspector`), `--external-sarif PATH`, `--external-llm/--no-external-llm`, `--external-args TEXT` |
 
-`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` into a temporary scratch tree and diffs the result against your working tree. Catches three failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed. The scan is read-only -- never writes to your project, lockfile, or live `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives. Bare `apm audit` still uses the warmed local cache and skips with an informational message when the cache is absent. `apm audit --ci` is stricter: when `apm_modules/` is missing but `apm.lock.yaml` is present, it self-hydrates a lock-pinned scratch install for `config-consistency` and drift without touching the checkout. That closes the setup-only CI gap for repos that commit deployed files. Repos that gitignore deployed outputs still need those files present on disk for `deployed-files-present`, so keep the full-install CI pattern there. Use `--no-drift` to opt out (e.g. fast inner loops); the flag is mutually exclusive with `--strip`/`--file`. Ordinary drift remains advisory in bare audit and fails only in `--ci` mode or when policy promotes it. A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`).
-`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives. If the install cache has not been warmed (e.g. a fresh checkout before the first `apm install`), the drift check is skipped with an informational message and can still exit 0; run `apm install` before relying on drift until cold-cache replay lands. Use `--no-drift` to opt out with reduced coverage; the flag is mutually exclusive with `--strip`/`--file`. Ordinary drift remains advisory in bare audit and fails in `--ci` mode. Remediate `unrecorded` with `apm install`, then commit the regenerated `apm.lock.yaml`. A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`/`unrecorded`).
-`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives. If the install cache has not been warmed (e.g. a fresh checkout before the first `apm install`), the drift check is skipped with an informational message and can still exit 0; run `apm install` before relying on drift until cold-cache replay lands. Use `--no-drift` to opt out with reduced coverage; the flag is mutually exclusive with `--strip`/`--file`. Drift is advisory in bare audit by default unless policy enables `security.audit.fail_on_drift`; `--ci` always gates on drift. Remediate `unrecorded` with `apm install`, then commit the regenerated `apm.lock.yaml`. A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`/`unrecorded`).
-`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives.
+Drift detection runs by default without modifying the project, lockfile, or live
+`apm_modules/`. It compares replayed output for `modified`, `unintegrated`,
+`orphaned`, and `unrecorded` files, normalizing build IDs, CRLF, and BOMs.
+Bare audit uses the local cache and skips drift on a cache miss. With a lockfile,
+`apm audit --ci` self-hydrates a lock-pinned scratch install for
+`config-consistency` and drift when `apm_modules/` is absent. Gitignored deployed
+outputs must still exist for `deployed-files-present`.
 
-If the install cache has not been warmed (e.g. a fresh checkout before the first `apm install`), the drift check is skipped with an informational message and can still exit 0; run `apm install` before relying on drift until cold-cache replay lands. Use `--no-drift` to opt out with reduced coverage; the flag is mutually exclusive with `--strip`/`--file`. Drift is advisory in bare audit by default unless policy enables `security.audit.fail_on_drift`; `--ci` always gates on drift. Remediate `unrecorded` with `apm install`, then commit the regenerated `apm.lock.yaml`. A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`/`unrecorded`).
+`--no-drift` skips replay with reduced coverage and cannot accompany `--strip`
+or `--file`. Ordinary drift is advisory in bare audit unless policy enables
+`security.audit.fail_on_drift`; `--ci` gates on drift. For `unrecorded` files,
+run `apm install` and commit the regenerated `apm.lock.yaml`. This does not
+provide a missing native replay backend. JSON reports use the top-level `drift`
+key; SARIF uses `apm/drift/<kind>` rule IDs.
+
+Invalid canonical deployment owners remain a hard `deployment-ledger-owners`
+failure in both modes: exit 1, owner/path diagnostics, and `--strip` blocked.
+Run `apm prune`, then rerun `apm audit`; invalid owner records never authorize
+deleting files.
 
 **External scanners (experimental, behind `apm experimental enable external-scanners`).** `--external NAME` runs a third-party SARIF scanner (e.g. `skillspector`) and merges its findings. `--external-llm/--no-external-llm` toggles LLM-powered analysis (default off; sends scanned content to a third-party API, so APM prints a `[!]` egress banner and forwards `OPENAI_API_KEY`/`NVIDIA_INFERENCE_KEY` only when on). `--external-args TEXT` is a single shlex-split string of extra scanner flags, validated against a per-adapter allowlist -- non-allowlisted flags, secret-looking flags, and out-of-cwd paths are rejected fail-closed. `--external-llm`/`--external-args` without `--external` is a usage error (exit 2). Scanner configuration or infrastructure errors (feature disabled, scanner not found, malformed SARIF) exit **3**. Persist defaults with `apm config set external.<name>.llm true` and `apm config set external.<name>.args -- "--model gpt-4o"`. Precedence: CLI > config > policy floor.
 

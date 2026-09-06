@@ -726,6 +726,7 @@ def _check_drift(
     from ..deps.path_anchoring import LocalResolutionError
     from ..install.audit_target_roots import (
         AuditTargetError,
+        audit_comparison_targets,
         external_replay_root,
         resolve_audit_targets,
     )
@@ -819,7 +820,16 @@ def _check_drift(
         project_targets,
         tracked_files=tracked_files,
     )
-    for target in resolved_targets:
+    try:
+        comparison_targets = audit_comparison_targets(
+            lockfile, tuple(resolved_targets), user_scope=user_scope
+        )
+    except AuditTargetError as exc:
+        return (
+            CheckResult(name="drift", passed=False, message=f"drift comparison failed: {exc}"),
+            findings,
+        )
+    for target in comparison_targets:
         live_root = target.managed_deploy_root
         if live_root is None:
             continue

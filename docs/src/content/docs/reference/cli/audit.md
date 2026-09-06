@@ -182,16 +182,28 @@ For the full workflow, see [Enforce in CI](../../../enterprise/enforce-in-ci/).
 Audit evaluates **current target intent**: `apm.yml target(s)` first, then
 [`apm config set target`](../config/), then existing directory detection.
 It does not reconstruct an earlier one-shot `apm install --target` override.
+Audit rejects a malformed saved target only when that fallback is selected;
+a valid manifest target wins over irrelevant stale invalid configuration.
 Keep the intended target in the manifest or saved configuration; experimental
 targets such as `grok-cloud` use the saved configuration because manifest
 target declarations do not accept experimental names.
 
 Changing that intent changes the expected output. Old recorded deployments
 remain in the comparison, and missing ownership does not remove source-derived
-expectations. Experimental targets still require enablement and their runtime
-prerequisites; an unavailable selected target fails CI as `target-resolution`,
-rather than passing an empty replay. Audit reads configuration without creating
-or updating it.
+expectations. Recorded native roots are comparison-only, not replay authority;
+an unavailable former root fails comparison instead of passing. Filesystem-backed
+native targets retain their scoped roots and layout, with replay destinations
+rebased into scratch.
+
+Experimental targets still require enablement and runtime prerequisites;
+an unavailable selected target fails CI as `target-resolution`. Saving a target
+name does not guarantee replay support: native nonfilesystem targets without
+an isolated filesystem backend (currently `copilot-app`) produce an explicit
+scratch replay failure. Audit does not invoke their live workflow writer or
+modify their database or sidecars.
+
+Audit leaves absent user configuration absent and existing configuration
+unchanged, including during package parsing, MCP inspection, and content scanning.
 
 The default audit replays the install pipeline into a scratch tree and diffs
 the result against the working tree. It catches hand-edits, missing

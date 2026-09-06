@@ -25,7 +25,7 @@ def test_configured_experimental_target_is_read_only(tmp_path: Path, user_scope:
         profiles = resolve_audit_targets(project, user_scope=user_scope)
     assert tuple(profile.name for profile in profiles) == ("grok-cloud",)
     assert profiles[0].root_dir == ".grok"
-    config.assert_called_once_with(create_config=False)
+    config.assert_called_once_with(create_config=False, strict=True)
     enabled.assert_called_once_with("grok_cloud", create_config=False)
     assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
 
@@ -89,6 +89,8 @@ def test_missing_config_is_not_created(tmp_path: Path, monkeypatch: pytest.Monke
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(config, "CONFIG_DIR", str(home / ".apm"))
+    monkeypatch.setattr(config, "CONFIG_FILE", str(home / ".apm/config.json"))
     monkeypatch.setattr(config, "_config_cache", None)
     before = ArtifactSnapshot.capture(home)
     assert resolve_audit_targets(tmp_path)[0].name == "copilot"
