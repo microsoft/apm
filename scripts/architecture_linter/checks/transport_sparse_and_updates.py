@@ -310,6 +310,11 @@ def _check_unix_install_ownership(provider: FactsProvider) -> tuple[Violation, .
             "install.sh",
             (
                 ("re", r"^apm_resolve_install_paths\(\)", 1, "eq"),
+                ("re", r"^apm_parse_modify_path_env\(\)", 1, "eq"),
+                ("re", r"^apm_read_shell_receipt\(\)", 1, "eq"),
+                ("re", r"^apm_write_shell_receipt\(\)", 1, "eq"),
+                ("re", r"^apm_restore_profile_after_partial_write\(\)", 1, "eq"),
+                ("re", r"^apm_configure_native_shell_path\(\)", 1, "eq"),
                 (
                     "sub",
                     "apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm",
@@ -349,9 +354,11 @@ def _check_unix_install_ownership(provider: FactsProvider) -> tuple[Violation, .
             re.compile(
                 r"^\s*(?:(?:async\s+)?def\s+|function\s+)?"
                 r"apm_(?:is_recognized_bundle|resolve_install_paths|probe_installation|"
-                r"require_owned_bundle)\s*[({]"
+                r"require_owned_bundle|configure_native_shell_path|read_shell_receipt|"
+                r"write_shell_receipt|restore_profile_after_partial_write|"
+                r"parse_modify_path_env)\s*[({]"
             ),
-            "Unix installation destination and ownership decisions belong only to install.sh",
+            "Unix installation destination, shell setup and ownership decisions belong only to install.sh",
             exempt=False,
         )
     )

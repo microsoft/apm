@@ -107,6 +107,9 @@ APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](htt
 ## Azure Pipelines
 
 Use one HOME-local prefix so fresh root and non-root runners need no `sudo`.
+`install.sh` does not edit shell profiles in CI/headless environments. Keep the
+explicit `export PATH=...` step in CI, or use `microsoft/apm-action@v1` where
+available.
 
 ```yaml
 steps:

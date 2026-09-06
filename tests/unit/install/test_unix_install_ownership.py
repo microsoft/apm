@@ -19,6 +19,18 @@ pytestmark = [
 ]
 
 
+def _unit_shell_setup_stubs(overrides: dict[str, str]) -> str:
+    """Return test-only shell function overrides for non-PTY unit snippets."""
+    stubs: list[str] = []
+    if "APM_UNIT_CURRENT_SHELL" in overrides:
+        stubs.append("apm_detect_current_shell() { printf '%s\\n' \"$APM_UNIT_CURRENT_SHELL\"; }\n")
+    if overrides.get("APM_UNIT_NO_TTY") == "1":
+        stubs.append("apm_has_controlling_tty() { return 1; }\n")
+    elif overrides.get("APM_UNIT_ALLOW_PROFILE_SETUP") == "1":
+        stubs.append("apm_has_controlling_tty() { return 0; }\n")
+    return "".join(stubs)
+
+
 @pytest.fixture(params=["/bin/bash", "/bin/sh"])
 def installation(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[Path, dict[str, str]]:
     """Stage only harmless tools, a bundle and an empty home."""
@@ -31,9 +43,16 @@ def installation(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[Path, 
         "ls",
         "mkdir",
         "rm",
+        "rmdir",
+        "mv",
         "cp",
         "touch",
         "ln",
+        "chmod",
+        "cksum",
+        "cmp",
+        "ps",
+        "sed",
         "find",
         "id",
         "test",
@@ -62,6 +81,7 @@ def installation(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[Path, 
     return tmp_path, {
         "PATH": str(tools),
         "HOME": str(home),
+        "CI": "1",
         "LC_ALL": "C",
         "TMP_DIR": str(bundle.parent),
         "EXTRACTED_DIR": bundle.name,
@@ -84,6 +104,7 @@ def _run(
     root, env = installation
     source = INSTALLER.read_text(encoding="ascii")
     config = source.split("# Banner\n", 1)[0]
+    config += _unit_shell_setup_stubs(overrides)
     if defaults:
         body = next(line for line in source.splitlines() if line.startswith('APM_LIB_DIR="'))
         body += '\nprintf "%s\\n%s\\n" "$APM_INSTALL_DIR" "$APM_LIB_DIR"\n'
@@ -124,10 +145,14 @@ def _run(
         overrides["HISTORICAL_APM"] = str(root / "usr/local/bin/apm")
     else:
         if script_args:
-            body = 'apm_parse_installer_args "$@"\napm_resolve_install_paths "$HISTORICAL_APM"\n'
+            body = (
+                'apm_parse_installer_args "$@"\n'
+                "apm_parse_modify_path_env\n"
+                'apm_resolve_install_paths "$HISTORICAL_APM"\n'
+            )
             overrides["HISTORICAL_APM"] = str(root / "usr/local/bin/apm")
         else:
-            body = 'apm_resolve_install_paths "$1" "$2" "$3"\n'
+            body = 'apm_parse_modify_path_env\napm_resolve_install_paths "$1" "$2" "$3"\n'
         body += source[source.index("# Install binary directory structure\n") :]
     args = (
         list(script_args)
@@ -164,6 +189,7 @@ def _run_arg_probe(
     config = source.split("# Banner\n", 1)[0]
     body = (
         'apm_parse_installer_args "$@"\n'
+        "apm_parse_modify_path_env\n"
         'apm_resolve_install_paths "$HISTORICAL_APM"\n'
         'printf "VERSION=%s\\nAPM_INSTALL_DIR=%s\\nAPM_LIB_DIR=%s\\n" '
         '"$VERSION" "$APM_INSTALL_DIR" "$APM_LIB_DIR"\n'
@@ -360,7 +386,915 @@ def test_help_documents_prefix_without_resolving_destinations(
     assert "--prefix PATH" in result.stdout
     assert "PATH/bin" in result.stdout
     assert "PATH/lib/apm" in result.stdout
+    assert "APM_NO_MODIFY_PATH" in result.stdout
     assert "never runs sudo" in result.stdout
+
+
+def _shell_setup_env(shell_name: str) -> dict[str, str]:
+    """Return deterministic shell-setup probes for hermetic installer tests."""
+    return {
+        "APM_UNIT_ALLOW_PROFILE_SETUP": "1",
+        "APM_UNIT_CURRENT_SHELL": shell_name,
+        "CI": "",
+    }
+
+
+def _receipt_values(receipt: Path) -> dict[str, str]:
+    """Parse the installer shell-setup receipt as simple key-value state."""
+    return dict(line.split("=", 1) for line in receipt.read_text(encoding="ascii").splitlines())
+
+
+def test_native_fresh_bash_install_enrolls_login_and_interactive_profiles(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """bash-fresh-login/bash-fresh-interactive: native desktop install persists PATH."""
+    root, _ = installation
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    hook = root / "home/.apm/shell/env"
+    assert hook.is_file(), result.stdout + result.stderr
+    assert ".apm/shell/env" in (root / "home/.bash_profile").read_text(encoding="ascii")
+    assert ".apm/shell/env" in (root / "home/.bashrc").read_text(encoding="ascii")
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["version"] == "1"
+    assert receipt["owner"] == "native"
+    assert receipt["modify_path"] == "managed"
+    assert receipt["selected_bin"] == str(root / "home/.local/bin")
+    assert "Open a new terminal, or run this for the current shell:" in result.stdout
+    assert "No shell profiles were changed." not in result.stdout
+
+
+def test_truthy_no_modify_path_writes_no_profiles_but_persists_native_preference(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """opt-out-initial: truthy opt-out is no profile/hook write, then receipt state."""
+    root, _ = installation
+    result = _run(
+        installation,
+        APM_NO_MODIFY_PATH="yes",
+        **_shell_setup_env("bash"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert list((root / "home").iterdir()) == [root / "home/.local"]
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["modify_path"] == "disabled"
+    assert "APM_NO_MODIFY_PATH is set; no shell profiles were changed." in result.stdout
+    assert "For this shell, run the following" in result.stdout
+
+
+def test_truthy_no_modify_path_preserves_existing_profile_and_hook_bytes(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """opt-out-after-managed: opting out records policy without cleanup side effects."""
+    root, _ = installation
+    profile = root / "home/.bashrc"
+    profile.write_text("# user profile\n", encoding="ascii")
+    hook_dir = root / "home/.apm/shell"
+    hook_dir.mkdir(parents=True)
+    hook = hook_dir / "env"
+    hook.write_text("# user-managed hook bytes\n", encoding="ascii")
+    before_profile = profile.read_bytes()
+    before_hook = hook.read_bytes()
+    result = _run(
+        installation,
+        APM_NO_MODIFY_PATH="1",
+        **_shell_setup_env("bash"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert profile.read_bytes() == before_profile
+    assert hook.read_bytes() == before_hook
+    assert (
+        _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")["modify_path"] == "disabled"
+    )
+    assert "For this shell, run the following" in result.stdout
+
+
+def test_unset_no_modify_path_inherits_disabled_receipt(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """opt-out-reinstall: unset env preserves a previous disabled preference."""
+    root, env = installation
+    disabled = _run(installation, APM_NO_MODIFY_PATH="1", **_shell_setup_env("bash"))
+    assert disabled.returncode == 0, disabled.stdout + disabled.stderr
+    bindir = root / "home/.local/bin"
+    repeat = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert repeat.returncode == 0, repeat.stdout + repeat.stderr
+    assert not (root / "home/.bash_profile").exists()
+    assert (
+        _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")["modify_path"] == "disabled"
+    )
+
+
+def test_falsy_no_modify_path_reenables_after_disabled_receipt(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """policy-change: explicit false opt-out re-enables automatic shell setup."""
+    root, env = installation
+    disabled = _run(installation, APM_NO_MODIFY_PATH="true", **_shell_setup_env("bash"))
+    assert disabled.returncode == 0, disabled.stdout + disabled.stderr
+    bindir = root / "home/.local/bin"
+    enabled = _run(
+        installation,
+        APM_NO_MODIFY_PATH="0",
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert enabled.returncode == 0, enabled.stdout + enabled.stderr
+    assert ".apm/shell/env" in (root / "home/.bash_profile").read_text(encoding="ascii")
+    assert (
+        _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")["modify_path"] == "managed"
+    )
+
+
+@pytest.mark.parametrize(
+    ("env_name", "env_value"),
+    [
+        ("CI", "0"),
+        ("CI", "false"),
+        ("BUILD_BUILDID", "0"),
+        ("BUILD_BUILDID", "false"),
+        ("GITHUB_ACTIONS", "false"),
+    ],
+)
+def test_falseish_ci_values_do_not_disable_safe_desktop_setup(
+    installation: tuple[Path, dict[str, str]],
+    env_name: str,
+    env_value: str,
+) -> None:
+    """ci-precedence: false-like CI flags do not suppress desktop setup."""
+    root, _ = installation
+    env_overrides = _shell_setup_env("bash")
+    env_overrides[env_name] = env_value
+    result = _run(
+        installation,
+        **env_overrides,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ".apm/shell/env" in (root / "home/.bash_profile").read_text(encoding="ascii")
+    assert "CI environment detected" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("case_id", "overrides", "reason"),
+    [
+        (
+            "root-system",
+            {"SIMULATE_ROOT": "1"},
+            "administrator installs never edit shell profiles",
+        ),
+        ("ci-precedence", {"CI": "1"}, "CI environment detected"),
+        (
+            "headless",
+            {"APM_UNIT_NO_TTY": "1"},
+            "no interactive terminal detected",
+        ),
+        (
+            "unknown-shell",
+            {"APM_UNIT_CURRENT_SHELL": "sh"},
+            "unsupported or unknown shell",
+        ),
+    ],
+)
+def test_shell_setup_skip_reasons_are_actionable_and_do_not_write_profiles(
+    installation: tuple[Path, dict[str, str]],
+    case_id: str,
+    overrides: dict[str, str],
+    reason: str,
+) -> None:
+    """root-system/ci-precedence/headless/unknown-shell: no profile mutation."""
+    root, _ = installation
+    simulate_root = overrides.get("SIMULATE_ROOT") == "1"
+    if simulate_root:
+        identity = root / "tools/id"
+        identity.unlink()
+        identity.write_text("#!/bin/sh\nprintf '0\\n'\n", encoding="ascii")
+        identity.chmod(0o755)
+    env = {
+        **_shell_setup_env("bash"),
+        **{key: value for key, value in overrides.items() if key != "SIMULATE_ROOT"},
+    }
+    result = _run(
+        installation,
+        APM_INSTALL_DIR=str(root / "explicit/bin"),
+        APM_LIB_DIR=str(root / "explicit/lib/apm"),
+        **env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert reason in result.stdout
+    assert not (root / "home/.apm/shell").exists()
+    assert not (root / "home/.bash_profile").exists()
+    assert not (root / "home/.bashrc").exists()
+    assert case_id
+
+
+def test_invalid_no_modify_path_fails_before_installing(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """invalid-opt-out: malformed opt-out value fails before downloads or writes."""
+    root, _ = installation
+    result = _run(installation, APM_NO_MODIFY_PATH="maybe", **_shell_setup_env("bash"))
+    assert result.returncode == 1
+    assert "APM_NO_MODIFY_PATH" in result.stderr
+    assert not (root / "home/.local").exists()
+
+
+def test_self_update_preserves_shell_receipt_without_profile_or_hook_mutation(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """opt-out-self-update/self-update-other-shell: updates never enroll shell profiles."""
+    root, _ = installation
+    bindir, lib = _prior(root)
+    hook_dir = root / "home/.apm/shell"
+    hook_dir.mkdir(parents=True)
+    hook = hook_dir / "env"
+    hook.write_text("# existing managed hook\n", encoding="ascii")
+    profile = root / "home/.bashrc"
+    profile.write_text(
+        "# >>> apm shell setup >>>\n. old-hook\n# <<< apm shell setup <<<\n", encoding="ascii"
+    )
+    receipt_path = lib / ".apm-shell-setup"
+    receipt_path.write_text(
+        "\n".join(
+            [
+                "version=1",
+                "owner=native",
+                f"selected_bin={bindir}",
+                f"hook_dir={hook_dir}",
+                "hook_kind=posix",
+                "hook_digest=fixture",
+                "modify_path=managed",
+                "",
+            ]
+        ),
+        encoding="ascii",
+    )
+    before_profile = profile.read_bytes()
+    before_hook = hook.read_bytes()
+    before_receipt = receipt_path.read_bytes()
+    result = _run(
+        installation,
+        APM_SELF_UPDATE_SOURCE=str(lib / "apm"),
+        PATH=f"{bindir}:{installation[1]['PATH']}",
+        **_shell_setup_env("fish"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert profile.read_bytes() == before_profile
+    assert hook.read_bytes() == before_hook
+    assert receipt_path.read_bytes() == before_receipt
+
+
+def test_native_zsh_respects_exported_zdotdir(installation: tuple[Path, dict[str, str]]) -> None:
+    """zsh-zdotdir: exported ZDOTDIR selects the managed zsh profile."""
+    root, _ = installation
+    zdotdir = root / "zsh config"
+    zdotdir.mkdir()
+    result = _run(installation, ZDOTDIR=str(zdotdir), **_shell_setup_env("zsh"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    zshrc = zdotdir / ".zshrc"
+    assert ".apm/shell/env" in zshrc.read_text(encoding="ascii")
+    assert not (root / "home/.zshrc").exists()
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["hook_kind"] == "posix"
+
+
+def test_native_fish_uses_xdg_config_home_with_native_syntax(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """fish-xdg: fish receives native conf.d syntax, not POSIX source syntax."""
+    root, _ = installation
+    xdg = root / "xdg config"
+    result = _run(
+        installation,
+        XDG_CONFIG_HOME=str(xdg),
+        **_shell_setup_env("fish"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    profile = xdg / "fish/conf.d/apm.fish"
+    profile_text = profile.read_text(encoding="ascii")
+    assert "source " in profile_text
+    assert not any(line.startswith(". ") for line in profile_text.splitlines())
+    hook = root / "home/.apm/shell/fish.fish"
+    hook_text = hook.read_text(encoding="ascii")
+    assert "set -gx PATH" in hook_text
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["hook_kind"] == "fish"
+
+
+def test_rerun_across_bash_fish_bash_reuses_own_alternate_hook(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """rerun-idempotence: switching shells does not orphan own generated hooks."""
+    root, env = installation
+    first = _run(installation, **_shell_setup_env("bash"))
+    assert first.returncode == 0, first.stdout + first.stderr
+    bindir = root / "home/.local/bin"
+    fish = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("fish"),
+    )
+    assert fish.returncode == 0, fish.stdout + fish.stderr
+    assert _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")["hook_kind"] == "fish"
+    final = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert final.returncode == 0, final.stdout + final.stderr
+    assert "existing hook is not owned" not in final.stdout
+    assert _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")["hook_kind"] == "posix"
+    assert (root / "home/.apm/shell/env").is_file()
+    assert (root / "home/.apm/shell/fish.fish").is_file()
+
+
+def test_unrepresentable_native_path_does_not_write_profiles(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """unrepresentable-path: colon paths install but stay manual."""
+    root, _ = installation
+    target = root / "colon:path/bin"
+    result = _run(installation, APM_INSTALL_DIR=str(target), **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Run APM using its absolute path:" in result.stdout
+    assert not (root / "home/.apm").exists()
+    assert not (root / "home/.bash_profile").exists()
+
+
+def test_rerun_keeps_one_owned_profile_block(installation: tuple[Path, dict[str, str]]) -> None:
+    """rerun-idempotence: managed reruns do not duplicate profile snippets."""
+    root, env = installation
+    first = _run(installation, **_shell_setup_env("bash"))
+    assert first.returncode == 0, first.stdout + first.stderr
+    bindir = root / "home/.local/bin"
+    second = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert second.returncode == 0, second.stdout + second.stderr
+    profile = root / "home/.bash_profile"
+    bashrc = root / "home/.bashrc"
+    assert profile.read_text(encoding="ascii").count(">>> apm shell setup >>>") == 1
+    assert bashrc.read_text(encoding="ascii").count(">>> apm shell setup >>>") == 1
+
+
+def test_edited_owned_block_prevents_profile_mutation(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """edited-owned-block/cross-install-hook-collision: markers alone are not ownership."""
+    root, _ = installation
+    profile = root / "home/.bash_profile"
+    profile.write_text(
+        "# >>> apm shell setup >>>\n. /some/other/hook\n# <<< apm shell setup <<<\n",
+        encoding="ascii",
+    )
+    before = profile.read_bytes()
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert profile.read_bytes() == before
+    assert "cannot safely update" in result.stdout
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["hook_kind"] == "posix"
+    assert receipt["hook_digest"] != "none"
+
+
+def test_existing_hook_without_matching_receipt_is_not_repointed(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """cross-install-hook-collision: generated output is not policy authority."""
+    root, _ = installation
+    hook_dir = root / "home/.apm/shell"
+    hook_dir.mkdir(parents=True)
+    hook = hook_dir / "env"
+    hook.write_text("# belongs to another install\n", encoding="ascii")
+    before = hook.read_bytes()
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert hook.read_bytes() == before
+    assert "existing hook is not owned by this installer" in result.stdout
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["hook_kind"] == "none"
+
+
+def test_profile_failure_then_recovery_rerun_reuses_own_generated_hook(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """setup-failure-retry: fixing the profile lets rerun use our staged hook."""
+    root, env = installation
+    bashrc_target = root / "outside-bashrc"
+    bashrc_target.write_text("# external bashrc\n", encoding="ascii")
+    bashrc = root / "home/.bashrc"
+    bashrc.symlink_to(bashrc_target)
+    first = _run(installation, **_shell_setup_env("bash"))
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert "cannot safely update" in first.stdout
+    hook = root / "home/.apm/shell/env"
+    assert hook.is_file()
+    bashrc.unlink()
+    bashrc.write_text("# fixed bashrc\n", encoding="ascii")
+    bindir = root / "home/.local/bin"
+    second = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "existing hook is not owned" not in second.stdout
+    assert ".apm/shell/env" in bashrc.read_text(encoding="ascii")
+    assert _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")["hook_kind"] == "posix"
+
+
+def test_hook_validation_failure_preserves_receipt_for_retry(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """setup-failure-retry: edited own hook failure preserves prior provenance."""
+    root, env = installation
+    first = _run(installation, **_shell_setup_env("bash"))
+    assert first.returncode == 0, first.stdout + first.stderr
+    bindir = root / "home/.local/bin"
+    receipt = root / "home/.local/lib/apm/.apm-shell-setup"
+    hook = root / "home/.apm/shell/env"
+    before_receipt = receipt.read_bytes()
+    before_hook = hook.read_bytes()
+    hook.write_text("# edited hook\n", encoding="ascii")
+    edited = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert edited.returncode == 0, edited.stdout + edited.stderr
+    assert "existing hook is not owned by this installer" in edited.stdout
+    assert receipt.read_bytes() == before_receipt
+    hook.write_bytes(before_hook)
+    retried = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert retried.returncode == 0, retried.stdout + retried.stderr
+    assert "existing hook is not owned by this installer" not in retried.stdout
+    assert ".apm/shell/env" in (root / "home/.bashrc").read_text(encoding="ascii")
+
+
+@pytest.mark.parametrize(
+    "receipt_lines",
+    [
+        [
+            "version=1",
+            "owner=native",
+            "selected_bin=/wrong/bin",
+            "hook_dir={hook_dir}",
+            "hook_kind=posix",
+            "hook_digest={digest}",
+            "modify_path=managed",
+        ],
+        [
+            "version=1",
+            "owner=other",
+            "selected_bin={selected_bin}",
+            "hook_dir={hook_dir}",
+            "hook_kind=posix",
+            "hook_digest={digest}",
+            "modify_path=managed",
+        ],
+        [
+            "version=1",
+            "owner=native",
+            "selected_bin={selected_bin}",
+            "hook_dir={hook_dir}",
+            "hook_kind=fish",
+            "hook_digest={digest}",
+            "modify_path=managed",
+        ],
+        [
+            "version=1",
+            "owner=native",
+            "selected_bin={selected_bin}",
+            "hook_dir={hook_dir}",
+            "hook_kind=posix",
+            "hook_digest=wrong:digest",
+            "modify_path=managed",
+        ],
+    ],
+)
+def test_invalid_shell_receipts_do_not_authorize_hook_rewrite(
+    installation: tuple[Path, dict[str, str]],
+    receipt_lines: list[str],
+) -> None:
+    """receipt-corruption: invalid receipts cannot authorize hook adoption."""
+    root, _ = installation
+    bindir, lib = _prior(root)
+    hook_dir = root / "home/.apm/shell"
+    hook_dir.mkdir(parents=True)
+    hook = hook_dir / "env"
+    hook.write_text("# foreign hook\n", encoding="ascii")
+    digest = subprocess.run(
+        ["cksum"],
+        input=hook.read_text(encoding="ascii"),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    (lib / ".apm-shell-setup").write_text(
+        "\n".join(
+            line.format(
+                selected_bin=bindir,
+                hook_dir=hook_dir,
+                digest=f"{digest[0]}:{digest[1]}",
+            )
+            for line in receipt_lines
+        )
+        + "\n",
+        encoding="ascii",
+    )
+    before_hook = hook.read_bytes()
+    result = _run(
+        installation,
+        PATH=f"{bindir}:{installation[1]['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert hook.read_bytes() == before_hook
+    assert "existing hook is not owned" in result.stdout
+
+
+def test_invalid_receipt_is_not_preserved_by_opt_out(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """receipt-corruption: opt-out cannot launder invalid hook provenance."""
+    root, env = installation
+    bindir, lib = _prior(root)
+    hook_dir = root / "home/.apm/shell"
+    hook_dir.mkdir(parents=True)
+    hook = hook_dir / "env"
+    hook.write_text("# foreign hook\n", encoding="ascii")
+    digest = subprocess.run(
+        ["cksum"],
+        input=hook.read_text(encoding="ascii"),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    (lib / ".apm-shell-setup").write_text(
+        "\n".join(
+            [
+                "version=1",
+                "owner=foreign",
+                f"selected_bin={bindir}",
+                f"hook_dir={hook_dir}",
+                "hook_kind=posix",
+                f"hook_digest={digest[0]}:{digest[1]}",
+                "modify_path=managed",
+                "",
+            ]
+        ),
+        encoding="ascii",
+    )
+    opted_out = _run(
+        installation,
+        APM_NO_MODIFY_PATH="1",
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert opted_out.returncode == 0, opted_out.stdout + opted_out.stderr
+    receipt = _receipt_values(lib / ".apm-shell-setup")
+    assert receipt["modify_path"] == "disabled"
+    assert receipt["hook_kind"] == "none"
+    assert receipt["hook_dir"] == "none"
+    assert receipt["hook_digest"] == "none"
+    reenabled = _run(
+        installation,
+        APM_NO_MODIFY_PATH="0",
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert reenabled.returncode == 0, reenabled.stdout + reenabled.stderr
+    assert hook.read_text(encoding="ascii") == "# foreign hook\n"
+    assert "existing hook is not owned" in reenabled.stdout
+
+
+def test_executable_or_symlink_receipt_does_not_authorize_hook_rewrite(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """receipt-corruption: executable or symlink receipts are ignored."""
+    root, _ = installation
+    bindir, lib = _prior(root)
+    hook_dir = root / "home/.apm/shell"
+    hook_dir.mkdir(parents=True)
+    hook = hook_dir / "env"
+    hook.write_text("# foreign hook\n", encoding="ascii")
+    receipt = lib / ".apm-shell-setup"
+    receipt.write_text(
+        "\n".join(
+            [
+                "version=1",
+                "owner=native",
+                f"selected_bin={bindir}",
+                f"hook_dir={hook_dir}",
+                "hook_kind=posix",
+                "hook_digest=fixture",
+                "modify_path=managed",
+                "",
+            ]
+        ),
+        encoding="ascii",
+    )
+    receipt.chmod(0o755)
+    before_hook = hook.read_bytes()
+    result = _run(
+        installation,
+        PATH=f"{bindir}:{installation[1]['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert hook.read_bytes() == before_hook
+    receipt.unlink()
+    outside_receipt = root / "outside-receipt"
+    outside_receipt.write_text("version=1\n", encoding="ascii")
+    receipt.symlink_to(outside_receipt)
+    second = _run(
+        installation,
+        PATH=f"{bindir}:{installation[1]['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert hook.read_bytes() == before_hook
+
+
+def test_posix_hook_preserves_empty_path_components_and_is_silent(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """path-component-preservation: hook only deduplicates selected APM bin."""
+    root, _ = installation
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    hook = root / "home/.apm/shell/env"
+    bindir = root / "home/.local/bin"
+    probe = subprocess.run(
+        [
+            "/bin/sh",
+            "-c",
+            '. "$1"; . "$1"; printf "%s\\n" "$PATH"',
+            "--",
+            str(hook),
+        ],
+        env={"PATH": f"alpha::{bindir}:beta:"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout == f"{bindir}:alpha::beta:\n"
+
+
+def test_failed_reinstall_preserves_prior_shell_receipt_and_binary(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """native-replacement: failed replacement leaves prior binary and receipt."""
+    root, env = installation
+    bindir, lib = _prior(root)
+    old_binary = lib / "apm"
+    old_binary.write_text("#!/bin/sh\nprintf 'old apm\\n'\n", encoding="ascii")
+    old_binary.chmod(0o755)
+    receipt = lib / ".apm-shell-setup"
+    receipt.write_text(
+        f"version=1\nowner=native\nselected_bin={bindir}\n"
+        "hook_dir=none\nhook_kind=none\nhook_digest=none\nmodify_path=disabled\n",
+        encoding="ascii",
+    )
+    new_binary = root / "download/apm-fixture/apm"
+    new_binary.write_text("#!/bin/sh\nexit 42\n", encoding="ascii")
+    new_binary.chmod(0o755)
+    before_receipt = receipt.read_bytes()
+    result = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert result.returncode == 1
+    assert old_binary.read_text(encoding="ascii") == "#!/bin/sh\nprintf 'old apm\\n'\n"
+    assert receipt.read_bytes() == before_receipt
+
+
+def test_receipt_write_failure_preserves_prior_receipt_and_warns(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """receipt-corruption: receipt write failures retain valid prior policy."""
+    root, env = installation
+    bindir, lib = _prior(root)
+    receipt = lib / ".apm-shell-setup"
+    receipt.write_text(
+        f"version=1\nowner=native\nselected_bin={bindir}\n"
+        "hook_dir=none\nhook_kind=none\nhook_digest=none\nmodify_path=disabled\n",
+        encoding="ascii",
+    )
+    before_receipt = receipt.read_bytes()
+    _replace_tool(
+        root,
+        "mktemp",
+        '#!/bin/sh\ncase "$1" in *.apm-shell-setup.*) exit 71 ;; esac\nexec __REAL__ "$@"\n',
+    )
+    result = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "shell setup preference could not be saved" in result.stdout
+    assert receipt.read_bytes() == before_receipt
+    assert (lib / "apm").read_text(encoding="ascii") == '#!/bin/sh\nprintf "apm fixture\\n"\n'
+
+
+def test_prior_receipt_copy_failure_leaves_old_bundle_intact(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """native-replacement: receipt preservation failure stops before swap."""
+    root, env = installation
+    bindir, lib = _prior(root)
+    old_binary = lib / "apm"
+    old_binary.write_text("#!/bin/sh\nprintf 'old apm\\n'\n", encoding="ascii")
+    receipt = lib / ".apm-shell-setup"
+    receipt.write_text(
+        f"version=1\nowner=native\nselected_bin={bindir}\n"
+        "hook_dir=none\nhook_kind=none\nhook_digest=none\nmodify_path=disabled\n",
+        encoding="ascii",
+    )
+    before_receipt = receipt.read_bytes()
+    _replace_tool(
+        root,
+        "cp",
+        '#!/bin/sh\nfor arg in "$@"; do\n'
+        '  case "$arg" in *.apm-shell-setup) exit 72 ;; esac\n'
+        'done\nexec __REAL__ "$@"\n',
+    )
+    result = _run(
+        installation,
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert result.returncode == 1
+    assert "Could not preserve the previous shell setup receipt" in result.stderr
+    assert old_binary.read_text(encoding="ascii") == "#!/bin/sh\nprintf 'old apm\\n'\n"
+    assert receipt.read_bytes() == before_receipt
+
+
+def test_restore_failure_reports_backup_path_without_claiming_restored(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """native-replacement: failed rollback leaves an actionable backup path."""
+    root, env = installation
+    bindir, lib = _prior(root)
+    (lib / "apm").write_text("#!/bin/sh\nprintf 'old apm\\n'\n", encoding="ascii")
+    new_binary = root / "download/apm-fixture/apm"
+    new_binary.write_text(
+        "#!/bin/sh\n"
+        "case \"$0\" in *.apm-stage.*) printf 'apm staged\\n'; exit 0 ;; esac\n"
+        "exit 42\n",
+        encoding="ascii",
+    )
+    new_binary.chmod(0o755)
+    _replace_tool(
+        root,
+        "mv",
+        "#!/bin/sh\n"
+        'case "$1:$2" in *.apm-backup.*:"$EXPECTED_LIB_DIR") exit 73 ;; esac\n'
+        'exec __REAL__ "$@"\n',
+    )
+    result = _run(
+        installation,
+        EXPECTED_LIB_DIR=str(lib),
+        PATH=f"{bindir}:{env['PATH']}",
+        **_shell_setup_env("bash"),
+    )
+    assert result.returncode == 1
+    assert "Could not restore the previous APM bundle from backup" in result.stderr
+    assert "Existing installation was restored" not in result.stderr
+    backups = list(lib.parent.glob(".apm-backup.*"))
+    assert len(backups) == 1
+    assert (backups[0] / "apm").read_text(encoding="ascii") == "#!/bin/sh\nprintf 'old apm\\n'\n"
+
+
+def test_fresh_launcher_removed_when_post_swap_version_check_fails(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """binary-failure: fresh failed activation does not leave a dangling launcher."""
+    root, _ = installation
+    new_binary = root / "download/apm-fixture/apm"
+    new_binary.write_text(
+        "#!/bin/sh\n"
+        "case \"$0\" in *.apm-stage.*) printf 'apm staged\\n'; exit 0 ;; esac\n"
+        "exit 42\n",
+        encoding="ascii",
+    )
+    new_binary.chmod(0o755)
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 1
+    assert "failed its --version check" in result.stderr
+    assert not (root / "home/.local/bin/apm").exists()
+    assert not (root / "home/.local/lib/apm").exists()
+
+
+def test_profile_symlink_is_preserved_without_mutation(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """profile-symlinks: shell setup refuses to write through profile links."""
+    root, _ = installation
+    target = root / "outside-profile"
+    target.write_text("# user-owned target\n", encoding="ascii")
+    profile = root / "home/.bash_profile"
+    profile.symlink_to(target)
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert profile.is_symlink()
+    assert target.read_text(encoding="ascii") == "# user-owned target\n"
+    assert "cannot safely update" in result.stdout
+    assert (root / "home/.local/lib/apm/apm").is_file()
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["hook_kind"] == "posix"
+    assert receipt["hook_digest"] != "none"
+
+
+def test_profile_unwritable_keeps_valid_binary_and_manual_guidance(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """profile-unwritable: optional profile failure never rolls back binary install."""
+    root, _ = installation
+    profile = root / "home/.bash_profile"
+    profile.write_text("# user profile\n", encoding="ascii")
+    profile.chmod(0o400)
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "home/.local/lib/apm/apm").is_file()
+    assert "cannot safely update" in result.stdout
+    assert "For this shell, run the following" in result.stdout
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["hook_kind"] == "posix"
+    assert receipt["hook_digest"] != "none"
+
+
+def test_bashrc_failure_rolls_back_new_login_profile_block(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """partial-write-failure: a late bashrc failure rolls back the new login edit."""
+    root, _ = installation
+    profile = root / "home/.bash_profile"
+    profile.write_text("# login profile\n", encoding="ascii")
+    bashrc_target = root / "outside-bashrc"
+    bashrc_target.write_text("# external bashrc\n", encoding="ascii")
+    (root / "home/.bashrc").symlink_to(bashrc_target)
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert profile.read_text(encoding="ascii") == "# login profile\n"
+    assert bashrc_target.read_text(encoding="ascii") == "# external bashrc\n"
+    assert "cannot safely update" in result.stdout
+    receipt = _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")
+    assert receipt["hook_kind"] == "posix"
+    assert receipt["hook_digest"] != "none"
+
+
+def test_common_bash_interactive_guard_is_preserved_and_supported(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """common-bash-guard: ordinary interactive guards do not block enrollment."""
+    root, _ = installation
+    bashrc = root / "home/.bashrc"
+    guard = "case $- in *i*) ;; *) return;; esac\n# user aliases\n"
+    bashrc.write_text(guard, encoding="ascii")
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = bashrc.read_text(encoding="ascii")
+    assert text.startswith(guard)
+    assert text.count(">>> apm shell setup >>>") == 1
+    assert (
+        _receipt_values(root / "home/.local/lib/apm/.apm-shell-setup")["modify_path"] == "managed"
+    )
+
+
+@pytest.mark.parametrize(
+    "profile_body",
+    [
+        "echo before\nexit\n",
+        'if [ -z "$PS1" ]; then\n    exit\nfi\necho interactive\n',
+    ],
+)
+def test_exit_bearing_profile_blocks_managed_shell_setup(
+    installation: tuple[Path, dict[str, str]],
+    profile_body: str,
+) -> None:
+    """profile-content-corners: bare exit lines refuse managed profile mutation."""
+    root, _ = installation
+    profile = root / "home/.bash_profile"
+    profile.write_text(profile_body, encoding="ascii")
+    before = profile.read_bytes()
+    result = _run(installation, **_shell_setup_env("bash"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert profile.read_bytes() == before
+    assert "cannot safely update" in result.stdout
+    assert "For this shell, run the following" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -514,6 +1448,16 @@ def _record_tool_calls(root: Path, name: str) -> None:
         encoding="ascii",
     )
     tool.chmod(0o755)
+
+
+def _replace_tool(root: Path, name: str, body: str) -> Path:
+    """Replace a staged tool with a wrapper while retaining the real path."""
+    tool = root / "tools" / name
+    executable = tool.resolve()
+    tool.unlink()
+    tool.write_text(body.replace("__REAL__", shlex.quote(str(executable))), encoding="ascii")
+    tool.chmod(0o755)
+    return executable
 
 
 def _stage_fake_python_pip(
@@ -819,13 +1763,16 @@ def test_copied_launcher_is_checked_before_completion(
         SMOKE_LOG=str(log),
     )
     assert log.is_file()
-    assert log.read_text(encoding="ascii").splitlines() == [str(bindir / "apm")]
+    smoke_calls = log.read_text(encoding="ascii").splitlines()
     assert result.returncode == (1 if exit_code else 0)
     if exit_code:
+        assert len(smoke_calls) == 1
+        assert "/.apm-stage." in smoke_calls[0]
         assert "failed its --version check" in result.stderr
-        assert "same destinations" in result.stderr
+        assert "Existing installation was left unchanged." in result.stderr
         assert "Installation complete!" not in result.stdout
     else:
+        assert smoke_calls[-1] == str(bindir / "apm")
         assert "Installation complete!" in result.stdout
 
 

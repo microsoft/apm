@@ -10,11 +10,7 @@ curl -sSL https://aka.ms/apm-unix | sh
 irm https://aka.ms/apm-windows | iex
 ```
 
-Fresh ordinary-user Unix installs use `~/.local/bin/apm` and `~/.local/lib/apm`, without `sudo` or profile edits. Set current-shell `PATH` if needed; optionally add this to your profile yourself:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
+Fresh ordinary-user Unix native installs use `~/.local/bin/apm` and `~/.local/lib/apm`, without `sudo`. For bash, zsh, and fish, the installer automatically configures future shells when the install path and profile files are safe. Open a new shell after install. If the installer skips profile edits, follow the manual `PATH` command it prints: POSIX shells use `export PATH=...`; fish uses `set -gx PATH ...`.
 
 ## Package managers
 
@@ -55,6 +51,12 @@ curl -sSL https://aka.ms/apm-unix | sh -s -- --prefix "$HOME/.local"
 # Custom fresh install (bundle: $HOME/tools/lib/apm)
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR="$HOME/tools/bin" sh
 
+# Opt out of automatic shell PATH setup
+curl -sSL https://aka.ms/apm-unix | APM_NO_MODIFY_PATH=1 sh
+
+# Re-enable after opting out
+curl -sSL https://aka.ms/apm-unix | APM_NO_MODIFY_PATH=0 sh
+
 # Air-gapped / GHE mirror - VERSION is required (skips GitHub API)
 GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 ```
@@ -65,7 +67,7 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 
 Inspect unrecognized data without deleting it. For a fresh install, choose another empty dedicated bundle; otherwise use the original owner's uninstall process.
 
-Update or uninstall pip-owned installs with the owning Python's `-m pip`; uninstall before switching to the binary installer. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set and uses the selected `python3 -m pip` or `python -m pip`. It prints a PATH command or, when one directory cannot be represented safely, an absolute launcher command. It never edits profiles.
+Update or uninstall pip-owned installs with the owning Python's `-m pip`; uninstall before switching to the binary installer. Automatic pip fallback requires a fresh ordinary-user install with neither destination variable set and uses the selected `python3 -m pip` or `python -m pip`. It prints a PATH command or, when one directory cannot be represented safely, an absolute launcher command. Pip fallback never edits profiles or writes native shell setup policy.
 
 `--prefix PATH` is an explicit Unix destination selector. It derives `PATH/bin` and `PATH/lib/apm`, counts as both destinations for root, and refuses contradictory `APM_INSTALL_DIR` or `APM_LIB_DIR` values before downloads or writes.
 
@@ -104,8 +106,10 @@ apm self-update --check
 
 For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY=1`. Homebrew and Scoop mirroring is package-manager documentation only in v0; these env vars do not rewrite Homebrew or Scoop internals.
 
+Native automatic shell setup writes only installer-owned marked profile blocks that source generated hooks under `~/.apm/shell`. CI/headless/root installs, self-update, unknown shells, unsafe profiles, unsafe paths, and pip fallback do not edit profiles.
+
 ## Troubleshooting
 
-- **macOS/Linux "command not found":** run the printed POSIX-quoted PATH command; for native or pip script directories containing `:` or control characters, use the printed absolute-path command.
-- **Permission denied:** follow [ownership and migration](#unix-ownership-and-migration), not a destination override.
+- **macOS/Linux "command not found":** open a new shell after a native desktop install. If the installer skipped profile edits, follow the manual `PATH` command it printed. Pip installs never edit profiles.
+- **Permission denied:** use a user-owned prefix such as `APM_INSTALL_DIR=$HOME/.local/bin`; the Unix installer does not use `sudo`.
 - **Windows antivirus locks:** set `$env:APM_DEBUG = "1"` and retry.

@@ -2,7 +2,8 @@
 
 | Problem | Fix |
 |---------|-----|
-| `apm: command not found` | Run the printed POSIX-quoted `PATH` command. For native or pip script directories containing `:` or control characters, use the printed absolute-path command. Pip fallback derives its user-script directory from the selected Python's user scheme, including `PYTHONUSERBASE` and framework layouts; profiles remain unchanged. See [installation and PATH setup](./installation.md#quick-install-recommended). |
+| `apm: command not found` | Install APM: `curl -sSL https://aka.ms/apm-unix \| sh` (macOS/Linux) or `irm https://aka.ms/apm-windows \| iex` (Windows). On macOS/Linux native desktop installs, open a new shell after install. If the installer skipped profile edits, follow the manual `PATH` command it printed. Pip installs never edit profiles. |
+| Disable automatic Unix PATH setup | Run the native installer with `APM_NO_MODIFY_PATH=1`. To re-enable after opting out, rerun a normal desktop native install with `APM_NO_MODIFY_PATH=0`. |
 | Unix install/self-update ownership, destination, or pip fallback refusal | Use the owning Python's `-m pip` or original owner. Inspect unknown data without deleting it. For a fresh install choose another empty dedicated bundle or one `--prefix PATH`; do not combine `--prefix` with contradictory `APM_INSTALL_DIR` / `APM_LIB_DIR`. Otherwise use the owner's uninstall before migration. See [ownership rules](./installation.md#unix-ownership-and-migration). |
 | Authentication errors (401/403) | Set the correct token. Run `apm install --verbose` to see which token source is used. See [Authentication](./authentication.md). |
 | File collision on install | A local file conflicts with a dependency file. Use `--force` to overwrite, or rename the local file. |

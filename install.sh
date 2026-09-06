@@ -38,6 +38,18 @@ APM_RELEASE_METADATA_URL="${APM_RELEASE_METADATA_URL:-}"
 APM_INSTALLER_BASE_URL="${APM_INSTALLER_BASE_URL:-}"
 APM_PYPI_INDEX_URL="${APM_PYPI_INDEX_URL:-}"
 APM_NO_DIRECT_FALLBACK="${APM_NO_DIRECT_FALLBACK:-}"
+APM_NO_MODIFY_PATH="${APM_NO_MODIFY_PATH:-}"
+_APM_MODIFY_PATH_REQUEST="inherit"
+_APM_PREVIOUS_SHELL_RECEIPT_VALID=""
+_APM_PREVIOUS_SHELL_SELECTED_BIN=""
+_APM_PREVIOUS_SHELL_HOOK_DIR=""
+_APM_PREVIOUS_SHELL_HOOK_KIND=""
+_APM_PREVIOUS_SHELL_HOOK_DIGEST=""
+_APM_PREVIOUS_SHELL_MODIFY_PATH=""
+_APM_NEW_SHELL_HOOK_DIR=""
+_APM_NEW_SHELL_HOOK_KIND="none"
+_APM_NEW_SHELL_HOOK_DIGEST="none"
+_APM_NATIVE_RECEIPT_WRITTEN=""
 
 # INSTALL_OWNERSHIP_BEGIN
 # Resolve symlink targets portably, including on macOS without readlink -f.
@@ -83,6 +95,7 @@ apm_print_usage() {
         "Environment:" \
         "  APM_INSTALL_DIR   Explicit launcher directory when --prefix is absent." \
         "  APM_LIB_DIR       Explicit Unix bundle directory when --prefix is absent." \
+        "  APM_NO_MODIFY_PATH  Set 1 to skip native shell PATH setup, 0 to re-enable." \
         "  VERSION           Release tag to install, equivalent to @vVERSION." \
         "" \
         "The installer never runs sudo. Run the shell with the privileges needed for" \
@@ -174,19 +187,692 @@ apm_shell_quote() (
 
 apm_print_path_guidance() {
     _apm_run_hint="apm"
+    _apm_guidance_shell="$(apm_detect_current_shell)"
     case "$1" in
         *:*|*[[:cntrl:]]*)
-            _apm_run_hint="$(apm_shell_quote "$1/apm")"
+            if [ "$_apm_guidance_shell" = "fish" ]; then
+                _apm_run_hint="$(apm_fish_quote "$1/apm")"
+            else
+                _apm_run_hint="$(apm_shell_quote "$1/apm")"
+            fi
             echo "Run APM using its absolute path:"
             printf '  %s --version\n' "$_apm_run_hint"
             echo "For PATH discovery, reinstall through its owner into a directory without ':' or control characters."
             ;;
         *)
-            echo "For this shell, run the following; add it to your shell profile only if desired:"
-            printf '  export PATH=%s:"$PATH"\n' "$(apm_shell_quote "$1")"
+            echo "For this shell, run the following for the current terminal:"
+            if [ "$_apm_guidance_shell" = "fish" ]; then
+                printf '  set -gx PATH %s $PATH\n' "$(apm_fish_quote "$1")"
+                echo "To persist it manually, add that line to your Fish config."
+            else
+                printf '  export PATH=%s:"$PATH"\n' "$(apm_shell_quote "$1")"
+                echo "To persist it manually, add that line to your shell profile."
+            fi
             ;;
     esac
-    echo "No shell profiles were changed."
+    if [ "${_APM_PROFILE_CHANGE_STATUS:-}" = "partial" ]; then
+        echo "Some shell profile changes may remain. Inspect blocks marked 'apm shell setup' before retrying."
+    else
+        echo "No shell profiles were changed."
+    fi
+}
+
+apm_parse_modify_path_env() {
+    [ -n "$APM_NO_MODIFY_PATH" ] || {
+        _APM_MODIFY_PATH_REQUEST="inherit"
+        return 0
+    }
+    _apm_value="$(printf '%s' "$APM_NO_MODIFY_PATH" | tr '[:upper:]' '[:lower:]')"
+    case "$_apm_value" in
+        1|true|yes|on)
+            _APM_MODIFY_PATH_REQUEST="disable"
+            ;;
+        0|false|no|off)
+            _APM_MODIFY_PATH_REQUEST="enable"
+            ;;
+        *)
+            apm_install_error "Invalid APM_NO_MODIFY_PATH value: $APM_NO_MODIFY_PATH. Use 1 to opt out, 0 to re-enable, or leave it unset."
+            ;;
+    esac
+}
+
+apm_path_is_safe_for_path() {
+    case "$1" in
+        *:*|*[[:cntrl:]]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+apm_fish_quote() (
+    _rest="$1"
+    printf "'"
+    while [ -n "$_rest" ]; do
+        _char="${_rest%"${_rest#?}"}"
+        _rest="${_rest#?}"
+        case "$_char" in
+            "'") printf "%s" "\\'" ;;
+            "\\") printf "%s" "\\\\" ;;
+            *) printf "%s" "$_char" ;;
+        esac
+    done
+    printf "'"
+)
+
+apm_bool_env_active() {
+    _apm_flag_value="$1"
+    [ -n "$_apm_flag_value" ] || return 1
+    _apm_flag_value="$(printf '%s' "$_apm_flag_value" | tr '[:upper:]' '[:lower:]')"
+    case "$_apm_flag_value" in
+        0|false|no|off) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+apm_has_controlling_tty() {
+    { : < /dev/tty; } >/dev/null 2>&1
+}
+
+apm_file_digest() {
+    [ -f "$1" ] || return 1
+    set -- $(cksum < "$1") || return 1
+    printf '%s:%s' "$1" "$2"
+}
+
+apm_reset_previous_shell_receipt() {
+    _APM_PREVIOUS_SHELL_RECEIPT_VALID=""
+    _APM_PREVIOUS_SHELL_RECEIPT_PRESENT=""
+    _APM_PREVIOUS_SHELL_SELECTED_BIN=""
+    _APM_PREVIOUS_SHELL_HOOK_DIR=""
+    _APM_PREVIOUS_SHELL_HOOK_KIND=""
+    _APM_PREVIOUS_SHELL_HOOK_DIGEST=""
+    _APM_PREVIOUS_SHELL_MODIFY_PATH=""
+}
+
+apm_read_shell_receipt() {
+    apm_reset_previous_shell_receipt
+    _apm_receipt="$1"
+    [ -e "$_apm_receipt" ] || [ -L "$_apm_receipt" ] || return 0
+    _APM_PREVIOUS_SHELL_RECEIPT_PRESENT=1
+    [ -f "$_apm_receipt" ] || return 0
+    [ ! -L "$_apm_receipt" ] || return 0
+    [ ! -x "$_apm_receipt" ] || return 0
+    _apm_seen_version=""
+    _apm_seen_owner=""
+    _apm_seen_selected_bin=""
+    _apm_seen_hook_dir=""
+    _apm_seen_hook_kind=""
+    _apm_seen_hook_digest=""
+    _apm_seen_modify_path=""
+    _apm_version=""
+    _apm_owner=""
+    _apm_selected_bin=""
+    _apm_hook_dir=""
+    _apm_hook_kind=""
+    _apm_hook_digest=""
+    _apm_modify_path=""
+    while IFS= read -r _apm_line || [ -n "$_apm_line" ]; do
+        case "$_apm_line" in
+            "") return 0 ;;
+            version=*)
+                [ -z "$_apm_seen_version" ] || return 0
+                _apm_seen_version=1
+                _apm_version="${_apm_line#version=}"
+                ;;
+            owner=*)
+                [ -z "$_apm_seen_owner" ] || return 0
+                _apm_seen_owner=1
+                _apm_owner="${_apm_line#owner=}"
+                ;;
+            selected_bin=*)
+                [ -z "$_apm_seen_selected_bin" ] || return 0
+                _apm_seen_selected_bin=1
+                _apm_selected_bin="${_apm_line#selected_bin=}"
+                ;;
+            hook_dir=*)
+                [ -z "$_apm_seen_hook_dir" ] || return 0
+                _apm_seen_hook_dir=1
+                _apm_hook_dir="${_apm_line#hook_dir=}"
+                ;;
+            hook_kind=*)
+                [ -z "$_apm_seen_hook_kind" ] || return 0
+                _apm_seen_hook_kind=1
+                _apm_hook_kind="${_apm_line#hook_kind=}"
+                ;;
+            hook_digest=*)
+                [ -z "$_apm_seen_hook_digest" ] || return 0
+                _apm_seen_hook_digest=1
+                _apm_hook_digest="${_apm_line#hook_digest=}"
+                ;;
+            modify_path=*)
+                [ -z "$_apm_seen_modify_path" ] || return 0
+                _apm_seen_modify_path=1
+                _apm_modify_path="${_apm_line#modify_path=}"
+                ;;
+            *) return 0 ;;
+        esac
+    done < "$_apm_receipt"
+    [ "$_apm_version" = "1" ] || return 0
+    [ "$_apm_owner" = "native" ] || return 0
+    [ "$_apm_selected_bin" = "$APM_INSTALL_DIR" ] || return 0
+    case "$_apm_hook_kind" in posix|fish|none) ;; *) return 0 ;; esac
+    case "$_apm_modify_path" in managed|disabled) ;; *) return 0 ;; esac
+    [ -n "$_apm_seen_version$_apm_seen_owner$_apm_seen_selected_bin$_apm_seen_hook_dir$_apm_seen_hook_kind$_apm_seen_hook_digest$_apm_seen_modify_path" ] || return 0
+    [ -n "$_apm_seen_version" ] && [ -n "$_apm_seen_owner" ] &&
+        [ -n "$_apm_seen_selected_bin" ] && [ -n "$_apm_seen_hook_dir" ] &&
+        [ -n "$_apm_seen_hook_kind" ] && [ -n "$_apm_seen_hook_digest" ] &&
+        [ -n "$_apm_seen_modify_path" ] || return 0
+    if [ "$_apm_hook_kind" = "none" ]; then
+        [ "$_apm_hook_dir" = "none" ] && [ "$_apm_hook_digest" = "none" ] || return 0
+    else
+        case "$_apm_hook_dir" in /*) ;; *) return 0 ;; esac
+        [ "$_apm_hook_digest" != "none" ] || return 0
+    fi
+    _APM_PREVIOUS_SHELL_SELECTED_BIN="$_apm_selected_bin"
+    _APM_PREVIOUS_SHELL_HOOK_DIR="$_apm_hook_dir"
+    _APM_PREVIOUS_SHELL_HOOK_KIND="$_apm_hook_kind"
+    _APM_PREVIOUS_SHELL_HOOK_DIGEST="$_apm_hook_digest"
+    _APM_PREVIOUS_SHELL_MODIFY_PATH="$_apm_modify_path"
+    _APM_PREVIOUS_SHELL_RECEIPT_VALID=1
+}
+
+apm_mktemp_in_dir() {
+    _apm_dir="$1"
+    _apm_name="$2"
+    mktemp "$_apm_dir/.$_apm_name.XXXXXX"
+}
+
+apm_write_shell_receipt() {
+    _apm_modify_path="$1"
+    _apm_hook_dir="$2"
+    _apm_hook_kind="$3"
+    _apm_hook_digest="$4"
+    apm_path_is_safe_for_path "$APM_INSTALL_DIR" || return 0
+    _apm_receipt="$APM_LIB_DIR/.apm-shell-setup"
+    _apm_tmp="$(apm_mktemp_in_dir "$APM_LIB_DIR" "apm-shell-setup")" || return 1
+    {
+        printf 'version=1\n'
+        printf 'owner=native\n'
+        printf 'selected_bin=%s\n' "$APM_INSTALL_DIR"
+        printf 'hook_dir=%s\n' "$_apm_hook_dir"
+        printf 'hook_kind=%s\n' "$_apm_hook_kind"
+        printf 'hook_digest=%s\n' "$_apm_hook_digest"
+        printf 'modify_path=%s\n' "$_apm_modify_path"
+    } > "$_apm_tmp" || { rm -f "$_apm_tmp"; return 1; }
+    chmod 600 "$_apm_tmp" 2>/dev/null || true
+    mv "$_apm_tmp" "$_apm_receipt" || return 1
+    _APM_NATIVE_RECEIPT_WRITTEN=1
+}
+
+apm_preserve_previous_shell_receipt_to() {
+    _apm_target_dir="$1"
+    _apm_previous_receipt="$APM_LIB_DIR/.apm-shell-setup"
+    [ -f "$_apm_previous_receipt" ] || return 0
+    [ ! -L "$_apm_previous_receipt" ] || return 0
+    cp -p "$_apm_previous_receipt" "$_apm_target_dir/.apm-shell-setup" || return 1
+}
+
+apm_detect_current_shell() {
+    _apm_comm=""
+    if command -v ps >/dev/null 2>&1; then
+        _apm_comm="$(ps -p "$PPID" -o comm= 2>/dev/null | sed 's/^ *//;s/ *$//' || true)"
+    fi
+    _apm_base="${_apm_comm##*/}"
+    _apm_base="${_apm_base#-}"
+    case "$_apm_base" in
+        bash|zsh|fish)
+            printf '%s\n' "$_apm_base"
+            return 0
+            ;;
+    esac
+    _apm_base="${SHELL##*/}"
+    _apm_base="${_apm_base#-}"
+    case "$_apm_base" in
+        bash|zsh|fish)
+            printf '%s\n' "$_apm_base"
+            return 0
+            ;;
+    esac
+    printf 'unknown\n'
+}
+
+apm_is_desktop_shell_setup_eligible() {
+    [ -n "${APM_SELF_UPDATE_SOURCE:-}" ] && {
+        _APM_SHELL_SETUP_SKIP_REASON="self-update never edits shell profiles"
+        return 1
+    }
+    [ "$(id -u)" -eq 0 ] && {
+        _APM_SHELL_SETUP_SKIP_REASON="administrator installs never edit shell profiles"
+        return 1
+    }
+    if apm_bool_env_active "${CI:-}" || apm_bool_env_active "${GITHUB_ACTIONS:-}" ||
+        apm_bool_env_active "${TF_BUILD:-}" || apm_bool_env_active "${BUILD_BUILDID:-}" ||
+        apm_bool_env_active "${BUILDKITE:-}" || apm_bool_env_active "${GITLAB_CI:-}"; then
+        _APM_SHELL_SETUP_SKIP_REASON="CI environment detected"
+        return 1
+    fi
+    if ! apm_has_controlling_tty; then
+        _APM_SHELL_SETUP_SKIP_REASON="no interactive terminal detected"
+        return 1
+    fi
+    case "$HOME" in
+        /*) ;;
+        *) _APM_SHELL_SETUP_SKIP_REASON="HOME is not an absolute path"; return 1 ;;
+    esac
+    [ -d "$HOME" ] && [ -w "$HOME" ] && [ -x "$HOME" ] || {
+        _APM_SHELL_SETUP_SKIP_REASON="HOME is not writable"
+        return 1
+    }
+    apm_path_is_safe_for_path "$APM_INSTALL_DIR" || {
+        _APM_SHELL_SETUP_SKIP_REASON="the install bin path cannot be represented safely in PATH"
+        return 1
+    }
+    _APM_DETECTED_SHELL="$(apm_detect_current_shell)"
+    case "$_APM_DETECTED_SHELL" in
+        bash|zsh|fish) return 0 ;;
+        *) _APM_SHELL_SETUP_SKIP_REASON="unsupported or unknown shell"; return 1 ;;
+    esac
+}
+
+apm_posix_hook_content() {
+    _apm_bin_word="$(apm_shell_quote "$1")"
+    printf '%s\n' \
+        "# APM shell setup generated by install.sh; do not edit inside this file." \
+        "# selected_bin=$1" \
+        "_apm_bin=$_apm_bin_word" \
+        '_apm_old_path="${PATH-}"' \
+        '_apm_had_path="${PATH+x}"' \
+        'PATH="$_apm_bin"' \
+        'if [ "$_apm_had_path" = "x" ]; then' \
+        '  _apm_remaining="$_apm_old_path"' \
+        '  while :; do' \
+        '    case "$_apm_remaining" in' \
+        '      *:*) _apm_entry="${_apm_remaining%%:*}"; _apm_remaining="${_apm_remaining#*:}"; _apm_more=1 ;;' \
+        '      *) _apm_entry="$_apm_remaining"; _apm_more=0 ;;' \
+        '    esac' \
+        '    if [ "$_apm_entry" != "$_apm_bin" ]; then' \
+        '      PATH="$PATH:$_apm_entry"' \
+        '    fi' \
+        '    [ "$_apm_more" = 1 ] || break' \
+        'done' \
+        'fi' \
+        'export PATH' \
+        'unset _apm_bin _apm_old_path _apm_had_path _apm_remaining _apm_entry _apm_more'
+}
+
+apm_fish_hook_content() {
+    _apm_bin_word="$(apm_fish_quote "$1")"
+    printf '%s\n' \
+        "# APM shell setup generated by install.sh; do not edit inside this file." \
+        "# selected_bin=$1" \
+        "set -l apm_bin $_apm_bin_word" \
+        "set -l apm_path_entries \$apm_bin" \
+        "for apm_entry in \$PATH" \
+        "    if test \"\$apm_entry\" != \"\$apm_bin\"" \
+        "        set apm_path_entries \$apm_path_entries \$apm_entry" \
+        "    end" \
+        "end" \
+        "set -gx PATH \$apm_path_entries"
+}
+
+apm_expected_profile_block() {
+    _apm_hook="$1"
+    _apm_shell="$2"
+    printf '%s\n' "# >>> apm shell setup >>>"
+    printf '%s\n' "# Generated by install.sh. Remove this block to stop loading APM."
+    if [ "$_apm_shell" = "fish" ]; then
+        printf 'test -f %s; and source %s\n' "$(apm_fish_quote "$_apm_hook")" "$(apm_fish_quote "$_apm_hook")"
+    else
+        printf '[ -f %s ] && . %s\n' "$(apm_shell_quote "$_apm_hook")" "$(apm_shell_quote "$_apm_hook")"
+    fi
+    printf '%s\n' "# <<< apm shell setup <<<"
+}
+
+apm_existing_path_owned_safe() {
+    _apm_path="$1"
+    [ ! -L "$_apm_path" ] || return 1
+    [ -O "$_apm_path" ] || return 1
+    if [ -d "$_apm_path" ]; then
+        [ -w "$_apm_path" ] && [ -x "$_apm_path" ] || return 1
+    else
+        [ -f "$_apm_path" ] && [ -r "$_apm_path" ] && [ -w "$_apm_path" ] || return 1
+    fi
+}
+
+apm_prepare_owned_directory() {
+    _apm_dir="$1"
+    _apm_base="$HOME"
+    case "$_apm_dir" in "$HOME"|"$HOME"/*) _apm_base="$HOME" ;; *) _apm_base="" ;; esac
+    if [ -z "$_apm_base" ] && [ -n "${ZDOTDIR:-}" ]; then
+        case "$_apm_dir" in "$ZDOTDIR"|"$ZDOTDIR"/*) _apm_base="$ZDOTDIR" ;; esac
+    fi
+    if [ -z "$_apm_base" ] && [ -n "${XDG_CONFIG_HOME:-}" ]; then
+        case "$_apm_dir" in "$XDG_CONFIG_HOME"|"$XDG_CONFIG_HOME"/*) _apm_base="$XDG_CONFIG_HOME" ;; esac
+    fi
+    [ -n "$_apm_base" ] || return 1
+    _apm_current="$_apm_base"
+    if [ -e "$_apm_current" ] || [ -L "$_apm_current" ]; then
+        apm_existing_path_owned_safe "$_apm_current" || return 1
+    else
+        _apm_base_parent="${_apm_current%/*}"
+        [ -n "$_apm_base_parent" ] && [ "$_apm_base_parent" != "$_apm_current" ] || return 1
+        apm_existing_path_owned_safe "$_apm_base_parent" || return 1
+        mkdir "$_apm_current" || return 1
+        chmod 700 "$_apm_current" 2>/dev/null || true
+    fi
+    _apm_rest="${_apm_dir#"$_apm_base"}"
+    _apm_rest="${_apm_rest#/}"
+    while [ -n "$_apm_rest" ]; do
+        _apm_part="${_apm_rest%%/*}"
+        if [ "$_apm_part" = "$_apm_rest" ]; then
+            _apm_rest=""
+        else
+            _apm_rest="${_apm_rest#*/}"
+        fi
+        [ -n "$_apm_part" ] || continue
+        _apm_current="$_apm_current/$_apm_part"
+        if [ -e "$_apm_current" ] || [ -L "$_apm_current" ]; then
+            apm_existing_path_owned_safe "$_apm_current" || return 1
+        else
+            mkdir "$_apm_current" || return 1
+            chmod 700 "$_apm_current" 2>/dev/null || true
+        fi
+    done
+}
+
+apm_profile_has_unreachable_exit() {
+    _apm_file="$1"
+    [ -f "$_apm_file" ] || return 1
+    grep -E '^[[:space:]]*(exit|return)([[:space:]]+[0-9]+)?[[:space:]]*(#.*)?$' "$_apm_file" >/dev/null 2>&1
+}
+
+apm_write_generated_hook() {
+    _apm_hook="$1"
+    _apm_kind="$2"
+    _apm_parent="${_apm_hook%/*}"
+    [ "$_apm_parent" != "$_apm_hook" ] || return 1
+    apm_prepare_owned_directory "$_apm_parent" || return 1
+    _apm_tmp="$(apm_mktemp_in_dir "$_apm_parent" "${_apm_hook##*/}")" || return 1
+    if [ "$_apm_kind" = "fish" ]; then
+        apm_fish_hook_content "$APM_INSTALL_DIR" > "$_apm_tmp" || { rm -f "$_apm_tmp"; return 1; }
+    else
+        apm_posix_hook_content "$APM_INSTALL_DIR" > "$_apm_tmp" || { rm -f "$_apm_tmp"; return 1; }
+    fi
+    chmod 600 "$_apm_tmp" 2>/dev/null || true
+    if [ -e "$_apm_hook" ] || [ -L "$_apm_hook" ]; then
+        apm_existing_path_owned_safe "$_apm_hook" || { rm -f "$_apm_tmp"; return 1; }
+        _apm_current_digest="$(apm_file_digest "$_apm_hook" || true)"
+        _apm_generated_digest="$(apm_file_digest "$_apm_tmp" || true)"
+        if [ -z "$_APM_PREVIOUS_SHELL_RECEIPT_VALID" ] ||
+            {
+                { [ "$_APM_PREVIOUS_SHELL_HOOK_DIR/${_apm_hook##*/}" != "$_apm_hook" ] ||
+                    [ "$_APM_PREVIOUS_SHELL_HOOK_KIND" != "$_apm_kind" ] ||
+                    [ "$_APM_PREVIOUS_SHELL_HOOK_DIGEST" != "$_apm_current_digest" ]; } &&
+                [ "$_apm_current_digest" != "$_apm_generated_digest" ]
+            }; then
+            rm -f "$_apm_tmp"
+            return 1
+        fi
+    fi
+    mv "$_apm_tmp" "$_apm_hook" || return 1
+    _APM_NEW_SHELL_HOOK_DIGEST="$(apm_file_digest "$_apm_hook" || printf 'none')"
+    return 0
+}
+
+apm_profile_contains_exact_block() {
+    _apm_file="$1"
+    _apm_block="$2"
+    _apm_content="$(cat "$_apm_file" 2>/dev/null || true)"
+    case "$_apm_content" in
+        *"$_apm_block"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+apm_update_profile_file() {
+    _apm_file="$1"
+    _apm_block="$2"
+    _apm_parent="${_apm_file%/*}"
+    [ "$_apm_parent" != "$_apm_file" ] || return 1
+    apm_prepare_owned_directory "$_apm_parent" || return 1
+    [ ! -L "$_apm_file" ] || return 1
+    if [ -e "$_apm_file" ]; then
+        apm_existing_path_owned_safe "$_apm_file" || return 1
+        apm_profile_has_unreachable_exit "$_apm_file" && return 1
+        _apm_start_count="$(grep -F -c "# >>> apm shell setup >>>" "$_apm_file" 2>/dev/null || true)"
+        _apm_end_count="$(grep -F -c "# <<< apm shell setup <<<" "$_apm_file" 2>/dev/null || true)"
+        case "$_apm_start_count:$_apm_end_count" in
+            0:0) ;;
+            1:1)
+                apm_profile_contains_exact_block "$_apm_file" "$_apm_block" || return 1
+                return 0
+                ;;
+            *) return 1 ;;
+        esac
+        _apm_before_digest="$(apm_file_digest "$_apm_file")" || return 1
+        _apm_tmp="$(apm_mktemp_in_dir "$_apm_parent" "${_apm_file##*/}.apm")" || return 1
+        cp -p "$_apm_file" "$_apm_tmp" || return 1
+        [ -s "$_apm_tmp" ] && printf '\n' >> "$_apm_tmp"
+        printf '%s\n' "$_apm_block" >> "$_apm_tmp" || { rm -f "$_apm_tmp"; return 1; }
+        [ "$(apm_file_digest "$_apm_file" || true)" = "$_apm_before_digest" ] ||
+            { rm -f "$_apm_tmp"; return 1; }
+        mv "$_apm_tmp" "$_apm_file" || return 1
+    else
+        _apm_tmp="$(apm_mktemp_in_dir "$_apm_parent" "${_apm_file##*/}.apm")" || return 1
+        printf '%s\n' "$_apm_block" > "$_apm_tmp" || return 1
+        chmod 600 "$_apm_tmp" 2>/dev/null || true
+        [ ! -e "$_apm_file" ] || { rm -f "$_apm_tmp"; return 1; }
+        mv "$_apm_tmp" "$_apm_file" || return 1
+    fi
+}
+
+apm_remove_profile_block() {
+    _apm_file="$1"
+    _apm_block="$2"
+    [ -f "$_apm_file" ] && [ ! -L "$_apm_file" ] || return 1
+    apm_profile_contains_exact_block "$_apm_file" "$_apm_block" || return 0
+    _apm_parent="${_apm_file%/*}"
+    _apm_tmp="$(apm_mktemp_in_dir "$_apm_parent" "${_apm_file##*/}.apm-remove")" || return 1
+    _apm_content="$(cat "$_apm_file")" || return 1
+    _apm_prefix="${_apm_content%%"$_apm_block"*}"
+    _apm_suffix="${_apm_content#*"$_apm_block"}"
+    printf '%s%s' "$_apm_prefix" "$_apm_suffix" > "$_apm_tmp" || return 1
+    mv "$_apm_tmp" "$_apm_file" || return 1
+}
+
+apm_restore_profile_after_partial_write() {
+    _apm_file="$1"
+    _apm_backup="$2"
+    _apm_existed="$3"
+    _apm_expected_digest="$4"
+    [ -n "$_apm_expected_digest" ] || return 1
+    [ -f "$_apm_file" ] && [ ! -L "$_apm_file" ] || return 1
+    [ "$(apm_file_digest "$_apm_file" || true)" = "$_apm_expected_digest" ] || return 1
+    if [ "$_apm_existed" = "1" ]; then
+        [ -n "$_apm_backup" ] && [ -f "$_apm_backup" ] || return 1
+        mv "$_apm_backup" "$_apm_file" || return 1
+    else
+        rm -f "$_apm_file" || return 1
+    fi
+}
+
+apm_bash_login_profile() {
+    for _apm_candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+        if [ -e "$_apm_candidate" ]; then
+            [ -r "$_apm_candidate" ] && {
+                printf '%s\n' "$_apm_candidate"
+                return 0
+            }
+            return 1
+        fi
+    done
+    printf '%s\n' "$HOME/.bash_profile"
+}
+
+apm_zsh_profile() {
+    if [ -n "${ZDOTDIR:-}" ]; then
+        case "$ZDOTDIR" in
+            /*) printf '%s\n' "$ZDOTDIR/.zshrc"; return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    if [ -f "$HOME/.zshenv" ] &&
+        grep -E '^[[:space:]]*(export[[:space:]]+)?ZDOTDIR=' "$HOME/.zshenv" >/dev/null 2>&1; then
+        return 1
+    fi
+    printf '%s\n' "$HOME/.zshrc"
+}
+
+apm_fish_profile() {
+    if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+        case "$XDG_CONFIG_HOME" in
+            /*) printf '%s\n' "$XDG_CONFIG_HOME/fish/conf.d/apm.fish"; return 0 ;;
+            *) return 1 ;;
+        esac
+    else
+        printf '%s\n' "$HOME/.config/fish/conf.d/apm.fish"
+    fi
+}
+
+apm_record_shell_setup_not_configured() {
+    if [ "$_APM_PREVIOUS_SHELL_RECEIPT_VALID" = "1" ]; then
+        apm_write_shell_receipt "$_APM_PREVIOUS_SHELL_MODIFY_PATH" "$_APM_PREVIOUS_SHELL_HOOK_DIR" "$_APM_PREVIOUS_SHELL_HOOK_KIND" "$_APM_PREVIOUS_SHELL_HOOK_DIGEST" ||
+            echo -e "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
+    elif [ -z "$_APM_PREVIOUS_SHELL_RECEIPT_PRESENT" ]; then
+        apm_write_shell_receipt "managed" "none" "none" "none" ||
+            echo -e "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
+    fi
+}
+
+apm_configure_native_shell_path() {
+    _apm_modify_path="managed"
+    if [ -n "${APM_SELF_UPDATE_SOURCE:-}" ]; then
+        echo "Self-update leaves existing shell PATH setup unchanged."
+        return 0
+    fi
+    if [ "$_APM_MODIFY_PATH_REQUEST" = "disable" ]; then
+        _apm_previous_hook_dir="none"
+        _apm_previous_hook_kind="none"
+        _apm_previous_hook_digest="none"
+        if [ "$_APM_PREVIOUS_SHELL_RECEIPT_VALID" = "1" ]; then
+            _apm_previous_hook_dir="$_APM_PREVIOUS_SHELL_HOOK_DIR"
+            _apm_previous_hook_kind="$_APM_PREVIOUS_SHELL_HOOK_KIND"
+            _apm_previous_hook_digest="$_APM_PREVIOUS_SHELL_HOOK_DIGEST"
+        fi
+        apm_write_shell_receipt "disabled" "$_apm_previous_hook_dir" "$_apm_previous_hook_kind" "$_apm_previous_hook_digest" ||
+            echo -e "${YELLOW}[!] APM installed, but shell setup preference could not be saved.${NC}"
+        echo "APM_NO_MODIFY_PATH is set; no shell profiles were changed."
+        echo "To remove existing APM shell setup, delete only blocks marked 'apm shell setup' from your shell profiles."
+        apm_print_path_guidance "$APM_INSTALL_DIR"
+        return 0
+    fi
+    if [ "$_APM_MODIFY_PATH_REQUEST" = "inherit" ] &&
+        [ "$_APM_PREVIOUS_SHELL_RECEIPT_VALID" = "1" ] &&
+        [ "$_APM_PREVIOUS_SHELL_MODIFY_PATH" = "disabled" ]; then
+        apm_write_shell_receipt "disabled" "$_APM_PREVIOUS_SHELL_HOOK_DIR" "$_APM_PREVIOUS_SHELL_HOOK_KIND" "$_APM_PREVIOUS_SHELL_HOOK_DIGEST" ||
+            echo -e "${YELLOW}[!] APM installed, but shell setup preference could not be saved.${NC}"
+        echo "Shell PATH setup remains disabled by the previous APM installer preference."
+        echo "To re-enable on a normal desktop shell, rerun with APM_NO_MODIFY_PATH=0."
+        apm_print_path_guidance "$APM_INSTALL_DIR"
+        return 0
+    fi
+    if ! apm_is_desktop_shell_setup_eligible; then
+        apm_record_shell_setup_not_configured
+        echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: $_APM_SHELL_SETUP_SKIP_REASON.${NC}"
+        apm_print_path_guidance "$APM_INSTALL_DIR"
+        return 0
+    fi
+    _apm_hook_dir="$HOME/.apm/shell"
+    case "$_APM_DETECTED_SHELL" in
+        fish)
+            _apm_hook="$_apm_hook_dir/fish.fish"
+            _apm_profile="$(apm_fish_profile)" || {
+                apm_record_shell_setup_not_configured
+                echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: fish config location is ambiguous.${NC}"
+                apm_print_path_guidance "$APM_INSTALL_DIR"
+                return 0
+            }
+            _apm_kind="fish"
+            ;;
+        zsh)
+            _apm_hook="$_apm_hook_dir/env"
+            _apm_profile="$(apm_zsh_profile)" || {
+                apm_record_shell_setup_not_configured
+                echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: zsh config location is ambiguous.${NC}"
+                apm_print_path_guidance "$APM_INSTALL_DIR"
+                return 0
+            }
+            _apm_kind="posix"
+            ;;
+        *)
+            _apm_hook="$_apm_hook_dir/env"
+            _apm_profile="$(apm_bash_login_profile)" || {
+                apm_record_shell_setup_not_configured
+                echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: bash login profile is not readable.${NC}"
+                apm_print_path_guidance "$APM_INSTALL_DIR"
+                return 0
+            }
+            _apm_kind="posix"
+            ;;
+    esac
+    if ! apm_write_generated_hook "$_apm_hook" "$_apm_kind"; then
+        apm_record_shell_setup_not_configured
+        echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: existing hook is not owned by this installer.${NC}"
+        apm_print_path_guidance "$APM_INSTALL_DIR"
+        return 0
+    fi
+    _apm_block="$(apm_expected_profile_block "$_apm_hook" "$_APM_DETECTED_SHELL")"
+    _apm_profile_failed=""
+    _apm_primary_had_block=""
+    _apm_primary_existed=""
+    _apm_primary_backup=""
+    _apm_primary_written_digest=""
+    _apm_configured_profiles="$_apm_profile"
+    _APM_PROFILE_CHANGE_STATUS=""
+    if [ -f "$_apm_profile" ] && apm_profile_contains_exact_block "$_apm_profile" "$_apm_block"; then
+        _apm_primary_had_block=1
+    fi
+    if [ -e "$_apm_profile" ] && [ ! -L "$_apm_profile" ]; then
+        _apm_primary_existed=1
+        _apm_primary_backup="$(apm_mktemp_in_dir "${_apm_profile%/*}" "${_apm_profile##*/}.apm-backup" || true)"
+        if [ -n "$_apm_primary_backup" ]; then
+            cp -p "$_apm_profile" "$_apm_primary_backup" || _apm_primary_backup=""
+        fi
+    fi
+    if ! apm_update_profile_file "$_apm_profile" "$_apm_block"; then
+        _apm_profile_failed="$_apm_profile"
+        [ -z "$_apm_primary_backup" ] || rm -f "$_apm_primary_backup"
+    else
+        _apm_primary_written_digest="$(apm_file_digest "$_apm_profile" || true)"
+    fi
+    if [ -z "$_apm_profile_failed" ] && [ "$_APM_DETECTED_SHELL" = "bash" ]; then
+        if ! apm_update_profile_file "$HOME/.bashrc" "$_apm_block"; then
+            _apm_profile_failed="$HOME/.bashrc"
+            [ -n "$_apm_primary_had_block" ] ||
+                apm_restore_profile_after_partial_write "$_apm_profile" "$_apm_primary_backup" "$_apm_primary_existed" "$_apm_primary_written_digest" ||
+                _APM_PROFILE_CHANGE_STATUS="partial"
+        else
+            _apm_configured_profiles="$_apm_configured_profiles and $HOME/.bashrc"
+        fi
+    fi
+    [ -z "$_apm_primary_backup" ] || rm -f "$_apm_primary_backup"
+    if [ -n "$_apm_profile_failed" ]; then
+        echo -e "${YELLOW}[!] APM installed, but PATH was not configured automatically: cannot safely update $_apm_profile_failed.${NC}"
+        apm_write_shell_receipt "managed" "$_apm_hook_dir" "$_apm_kind" "$_APM_NEW_SHELL_HOOK_DIGEST" ||
+            echo -e "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
+        apm_print_path_guidance "$APM_INSTALL_DIR"
+        return 0
+    fi
+    _APM_NEW_SHELL_HOOK_DIR="$_apm_hook_dir"
+    _APM_NEW_SHELL_HOOK_KIND="$_apm_kind"
+    apm_write_shell_receipt "managed" "$_APM_NEW_SHELL_HOOK_DIR" "$_APM_NEW_SHELL_HOOK_KIND" "$_APM_NEW_SHELL_HOOK_DIGEST" ||
+        echo -e "${YELLOW}[!] APM installed, but shell setup receipt could not be saved.${NC}"
+    echo -e "${GREEN}[+] Shell PATH configured for $_APM_DETECTED_SHELL: $_apm_configured_profiles.${NC}"
+    echo "Open a new terminal, or run this for the current shell:"
+    if [ "$_APM_DETECTED_SHELL" = "fish" ]; then
+        printf '  source %s\n' "$(apm_fish_quote "$_apm_hook")"
+    else
+        printf '  . %s\n' "$(apm_shell_quote "$_apm_hook")"
+    fi
 }
 
 apm_is_recognized_bundle() {
@@ -414,6 +1100,7 @@ echo -e "${BLUE}Target binary: $DOWNLOAD_BINARY${NC}"
 
 # Parse options: --prefix PATH / --prefix=PATH, @v1.2.3, or VERSION env var.
 apm_parse_installer_args "$@"
+apm_parse_modify_path_env
 
 # Enterprise bootstrap mirror helpers
 is_truthy() {
@@ -1048,40 +1735,99 @@ fi
 apm_require_owned_bundle
 apm_require_writable_directory "$(dirname "$APM_LIB_DIR")"
 apm_require_writable_directory "$APM_INSTALL_DIR"
+apm_read_shell_receipt "$APM_LIB_DIR/.apm-shell-setup"
 
-# Remove any existing installation (safety-validated above)
+_apm_lib_parent="$(dirname "$APM_LIB_DIR")"
+_apm_stage_dir="$(mktemp -d "$_apm_lib_parent/.apm-stage.XXXXXX")" ||
+    apm_install_error "Cannot create a staging directory in $_apm_lib_parent."
+_apm_backup_dir=""
+_apm_had_old_bundle=""
 if [ -d "$APM_LIB_DIR" ]; then
-    _rc=0
-    apm_lib_dir_validate "$APM_LIB_DIR" || _rc=$?
-    if [ "$_rc" -ne 0 ]; then
-        echo -e "${RED}Error: APM_LIB_DIR became unsafe before removal; refusing to delete.${NC}"
-        exit 1
-    fi
-    rm -rf "$APM_LIB_DIR"
+    _apm_had_old_bundle=1
 fi
 
-# Create installation directory
-mkdir -p "$APM_LIB_DIR"
-cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$APM_LIB_DIR/"
-touch "$APM_LIB_DIR/.apm-installed"
+if ! cp -r "$TMP_DIR/$EXTRACTED_DIR"/* "$_apm_stage_dir/" ||
+    ! touch "$_apm_stage_dir/.apm-installed"; then
+    rm -rf "$_apm_stage_dir"
+    apm_install_error "Could not stage the downloaded APM bundle. Existing installation was left unchanged."
+fi
 
-# Create symlink pointing to the actual binary
-ln -sf "$APM_LIB_DIR/$BINARY_NAME" "$APM_INSTALL_DIR/$BINARY_NAME"
+if [ -n "$_apm_had_old_bundle" ] &&
+    ! apm_preserve_previous_shell_receipt_to "$_apm_stage_dir"; then
+    rm -rf "$_apm_stage_dir"
+    apm_install_error "Could not preserve the previous shell setup receipt. Existing installation was left unchanged."
+fi
 
-# Verify installation
+if ! INSTALLED_VERSION=$("$_apm_stage_dir/$BINARY_NAME" --version); then
+    rm -rf "$_apm_stage_dir"
+    apm_install_error "Downloaded APM failed its --version check. Existing installation was left unchanged."
+fi
+
+apm_restore_old_bundle_after_failed_swap() {
+    if [ -n "$_apm_had_old_bundle" ] && [ -n "$_apm_backup_dir" ] && [ -d "$_apm_backup_dir" ]; then
+        rm -rf "$APM_LIB_DIR" || return 1
+        mv "$_apm_backup_dir" "$APM_LIB_DIR" || return 1
+    elif [ -z "$_apm_had_old_bundle" ]; then
+        rm -rf "$APM_LIB_DIR" || return 1
+        rm -f "$APM_INSTALL_DIR/$BINARY_NAME" || return 1
+    fi
+    return 0
+}
+
+apm_abort_after_failed_swap() {
+    _apm_failure_message="$1"
+    if apm_restore_old_bundle_after_failed_swap; then
+        apm_install_error "$_apm_failure_message Existing installation was restored."
+    fi
+    if [ -n "$_apm_had_old_bundle" ] && [ -n "$_apm_backup_dir" ] && [ -d "$_apm_backup_dir" ]; then
+        apm_install_error "$_apm_failure_message Could not restore the previous APM bundle from backup $_apm_backup_dir. Move it back to $APM_LIB_DIR after resolving permissions."
+    fi
+    apm_install_error "$_apm_failure_message Could not roll back the incomplete fresh install completely. Remove $APM_INSTALL_DIR/$BINARY_NAME and $APM_LIB_DIR before retrying."
+}
+
+if [ -n "$_apm_had_old_bundle" ]; then
+    _apm_backup_dir="$(mktemp -d "$_apm_lib_parent/.apm-backup.XXXXXX")" ||
+        { rm -rf "$_apm_stage_dir"; apm_install_error "Cannot create a backup directory in $_apm_lib_parent."; }
+    rmdir "$_apm_backup_dir" || { rm -rf "$_apm_stage_dir"; apm_install_error "Cannot prepare bundle backup."; }
+    mv "$APM_LIB_DIR" "$_apm_backup_dir" ||
+        { rm -rf "$_apm_stage_dir" "$_apm_backup_dir"; apm_install_error "Could not back up existing APM bundle. Existing installation was left unchanged."; }
+fi
+
+if ! mv "$_apm_stage_dir" "$APM_LIB_DIR"; then
+    rm -rf "$_apm_stage_dir"
+    apm_abort_after_failed_swap "Could not activate the staged APM bundle."
+fi
+
+_apm_link_tmp="$(apm_mktemp_in_dir "$APM_INSTALL_DIR" "$BINARY_NAME.link")" ||
+    apm_abort_after_failed_swap "Cannot create a temporary launcher link."
+rm -f "$_apm_link_tmp"
+if ! ln -s "$APM_LIB_DIR/$BINARY_NAME" "$_apm_link_tmp" ||
+    ! mv -f "$_apm_link_tmp" "$APM_INSTALL_DIR/$BINARY_NAME"; then
+    rm -f "$_apm_link_tmp"
+    apm_abort_after_failed_swap "Could not update the APM launcher."
+fi
 if ! INSTALLED_VERSION=$("$APM_INSTALL_DIR/$BINARY_NAME" --version); then
-    apm_install_error "Installed APM at $APM_INSTALL_DIR/$BINARY_NAME failed its --version check. Retry with the same destinations or ask its owner to repair this installation."
+    apm_abort_after_failed_swap "Installed APM at $APM_INSTALL_DIR/$BINARY_NAME failed its --version check."
+fi
+if [ -n "$_apm_backup_dir" ] && [ -d "$_apm_backup_dir" ]; then
+    rm -rf "$_apm_backup_dir"
 fi
 _apm_on_path="$(command -v apm || true)"
 _apm_run_hint="apm"
-if [ -n "$_apm_on_path" ] &&
+if [ -n "${APM_SELF_UPDATE_SOURCE:-}" ]; then
+    echo -e "${GREEN}[+] APM installed successfully!${NC}"
+    echo -e "${BLUE}Version: $INSTALLED_VERSION${NC}"
+    echo -e "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
+    echo "Self-update leaves existing shell PATH setup unchanged."
+elif [ -n "$_apm_on_path" ] &&
     [ "$(apm_real_path "$_apm_on_path")" = "$(apm_real_path "$APM_LIB_DIR/$BINARY_NAME")" ]; then
     echo -e "${GREEN}[+] APM installed successfully!${NC}"
     echo -e "${BLUE}Version: $INSTALLED_VERSION${NC}"
     echo -e "${BLUE}Location: $APM_INSTALL_DIR/$BINARY_NAME -> $APM_LIB_DIR/$BINARY_NAME${NC}"
+    apm_configure_native_shell_path
 else
     echo -e "${YELLOW}[!] APM installed but not found in PATH${NC}"
-    apm_print_path_guidance "$APM_INSTALL_DIR"
+    apm_configure_native_shell_path
 fi
 
 echo ""
