@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -127,6 +130,62 @@ def _package_token_step() -> dict:
     return next(step for step in apm_job["steps"] if step.get("name") == "Select APM package token")
 
 
+def _run_bash(script: str, *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Execute an extracted workflow step with its declared test environment."""
+    # Windows' ambient bash.exe can be the WSL launcher, not Git Bash.
+    search_path = (
+        str(Path(os.environ["PROGRAMFILES"]) / "Git" / "bin") if sys.platform == "win32" else None
+    )
+    executable = shutil.which("bash", path=search_path)
+    if executable is None:
+        raise FileNotFoundError("Workflow contract tests require native Bash (Git for Windows)")
+    return subprocess.run(
+        (executable, "-c", script),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, **env},
+        timeout=30,
+    )
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
+def test_workflow_shell_resolves_native_bash(
+    monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    """Never dispatch a workflow through Windows' ambient WSL launcher."""
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setenv("PROGRAMFILES", "C:/Program Files")
+    search_path = str(Path("C:/Program Files") / "Git" / "bin") if platform == "win32" else None
+    executable = str(Path(search_path) / "bash.exe") if search_path else "/bin/bash"
+    with (
+        patch("shutil.which", return_value=executable) as which,
+        patch("subprocess.run") as run,
+    ):
+        result = _run_bash("printf '%s' \"$VALUE\"", env={"VALUE": "workflow value"})
+
+    which.assert_called_once_with("bash", path=search_path)
+    run.assert_called_once_with(
+        (executable, "-c", "printf '%s' \"$VALUE\""),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "VALUE": "workflow value"},
+        timeout=30,
+    )
+    assert result is run.return_value
+
+
+@pytest.mark.windows_compat
+def test_workflow_shell_does_not_fall_back_when_native_bash_is_missing() -> None:
+    """A missing prerequisite must fail rather than skip or dispatch to WSL."""
+    with patch("shutil.which", return_value=None), patch("subprocess.run") as run:
+        with pytest.raises(FileNotFoundError, match="require native Bash"):
+            _run_bash("exit 0", env={})
+    run.assert_not_called()
+
+
 def _run_compute_step(
     tmp_path: Path,
     *,
@@ -137,15 +196,11 @@ def _run_compute_step(
     legacy_app_id: str = "",
 ) -> tuple[str, dict]:
     assert packages is None or packages_literal is None
-    output = tmp_path / "github-output"
+    output = tmp_path / "github output"
     compute = _compute_step()
-    result = subprocess.run(
-        ("bash", "-c", compute["run"]),
-        capture_output=True,
-        text=True,
-        check=False,
+    result = _run_bash(
+        compute["run"],
         env={
-            **os.environ,
             "AW_APM_PACKAGES": packages_literal
             if packages_literal is not None
             else json.dumps(packages or []),
@@ -154,7 +209,7 @@ def _run_compute_step(
             "AW_APM_LEGACY_OWNER": "",
             "AW_APM_LEGACY_REPOS": "",
             "AW_APM_TOKEN_SOURCE": token_source,
-            "GITHUB_OUTPUT": str(output),
+            "GITHUB_OUTPUT": output.as_posix(),
         },
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -303,6 +358,7 @@ def test_shared_apm_fallback_token_has_current_repo_read_only() -> None:
         ("CASCADE", "builtin", "app", "cascade", None, 1),
     ],
 )
+@pytest.mark.windows_compat
 def test_shared_apm_token_selection_has_no_cross_identity_fallback(
     tmp_path: Path,
     token_source: str,
@@ -312,22 +368,18 @@ def test_shared_apm_token_selection_has_no_cross_identity_fallback(
     expected_token: str | None,
     expected_code: int,
 ) -> None:
-    output = tmp_path / "github-output"
+    output = tmp_path / "github output"
     selector = _package_token_step()
-    result = subprocess.run(
-        ("bash", "-c", selector["run"]),
-        capture_output=True,
-        text=True,
-        check=False,
+    result = _run_bash(
+        selector["run"],
         env={
-            **os.environ,
             "ROW_TOKEN_SOURCE": token_source,
             "BUILTIN_TOKEN": builtin_token,
             "APP_TOKEN": app_token,
             "CASCADE_TOKEN": cascade_token,
             "HAS_PLUGINS_TOKEN": "false",
             "HAS_GH_AW_TOKEN": "false",
-            "GITHUB_OUTPUT": str(output),
+            "GITHUB_OUTPUT": output.as_posix(),
         },
     )
 
@@ -353,27 +405,24 @@ def test_shared_apm_token_selection_has_no_cross_identity_fallback(
         ("false", "false", "cascade:GITHUB_TOKEN"),
     ],
 )
+@pytest.mark.windows_compat
 def test_shared_apm_reports_nonsecret_cascade_tier(
     tmp_path: Path,
     has_plugins: str,
     has_gh_aw: str,
     expected_tier: str,
 ) -> None:
-    output = tmp_path / "github-output"
-    result = subprocess.run(
-        ("bash", "-c", _package_token_step()["run"]),
-        capture_output=True,
-        text=True,
-        check=False,
+    output = tmp_path / "github output"
+    result = _run_bash(
+        _package_token_step()["run"],
         env={
-            **os.environ,
             "ROW_TOKEN_SOURCE": "cascade",
             "BUILTIN_TOKEN": "",
             "APP_TOKEN": "",
             "CASCADE_TOKEN": "selected",
             "HAS_PLUGINS_TOKEN": has_plugins,
             "HAS_GH_AW_TOKEN": has_gh_aw,
-            "GITHUB_OUTPUT": str(output),
+            "GITHUB_OUTPUT": output.as_posix(),
         },
     )
 
@@ -403,6 +452,7 @@ def test_job_level_credential_relay_slots_are_frozen() -> None:
 
 
 @pytest.mark.parametrize("token_source", ["cascade", "github-token"])
+@pytest.mark.windows_compat
 def test_shared_apm_routes_no_app_token_source_explicitly(
     tmp_path: Path,
     token_source: str,
@@ -435,6 +485,7 @@ def test_shared_apm_routes_no_app_token_source_explicitly(
     }
 
 
+@pytest.mark.windows_compat
 def test_shared_apm_app_rows_keep_minted_token_precedence(tmp_path: Path) -> None:
     packages = ["DevExpGbb/private-package#abc"]
 
@@ -459,6 +510,7 @@ def test_shared_apm_app_rows_keep_minted_token_precedence(tmp_path: Path) -> Non
     ]
 
 
+@pytest.mark.windows_compat
 def test_shared_apm_app_array_rows_always_mint_regardless_of_selector(
     tmp_path: Path,
 ) -> None:
@@ -482,6 +534,7 @@ def test_shared_apm_app_array_rows_always_mint_regardless_of_selector(
     assert [row["token-source"] for row in matrix["group"]] == ["app"]
 
 
+@pytest.mark.windows_compat
 def test_shared_apm_matrix_rows_carry_no_credential_material(
     tmp_path: Path,
 ) -> None:
@@ -508,6 +561,7 @@ def test_shared_apm_matrix_rows_carry_no_credential_material(
     assert "111" not in raw
 
 
+@pytest.mark.windows_compat
 def test_shared_apm_repairs_go_slice_formatted_packages(tmp_path: Path) -> None:
     _raw, matrix = _run_compute_step(
         tmp_path,
@@ -534,6 +588,7 @@ def test_shared_apm_repairs_go_slice_formatted_packages(tmp_path: Path) -> None:
         ("copilot,ALL", 1, "degrades to auto-detection"),
     ],
 )
+@pytest.mark.windows_compat
 def test_shared_apm_rejects_empty_or_cli_only_target(
     target: str,
     expected_code: int,
@@ -542,12 +597,9 @@ def test_shared_apm_rejects_empty_or_cli_only_target(
     validate = _validate_step()
     assert validate["env"]["AW_APM_TARGET"] == TARGET_EXPRESSION
 
-    result = subprocess.run(
-        ("bash", "-c", validate["run"]),
-        capture_output=True,
-        text=True,
-        check=False,
-        env={**os.environ, "AW_APM_TARGET": target},
+    result = _run_bash(
+        validate["run"],
+        env={"AW_APM_TARGET": target},
     )
 
     assert result.returncode == expected_code
@@ -564,18 +616,16 @@ def test_shared_apm_rejects_empty_or_cli_only_target(
         ("auto", 1, "expected cascade or github-token"),
     ],
 )
+@pytest.mark.windows_compat
 def test_shared_apm_rejects_unknown_token_source(
     token_source: str,
     expected_code: int,
     expected_fragment: str,
 ) -> None:
     validate = _token_source_step()
-    result = subprocess.run(
-        ("bash", "-c", validate["run"]),
-        capture_output=True,
-        text=True,
-        check=False,
-        env={**os.environ, "AW_APM_TOKEN_SOURCE": token_source},
+    result = _run_bash(
+        validate["run"],
+        env={"AW_APM_TOKEN_SOURCE": token_source},
     )
 
     assert result.returncode == expected_code

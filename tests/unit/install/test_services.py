@@ -258,6 +258,7 @@ class TestDeployedPathEntry:
         assert result == expected
 
 
+@pytest.mark.windows_compat
 def test_skill_bundle_file_entries_omit_python_compiled_artifacts(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     skill_dir = project_root / ".agents" / "skills" / "example"
@@ -271,7 +272,7 @@ def test_skill_bundle_file_entries_omit_python_compiled_artifacts(tmp_path: Path
 
     entries = skill_bundle_file_entries(skill_dir, project_root, targets=[])
 
-    assert entries == [
+    assert sorted(entries) == [
         ".agents/skills/example/SKILL.md",
         ".agents/skills/example/scripts/helper.py",
     ]

@@ -134,6 +134,7 @@ class TestSkillDirectoryCleanup:
         assert ".agents/skills/my-skill" in result.deleted
         assert not (project_root / ".agents/skills/my-skill").exists()
 
+    @pytest.mark.windows_compat
     def test_skill_dir_removed_when_only_generated_bytecode_remains(
         self,
         project_root,
@@ -162,7 +163,7 @@ class TestSkillDirectoryCleanup:
             recorded_hashes=recorded_hashes,
         )
 
-        assert entries == [
+        assert sorted(entries) == [
             ".agents/skills/my-skill/SKILL.md",
             ".agents/skills/my-skill/scripts/helper.py",
         ]
