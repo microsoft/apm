@@ -177,6 +177,16 @@
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
       ]
+    },
+    {
+      "issue": 2852,
+      "fixed_in": "already fixed at 045f78cd71e56b9029e1b4193f7e4d4a46b00086",
+      "summary": "Regression-only coverage: shared transitive instructions survive either diamond parent's uninstall and are removed after the last parent.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_diamond_uninstall_preserves_shared_instructions_until_last_parent"
+      ]
     }
   ],
   "known_gaps": [
