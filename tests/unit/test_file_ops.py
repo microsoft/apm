@@ -233,10 +233,15 @@ class TestRetryOnLock:
             return "ok"
 
         with patch("apm_cli.utils.file_ops.time.sleep"), patch.dict(os.environ, {"APM_DEBUG": "1"}):
-            _retry_on_lock(fail_once, "SENSITIVE_PATH_SENTINEL", max_retries=3)
+            _retry_on_lock(
+                fail_once,
+                "SENSITIVE_PATH_SENTINEL",
+                max_retries=3,
+                initial_delay=0.1,
+            )
 
         captured = capsys.readouterr()
-        assert "Transient file lock" in captured.err
+        assert "[DEBUG] Transient file lock (attempt 1/3); retrying in 0.10s" in captured.err
         assert "SENSITIVE_PATH_SENTINEL" not in captured.err
         assert "SENSITIVE_ERROR_SENTINEL" not in captured.err
 
