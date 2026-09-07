@@ -15,7 +15,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache, _dir_size, _safe_git_args, _sanitize_url
+from apm_cli.cache.git_cache import (
+    CachePruneError,
+    GitCache,
+    _dir_size,
+    _safe_git_args,
+    _sanitize_url,
+)
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.git_env import _GitConfigSnapshot
 
@@ -833,7 +839,7 @@ class TestStatsCleanAndPrune:
         with patch("time.time", return_value=100 * 86400):
             assert cache.prune(max_age_days=30) == 0
 
-    def test_prune_ignores_stat_errors(
+    def test_prune_reports_stat_errors(
         self, cache: GitCache, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         old_dir = cache._checkouts_root / "shard" / "broken"
@@ -858,7 +864,11 @@ class TestStatsCleanAndPrune:
             return iter(entries)
 
         monkeypatch.setattr(os, "scandir", _fake_scandir)
-        assert cache.prune(max_age_days=30) == 0
+        with pytest.raises(CachePruneError, match=r"0 SHA group.*1 failed") as caught:
+            cache.prune(max_age_days=30)
+        assert caught.value.pruned == 0
+        assert str(caught.value.failures[0][1]) == "stat failed"
+        assert old_dir.is_dir()
 
 
 class TestHelperFunctions:

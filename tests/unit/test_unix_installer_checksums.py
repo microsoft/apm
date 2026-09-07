@@ -130,8 +130,22 @@ def _run_installer(
             encoding="ascii",
         )
         wrapper.chmod(0o755)
-    # GNU tar spawns gzip; BSD tar decompresses internally.
-    for tool in ("grep", "sed", "awk", "tr", "sort", "head", "dirname", "readlink", "gzip"):
+    # Native read-only ownership probes and GNU tar's gzip helper.
+    for tool in (
+        "grep",
+        "sed",
+        "awk",
+        "tr",
+        "sort",
+        "head",
+        "dirname",
+        "readlink",
+        "gzip",
+        "id",
+        "ls",
+        "find",
+        "sh",
+    ):
         native = shutil.which(tool)
         assert native is not None, tool
         (tmp_path / "bin" / tool).symlink_to(native)
@@ -152,6 +166,7 @@ def _run_installer(
         "APM_LIB_DIR": str(tmp_path / "install/lib/apm"),
         "GITHUB_URL": f"https://{github_host}",
         "GITHUB_APM_PAT": "fixture-token",
+        "HISTORICAL_APM": str(tmp_path / "historical/bin/apm"),
     }
     for tool in hash_tools:
         native = shutil.which(tool)
@@ -167,22 +182,43 @@ def _run_installer(
         )
     if auth_required:
         env["FIXTURE_AUTH_REQUIRED"] = "1"
-    command = [shutil.which(shell) or shell, str(ROOT / "install.sh")]
+    # Redirect only historical discovery arguments, not the ownership authority.
+    source = (ROOT / "install.sh").read_text(encoding="ascii")
+    historical = (
+        "apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm"
+    )
+    assert historical in source
+    installer = tmp_path / "install.sh"
+    installer.write_text(
+        source.replace(historical, 'apm_resolve_install_paths "$HISTORICAL_APM"'),
+        encoding="ascii",
+    )
+    command = [shutil.which(shell) or shell, str(installer)]
     if selection == "argument":
         command.append("@v0.29.0")
     elif selection == "self-update":
         import apm_cli.commands.self_update as update_module
 
+        existing_lib = tmp_path / "existing/lib/apm"
+        existing_bin = tmp_path / "existing/bin"
+        existing_lib.mkdir(parents=True)
+        existing_bin.mkdir(parents=True)
+        (existing_lib / "apm").write_bytes(payload)
+        (existing_lib / "apm").chmod(0o755)
+        (existing_lib / ".apm-installed").touch()
+        (existing_bin / "apm").symlink_to(existing_lib / "apm")
+        env.update(APM_INSTALL_DIR=str(existing_bin), APM_LIB_DIR=str(existing_lib))
         # Use the production self-update command/env bridge, with only persisted
-        # preferences and ambient environment replaced to avoid user config I/O.
+        # preferences, caller identity and ambient environment isolated.
         with (
             patch.object(update_module, "external_process_env", return_value=env),
+            patch.object(update_module.sys, "argv", [str(existing_bin / "apm")]),
             patch("apm_cli.config.get_self_update_install_dir", return_value=None),
             patch("apm_cli.config.get_self_update_channel", return_value="stable"),
         ):
             release = update_module._resolve_self_update_release("0.29.0")
             env = update_module._build_self_update_installer_env(release)
-            command = update_module._get_installer_run_command(str(ROOT / "install.sh"))
+            command = update_module._get_installer_run_command(str(installer))
     result = subprocess.run(
         command, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30
     )
@@ -191,6 +227,9 @@ def _run_installer(
         for line in (tmp_path / "trace.jsonl").read_text(encoding="ascii").splitlines()
     ]
     assert not (tmp_path / "install").exists()
+    if selection == "self-update":
+        assert (existing_lib / "apm").read_bytes() == payload
+        assert (existing_bin / "apm").resolve() == existing_lib / "apm"
     assert "fixture-token" not in result.stdout + result.stderr
     if mirror:
         requests = [event for event in trace if event["tool"] == "curl"]
@@ -216,6 +255,16 @@ def _assert_refused(
     assert "checksum" in result.stdout.lower() or "sha-256" in result.stdout.lower()
 
 
+def _assert_verified(
+    result: subprocess.CompletedProcess[str], trace: list[dict], marker: Path
+) -> None:
+    """Verified bytes run, then the fixture denies the first installation write."""
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "[+] Archive checksum verified" in result.stdout
+    assert marker.read_text(encoding="ascii") == "executed:--version\n"
+    assert [event["tool"] for event in trace if event["tool"] in DENIED_TOOLS] == ["mkdir"]
+
+
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
 @pytest.mark.parametrize("selection", ["pinned", "latest", "self-update"])
 @pytest.mark.parametrize("mirror", [False, True])
@@ -236,8 +285,7 @@ def test_verification_precedes_archive_consumption(
             assert "Retry once" in result.stdout
             assert "token permissions" not in result.stdout
     else:
-        assert result.returncode == 95, result.stdout + result.stderr
-        assert marker.read_text(encoding="ascii") == "executed:--version\n"
+        _assert_verified(result, trace, marker)
         tools = [event["tool"] for event in trace]
         assert tools.index("sha256sum") < tools.index("tar") < tools.index("chmod")
     requests = [event for event in trace if event["tool"] == "curl"]
@@ -291,8 +339,7 @@ def test_supported_hash_tools_and_sidecar_formats(
     result, trace, marker = _run_installer(
         tmp_path, hash_tools=hash_tools, checksum=checksum, shell=shell, selection="argument"
     )
-    assert result.returncode == 95, result.stdout + result.stderr
-    assert marker.read_text(encoding="ascii") == "executed:--version\n"
+    _assert_verified(result, trace, marker)
     assert [e["tool"] for e in trace if e["tool"] in ("shasum", "sha256sum")] == list(hash_tools)
 
 
@@ -327,8 +374,7 @@ def test_checksum_auth_retry_stays_on_configured_github_host(
 ) -> None:
     """Private sidecars use the already-resolved token only on the canonical host."""
     result, trace, marker = _run_installer(tmp_path, auth_required=True, github_host=github_host)
-    assert result.returncode == 95, result.stdout + result.stderr
-    assert marker.exists()
+    _assert_verified(result, trace, marker)
     requests = [e for e in trace if e["tool"] == "curl" and "-H" in e["args"]]
     assert len(requests) == 2
     assert urlparse(requests[-1]["args"][-3]).hostname == github_host
@@ -349,8 +395,7 @@ def test_private_checksum_api_uses_canonical_selected_release(
         api_checksum=True,
         metadata_format=metadata_format,
     )
-    assert result.returncode == 95, result.stdout + result.stderr
-    assert marker.exists()
+    _assert_verified(result, trace, marker)
     requests = [e for e in trace if e["tool"] == "curl" and "-H" in e["args"]]
     urls = [urlparse(arg) for e in requests for arg in e["args"] if urlparse(arg).scheme == "https"]
     assert {url.hostname for url in urls} == {
@@ -370,8 +415,7 @@ def test_private_latest_archive_and_sidecar_use_api(tmp_path: Path) -> None:
     result, trace, marker = _run_installer(
         tmp_path, selection="latest", api_checksum=True, private_archive=True
     )
-    assert result.returncode == 95, result.stdout + result.stderr
-    assert marker.exists()
+    _assert_verified(result, trace, marker)
     api_downloads = [
         urlparse(arg).path
         for event in trace

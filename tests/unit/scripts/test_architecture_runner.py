@@ -710,6 +710,7 @@ registry_delegation.runtime_descriptors
 registry_delegation.target_vocabulary
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
+transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
@@ -724,6 +725,7 @@ transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
 transport-platform-tls-trust-injection
+transport-platform-unix-install-ownership
 transport-platform-url-path-security
 transport-platform-windows-stable-path
 """

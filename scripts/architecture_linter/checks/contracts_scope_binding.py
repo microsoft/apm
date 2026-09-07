@@ -17,7 +17,9 @@ from scripts.architecture_linter.checks.contracts_test_shared import _APM_EXECUT
 from scripts.architecture_linter.checks.python_semantics import propagated_assignment_values
 from scripts.architecture_linter.checks.tree_index import FUNCTION_NODES, TreeIndex
 
-_LOCAL_BINARY_FACADES = frozenset({"_resolve_apm_executable", "apm_binary", "apm_command"})
+_LOCAL_BINARY_FACADES = frozenset(
+    {"_resolve_apm_executable", "apm_binary", "apm_command", "apm_engine_command"}
+)
 
 
 def _attribute_name(node: ast.AST) -> str | None:

@@ -1,13 +1,45 @@
 """Tests for persistent git cache."""
 
+import errno
 import os
+import shutil
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.cache.git_cache import GitCache
+from apm_cli.cache.git_cache import CachePruneError, GitCache
+
+
+@pytest.mark.windows_compat
+def test_prune_reports_only_completed_deletions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A denied removal is not counted, and other stale entries still prune."""
+    cache = GitCache(tmp_path)
+    blocked = cache._checkouts_root / "fixture" / ("a" * 40)
+    removable = blocked.with_name("b" * 40)
+    for path in (blocked, removable):
+        path.mkdir(parents=True)
+        (path / "payload").write_bytes(b"preserve on failure")
+        os.utime(path, (1, 1))
+    original = shutil.rmtree
+
+    def remove(path: str, **kwargs: object) -> None:
+        if Path(path) == blocked:
+            raise PermissionError(errno.EACCES, "fixture removal denied", path)
+        original(path, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", remove)
+    with pytest.raises(CachePruneError, match="1 failed") as caught:
+        cache.prune()
+    assert caught.value.pruned == 1
+    assert len(caught.value.failures) == 1
+    assert caught.value.failures[0][0] == blocked
+    assert caught.value.failures[0][1].errno == errno.EACCES
+    assert (blocked / "payload").read_bytes() == b"preserve on failure"
+    assert not removable.exists()
 
 
 class TestGitCacheInit:

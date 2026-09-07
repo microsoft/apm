@@ -379,10 +379,10 @@ class TestPruneCommand:
             ):
                 result = self.runner.invoke(cli, ["prune"])
 
-            # Command should continue gracefully and not fail the whole prune run
-            assert result.exit_code == 0
-            # Should report the failure (not crash silently)
-            assert "bad-org/bad-repo" in result.output or "Failed" in result.output
+            assert result.exit_code == 1
+            assert "Failed to remove bad-org/bad-repo" in result.output
+            assert "Prune incomplete" in result.output
+            assert "rerun 'apm prune'" in " ".join(result.output.split())
 
     # ------------------------------------------------------------------
     # Lockfile cleanup
@@ -927,7 +927,7 @@ dependencies:
             ):
                 result = self.runner.invoke(cli, ["prune"])
 
-            assert result.exit_code == 0
+            assert result.exit_code == 1
             retained = LockFile.read(lockfile_path)
             assert retained is not None
             assert beta_key in retained.dependencies
