@@ -42,19 +42,25 @@ def _populated_cache(
         commits.append(repositories.commit(repository, message=name))
     environment = repositories.url_rewrite_subprocess_env(repository, _REMOTE)
     cache = GitCache(isolated.cache_root)
-    used, stale, fresh = (
-        cache.get_checkout(
-            _REMOTE, None, locked_sha=commit.sha, env=environment, sparse_paths=sparse_paths
+    try:
+        used, stale, fresh = (
+            cache.get_checkout(
+                _REMOTE, None, locked_sha=commit.sha, env=environment, sparse_paths=sparse_paths
+            )
+            for commit in commits
         )
-        for commit in commits
-    )
+    except RuntimeError as exc:
+        if isinstance(exc.__cause__, subprocess.CalledProcessError):
+            pytest.fail(f"Local Git fixture failed: {exc.__cause__.stderr}")
+        raise
     return cache, environment, (used, stale, fresh)
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize(
     ("refresh", "sparse_paths"),
     [
-        pytest.param(False, None, id="hit-full", marks=pytest.mark.windows_compat),
+        pytest.param(False, None, id="hit-full"),
         pytest.param(False, ["skills"], id="hit-sparse"),
         pytest.param(True, None, id="write-dedup-full"),
         pytest.param(True, ["skills"], id="write-dedup-sparse"),
@@ -121,6 +127,7 @@ def test_failed_sparse_validation_does_not_refresh_access(
     record_access.assert_not_called()
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize("refresh", [False, True], ids=["hit", "write-dedup"])
 @pytest.mark.parametrize("sparse_paths", [None, ["skills"]], ids=["full", "sparse"])
 @pytest.mark.parametrize(
@@ -183,6 +190,7 @@ def test_checkout_recency_error_contract(
             assert not caplog.records
 
 
+@pytest.mark.windows_compat
 def test_recency_permission_warning_reaches_default_cli_stderr(tmp_path: Path) -> None:
     """The real CLI logging configuration exposes the backend warning by default."""
     cache, environment, (used, _stale, _fresh) = _populated_cache(tmp_path, None)
