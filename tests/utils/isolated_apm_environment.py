@@ -75,10 +75,11 @@ class _GuardedSocketOperations:
             raise OSError(_MESSAGE)
         return super().sendto(*args, **kwargs)
 
-    def sendmsg(self, *args, **kwargs):
-        if self.family in (socket.AF_INET, socket.AF_INET6):
-            raise OSError(_MESSAGE)
-        return super().sendmsg(*args, **kwargs)
+    if hasattr(_REAL_RAW_SOCKET, "sendmsg"):
+        def sendmsg(self, *args, **kwargs):
+            if self.family in (socket.AF_INET, socket.AF_INET6):
+                raise OSError(_MESSAGE)
+            return super().sendmsg(*args, **kwargs)
 
 
 class _GuardedSocket(_GuardedSocketOperations, _REAL_SOCKET):

@@ -27,8 +27,10 @@ _REMOTE = "https://gitlab.example.invalid/cache/recency.git"
 
 @pytest.fixture
 def recency_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Reproduce main's worker-depth fixture paths in the Windows PR gate."""
-    return tmp_path_factory.mktemp("test_checkout_recency_error_co") / "popen-gw0"
+    """Keep Git metadata below MAX_PATH, including main's worker-depth layout."""
+    # Per-test names exhaust Git's config.worktree path budget. Retain an extra
+    # worker component so the unsharded Windows gate also exercises main's depth.
+    return tmp_path_factory.mktemp("r") / "popen-gw0"
 
 
 def _populated_cache(
