@@ -359,6 +359,8 @@ environment end-to-end; for local iteration prefer the direct
 **On PR and merge queue:**
 1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
 
+The required Windows compatibility gate selects `windows_compat` tests. Its collection guard requires a non-empty subset, not a fixed test count, so adding marked regressions does not require raising a ceiling. The workflow's test roots and timeout bound scope and runtime.
+
 **On pushed version tag releases:**
 1. Unit tests + Smoke tests
 2. Build binaries (cross-platform)
