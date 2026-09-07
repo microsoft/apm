@@ -25,7 +25,6 @@ Concurrency:
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import logging
@@ -883,18 +882,11 @@ class GitCache:
             "total_size_bytes": total_size,
         }
 
-    def clean_all(self) -> None:
-        """Remove ALL cache content (db + checkouts). Used by ``apm cache clean``."""
-        from ..utils.file_ops import robust_rmtree
+    def clean_all(self) -> list[str]:
+        """Remove db and checkouts, returning details of every incomplete removal."""
+        from .cleanup import clean_cache_buckets
 
-        for bucket in (self._db_root, self._checkouts_root):
-            if bucket.is_dir():
-                for entry in os.scandir(str(bucket)):
-                    if entry.is_dir(follow_symlinks=False):
-                        robust_rmtree(Path(entry.path), ignore_errors=True)
-                    elif entry.is_file(follow_symlinks=False):
-                        with contextlib.suppress(OSError):
-                            os.unlink(entry.path)
+        return clean_cache_buckets((self._db_root, self._checkouts_root))
 
     def prune(self, *, max_age_days: int = 30) -> int:
         """Remove checkout entries older than *max_age_days*.
