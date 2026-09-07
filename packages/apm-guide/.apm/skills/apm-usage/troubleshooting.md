@@ -2,7 +2,7 @@
 
 | Problem | Fix |
 |---------|-----|
-| `apm: command not found` | Install APM: `curl -sSL https://aka.ms/apm-unix \| sh` (macOS/Linux) or `irm https://aka.ms/apm-windows \| iex` (Windows). On macOS/Linux native desktop installs, open a new shell after install. If the installer skipped profile edits, follow the manual `PATH` command it printed. Pip installs never edit profiles. |
+| `apm: command not found` | On macOS with Homebrew, use `brew install apm` and follow Homebrew's `brew shellenv` guidance if needed. For Linux/macOS without Homebrew or Windows, see [Installation](./installation.md). On macOS/Linux native desktop installs, open a new shell after install; if setup was skipped, run the shell-specific `PATH` command the installer printed. Pip installs never edit profiles. |
 | Disable automatic Unix PATH setup | Run the native installer with `APM_NO_MODIFY_PATH=1`. To re-enable after opting out, rerun a normal desktop native install with `APM_NO_MODIFY_PATH=0`. |
 | Unix install/self-update ownership, destination, or pip fallback refusal | Use the owning Python's `-m pip` or original owner. Inspect unknown data without deleting it. For a fresh install choose another empty dedicated bundle or one `--prefix PATH`; do not combine `--prefix` with contradictory `APM_INSTALL_DIR` / `APM_LIB_DIR`. Otherwise use the owner's uninstall before migration. See [ownership rules](./installation.md#unix-ownership-and-migration). |
 | Authentication errors (401/403) | Set the correct token. Run `apm install --verbose` to see which token source is used. See [Authentication](./authentication.md). |

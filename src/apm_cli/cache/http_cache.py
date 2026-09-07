@@ -121,6 +121,13 @@ class HttpCache:
                     robust_rmtree(entry_path, ignore_errors=True)
                     return None
 
+            # Recency is independent of TTL. A concurrent eviction or read-only
+            # cache must not discard the response we have already verified.
+            try:
+                os.utime(str(entry_path), None)
+            except OSError as exc:
+                _log.debug("Failed to update HTTP cache recency for %s: %s", url, exc)
+
             return CacheEntry(
                 body=body,
                 etag=meta.get("etag"),

@@ -22,17 +22,16 @@ APM acts as a runtime package manager, downloading and configuring LLM runtimes 
 ## Quick Setup
 
 ### Install APM and Setup Runtime
-```bash
-# 1. Install APM
-curl -sSL https://aka.ms/apm-unix | sh
-```
 
-If `apm` is off `PATH`, follow the installer's printed guidance. For a fresh default install, use the absolute launcher command below until the current shell's `PATH` is updated. Root/container installs require [explicit administrator destinations](../../getting-started/installation/#unix-install-ownership-and-migration).
+Choose an [APM installation method](../../getting-started/installation/), then set up a runtime:
 
 ```bash
-# 2. Setup AI runtime (downloads and configures automatically)
-"$HOME/.local/bin/apm" runtime setup copilot
+apm runtime setup copilot
 ```
+
+For standalone Unix installs, open a new shell after installation or run the
+exact shell-specific `PATH` command the installer printed for the current
+terminal. Root and container installs require [explicit administrator destinations](../../getting-started/installation/#unix-install-ownership-and-migration).
 
 ### Runtime Management
 ```bash

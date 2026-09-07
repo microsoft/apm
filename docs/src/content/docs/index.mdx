@@ -35,7 +35,16 @@ APM is a dependency manager for AI agents. Declare the skills, prompts, instruct
 ## Install APM
 
 <Tabs syncKey="os">
-  <TabItem label="macOS / Linux" icon="apple">
+  <TabItem label="macOS (Homebrew)" icon="apple">
+    Already use Homebrew?
+
+    ```bash
+    brew install apm
+    ```
+
+    No custom tap needed. Update with `brew upgrade apm`.
+  </TabItem>
+  <TabItem label="Linux / macOS (no Homebrew)" icon="document">
     ```bash
     curl -sSL https://aka.ms/apm-unix | sh
     ```
@@ -47,13 +56,10 @@ APM is a dependency manager for AI agents. Declare the skills, prompts, instruct
   </TabItem>
 </Tabs>
 
-If the Unix installer reports that `apm` is not on `PATH`, follow its
-printed export command for the current shell. For a fresh ordinary-user
-install with default destinations, that command is:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
+Homebrew is optional. See [all installation options](./getting-started/installation/)
+for pip, Scoop, and manual installs. For standalone Unix installs, follow the
+installer's shell-specific `PATH` guidance if the current terminal cannot find
+`apm`.
 
 Then try it on a sample package:
 

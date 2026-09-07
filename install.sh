@@ -1612,6 +1612,7 @@ fi
 # Make binary executable
 chmod +x "$TMP_DIR/$EXTRACTED_DIR/$BINARY_NAME"
 
+# INSTALL_BINARY_CHECK_BEGIN
 # Test the binary
 # Use if/else to capture exit code without triggering set -e.
 # When glibc is too old the binary exits 255 immediately;
@@ -1653,7 +1654,7 @@ else
     print_pip_recovery_guidance
     echo ""
     
-    echo "1. Homebrew (macOS/Linux): brew install microsoft/apm/apm"
+    echo "1. Homebrew (macOS/Linux): brew install apm (no tap needed)"
     echo ""
     echo "2. From source:"
     echo "   git clone $GITHUB_URL/$APM_REPO.git"
@@ -1669,6 +1670,8 @@ else
     echo "Need help? Create an issue at: $GITHUB_URL/$APM_REPO/issues"
     exit 1
 fi
+
+# INSTALL_BINARY_CHECK_END
 
 # Resolve before either installation path can create a competing installation.
 apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm

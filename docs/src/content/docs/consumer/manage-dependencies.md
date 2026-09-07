@@ -392,8 +392,9 @@ For the full lockfile schema, see
 The split mirrors `package.json` + `package-lock.json`. The verbs match
 too: `apm update` refreshes dependencies to the latest matching versions or refs
 (like `npm update`); `apm install --frozen` is the lockfile-only,
-fail-on-drift install for CI (like `npm ci`). To upgrade the `apm` CLI
-binary itself, use `apm self-update`.
+fail-on-drift install for CI (like `npm ci`). CLI upgrades use your
+package manager (`brew upgrade apm` for Homebrew), or `apm self-update` for
+standalone installs. See [Update and refresh](../update-and-refresh/#update-the-apm-cli-binary).
 :::
 
 ## Explain a transitive dependency: `apm deps why`

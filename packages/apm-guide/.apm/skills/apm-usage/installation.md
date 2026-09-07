@@ -1,12 +1,25 @@
 # Installation
 
-## Quick install (recommended)
+## macOS with Homebrew (recommended)
 
 ```bash
-# macOS / Linux
-curl -sSL https://aka.ms/apm-unix | sh
+brew install apm
+```
 
-# Windows (PowerShell)
+No custom tap is required. Homebrew owns installation and updates in its
+managed environment; it does not eliminate supply-chain risk.
+
+## Linux / macOS without Homebrew
+
+Homebrew is optional. Use the standalone installer or pip below.
+
+```bash
+curl -sSL https://aka.ms/apm-unix | sh
+```
+
+## Windows (PowerShell)
+
+```powershell
 irm https://aka.ms/apm-windows | iex
 ```
 
@@ -16,7 +29,7 @@ Fresh ordinary-user Unix native installs use `~/.local/bin/apm` and `~/.local/li
 
 ```bash
 # Homebrew (macOS / Linux)
-brew install microsoft/apm/apm
+brew install apm
 
 # Scoop (Windows)
 scoop bucket add apm https://github.com/microsoft/scoop-apm
@@ -33,6 +46,22 @@ apm --version
 ```
 
 ## Update
+
+Use the same tool that installed APM:
+
+| Installation | Update command |
+|--------------|----------------|
+| Homebrew core | `brew upgrade apm` |
+| pip | `pip install --upgrade apm-cli` |
+| Scoop | `scoop update apm` |
+| Standalone installer | `apm self-update` |
+
+Homebrew core disables `apm self-update` and its startup update notification.
+Do not run the standalone installer over a package-manager-owned installation.
+For an existing `microsoft/apm` tap installation, follow the
+[tap-to-core migration guide](https://microsoft.github.io/apm/getting-started/installation/#migrate-from-the-microsoft-tap).
+
+For standalone installs only:
 
 ```bash
 apm self-update          # update APM itself
@@ -110,6 +139,11 @@ Native automatic shell setup writes only installer-owned marked profile blocks t
 
 ## Troubleshooting
 
-- **macOS/Linux "command not found":** open a new shell after a native desktop install. If the installer skipped profile edits, follow the manual `PATH` command it printed. Pip installs never edit profiles.
-- **Permission denied:** use a user-owned prefix such as `APM_INSTALL_DIR=$HOME/.local/bin`; the Unix installer does not use `sudo`.
+- **macOS/Linux "command not found":** for Homebrew, follow `brew shellenv`
+  guidance from your Homebrew installation. For standalone native desktop
+  installs, open a new shell; if setup was skipped, run the shell-specific
+  `PATH` command the installer printed. Pip installs never edit profiles.
+- **Permission denied:** use a caller-owned destination, such as
+  `--prefix "$HOME/.local"` for a fresh standalone install. The Unix installer
+  does not use `sudo`.
 - **Windows antivirus locks:** set `$env:APM_DEBUG = "1"` and retry.

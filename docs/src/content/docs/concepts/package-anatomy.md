@@ -150,7 +150,8 @@ The shape mirrors `package.json` on purpose: `name`, `version`,
 `dependencies`, `devDependencies`, `scripts`. The verbs match too:
 `apm install` deploys, `apm update` refreshes dependencies, and
 `apm install --frozen` is the lockfile-only CI install (mirrors
-`npm ci`). The CLI binary itself updates via `apm self-update`.
+`npm ci`). CLI upgrades use your package manager (`brew upgrade apm` for
+Homebrew), or `apm self-update` for standalone installs.
 :::
 
 ## Anatomy of `apm.lock.yaml`
