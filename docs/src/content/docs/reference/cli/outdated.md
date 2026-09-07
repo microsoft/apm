@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-Compare locked dependencies against their remotes. Read-only: no manifest, lockfile, `apm_modules/`, or deployment writes. Legacy `apm.lock` files are read in place, without migration.
+Compare locked dependencies against their remotes. Read-only: does not modify `apm.yml`, the lockfile, `apm_modules/`, or deployed files. Legacy `apm.lock` files are read in place, without migration.
 
 ## Synopsis
 

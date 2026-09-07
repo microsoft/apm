@@ -36,15 +36,14 @@ class RegistryOutdatedContext:
 
 def _highest_semver(version_strings: list[str]) -> str | None:
     """Return the highest parseable semver in *version_strings*."""
-    candidates: list[tuple[SemVer, str]] = []
+    highest: SemVer | None = None
+    latest: str | None = None
     for raw in version_strings:
         parsed = parse_semver(raw)
-        if parsed is not None:
-            candidates.append((parsed, raw))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda pair: pair[0])
-    return candidates[-1][1]
+        if parsed is not None and (highest is None or not parsed < highest):
+            # Preserve the last entry on equal precedence, including build metadata.
+            highest, latest = parsed, raw
+    return latest
 
 
 def _add_registry_manifest_deps(

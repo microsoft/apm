@@ -21,7 +21,7 @@ pytestmark = pytest.mark.component
 @pytest.mark.parametrize("current", ["1.7.0", "2.0.0"])
 @pytest.mark.parametrize(
     ("selector", "wanted"),
-    [("1.7.0", "1.7.0"), ("=1.7.0", "1.7.0"), ("^1.7.0", "1.8.0")],
+    [("1.7.0", "1.7.0"), ("=1.7.0", "1.7.0"), ("^1.7.0", "1.8.0"), ("9.0.0", "-")],
 )
 def test_exact_registry_pin_reports_latest_without_writes(
     tmp_path: Path,
@@ -73,14 +73,26 @@ def test_exact_registry_pin_reports_latest_without_writes(
     assert result.exit_code == 0, result.output
     assert "Wanted" in result.output
     package_line = next(line for line in result.output.splitlines() if "org/pkg" in line)
-    assert re.findall(r"\d+\.\d+\.\d+", package_line) == [current, wanted, "2.0.0"]
+    assert re.findall(r"\d+\.\d+\.\d+", package_line) == [
+        current,
+        *([wanted] if wanted != "-" else []),
+        "2.0.0",
+    ]
     assert "outside constraint" in result.output
-    if current == "1.7.0":
+    if wanted == "-":
+        assert "unknown" in package_line
+        assert "Some dependencies could not be checked" in result.output
+        assert "branch/commit refs" not in result.output
+    elif current == "1.7.0":
         assert "1 outdated dependency found" in result.output
     else:
         assert "up-to-date" in result.output
     assert "All dependencies are up-to-date" not in result.output
     assert "local/pkg" not in result.output
+    if plain:
+        lines = result.output.splitlines()
+        header_index = next(i for i, line in enumerate(lines) if line.startswith("Package"))
+        assert lines[header_index + 1] == "-" * len(lines[header_index])
     downloader.return_value.list_remote_refs.assert_not_called()
     client.download_archive.assert_not_called()
     after = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}

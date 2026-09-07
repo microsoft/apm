@@ -11,6 +11,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.registry.client import RegistryError, VersionEntry
 from apm_cli.deps.registry.outdated import (
     RegistryOutdatedContext,
+    _highest_semver,
     check_registry_locked_dep,
     load_registry_outdated_context,
 )
@@ -56,6 +57,23 @@ def _fake_client(versions: list[str]):
         for v in versions
     ]
     return fake
+
+
+@pytest.mark.parametrize(
+    ("versions", "expected"),
+    [
+        ([], None),
+        (["stable", "invalid"], None),
+        (["2.0.0-rc.1", "invalid", "1.9.0", "2.0.0"], "2.0.0"),
+        (["1.7.0+build.2", "1.7.0+build.1", "1.6.0"], "1.7.0+build.1"),
+        (["1.7.0+build.1", "1.6.0", "1.7.0+build.2"], "1.7.0+build.2"),
+    ],
+)
+def test_highest_semver_preserves_last_equal_precedence(
+    versions: list[str], expected: str | None
+) -> None:
+    """Selecting the maximum preserves the prior stable-sort tie behavior."""
+    assert _highest_semver(versions) == expected
 
 
 @pytest.fixture(autouse=True)

@@ -604,10 +604,11 @@ def outdated(global_, verbose, parallel_checks):
     except (ImportError, Exception):
         # Fallback: plain text output
         wanted_header = f"{'Wanted':<13}" if show_wanted else ""
-        click.echo(
+        header = (
             f"{'Package':<24}{'Current':<13}{wanted_header}{'Latest':<13}{'Status':<15}{'Source'}"
         )
-        click.echo("-" * 82)
+        click.echo(header)
+        click.echo("-" * len(header))
         for row, source in zip(rows, sources, strict=True):
             wanted_cell = f"{row.wanted or '-':<13}" if show_wanted else ""
             click.echo(
@@ -625,7 +626,7 @@ def outdated(global_, verbose, parallel_checks):
             f"{'dependency' if outdated_count == 1 else 'dependencies'} found"
         )
     elif has_unknown:
-        logger.progress("Some dependencies could not be checked (branch/commit refs)")
+        logger.progress("Some dependencies could not be checked")
     if has_outside_constraint:
         logger.progress(
             "Registry Latest is published; Wanted respects the manifest constraint. "
