@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm uninstall` now preserves declarations and deployed ownership after package deletion failures, keeping retry and reinstall recovery available after partial removal. (#2860)
+- Successful HTTP cache hits now refresh LRU recency without extending response freshness, retaining frequently used MCP registry responses. (#2859)
 
 ## [0.29.1] - 2026-09-06
 
