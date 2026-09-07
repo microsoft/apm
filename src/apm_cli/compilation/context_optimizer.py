@@ -159,11 +159,13 @@ class ContextOptimizer:
 
         # Performance optimization caches
         self._glob_cache: builtins.dict[str, builtins.list[str]] = {}
-        self._glob_set_cache: builtins.dict[str, builtins.set[Path]] = {}
+        self._glob_set_cache: builtins.dict[str, builtins.set[str]] = {}
+        self._rel_path_cache: builtins.dict[Path, str] = {}
         self._file_list_cache: builtins.list[Path] | None = None
         self._placement_hidden_tool_trees: frozenset[str] = frozenset()
         self._scan_top_level_roots: frozenset[str] | None = None
         self._inheritance_cache: builtins.dict[Path, builtins.list[Path]] = {}  # (#171)
+        self._resolved_dir_cache: builtins.dict[Path, Path] = {}
         self._timing_enabled = False
         self._phase_timings: builtins.dict[str, float] = {}
 
@@ -224,13 +226,30 @@ class ContextOptimizer:
             self._glob_cache[pattern] = self._safe_recursive_glob(pattern)
         return self._glob_cache[pattern]
 
+    def _portable_rel_path(self, path: Path) -> str:
+        """Memoized relative path for files from the canonical walk.
+
+        These paths always come from the non-symlink-following walk rooted at
+        the already-resolved ``self.base_dir``, so ``relative_to`` needs no
+        ``.resolve()`` here -- unlike ``portable_relpath``, kept as a fallback
+        for any path that turns out not to be under ``self.base_dir``.
+        """
+        cached = self._rel_path_cache.get(path)
+        if cached is None:
+            try:
+                cached = path.relative_to(self.base_dir).as_posix()
+            except ValueError:
+                cached = portable_relpath(path, self.base_dir)
+            self._rel_path_cache[path] = cached
+        return cached
+
     def _safe_recursive_glob(self, pattern: str) -> builtins.list[str]:
         """Symlink-safe, exclusion-aware ``glob(recursive=True)`` replacement:
         match the cached project file list against ``pattern`` (POSIX rel paths).
         """
         results: builtins.list[str] = []
         for path in self._get_all_files():
-            rel = portable_relpath(path, self.base_dir)
+            rel = self._portable_rel_path(path)
             if matches_glob(rel, pattern):
                 results.append(rel)
         return results
@@ -862,24 +881,19 @@ class ContextOptimizer:
         for expanded_pattern in expanded_patterns:
             # For patterns with **, use cached glob results
             if "**" in expanded_pattern:
-                try:
-                    # Resolve the candidate against the constructor-resolved base path.
-                    resolved_file = file_path.resolve()
-                    rel_path = resolved_file.relative_to(self.base_dir)
+                rel_path = self._portable_rel_path(file_path)
 
-                    # Use cached glob results instead of repeated glob calls
-                    matches = self._cached_glob(expanded_pattern)
-                    # Use cached Set[Path] to avoid recreating on every call
-                    if expanded_pattern not in self._glob_set_cache:
-                        self._glob_set_cache[expanded_pattern] = {Path(match) for match in matches}
-                    if rel_path in self._glob_set_cache[expanded_pattern]:
-                        return True
-                except (ValueError, OSError):
-                    pass
+                # Use cached glob results instead of repeated glob calls
+                matches = self._cached_glob(expanded_pattern)
+                # Use cached Set[str] to avoid recreating on every call
+                if expanded_pattern not in self._glob_set_cache:
+                    self._glob_set_cache[expanded_pattern] = set(matches)
+                if rel_path in self._glob_set_cache[expanded_pattern]:
+                    return True
             else:
-                # For non-recursive patterns, use fnmatch as before
+                # For non-recursive patterns, use fnmatch as before.
                 try:
-                    rel_str = portable_relpath(file_path, self.base_dir)
+                    rel_str = self._portable_rel_path(file_path)
                     if fnmatch.fnmatch(rel_str, expanded_pattern):
                         return True
                 except ValueError:
@@ -975,9 +989,8 @@ class ContextOptimizer:
         Returns:
             float: Distribution score accounting for spread and depth diversity.
         """
-        total_dirs_with_files = sum(
-            analysis.total_files > 0 for analysis in self._directory_cache.values()
-        )
+        # _directory_cache only ever holds dirs with >=1 file, so len() suffices.
+        total_dirs_with_files = len(self._directory_cache)
         if total_dirs_with_files == 0:
             return 0.0
 
@@ -988,7 +1001,8 @@ class ContextOptimizer:
         if not depths:
             return base_ratio
 
-        depth_variance = sum((d - sum(depths) / len(depths)) ** 2 for d in depths) / len(depths)
+        mean_depth = sum(depths) / len(depths)
+        depth_variance = sum((d - mean_depth) ** 2 for d in depths) / len(depths)
         diversity_factor = 1.0 + (depth_variance * self.DIVERSITY_FACTOR_BASE)
 
         return base_ratio * diversity_factor
@@ -1012,11 +1026,10 @@ class ContextOptimizer:
         # CRITICAL: Mandatory coverage constraint - filter candidates that provide complete coverage
         coverage_candidates = []
         for candidate in candidates:
-            # Verify this placement can provide hierarchical coverage for ALL matching directories
-            covered_directories = self._calculate_hierarchical_coverage(
-                [candidate.directory], matching_directories
-            )
-            if covered_directories == matching_directories:
+            # Verify this placement can provide hierarchical coverage for ALL matching directories.
+            # Short-circuits on the first uncovered target, avoiding a full
+            # O(candidates x matching_directories) scan.
+            if self._single_placement_covers_all(candidate.directory, matching_directories):
                 # This candidate satisfies the mandatory coverage constraint
                 coverage_candidates.append(candidate)
 
@@ -1194,8 +1207,9 @@ class ContextOptimizer:
         if not matching_directories:
             return None
 
-        # Convert to relative paths for easier analysis
-        relative_dirs = [d.resolve().relative_to(self.base_dir) for d in matching_directories]
+        # matching_directories are already-canonical _directory_cache keys, so
+        # no per-directory resolve() is needed here.
+        relative_dirs = [d.relative_to(self.base_dir) for d in matching_directories]
 
         # Find the lowest common ancestor that covers all directories
         if len(relative_dirs) == 1:
@@ -1244,14 +1258,32 @@ class ContextOptimizer:
 
         return covered
 
+    def _single_placement_covers_all(
+        self, placement_dir: Path, target_directories: builtins.set[Path]
+    ) -> bool:
+        """Whether one placement hierarchically covers every target directory.
+
+        Like ``_calculate_hierarchical_coverage`` but short-circuits on the
+        first miss instead of scanning every target.
+        """
+        for target in target_directories:
+            try:
+                target.relative_to(placement_dir)
+            except ValueError:
+                return False
+        return True
+
     def _is_hierarchically_covered(self, target_dir: Path, placement_dir: Path) -> bool:
         """Check if target_dir can inherit instructions from placement_dir through hierarchy.
 
         This is true if placement_dir is target_dir itself or any parent of target_dir.
+
+        Both args always come from ``self._directory_cache`` (already canonical),
+        so no resolve() is needed here.
         """
         try:
             # Check if target is the same as placement or is a subdirectory of placement
-            target_dir.resolve().relative_to(placement_dir.resolve())
+            target_dir.relative_to(placement_dir)
             return True
         except ValueError:
             # target_dir is not under placement_dir
@@ -1392,11 +1424,19 @@ class ContextOptimizer:
         if not pattern:
             return True
 
-        # Resolve working directory to handle path inconsistencies
-        try:
-            resolved_working_dir = working_directory.resolve()
-        except (OSError, ValueError):
-            resolved_working_dir = working_directory.absolute()
+        # Resolve working directory to handle path inconsistencies, but skip
+        # it entirely when it's already a canonical _directory_cache key, and
+        # cache the resolve() otherwise -- this runs per placed instruction.
+        if working_directory in self._directory_cache:
+            resolved_working_dir = working_directory
+        else:
+            resolved_working_dir = self._resolved_dir_cache.get(working_directory)
+            if resolved_working_dir is None:
+                try:
+                    resolved_working_dir = working_directory.resolve()
+                except (OSError, ValueError):
+                    resolved_working_dir = working_directory.absolute()
+                self._resolved_dir_cache[working_directory] = resolved_working_dir
 
         # Check if working directory has files matching the pattern
         analysis = self._directory_cache.get(resolved_working_dir)
