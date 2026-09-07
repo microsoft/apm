@@ -7,23 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-07
+
 ### Security
 
-- Unix binary installs now verify original publisher SHA-256 sidecars before
-  extraction or execution, refuse historical or mirrored archives without
-  sidecars, and never fall back to pip after integrity failures. (#2842)
-### Fixed
+- **BREAKING:** Unix binary installs now require matching original publisher SHA-256 sidecars before extraction or execution, with no pip fallback after integrity failures. For historical releases or mirrors, select a release with sidecars or update the mirrored installer and publish the original publisher sidecars alongside its archives. (#2842)
 
-- Unix installation defaults to user-local directories without profile edits or implicit `sudo`. Existing destinations are preserved, but ordinary users cannot replace root-owned or package-managed installs; ask the original administrator or package manager to update or uninstall before migrating. See [Unix install ownership and migration](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration). (#2844)
 ### Changed
 
+- **BREAKING:** Fresh Unix native installs default to `~/.local`, add `install.sh --prefix PATH`, and configure eligible bash/zsh/fish profiles without implicit `sudo`; set `APM_NO_MODIFY_PATH=1` to opt out of shell setup. Existing destinations are preserved, and root-owned or package-managed installs require their original administrator or package manager to update or uninstall before [migration](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration). (#2844)
 - macOS onboarding now recommends Homebrew core (`brew install apm`, no tap) for existing Homebrew users, with `brew upgrade apm` for updates and visible standalone alternatives. (#2846)
 
 ### Fixed
 
 - Public CLI release discovery can recover from a rejected environment token: one anonymous retry after a selected token's 401/non-rate-limit 403 only for canonical public APM metadata; metadata redirects require `APM_RELEASE_METADATA_URL` at the final JSON endpoint or a `VERSION` pin. (#2843)
+- `apm cache prune` now counts only successfully deleted SHA groups, continues after removal errors, and exits `1` with failed paths and causes when pruning is incomplete. Fix permissions or release file locks, then rerun the command. (#2865)
+- `apm prune` now exits `1` when orphan deletion fails, continues processing remaining packages, and retains failed packages' lockfile entries. Resolve the reported deletion errors and rerun `apm prune`. (#2863)
+- `apm cache prune --days` now rejects negative ages before touching the cache, preventing accidental eviction from invalid input. (#2862)
+- `apm cache prune` now retains recently reused Git checkouts by refreshing shared SHA-group recency when either a full or sparse variant is reused. (#2861)
 - `apm uninstall` now preserves declarations and deployed ownership after package deletion failures, keeping retry and reinstall recovery available after partial removal. (#2860)
 - Successful HTTP cache hits now refresh LRU recency without extending response freshness, retaining frequently used MCP registry responses. (#2859)
+- `apm cache clean` now continues removing other entries after deletion errors, reports affected paths, and exits non-zero instead of claiming complete cleanup. Resolve permissions or file locks and retry; `--force` only skips confirmation. (#2864)
+
+### Performance
+
+- Dependency policy checks now reuse canonical dependency names across required-package and executable checks, avoiding repeated name computation without changing policy results. (by @aryansk, #2588)
+- `apm compile` now reuses the resolved project base path during instruction matching and placement, avoiding repeated filesystem path resolution. (by @aryansk, #2587)
 
 ## [0.29.1] - 2026-09-06
 
