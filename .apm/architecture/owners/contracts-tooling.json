@@ -20,6 +20,13 @@
       "guards": ["contracts-tooling-cached-policy-shape"]
     },
     {
+      "id": "policy-content-hash",
+      "decision": "SHA-2 digest computation for policy pin verification and cache metadata",
+      "owner": "policy/project_config.py (compute_policy_hash)",
+      "selectors": ["src/apm_cli/policy/project_config.py"],
+      "guards": ["contracts-tooling-policy-content-hash"]
+    },
+    {
       "id": "apply-to-hidden-tool-placement",
       "decision": "applyTo normalization and hidden-tool placement",
       "owner": "utils/patterns.py (normalize_apply_to); compilation/context_optimizer.py (ContextOptimizer)",
