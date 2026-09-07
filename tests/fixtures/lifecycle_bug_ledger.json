@@ -51,6 +51,12 @@
       "law": "Exit status and diagnostics truthfully describe the durable outcome."
     },
     {
+      "id": "cache.successful_reads_refresh_recency",
+      "phase": 0,
+      "oracle_tier": "outcome",
+      "law": "Successful fresh HTTP cache reads protect entries from eviction without extending response TTL or causing a refetch."
+    },
+    {
       "id": "auth.credentials_isolated",
       "phase": 0,
       "oracle_tier": "outcome",
@@ -179,6 +185,42 @@
       ]
     },
     {
+      "issue": 2849,
+      "fixed_in": "Unreleased",
+      "summary": "Uninstall reported success and discarded ownership after package deletion failed.",
+      "failure_modes": ["cleanup", "outcome", "ownership", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_failed_package_deletion_retains_ownership_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_global_failed_package_deletion_preserves_user_scope_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_shared_local_slot_rename_failure_restores_original_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_user_edited_target_refusal_retains_ownership_after_package_deletion"
+      ]
+    },
+    {
+      "issue": 2850,
+      "fixed_in": "Unreleased",
+      "summary": "Cache pruning evicted checkouts just reused by a frozen install.",
+      "failure_modes": ["cache", "cleanup"],
+      "properties": ["source.ref_cache_coherent", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_git_cache_recency_lifecycle.py::test_frozen_rehydrate_then_prune_preserves_recent_checkout_and_ownership",
+        "tests/unit/cache/test_git_cache_recency.py::test_successful_checkout_reuse_survives_prune"
+      ]
+    },
+    {
+      "issue": 2851,
+      "fixed_in": "Unreleased",
+      "summary": "Successful MCP HTTP cache hits did not refresh LRU recency and were evicted before cold entries.",
+      "failure_modes": ["cache"],
+      "properties": ["cache.successful_reads_refresh_recency"],
+      "regression_tests": [
+        "tests/integration/test_http_cache_recency_lifecycle.py::test_mcp_show_hit_survives_cache_pressure_without_refetch",
+        "tests/unit/cache/test_http_cache.py::TestHttpCacheSizeCap::test_successful_hit_protects_entry_from_eviction",
+        "tests/unit/cache/test_http_cache.py::TestHttpCacheHitMiss::test_hit_updates_recency_without_rewriting_response"
+      ]
+    },
+    {
       "issue": 2852,
       "fixed_in": "already fixed at 045f78cd71e56b9029e1b4193f7e4d4a46b00086",
       "summary": "Regression-only coverage: shared transitive instructions survive either diamond parent's uninstall and are removed after the last parent.",
@@ -186,6 +228,16 @@
       "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_diamond_uninstall_preserves_shared_instructions_until_last_parent"
+      ]
+    },
+    {
+      "issue": 2853,
+      "fixed_in": "Unreleased",
+      "summary": "Cache clean reported success despite failed Git db, checkout, or HTTP removal.",
+      "failure_modes": ["cache", "cleanup", "outcome"],
+      "properties": ["outcome.status_matches_state", "filesystem.open_world_observation", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_cache_clean_lifecycle.py::test_cache_clean_status_matches_residual_state"
       ]
     },
     {
@@ -204,6 +256,13 @@
     }
   ],
   "known_gaps": [
+    {
+      "id": "partial-uninstall-deletion",
+      "summary": "A recursive deletion failure can leave earlier packages or some files removed; declarations and lock ownership remain available for retry.",
+      "properties": ["transaction.failed_command_preserves_state"],
+      "bounded_by": "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_failed_package_deletion_retains_ownership_until_retry",
+      "next_decision": "Filesystem rollback is not guaranteed; retry uninstall after resolving the error or reinstall declared packages."
+    },
     {
       "id": "late-lock-write-atomicity",
       "summary": "An injected lockfile replacement failure can occur after target files move to the newly declared target while the prior lockfile remains intact.",
