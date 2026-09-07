@@ -38,6 +38,26 @@ apm_resolve_install_paths() {{
     :
 }}
 
+apm_parse_modify_path_env() {{
+    :
+}}
+
+apm_read_shell_receipt() {{
+    :
+}}
+
+apm_write_shell_receipt() {{
+    :
+}}
+
+apm_restore_profile_after_partial_write() {{
+    :
+}}
+
+apm_configure_native_shell_path() {{
+    :
+}}
+
 apm_require_owned_bundle() {{
     :
 }}

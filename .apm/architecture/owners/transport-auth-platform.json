@@ -9,6 +9,13 @@
       "guards": ["transport-platform-unix-install-ownership"]
     },
     {
+      "id": "cache-cleanup-outcome",
+      "decision": "Explicit cache-clean removal and residual outcome",
+      "owner": "cache/cleanup.py (clean_cache_buckets)",
+      "selectors": ["src/apm_cli/cache/cleanup.py"],
+      "guards": ["transport-platform-cache-cleanup-outcome"]
+    },
+    {
       "id": "host-credential-resolution",
       "decision": "Host + credential resolution",
       "owner": "core/auth.py (AuthResolver), core/host_providers.py",

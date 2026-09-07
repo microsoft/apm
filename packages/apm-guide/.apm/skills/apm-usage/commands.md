@@ -141,6 +141,12 @@ writes only `.vscode/mcp.json`.
 
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
 
+## Cache management
+
+| Command | Purpose | Key flags |
+|---------|---------|-----------|
+| `apm cache clean` | Remove every entry from the git and HTTP caches (see [`apm cache`](/apm/reference/cli/cache/) for `info`/`prune`). If a deletion fails, it still removes every other entry, reports the affected paths, and exits nonzero; successful removals are not rolled back. Close locking processes or fix permissions, then retry. | `--force`/`-f`, `--yes`/`-y` skip the confirmation prompt only -- they do not suppress deletion failures or make the command succeed |
+
 ## Compilation
 
 | Command | Purpose | Key flags |

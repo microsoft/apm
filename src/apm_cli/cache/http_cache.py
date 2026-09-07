@@ -270,14 +270,12 @@ class HttpCache:
         except (json.JSONDecodeError, OSError) as exc:
             _log.debug("Failed to refresh HTTP cache entry for %s: %s", url, exc)
 
-    def clean_all(self) -> None:
-        """Remove all HTTP cache entries."""
-        from ..utils.file_ops import robust_rmtree
+    def clean_all(self) -> list[str]:
+        """Remove HTTP entries, returning details of every incomplete removal."""
+        from .cleanup import clean_cache_buckets
 
-        if self._cache_dir.is_dir():
-            for entry in os.scandir(str(self._cache_dir)):
-                if entry.is_dir(follow_symlinks=False):
-                    robust_rmtree(Path(entry.path), ignore_errors=True)
+        self._tracked_size = None
+        return clean_cache_buckets((self._cache_dir,))
 
     def get_stats(self) -> dict[str, int]:
         """Return cache statistics.
