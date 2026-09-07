@@ -490,6 +490,19 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
         "or typo'd marker name fails loudly instead of silently "
         "selecting zero tests"
     )
+    worker_flags = [token for token in tokens if token.startswith(("-n", "--numprocesses"))]
+    assert worker_flags == ["-n"], "lifecycle-smoke must use two bounded xdist workers"
+    worker_index = tokens.index("-n")
+    assert tokens[worker_index : worker_index + 2] == ["-n", "2"], (
+        "lifecycle-smoke must use two bounded xdist workers"
+    )
+    assert [token for token in tokens if token.startswith("--dist")] == ["--dist"], (
+        "lifecycle-smoke must use loadgroup to preserve xdist_group serialization"
+    )
+    scheduler_index = tokens.index("--dist")
+    assert tokens[scheduler_index : scheduler_index + 2] == ["--dist", "loadgroup"], (
+        "lifecycle-smoke must use loadgroup to preserve xdist_group serialization"
+    )
     assert "-m" in tokens
     marker_index = tokens.index("-m")
     assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
@@ -768,6 +781,29 @@ def test_lifecycle_smoke_e2e_flag_dropped_fails(
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_e2e_mode(provisional_lifecycle_job)
+
+
+@pytest.mark.parametrize(
+    "parallel_args",
+    [
+        "",
+        "-n 0 --dist loadgroup",
+        "-n auto --dist loadgroup",
+        "-n 3 --dist loadgroup",
+        "-n 2 --dist worksteal",
+        "-n 2 --dist loadgroup --numprocesses=auto",
+        "-n 2 --dist loadgroup --dist=load",
+    ],
+)
+def test_lifecycle_smoke_parallelism_drift_fails(
+    provisional_lifecycle_job: WorkflowNode, parallel_args: str
+) -> None:
+    """Keep the runtime budget without dropping grouping or allowing unbounded workers."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["run"] = step["run"].replace("-n 2 --dist loadgroup", parallel_args)
+
+    with pytest.raises(AssertionError, match=r"workers|loadgroup"):
+        _assert_lifecycle_smoke_command(provisional_lifecycle_job)
 
 
 def test_lifecycle_smoke_e2e_flag_wrong_value_fails(

@@ -990,6 +990,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Downloader skips the dangling-cone-symlink repair owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-unix-install-ownership",
+        rule_id="transport-platform-unix-install-ownership",
+        path="install.sh",
+        old="\napm_require_owned_bundle\n",
+        new="\n:\n",
+        intent="Unix installation skips bundle ownership preflight before destructive replacement.",
+    ),
+    MutationCase(
         guard_id="transport-platform-url-path-security",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/marketplace/yml_schema.py",

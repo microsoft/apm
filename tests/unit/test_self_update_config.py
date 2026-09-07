@@ -1,9 +1,43 @@
 """Tests for self-update config-backed installer preferences."""
 
 import os
+import sys
 from urllib.parse import urlparse
 
 from apm_cli.commands import self_update
+
+
+def test_unix_self_update_passes_running_identity_not_new_destination(monkeypatch, tmp_path):
+    """A frozen absolute invocation must remain identifiable outside PATH."""
+    binary = tmp_path / "custom/lib/apm/apm"
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(binary))
+    monkeypatch.setattr(self_update, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
+    monkeypatch.delenv("APM_INSTALL_DIR", raising=False)
+    monkeypatch.setenv("APM_SELF_UPDATE_SOURCE", "/untrusted/apm")
+
+    env = self_update._build_self_update_installer_env(
+        self_update._resolve_self_update_release("1.2.3")
+    )
+
+    assert env["APM_SELF_UPDATE_SOURCE"] == str(binary)
+    assert "APM_INSTALL_DIR" not in env
+
+
+def test_unix_pip_self_update_passes_console_entrypoint(monkeypatch, tmp_path):
+    """The shell can refuse unmanaged Python launchers instead of shadowing them."""
+    entrypoint = tmp_path / "venv/bin/apm"
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setattr(sys, "argv", [str(entrypoint), "self-update"])
+    monkeypatch.setattr(self_update, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr("apm_cli.config.get_self_update_install_dir", lambda: None)
+    monkeypatch.setattr("apm_cli.config.get_self_update_channel", lambda: "stable")
+    env = self_update._build_self_update_installer_env(
+        self_update._resolve_self_update_release("1.2.3")
+    )
+    assert env["APM_SELF_UPDATE_SOURCE"] == str(entrypoint)
 
 
 def test_update_installer_env_reads_non_secret_config(monkeypatch, tmp_path):

@@ -196,6 +196,11 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install Unix shell startup test runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fish zsh
+
       - name: Install test dependencies
         run: uv sync --frozen --extra dev
 

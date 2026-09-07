@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Unix binary installs now verify original publisher SHA-256 sidecars before
+  extraction or execution, refuse historical or mirrored archives without
+  sidecars, and never fall back to pip after integrity failures. (#2842)
+### Fixed
+
+- Unix installation defaults to user-local directories without profile edits or implicit `sudo`. Existing destinations are preserved, but ordinary users cannot replace root-owned or package-managed installs; ask the original administrator or package manager to update or uninstall before migrating. See [Unix install ownership and migration](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration). (#2844)
 ### Changed
 
 - macOS onboarding now recommends Homebrew core (`brew install apm`, no tap) for existing Homebrew users, with `brew upgrade apm` for updates and visible standalone alternatives. (#2846)
@@ -14,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Public CLI release discovery can recover from a rejected environment token: one anonymous retry after a selected token's 401/non-rate-limit 403 only for canonical public APM metadata; metadata redirects require `APM_RELEASE_METADATA_URL` at the final JSON endpoint or a `VERSION` pin. (#2843)
+- `apm uninstall` now preserves declarations and deployed ownership after package deletion failures, keeping retry and reinstall recovery available after partial removal. (#2860)
 - Successful HTTP cache hits now refresh LRU recency without extending response freshness, retaining frequently used MCP registry responses. (#2859)
 
 ## [0.29.1] - 2026-09-06

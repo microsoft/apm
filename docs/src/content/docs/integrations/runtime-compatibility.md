@@ -29,6 +29,10 @@ Choose an [APM installation method](../../getting-started/installation/), then s
 apm runtime setup copilot
 ```
 
+For standalone Unix installs, open a new shell after installation or run the
+exact shell-specific `PATH` command the installer printed for the current
+terminal. Root and container installs require [explicit administrator destinations](../../getting-started/installation/#unix-install-ownership-and-migration).
+
 ### Runtime Management
 ```bash
 apm runtime list              # Show installed runtimes

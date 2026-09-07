@@ -20,4 +20,8 @@ mkdir() { deny; }
 pip() { deny; }
 pip3() { deny; }
 apm() { deny; }
-. "$TEST_ROOT/install.sh"
+TEST_HISTORICAL_APM="${TEST_HISTORICAL_APM:-$HOME/historical/bin/apm}"
+TEST_INSTALLER_COPY="$HOME/public-release-metadata-install.sh"
+sed 's#apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm#apm_resolve_install_paths "$TEST_HISTORICAL_APM"#g' \
+    "$TEST_ROOT/install.sh" >"$TEST_INSTALLER_COPY"
+. "$TEST_INSTALLER_COPY"

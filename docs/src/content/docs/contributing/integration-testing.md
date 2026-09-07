@@ -300,6 +300,13 @@ system install:
 2. `./dist/apm-<os>-<arch>/apm` (the layout produced by `scripts/build-binary.sh`)
 3. `shutil.which("apm")`
 
+`apm_engine_command` is the canonical fixture for narrowly scoped Python
+filesystem-boundary fault injection: it returns `(sys.executable, "-m",
+"apm_cli.cli")` so `ApmLifecycleRunner` executes the installed Python engine.
+This is an explicit engine contract, not packaged-binary coverage, and it is
+independent of `APM_BINARY_PATH` so frozen CI cannot bypass the instrumentation.
+Packaged executable tests must continue to use `apm_binary_path`.
+
 ### Adding an integration test that needs a precondition
 
 1. Apply the marker at module or test level:
@@ -351,6 +358,10 @@ environment end-to-end; for local iteration prefer the direct
 
 **On PR and merge queue:**
 1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
+
+The required Windows compatibility gate selects `windows_compat` tests. Its collection guard requires a non-empty subset, not a fixed test count, so adding marked regressions does not require raising a ceiling. The workflow's test roots and timeout bound scope and runtime.
+
+Linux Lifecycle Smoke runs the required marker subset with `-n 2 --dist loadgroup`. Grouped tests stay on one worker, and the six-minute job limit remains unchanged.
 
 **On pushed version tag releases:**
 1. Unit tests + Smoke tests

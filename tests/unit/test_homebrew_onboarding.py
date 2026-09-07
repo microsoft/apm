@@ -99,7 +99,13 @@ def test_standalone_failure_recommends_homebrew_core(tmp_path: Path, platform: s
     binary = tmp_path / "apm"
     binary.write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
     binary.chmod(0o755)
-    prelude = "set -e\ncheck_python_requirements() { return 1; }\ngrep() { return 1; }\n"
+    prelude = (
+        "set -e\n"
+        "apm_echo() { printf '%s\\n' \"$*\"; }\n"
+        "try_pip_installation() { return 1; }\n"
+        "print_pip_recovery_guidance() { echo selected-interpreter-recovery; }\n"
+        "grep() { return 1; }\n"
+    )
     result = subprocess.run(
         [BASH, "-c", prelude + failure_branch],
         env={
@@ -118,6 +124,6 @@ def test_standalone_failure_recommends_homebrew_core(tmp_path: Path, platform: s
 
     assert result.returncode == 1
     assert (
-        "2. Homebrew (macOS/Linux): brew install apm (no tap needed)" in result.stdout.splitlines()
+        "1. Homebrew (macOS/Linux): brew install apm (no tap needed)" in result.stdout.splitlines()
     )
-    assert "  pip3 install --user apm-cli" in result.stdout.splitlines()
+    assert result.stdout.splitlines().count("selected-interpreter-recovery") == 1

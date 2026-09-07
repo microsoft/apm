@@ -241,6 +241,7 @@ def prune(ctx, dry_run):
             return
 
         removed_count = 0
+        failed_count = 0
         removed_packages: list[str] = []
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
@@ -263,6 +264,7 @@ def prune(ctx, dry_run):
                         pruned_key_set.add(dep_key)
                 deleted_pkg_paths.append(pkg_path)
             except Exception as e:
+                failed_count += 1
                 logger.error(f"Failed to remove {org_repo_name}: {e}")
 
         BaseIntegrator.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
@@ -396,6 +398,17 @@ def prune(ctx, dry_run):
                     f"Hook reconciliation failed: {e}. Some hook entries may be "
                     "stale -- run 'apm install' to rebuild hook configuration."
                 )
+
+        if failed_count:
+            logger.error(
+                f"Prune incomplete: removed {removed_count} orphaned package(s); "
+                f"failed to remove {failed_count} package(s)."
+            )
+            logger.error_detail(
+                "Filesystem cleanup may be partial. Resolve the removal errors, "
+                "then rerun 'apm prune'."
+            )
+            sys.exit(1)
 
         if removed_count > 0:
             message = f"Pruned {removed_count} orphaned package(s)"

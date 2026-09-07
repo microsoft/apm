@@ -191,6 +191,11 @@ jobs:
       - name: Install UPX
         run: brew install upx
 
+      - name: Install Unix shell startup test runtimes
+        run: |
+          brew list bash >/dev/null 2>&1 || brew install bash
+          brew list fish >/dev/null 2>&1 || brew install fish
+
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -307,6 +312,11 @@ jobs:
 
       - name: Install UPX
         run: brew install upx
+
+      - name: Install Unix shell startup test runtimes
+        run: |
+          brew list bash >/dev/null 2>&1 || brew install bash
+          brew list fish >/dev/null 2>&1 || brew install fish
 
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -465,6 +475,12 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
+
+      - name: Install Unix shell startup test runtimes
+        if: matrix.platform != 'windows' && (github.event_name != 'schedule' || steps.artifact.outputs.available == 'true')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fish zsh
 
       - name: Install test dependencies
         if: github.event_name != 'schedule' || steps.artifact.outputs.available == 'true'
