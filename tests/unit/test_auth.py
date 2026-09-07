@@ -1751,7 +1751,7 @@ class TestCredentialFallbackOrderRegressionTrap:
                 ):
                     resolver = AuthResolver()
 
-                    def op_embed_secret(token, env):
+                    def op_raise_on_authenticated_attempt(token, env):
                         if token is not None:
                             # Simulates an HTTP library embedding a bearer token in
                             # the exception message (the real supply-chain risk).
@@ -1759,7 +1759,9 @@ class TestCredentialFallbackOrderRegressionTrap:
                         return "ok"
 
                     with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
-                        resolver.try_with_fallback("github.com", op_embed_secret, path="owner/repo")
+                        resolver.try_with_fallback(
+                            "github.com", op_raise_on_authenticated_attempt, path="owner/repo"
+                        )
         finally:
             auth_logger.removeFilter(redaction_filter)
 

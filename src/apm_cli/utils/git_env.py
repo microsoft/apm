@@ -327,8 +327,8 @@ def redact_git_diagnostic(text: str) -> str:
     """Redact credentials and private key paths from Git diagnostics."""
     without_url_secrets = _DIAGNOSTIC_GIT_URL_RE.sub(_redact_git_diagnostic_url, text)
     without_userinfo = _URL_USERINFO_RE.sub(r"\1***@", without_url_secrets)
-    without_query_secrets = _URL_SECRET_QUERY_RE.sub(r"\1***", without_userinfo)
-    without_headers = _AUTH_HEADER_RE.sub(r"\1******", without_query_secrets)
+    query_redacted = _URL_SECRET_QUERY_RE.sub(r"\1***", without_userinfo)
+    without_headers = _AUTH_HEADER_RE.sub(r"\1******", query_redacted)
     without_env = _SECRET_ENV_ASSIGNMENT_RE.sub(r"\1=***", without_headers)
     without_tokens = _BARE_PLATFORM_TOKEN_RE.sub("***", without_env)
     without_labelled = _LABELLED_SECRET_RE.sub(r"\1\2***", without_tokens)
