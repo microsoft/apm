@@ -1,6 +1,9 @@
 ---
 name: Triage Panel
 description: Auto-invoke the apm-triage-panel skill on a daily sweep of untriaged issues plus an opt-in fast path for explicit re-triage. Posts one synthesized verdict per issue and applies the panel-decided labels and milestone, with explicit "agentic proposal pending human ratification" framing.
+engine:
+  id: copilot
+  version: 1.0.80
 
 # Trigger model -- two paths plus manual dispatch:
 #
@@ -37,12 +40,10 @@ description: Auto-invoke the apm-triage-panel skill on a daily sweep of untriage
 #     triage on a specific issue apply `status/needs-triage` (fast
 #     path) -- one click, instant.
 #
-# Front-gates for the labeled fast path (enforced via the top-level
-# `if:` field below, not via `on.steps:` -- see comment block on `if:`):
-#   - Triggering label must be `status/needs-triage`. Any other label
-#     change is dropped at zero cost (no runner, no agent).
-#   - Issue author must not be a Bot.
-#   - Issue must be open and unlocked.
+# Front-gates for the labeled fast path:
+#   - `on.labels` drops unrelated label changes before runner allocation.
+#   - The top-level `if:` requires a non-Bot author and an open,
+#     unlocked issue.
 on:
   issues:
     types: [labeled]
@@ -57,9 +58,11 @@ on:
         description: "Optional: specific issue number to triage (overrides sweep). Leave blank to run the daily sweep on demand."
         required: false
         type: string
+  labels: [status/needs-triage]
   roles: [admin, maintainer, write]
 
-# Label-name + issue-state gate for the `issues.labeled` fast path.
+# Author + issue-state gate for the `issues.labeled` fast path.
+# `on.labels` rejects unrelated label events before a runner starts.
 # gh-aw propagates this top-level `if:` to BOTH `pre_activation` and
 # `activation`, so unmatched events render as a clean gray Skipped
 # status (no failed CI check, no runner cold-start). schedule and
@@ -68,14 +71,10 @@ on:
 #
 # Previously this gate lived in an `on.steps:` step that called `exit 1`
 # on every non-matching label change, which marked each unrelated
-# `issues.labeled` event as a Failed run on the CI dashboard. Replace
-# with `on.labels: [status/needs-triage]` once gh-aw releases a version
-# that supports it on `issues` (see github/gh-aw ADR-28737, currently
-# unreleased post-v0.71.1).
+# `issues.labeled` event as a Failed run on the CI dashboard.
 if: >-
   ${{ github.event_name != 'issues'
-      || (github.event.label.name == 'status/needs-triage'
-          && github.event.issue.user.type != 'Bot'
+      || (github.event.issue.user.type != 'Bot'
           && github.event.issue.locked != true
           && github.event.issue.state == 'open') }}
 

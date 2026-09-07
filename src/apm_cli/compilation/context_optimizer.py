@@ -863,9 +863,9 @@ class ContextOptimizer:
             # For patterns with **, use cached glob results
             if "**" in expanded_pattern:
                 try:
-                    # Resolve both paths to handle symlinks and path inconsistencies
+                    # Resolve the candidate against the constructor-resolved base path.
                     resolved_file = file_path.resolve()
-                    rel_path = resolved_file.relative_to(self.base_dir.resolve())
+                    rel_path = resolved_file.relative_to(self.base_dir)
 
                     # Use cached glob results instead of repeated glob calls
                     matches = self._cached_glob(expanded_pattern)
@@ -1195,9 +1195,7 @@ class ContextOptimizer:
             return None
 
         # Convert to relative paths for easier analysis
-        relative_dirs = [
-            d.resolve().relative_to(self.base_dir.resolve()) for d in matching_directories
-        ]
+        relative_dirs = [d.resolve().relative_to(self.base_dir) for d in matching_directories]
 
         # Find the lowest common ancestor that covers all directories
         if len(relative_dirs) == 1:

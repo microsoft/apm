@@ -21,7 +21,7 @@ or when the runtime owns the install surface (VS Code Copilot Chat).
 
 | Runtime                         | Install command                                                         | Auth                                | Cache layout                                                                 |
 |---------------------------------|-------------------------------------------------------------------------|-------------------------------------|------------------------------------------------------------------------------|
-| APM (recommended)               | `apm marketplace add <owner>/<repo>` then `apm install <pkg>@<marketplace>` | Host token (`GITHUB_APM_PAT`, etc.) via git credential helper. | `apm_modules/` in the project; `~/.apm/cache/` for fetched refs.             |
+| APM (recommended)               | `apm marketplace add <owner>/<repo>` then `apm install <pkg>@<marketplace>` | HTTPS: host token or git credential helper. SSH: local key or agent. | `apm_modules/` in the project; `~/.apm/cache/` for fetched refs.             |
 | VS Code (GitHub Copilot Chat)   | Plugin marketplace UI; or `code --install-extension` for the marketplace itself. | VS Code GitHub sign-in.             | Per-user extension store managed by VS Code. APM artifacts stream from the marketplace at activation. |
 | Cursor                          | Settings -> Plugins -> add marketplace URL.                             | Cursor account.                     | `~/.cursor/extensions/` per-user.                                            |
 | GitHub Copilot CLI              | `gh copilot marketplace add <owner>/<repo>` then `gh copilot plugin install <pkg>`. | `gh auth login`.                    | `~/.config/gh/copilot/` per-user.                                            |
@@ -90,8 +90,12 @@ browse / install / update workflow works against:
   GitHub or GitLab family flows through subprocess `git` and
   `GitCache`. Includes Azure DevOps (auth via `ADO_APM_PAT`),
   Gitea, Bitbucket Server, and self-hosted git servers.
-- **SSH URLs** -- `git@gitea.example.com:org/repo.git`. The host
-  is extracted, classified, and routed through the matching fetcher.
+- **SSH URLs** -- `git@gitea.example.com:org/repo.git`, or
+  `ssh://git@gitea.example.com:2222/org/repo.git` when the server uses a
+  non-default port. The fully qualified form retains its username and port
+  when passed to subprocess `git`. SSH uses the local key or agent
+  without forwarding HTTP credentials; passwords, query parameters, and `#ref`
+  fragments are rejected (use `--ref` instead).
   For in-repository plugins from GitLab and generic git marketplaces, APM
   keeps this consumer-selected SSH transport when it writes their concrete
   `git:` and `path:` entry to `apm.yml`. HTTPS registrations likewise remain
@@ -122,12 +126,12 @@ send custom auth headers. Use git-backed marketplaces for private
 catalogs.
 :::
 
-For generic-git marketplaces, `marketplace.json` is fetched via a
-sparse-cone clone (only the manifest path is downloaded); APM does
-not forward `GITHUB_APM_PAT` or `GITLAB_APM_PAT` to non-GitHub /
-non-GitLab hosts. Authentication falls through to the host's matching
-`*_APM_PAT` variable (such as `ADO_APM_PAT`) or local git credential
-helper when one is configured. See
+For generic HTTPS marketplaces, `marketplace.json` is fetched via Git.
+Authentication may use the host's matching `*_APM_PAT` variable (such as
+`ADO_APM_PAT`) or a local git credential helper. SSH marketplaces instead use
+the local SSH key or agent in non-interactive mode; APM does not forward HTTP
+tokens, authorization headers, askpass programs, or registry credentials to
+that subprocess. See
 [Authentication](../../getting-started/authentication/).
 
 **Lockfile note.** Relative package sources from a local marketplace record a

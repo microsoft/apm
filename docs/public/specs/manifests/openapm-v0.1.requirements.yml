@@ -148,6 +148,7 @@ requirements:
     keyword: MUST
     section: "5.5"
     conformance_class: consumer
+    notes: "generated_at is optional advisory metadata; consumers omit it from new lockfiles by default and preserve an existing omission unless explicitly configured otherwise"
   - id: req-lk-006
     keyword: MUST
     section: "5.5"
@@ -291,6 +292,11 @@ requirements:
     section: "6.8"
     conformance_class: governance
     notes: "Azure DevOps organization-policy discovery uses a distinct primary apm/apm-policy cache first and permits a distinct _apm/_apm fallback only after HTTP 404; non-404 failures do not fall back and legacy success warns"
+  - id: req-pl-018
+    keyword: MUST
+    section: "6.3.1"
+    conformance_class: governance
+    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged"
   - id: req-rs-001
     keyword: MUST
     section: "7.2"
@@ -356,6 +362,11 @@ requirements:
     section: "7.2"
     conformance_class: consumer
     notes: "minimum repository identity binds every cache layer; distinct identities must not share source material"
+  - id: req-rs-017
+    keyword: MUST
+    section: "7.7"
+    conformance_class: consumer
+    notes: "full-SHA update extensions deterministically select the highest eligible non-prerelease annotated tag, retain pins with no eligible tag, persist git-literal provenance, and stop before writes on malformed or failed remote resolution"
   - id: req-pr-001
     keyword: MUST
     section: "8.2"
@@ -432,6 +443,11 @@ requirements:
     section: "8.5.7"
     conformance_class: consumer
     notes: "schema, effective-target, integrity, security, and executable admission drives one in-place aggregate registration opaque to legacy projection without lifecycle host-binary probing; only admitted dependencies participate in claimant selection and registration, direct dependencies win plugin-name collisions over transitive dependencies, equal-precedence collisions fail during admission, advisory cleanup omits ambiguous or changed-owner entries, and ledger-primary ownership permits exact-entry recovery of a reserved namespace while rejecting foreign collisions and invalid JSON, preserving unrelated JSON semantics, and rolling back catalog, ledger, and settings together"
+  - id: req-tg-014
+    keyword: MUST
+    section: "8.5.8"
+    conformance_class: consumer
+    notes: "user-scoped MCP target selection uses a disclosed versioned capability contract, ignores project-only detection signals, applies first-source precedence without fallback, filters mixed sets, and refuses zero-supported selections before user manifest, lockfile, or target-config mutation"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"

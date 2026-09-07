@@ -14,7 +14,14 @@ import yaml
 def _assert_release_workflow_has_no_package_manager_push(workflow_path: Path) -> None:
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     for job_name, job in workflow.get("jobs", {}).items():
-        rendered = json.dumps(job)
+        # An incoming event condition does not dispatch to another repository.
+        executable_job = {key: value for key, value in job.items() if key != "if"}
+        if "steps" in executable_job:
+            executable_job["steps"] = [
+                {key: value for key, value in step.items() if key != "if"}
+                for step in executable_job["steps"]
+            ]
+        rendered = json.dumps(executable_job)
         forbidden = ("GH_PKG_PAT", "repository-dispatch", "repository_dispatch", "gh pr create")
         found = [token for token in forbidden if token in rendered]
         package_manager_job = any(

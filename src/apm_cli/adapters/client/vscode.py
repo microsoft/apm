@@ -49,8 +49,9 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
         Args:
             registry_url (str, optional): URL of the MCP registry.
-                If not provided, uses the MCP_REGISTRY_URL environment variable
-                or falls back to the default demo registry.
+                If not provided, resolves the MCP_REGISTRY_URL env var,
+                then ``apm config set mcp-registry-url``, then the public
+                default (see ``registry.client.resolve_mcp_registry_url``).
             project_root: Project root used to resolve the repository-local
                 `.vscode/mcp.json` path.
             user_scope: Whether to resolve user-scope config paths instead of

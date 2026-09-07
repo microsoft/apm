@@ -104,6 +104,15 @@ class TestDebug:
         assert "[DEBUG]" not in out.err
         assert "[DEBUG]" not in out.out
 
+    def test_debug_redacts_git_credentials(self, capsys: pytest.CaptureFixture[str]) -> None:
+        secret = "github_pat_" + "A" * 30
+        with patch.dict(os.environ, {"APM_DEBUG": "1"}):
+            _debug(f"git failed with {secret}")
+
+        out = capsys.readouterr()
+        assert secret not in out.err
+        assert "[DEBUG] git failed with ***" in out.err
+
 
 # ---------------------------------------------------------------------------
 # _close_repo
@@ -962,10 +971,9 @@ class TestTrySparseCheckout:
         ctx.auth_scheme = "basic"
         ctx.git_env = {}
         downloader.auth_resolver.resolve_for_dep.return_value = ctx
-        downloader.auth_resolver.git_env_for_context.side_effect = lambda auth_ctx, *, base_env: {
-            **base_env,
-            **auth_ctx.git_env,
-        }
+        downloader.auth_resolver.git_env_for_remote.side_effect = lambda auth_ctx, _remote_url: (
+            dict(auth_ctx.git_env)
+        )
 
         ok_result = MagicMock()
         ok_result.returncode = 0
@@ -984,10 +992,9 @@ class TestTrySparseCheckout:
         ctx.auth_scheme = "bearer"
         ctx.git_env = {"GIT_EXTRA_HEADER": "Authorization: Bearer tok"}
         downloader.auth_resolver.resolve_for_dep.return_value = ctx
-        downloader.auth_resolver.git_env_for_context.side_effect = lambda auth_ctx, *, base_env: {
-            **base_env,
-            **auth_ctx.git_env,
-        }
+        downloader.auth_resolver.git_env_for_remote.side_effect = lambda auth_ctx, _remote_url: (
+            dict(auth_ctx.git_env)
+        )
 
         ok_result = MagicMock()
         ok_result.returncode = 0
@@ -1003,6 +1010,45 @@ class TestTrySparseCheckout:
         assert result is True
         # env must contain the git header injected by the bearer auth ctx
         assert any("GIT_EXTRA_HEADER" in c["env"] for c in calls_seen)
+
+    def test_generic_host_sparse_checkout_strips_repository_state(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        dep = _make_dep(host="git.example.com")
+        downloader._strategies.build_repo_url = MagicMock(
+            return_value="https://git.example.com/o/r"
+        )
+        downloader.git_env = {
+            "PATH": "/usr/bin",
+            "GIT_DIR": "/invoking/.git",
+            "GIT_WORK_TREE": "/invoking",
+            "GITHUB_TOKEN": "must-not-reach-generic-host",
+            "GIT_HTTP_EXTRAHEADER": "Authorization: Basic stale",
+        }
+        downloader.auth_resolver.resolve_for_dep.return_value = None
+        generic_ctx = MagicMock()
+        downloader.auth_resolver.resolve_for_remote.return_value = generic_ctx
+        downloader.auth_resolver.git_env_for_remote.return_value = {"PATH": "/usr/bin"}
+        ok_result = MagicMock(returncode=0, stderr="")
+        environments: list[dict[str, str]] = []
+
+        def fake_run(cmd: list[str], **kwargs: Any) -> MagicMock:
+            environments.append(kwargs["env"])
+            return ok_result
+
+        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+            result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
+
+        assert result is True
+        assert environments
+        assert all("GIT_DIR" not in env for env in environments)
+        assert all("GIT_WORK_TREE" not in env for env in environments)
+        assert all("GITHUB_TOKEN" not in env for env in environments)
+        assert all("GIT_HTTP_EXTRAHEADER" not in env for env in environments)
+        downloader.auth_resolver.git_env_for_remote.assert_called_once_with(
+            generic_ctx,
+            "https://git.example.com/o/r",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1200,10 +1246,10 @@ class TestDownloadPackage:
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.deps.package_validator.stamp_plugin_version"),
             patch("apm_cli.deps._shared._validate_and_load_package", return_value=pkg),
+            patch("apm_cli.deps.github_downloader.checkout_git_worktree") as checkout,
         ):
             downloader.download_package(dep, tmp_path / "pkg")
-        # For commit type, checkout of the specific SHA must be called
-        repo_mock.git.checkout.assert_called_once_with(sha)
+        checkout.assert_called_once_with(tmp_path / "pkg", sha, env=downloader.git_env)
 
     def test_virtual_artifactory_subdir_routes_to_artifactory(
         self, downloader: GitHubPackageDownloader, tmp_path: Path

@@ -31,25 +31,27 @@ see [Primitive types](../primitive-types/).
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
+| hermes          | `.agents/` (`~/.hermes/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [x] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
-Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
-below). Claude, Grok Build, and Kiro keep target-native skill directories.
+Gemini, Antigravity, Codex, Hermes project scope, and Windsurf by default (see
+[Skills convergence](#skills-convergence) below). Claude, Grok Build, Kiro, and
+Hermes user scope keep target-native skill directories.
 
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
 `.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub Copilot
-desktop App), `grok-cloud` (xAI Grok Cloud), `openclaw` (OpenClaw agent
-runtime), and `hermes` are gated behind experimental flags and not listed
-above. See [Experimental](../experimental/).
+desktop App), `grok-cloud` (xAI Grok Cloud), and `openclaw` (OpenClaw agent
+runtime) are gated behind experimental flags and not listed above. Hermes is
+stable but explicit-only. See [Experimental](../experimental/).
 
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, and `opencode`, plus
-experimental `hermes` when enabled. It emits the
+separate root-context compile for `codex`, `gemini`, `opencode`, and `hermes`.
+It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
@@ -95,12 +97,12 @@ user-scope `mcp.json`. That global signal does not auto-select file-primitive
 deployment. When `intellij` is selected explicitly, package file primitives use
 the Copilot profile. `intellij` does not participate in plain `all` expansion.
 
-`agent-skills` is a canonical target key; `antigravity` is explicit-only for
-auto-detection. Both are available with `--target` and can be listed in a
+`agent-skills` and `hermes` are canonical target keys; `antigravity` and
+`hermes` are explicit-only for auto-detection. All are available with `--target` and can be listed in a
 project's `apm.yml` `targets:` field so contributors running plain `apm
 install` pick them up automatically.
 
-`copilot-cowork`, `copilot-app`, `grok-cloud`, `openclaw`, and `hermes` are
+`copilot-cowork`, `copilot-app`, `grok-cloud`, and `openclaw` are
 experimental targets that require `apm experimental enable <name>` before use.
 They are selected with `--target` only and cannot be listed in `apm.yml` (the
 canonical targets validator will reject them).
@@ -290,6 +292,22 @@ Cross-client shared skills directory.
 - **Supported primitives.** skills only.
 - **File conventions.** `.agents/skills/<name>/SKILL.md`.
 - **Use case.** Author-time target for shipping a SKILL bundle that any Skills-aware client (Codex, Copilot CLI, Claude Code, etc.) can read without per-tool deployment.
+
+## hermes
+
+Hermes Agent.
+
+- **Detection.** Never auto-detected. Select with `--target hermes` or list it
+  in `apm.yml`.
+- **Deploy directory.** Project-scope skills use `.agents/skills/`. User-scope
+  skills and MCP servers use `$HERMES_HOME` (default `~/.hermes`).
+- **Supported primitives.** skills, mcp, and compiled instructions.
+- **File conventions.**
+  - skills: `.agents/skills/<name>/SKILL.md` (project) or
+    `$HERMES_HOME/skills/<name>/SKILL.md` (user)
+  - mcp: `$HERMES_HOME/config.yaml` under the `mcp_servers:` block
+  - compiled instructions: `AGENTS.md`
+- **Compile behavior.** `apm compile --target hermes` emits `AGENTS.md`.
 
 ## grok-build
 

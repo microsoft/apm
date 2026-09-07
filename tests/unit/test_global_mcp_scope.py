@@ -127,6 +127,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
                 runtime=None,
                 exclude=None,
                 verbose=False,
+                apm_config={},
                 scope=InstallScope.USER,
             )
 
@@ -167,6 +168,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
             MCPIntegrator.install(
                 mcp_deps=["test/server"],
                 runtime=None,
+                apm_config={},
                 scope=InstallScope.PROJECT,
             )
 
@@ -253,6 +255,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
             with patch.object(MCPIntegrator, "_detect_runtimes", return_value=set()):
                 MCPIntegrator.install(
                     mcp_deps=["test/server"],
+                    apm_config={},
                     scope=None,
                 )
 

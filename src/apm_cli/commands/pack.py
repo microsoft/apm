@@ -13,6 +13,7 @@ from ..core.build_orchestrator import (
     BuildError,
     BuildOptions,
     BuildOrchestrator,
+    MetadataEnrichmentError,
     OutputKind,
 )
 from ..core.command_logger import CommandLogger
@@ -63,6 +64,7 @@ Exit codes:
   2  Manifest schema validation error
   3  Version alignment check failed (--check-versions)
   4  Marketplace working-tree drift detected (--check-clean)
+  5  Strict marketplace metadata check failed (--strict-metadata)
 """
 
 
@@ -250,8 +252,18 @@ def _parse_marketplace_filter(
     help=(
         "Release gate: regenerate every configured marketplace output to a "
         "temp representation and diff against the effective on-disk path, "
-        "including --marketplace-path overrides. Exits 4 for drift. Use "
-        "with --dry-run to check without normal pack output generation."
+        "including --marketplace-path overrides. This check is always read-only. "
+        "Exits 4 for drift or uncertifiable remote metadata."
+    ),
+)
+@click.option(
+    "--strict-metadata",
+    is_flag=True,
+    default=False,
+    help=(
+        "Marketplace: fail before writing when remote description/version metadata "
+        "cannot be fetched. Exits 5; --check-clean always rejects uncertifiable "
+        "metadata with exit 4."
     ),
 )
 @click.option(
@@ -295,7 +307,7 @@ def _parse_marketplace_filter(
     ),
 )
 @click.pass_context
-def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
+def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CLI option
     ctx,
     select_claude_plugin,
     fmt,
@@ -314,9 +326,12 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     legacy_skill_paths,
     check_versions,
     check_clean,
+    strict_metadata,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
-    logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
+    effective_dry_run = dry_run or check_clean
+    implicit_check_clean_dry_run = check_clean and not dry_run
+    logger = CommandLogger("pack", verbose=verbose, dry_run=effective_dry_run)
 
     try:
         bundle_format = resolve_bundle_format(
@@ -384,14 +399,32 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         bundle_force=force,
         marketplace_offline=offline,
         marketplace_include_prerelease=include_prerelease,
+        marketplace_strict_metadata=strict_metadata,
         marketplace_formats=marketplace_formats,
         marketplace_path_overrides=path_overrides if path_overrides else None,
-        dry_run=dry_run,
+        dry_run=effective_dry_run,
         verbose=verbose,
     )
 
     try:
         result = BuildOrchestrator().run(options, logger=logger)
+    except MetadataEnrichmentError as exc:
+        if json_output:
+            from ..marketplace.builder import BuildReport
+
+            click.echo(
+                json_mod.dumps(
+                    BuildReport.failure_to_json_dict(
+                        errors=[{"code": "metadata_incomplete", "message": str(exc)}],
+                        warnings=list(exc.metadata_enrichment.warnings),
+                        dry_run=effective_dry_run,
+                        metadata_enrichment=exc.metadata_enrichment,
+                    )
+                )
+            )
+        else:
+            logger.error(str(exc))
+        ctx.exit(5)
     except BuildError as exc:
         _emit_json_error_or_raise(ctx, json_output, "build_error", str(exc))
         return
@@ -399,9 +432,18 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     # -- Release gates (--check-versions / --check-clean) --
     version_alignment_payload: dict | None = None
     drift_payload: dict | None = None
+    drift_metadata_enrichment = None
     gate_errors: list[dict] = []
     version_gate_failed = False
     drift_gate_failed = False
+    prepared_marketplace = next(
+        (
+            sub.prepared
+            for sub in result.producer_results
+            if sub.kind is OutputKind.MARKETPLACE and sub.prepared is not None
+        ),
+        None,
+    )
 
     if check_versions or check_clean:
         from ..marketplace.builder import BuildOptions as MktBuildOptions
@@ -473,21 +515,28 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             if check_clean:
                 # Use a builder with dry_run=True so the gate itself
                 # never mutates the working tree.
-                mkt_opts = MktBuildOptions(
-                    dry_run=True,
-                    offline=options.marketplace_offline,
-                    include_prerelease=options.marketplace_include_prerelease,
-                )
-                drift_builder = MarketplaceBuilder.from_config(
-                    gate_config, project_root=project_root, options=mkt_opts
-                )
+                prepared_resolve_result = None
+                if prepared_marketplace is not None and prepared_marketplace.outputs:
+                    drift_builder = prepared_marketplace.builder
+                    prepared_resolve_result = prepared_marketplace.resolve_result
+                else:
+                    mkt_opts = MktBuildOptions(
+                        dry_run=True,
+                        offline=options.marketplace_offline,
+                        include_prerelease=options.marketplace_include_prerelease,
+                    )
+                    drift_builder = MarketplaceBuilder.from_config(
+                        gate_config, project_root=project_root, options=mkt_opts
+                    )
                 d_report = check_marketplace_drift(
                     drift_builder,
                     gate_config,
                     project_root,
                     options.marketplace_path_overrides,
+                    resolve_result=prepared_resolve_result,
                 )
                 drift_payload = d_report.to_json_dict()
+                drift_metadata_enrichment = d_report.metadata_enrichment
                 if d_report.ok:
                     if not json_output:
                         formats = ", ".join(o.format for o in d_report.outputs)
@@ -500,7 +549,15 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                         dirty_formats = ", ".join(
                             o.format for o in d_report.outputs if o.status != "unchanged"
                         )
-                        logger.error(f"Marketplace working tree dirty [outputs={dirty_formats}]")
+                        if any(out.status == "uncertifiable" for out in d_report.outputs):
+                            logger.error(
+                                "Marketplace clean check failed: remote metadata unavailable "
+                                f"[outputs={dirty_formats}]"
+                            )
+                        else:
+                            logger.error(
+                                f"Marketplace working tree dirty [outputs={dirty_formats}]"
+                            )
                         for out in d_report.outputs:
                             if out.status == "unchanged":
                                 logger.info(f"    {out.path}  [unchanged]")
@@ -512,6 +569,12 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                                     out.format,
                                     (options.marketplace_path_overrides or {}).get(out.format),
                                 )
+                            elif out.status == "uncertifiable":
+                                logger.error(
+                                    f"    {out.path}  [cannot certify regenerated metadata]"
+                                )
+                                for warning in out.metadata_warnings:
+                                    logger.warning(f"    {warning}")
                             else:
                                 count = len(out.differences)
                                 logger.info(f"    {out.path}  [drift: {count} differences]")
@@ -523,16 +586,27 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                                     out.format,
                                     (options.marketplace_path_overrides or {}).get(out.format),
                                 )
-                    for msg in d_report.error_messages():
-                        gate_errors.append({"code": "marketplace_drift", "message": msg})
+                    for out in d_report.outputs:
+                        if out.status == "unchanged":
+                            continue
+                        code = (
+                            "marketplace_metadata_uncertifiable"
+                            if out.status == "uncertifiable"
+                            else "marketplace_drift"
+                        )
+                        messages = out.error_messages()
+                        gate_errors.extend(
+                            {"code": code, "message": message} for message in messages
+                        )
 
     # -- JSON output mode: consistent envelope --
     if json_output:
         envelope = {
             "ok": True,
-            "dry_run": dry_run,
+            "dry_run": effective_dry_run,
             "warnings": list(result.warnings),
             "errors": [],
+            "metadata_enrichment": {"certifiable": True, "outcomes": []},
             "marketplace": {"outputs": []},
             "bundle": None,
             "plugin_manifests": {"written": [], "skipped": [], "dry_run": []},
@@ -543,8 +617,18 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             if sub.kind is OutputKind.MARKETPLACE and sub.payload is not None:
                 payload = sub.payload.to_json_dict()
                 envelope["marketplace"] = payload.get("marketplace", {"outputs": []})
+                envelope["metadata_enrichment"] = payload.get(
+                    "metadata_enrichment",
+                    envelope["metadata_enrichment"],
+                )
             elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
                 envelope["plugin_manifests"] = sub.payload
+        if drift_metadata_enrichment is not None:
+            envelope["metadata_enrichment"] = drift_metadata_enrichment.to_json_dict()
+            metadata_warnings = set(drift_metadata_enrichment.warnings)
+            envelope["warnings"] = [
+                warning for warning in envelope["warnings"] if warning not in metadata_warnings
+            ]
         if gate_errors:
             envelope["errors"] = list(envelope["errors"]) + gate_errors
             envelope["ok"] = False
@@ -555,14 +639,19 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
             ctx.exit(4)
         return
 
+    if implicit_check_clean_dry_run:
+        logger.dry_run_notice("--check-clean is read-only; no pack outputs were written.")
+
     for sub in result.producer_results:
+        if implicit_check_clean_dry_run:
+            continue
         if sub.kind is OutputKind.BUNDLE:
             _render_bundle_result(
                 logger,
                 sub.payload,
                 bundle_format,
                 target,
-                dry_run,
+                effective_dry_run,
                 show_zip_migration_notice=(
                     archive
                     and archive_format == "zip"
@@ -571,7 +660,15 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
                 ),
             )
         elif sub.kind is OutputKind.MARKETPLACE:
-            _render_marketplace_result(logger, sub.payload, dry_run, sub.warnings, sub.outputs)
+            if (
+                check_clean
+                and drift_metadata_enrichment is not None
+                and not drift_metadata_enrichment.certifiable
+            ):
+                continue
+            _render_marketplace_result(
+                logger, sub.payload, effective_dry_run, sub.warnings, sub.outputs
+            )
 
     # Gate exit codes (after non-JSON rendering above): 3 wins over 4.
     if version_gate_failed:

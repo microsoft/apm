@@ -346,7 +346,10 @@ def _attach_resolver_marketplace_provenance(
 def _build_dependency_graph(ctx: InstallContext, resolver):
     """Resolve the manifest graph and retain its marketplace provenance."""
     manifest_anchor = ctx.source_root if ctx.source_root != ctx.project_root else ctx.apm_dir
-    dependency_graph = resolver.resolve_dependencies(manifest_anchor)
+    dependency_graph = resolver.resolve_dependencies(
+        manifest_anchor,
+        root_package=ctx.apm_package,
+    )
     ctx.dependency_graph = dependency_graph
     _attach_resolver_marketplace_provenance(ctx, resolver)
     return dependency_graph

@@ -26,15 +26,20 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
+from .deployed_paths import format_target_collapse as _format_target_collapse
 from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
 from .exec_gate import check_executable_approval
 from .exec_gate import plugin_bin_deployable as _plugin_bin_deployable
 from .exec_gate import resolve_bin_skip as _resolve_bin_skip
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
+from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
+from .target_filter import (
+    log_package_target_restriction as _log_package_target_restriction,
+)
 from .target_filter import resolve_effective_package_targets
 
 if TYPE_CHECKING:
@@ -199,21 +204,6 @@ def _warn_target_reconcile_failure(
     )
 
 
-def _log_package_target_restriction(logger: InstallLogger | None, target_selection: Any) -> None:
-    """Name the declared and effective target sets when a package narrows them."""
-    if logger is None or not target_selection.package_restriction_active:
-        return
-    declared = (
-        ", ".join(target_selection.package_declared_targets)
-        if target_selection.package_declared_targets
-        else "unrestricted"
-    )
-    effective = ", ".join(target.name for target in target_selection.targets) or "none"
-    logger.verbose_detail(
-        f"Package target restriction: [{declared}]; effective targets: [{effective}]"
-    )
-
-
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -318,14 +308,18 @@ def integrate_package_primitives(  # noqa: PLR0913
         "reconcile_package_target_restriction",
         None,
     )
-    if target_selection.excluded_targets and callable(reconcile_package_targets):
-        reconcile_stats = reconcile_package_targets(
-            package_info,
-            project_root,
-            target_selection.excluded_targets,
-        )
-        _warn_target_reconcile_failure(diagnostics, package_name, reconcile_stats)
+
+    def _reconcile_excluded_targets() -> None:
+        if target_selection.excluded_targets and callable(reconcile_package_targets):
+            reconcile_stats = reconcile_package_targets(
+                package_info,
+                project_root,
+                target_selection.excluded_targets,
+            )
+            _warn_target_reconcile_failure(diagnostics, package_name, reconcile_stats)
+
     if not targets:
+        _reconcile_excluded_targets()
         return result
 
     # Executable approval gate (npm v12-style default-deny); all five verdicts feed the gates.
@@ -384,6 +378,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     from apm_cli.install.native_plugin_admission import finalize_native_plugin
 
     if admits_native_plugin(package_info):
+        _reconcile_excluded_targets()
         return finalize_native_plugin(
             result,
             package_info,
@@ -414,37 +409,6 @@ def integrate_package_primitives(  # noqa: PLR0913
         if logger:
             logger.tree_item(msg)
 
-    def _format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
-        """Apply the 1/2/3+ multi-target collapse rule.
-
-        Returns a tuple ``(suffix, expansion_lines)``:
-
-        * ``suffix`` -- the text appended after ``-> `` on the aggregate line.
-        * ``expansion_lines`` -- extra ``  |     -> <path>`` lines emitted
-          AFTER the aggregate line when ``verbose`` is True. Empty list when
-          collapsed.
-
-        The rule:
-          1 target  -> ``<path1>``
-          2 targets -> ``<path1>, <path2>``
-          3+        -> ``N targets`` (verbose forces full enumeration)
-        """
-        deduped: list[str] = []
-        seen: set = builtins.set()
-        for p in paths:
-            if p not in seen:
-                seen.add(p)
-                deduped.append(p)
-        if verbose and len(deduped) >= 2:
-            return "", [f"  |     -> {p}" for p in deduped]
-        if len(deduped) == 0:
-            return "", []
-        if len(deduped) == 1:
-            return deduped[0], []
-        if len(deduped) == 2:
-            return f"{deduped[0]}, {deduped[1]}", []
-        return f"{len(deduped)} targets", []
-
     _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
 
     _INTEGRATOR_KWARGS = {
@@ -456,6 +420,21 @@ def integrate_package_primitives(  # noqa: PLR0913
         "canvas": integrators.canvas,
         "skills": integrators.skill,
     }
+
+    # Validate every converted instruction target before any primitive kind can
+    # write. A rejected instruction must not leave prompts, agents, commands,
+    # or identity-target instructions from the same package active.
+    if integrators.instruction is not None:
+        integrators.instruction.preflight_instructions_for_targets(
+            targets,
+            package_info,
+            project_root,
+            source_plan,
+            force=force,
+            diagnostics=diagnostics,
+        )
+
+    _reconcile_excluded_targets()
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
@@ -816,6 +795,8 @@ def integrate_local_bundle(
     scope: InstallScope | None = None,
     alias: str | None = None,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+    approval_key: str | None = None,
+    create_config: bool = True,
 ) -> dict:
     """Integrate a detected local bundle into project / user scope.
 
@@ -845,11 +826,9 @@ def integrate_local_bundle(
         logger: Install-flow logger.
         scope: ``InstallScope`` (project vs user) for downstream consumers.
         alias: Slug override from ``--as``.
-        allow_executables: The ``allowExecutables`` block from the consuming
-            project's ``apm.yml``.  When ``None`` (no enforcement), all
-            executable primitives including canvas are allowed.  When
-            provided, canvas extensions from the bundle are only deployed if
-            the bundle slug is approved for the ``canvas`` exec type.
+        allow_executables: Effective executable approvals, or ``None`` when disabled.
+        approval_key: Exact local-bundle content identity for executable approval.
+        create_config: Whether config reads may create the user config file.
 
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
@@ -942,12 +921,13 @@ def integrate_local_bundle(
     from ..core.experimental import is_enabled
     from ..integration.canvas_integrator import is_canvas_bundle_path
 
-    _canvas_enabled = is_enabled("canvas")
+    _canvas_enabled = is_enabled("canvas", create_config=create_config)
     if _canvas_enabled:
         from ..security.executables import EXEC_TYPE_CANVAS, is_package_approved
 
-        _canvas_approved_bundle = allow_executables is None or is_package_approved(
-            allow_executables, slug, EXEC_TYPE_CANVAS
+        _canvas_approved_bundle = allow_executables is None or (
+            approval_key is not None
+            and is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)
         )
     else:
         _canvas_approved_bundle = False
@@ -963,8 +943,13 @@ def integrate_local_bundle(
                 _msg = (
                     f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
                     f"'{slug}': canvas extensions are executable extension.mjs code "
-                    f"and are not approved in allowExecutables. "
-                    f"Run 'apm approve {slug}' to approve them."
+                    "and are not approved for this exact bundle content. "
+                    "Add this to apm.yml:\n"
+                    "executables:\n"
+                    "  allow:\n"
+                    f'    "{approval_key}":\n'
+                    "      canvas: true\n"
+                    "Then rerun the install."
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message=_msg, package=str(slug))
@@ -1033,8 +1018,20 @@ def integrate_local_bundle(
                 _rel_norm,
                 _allowed_deploy_prefixes,
                 _known_deploy_prefixes,
+                target=target,
             )
             if _deploy_rel is None:
+                if _skip_warning := _bundle_skip_warning(
+                    _rel_norm,
+                    _allowed_deploy_prefixes,
+                    _known_deploy_prefixes,
+                    target=target,
+                ):
+                    if diagnostics is not None:
+                        diagnostics.warn(message=_skip_warning, package=str(slug))
+                    elif logger is not None:
+                        logger.warning(_skip_warning)
+                    skipped += 1
                 continue
             _first_seg = _deploy_rel.split("/", 1)[0] if "/" in _deploy_rel else ""
             if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
@@ -1069,14 +1066,6 @@ def integrate_local_bundle(
                 dest = stage_root / _rel_under_instructions
                 deploy_root = stage_root
             else:
-                # Canvas extensions are Copilot-only.  A plugin bundle is
-                # target-agnostic, so guard against depositing an
-                # ``extensions/`` tree into a non-Copilot client root
-                # (e.g. ``.claude/extensions/``).  Skip silently for other
-                # targets; the trust filter above already removed these
-                # entries entirely when canvas was not trusted.
-                if _first_seg.lower() == "extensions" and target.name != "copilot":
-                    continue
                 # Route the file to the correct deploy root.  If the first
                 # path segment matches a primitive with an explicit
                 # ``deploy_root`` (e.g. ``skills/`` -> ``.agents/``), use

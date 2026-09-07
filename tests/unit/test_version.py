@@ -289,7 +289,8 @@ class TestGetBuildSha:
                 with patch("subprocess.run", return_value=mock_result) as mock_run:
                     get_build_sha()
         call_args = mock_run.call_args
-        assert call_args[0][0] == ["git", "rev-parse", "--short", "HEAD"]
+        assert Path(call_args[0][0][0]).stem == "git"
+        assert call_args[0][0][1:] == ["rev-parse", "--short", "HEAD"]
         assert call_args[1].get("timeout") == 5
 
     def test_pyproject_no_version_field_returns_unknown(self, tmp_path: Path) -> None:

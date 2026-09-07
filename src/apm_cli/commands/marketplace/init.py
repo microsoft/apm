@@ -9,6 +9,7 @@ from pathlib import Path
 import click
 
 from ...core.command_logger import CommandLogger
+from ...install.locking import serialized_lifecycle
 from . import (
     _check_gitignore_for_marketplace_json,
     marketplace,
@@ -29,6 +30,7 @@ from . import (
 @click.option("--name", default=None, help="Marketplace/package name (default: my-marketplace)")
 @click.option("--owner", default=None, help="Owner name for the marketplace")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@serialized_lifecycle
 def init(force, no_gitignore_check, name, owner, verbose):
     """Scaffold a ``marketplace:`` block in apm.yml (creates apm.yml if absent)."""
     from ruamel.yaml import YAML

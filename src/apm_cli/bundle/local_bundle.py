@@ -29,22 +29,18 @@ import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from ..agent_plugins.constants import (
-    AGENT_PLUGINS_SCHEMA_PREFIX,
-    COM_MICROSOFT_APM_NAMESPACE,
-    PLUGIN_SCHEMA_ID,
-)
-from ..agent_plugins.errors import (
-    AgentPluginManifestError,
-    UnsupportedAgentPluginVersionError,
-)
+from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
+from ..agent_plugins.errors import AgentPluginManifestError
 from ..agent_plugins.io import read_json_document
+from ..install.primitive_classification import (
+    PluginSchemaRoute,
+    classify_plugin_manifest_schema,
+)
 from ..utils.archive import (
     MAX_ZIP_ENTRIES,
     MAX_ZIP_UNCOMPRESSED,
@@ -61,48 +57,29 @@ from ..utils.yaml_io import load_yaml_str
 from .formats import BundleFormat
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from ..agent_plugins.ir import AgentPlugin, AgentPluginDetection
 
 _MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
 _MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
 
 
-class PluginSchemaRoute(Enum):
-    """Admission route selected exclusively by root plugin.json."""
-
-    LEGACY = "legacy"
-    AGENT_PLUGIN = "agent_plugin"
-
-
-def classify_plugin_manifest_schema(document: Mapping[str, Any]) -> PluginSchemaRoute:
-    """Select native admission only for the exact supported schema identifier."""
-    if "$schema" not in document:
-        return PluginSchemaRoute.LEGACY
-    schema_id = document["$schema"]
-    if not isinstance(schema_id, str):
-        raise AgentPluginManifestError("Invalid root plugin.json: $schema must be a string")
-    if schema_id == PLUGIN_SCHEMA_ID:
-        return PluginSchemaRoute.AGENT_PLUGIN
-    if schema_id.startswith(AGENT_PLUGINS_SCHEMA_PREFIX):
-        raise UnsupportedAgentPluginVersionError(
-            f"Unsupported Agent Plugins manifest schema: {schema_id}. "
-            f"This APM version supports only {PLUGIN_SCHEMA_ID}."
-        )
-    raise AgentPluginManifestError(
-        f"Unsupported schema-bearing plugin manifest: {schema_id}. "
-        f"APM accepts schema-bearing plugin.json only with {PLUGIN_SCHEMA_ID}; "
-        "remove $schema only for a schema-less legacy plugin."
-    )
-
-
 def route_agent_plugin_package(package_root: Path) -> AgentPluginDetection | None:
     """Route one materialized package through canonical Agent Plugin admission."""
     from ..agent_plugins.loader import detect_agent_plugin
+    from ..models.validation import PackageType, detect_package_type
 
     detection = detect_agent_plugin(package_root)
-    if detection is not None and detection.error is not None:
+    if detection is None:
+        return None
+    package_type, _ = detect_package_type(
+        package_root,
+        agent_plugin_detection=detection,
+    )
+    if package_type != PackageType.AGENT_PLUGIN:
+        if package_type == PackageType.INVALID and detection.error is not None:
+            raise detection.error
+        return None
+    if detection.error is not None:
         raise detection.error
     return detection
 

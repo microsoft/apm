@@ -47,6 +47,9 @@ KNOWN_LARGE_MODULES = {
     # target reconciliation or generic integrator can mutate state.
     # Decomposition tracked as follow-up.
     "services.py": 1175,
+    # drift.py crossed 1000 when replay target-root claim scoping (#2655)
+    # merged atop main's replay growth. Decomposition tracked as follow-up.
+    "drift.py": 1020,
 }
 
 

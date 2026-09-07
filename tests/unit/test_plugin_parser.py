@@ -1,9 +1,9 @@
 """Unit tests for plugin_parser.py and find_plugin_json helper."""
 
 import json
-import logging
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -16,6 +16,7 @@ from apm_cli.deps.plugin_parser import (
     _map_plugin_artifacts,
     _mcp_servers_to_apm_deps,
     _union_dep_list,
+    has_normalized_plugin_skill_sources_receipt,
     normalize_plugin_directory,
     normalized_plugin_skill_sources,
     parse_plugin_manifest,
@@ -261,6 +262,28 @@ class TestMapPluginArtifacts:
         assert declared is True
         assert not (apm_dir / "skills" / "alpha").exists()
         assert not (apm_dir / "skills" / "beta").exists()
+
+    def test_skill_receipt_presence_rejects_symlinked_paths(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir(parents=True)
+        external = tmp_path / "external-receipt.json"
+        external.write_text("{}", encoding="ascii")
+        try:
+            (apm_dir / ".plugin-skill-sources.json").symlink_to(external)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        assert not has_normalized_plugin_skill_sources_receipt(plugin_dir)
+
+        (apm_dir / ".plugin-skill-sources.json").unlink()
+        apm_dir.rmdir()
+        external_apm = tmp_path / "external-apm"
+        external_apm.mkdir()
+        (external_apm / ".plugin-skill-sources.json").write_text("{}", encoding="ascii")
+        apm_dir.symlink_to(external_apm, target_is_directory=True)
+
+        assert not has_normalized_plugin_skill_sources_receipt(plugin_dir)
 
     def test_skill_receipt_removes_prior_skills_for_file_only_declaration(self, tmp_path):
         """A file-only declaration must remove prior parser-owned skill directories."""
@@ -612,7 +635,7 @@ class TestMapPluginArtifacts:
         # Undeclared siblings stay out: the entry is a requirement, not a hint.
         assert not (normalized / "pairing").exists()
 
-    def test_declared_skills_entry_holding_no_skill_warns(self, tmp_path, caplog):
+    def test_declared_skills_entry_holding_no_skill_warns(self, tmp_path):
         """An entry that is neither a skill nor a container must say so.
 
         A container whose skills sit two levels down reaches no deployable
@@ -629,14 +652,15 @@ class TestMapPluginArtifacts:
 
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
-        with caplog.at_level(logging.WARNING, logger="apm_cli.deps.plugin_parser"):
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
             _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
 
-        assert "skills" in caplog.text
-        assert "no SKILL.md" in caplog.text
-        assert "--skill" in caplog.text
+        warning = rich_warning.call_args.args[0]
+        assert "skills" in warning
+        assert "no SKILL.md" in warning
+        assert "--skill" in warning
 
-    def test_declared_skills_container_does_not_warn(self, tmp_path, caplog):
+    def test_declared_skills_container_does_not_warn(self, tmp_path):
         """The healthy shapes stay quiet -- a warning nobody can act on is noise."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
@@ -646,10 +670,10 @@ class TestMapPluginArtifacts:
 
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
-        with caplog.at_level(logging.WARNING, logger="apm_cli.deps.plugin_parser"):
+        with patch("apm_cli.deps.plugin_parser._rich_warning") as rich_warning:
             _map_plugin_artifacts(plugin_dir, apm_dir, manifest={"skills": ["./skills/"]})
 
-        assert "no SKILL.md" not in caplog.text
+        rich_warning.assert_not_called()
 
     def test_custom_commands_path(self, tmp_path):
         """Manifest commands field redirects command discovery."""

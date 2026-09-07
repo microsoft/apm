@@ -1,6 +1,5 @@
 """Static coverage for enterprise bootstrap mirror support in installers."""
 
-import os
 import shutil
 import subprocess
 import sys
@@ -108,33 +107,42 @@ def test_windows_pinned_installer_requires_release_checksum() -> None:
     assert "Checksum verification FAILED." in text
 
 
-def _run_unix_installer(extra_env: dict[str, str]) -> subprocess.CompletedProcess:
-    """Execute install.sh with a sanitized env and no mirror coverage.
-
-    All mirror env vars and any resolved token are stripped so the script
-    reaches its fail-closed guards before any network call.
-    """
+def _run_unix_installer(
+    tmp_path: Path, extra_env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Reach the real mirror guards without probing the host's APM installation."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("dirname", "readlink", "grep", "id", "mkdir", "mktemp", "rm", "tr"):
+        executable = shutil.which(name, path="/usr/bin:/bin")
+        assert executable is not None
+        (tools / name).symlink_to(executable)
+    uname = tools / "uname"
+    uname.write_text(
+        '#!/bin/sh\ncase "$1" in -s) printf "Darwin\\n";; -m) printf "x86_64\\n";; esac\n',
+        encoding="ascii",
+    )
+    uname.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
     env = {
-        k: v
-        for k, v in os.environ.items()
-        if k
-        not in {
-            "APM_RELEASE_BASE_URL",
-            "APM_RELEASE_METADATA_URL",
-            "APM_INSTALLER_BASE_URL",
-            "APM_PYPI_INDEX_URL",
-            "APM_NO_DIRECT_FALLBACK",
-            "VERSION",
-            "GITHUB_URL",
-            "GITHUB_APM_PAT",
-            "GITHUB_TOKEN",
-            "GH_TOKEN",
-        }
+        "HOME": str(home),
+        "PATH": str(tools),
+        "TMPDIR": str(tmp_path),
+        "LC_ALL": "C",
+        "APM_INSTALL_DIR": str(tmp_path / "bin"),
+        "APM_LIB_DIR": str(tmp_path / "lib/apm"),
+        "HISTORICAL_APM": str(tmp_path / "historical/bin/apm"),
+        **extra_env,
     }
-    env.update(extra_env)
+    script = _read_repo_file("install.sh").replace(
+        "apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/lib/apm/apm",
+        'apm_resolve_install_paths "$HISTORICAL_APM"',
+    )
     return subprocess.run(
-        ["sh", str(ROOT / "install.sh")],
+        ["/bin/sh", "-c", script],
         env=env,
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=60,
@@ -145,7 +153,7 @@ def _run_unix_installer(extra_env: dict[str, str]) -> subprocess.CompletedProces
     sys.platform == "win32",
     reason="install.sh is the Unix installer; its OS guard rejects MINGW/Windows before env-var checks",
 )
-def test_unix_installer_fail_closed_metadata_exit_code() -> None:
+def test_unix_installer_fail_closed_metadata_exit_code(tmp_path: Path) -> None:
     """Fail-closed metadata path exits non-zero with actionable guidance.
 
     Executable regression trap (no network): APM_NO_DIRECT_FALLBACK without a
@@ -154,7 +162,7 @@ def test_unix_installer_fail_closed_metadata_exit_code() -> None:
     if shutil.which("sh") is None:
         pytest.skip("POSIX sh not available")
 
-    result = _run_unix_installer({"APM_NO_DIRECT_FALLBACK": "1"})
+    result = _run_unix_installer(tmp_path, {"APM_NO_DIRECT_FALLBACK": "1"})
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr
@@ -166,12 +174,12 @@ def test_unix_installer_fail_closed_metadata_exit_code() -> None:
     sys.platform == "win32",
     reason="install.sh is the Unix installer; its OS guard rejects MINGW/Windows before env-var checks",
 )
-def test_unix_installer_fail_closed_asset_exit_code() -> None:
+def test_unix_installer_fail_closed_asset_exit_code(tmp_path: Path) -> None:
     """Fail-closed asset path (pinned VERSION) exits non-zero, no public fallback."""
     if shutil.which("sh") is None:
         pytest.skip("POSIX sh not available")
 
-    result = _run_unix_installer({"APM_NO_DIRECT_FALLBACK": "1", "VERSION": "v9.9.9"})
+    result = _run_unix_installer(tmp_path, {"APM_NO_DIRECT_FALLBACK": "1", "VERSION": "v9.9.9"})
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr

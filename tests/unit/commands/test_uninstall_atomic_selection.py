@@ -9,8 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from apm_cli.commands.uninstall.cli import uninstall
+from apm_cli.commands.uninstall.cli import _cleanup_stale_lsp, uninstall
 from apm_cli.commands.uninstall.engine import (
+    IntegrationCleanupOutcome,
     LocalSlotRefresh,
     _activate_staged_local_refresh,
     _recover_local_refresh_backups,
@@ -31,6 +32,29 @@ def _write_manifest(project: Path, dependencies: Sequence[object]) -> None:
         },
         project / "apm.yml",
     )
+
+
+def test_global_lsp_cleanup_failure_uses_global_recovery_command(tmp_path: Path) -> None:
+    """User-scope cleanup must not prescribe a project-scope reinstall."""
+    logger = MagicMock()
+    with patch(
+        "apm_cli.install.lsp.integration.reconcile_lsp_after_uninstall",
+        side_effect=OSError("foreign config"),
+    ):
+        updated, error = _cleanup_stale_lsp(
+            apm_package=MagicMock(),
+            lockfile=MagicMock(),
+            lockfile_path=tmp_path / "apm.lock.yaml",
+            modules_dir=tmp_path / "apm_modules",
+            deploy_root=tmp_path,
+            user_scope=True,
+            logger=logger,
+        )
+
+    assert updated is False
+    assert isinstance(error, OSError)
+    message = logger.error.call_args.args[0]
+    assert "'apm install --global'" in message
 
 
 def test_uninstall_help_points_to_actionable_dependency_keys() -> None:
@@ -201,7 +225,7 @@ def test_successful_alias_uses_portable_lifecycle_payloads(
         ),
         patch(
             "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
-            return_value=({}, {}),
+            return_value=IntegrationCleanupOutcome({}, {}, [], 0),
         ),
         patch("apm_cli.commands.uninstall.cli._cleanup_stale_mcp"),
     ):
@@ -211,6 +235,102 @@ def test_successful_alias_uses_portable_lifecycle_payloads(
     assert declared_path not in result.output
     assert fire_scripts.call_count == 2
     assert all(call.kwargs["packages"] == (alias,) for call in fire_scripts.call_args_list)
+
+
+@pytest.mark.windows_compat
+def test_mcp_cleanup_failure_preserves_lock_and_live_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uninstall must not persist dropped ownership after native cleanup fails."""
+    project = tmp_path / "project"
+    project.mkdir()
+    package = "owner/installed"
+    _write_manifest(project, [package])
+    dependency = LockedDependency(repo_url=package)
+    lock_path = project / "apm.lock.yaml"
+    LockFile(
+        dependencies={dependency.get_unique_key(): dependency},
+        mcp_servers=["owned-server"],
+        mcp_target_servers={"antigravity": ["owned-server"]},
+    ).write(lock_path)
+    config_path = project / ".agents" / "mcp_config.json"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        '{"mcpServers":["malformed"]}',
+        encoding="utf-8",
+    )
+    lock_before = lock_path.read_bytes()
+    config_before = config_path.read_bytes()
+    monkeypatch.chdir(project)
+
+    with (
+        patch("apm_cli.commands.uninstall.cli._fire_uninstall_scripts"),
+        patch(
+            "apm_cli.commands.uninstall.cli._remove_packages_from_disk",
+            return_value=0,
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._cleanup_transitive_orphans",
+            return_value=(0, set()),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
+            return_value=IntegrationCleanupOutcome({}, {}, [], 0),
+        ),
+    ):
+        result = CliRunner().invoke(uninstall, [package])
+
+    assert result.exit_code != 0
+    output = " ".join(result.output.split())
+    assert "MCP cleanup failed" in result.output
+    assert "apm install" in output
+    assert "lock ownership was retained" in output
+    assert lock_path.read_bytes() == lock_before
+    assert config_path.read_bytes() == config_before
+
+
+def test_preserved_hook_makes_completed_package_removal_nonzero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incomplete managed-hook cleanup must not report complete success."""
+    project = tmp_path / "project"
+    project.mkdir()
+    package = "owner/installed"
+    _write_manifest(project, [package])
+    dependency = LockedDependency(repo_url=package)
+    LockFile(dependencies={dependency.get_unique_key(): dependency}).write(
+        project / "apm.lock.yaml"
+    )
+    monkeypatch.chdir(project)
+
+    with (
+        patch("apm_cli.commands.uninstall.cli._fire_uninstall_scripts"),
+        patch(
+            "apm_cli.commands.uninstall.cli._remove_packages_from_disk",
+            return_value=0,
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._cleanup_transitive_orphans",
+            return_value=(0, set()),
+        ),
+        patch(
+            "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
+            return_value=IntegrationCleanupOutcome(
+                {},
+                {},
+                [".copilot/hooks/preserved.json"],
+                1,
+            ),
+        ),
+        patch("apm_cli.commands.uninstall.cli._cleanup_stale_mcp"),
+    ):
+        result = CliRunner().invoke(uninstall, [package])
+
+    assert result.exit_code == 1
+    assert "managed hook cleanup is incomplete" in result.output
+    assert "Uninstall complete" not in result.output
 
 
 @pytest.mark.parametrize("survivor_mode", ("missing", "malformed"))
@@ -330,7 +450,7 @@ def test_pre_uninstall_manifest_edits_are_reloaded_and_preserved(
         ),
         patch(
             "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
-            return_value=({}, {}),
+            return_value=IntegrationCleanupOutcome({}, {}, [], 0),
         ),
         patch("apm_cli.commands.uninstall.cli._cleanup_stale_mcp"),
     ):
@@ -367,7 +487,7 @@ def test_duplicate_identifier_removes_manifest_entry_once(
         ),
         patch(
             "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
-            return_value=({}, {}),
+            return_value=IntegrationCleanupOutcome({}, {}, [], 0),
         ),
         patch("apm_cli.commands.uninstall.cli._cleanup_stale_mcp"),
     ):

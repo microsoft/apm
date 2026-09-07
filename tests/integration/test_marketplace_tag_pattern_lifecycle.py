@@ -192,21 +192,11 @@ def _new_scenario(
         source_tree=marketplace.package.root,
     )
     marketplace_remote = f"https://{_HOST}/{_OWNER}/{_MARKETPLACE}"
-    marketplace_remote_forms = repositories.install_url_rewrite(
+    repositories.install_url_rewrite(
         marketplace_repository,
         marketplace_remote,
     )
-    environment = repositories.url_rewrite_subprocess_env(
-        package_repository,
-        package_remote,
-    )
-    rewrite_key = f"url.{marketplace_repository.file_url}/.insteadOf"
-    rewrite_count = int(environment["GIT_CONFIG_COUNT"])
-    for offset, remote_form in enumerate(marketplace_remote_forms):
-        index = rewrite_count + offset
-        environment[f"GIT_CONFIG_KEY_{index}"] = rewrite_key
-        environment[f"GIT_CONFIG_VALUE_{index}"] = remote_form
-    environment["GIT_CONFIG_COUNT"] = str(rewrite_count + len(marketplace_remote_forms))
+    (isolated.home / ".gitconfig").write_bytes(Path(environment["GIT_CONFIG_GLOBAL"]).read_bytes())
 
     scenario = _Scenario(
         isolated=isolated,

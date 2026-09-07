@@ -7,10 +7,13 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import yaml
 
+from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.utils.yaml_io import loads_frontmatter
 
 
 def _make_package_info(package_dir, name="test-pkg"):
@@ -124,6 +127,108 @@ class TestInstructionIntegrator:
 
         self.integrator.copy_instruction(source, target)
         assert target.read_text() == content
+
+    def test_direct_identity_target_rejects_invalid_frontmatter_before_writes(self):
+        """Direct target integration keeps the same validation boundary as install."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.project_root / "package"
+        instruction_dir = package_dir / ".apm" / "instructions"
+        instruction_dir.mkdir(parents=True)
+        (instruction_dir / "broken.instructions.md").write_text(
+            "---\napplyTo: [\n---\n# Invalid\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(yaml.YAMLError, match="Rejected frontmatter"):
+            self.integrator.integrate_instructions_for_target(
+                KNOWN_TARGETS["copilot"],
+                self._make_package_info(package_dir),
+                self.project_root,
+            )
+
+        assert not (self.project_root / ".github/instructions").exists()
+
+    def test_preflight_force_report_does_not_claim_deployment(self):
+        """Preflight labels a force override without claiming files were written."""
+        from unittest.mock import patch
+
+        from apm_cli.security.gate import SecurityGate
+
+        source = self.project_root / "forced.instructions.md"
+        source.write_text("# Rule\n", encoding="utf-8")
+        diagnostics = Mock()
+        verdict = Mock(has_findings=True, should_block=False)
+
+        with (
+            patch.object(SecurityGate, "scan_text", return_value=verdict),
+            patch.object(SecurityGate, "report") as report,
+        ):
+            self.integrator._prepare_instruction(
+                source,
+                force=True,
+                diagnostics=diagnostics,
+                package_name="pkg",
+            )
+
+        report.assert_called_once_with(
+            verdict,
+            diagnostics,
+            package="pkg",
+            force=True,
+            force_action="Allowed by preflight",
+            force_detail=(
+                "Decoded frontmatter contains critical hidden characters; "
+                "edit the escaped value in forced.instructions.md"
+            ),
+        )
+
+    @pytest.mark.windows_compat
+    def test_identity_target_materializes_preflight_validated_content(self):
+        """Identity deployment writes the bytes validated during preflight."""
+        from unittest.mock import patch
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        package_dir = self.project_root / "package"
+        instruction_dir = package_dir / ".apm" / "instructions"
+        instruction_dir.mkdir(parents=True)
+        source = instruction_dir / "python.instructions.md"
+        source.write_text("# Validated content\n", encoding="utf-8")
+        package_info = self._make_package_info(package_dir)
+        source_plan = DeployableSourcePlan(
+            package_dir.resolve(),
+            frozenset({".apm/instructions/python.instructions.md"}),
+        )
+
+        self.integrator.preflight_instructions_for_targets(
+            [KNOWN_TARGETS["copilot"]],
+            package_info,
+            self.project_root,
+            source_plan,
+        )
+        changed = "---\napplyTo: [\n---\n# Changed after preflight\n"
+        source.write_text(changed, encoding="utf-8")
+        deployed = self.project_root / ".github/instructions/python.instructions.md"
+        deployed.parent.mkdir(parents=True)
+        deployed.write_bytes(b"# Resolved link\n")
+
+        def resolve_prepared(content, _source, _target):
+            assert content == "# Validated content\n"
+            return "# Resolved link\n", 1
+
+        with patch.object(self.integrator, "resolve_links", side_effect=resolve_prepared):
+            result = self.integrator.integrate_instructions_for_target(
+                KNOWN_TARGETS["copilot"],
+                package_info,
+                self.project_root,
+                source_plan=source_plan,
+            )
+
+        assert result.files_integrated == 0
+        assert result.files_adopted == 1
+        assert result.target_paths == [deployed]
+        assert deployed.read_text(encoding="utf-8") == "# Resolved link\n"
 
     # ===== Integration =====
 
@@ -522,24 +627,24 @@ class TestConvertToCursorRules:
     def test_preserves_description(self):
         content = "---\napplyTo: '**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "description: TypeScript guidelines" in result
+        assert 'description: "TypeScript guidelines"' in result
         assert 'globs: "**/*.ts"' in result
 
     def test_generates_description_from_heading(self):
         content = "---\napplyTo: '**/*.py'\n---\n\n# Python coding standards\n\nUse type hints."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "description: Python coding standards" in result
+        assert 'description: "Python coding standards"' in result
 
     def test_generates_description_from_first_sentence(self):
         content = "---\napplyTo: '**'\n---\n\nAlways use descriptive names. Follow PEP8."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
-        assert "description: Always use descriptive names" in result
+        assert 'description: "Always use descriptive names"' in result
 
     def test_no_frontmatter(self):
         content = "# Simple rules\n\nJust some guidelines."
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert result.startswith("---\n")
-        assert "description: Simple rules" in result
+        assert 'description: "Simple rules"' in result
         # No globs when no applyTo
         assert "globs" not in result
 
@@ -553,7 +658,7 @@ class TestConvertToCursorRules:
         content = "---\ndescription: General rules\n---\n\n# Rules"
         result = InstructionIntegrator._convert_to_cursor_rules(content)
         assert "globs" not in result
-        assert "description: General rules" in result
+        assert 'description: "General rules"' in result
 
 
 class TestCursorRulesIntegration:
@@ -768,7 +873,7 @@ class TestCursorRulesIntegration:
 
         deployed = (self.project_root / ".cursor" / "rules" / "ts.mdc").read_text()
         assert 'globs: "src/**/*.ts"' in deployed
-        assert "description: TypeScript rules" in deployed
+        assert 'description: "TypeScript rules"' in deployed
         assert "applyTo" not in deployed
         assert "# TypeScript" in deployed
         assert "Use strict mode." in deployed
@@ -1307,7 +1412,41 @@ class TestConvertToWindsurfRules:
 
 
 class TestApplyToCommaSplitting:
-    """Verify all three converters split comma-separated applyTo globs."""
+    """Verify target converters preserve canonical applyTo semantics."""
+
+    @pytest.mark.parametrize(
+        ("converter", "scope_marker"),
+        [
+            ("_convert_to_claude_rules", '  - "src/**"'),
+            ("_convert_to_cursor_rules", 'globs: "src/**"'),
+            ("_convert_to_windsurf_rules", 'globs: "src/**"'),
+            ("_convert_to_kiro_steering", 'fileMatchPattern: "src/**"'),
+            ("_convert_to_antigravity_rules", 'globs: "src/**"'),
+        ],
+    )
+    def test_four_hyphen_frontmatter_uses_canonical_parser(self, converter, scope_marker):
+        content = "----\napplyTo: src/**\n----\n# Scoped rule\n"
+
+        result = getattr(InstructionIntegrator, converter)(content)
+
+        assert scope_marker in result
+        assert "----" not in result
+        assert "# Scoped rule" in result
+
+    def test_strip_frontmatter_supports_four_hyphen_fence(self):
+        content = "----\napplyTo: src/**\n----\n# Scoped rule\n"
+
+        assert InstructionIntegrator._strip_frontmatter(content) == "# Scoped rule\n"
+
+    def test_cursor_quotes_multiline_description(self):
+        content = '---\napplyTo: src/**\ndescription: "safe\\n---\\n"\n---\n# Scoped rule\n'
+
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        post = loads_frontmatter(result)
+
+        assert post.metadata["globs"] == "src/**"
+        assert post.metadata["description"] == "safe\n---"
+        assert post.content == "# Scoped rule"
 
     # ---- Claude ----
 
@@ -1516,15 +1655,10 @@ class TestApplyToCommaSplitting:
         assert '  - "src/foo,bar/*.py"' in result
         assert '  - "tests/**/*.py"' in result
 
-    def test_antigravity_malformed_yaml_fallback(self, caplog):
-        import logging
-
+    def test_antigravity_malformed_yaml_fails_closed(self):
         content = "---\napplyTo: [\n---\n\n# Body"
-        with caplog.at_level(logging.WARNING):
-            result = InstructionIntegrator._convert_to_antigravity_rules(content)
-        assert "Failed to parse instruction frontmatter YAML" in caplog.text
-        assert "trigger: glob" not in result
-        assert "# Body" in result
+        with pytest.raises(yaml.YAMLError):
+            InstructionIntegrator._convert_to_antigravity_rules(content)
 
 
 class TestWindsurfRulesIntegration:

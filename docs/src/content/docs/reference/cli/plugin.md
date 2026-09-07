@@ -18,6 +18,10 @@ apm plugin init my-skill --yes
 
 `apm plugin init` scaffolds a publishable plugin in the current directory: a `plugin.json` manifest plus an `apm.yml` carrying a `devDependencies` block. The result is a working tree you can commit, tag, and reference from a marketplace.
 
+The generated dependency block is empty so direct installs select the plugin
+layout. Adding an APM or MCP dependency makes `apm.yml` eligible and switches
+direct installs to the APM package layout.
+
 `apm plugin` is the noun-verb home for plugin-author workflows, mirroring `apm marketplace` for marketplace-author verbs. Today it ships a single verb -- `apm plugin init`. Sibling verbs live under the same namespace as they ship.
 
 The two common repo shapes for plugin authors -- **single-plugin** (one plugin per repo) and **aggregator** (one repo that ships a marketplace plus the plugins it indexes) -- are not gated by flags. They emerge from composing `apm plugin init` and [`apm marketplace init`](../marketplace/#apm-marketplace-init) in the same working tree.

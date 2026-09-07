@@ -203,6 +203,22 @@ class TestPackBundle:
 
         assert set(result.files) == set(deployed)
 
+    def test_apm_format_dry_run_reads_legacy_lockfile_without_migration(
+        self, tmp_path: Path
+    ) -> None:
+        project = _setup_project(tmp_path, [".github/agents/a.md"], target="vscode")
+        canonical = project / "apm.lock.yaml"
+        legacy = project / "apm.lock"
+        canonical.rename(legacy)
+        initial_bytes = legacy.read_bytes()
+        out = tmp_path / "build"
+
+        pack_bundle(project, out, fmt="apm", dry_run=True)
+
+        assert legacy.read_bytes() == initial_bytes
+        assert not canonical.exists()
+        assert not out.exists()
+
     def test_pack_archive(self, tmp_path):
         deployed = [".github/agents/a.md"]
         project = _setup_project(tmp_path, deployed, target="vscode")

@@ -182,6 +182,32 @@ class TestDoctorNetworkCheck:
         assert "timed out" in result.output.lower()
 
     @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_unsafe_rewrite_preserves_recovery_guidance(
+        self,
+        mock_run,
+        runner,
+        tmp_path,
+        monkeypatch,
+    ):
+        from apm_cli.utils.git_env import GitUrlRewriteError
+
+        monkeypatch.chdir(tmp_path)
+        mock_run.return_value = _make_run_result(0, stdout="git version 2.40.0")
+        with patch(
+            "apm_cli.utils.git_env.git_network_env",
+            side_effect=GitUrlRewriteError(
+                "https-downgrade",
+                "HTTPS Git remote must not rewrite to insecure HTTP",
+            ),
+        ):
+            result = runner.invoke(cli, ["doctor"])
+
+        normalized = " ".join(result.output.split())
+        assert result.exit_code == 1
+        assert "git config" in normalized
+        assert "--show-origin" in normalized
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_network_auth_error(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [

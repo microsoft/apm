@@ -16,6 +16,7 @@ Covers the security gates added to ``github_downloader_validation``:
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
@@ -226,8 +227,10 @@ class TestAdoBearerHeaderInjection:
         secret = "ADO_PAT_SECRET_VALUE_DO_NOT_LEAK"
 
         ado_mock_ctx = MagicMock()
+        ado_mock_ctx.token = secret
         ado_mock_ctx.auth_scheme = "basic"
         ado_mock_ctx.git_env = {}
+        ado_mock_ctx.host_info.kind = "ado"
 
         with (
             patch.object(downloader, "_resolve_dep_token", return_value=secret),
@@ -274,8 +277,10 @@ class TestAdoBearerHeaderInjection:
         secret = "fake-aad-jwt-token"
 
         ado_mock_ctx = MagicMock()
+        ado_mock_ctx.token = secret
         ado_mock_ctx.auth_scheme = "bearer"
         ado_mock_ctx.git_env = {}
+        ado_mock_ctx.host_info.kind = "ado"
 
         with (
             patch.object(downloader, "_resolve_dep_token", return_value=secret),
@@ -349,8 +354,10 @@ class TestAdoBearerHeaderInjection:
         secret = "glpat_VALIDATION_SECRET"
 
         mock_ctx = MagicMock()
+        mock_ctx.token = secret
         mock_ctx.auth_scheme = "basic"
         mock_ctx.git_env = {}
+        mock_ctx.host_info.kind = "gitlab"
 
         with (
             patch.object(downloader, "_resolve_dep_token", return_value=secret),
@@ -378,6 +385,36 @@ class TestAdoBearerHeaderInjection:
         expected = base64.b64encode(f"oauth2:{secret}".encode()).decode("ascii")
         assert expected in header_value
         assert secret not in header_value
+
+    def test_gitlab_pat_is_suppressed_for_explicit_http(self) -> None:
+        """Validation cannot send a managed GitLab PAT over plaintext HTTP."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = DependencyReference(
+            repo_url="group/repo",
+            host="gitlab.com",
+            explicit_scheme="http",
+            is_insecure=True,
+        )
+        secret = "gitlab-http-secret"
+        mock_ctx = MagicMock()
+        mock_ctx.token = secret
+        mock_ctx.auth_scheme = "basic"
+        mock_ctx.host_info.kind = "gitlab"
+        with (
+            patch.object(downloader, "_resolve_dep_token", return_value=secret),
+            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=mock_ctx),
+        ):
+            attempts = gdv._build_validation_attempts(downloader, dep_ref, log=lambda _m: None)
+
+        assert attempts
+        for attempt in attempts:
+            if urlparse(attempt.url).scheme == "http":
+                assert "GIT_TOKEN" not in attempt.env
+                count = int(attempt.env.get("GIT_CONFIG_COUNT", "0"))
+                assert all(
+                    "extraheader" not in attempt.env.get(f"GIT_CONFIG_KEY_{index}", "").lower()
+                    for index in range(count)
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -524,15 +561,14 @@ class TestRound3SafeRmtreeNotRobustRmtreeDirect:
         dep_ref = _make_subdir_dep(vpath="skills/x", ref="main")
         winning = gdv.AttemptSpec("plain HTTPS w/ credential helper", "https://x", {})
 
-        # Patch git.cmd.Git so init/fetch/ls_tree don't actually run.
+        completed = MagicMock(stdout="100644 blob abc\tskills/x")
         with (
             patch("apm_cli.deps.github_downloader_validation.safe_rmtree") as safe_rm_mock,
-            patch("apm_cli.deps.github_downloader_validation.git.cmd.Git") as MockGit,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                return_value=completed,
+            ),
         ):
-            MockGit.return_value.init = MagicMock()
-            MockGit.return_value.remote = MagicMock()
-            MockGit.return_value.fetch = MagicMock()
-            MockGit.return_value.ls_tree = MagicMock(return_value="100644 blob abc\tskills/x")
             ok = gdv._path_exists_in_tree_at_ref(
                 downloader,
                 dep_ref,

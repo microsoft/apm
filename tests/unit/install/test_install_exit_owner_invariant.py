@@ -7,6 +7,8 @@ from pathlib import Path
 
 SRC_ROOT = Path(__file__).resolve().parents[3] / "src" / "apm_cli"
 INSTALL_ROOT = SRC_ROOT / "install"
+ALLOWED_EXIT_MAPPERS = {"commands/install.py", "install/summary.py"}
+INSTALL_HELPER_EXIT_MAPPERS = {"install/summary.py"}
 
 
 def _tree(path: Path) -> ast.AST:
@@ -63,8 +65,8 @@ def _result_exit_mappings(tree: ast.AST) -> list[ast.Call]:
     return mappings
 
 
-def test_only_install_command_maps_result_exit_code() -> None:
-    """Exactly one command boundary translates InstallResult.exit_code."""
+def test_only_command_boundary_helpers_map_result_exit_code() -> None:
+    """Only command boundaries and shared helpers translate outcome exit codes."""
     owners: list[str] = []
     for path in SRC_ROOT.rglob("*.py"):
         relative_path = path.relative_to(SRC_ROOT).as_posix()
@@ -72,15 +74,16 @@ def test_only_install_command_maps_result_exit_code() -> None:
         if mappings:
             owners.append(relative_path)
 
-    assert owners == ["commands/install.py"]
+    assert set(owners) == ALLOWED_EXIT_MAPPERS
 
 
-def test_install_engine_never_maps_result_exit_code() -> None:
-    """Install engine modules return InstallResult; only the command maps it."""
+def test_install_engine_pipeline_never_maps_result_exit_code() -> None:
+    """Pipeline modules return InstallResult; adapter helpers own exits."""
     offenders = [
         path.relative_to(SRC_ROOT).as_posix()
         for path in INSTALL_ROOT.rglob("*.py")
-        if _result_exit_mappings(_tree(path))
+        if path.relative_to(SRC_ROOT).as_posix() not in INSTALL_HELPER_EXIT_MAPPERS
+        and _result_exit_mappings(_tree(path))
     ]
 
     assert not offenders

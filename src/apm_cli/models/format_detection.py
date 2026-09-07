@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from ..agent_plugins import AgentPluginDetection
     from .validation import PackageType
 
 from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
@@ -301,6 +302,13 @@ class AgentPluginDetector:
         from ..agent_plugins.loader import detect_agent_plugin
 
         detection = detect_agent_plugin(package_path)
+        return self.from_detection(detection)
+
+    @staticmethod
+    def from_detection(
+        detection: AgentPluginDetection | None,
+    ) -> AgentPluginFormatEvidence | None:
+        """Convert canonical Agent Plugin detection into planner evidence."""
         if detection is None:
             return None
         return AgentPluginFormatEvidence(
@@ -357,7 +365,12 @@ class PackageFormatRegistry:
     ) -> None:
         self._detectors = detectors if detectors is not None else _DEFAULT_DETECTORS
 
-    def detect(self, package_path: Path) -> DetectionReport:
+    def detect(
+        self,
+        package_path: Path,
+        *,
+        agent_plugin_detection: AgentPluginDetection | None = None,
+    ) -> DetectionReport:
         """Run all detectors against ``package_path`` and return the report."""
         apm_yml_ev: ApmYmlFormatEvidence | None = None
         skill_md_ev: SkillMdFormatEvidence | None = None
@@ -366,7 +379,10 @@ class PackageFormatRegistry:
         claude_plugin_ev: ClaudePluginFormatEvidence | None = None
 
         for detector in self._detectors:
-            result = detector.detect(package_path)
+            if isinstance(detector, AgentPluginDetector) and agent_plugin_detection is not None:
+                result = detector.from_detection(agent_plugin_detection)
+            else:
+                result = detector.detect(package_path)
             if isinstance(result, ApmYmlFormatEvidence):
                 apm_yml_ev = result
             elif isinstance(result, SkillMdFormatEvidence):
@@ -395,20 +411,21 @@ class PackageFormatRegistry:
 class NormalizationPlanner:
     """Maps a ``DetectionReport`` to a ``(PackageType, plugin_json_path)`` tuple.
 
-    Encodes the same cascade priority as the old if/elif chain, but the
-    logic is now explicit and the source of each branch is traceable to
+    Encodes format precedence explicitly, with each branch traceable to
     the independent detector that produced the evidence.
 
     Cascade (first match wins):
 
-    1. ``AGENT_PLUGIN`` -- root ``plugin.json`` matches the Agent Plugins
+    1. Eligible ``apm.yml`` -- preserve root or nested skill semantics,
+       otherwise select ``APM_PACKAGE``.
+    2. ``AGENT_PLUGIN`` -- root ``plugin.json`` matches the Agent Plugins
        schema family.
-    2. ``MARKETPLACE_PLUGIN`` -- Claude plugin detector found a manifest
+    3. ``MARKETPLACE_PLUGIN`` -- Claude plugin detector found a manifest
        (``plugin.json`` or ``.claude-plugin/``).
-    3. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` both present.
-    4. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
-    5. ``SKILL_BUNDLE`` -- nested ``skills/<name>/SKILL.md`` found.
-    6. ``APM_PACKAGE`` -- ``apm.yml`` with ``.apm/`` or declared deps.
+    4. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` (eligible or
+       metadata-only).
+    5. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
+    6. ``SKILL_BUNDLE`` -- nested ``skills/<name>/SKILL.md`` found.
     7. ``HOOK_PACKAGE`` -- hooks JSON found, nothing else.
     8. ``INVALID`` -- no recognisable signals.
 
@@ -429,39 +446,48 @@ class NormalizationPlanner:
         sm = report.skill_md
         ay = report.apm_yml
         hj = report.hook_json
+        has_root_skill_md = sm is not None and sm.skill_md_path is not None
+        has_nested_skills = sm is not None and bool(sm.nested_skill_dirs)
+        has_eligible_apm_yml = ay is not None and (ay.has_apm_dir or ay.declares_dependencies)
 
-        # 1. Agent plugin manifest present -> AGENT_PLUGIN or INVALID.
+        # An eligible APM manifest expresses package intent more specifically
+        # than co-located plugin publishing surfaces.
+        if has_eligible_apm_yml:
+            if has_root_skill_md:
+                return PackageType.HYBRID, None
+            if has_nested_skills:
+                return PackageType.SKILL_BUNDLE, None
+            return PackageType.APM_PACKAGE, None
+
+        # Agent plugin manifest present -> AGENT_PLUGIN or INVALID.
         if ap is not None:
             if ap.supported:
                 return PackageType.AGENT_PLUGIN, ap.plugin_json_path
             return PackageType.INVALID, ap.plugin_json_path
 
-        # 2. Claude plugin manifest present -> MARKETPLACE_PLUGIN
+        # Claude plugin manifest present -> MARKETPLACE_PLUGIN
         if cp is not None:
             return PackageType.MARKETPLACE_PLUGIN, cp.plugin_json_path
 
-        # 3. Root SKILL.md + apm.yml -> HYBRID
-        has_root_skill_md = sm is not None and sm.skill_md_path is not None
+        # Root SKILL.md + apm.yml -> HYBRID
         if ay is not None and has_root_skill_md:
             return PackageType.HYBRID, None
 
-        # 4. Root SKILL.md only (no apm.yml) -> CLAUDE_SKILL
+        # Root SKILL.md only (no apm.yml) -> CLAUDE_SKILL
         if has_root_skill_md:
             return PackageType.CLAUDE_SKILL, None
 
-        # 5. Nested skills/<name>/SKILL.md -> SKILL_BUNDLE (apm.yml optional)
-        if sm is not None and sm.nested_skill_dirs:
+        # Nested skills/<name>/SKILL.md -> SKILL_BUNDLE (apm.yml optional)
+        if has_nested_skills:
             return PackageType.SKILL_BUNDLE, None
 
-        # 6. apm.yml present -> APM classification
+        # Metadata-only apm.yml without another package signal is invalid.
         if ay is not None:
-            if ay.has_apm_dir or ay.declares_dependencies:
-                return PackageType.APM_PACKAGE, None
             return PackageType.INVALID, None
 
-        # 7. hooks/*.json only -> HOOK_PACKAGE
+        # hooks/*.json only -> HOOK_PACKAGE
         if hj is not None:
             return PackageType.HOOK_PACKAGE, None
 
-        # 8. Nothing recognisable -> INVALID
+        # Nothing recognisable -> INVALID
         return PackageType.INVALID, None

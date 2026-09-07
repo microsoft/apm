@@ -31,6 +31,7 @@ import logging
 import os
 from pathlib import Path
 
+from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success
 from .copilot import CopilotClientAdapter
 
@@ -102,8 +103,11 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 "Creating %s for %s user configuration", config_path.parent, self.target_name
             )
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(current_config, f, indent=2)
+        atomic_write_text(
+            config_path,
+            json.dumps(current_config, indent=2),
+            new_file_mode=0o600,
+        )
         os.chmod(config_path, 0o600)
 
     def get_current_config(self):

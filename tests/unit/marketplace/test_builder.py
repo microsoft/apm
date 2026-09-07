@@ -9,7 +9,7 @@ from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional  # noqa: F401, UP035
-from unittest.mock import patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -17,6 +17,7 @@ from apm_cli.marketplace.builder import (
     BuildOptions,
     BuildReport,
     MarketplaceBuilder,
+    MetadataEnrichmentResult,
     ResolvedPackage,
 )
 from apm_cli.marketplace.errors import (
@@ -1560,7 +1561,13 @@ class TestDuplicateNameWarnings:
             "acme/pkg-beta": _make_refs("v1.0.0"),
         }
         report = _build_with_mock(tmp_path, yml, refs)
-        assert report.warnings == ()
+        assert all(
+            "Duplicate marketplace package name" not in warning for warning in report.warnings
+        )
+        assert len(report.warnings) == 2
+        assert all(
+            "metadata enrichment skipped by --offline" in warning for warning in report.warnings
+        )
 
     def test_duplicate_names_produce_warning(self, tmp_path: Path) -> None:
         """Bypass yml_schema by feeding resolved packages directly."""
@@ -1667,7 +1674,7 @@ class TestDuplicateNameWarnings:
         assert "acme/tool-b" in warnings[0]
 
     def test_build_report_carries_warnings(self, tmp_path: Path) -> None:
-        """BuildReport.warnings is empty for a clean build."""
+        """BuildReport carries offline metadata warnings from its canonical result."""
         yml = """\
         name: test-mkt
         description: Test
@@ -1682,7 +1689,8 @@ class TestDuplicateNameWarnings:
         refs = {"acme/solo": _make_refs("v1.0.0")}
         report = _build_with_mock(tmp_path, yml, refs)
         assert isinstance(report.warnings, tuple)
-        assert len(report.warnings) == 0
+        assert len(report.warnings) == 1
+        assert "metadata enrichment skipped by --offline" in report.warnings[0]
 
     def test_empty_build_report_primary_output_is_safe(self) -> None:
         report = BuildReport(outputs=())
@@ -1871,11 +1879,16 @@ class TestFetchRemoteMetadata:
         assert result is not None
         assert result["version"] == "1.0"
 
-    def test_auth_header_added_when_token_present(self, tmp_path: Path) -> None:
-        """When _github_token is set, Authorization header is included."""
+    def test_auth_header_uses_the_resolver_selected_token(self, tmp_path: Path) -> None:
+        """Metadata reads use the credential supplied by AuthResolver."""
         pkg = self._make_pkg()
         builder = self._make_builder(tmp_path)
-        builder._github_token = "ghp_faketoken123"
+        resolver = MagicMock()
+        builder._auth_resolver = resolver
+        resolver.uses_public_github_anonymous_first.return_value = True
+        resolver.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: operation(
+            "ghp_faketoken123", {}
+        )
         yaml_body = b"description: Private plugin\nversion: 1.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch(
@@ -1889,12 +1902,22 @@ class TestFetchRemoteMetadata:
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") == "token ghp_faketoken123"
+        resolver.try_with_fallback.assert_called_once_with(
+            "github.com",
+            ANY,
+            org="acme",
+            path="acme/my-tool",
+            unauth_first=True,
+        )
 
-    def test_no_auth_header_when_no_token(self, tmp_path: Path) -> None:
-        """When _github_token is None, no Authorization header is set."""
+    def test_no_auth_header_when_resolver_has_no_token(self, tmp_path: Path) -> None:
+        """Metadata reads omit Authorization when AuthResolver has no token."""
         pkg = self._make_pkg()
         builder = self._make_builder(tmp_path)
-        builder._github_token = None
+        builder._auth_resolver = SimpleNamespace(
+            uses_public_github_anonymous_first=lambda _host: True,
+            try_with_fallback=lambda _host, operation, **_kwargs: operation(None, {}),
+        )
         yaml_body = b"description: Public plugin\nversion: 2.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch(
@@ -2287,11 +2310,11 @@ class TestResolveGitHubToken:
         assert token == "ghp_lazy_token"
         assert builder._auth_resolver is not None
 
-    def test_prefetch_metadata_resolves_token_before_fetching(
+    def test_prefetch_metadata_defers_credentials_to_fallback(
         self,
         tmp_path: Path,
     ) -> None:
-        """_prefetch_metadata resolves the token once, then workers use it."""
+        """Prefetch delegates credential selection without eager resolution."""
         from unittest.mock import MagicMock
 
         mock_resolver = MagicMock()
@@ -2299,6 +2322,16 @@ class TestResolveGitHubToken:
         mock_ctx.token = "ghp_prefetch_token"
         mock_ctx.source = "GITHUB_APM_PAT"
         mock_resolver.resolve.return_value = mock_ctx
+        mock_resolver.uses_public_github_anonymous_first.return_value = True
+
+        def invoke_with_token(
+            _host: str,
+            operation: Any,
+            **_kwargs: Any,
+        ) -> str:
+            return operation("ghp_prefetch_token", {})
+
+        mock_resolver.try_with_fallback.side_effect = invoke_with_token
 
         yml_path = _write_yml(tmp_path, _BASIC_YML)
         builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
@@ -2321,13 +2354,16 @@ class TestResolveGitHubToken:
             return_value=mock_resp,
         ) as mock_open:
             results = builder._prefetch_metadata(resolved)
-        # Token was resolved
-        assert builder._github_token == "ghp_prefetch_token"
+        # The fallback owner selected the token without an eager unscoped lookup.
+        assert builder._github_token is None
+        mock_resolver.resolve.assert_not_called()
+        mock_resolver.try_with_fallback.assert_called_once()
         # Request included auth header
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") == "token ghp_prefetch_token"
         # Result was populated
+        assert isinstance(results, MetadataEnrichmentResult)
         assert "auth-pkg" in results
         assert results["auth-pkg"]["description"] == "Auth test"
 
@@ -2339,6 +2375,16 @@ class TestResolveGitHubToken:
         mock_ctx = MagicMock()
         mock_ctx.token = None
         mock_resolver.resolve.return_value = mock_ctx
+        mock_resolver.uses_public_github_anonymous_first.return_value = True
+
+        def invoke_without_token(
+            _host: str,
+            operation: Any,
+            **_kwargs: Any,
+        ) -> str:
+            return operation(None, {})
+
+        mock_resolver.try_with_fallback.side_effect = invoke_without_token
 
         yml_path = _write_yml(tmp_path, _BASIC_YML)
         builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
@@ -2363,11 +2409,14 @@ class TestResolveGitHubToken:
             results = builder._prefetch_metadata(resolved)
         # No token was set
         assert builder._github_token is None
+        mock_resolver.resolve.assert_not_called()
+        mock_resolver.try_with_fallback.assert_called_once()
         # Request had no auth header
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") is None
         # Result was still populated (public repo)
+        assert isinstance(results, MetadataEnrichmentResult)
         assert "public-pkg" in results
 
 
@@ -2568,7 +2617,7 @@ class TestFetchRemoteMetadataGHEHost:
         builder._host_info = SimpleNamespace(kind="github", api_base="https://api.github.com")
         # AuthResolver returns a GHE-specific token for the package's host.
         fake_auth = MagicMock()
-        fake_auth.resolve.return_value = AuthContext(
+        auth_context = AuthContext(
             token="ghs_ghe_specific_token",
             source="GITHUB_APM_PAT_GHE",
             token_type="classic",
@@ -2580,6 +2629,10 @@ class TestFetchRemoteMetadataGHEHost:
             ),
             git_env={},
             auth_scheme="basic",
+        )
+        fake_auth.uses_public_github_anonymous_first.return_value = False
+        fake_auth.try_with_fallback.side_effect = lambda _host, operation, **_kwargs: operation(
+            auth_context.token, {}
         )
         builder._auth_resolver = fake_auth
         yaml_body = b"description: GHE tool\nversion: 0.3.1\n"

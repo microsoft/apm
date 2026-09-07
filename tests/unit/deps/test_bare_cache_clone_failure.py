@@ -11,6 +11,7 @@ import pytest
 from apm_cli.deps.bare_cache import build_clone_failure_message
 from apm_cli.deps.clone_engine import CloneEngine
 from apm_cli.deps.transport_selection import (
+    REWRITE_FALLBACK_HINT,
     ProtocolPreference,
     TransportAttempt,
     TransportPlan,
@@ -23,6 +24,12 @@ def _clone_failure_message(
     stderr: bytes,
     attempt_scheme: str,
     command_scheme: str | None = None,
+    fallback_hint: str | None = None,
+    effective_url: str | None = None,
+    is_generic: bool = False,
+    is_ado: bool = False,
+    dep_host: str = "github.com",
+    configured_github_host: str = "github.com",
 ) -> str:
     """Build a clone failure message for an SSH diagnostic scenario."""
     command_scheme = command_scheme or attempt_scheme
@@ -32,9 +39,11 @@ def _clone_failure_message(
                 scheme=attempt_scheme,
                 use_token=attempt_scheme == "https",
                 label=attempt_scheme.upper(),
+                effective_url=effective_url,
             )
         ],
         strict=True,
+        fallback_hint=fallback_hint,
     )
     auth_resolver = MagicMock()
     auth_resolver.build_error_context.return_value = ""
@@ -49,21 +58,64 @@ def _clone_failure_message(
         plan=plan,
         dep_ref=DependencyReference(
             repo_url="owner/repo",
-            host="github.com",
+            host=dep_host,
             explicit_scheme=attempt_scheme,
         ),
-        dep_host="github.com",
-        is_ado=False,
-        is_generic=False,
+        dep_host=dep_host,
+        is_ado=is_ado,
+        is_generic=is_generic,
         has_ado_token=False,
         has_token=False,
         auth_resolver=auth_resolver,
-        configured_github_host="github.com",
+        configured_github_host=configured_github_host,
         default_host_fn=lambda: "github.com",
         last_error=last_error,
         last_attempt_scheme=attempt_scheme,
-        sanitize_git_error=lambda value: value,
     )
+
+
+@pytest.mark.parametrize(
+    ("dep_host", "is_generic", "is_ado", "configured_github_host"),
+    (
+        ("git.example.test", True, False, ""),
+        ("github.com", False, False, "github.com"),
+        ("github.enterprise.test", False, False, "github.enterprise.test"),
+        ("dev.azure.com", False, True, ""),
+    ),
+    ids=("generic", "github", "ghes", "ado"),
+)
+def test_clone_failure_message_explains_local_mirror_failure(
+    dep_host: str,
+    is_generic: bool,
+    is_ado: bool,
+    configured_github_host: str,
+) -> None:
+    """A failed file rewrite points to mirror configuration, not host auth."""
+    message = _clone_failure_message(
+        stderr=b"fatal: repository not found\n",
+        attempt_scheme="https",
+        effective_url="file:///fixture/mirror.git",
+        is_generic=is_generic,
+        is_ado=is_ado,
+        dep_host=dep_host,
+        configured_github_host=configured_github_host,
+    )
+
+    assert "configured local Git mirror failed" in message
+    assert "path exists and is readable" in message
+    assert "git config --show-origin --get-regexp" in message
+    assert "configure SSH keys" not in message
+    assert "credential helper" not in message
+
+
+def test_clone_failure_message_preserves_rewrite_inspection_command() -> None:
+    message = _clone_failure_message(
+        stderr=b"fatal: connection refused\n",
+        attempt_scheme="ssh",
+        fallback_hint=REWRITE_FALLBACK_HINT,
+    )
+
+    assert "git config --show-origin --get-regexp" in message
 
 
 def test_clone_failure_message_explains_passphrase_protected_ssh_key() -> None:
@@ -124,8 +176,8 @@ def test_clone_failure_message_explains_batchmode_no_more_auth_methods() -> None
     assert "ssh-add <key-file>" in message
 
 
-def test_clone_failure_message_does_not_echo_captured_ssh_stderr() -> None:
-    """Classification input must not become user-visible output."""
+def test_clone_failure_message_redacts_key_path_and_keeps_ssh_cause() -> None:
+    """SSH failures keep an actionable cause without exposing a key path."""
     message = _clone_failure_message(
         stderr=(
             b"Enter passphrase for key '/Users/alice/.ssh/id_secret':\n"
@@ -136,7 +188,7 @@ def test_clone_failure_message_does_not_echo_captured_ssh_stderr() -> None:
 
     assert "SSH key authentication failed" in message
     assert "/Users/alice/.ssh/id_secret" not in message
-    assert "Permission denied (publickey)" not in message
+    assert "Permission denied (publickey)" in message
 
 
 def test_clone_failure_message_omits_ssh_diagnostic_for_https_token_failure() -> None:
@@ -170,6 +222,7 @@ def test_clone_failure_message_omits_ssh_diagnostic_for_host_key_failure() -> No
 
     assert "SSH key authentication failed" not in message
     assert "ssh-add <key-file>" not in message
+    assert "Host key verification failed." in message
 
 
 def test_clone_failure_message_omits_ssh_diagnostic_for_network_failure() -> None:
@@ -181,6 +234,7 @@ def test_clone_failure_message_omits_ssh_diagnostic_for_network_failure() -> Non
 
     assert "SSH key authentication failed" not in message
     assert "ssh-add <key-file>" not in message
+    assert "Could not resolve hostname" in message
 
 
 def test_clone_engine_threads_failed_ssh_scheme_into_diagnostic(tmp_path: Path) -> None:

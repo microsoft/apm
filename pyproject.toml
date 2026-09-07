@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.29.0"
+version = "0.30.0"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -219,4 +219,5 @@ markers = [
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
     "lifecycle_smoke: promoted to the required PR-time Lifecycle Smoke (Linux) job -- see ci.yml's lifecycle-smoke job and docs/src/content/docs/contributing/integration-testing.md",
     "lifecycle_merge_group: unique lifecycle contracts retained in the full merge-group integration suite",
+    "xdist_group(name): assigns HOME-mutating tests to one pytest-xdist loadgroup for process-level serialization",
 ]

@@ -121,7 +121,7 @@ Consumers can opt into fail-closed semantics for the no-cache case from their `a
 
 ### `ttl`
 
-Time-to-live in seconds for the cached policy file. Default: `3600` (1 hour). The cache is stored in `apm_modules/.policy-cache/`.
+Time-to-live in seconds for the cached policy file. Default: `3600` (1 hour). The cache is stored in the platform user cache under `apm/policy_v1/<project-key>/`, not inside the project.
 
 ---
 
@@ -162,6 +162,8 @@ dependencies:
     - "contoso/agent-standards"           # Must be a dependency
     - "contoso/security-rules#v2.0.0"     # Must be at specific version
 ```
+
+`allow`, `deny`, and `require` match GitHub and registry-backed packages case-insensitively (`Contoso/Repo` matches `contoso/repo`); other sources (non-GitHub hosts, ADO, local paths, marketplace, refs) stay case-sensitive. See [Identity casing](../../reference/policy-schema/#identity-casing) for the full breakdown.
 
 ### `require_resolution`
 
@@ -795,7 +797,7 @@ $ echo $?
 
 ### 9. Cache and offline behaviour
 
-Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
+Resolved effective policy is cached under the platform user cache at `apm/policy_v1/<project-key>/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
 
 ### 9.5. Network failure semantics
 
@@ -849,7 +851,7 @@ shasum -a 256 .github/apm-policy.yml | awk '{print "sha256:" $1}'
 
 When set, every install / `apm policy status` / `apm audit --ci` verifies the hash of the fetched leaf policy bytes (UTF-8 encoded, **before** YAML parsing -- so re-serialized semantically-equivalent YAML still fails). A mismatch is **always** fail-closed regardless of `policy.fetch_failure` / `policy.fetch_failure_default`. The pin applies only to the leaf policy; parents in an `extends:` chain remain the leaf author's responsibility.
 
-A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. MD5 and SHA-1 are not accepted.
+A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. Only SHA-256, SHA-384, and SHA-512 are supported.
 
 Compute the pin on Linux with `sha256sum .github/apm-policy.yml | awk '{print "sha256:" $1}'`.
 

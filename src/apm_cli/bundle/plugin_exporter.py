@@ -18,8 +18,7 @@ import yaml
 from ..deps.lockfile import (
     LockedDependency,
     LockFile,
-    get_lockfile_path,
-    migrate_lockfile_if_needed,
+    resolve_lockfile_path_for_read,
 )
 from ..models.apm_package import APMPackage, DependencyReference
 from ..models.dependency.subsets import skill_subset_filter_tokens
@@ -826,8 +825,7 @@ def export_plugin_bundle(
         :class:`PackResult` describing what was produced.
     """
     # 1. Read lockfile
-    migrate_lockfile_if_needed(project_root)
-    lockfile_path = get_lockfile_path(project_root)
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
 
     # 2. Read apm.yml

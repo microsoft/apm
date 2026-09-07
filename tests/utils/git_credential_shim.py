@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import base64
@@ -22,6 +23,16 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 _LOCALIZED_AUTH_FAILURE = "fatal: Autentikasi gagal untuk 'https://github.com/fixture/private.git/'\n"
+_BARE_PLATFORM_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    r"github_pat_[A-Za-z0-9_]{20,}|"
+    r"gh[oprsu]_[A-Za-z0-9_]{6,}|"
+    r"gl(?:agent|cbt|ft|pat|ptt|rt|soat)[-_][A-Za-z0-9_-]{6,}|"
+    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}|"
+    r"[A-Za-z0-9]{75}AZDO[A-Za-z0-9]{5}|"
+    r"[A-Za-z0-9]{52}"
+    r")(?![A-Za-z0-9_])"
+)
 
 
 def _config_entries():
@@ -73,6 +84,76 @@ def _credential_request():
     return 0
 
 
+def _authorization_for_url(value):
+    parsed = urlsplit(value)
+    candidates = []
+    for key, _header in _config_entries():
+        normalized = key.lower()
+        if normalized == "http.extraheader":
+            candidates.append((0, normalized))
+            continue
+        if not normalized.startswith("http.") or not normalized.endswith(".extraheader"):
+            continue
+        scope = key[len("http.") : -len(".extraheader")]
+        parsed_scope = urlsplit(scope)
+        if (
+            parsed_scope.scheme.lower() != parsed.scheme.lower()
+            or parsed_scope.hostname != parsed.hostname
+            or parsed_scope.port != parsed.port
+            or not parsed.path.startswith(parsed_scope.path.rstrip("/") + "/")
+            and parsed.path.rstrip("/") != parsed_scope.path.rstrip("/")
+        ):
+            continue
+        candidates.append((len(scope), normalized))
+    if not candidates:
+        return None
+    selected_key = max(candidates)[1]
+    active = []
+    for key, header in _config_entries():
+        if key.lower() != selected_key:
+            continue
+        if header.strip():
+            active.append(header)
+        else:
+            active.clear()
+    return next(
+        (
+            header
+            for header in reversed(active)
+            if _is_active_credential_header(header)
+        ),
+        None,
+    )
+
+
+def _is_active_credential_header(value):
+    name, separator, credential = value.partition(":")
+    if not separator or not credential.strip():
+        return False
+    if _BARE_PLATFORM_TOKEN_RE.search(credential):
+        return True
+    if re.match(r"(?i)^\s*(?:basic|bearer|token)\s+\S+", credential):
+        return True
+    parts = {
+        part
+        for part in re.split(r"[^a-z0-9]+", name.strip().lower())
+        if part
+    }
+    return bool(
+        parts
+        & {
+            "auth",
+            "authorization",
+            "cookie",
+            "credential",
+            "key",
+            "password",
+            "secret",
+            "token",
+        }
+    )
+
+
 def _rewrite_url(value):
     parsed = urlsplit(value)
     if parsed.hostname != "github.com":
@@ -96,11 +177,13 @@ def _rewrite_url(value):
     if parsed.username is not None:
         raw = f"{parsed.username}:{parsed.password or ''}".encode("utf-8")
         authorization = "Authorization: Basic " + base64.b64encode(raw).decode("ascii")
+    if authorization is None:
+        authorization = _authorization_for_url(value)
     return rewritten, {
         "host": parsed.hostname,
         "path": repository_path,
         "authenticated_url": parsed.username is not None,
-    }, authorization
+    }, ((rewritten, authorization) if authorization is not None else None)
 
 
 def _strip_dumb_http_incompatible_options(args):
@@ -142,8 +225,9 @@ def main():
         if authorization is not None:
             authorizations.append(authorization)
     rewritten_args = _strip_dumb_http_incompatible_options(rewritten_args)
-    for authorization in reversed(authorizations):
-        rewritten_args[:0] = ["-c", f"http.extraHeader={authorization}"]
+    for target, authorization in reversed(authorizations):
+        rewritten_args[:0] = ["-c", f"http.{target}.extraHeader={authorization}"]
+        rewritten_args[:0] = ["-c", f"http.{target}.extraHeader="]
 
     entries = _config_entries()
     _append_event(
@@ -159,8 +243,8 @@ def main():
             ),
             "git_token_present": "GIT_TOKEN" in os.environ,
             "auth_config_present": any(
-                (value and "extraheader" in key.lower())
-                or value.strip().lower().startswith("authorization:")
+                "extraheader" in key.lower()
+                and _is_active_credential_header(value)
                 for key, value in entries
             ),
             "credential_helpers": [

@@ -31,6 +31,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _NoNetrcSession(_requests.Session):
+    """Requests session that preserves environment transport without netrc auth."""
+
+    def prepare_request(self, request: _requests.Request) -> _requests.PreparedRequest:
+        """Prepare without loading ambient netrc credentials."""
+        trust_env = self.trust_env
+        self.trust_env = False
+        try:
+            return super().prepare_request(request)
+        finally:
+            self.trust_env = trust_env
+
+    def rebuild_auth(
+        self,
+        prepared_request: _requests.PreparedRequest,
+        response: _requests.Response,
+    ) -> None:
+        """Strip explicit auth across authorities without reapplying netrc."""
+        if "Authorization" in prepared_request.headers and self.should_strip_auth(
+            response.request.url,
+            prepared_request.url,
+        ):
+            del prepared_request.headers["Authorization"]
+
+
 class ArtifactoryRegistryClient:
     """Artifactory backend for the :class:`RegistryClient` protocol.
 
@@ -169,11 +194,12 @@ def _fetch_entry(
                 if resilient_get is not None:
                     resp = resilient_get(entry_url, headers=req_headers, timeout=30)
                 else:
-                    resp = _requests.get(
-                        entry_url,
-                        headers=req_headers,
-                        timeout=30,
-                    )
+                    with _NoNetrcSession() as session:
+                        resp = session.get(
+                            entry_url,
+                            headers=req_headers,
+                            timeout=30,
+                        )
                 if resp.status_code == 200:
                     logger.debug("Archive entry download OK: %s", entry_url)
                     return resp.content

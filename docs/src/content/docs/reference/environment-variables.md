@@ -56,7 +56,7 @@ APM verifies HTTPS against the operating-system trust store by default. For the 
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
-| `MCP_REGISTRY_URL` | Override the MCP registry endpoint used by `apm mcp` and `apm install --mcp NAME`. Must be `https://`. | public registry | When set, every `apm mcp` command prints `Registry: <url>`. See [`apm mcp`](../cli/mcp/). |
+| `MCP_REGISTRY_URL` | Override the MCP registry endpoint used by `apm mcp`, `apm install --mcp NAME`, and manifest-driven `dependencies.mcp` installs. HTTPS by default; HTTP requires `MCP_REGISTRY_ALLOW_HTTP=1`. | public registry | When set, registry commands print `Registry: <url> (from MCP_REGISTRY_URL)` and installs print `Using MCP registry: <url> (from MCP_REGISTRY_URL)`. See [`apm mcp`](../cli/mcp/). |
 | `MCP_REGISTRY_ALLOW_HTTP` | Set to `1` to permit a plaintext `http://` `MCP_REGISTRY_URL` (development only). | unset | Required to opt in to HTTP; production should always use HTTPS. |
 | `MCP_REGISTRY_CONNECT_TIMEOUT` | Connect timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
 | `MCP_REGISTRY_READ_TIMEOUT` | Read timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
@@ -83,7 +83,7 @@ APM verifies HTTPS against the operating-system trust store by default. For the 
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
 | `COPILOT_HOME` | Override the GitHub Copilot CLI home used by Copilot target detection and user-scope writes. | platform auto-detect | Read by the Copilot integration target. |
 | `CODEX_HOME` | Override the Codex home used by Codex target detection and user-scope writes. | platform auto-detect | Read by the Codex integration target. |
-| `HERMES_HOME` | Override the Hermes home used by Hermes target detection and user-scope writes. | platform auto-detect | Requires the `hermes` experimental flag for Hermes deployment. |
+| `HERMES_HOME` | Override the Hermes home used by user-scope skills and MCP config. | `~/.hermes` | Used by the explicit `hermes` target; it does not enable auto-detection. |
 | `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |

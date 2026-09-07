@@ -214,6 +214,35 @@ class TestDownloadPackageDelegation:
         # The 5th positional arg is `ref`; defaults to "main".
         assert archive.download_artifactory_archive.call_args.args[4] == "main"
 
+    def test_full_sha_preserves_immutable_resolution_metadata(self, tmp_path):
+        """A frozen full-SHA replay must retain its lockfile integrity anchor."""
+        from apm_cli.models.apm_package import GitReferenceType
+
+        commit = "a" * 40
+        orch, archive = self._orchestrator_with_validation_ok()
+        dep = _dep(
+            artifactory=True,
+            host="art.example.com",
+            artifactory_prefix="apm/github",
+            repo_url="owner/repo",
+            reference=commit,
+        )
+        valid_pkg = types.SimpleNamespace(source=None, resolved_commit=None, name="pkg")
+        validation = types.SimpleNamespace(
+            is_valid=True, errors=[], package=valid_pkg, package_type="apm"
+        )
+
+        with patch(
+            "apm_cli.deps.artifactory_orchestrator.validate_apm_package",
+            return_value=validation,
+        ):
+            result = orch.download_package(dep, tmp_path / "pkg")
+
+        assert archive.download_artifactory_archive.call_args.args[4] == commit
+        assert result.package.resolved_commit == commit
+        assert result.resolved_reference.ref_type is GitReferenceType.COMMIT
+        assert result.resolved_reference.resolved_commit == commit
+
     def test_validation_failure_raises_and_cleans_up(self, tmp_path):
         orch, _archive = self._orchestrator_with_validation_ok()
         dep = _dep(
@@ -285,6 +314,51 @@ class TestDownloadPackageDelegation:
         )
         with pytest.raises(RuntimeError, match=r"404"):
             orch.download_package(dep, tmp_path / "pkg")
+
+
+class TestDownloadSubdirectoryResolution:
+    """Artifactory virtual packages retain frozen commit metadata."""
+
+    def test_full_sha_preserves_immutable_resolution_metadata(self, tmp_path):
+        from apm_cli.models.apm_package import GitReferenceType
+
+        commit = "a" * 40
+        archive = MagicMock()
+        orch = ArtifactoryOrchestrator(archive)
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="art.example.com",
+            artifactory_prefix="apm/github",
+            reference=commit,
+            virtual_path="nested",
+        )
+        valid_pkg = types.SimpleNamespace(source=None, resolved_commit=None, name="pkg")
+        validation = types.SimpleNamespace(
+            is_valid=True, errors=[], package=valid_pkg, package_type="apm"
+        )
+
+        def materialize(*args, **kwargs):
+            del args, kwargs
+            archive_target = archive.download_artifactory_archive.call_args.args[5]
+            nested = archive_target / "nested"
+            nested.mkdir(parents=True)
+            (nested / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n", encoding="utf-8")
+
+        archive.download_artifactory_archive.side_effect = materialize
+        with patch(
+            "apm_cli.deps.artifactory_orchestrator.validate_apm_package",
+            return_value=validation,
+        ):
+            result = orch.download_subdirectory(
+                dep,
+                tmp_path / "pkg",
+                ("art.example.com", "apm/github", "https"),
+            )
+
+        assert archive.download_artifactory_archive.call_args.args[4] == commit
+        assert result.package.resolved_commit == commit
+        assert result.resolved_reference.ref_type is GitReferenceType.COMMIT
+        assert result.resolved_reference.resolved_commit == commit
 
 
 # ---------------------------------------------------------------------------

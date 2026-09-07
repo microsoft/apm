@@ -74,17 +74,20 @@ def _gitlab_project_state_via_git(
 
     def _probe(_token: str | None, git_env: dict[str, str]) -> bool | None:
         try:
-            probe_env = {**os.environ, **git_env, "GIT_TERMINAL_PROMPT": "0"}
+            from ..utils.git_env import git_remote_refs, git_subprocess_env
+
+            probe_env = git_subprocess_env(git_env)
+            probe_env["GIT_TERMINAL_PROMPT"] = "0"
             # A mocked or legacy resolver environment must not reintroduce
             # the deprecated raw-token transport into this subprocess.
             probe_env.pop("GIT_TOKEN", None)
             # auth-delegated: AuthResolver supplies the selected Git credential header.
-            result = subprocess.run(
-                ["git", "ls-remote", "--exit-code", project_url, "HEAD"],
-                capture_output=True,
-                text=True,
+            result = git_remote_refs(
+                project_url,
+                "HEAD",
                 timeout=10,
                 env=probe_env,
+                options=("--exit-code",),
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired):

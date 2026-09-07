@@ -124,6 +124,7 @@ These controls make the decision visible, but they do **not** make HTTP safe:
 - HTTP has no transport encryption or server authentication. A machine-in-the-middle can modify repository contents or refs in transit.
 - On the first HTTP fetch (or any update fetched over HTTP), the lockfile's `resolved_commit` and `content_hash` come from that same untrusted channel. They improve replay detection later, but they do not establish trustworthy provenance for the initial fetch.
 - APM explicitly suppresses git credential helpers for HTTP clone and `ls-remote` operations so stored tokens from Keychain, Credential Manager, `gh auth`, or other helpers are not sent over plaintext HTTP.
+- `apm config set mcp-registry-url http://...` is also explicit consent to plaintext registry metadata. A machine-in-the-middle can change the MCP package configuration returned by that registry; use HTTPS outside isolated development networks.
 
 For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](../registry-proxy/).
 
@@ -419,10 +420,13 @@ across targets.
 
 ## Executable trust gate
 
-APM blocks executable primitives from dependency packages by default: hooks,
-`bin/` executables, self-defined MCP servers (`registry: false`), and canvas
-extensions. Text primitives (skills, agents, instructions) are never gated, and
-local root `.apm/` content is always trusted.
+When the executable trust gate is enabled, APM blocks unapproved executable
+primitives from dependency packages: hooks, `bin/` executables, self-defined
+MCP servers (`registry: false`), LSP servers, and canvas extensions. The gate is
+opt-in for backward compatibility; a project `executables:` block or org policy
+enables it. Text primitives (skills, agents, instructions) are never gated, and
+local root `.apm/` content is always trusted. Supported runtimes may start an
+approved generated LSP command automatically after install.
 
 Trust is expressed through one noun, `executables`, across three layers, and the
 install gate and `apm audit` resolve it through a single deny-wins,
@@ -445,14 +449,17 @@ first-match-wins ladder:
 - **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
   shared with the team.
 - **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest
-  authority -- a machine-local override that can only narrow, never widen past
-  an org or project deny.
+  authority. `apm approve --user` can grant machine-local trust when no org or
+  project deny blocks it; `apm deny --user` narrows trust on one machine.
 
 Personal consent can never widen past an org deny, and the default (rung 7) is
 **gated pending approval** -- a package with executables and no opinion anywhere
 is parked until approved, not hard-denied. This release ships no `enforce`
-mandate runtime, no signing, and no content-hash binding; an org
-`executables.enforce` rung degrades to `recommend`.
+mandate runtime or package signing; an org `executables.enforce` rung degrades
+to `recommend`. Local bundle MCP, LSP, and canvas approvals are narrower: APM
+prints an exact `executables.allow` key containing the bundle's SHA-256 content
+digest, so another bundle that claims the same package name cannot inherit that
+consent.
 
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, or `absent`).
@@ -481,6 +488,17 @@ APM integrates MCP (Model Context Protocol) server configurations from packages.
 
 For Codex remote transport requirements, see
 [stdio vs HTTP servers](../../consumer/install-mcp-servers/#stdio-vs-http-servers).
+
+### Direct registry installs at user scope
+
+`apm install -g --mcp NAME` can use an MCP registry endpoint to update
+account-wide runtime configuration. APM requires HTTPS for registry URLs from
+the environment or saved config unless `MCP_REGISTRY_ALLOW_HTTP=1` is set, and
+rejects embedded credentials, query strings, and fragments. When a non-default
+registry supplies the entry, APM saves that registry URL for reproducible
+replay, but registry metadata is not signed or content-hash verified. Treat a
+custom registry as a trusted source with access to every global runtime selected
+for the install.
 
 ### Direct dependencies
 

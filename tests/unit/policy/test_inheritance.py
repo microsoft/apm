@@ -183,20 +183,20 @@ class TestDependencyTransparency(unittest.TestCase):
         self.assertEqual(result.dependencies.deny, ("evil/*",))
 
     def test_parent_require_child_explicit_empty_require(self):
-        """Child explicit empty require=() overrides parent (AC#2)."""
+        """Child explicit empty require cannot relax the parent requirement."""
         result = merge_policies(
             ApmPolicy(dependencies=DependencyPolicy(require=("contoso/hooks",))),
             ApmPolicy(dependencies=DependencyPolicy(require=())),
         )
-        self.assertEqual(result.dependencies.require, ())
+        self.assertEqual(result.dependencies.require, ("contoso/hooks",))
 
     def test_parent_deny_child_explicit_empty_deny(self):
-        """Child explicit empty deny=() overrides parent."""
+        """Child explicit empty deny cannot relax the parent restriction."""
         result = merge_policies(
             ApmPolicy(dependencies=DependencyPolicy(deny=("evil/*",))),
             ApmPolicy(dependencies=DependencyPolicy(deny=())),
         )
-        self.assertEqual(result.dependencies.deny, ())
+        self.assertEqual(result.dependencies.deny, ("evil/*",))
 
     def test_three_level_chain_require_transparency(self):
         """Enterprise require -> org omits -> repo omits -> require preserved."""

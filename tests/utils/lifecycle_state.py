@@ -500,7 +500,7 @@ def _mcp_state(lock: LockFile | None) -> dict[str, object]:
 
 
 def _empty_lsp_state() -> dict[str, object]:
-    return {"servers": [], "configs": {}}
+    return {"servers": [], "configs": {}, "target_servers": {}, "provenance": {}}
 
 
 def _lsp_state(lock: LockFile | None) -> dict[str, object]:
@@ -509,6 +509,10 @@ def _lsp_state(lock: LockFile | None) -> dict[str, object]:
     return {
         "servers": sorted(lock.lsp_servers),
         "configs": dict(sorted(lock.lsp_configs.items())),
+        "target_servers": {
+            target: sorted(servers) for target, servers in sorted(lock.lsp_target_servers.items())
+        },
+        "provenance": dict(sorted(lock.lsp_config_provenance.items())),
     }
 
 

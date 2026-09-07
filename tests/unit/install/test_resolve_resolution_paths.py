@@ -150,7 +150,8 @@ def test_refresh_keeps_registered_hook_live_while_replacement_downloads(
             self.marketplace_provenance = {}
             self._rejected_remote_local_keys = set()
 
-        def resolve_dependencies(self, _anchor):
+        def resolve_dependencies(self, _anchor, *, root_package=None):
+            assert root_package is ctx.apm_package
             downloaded = self._download_callback(dependency, modules)
             assert downloaded != package
             assert hook.read_text(encoding="ascii") == "old hook"

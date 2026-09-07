@@ -40,6 +40,21 @@ class _FakeTokenManager:
 
 
 class TestSetupEnvironment:
+    def test_strips_repository_locating_state(self):
+        tm = _FakeTokenManager(
+            {
+                "GIT_DIR": "/hook/repo.git",
+                "GIT_WORK_TREE": "/hook/worktree",
+                "GIT_OBJECT_DIRECTORY": "/hook/objects",
+            }
+        )
+
+        env = GitAuthEnvBuilder(tm).setup_environment()
+
+        assert "GIT_DIR" not in env
+        assert "GIT_WORK_TREE" not in env
+        assert "GIT_OBJECT_DIRECTORY" not in env
+
     def test_pat_path_sets_git_askpass_and_fence_vars(self):
         # Token manager already injected GITHUB_APM_PAT-style env.
         tm = _FakeTokenManager(
@@ -191,6 +206,20 @@ class TestNoninteractiveEnv:
         assert "GIT_CONFIG_GLOBAL" not in env
         # Token left as-is for subprocess to ignore; no leak via env.
         assert env["GITHUB_TOKEN"] == "ghp_xxx"
+
+    def test_strips_repository_locating_state(self):
+        base = {
+            **self._base(),
+            "GIT_DIR": "/hook/repo.git",
+            "GIT_WORK_TREE": "/hook/worktree",
+            "GIT_OBJECT_DIRECTORY": "/hook/objects",
+        }
+
+        env = GitAuthEnvBuilder.noninteractive_env(base)
+
+        assert "GIT_DIR" not in env
+        assert "GIT_WORK_TREE" not in env
+        assert "GIT_OBJECT_DIRECTORY" not in env
 
     def test_preserve_config_isolation_keeps_global_and_nosystem(self):
         env = GitAuthEnvBuilder.noninteractive_env(self._base(), preserve_config_isolation=True)

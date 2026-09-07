@@ -52,38 +52,23 @@ def _effective_allow(ctx) -> dict | None:
     executable deploys).
     """
     from apm_cli.security.executables import (
-        build_exec_trust_context,
+        exec_trust_context_for_project,
         materialize_exec_map,
     )
-    from apm_cli.utils.yaml_io import load_yaml
 
     if getattr(ctx, "exec_trust_ctx", None) is not None:
         return getattr(ctx, "exec_allow_map", None)
 
-    project_data: dict | None = None
-    manifest = getattr(ctx, "project_root", None)
-    if manifest is not None:
-        manifest_path = manifest / "apm.yml"
-        if manifest_path.is_file():
-            data = load_yaml(manifest_path)
-            if isinstance(data, dict):
-                project_data = data
-                if data.get("allowExecutables") is not None:
-                    from apm_cli.security.executables import (
-                        warn_allow_executables_alias_once,
-                    )
-
-                    warn_allow_executables_alias_once(getattr(ctx, "logger", None))
-
-    # Fall back to the in-memory gate signal when apm.yml is unreadable so a
-    # project that opted in via allowExecutables still gates.
-    if project_data is None:
-        project_val = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
-        if isinstance(project_val, dict):
-            project_data = {"allowExecutables": project_val}
-
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
-    trust_ctx = build_exec_trust_context(policy=policy, project_data=project_data)
+    project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+    project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
+    trust_ctx = exec_trust_context_for_project(
+        project_root,
+        policy=policy,
+        fallback_allow_executables=project_allow,
+        logger=getattr(ctx, "logger", None),
+        migrate_user_legacy=not getattr(ctx, "dry_run", False),
+    )
     allow_map = materialize_exec_map(trust_ctx)
     # Cache the resolved context and allow map once per install so each
     # dependency uses the same precedence ladder without re-reading policy files.
@@ -182,6 +167,7 @@ def preflight_agent_plugin_dry_run(
             source_root,
             user_scope=is_user_scope(ctx.scope),
             explicit_target=explicit_target,
+            create_config=ctx.create_config,
         )
     except Exception:
         targets = getattr(ctx, "targets", None)
@@ -321,10 +307,9 @@ def _integrate_materialization(
             return deltas
 
     # No-op when targets are empty or acquire decided to skip integration
-    # (signalled by package_info=None).  Still record an empty deployed
-    # list so cleanup phase has a deterministic state.
+    # (signalled by package_info=None). Leave this dependency absent from the
+    # integration outcome so cleanup does not treat every prior file as stale.
     if m.package_info is None or not ctx.targets:
-        ctx.package_deployed_files[dep_key] = []
         return deltas
 
     try:

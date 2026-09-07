@@ -612,7 +612,7 @@ class TestTryLoadDependencyPackage:
         assert pkg.agent_plugin is not None
         assert not (pkg_dir / "apm.yml").exists()
 
-    def test_native_agent_plugin_retains_projected_transitive_apm_dependencies(
+    def test_eligible_apm_manifest_wins_and_retains_transitive_dependencies(
         self, tmp_path: Path
     ) -> None:
         from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
@@ -631,7 +631,13 @@ class TestTryLoadDependencyPackage:
             encoding="utf-8",
         )
         (pkg_dir / "apm.yml").write_text(
-            yaml.safe_dump({"dependencies": {"apm": ["org/child#v1.0.0"]}}),
+            yaml.safe_dump(
+                {
+                    "name": "apm-native",
+                    "version": "3.0.0",
+                    "dependencies": {"apm": ["org/child#v1.0.0"]},
+                }
+            ),
             encoding="utf-8",
         )
         ref = _make_dep_ref("org/native")
@@ -640,6 +646,9 @@ class TestTryLoadDependencyPackage:
         pkg = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
 
         assert pkg is not None
+        assert pkg.name == "apm-native"
+        assert pkg.version == "3.0.0"
+        assert pkg.agent_plugin is None
         assert [dep.repo_url for dep in pkg.get_apm_dependencies()] == ["org/child"]
 
     def test_malformed_root_plugin_fails_closed_without_apm_yml(self, tmp_path: Path) -> None:
@@ -958,6 +967,47 @@ class TestTryLoadDependencyPackageForceRecheck:
         assert package is not None
         assert package.version == "2.0.0"
         assert package.package_path == live
+
+    def test_legacy_marketplace_candidate_is_normalized_before_activation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A staged legacy plugin is normalized with its source anchor before publication."""
+        mods = tmp_path / "apm_modules"
+        live = mods / "org" / "legacy"
+        candidate = mods / ".staging" / "org" / "legacy"
+        candidate.mkdir(parents=True)
+        (candidate / "plugin.json").write_text(
+            json.dumps({"name": "legacy", "version": "2.0.0"}),
+            encoding="utf-8",
+        )
+        activated: list[Path] = []
+        ref = self._semver_dep_ref(live, key="org/legacy")
+
+        def activate(path: Path) -> Path:
+            activated.append(path)
+            live.parent.mkdir(parents=True)
+            path.replace(live)
+            return live
+
+        resolver = APMDependencyResolver(
+            apm_modules_dir=mods,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=activate,
+            update_refs=True,
+        )
+
+        package = resolver._try_load_dependency_package(ref)
+
+        assert activated == [candidate]
+        assert package is not None
+        assert package.package_path == live
+        assert package.source_path == live.resolve()
+        assert (live / "apm.yml").is_file()
+        reloaded = APMDependencyResolver(apm_modules_dir=mods)._try_load_dependency_package(ref)
+        assert reloaded is not None
+        assert reloaded.package_path == live
+        assert reloaded.source_path == live.resolve()
 
     def test_cached_local_package_is_not_activated_as_candidate(self, tmp_path: Path) -> None:
         """A live local cache hit remains readable for transitive resolution."""

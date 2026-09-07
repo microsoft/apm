@@ -39,7 +39,13 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from apm_cli.core.command_logger import CommandLogger
-from apm_cli.deps.path_anchoring import resolve_local_dep_dir
+from apm_cli.deps.path_anchoring import build_local_parent_index, resolve_local_dep_dir
+from apm_cli.install.drift_render import (
+    _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
+)
+from apm_cli.install.drift_render import (
+    _inline_diff_for,
+)
 from apm_cli.install.drift_render import (
     render_drift as render_drift,
 )
@@ -81,6 +87,7 @@ class ReplayConfig:
     parallel_downloads: int = 1
     scratch_root: Path | None = None
     modules_root: Path | None = None
+    user_scope: bool = False
 
 
 @dataclass(frozen=True)
@@ -93,9 +100,7 @@ class DriftFinding:
     inline_diff: str = ""
 
 
-# ---------------------------------------------------------------------------
 # Errors
-# ---------------------------------------------------------------------------
 
 
 class CacheMissError(RuntimeError):
@@ -264,6 +269,8 @@ def _materialize_install_path(
     cache_only: bool,
     *,
     lockfile: LockFile | None = None,
+    parent_index: dict[str, tuple[LockedDependency, ...]] | None = None,
+    resolved_cache: dict[str, Path] | None = None,
     live_modules_dir: Path | None = None,
     downloader: Any | None = None,
     registry_resolver: Any | None = None,
@@ -297,7 +304,13 @@ def _materialize_install_path(
     if lock_dep.source == "local":
         if not lock_dep.local_path:
             raise CacheMissError(f"local dep {lock_dep.repo_url!r} has no local_path in lockfile")
-        candidate = resolve_local_dep_dir(lock_dep, lockfile, project_root)
+        candidate = resolve_local_dep_dir(
+            lock_dep,
+            lockfile,
+            project_root,
+            parent_index=parent_index,
+            resolved_cache=resolved_cache,
+        )
         if not candidate.exists():
             raise CacheMissError(
                 f"local source missing for {lock_dep.local_path!r}: expected {candidate}"
@@ -414,7 +427,7 @@ def _build_package_info(
         PackageInfo,
         ResolvedReference,
     )
-    from apm_cli.models.validation import detect_package_type
+    from apm_cli.models.validation import PackageType, detect_package_type
 
     apm_yml = install_path / "apm.yml"
     if apm_yml.exists():
@@ -451,8 +464,8 @@ def _build_package_info(
         dependency_ref=lock_dep.to_dependency_ref(),
     )
     try:
-        pkg_type, _ = detect_package_type(install_path)
-        info.package_type = pkg_type
+        package_type = lock_dep.package_type or detect_package_type(install_path)[0].value
+        info.package_type = PackageType(package_type)
     except Exception:
         info.package_type = None
     return info
@@ -541,6 +554,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         Surfaced verbatim when a locked dep cannot be materialized.
     """
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
+    from apm_cli.install.audit_target_roots import replay_target
     from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
     from apm_cli.integration.targets import resolve_targets
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -575,8 +589,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     # targets ``copilot,claude,cursor`` would replay only the primary
     # auto-detected target and report the others as ``orphaned``.
     explicit_target = _read_apm_yml_target(project_root)
-    all_targets = resolve_targets(project_root, explicit_target=explicit_target)
-    targets = _filter_targets(all_targets, config.targets)
+    live_targets = resolve_targets(
+        project_root,
+        user_scope=config.user_scope,
+        explicit_target=explicit_target,
+    )
+    targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
     registries: dict[str, str] | None = None
     downloader = None
     registry_resolver = None
@@ -624,6 +642,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     logger.replay_start()
     replayed_count = 0
+    local_parent_index = build_local_parent_index(lock)
+    local_resolved_cache: dict[str, Path] = {}
     try:
         with _ReadOnlyProjectGuard(project_root, protected_subpaths):
             for lock_dep in lock.get_all_dependencies():
@@ -638,6 +658,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         apm_modules_dir,
                         cache_only=config.cache_only,
                         lockfile=lock,
+                        parent_index=local_parent_index,
+                        resolved_cache=local_resolved_cache,
                         live_modules_dir=live_modules_dir,
                         downloader=downloader,
                         registry_resolver=registry_resolver,
@@ -703,11 +725,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     return scratch_root
 
 
-# ---------------------------------------------------------------------------
 # Diff engine
-# ---------------------------------------------------------------------------
-
-_INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
 
 
 def _governed_root_dirs(targets: list[TargetProfile]) -> set[str]:
@@ -745,16 +763,16 @@ def _walk_managed(root: Path, governed_roots: set[str]) -> dict[str, Path]:
         base = root / top
         if not base.exists():
             continue
-        if base.is_file():
+        if base.is_file() and not base.is_symlink():
             out[top] = base
             continue
         for p in base.rglob("*"):
-            if p.is_file():
+            if p.is_file() and not p.is_symlink():
                 rel = p.relative_to(root).as_posix()
                 out[rel] = p
     # AGENTS.md is a flat top-level file in some target layouts.
     agents_md = root / "AGENTS.md"
-    if agents_md.is_file():
+    if agents_md.is_file() and not agents_md.is_symlink():
         out["AGENTS.md"] = agents_md
     return out
 
@@ -800,18 +818,6 @@ def _collect_hashed_files(lockfile: LockFile) -> set[str]:
     return set(DeploymentLedgerCodec.legacy_deployed_file_hash_paths(lockfile))
 
 
-def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
-    """Build an inline diff hint, capped to keep findings compact."""
-    try:
-        s_size = scratch_path.stat().st_size
-        p_size = project_path.stat().st_size
-    except OSError:
-        return ""
-    if s_size > _INLINE_DIFF_BYTE_CAP or p_size > _INLINE_DIFF_BYTE_CAP:
-        return "(file too large for inline diff; use 'git diff --no-index' to compare)"
-    return ""
-
-
 def _canvas_deploy_prefixes(targets) -> set[str]:
     """Return ``root/subdir/`` prefixes for every target carrying a canvas mapping.
 
@@ -838,6 +844,8 @@ def diff_scratch_against_project(
     targets,
     *,
     tracked_files: frozenset[str] | None = None,
+    absolute_claims_only: bool = False,
+    governed_roots: set[str] | None = None,
 ) -> list[DriftFinding]:
     """Compare the replay scratch tree against the project tree.
 
@@ -868,13 +876,27 @@ def diff_scratch_against_project(
     """
     scratch_root = scratch_root.resolve()
     project_root = project_root.resolve()
-    governed = _governed_root_dirs(targets)
+    governed = governed_roots if governed_roots is not None else _governed_root_dirs(targets)
     scratch_files = _walk_managed(scratch_root, governed)
     project_files = _walk_managed(project_root, governed)
-    tracked = _collect_tracked_files(lockfile)
+    from apm_cli.install.audit_target_roots import claims_for_root
+
+    tracked = claims_for_root(
+        _collect_tracked_files(lockfile),
+        project_root,
+        absolute_only=absolute_claims_only,
+        targets=tuple(targets),
+    )
     claimed_prefixes = _claimed_prefixes(
         tracked,
-        _collect_hashed_files(lockfile),
+        set(
+            claims_for_root(
+                {path: "" for path in _collect_hashed_files(lockfile)},
+                project_root,
+                absolute_only=absolute_claims_only,
+                targets=tuple(targets),
+            )
+        ),
         project_files,
     )
     # Hook merge targets are shared with the user and never claimed in

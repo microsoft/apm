@@ -91,6 +91,11 @@ class _RecordingHookIntegrator:
         return self.reconcile_result
 
 
+class _RejectingInstructionIntegrator:
+    def preflight_instructions_for_targets(self, *_args, **_kwargs) -> None:
+        raise ValueError("malformed instruction frontmatter")
+
+
 def _bundle(hook_integrator) -> IntegratorBundle:
     return IntegratorBundle(
         prompt=None,
@@ -101,6 +106,61 @@ def _bundle(hook_integrator) -> IntegratorBundle:
         hook=hook_integrator,
         canvas=None,
     )
+
+
+def test_instruction_preflight_precedes_excluded_hook_reconciliation(tmp_path: Path) -> None:
+    """A rejected instruction cannot leave excluded-target hook mutations."""
+    hook_integrator = _RecordingHookIntegrator()
+    bundle = _bundle(hook_integrator)
+    bundle = replace(bundle, instruction=_RejectingInstructionIntegrator())
+    package_path = tmp_path / "pkg"
+    package_path.mkdir()
+
+    with pytest.raises(ValueError, match="malformed instruction frontmatter"):
+        integrate_package_primitives(
+            _package_info(package_path, target="copilot"),
+            tmp_path / "project",
+            targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]],
+            integrators=bundle,
+            force=False,
+            managed_files=set(),
+            diagnostics=DiagnosticCollector(),
+            package_name="targeted-hooks",
+        )
+
+    assert hook_integrator.reconciled_targets == []
+
+
+def test_native_plugin_reconciles_excluded_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native plugin admission still removes excluded-target hook ownership."""
+    from apm_cli.copilot_plugins import capability
+    from apm_cli.install import native_plugin_admission
+
+    hook_integrator = _RecordingHookIntegrator()
+    monkeypatch.setattr(capability, "admits_native_plugin", lambda _package: True)
+    monkeypatch.setattr(
+        native_plugin_admission,
+        "finalize_native_plugin",
+        lambda result, *_args, **_kwargs: result,
+    )
+    package_path = tmp_path / "pkg"
+    package_path.mkdir()
+
+    integrate_package_primitives(
+        _package_info(package_path, target="copilot"),
+        tmp_path / "project",
+        targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]],
+        integrators=_bundle(hook_integrator),
+        force=False,
+        managed_files=set(),
+        diagnostics=DiagnosticCollector(),
+        package_name="targeted-hooks",
+    )
+
+    assert hook_integrator.reconciled_targets == ["claude"]
 
 
 def _run_with_targets(

@@ -3023,26 +3023,6 @@ class TestMarketplaceClientFetchPaths:
         path = _auto_detect_path(source)
         assert path is None
 
-    def test_host_from_url_http_url(self) -> None:
-        """_host_from_url extracts host from HTTP URL."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        host = _host_from_url("https://gitea.example.com/org/repo")
-        assert host == "gitea.example.com"
-
-    def test_host_from_url_scp_like(self) -> None:
-        """_host_from_url handles SCP-like git URLs."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        host = _host_from_url("git@github.com:org/repo.git")
-        assert host == "github.com"
-
-    def test_host_from_url_empty_returns_empty(self) -> None:
-        """_host_from_url returns empty string for empty input."""
-        from apm_cli.marketplace.client import _host_from_url
-
-        assert _host_from_url("") == ""
-
     def test_fetch_file_local_kind_dispatches(self, tmp_path: Path) -> None:
         """_fetch_file dispatches local kind to _fetch_local."""
         from apm_cli.marketplace.client import _fetch_file
@@ -4036,7 +4016,7 @@ class TestDependencyTypes:
 
 
 class TestMCPConflictMatrix:
-    """Tests for MCP flag conflict validation (E1-E15)."""
+    """Tests for MCP flag conflict validation."""
 
     def _base_kwargs(self, **overrides) -> dict:
         """Return base valid kwargs for validate_mcp_conflicts."""
@@ -4050,7 +4030,6 @@ class TestMCPConflictMatrix:
             "headers": {},
             "mcp_version": None,
             "command_argv": None,
-            "global_": False,
             "only": None,
             "update": False,
             "any_transport_flag": False,
@@ -4121,15 +4100,6 @@ class TestMCPConflictMatrix:
 
         with pytest.raises(click.UsageError, match="cannot mix"):
             validate_mcp_conflicts(**self._base_kwargs(pre_dash_packages=["owner/repo"]))
-
-    def test_e2_global_with_mcp(self) -> None:
-        """--global with --mcp raises UsageError."""
-        import click
-
-        from apm_cli.install.mcp.conflicts import validate_mcp_conflicts
-
-        with pytest.raises(click.UsageError, match="--global is not supported"):
-            validate_mcp_conflicts(**self._base_kwargs(global_=True))
 
     def test_e3_only_apm_with_mcp(self) -> None:
         """--only apm with --mcp raises UsageError."""

@@ -14,18 +14,22 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
-def get_effective_default_registry(data: dict) -> str | None:
+def get_effective_default_registry(data: dict, *, create_config: bool = True) -> str | None:
     """Return the effective default registry name for CLI shorthand routing.
 
     Checks the project-level ``registries.default`` key from *data* (the raw
     ``apm.yml`` dict) first, then falls back to the user-level default
     configured via ``apm config set``.  Returns ``None`` when no default is
     configured at either level.
+
+    Args:
+        create_config: When false, do not create a missing user config while
+            reading the user-level default.
     """
     try:
         from ..deps.registry.feature_gate import is_package_registry_enabled
 
-        if not is_package_registry_enabled():
+        if not is_package_registry_enabled(create_config=create_config):
             return None
     except Exception:
         return None
@@ -46,7 +50,7 @@ def get_effective_default_registry(data: dict) -> str | None:
         # names are intentionally excluded: they are validated above against the
         # project registries block, and the user config has no knowledge of
         # project-only registry names.
-        _, user_default = resolve_effective_registries({}, None)
+        _, user_default = resolve_effective_registries({}, None, create_config=create_config)
         return user_default
     except Exception:
         return None

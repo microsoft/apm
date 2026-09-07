@@ -69,6 +69,7 @@ from ..deps.github_downloader import GitHubPackageDownloader
 from ..deps.revision_pins import (
     RemoteRefDownloader,
     RevisionPinResolutionError,
+    RevisionPinResolutionResult,
     RevisionPinUpdate,
     apply_revision_pin_updates,
     render_revision_pin_update_plan,
@@ -81,6 +82,7 @@ from ..install.errors import (
     PolicyViolationError,
     RequiredIntegrationError,
 )
+from ..install.locking import serialized_lifecycle
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
@@ -146,7 +148,7 @@ def _resolve_and_stage_revision_pin_updates(
     logger: InstallLogger,
     downloader: RemoteRefDownloader | None = None,
     max_workers: int = 4,
-) -> list[RevisionPinUpdate]:
+) -> RevisionPinResolutionResult:
     """Resolve SHA pins and stage their in-memory references for the plan.
 
     The passed dependency references belong to a staged APMPackage copy, not to
@@ -164,14 +166,14 @@ def _resolve_and_stage_revision_pin_updates(
         # independently re-resolves the freshly-written pin against upstream
         # before downloading. Threading the SHA resolved here into install
         # would collapse the authoritative-upstream fence.
-        updates = resolve_revision_pin_updates(
+        resolution = resolve_revision_pin_updates(
             all_declared_deps,
             downloader or _build_revision_pin_downloader(),
             only_packages=only_set,
             max_workers=max_workers,
         )
     except RevisionPinResolutionError as e:
-        logger.error(str(e))
+        logger.revision_pin_resolution_failed(e)
         sys.exit(1)
     except (GitCommandError, OSError) as e:
         logger.error(f"Failed to resolve revision pins: {e}")
@@ -179,12 +181,14 @@ def _resolve_and_stage_revision_pin_updates(
             logger.info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
-    updates_by_key = {update.dep_key: update for update in updates}
+    logger.revision_pins_retained(resolution.skips)
+
+    updates_by_key = {update.dep_key: update for update in resolution.updates}
     for dep_ref in all_declared_deps:
         update = updates_by_key.get(dep_ref.get_unique_key())
         if update is not None:
             dep_ref.reference = update.new_sha
-    return updates
+    return resolution
 
 
 def _annotate_lockfile_revision_tags(project_root: Path, updates: list[RevisionPinUpdate]) -> None:
@@ -227,6 +231,9 @@ def _run_mcp_lsp_integration(
     diagnostics: Any,
     logger: InstallLogger,
     verbose: bool,
+    effective_allow_executables: dict[str, dict[str, bool]] | None = None,
+    effective_allow_resolved: bool = False,
+    force: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -307,6 +314,9 @@ def _run_mcp_lsp_integration(
         target_context=(mcp_apm_config, effective_target, scope),
         target_decision=target_decision,
         fail_on_write_error=True,
+        effective_allow_executables=effective_allow_executables,
+        effective_allow_resolved=effective_allow_resolved,
+        force=force,
     )
 
 
@@ -318,6 +328,7 @@ def _handle_service_only_update(
     dry_run: bool,
     logger: InstallLogger,
     verbose: bool,
+    force: bool,
 ) -> bool:
     """Reconcile service-only manifests and return whether update is complete."""
     if apm_package.has_any_apm_dependencies():
@@ -359,6 +370,7 @@ def _handle_service_only_update(
             diagnostics=None,
             logger=logger,
             verbose=verbose,
+            force=force,
         )
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
@@ -439,6 +451,7 @@ def _handle_service_only_update(
     ),
 )
 @click.pass_context
+@serialized_lifecycle
 def update(
     ctx: click.Context,
     packages: tuple[str, ...],
@@ -553,6 +566,35 @@ def _run_dep_update(
     force: bool = False,
     parallel_downloads: int = 4,
 ) -> None:
+    """Serialize update with every other mutation of the same workspace."""
+    from apm_cli.core.scope import InstallScope
+
+    effective_scope = scope or InstallScope.PROJECT
+    _run_dep_update_locked(
+        assume_yes=assume_yes,
+        dry_run=dry_run,
+        verbose=verbose,
+        project_root=project_root,
+        target=target,
+        scope=effective_scope,
+        packages=packages,
+        force=force,
+        parallel_downloads=parallel_downloads,
+    )
+
+
+def _run_dep_update_locked(
+    *,
+    assume_yes: bool,
+    dry_run: bool,
+    verbose: bool,
+    project_root: Path | None = None,
+    target: str | list[str] | None = None,
+    scope=None,
+    packages: tuple[str, ...] = (),
+    force: bool = False,
+    parallel_downloads: int = 4,
+) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
 
     When ``project_root`` is provided, the working directory is
@@ -606,6 +648,7 @@ def _run_dep_update(
         dry_run=dry_run,
         logger=logger,
         verbose=verbose,
+        force=force,
     ):
         return
 
@@ -629,12 +672,13 @@ def _run_dep_update(
         _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
         sys.exit(1)
 
-    revision_pin_updates = _resolve_and_stage_revision_pin_updates(
+    revision_pin_resolution = _resolve_and_stage_revision_pin_updates(
         all_declared_deps=all_declared_deps,
         only_packages=only_packages,
         logger=logger,
         max_workers=parallel_downloads if parallel_downloads > 0 else 1,
     )
+    revision_pin_updates = revision_pin_resolution.updates
 
     plan_state = _UpdateRunState()
 
@@ -690,10 +734,18 @@ def _run_dep_update(
                 _rich_echo("")
         elif not revision_pin_updates:
             if not _cache_rehydration_required:
-                _rich_success(
-                    "All dependencies already at their latest matching refs.",
-                    symbol="check",
-                )
+                retained_count = len(revision_pin_resolution.skips)
+                if retained_count:
+                    noun = "pin" if retained_count == 1 else "pins"
+                    logger.info(
+                        f"No dependencies updated; retained {retained_count} revision "
+                        f"{noun} at the current SHA."
+                    )
+                else:
+                    _rich_success(
+                        "All dependencies already at their latest matching refs.",
+                        symbol="check",
+                    )
                 return False
             plan_state.cache_rehydration_requested = True
 
@@ -785,6 +837,14 @@ def _run_dep_update(
             _rich_info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
+    from apm_cli.install.summary import exit_unless_install_result_allows_success
+
+    exit_unless_install_result_allows_success(
+        logger=logger,
+        result=result,
+        allow_neutral_outcome=True,
+    )
+
     plan = plan_state.plan
     if plan is None or not isinstance(plan, UpdatePlan):
         return
@@ -822,6 +882,9 @@ def _run_dep_update(
                 diagnostics=getattr(result, "diagnostics", None),
                 logger=logger,
                 verbose=verbose,
+                effective_allow_executables=getattr(result, "exec_allow_map", None),
+                effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
+                force=force,
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))

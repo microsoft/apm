@@ -13,6 +13,7 @@ from pathlib import Path
 from filelock import FileLock, Timeout
 
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
+from apm_cli.utils.staging_guard import STAGING_DIR_NAME
 
 _STAGING_NAME = re.compile(r"[0-9a-f]{32}")
 
@@ -24,7 +25,7 @@ class ResolutionStagingSession:
         """Create an empty staging session rooted below ``apm_modules``."""
         self._modules_dir = apm_modules_dir
         self._modules_existed = apm_modules_dir.exists()
-        self._staging_root = apm_modules_dir / ".apm-resolution-staging" / uuid.uuid4().hex
+        self._staging_root = apm_modules_dir / STAGING_DIR_NAME / uuid.uuid4().hex
         self._staging_lock_path = self._staging_root.with_suffix(".lock")
         self._staging_lock: FileLock | None = None
         self._backups: dict[Path, Path | None] = {}

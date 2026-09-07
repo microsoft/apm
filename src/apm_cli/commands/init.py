@@ -21,6 +21,7 @@ from ..core.target_detection import (
     detect_signals,
     manifest_targets_from_target_option,
 )
+from ..install.locking import serialized_lifecycle
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
@@ -92,6 +93,7 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
+@serialized_lifecycle
 def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
     """Initialize a new APM project (like npm init).
 

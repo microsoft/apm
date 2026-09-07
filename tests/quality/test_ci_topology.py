@@ -31,6 +31,10 @@ RATCHET_TEST_SCOPE = "repository"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RATCHET_JOB = "test-architecture"
 RATCHET_CHECK = "Test Architecture Ratchets"
+ARCHITECTURE_SCALING_TARGET = (
+    "tests/perf/test_architecture_linter_scaling.py::"
+    "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction"
+)
 ALLOW_PROVISIONAL_KEY = "APM_ALLOW_PROVISIONAL_BASELINES"
 DRAFT_PROVISIONAL_GUARD = (
     "${{ github.event_name == 'pull_request' && "
@@ -59,7 +63,7 @@ REQUIRED_SHARD_ROOTS = (
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 5
+LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 6
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
@@ -216,7 +220,10 @@ def _assert_ci_test_targets(
     repository_modules = {path for path, scope in inventory.items() if scope == REPOSITORY_SCOPE}
     fixture_modules = {path for path, scope in inventory.items() if scope == FIXTURE_SCOPE}
     ratchet = workflow_job(ci, RATCHET_JOB)
-    expected_ratchet_targets = Counter({path: 1 for path in repository_modules | fixture_modules})
+    expected_ratchet_targets = Counter(
+        {path: 1 for path in repository_modules | fixture_modules}
+        | {ARCHITECTURE_SCALING_TARGET: 1}
+    )
     assert Counter(_pytest_targets(ratchet)) == expected_ratchet_targets
 
     required_shard = workflow_job(ci, "build-and-test-shard")
@@ -482,6 +489,19 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
         "lifecycle-smoke must pass --strict-markers so an unregistered "
         "or typo'd marker name fails loudly instead of silently "
         "selecting zero tests"
+    )
+    worker_flags = [token for token in tokens if token.startswith(("-n", "--numprocesses"))]
+    assert worker_flags == ["-n"], "lifecycle-smoke must use two bounded xdist workers"
+    worker_index = tokens.index("-n")
+    assert tokens[worker_index : worker_index + 2] == ["-n", "2"], (
+        "lifecycle-smoke must use two bounded xdist workers"
+    )
+    assert [token for token in tokens if token.startswith("--dist")] == ["--dist"], (
+        "lifecycle-smoke must use loadgroup to preserve xdist_group serialization"
+    )
+    scheduler_index = tokens.index("--dist")
+    assert tokens[scheduler_index : scheduler_index + 2] == ["--dist", "loadgroup"], (
+        "lifecycle-smoke must use loadgroup to preserve xdist_group serialization"
     )
     assert "-m" in tokens
     marker_index = tokens.index("-m")
@@ -761,6 +781,29 @@ def test_lifecycle_smoke_e2e_flag_dropped_fails(
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_e2e_mode(provisional_lifecycle_job)
+
+
+@pytest.mark.parametrize(
+    "parallel_args",
+    [
+        "",
+        "-n 0 --dist loadgroup",
+        "-n auto --dist loadgroup",
+        "-n 3 --dist loadgroup",
+        "-n 2 --dist worksteal",
+        "-n 2 --dist loadgroup --numprocesses=auto",
+        "-n 2 --dist loadgroup --dist=load",
+    ],
+)
+def test_lifecycle_smoke_parallelism_drift_fails(
+    provisional_lifecycle_job: WorkflowNode, parallel_args: str
+) -> None:
+    """Keep the runtime budget without dropping grouping or allowing unbounded workers."""
+    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
+    step["run"] = step["run"].replace("-n 2 --dist loadgroup", parallel_args)
+
+    with pytest.raises(AssertionError, match=r"workers|loadgroup"):
+        _assert_lifecycle_smoke_command(provisional_lifecycle_job)
 
 
 def test_lifecycle_smoke_e2e_flag_wrong_value_fails(

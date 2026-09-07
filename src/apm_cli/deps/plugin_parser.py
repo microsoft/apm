@@ -21,6 +21,7 @@ from typing import Any
 
 import yaml
 
+from ..bundle.plugin_layout import plugin_command_prompt_name
 from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
@@ -36,6 +37,10 @@ _logger = logging.getLogger(__name__)
 # Cap the file size first, then funnel every parse failure into a single
 # ``ValueError`` so callers fail closed with one except type.
 _MAX_PLUGIN_JSON_BYTES = 5 * 1024 * 1024
+_LSP_FIELD_ALIASES = (
+    ("extensionToLanguage", "fileExtensions"),
+    ("startupTimeout", "warmupTimeoutMs"),
+)
 _PLUGIN_SKILL_SOURCES_FILE = ".plugin-skill-sources.json"
 
 
@@ -95,20 +100,11 @@ def _assert_no_symlink_descendants(target: Path) -> None:
 
 
 def _surface_warning(message: str, logger: logging.Logger) -> None:
-    """Emit a warning to both the stdlib logger and the rich console.
-
-    The ``apm`` stdlib logger has no handlers configured by default, so
-    ``logger.warning`` calls are silently dropped in non-debug runs. For
-    user-visible plugin-parse issues (skipped MCP servers, validation
-    failures), also route through ``_rich_warning`` so the user sees them
-    even without ``--verbose``. Falls back gracefully if Rich is unavailable.
-    """
-    logger.warning(message)
-    try:  # noqa: SIM105
+    """Emit one standard user-facing warning, with logging as fallback."""
+    try:
         _rich_warning(message, symbol="warning")
     except Exception:
-        # Console output is best-effort; never mask the underlying warning.
-        pass
+        logger.warning(message)
 
 
 def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> bool:
@@ -357,6 +353,13 @@ def normalized_plugin_skill_sources(plugin_path: Path) -> tuple[dict[str, Path],
     return resolved, declared
 
 
+def has_normalized_plugin_skill_sources_receipt(plugin_path: Path) -> bool:
+    """Return whether parser-owned plugin skill membership is present."""
+    apm_dir = plugin_path.resolve() / ".apm"
+    receipt = apm_dir / _PLUGIN_SKILL_SOURCES_FILE
+    return not apm_dir.is_symlink() and receipt.is_file() and not receipt.is_symlink()
+
+
 def _write_plugin_skill_sources(
     plugin_path: Path,
     apm_dir: Path,
@@ -484,7 +487,10 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     ):
         manifest = parse_plugin_manifest(plugin_json_path)
         from ..agent_plugins.errors import AgentPluginLegacyBoundaryError
-        from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+        from ..install.primitive_classification import (
+            PluginSchemaRoute,
+            classify_plugin_manifest_schema,
+        )
 
         if classify_plugin_manifest_schema(manifest) is PluginSchemaRoute.AGENT_PLUGIN:
             raise AgentPluginLegacyBoundaryError(
@@ -498,7 +504,13 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
             raise ValueError("Present root plugin.json must declare a non-empty name")
         manifest["name"] = plugin_path.name
 
-    return synthesize_apm_yml_from_plugin(plugin_path, manifest)
+    # Keep the generated manifest portable. APMPackage expands the placeholder
+    # when it loads the manifest, using the package's current published root.
+    return synthesize_apm_yml_from_plugin(
+        plugin_path,
+        manifest,
+        substitute_plugin_root=False,
+    )
 
 
 def _validate_declared_component_paths(plugin_path: Path, manifest: dict[str, Any]) -> None:
@@ -604,7 +616,7 @@ def synthesize_apm_yml_from_plugin(
         substitute_plugin_root=substitute_plugin_root,
     )
     if lsp_servers:
-        lsp_deps = _lsp_servers_to_apm_deps(
+        lsp_deps = lsp_servers_to_apm_deps(
             lsp_servers,
             plugin_path,
             warn_on_invalid=warn_on_invalid_servers,
@@ -770,6 +782,24 @@ def resolve_plugin_root_placeholders(value: Any, plugin_path: Path) -> Any:
         }
     if isinstance(value, list):
         return [resolve_plugin_root_placeholders(item, plugin_path) for item in value]
+    return value
+
+
+def rebase_plugin_root_paths(value: Any, old_root: Path, new_root: Path) -> Any:
+    """Repoint already-substituted plugin-root paths at a new package root.
+
+    Exact inverse of :func:`resolve_plugin_root_placeholders`: the placeholder
+    may sit anywhere in a string and appear more than once, so every occurrence
+    of *old_root* is swapped rather than only a leading path prefix.
+    """
+    if isinstance(value, str):
+        return value.replace(str(old_root), str(new_root))
+    if isinstance(value, dict):
+        return {
+            key: rebase_plugin_root_paths(item, old_root, new_root) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [rebase_plugin_root_paths(item, old_root, new_root) for item in value]
     return value
 
 
@@ -970,7 +1000,7 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     return dict(data)
 
 
-def _lsp_servers_to_apm_deps(
+def lsp_servers_to_apm_deps(
     servers: dict[str, Any],
     plugin_path: Path,
     *,
@@ -981,6 +1011,14 @@ def _lsp_servers_to_apm_deps(
     Required fields per Claude Code spec:
     - ``command``: binary to run
     - ``extensionToLanguage``: mapping of file extensions to language IDs
+
+    Copilot-dialect spellings are accepted as aliases (#2509): plugins
+    authored against the Copilot CLI schema -- including the official
+    ``dotnet/skills`` dotnet plugin -- write the extension map as
+    ``fileExtensions`` and the startup budget as ``warmupTimeoutMs``.
+    APM itself emits ``fileExtensions`` when generating Copilot output,
+    so rejecting it on intake would drop servers that every supported
+    consumer runtime accepts. Canonical names win when both are present.
 
     All resulting entries are routed through ``LSPDependency.from_dict()``
     for validation. Entries that fail validation are skipped with a warning.
@@ -1004,6 +1042,7 @@ def _lsp_servers_to_apm_deps(
             continue
 
         dep: dict[str, Any] = {"name": name}
+        aliases_used: list[tuple[str, str]] = []
 
         # Copy all recognized fields
         for key in (
@@ -1023,13 +1062,49 @@ def _lsp_servers_to_apm_deps(
             if key in cfg:
                 dep[key] = cfg[key]
 
+        # Copilot-dialect aliases; canonical spelling wins when both exist.
+        for canonical, alias in _LSP_FIELD_ALIASES:
+            if dep.get(canonical) is None and alias in cfg:
+                dep[canonical] = cfg[alias]
+                aliases_used.append((alias, canonical))
+                logger.debug(
+                    "Normalizing LSP server '%s' from plugin '%s': '%s' to '%s'",
+                    name,
+                    plugin_path.name,
+                    alias,
+                    canonical,
+                )
+            elif canonical in dep and alias in cfg and dep[canonical] != cfg[alias]:
+                _surface_warning(
+                    f"LSP server '{name}' from plugin '{plugin_path.name}' defines both "
+                    f"'{canonical}' and '{alias}'; using '{canonical}'.",
+                    logger,
+                )
+
+        # ``cwd`` has no LSPDependency equivalent: APM-managed servers are
+        # started by the consumer runtime in its own working directory.
+        # Ignore it explicitly rather than letting it look like a typo.
+        if "cwd" in cfg:
+            _surface_warning(
+                f"LSP server '{name}' from plugin '{plugin_path.name}' uses unsupported "
+                "'cwd'; the consumer runtime chooses the working directory.",
+                logger,
+            )
+
         # Route through the validation chokepoint
         try:
             LSPDependency.from_dict(dep)
         except Exception as exc:
             if warn_on_invalid:
+                alias_context = ""
+                if aliases_used:
+                    normalized = ", ".join(
+                        f"'{alias}' to '{canonical}'" for alias, canonical in aliases_used
+                    )
+                    alias_context = f" after normalizing {normalized}"
                 _surface_warning(
-                    f"Skipping invalid LSP server '{name}' from plugin '{plugin_path.name}': {exc}",
+                    f"Skipping invalid LSP server '{name}' from plugin "
+                    f"'{plugin_path.name}'{alias_context}: {exc}",
                     logger,
                 )
             continue
@@ -1037,6 +1112,9 @@ def _lsp_servers_to_apm_deps(
         deps.append(dep)
 
     return deps
+
+
+_lsp_servers_to_apm_deps = lsp_servers_to_apm_deps
 
 
 def _map_plugin_artifacts(
@@ -1198,8 +1276,7 @@ def _map_plugin_artifacts(
                 target_path = dest_dir / relative_path
             else:
                 target_path = dest_dir / source_file.name
-            if not source_file.name.endswith(".prompt.md") and source_file.suffix == ".md":
-                target_path = target_path.with_name(f"{source_file.stem}.prompt.md")
+            target_path = target_path.with_name(plugin_command_prompt_name(source_file.name))
             target_path.parent.mkdir(parents=True, exist_ok=True)
             if _is_same_path(source_file, target_path):
                 return

@@ -140,6 +140,7 @@ class InstallContext:
     # Integrate phase outputs (written by integrate, read by cleanup/lockfile/summary)
     # ------------------------------------------------------------------
     intended_dep_keys: set[str] = field(default_factory=set)
+    # Absent means integration skipped; empty means it completed with no files.
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.

@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import click
 
+from apm_cli.install.locking import serialized_lifecycle
 from apm_cli.utils.console import (
     STATUS_SYMBOLS,
     _rich_echo,
@@ -191,6 +192,7 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
     help="Inject a starter lifecycle: block into apm.yml.",
 )
 @click.option("--force", is_flag=True, help="Overwrite existing lifecycle: block if present.")
+@serialized_lifecycle
 def lifecycle_init(force: bool) -> None:
     """Inject a starter lifecycle: block into the project apm.yml file."""
     import yaml
