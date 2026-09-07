@@ -63,8 +63,11 @@ class ScanRule:
     relative_glob: str
     """Posix glob relative to the scan root, e.g. ``.cursor/rules/*.mdc``.
 
-    Only the final segment may contain wildcards. ``recursive=True`` widens
-    the match to the subtree below the rule directory.
+    The leading wildcard-free segments form the directory that is opened; the
+    remaining segments (which may contain ``*``, ``?`` or ``[...]`` in any
+    position, e.g. ``*/SKILL.md``) are handed to ``Path.glob``. ``**`` is
+    rejected so a rule can never walk the whole workspace; ``recursive=True``
+    widens the match to the subtree below the rule directory instead.
     """
     recursive: bool = False
     is_dir_rule: bool = False

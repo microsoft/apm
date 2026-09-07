@@ -41,6 +41,7 @@ def _row(finding: Finding) -> tuple[str, ...]:
 def _print_table(rows: Sequence[tuple[str, ...]]) -> None:
     """Print an ASCII table; Rich when available, aligned text otherwise."""
     try:
+        from rich import box
         from rich.table import Table
 
         from apm_cli.utils.console import _get_console
@@ -49,7 +50,12 @@ def _print_table(rows: Sequence[tuple[str, ...]]) -> None:
     except Exception:  # Rich missing or console unavailable
         console = None
     if console is not None and getattr(console, "is_terminal", False) and console.width >= 120:
-        table = Table(title="Discovered agent context", show_header=True, header_style="bold cyan")
+        table = Table(
+            title="Discovered agent context",
+            show_header=True,
+            header_style="bold cyan",
+            box=box.ASCII,
+        )
         for column in _COLUMNS:
             table.add_column(
                 column, style="bold white" if column == "PATH" else "white", overflow="fold"

@@ -28,7 +28,8 @@ def read_text(path: Path, limit: int) -> str:
     try:
         if path.stat().st_size > limit:
             raise ConvertError("source exceeds the size limit")
-        return path.read_text(encoding="utf-8-sig")
+        # Strip one leading BOM; front matter parsing itself stays in utils/yaml_io.
+        return path.read_text(encoding="utf-8").removeprefix("\ufeff")
     except UnicodeDecodeError as exc:
         raise ConvertError("source is not UTF-8 text") from exc
     except OSError as exc:

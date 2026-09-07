@@ -14,8 +14,9 @@ from apm_cli.adopt.ownership import OwnershipIndex
 from apm_cli.adopt.registry import ScanRule
 from apm_cli.adopt.scanners.profile_files import derive_rules, rules_for_targets
 
+pytestmark = pytest.mark.component
 
-@pytest.mark.unit
+
 def test_every_static_target_primitive_yields_a_rule():
     for scope in (Scope.PROJECT, Scope.USER):
         for profile in scan_targets(scope):
@@ -34,7 +35,6 @@ def test_every_static_target_primitive_yields_a_rule():
                 assert primitive in covered, (profile.name, scope, primitive)
 
 
-@pytest.mark.unit
 def test_rules_never_use_recursive_globstar():
     rules = rules_for_targets(scan_targets(Scope.PROJECT))
     assert rules
@@ -43,7 +43,6 @@ def test_rules_never_use_recursive_globstar():
         ScanRule(tool="x", kind=HarnessKind.RULE, relative_glob=".x/**/*.md")
 
 
-@pytest.mark.unit
 def test_shared_skill_root_collapses_to_one_shared_rule():
     rules = rules_for_targets(scan_targets(Scope.PROJECT))
     shared = [r for r in rules if r.relative_glob == ".agents/skills/*/SKILL.md"]
@@ -53,13 +52,11 @@ def test_shared_skill_root_collapses_to_one_shared_rule():
     assert shared[0].pattern == "*/SKILL.md"
 
 
-@pytest.mark.unit
 def test_classification_table_covers_every_kind():
     kinds = {kind for (_tool, kind) in classification_rows()}
     assert kinds == set(HarnessKind)
 
 
-@pytest.mark.unit
 def test_apm_owned_forces_ignored():
     raw = RawFinding(
         "cursor", Scope.PROJECT, HarnessKind.RULE, ".cursor/rules/x.mdc", format_id="cursor_rules"
@@ -69,7 +66,6 @@ def test_apm_owned_forces_ignored():
     assert classify(raw, Ownership.APM_GENERATED).converter_id is None
 
 
-@pytest.mark.component
 def test_ownership_from_lockfile_hash_and_markers(tmp_path: Path):
     root = tmp_path
     (root / ".cursor/rules").mkdir(parents=True)
@@ -119,7 +115,6 @@ def test_ownership_from_lockfile_hash_and_markers(tmp_path: Path):
     assert index.decide(mixed)[0] is Ownership.AMBIGUOUS
 
 
-@pytest.mark.component
 def test_discover_mixed_project_reports_everything(mixed_project: Path):
     report = discover(mixed_project, Scope.PROJECT)
     by_path = {f.display_path: f for f in report.findings}
@@ -151,7 +146,6 @@ def test_discover_mixed_project_reports_everything(mixed_project: Path):
     assert json.dumps(report.to_dict())  # serialisable
 
 
-@pytest.mark.component
 def test_report_never_leaks_secrets_or_home(mixed_project: Path):
     from tests.unit.adopt.conftest import FAKE_TOKEN
 
@@ -164,7 +158,6 @@ def test_report_never_leaks_secrets_or_home(mixed_project: Path):
         assert str(mixed_project) not in rendered
 
 
-@pytest.mark.component
 def test_hook_scripts_detected_behind_interpreters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """`uv run script.py --flag` and `python3 script.py` both reference in-project scripts."""
     import json

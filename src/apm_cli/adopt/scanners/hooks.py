@@ -40,7 +40,7 @@ def _load_json(path: Path, ctx: ScanContext) -> Any | None:
         if path.stat().st_size > ctx.limits.max_file_bytes:
             ctx.error(path, "oversize; not parsed")
             return None
-        return json.loads(path.read_text(encoding="utf-8-sig"))
+        return json.loads(path.read_text(encoding="utf-8").removeprefix("\ufeff"))
     except (OSError, ValueError) as exc:
         ctx.error(path, f"invalid JSON: {type(exc).__name__}")
         return None

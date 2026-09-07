@@ -104,9 +104,13 @@ project that already uses APM only sees its hand-authored remainder.
    `dependencies.mcp` entries. Literal credentials in MCP `env`, `headers`,
    arguments, or URLs are replaced by `${SERVER_KEY}` placeholders that
    `apm install` resolves from the environment.
-4. Stages into a temporary directory, validates with the same parsers
-   `apm install` uses, then moves files into place atomically. A failure
-   leaves nothing behind.
+4. Stages into a temporary directory and validates with the same parsers
+   `apm install` uses *before* asking for confirmation, so the plan you approve
+   lists every file with its conversion losses, the MCP servers and `apm.yml`
+   edits, and anything skipped or refused. Files, `apm.yml` and provenance are
+   then committed together and rolled back together on any error. If some items
+   could not be imported the command still applies the rest but reports `PARTIAL`
+   and exits with status 1 (`"status": "partial"` in JSON/YAML).
 5. Writes `.apm/.import-sources.json` so a re-run is idempotent: unchanged
    sources are skipped, updated sources refresh their import, and an import
    you edited by hand is left alone with a warning.

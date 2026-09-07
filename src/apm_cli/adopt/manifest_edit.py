@@ -55,19 +55,29 @@ def apply_manifest_delta(
     targets: Iterable[str],
     mcp_entries: Iterable[Mapping[str, Any]],
     create_config: Mapping[str, Any] | None,
+    dry_run: bool = False,
 ) -> list[str]:
-    """Merge *targets* and *mcp_entries* into the manifest, creating it if needed."""
+    """Merge *targets* and *mcp_entries* into the manifest, creating it if needed.
+
+    With ``dry_run=True`` nothing is written; the returned notes describe what
+    would change so the user can approve the manifest edit up front.
+    """
     notes: list[str] = []
     if not manifest_path.is_file():
         if create_config is None:
             return notes
-        from apm_cli.commands._helpers import _create_minimal_apm_yml
+        if dry_run:
+            data: Any = {"dependencies": {"apm": [], "mcp": []}}
+            notes.append(f"create {manifest_path.name}")
+        else:
+            from apm_cli.commands._helpers import _create_minimal_apm_yml
 
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        _create_minimal_apm_yml(dict(create_config), target_path=manifest_path)
-        notes.append(f"created {manifest_path.name}")
-
-    data = load_yaml_roundtrip(manifest_path)
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            _create_minimal_apm_yml(dict(create_config), target_path=manifest_path)
+            notes.append(f"created {manifest_path.name}")
+            data = load_yaml_roundtrip(manifest_path)
+    else:
+        data = load_yaml_roundtrip(manifest_path)
     if not isinstance(data, Mapping):
         raise ValueError(f"{manifest_path} is not a mapping")
 
@@ -100,6 +110,6 @@ def apply_manifest_delta(
         dependencies["mcp"] = merged
         notes.extend(mcp_notes)
 
-    if notes:
+    if notes and not dry_run:
         dump_yaml_roundtrip(data, manifest_path)
     return notes

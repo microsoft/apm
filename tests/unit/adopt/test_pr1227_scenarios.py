@@ -16,6 +16,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 
 def _seed(root: Path, files: dict[str, str]) -> None:
     for rel, content in files.items():
@@ -36,7 +38,6 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-@pytest.mark.component
 def test_preview_multi_agent_reports_all_tools(project: Path):
     _seed(
         project,
@@ -54,7 +55,6 @@ def test_preview_multi_agent_reports_all_tools(project: Path):
     assert not (project / "apm.yml").exists()
 
 
-@pytest.mark.component
 def test_write_creates_well_formed_apm_yml(project: Path):
     _seed(
         project,
@@ -72,7 +72,6 @@ def test_write_creates_well_formed_apm_yml(project: Path):
     assert (project / ".apm/agents/coder.agent.md").is_file()
 
 
-@pytest.mark.component
 def test_json_output_is_machine_parseable(project: Path):
     _seed(project, {".windsurf/rules/python.md": "windsurf rule"})
     result = CliRunner().invoke(cli, ["init", "--discover", "--yes", "--format", "json"])
@@ -85,7 +84,6 @@ def test_json_output_is_machine_parseable(project: Path):
     assert not (project / "apm.yml").exists()
 
 
-@pytest.mark.component
 def test_all_agents_found_in_one_project(project: Path):
     _seed(
         project,

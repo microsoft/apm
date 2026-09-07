@@ -59,18 +59,24 @@ _MERGED_READERS: dict[str, Callable[[list, str], HookDocument]] = {
 _MAX_SCRIPT_BYTES = 1_048_576
 
 
+# Targets that consume the canonical (Claude PascalCase) event names unchanged.
+_CANONICAL_EVENT_TARGETS: frozenset[str] = frozenset(
+    {"claude", "cursor", "codex", "windsurf", "antigravity"}
+)
+
+
 def event_portability(event: str) -> tuple[list[str], list[str]]:
-    """Return (targets that render *event* natively, targets that pass it through)."""
-    native: list[str] = []
-    passthrough: list[str] = []
-    for target, mapping in _HOOK_EVENT_MAP.items():
-        if event in mapping or (target == "claude" and event in CANONICAL_EVENTS):
-            native.append(target)
-        else:
-            passthrough.append(target)
-    for target in ("cursor", "codex", "windsurf", "antigravity"):
-        (native if event in CANONICAL_EVENTS else passthrough).append(target)
-    return sorted(native), sorted(passthrough)
+    """Return (targets that render *event* natively, targets that pass it through).
+
+    Each target appears exactly once, in one of the two lists.
+    """
+    targets = set(_HOOK_EVENT_MAP) | _CANONICAL_EVENT_TARGETS
+    native: set[str] = set()
+    for target in targets:
+        mapping = _HOOK_EVENT_MAP.get(target, {})
+        if event in mapping or (target in _CANONICAL_EVENT_TARGETS and event in CANONICAL_EVENTS):
+            native.add(target)
+    return sorted(native), sorted(targets - native)
 
 
 def _rewrite_script_tokens(
@@ -115,13 +121,14 @@ def _rewrite_script_tokens(
                     raise ConvertError("hook script blocked by the security scan")
             scripts_dir = dest_dir / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
-            target = scripts_dir / candidate.name
+            script_name = _unique_script_name(scripts_dir, candidate, text)
+            target = scripts_dir / script_name
             if not target.exists():
                 import shutil
 
                 shutil.copy2(candidate, target)
                 result.written.append(target)
-            argv[index] = f"./scripts/{candidate.name}"
+            argv[index] = f"./scripts/{script_name}"
             changed = True
             result.transform(f"hooks.{event}.command", "script copied into .apm/hooks/scripts/")
         elif (
@@ -138,6 +145,27 @@ def _rewrite_script_tokens(
                     f"hooks.{event}.command", "machine-local script path is not portable", "warning"
                 )
     return shlex.join(argv) if changed else command
+
+
+def _unique_script_name(scripts_dir: Path, candidate: Path, content: bytes) -> str:
+    """Return a file name under *scripts_dir* that does not shadow a different script.
+
+    Two hooks may reference scripts with the same basename from different
+    directories; the second one gets its parent directory folded into the name
+    (``hooks-notify.sh``) instead of silently reusing the first copy.
+    """
+    existing = scripts_dir / candidate.name
+    if not existing.exists() or existing.read_bytes() == content:
+        return candidate.name
+    parent = re.sub(r"[^A-Za-z0-9]+", "-", candidate.parent.name).strip("-") or "script"
+    alternative = f"{parent}-{candidate.name}"
+    counter = 2
+    while (scripts_dir / alternative).exists() and (
+        scripts_dir / alternative
+    ).read_bytes() != content:
+        alternative = f"{parent}-{counter}-{candidate.name}"
+        counter += 1
+    return alternative
 
 
 def _load_json(path: Path, limit: int) -> Any:

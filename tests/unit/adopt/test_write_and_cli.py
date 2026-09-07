@@ -20,6 +20,8 @@ from apm_cli.cli import cli
 from apm_cli.integration.hook_file_routing import _hook_file_allowed_targets
 from tests.unit.adopt.conftest import FAKE_TOKEN
 
+pytestmark = pytest.mark.component
+
 
 def _snapshot(root: Path) -> dict[str, bytes]:
     return {
@@ -44,7 +46,6 @@ def _finding(path: Path, kind: HarnessKind, tool: str, fmt: str, converter: str)
     )
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("fmt", "source", "expected_apply_to", "warn"),
     [
@@ -96,7 +97,6 @@ def test_rules_converter_maps_scoping(
     assert any(c.severity == "warning" for c in result.changes) is warn
 
 
-@pytest.mark.unit
 def test_strip_managed_section_keeps_outside_text():
     result = ConvertResult()
     text = "keep\n<!-- apm:start -->\ngenerated\n<!-- apm:end -->\ntail\n"
@@ -104,7 +104,6 @@ def test_strip_managed_section_keeps_outside_text():
     assert result.lossy
 
 
-@pytest.mark.unit
 def test_mcp_entry_redacts_secrets_and_keeps_placeholders():
     result = ConvertResult()
     entry = to_manifest_entry(
@@ -139,7 +138,6 @@ def test_mcp_entry_redacts_secrets_and_keeps_placeholders():
     assert looks_like_secret("api_key", "x") and not looks_like_secret("MODE", "fast")
 
 
-@pytest.mark.unit
 def test_generated_hook_filenames_stay_universal():
     for tool in (
         "claude",
@@ -154,7 +152,6 @@ def test_generated_hook_filenames_stay_universal():
         assert _hook_file_allowed_targets(Path(f"{tool}-native.json")) is None
 
 
-@pytest.mark.unit
 def test_registry_has_every_classified_converter():
     from apm_cli.adopt.classify import classification_rows
     from apm_cli.adopt.converters import CONVERTERS
@@ -167,7 +164,6 @@ def test_registry_has_every_classified_converter():
             )
 
 
-@pytest.mark.component
 def test_discover_default_is_read_only(in_project: Path):
     result = CliRunner().invoke(cli, ["init", "--discover"])
     assert result.exit_code == 0, result.output
@@ -176,7 +172,6 @@ def test_discover_default_is_read_only(in_project: Path):
     assert "claude" in result.output and "Re-run with --apply" in result.output
 
 
-@pytest.mark.component
 def test_discover_json_schema(in_project: Path):
     result = CliRunner().invoke(cli, ["init", "--discover", "--format", "json"])
     assert result.exit_code == 0, result.output
@@ -204,14 +199,12 @@ def test_discover_json_schema(in_project: Path):
     assert yaml_result.exit_code == 0 and yaml.safe_load(yaml_result.output)["schema_version"] == 1
 
 
-@pytest.mark.component
 def test_write_flags_require_discover(in_project: Path):
     result = CliRunner().invoke(cli, ["init", "--apply", "--yes"])
     assert result.exit_code == 2 and "require --discover" in result.output
     assert CliRunner().invoke(cli, ["init", "--write", "--yes"]).exit_code == 2
 
 
-@pytest.mark.component
 def test_hidden_alias_matches_init(in_project: Path):
     a = CliRunner().invoke(cli, ["discover", "--format", "json"])
     b = CliRunner().invoke(cli, ["init", "--discover", "--format", "json"])
@@ -220,7 +213,6 @@ def test_hidden_alias_matches_init(in_project: Path):
     assert not any(line.split()[:1] == ["discover"] for line in listing.splitlines())
 
 
-@pytest.mark.component
 def test_write_materializes_merges_and_is_idempotent(in_project: Path):
     before = _snapshot(in_project)
     result = CliRunner().invoke(cli, ["init", "--discover", "--write", "--yes"])
@@ -256,7 +248,6 @@ def test_write_materializes_merges_and_is_idempotent(in_project: Path):
     assert yaml.safe_load((in_project / "apm.yml").read_text(encoding="utf-8")) == manifest
 
 
-@pytest.mark.component
 def test_write_copies_hook_scripts_when_requested(in_project: Path):
     result = CliRunner().invoke(
         cli, ["init", "--discover", "--write", "--yes", "--include-hook-scripts"]
@@ -269,7 +260,6 @@ def test_write_copies_hook_scripts_when_requested(in_project: Path):
     assert hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "./scripts/notify.sh"
 
 
-@pytest.mark.component
 def test_write_refuses_without_yes_when_not_interactive(in_project: Path):
     result = CliRunner().invoke(cli, ["init", "--discover", "--write"])
     assert result.exit_code == 1
@@ -277,7 +267,6 @@ def test_write_refuses_without_yes_when_not_interactive(in_project: Path):
     assert not (in_project / ".apm").exists()
 
 
-@pytest.mark.component
 def test_write_skips_locally_modified_import(in_project: Path):
     assert CliRunner().invoke(cli, ["init", "--discover", "--write", "--yes"]).exit_code == 0
     target = in_project / ".apm/instructions/python.instructions.md"
@@ -291,7 +280,6 @@ def test_write_skips_locally_modified_import(in_project: Path):
     )
 
 
-@pytest.mark.component
 def test_global_scope_scans_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     home = tmp_path / "home"
     (home / ".claude/agents").mkdir(parents=True)
@@ -320,7 +308,6 @@ def test_global_scope_scans_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert payload["scopes"] == ["user"]
 
 
-@pytest.mark.unit
 def test_lenient_frontmatter_for_claude_style_descriptions(tmp_path: Path):
     """Claude Code accepts unquoted descriptions containing colons; so must the import."""
     from apm_cli.adopt.converters.agents import AgentsConverter
@@ -358,20 +345,36 @@ def test_lenient_frontmatter_for_claude_style_descriptions(tmp_path: Path):
     assert reparsed["tools"] == ["Read", "Grep"] and "color" not in reparsed
 
 
-@pytest.mark.component
 def test_apply_alias_and_credential_refusal(in_project: Path):
     """--apply is the primary spelling; files carrying literal secrets are never copied."""
     from tests.unit.adopt.conftest import write
 
     write(in_project / ".claude/rules/leaky.md", f"Use token {FAKE_TOKEN} for CI.\n")
     result = CliRunner().invoke(cli, ["init", "--discover", "--apply", "--yes", "--format", "json"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output  # partial import is unmistakable in exit status
     payload = json.loads(result.output)
+    assert payload["write"]["status"] == "partial"
     assert (in_project / ".apm/instructions/python.instructions.md").is_file()
     assert not (in_project / ".apm/instructions/leaky.instructions.md").exists()
+    provenance = json.loads((in_project / ".apm/.import-sources.json").read_text(encoding="utf-8"))
+    assert set(provenance["entries"]) == set(payload["write"]["written"]) - {
+        p for p in payload["write"]["written"] if p.startswith("skills/")
+    } | {p for p in provenance["entries"] if p.startswith("skills/")}
     failed = {f["path"]: f["reason"] for f in payload["write"]["failed"]}
     assert "github-token" in failed[".claude/rules/leaky.md"]
     assert FAKE_TOKEN not in result.output
     assert FAKE_TOKEN not in "".join(
         p.read_text(encoding="utf-8") for p in (in_project / ".apm").rglob("*.md")
+    )
+
+
+def test_failed_apply_rolls_back_everything(in_project: Path):
+    """A commit failure leaves no .apm/ files, no provenance and no apm.yml behind."""
+    (in_project / ".apm").write_text("not a directory\n", encoding="utf-8")
+    result = CliRunner().invoke(cli, ["init", "--discover", "--apply", "--yes", "--format", "json"])
+    assert result.exit_code == 1, result.output
+    assert (in_project / ".apm").is_file()
+    assert not (in_project / "apm.yml").exists()
+    assert "rolled back" in (
+        result.output + result.stderr if hasattr(result, "stderr") else result.output
     )
