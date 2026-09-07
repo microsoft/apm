@@ -1,8 +1,7 @@
 """Registry-backed outdated checks for ``apm outdated``.
 
-Compares the lockfile's exact registry ``version`` against the highest semver
-on the registry that satisfies the manifest range (same ``pick_best`` semantics
-as install).
+Reports the newest published semver separately from the wanted version within
+the manifest constraint (same ``pick_best`` semantics as install/update).
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from .client import RegistryClient, RegistryError
 from .config_loader import resolve_effective_registries
 from .feature_gate import is_package_registry_enabled
 from .resolver import _split_owner_repo
-from .semver import is_semver_range, pick_best
+from .semver import is_semver_range, match_version, pick_best
 
 if TYPE_CHECKING:
     from ...deps.lockfile import LockedDependency, LockFile
@@ -159,7 +158,7 @@ def check_registry_locked_dep(
     client_factory=None,
     verbose: bool = False,
 ) -> OutdatedRow:
-    """Compare *locked* against the newest registry version in manifest range."""
+    """Compare *locked* with published latest, preserving constraint-bound wanted."""
     package_name = locked.get_unique_key()
     current = locked.version or ""
 
@@ -274,17 +273,20 @@ def check_registry_locked_dep(
         )
 
     version_strings = [entry.version for entry in version_entries]
-    if lockfile_only:
-        latest = _highest_semver(version_strings)
-    else:
-        latest = pick_best(manifest_range, version_strings)
-    if latest is None:
+    latest = _highest_semver(version_strings)
+    wanted = pick_best(manifest_range, version_strings) if not lockfile_only else None
+    outside_constraint = bool(
+        latest and manifest_range and not match_version(manifest_range, latest)
+    )
+    if latest is None or (not lockfile_only and wanted is None):
         return OutdatedRow(
             package=package_name,
             current=current,
-            latest="-",
+            latest=latest or "-",
             status="unknown",
             source=source_label,
+            wanted=wanted or "-",
+            outside_constraint=outside_constraint,
         )
 
     extra: list[str] = []
@@ -313,4 +315,6 @@ def check_registry_locked_dep(
         status=status,
         extra_tags=extra,
         source=source_label,
+        wanted=wanted or "-",
+        outside_constraint=outside_constraint,
     )

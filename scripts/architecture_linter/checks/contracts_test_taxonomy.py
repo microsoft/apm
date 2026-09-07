@@ -95,6 +95,7 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/bundle/packer.py",
     "src/apm_cli/bundle/plugin_exporter.py",
     "src/apm_cli/bundle/agent_plugin_exporter.py",
+    "src/apm_cli/commands/outdated.py",
 )
 
 
@@ -247,10 +248,15 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
             consumer.tree_index.nodes,
             "resolve_lockfile_path_for_read",
         )
-        routes_read_only = len(calls) == 1 and _keyword_is_name(
-            calls[0],
-            "read_only",
-            "dry_run",
+        routes_read_only = len(calls) == 1 and (
+            any(
+                keyword.arg == "read_only"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+                for keyword in calls[0].keywords
+            )
+            if consumer_path == "src/apm_cli/commands/outdated.py"
+            else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (
             "resolve_lockfile_path_for_read" not in imported
@@ -261,7 +267,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 _summary(
                     rule_id,
                     consumer_path,
-                    "Bundle lockfile reads must route through the read-only owner",
+                    "Lockfile reads must route through the read-only owner",
                 )
             )
     return tuple(findings)

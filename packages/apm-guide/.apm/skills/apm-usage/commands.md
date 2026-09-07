@@ -29,13 +29,19 @@
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
 | `apm find <PATH>` | Trace a deployed file back to the package(s) that contributed it (inverse of install; reads `apm.lock.yaml` only) | `--source` show OCI/git/local origin, `--path` show full why-chain (same as `apm deps why`) |
 | `apm view PKG [FIELD]` | View package details, git refs, or registry versions | `-g` global, `FIELD=versions`, `--registry [NAME]` forces registry path for versions |
-| `apm outdated` | Check locked deps against authenticated upstream state via SHA/semver comparison; stale bare-cache refs are never reported as current, and unavailable remotes report `unknown` | `-g` global, `-v` verbose, `-j N` parallel checks |
+| `apm outdated` | Read-only upstream check: no manifest, lockfile, modules, or deployment writes; legacy `apm.lock` is read in place. Registry `Latest` is highest published parseable semver (existing prerelease/build ordering); `Wanted` is highest within the constraint. `Source` adds `(outside constraint)` when Latest fails it. Unknown remotes never fall back to stale cached refs. Completed checks exit `0`, including outdated/unknown. | `-g` global, `-v` verbose (registry versions within constraint), `-j N` parallel checks; no `--json` or package filter |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm cache prune` | Remove stale SHA groups; partial failures exit `1`, so fix permissions or release locks and rerun | `--days N` |
 | `apm cache prune` | Remove git-cache checkouts older than `--days`; `0` makes all entries eligible; negative values are rejected before the cache is touched | `--days N` nonnegative integer, default `30` |
 | `apm cache prune` | Remove Git checkout SHA groups outside the retention window; all full and sparse variants share recency and eviction | `--days N` (default `30`) |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
+
+For conditional columns, lockfile-only rows, unknown selectors, and explicit
+outside-constraint upgrades, see the
+[outdated reference](https://microsoft.github.io/apm/reference/cli/outdated/#registry-reporting).
+`apm update` remains constraint-respecting and writable; it does not take an
+outside-constraint `Latest`.
 
 For `apm install -g --mcp`, mixed target selections warn and skip
 workspace-only runtimes. If no selected target supports user scope, the command

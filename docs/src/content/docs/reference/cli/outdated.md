@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-Compare locked dependencies against their remotes to see what has new versions available. Read-only: this command does not modify `apm.lock.yaml` or touch `apm_modules/`.
+Compare locked dependencies against their remotes. Read-only: no manifest, lockfile, `apm_modules/`, or deployment writes. Legacy `apm.lock` files are read in place, without migration.
 
 ## Synopsis
 
@@ -15,7 +15,7 @@ apm outdated [OPTIONS]
 
 ## Description
 
-`apm outdated` reads `apm.lock.yaml` and queries each authenticated upstream to
+`apm outdated` reads the lockfile and queries each authenticated upstream to
 detect staleness. It does not report locally cached refs as current upstream
 state:
 
@@ -25,20 +25,20 @@ state:
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
 - **Marketplace deps**: compare the installed ref against the marketplace entry's current `source.ref`.
-- **Registry deps** (experimental `registries` feature): compare the lockfile's exact `version` against the highest semver on the registry that satisfies the manifest range (same resolution semantics as `apm install`). Manifest ranges come from the root `apm.yml` and from installed packages' `apm.yml` files (transitive deps). When a registry lockfile entry has no manifest range, `apm outdated` compares against the highest published version and labels the source `(lockfile)`.
+- **Registry deps** (experimental `registries` feature): `Current` is the locked version; `Latest` is the highest published parseable semver, including prereleases under existing registry ordering and build precedence. `Wanted` is the highest version satisfying the manifest constraint, using the same matching as `apm install`. Constraints come from the root or installed packages' `apm.yml` files.
 
 Common monorepo layouts are detected automatically for `outdated` reporting. Set an explicit marketplace `tag_pattern` when your producer uses a different layout than the built-in patterns.
 
-Local dependencies and Artifactory-hosted deps are skipped. Legacy `apm.lock` files are migrated to `apm.lock.yaml` automatically on read.
+Local dependencies and Artifactory-hosted deps are skipped.
 
-To apply the suggested updates, run [`apm update`](../update/).
+[`apm update`](../update/) applies constraint-respecting updates, not outside-constraint releases.
 
 ## Options
 
 | Option | Description |
 |---|---|
 | `-g, --global` | Check user-scope dependencies in `~/.apm/` instead of the current project. |
-| `-v, --verbose` | For outdated tag-pinned or registry deps, also list up to 10 newer available versions/tags. |
+| `-v, --verbose` | List up to 10 newer Git tags or matching registry versions within the constraint; lockfile-only registry rows list newer versions. |
 | `-j, --parallel-checks N` | Max concurrent remote checks. Default `4`. `0` forces sequential. |
 
 ## Examples
@@ -49,24 +49,33 @@ Check project dependencies:
 apm outdated
 ```
 
-Sample output:
+### Registry reporting
 
-```
-                        Dependency Status
-  Package                       Current          Latest             Status       Source
-  ----------------------------- ---------------- ------------------ ------------ -----------------------
-  acme/agent-skills             v1.2.0           v1.4.1             outdated     git tags
-  acme/prompt-pack              main             9c1ab2f0           outdated     git branch
-  acme/sha-pinned               a1b2c3d4         v2.0.0 (9e8d7c6b)  outdated     git tags
-  acme/lint-rules               v0.3.0           v0.3.0             up-to-date   git tags
-  org/monorepo/packages/my-pkg  my-pkg_v1.0.0    my-pkg_v1.1.0      outdated     git tags
-  nadavy/e2e-demo               1.0.1            1.1.1              outdated     registry: corp
-  microsoft/apm-review-panel    0.1.1            0.1.2              outdated     registry: corp (lockfile)
-  acme/deploy-helpers           stable           -                  unknown      registry (pinned ref)
-  pirate-skill@apm-marketplace  v0.2.1           v0.3.0 (...)       outdated     marketplace: apm-marketplace
+`Wanted` appears only when registry comparison rows exist. Mixed Git rows show
+`-` in that column; Git-only columns remain unchanged. There is no `--json`
+output or package filter.
 
-  [!] 7 outdated dependencies found
+Example rows with registry `corp` configured as the default:
+
+| Package | Current | Wanted | Latest | Status | Source |
+|---|---|---|---|---|---|
+| org/pkg | 1.7.0 | 1.7.0 | 1.8.0 | outdated | registry: corp (outside constraint) |
+| org/lockfile-only | 1.0.0 | - | 1.1.0 | outdated | registry: corp (lockfile) |
+| acme/agent-skills | v1.2.0 | - | v1.4.1 | outdated | git tags |
+| acme/deploy-helpers | stable | - | - | unknown | registry (pinned ref) |
+
+The first row uses an exact `1.7.0` or `=1.7.0` constraint. `apm update`
+keeps it at `1.7.0`. To select `1.8.0` explicitly with the same configured
+registry:
+
+```bash
+apm install 'org/pkg#1.8.0'
 ```
+
+Alternatively, edit the existing selector in `apm.yml`, preserving its registry
+declaration, then run `apm install`.
+
+### Other checks
 
 Check user-scope deps installed under `~/.apm/`:
 
@@ -109,16 +118,17 @@ apm outdated -j 8
 | Status | Meaning |
 |---|---|
 | `up-to-date` | Locked ref matches the current state from the authoritative remote. |
-| `outdated` | A newer tag, branch tip SHA, or registry version in the manifest range is available. |
-| `unknown` | APM reports `unknown` and continues when the authoritative remote cannot be queried or the ref cannot be resolved. It does not report a cached Git ref as `up-to-date`. For registry deps, also check auth (`APM_REGISTRY_TOKEN_{NAME}`) and that the registry URL is configured. |
+| `outdated` | A newer tag, branch tip SHA, or published registry version is available, even outside the manifest constraint. |
+| `unknown` | The remote cannot be queried or the ref cannot be resolved. Registry deps also remain unknown when no published version matches the constraint, even if `Latest` is available. Cached Git refs are not reported as current. |
 
 Registry `Source` values:
 
 | Source pattern | Meaning |
 |---|---|
-| `registry: NAME` | Compared using the manifest semver range from `apm.yml` (root or an installed package). |
-| `registry: NAME (lockfile)` | No manifest range found; compared against the highest published version on the registry. |
-| `registry (pinned ref)` | Manifest carries a non-semver selector (e.g. `main`, `stable`, `v1.4.2`); the dep is exact-matched at install time. `apm outdated` reports `unknown` status since a pinned label is not a range and no higher version can be inferred. Previously, such deps reported perpetual `outdated`; this was a bug (the locked version always differed from a range comparison result). |
+| `registry: NAME` | Registry check with a manifest constraint; no outside-constraint release identified. |
+| `registry: NAME (outside constraint)` | Published `Latest` fails the manifest constraint; `Wanted` stays within it, or is `-` if no version matches. |
+| `registry: NAME (lockfile)` | No known manifest constraint; compare against the highest published semver, with `Wanted` shown as `-`. |
+| `registry (pinned ref)` | Literal non-semver selector (e.g. `main`, `stable`, `v1.4.2`); remains `unknown`, with no inferred upgrade. |
 | `registry (no version selector)` | Manifest dep has no `#<version>` selector; `apm install` rejects it. |
 | `registry (invalid manifest range)` | Manifest carries a malformed semver range (e.g. `^1.0` missing patch); `apm install` rejects it. |
 
@@ -126,10 +136,8 @@ Registry `Source` values:
 
 | Code | Condition |
 |---|---|
-| `0` | Check completed (including when outdated deps are reported). |
+| `0` | Check completed, including outdated or unknown dependencies. |
 | `1` | No lockfile found in the selected scope. |
-
-`apm outdated` is a reporting command. Finding outdated deps is not an error and does not change the exit code; wire `apm audit` into CI instead if you want gating.
 
 ## Related
 
