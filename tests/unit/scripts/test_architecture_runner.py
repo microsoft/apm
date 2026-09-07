@@ -611,6 +611,7 @@ contracts-tooling-lockfile-read
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-policy-content-hash
 contracts-tooling-project-yaml-write-delegation
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery

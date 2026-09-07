@@ -160,9 +160,7 @@ def _verify_hash_pin(
             expected_hash=expected_hash,
         )
 
-    digest = hashlib.new(algo)
-    digest.update(raw_bytes)
-    actual_hex = digest.hexdigest().lower()
+    actual_hex = compute_policy_hash(raw_bytes, algo)
     if actual_hex == expected_hex:
         return None
 

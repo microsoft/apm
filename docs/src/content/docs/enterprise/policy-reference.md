@@ -849,7 +849,7 @@ shasum -a 256 .github/apm-policy.yml | awk '{print "sha256:" $1}'
 
 When set, every install / `apm policy status` / `apm audit --ci` verifies the hash of the fetched leaf policy bytes (UTF-8 encoded, **before** YAML parsing -- so re-serialized semantically-equivalent YAML still fails). A mismatch is **always** fail-closed regardless of `policy.fetch_failure` / `policy.fetch_failure_default`. The pin applies only to the leaf policy; parents in an `extends:` chain remain the leaf author's responsibility.
 
-A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. MD5 and SHA-1 are not accepted.
+A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. Only SHA-256, SHA-384, and SHA-512 are supported.
 
 Compute the pin on Linux with `sha256sum .github/apm-policy.yml | awk '{print "sha256:" $1}'`.
 

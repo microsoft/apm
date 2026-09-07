@@ -78,8 +78,10 @@ apm outdated --global     # ~/.apm/ user-scope lockfile
 apm outdated -j 8         # 8 parallel remote checks
 ```
 
-`apm outdated` does not modify anything. It is the read-only view that
-tells you which floating refs have moved.
+`apm outdated` is read-only. It reports moved refs and newer registry releases,
+even for exact pins. Registry rows distinguish Current, constraint-bound Wanted,
+and published Latest. `apm update` still respects the declared constraint;
+[select an outside-constraint release explicitly](../../reference/cli/outdated/#registry-reporting).
 
 ### `apm view <package>`
 

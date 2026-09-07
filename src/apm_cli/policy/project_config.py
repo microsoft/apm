@@ -204,9 +204,10 @@ def read_project_policy_hash_pin(
     return parse_project_policy_hash_pin(policy_block)
 
 
-def compute_policy_hash(content: str, algorithm: str = _DEFAULT_HASH_ALGORITHM) -> str:
+def compute_policy_hash(content: str | bytes, algorithm: str = _DEFAULT_HASH_ALGORITHM) -> str:
     """Compute the digest of fetched policy content under *algorithm*.
 
+    Text is encoded as UTF-8; bytes are hashed without decoding or normalization.
     The hash is computed on the **UTF-8 bytes of the raw policy text** --
     the same bytes that ``yaml.safe_load`` consumes -- so a malicious
     mirror cannot return semantically equivalent YAML with different bytes
@@ -218,6 +219,13 @@ def compute_policy_hash(content: str, algorithm: str = _DEFAULT_HASH_ALGORITHM) 
         raise ProjectPolicyConfigError(
             f"Refusing to compute policy hash with unsupported algorithm '{algorithm}'"
         )
-    digest = hashlib.new(algorithm)
-    digest.update(content.encode("utf-8"))
-    return digest.hexdigest()
+    raw_bytes = content.encode("utf-8") if isinstance(content, str) else content
+    if algorithm == "sha256":
+        return hashlib.sha256(raw_bytes).hexdigest()
+    if algorithm == "sha384":
+        return hashlib.sha384(raw_bytes).hexdigest()
+    if algorithm == "sha512":
+        return hashlib.sha512(raw_bytes).hexdigest()
+    raise ProjectPolicyConfigError(
+        f"Refusing to compute policy hash with unsupported algorithm '{algorithm}'"
+    )

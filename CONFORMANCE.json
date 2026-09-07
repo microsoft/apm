@@ -987,8 +987,11 @@
       "keyword": "MUST",
       "section": "7.7",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[1.7.0-1.7.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[=1.7.0-1.7.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[^1.7.0-1.8.0]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_source_url_in_lockfile"
       ]
     },
