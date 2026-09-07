@@ -54,6 +54,19 @@ Enhancement suggestions are welcome! Please:
 4. Update documentation if needed.
 5. PRs must pass all CI checks before they can be merged.
 
+### Workflow dependency updates
+
+When updating actions in generated `.github/workflows/*.lock.yml` files,
+keep their `gh-aw-manifest` headers, human-readable action lists, and
+`.github/aw/actions-lock.json` entries aligned with the runtime `uses:` pins.
+Dependabot does not update those metadata records. Preserve the compiler
+version and source hashes for dependency-only edits; recompile with
+`gh aw compile` when changing workflow source.
+
+Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py`
+to check setup and app-token action pin consistency across the manifest-bearing
+workflows.
+
 ### Issue Triage
 
 Every new issue is automatically labeled `needs-triage`. Maintainers review incoming issues and:

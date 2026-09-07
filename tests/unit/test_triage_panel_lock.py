@@ -1,8 +1,10 @@
-"""Regression checks for the generated Triage Panel workflow."""
+"""Regression checks for generated workflow action pins and Triage Panel metadata."""
 
 import json
 import re
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOCK_PATH = REPO_ROOT / ".github" / "workflows" / "triage-panel.lock.yml"
@@ -16,35 +18,31 @@ def _load_lock_header(lock_text: str, prefix: str) -> dict:
     return json.loads(matching_lines[0].removeprefix(prefix))
 
 
-def test_triage_panel_lock_manifest_matches_runtime_setup_pin() -> None:
-    """Keep the runtime setup action aligned with the compiled manifest."""
-    lock_text = LOCK_PATH.read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    "workflow",
+    ["cli-consistency-checker", "daily-doc-updater", "docs-sync", "perf-scan", "triage-panel"],
+)
+def test_lock_manifest_matches_runtime_action_pins(workflow: str) -> None:
+    """Keep updated runtime actions aligned with manifests and the canonical lock."""
+    lock_text = LOCK_PATH.with_name(f"{workflow}.lock.yml").read_text(encoding="utf-8")
     manifest = _load_lock_header(lock_text, "# gh-aw-manifest: ")
-    manifest_setups = [
-        action for action in manifest["actions"] if action["repo"] == "github/gh-aw-actions/setup"
-    ]
-    assert len(manifest_setups) == 1
-    manifest_setup = manifest_setups[0]
-
     actions_lock = json.loads(ACTIONS_LOCK_PATH.read_text(encoding="utf-8"))
-    canonical_setups = [
-        action
-        for action in actions_lock["entries"].values()
-        if action["repo"] == "github/gh-aw-actions/setup"
-    ]
-    assert len(canonical_setups) == 1
-    canonical_setup = canonical_setups[0]
-    assert manifest_setup["version"] == canonical_setup["version"]
-    assert manifest_setup["sha"] == canonical_setup["sha"]
-
-    runtime_setup_refs = set(
-        re.findall(
-            r"^\s+uses:\s*github/gh-aw-actions/setup@([^\s#]+)",
-            lock_text,
-            re.MULTILINE,
+    for repo in ("github/gh-aw-actions/setup", "actions/create-github-app-token"):
+        runtime_refs = set(
+            re.findall(
+                rf"^\s+uses:\s*{re.escape(repo)}@([^\s#]+)",
+                lock_text,
+                re.MULTILINE,
+            )
         )
-    )
-    assert runtime_setup_refs == {manifest_setup["sha"]}
+        manifest_actions = [action for action in manifest["actions"] if action["repo"] == repo]
+        if repo == "github/gh-aw-actions/setup":
+            assert len(manifest_actions) == 1
+            assert runtime_refs
+        assert runtime_refs == {action["sha"] for action in manifest_actions}
+        for action in manifest_actions:
+            assert action == actions_lock["entries"][f"{repo}@{action['version']}"]
+            assert f"#   - {repo}@{action['sha']} # {action['version']}" in lock_text
 
 
 def test_triage_panel_lock_pins_copilot_cli_version() -> None:
