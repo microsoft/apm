@@ -223,7 +223,7 @@ jobs:
           set -euo pipefail
           raw_target=${AW_APM_TARGET:-}
           if [ -z "$(printf '%s' "$raw_target" | tr -d '[:space:]')" ]; then
-            echo "::error::shared/apm.md requires a non-empty target matching the workflow engine"
+            echo "::error::shared/apm.md requires a non-empty target under the import's with: block (for example, target: copilot); match the workflow engine"
             exit 1
           fi
           IFS=',' read -ra requested_targets <<< "$raw_target"

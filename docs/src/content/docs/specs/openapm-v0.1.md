@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **122 normative statements** indexed in
+- OpenAPM v0.1 carries **122 normative statements (117 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1438,8 +1438,8 @@ the following dependency-policy identity rules:
 (a) The match subject is the canonical, host-blind dependency package
 path: its repository coordinate plus any virtual in-repository path,
 with any `#` reference suffix excluded. A registry name is never part
-of this match subject and is compared literally by its separate policy
-field. This
+of this match subject and is compared literally wherever it appears in
+policy operands. This
 statement governs glob matching for `dependencies.allow` and
 `dependencies.deny`, plus exact identity matching for
 `dependencies.require`. A `require` entry is exact: `*` characters
@@ -1452,7 +1452,7 @@ compare authored entries byte-exactly.
 
 (b) A Governance implementation MUST apply to policy operands the
 repository path case rule disclosed under
-[Section 11.2](#112-how-to-claim-conformance) item 6. This is the same
+[Section 11.2 item 6](#conformance-statement-case-rule). This is the same
 rule governed by [req-rs-016](#req-rs-016) clause (3) where the
 implementation also claims the Consumer class. A
 registry-sourced dependency, including one resolved through a
@@ -3429,7 +3429,7 @@ conformance statement identifying:
    requirement, including reserved namespace disclosure under
    [req-tg-013](#req-tg-013) and fixture citations under
    [req-cf-002](#req-cf-002).
-6. If it claims the Governance class, or documents a case-insensitive
+6. <a id="conformance-statement-case-rule"></a>If it claims the Governance class, or documents a case-insensitive
    host under [req-rs-016](#req-rs-016), the repository-coordinate
    case rule for every such host. Registry sources are
    case-insensitive under [req-rs-016](#req-rs-016) and

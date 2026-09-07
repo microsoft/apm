@@ -12,6 +12,7 @@ comparison identity. It must never be used as a display or filesystem path.
 
 import re
 from enum import Enum
+from functools import lru_cache
 
 from ...utils.github_host import default_host, is_github_hostname
 
@@ -151,6 +152,7 @@ def case_insensitive_identity_prefix_segments(
     return len(repo_url.split("/"))
 
 
+@lru_cache(maxsize=512)
 def normalize_package_policy_identity(
     value: str,
     *,

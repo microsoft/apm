@@ -146,6 +146,32 @@ def test_host_qualified_pattern_does_not_match_host_blind_policy_identity() -> N
 
 
 @pytest.mark.parametrize(
+    "options",
+    [
+        {"host": "ghe.enterprise.test"},
+        {"host": "contoso.ghe.com"},
+        {"host": "artifacts.example.test", "source": "registry", "artifactory_prefix": "apm"},
+    ],
+)
+def test_enterprise_and_registry_policy_subjects_are_host_blind(
+    options: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_HOST", "ghe.enterprise.test")
+    dependency = DependencyReference(repo_url="Contoso/Widget", **options)
+    assert dependency.get_canonical_dependency_string() == "contoso/widget"
+    assert dependency.case_insensitive_identity_prefix_segments == 2
+    assert _check_dependency_allowlist(
+        [dependency], DependencyPolicy(allow=("CONTOSO/WIDGET",))
+    ).passed
+    assert not _check_dependency_denylist(
+        [dependency], DependencyPolicy(deny=("CONTOSO/WIDGET",))
+    ).passed
+    assert _check_required_packages(
+        [dependency], DependencyPolicy(require=("CONTOSO/WIDGET",))
+    ).passed
+
+
+@pytest.mark.parametrize(
     "dependency",
     [
         "gitlab.com/DevExpGbb/Secure-Baseline",

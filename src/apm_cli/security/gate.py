@@ -307,7 +307,7 @@ def ignore_symlinks(directory: str, contents: list[str]) -> list[str]:
 
 
 def is_generated_python_artifact(path: Path) -> bool:
-    """Return whether *path* is interpreter-generated Python bytecode."""
+    """Exclude cache trees and loose .pyc/.pyo files from copy and inventory."""
     return "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}
 
 
