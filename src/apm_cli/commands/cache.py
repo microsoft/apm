@@ -60,43 +60,51 @@ def info() -> None:
 def clean(force: bool, yes: bool) -> None:
     """Remove all cache content (git repos, checkouts, HTTP responses)."""
     from ..cache.paths import get_cache_root
-    from ..utils.console import _rich_info, _rich_success
+    from ..core.command_logger import CommandLogger
 
+    logger = CommandLogger("cache clean")
     try:
         root = get_cache_root()
     except (ValueError, OSError) as exc:
-        from ..utils.console import _rich_error
-
-        _rich_error(f"Cannot resolve cache root: {exc}", symbol="error")
+        logger.error(f"Cannot resolve cache root: {exc}")
         raise SystemExit(1) from exc
 
     if not force and not yes:
         confirmed = click.confirm(f"Remove all cache content in {root}?", default=False)
         if not confirmed:
-            _rich_info("Aborted.", symbol="info")
+            logger.progress("Aborted.")
             return
 
-    _rich_info("Cleaning cache...", symbol="gear")
+    logger.start("Cleaning cache...", symbol="gear")
 
     from ..cache.git_cache import GitCache
     from ..cache.http_cache import HttpCache
 
-    git_cache = GitCache(root)
-    git_cache.clean_all()
+    failures: list[str] = []
+    for cache_type in (GitCache, HttpCache):
+        try:
+            failures.extend(cache_type(root).clean_all())
+        except OSError as exc:
+            failures.append(f"{cache_type.__name__}: {exc}")
+    if failures:
+        logger.error("Cache cleanup incomplete; some cached content could not be removed.")
+        for failure in failures:
+            logger.error(failure)
+        logger.error(
+            "Close processes using the cache, check permissions, then retry apm cache clean."
+        )
+        raise SystemExit(1)
 
-    http_cache = HttpCache(root)
-    http_cache.clean_all()
-
-    _rich_success("Cache cleaned.", symbol="check")
+    logger.success("Cache cleaned.", symbol="check")
 
 
-@cache.command(help="Remove cache entries older than N days")
+@cache.command(help="Remove Git checkout SHA groups older than N days")
 @click.option(
     "--days",
-    type=int,
+    type=click.IntRange(min=0),
     default=30,
     show_default=True,
-    help="Remove entries not accessed within this many days",
+    help="Remove SHA groups not accessed within this many days",
 )
 def prune(days: int) -> None:
     """Remove stale cache entries based on last access time.
@@ -117,12 +125,12 @@ def prune(days: int) -> None:
         _rich_error(f"Cannot resolve cache root: {exc}", symbol="error")
         raise SystemExit(1) from exc
 
-    _rich_info(f"Pruning entries older than {days} days...", symbol="gear")
+    _rich_info(f"Pruning SHA groups older than {days} days...", symbol="gear")
 
     git_cache = GitCache(root)
     pruned = git_cache.prune(max_age_days=days)
 
-    _rich_success(f"Pruned {pruned} checkout(s).", symbol="check")
+    _rich_success(f"Pruned {pruned} SHA group(s).", symbol="check")
 
 
 def _format_size(size_bytes: int) -> str:

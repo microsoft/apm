@@ -462,8 +462,8 @@ class TestDryRunUninstallWithLockfile:
 class TestRemovePackagesFromDiskEdgeCases:
     """Additional edge cases for _remove_packages_from_disk."""
 
-    def test_path_traversal_error_skipped(self, tmp_path: Path) -> None:
-        """PathTraversalError on get_install_path causes skip with error log."""
+    def test_path_traversal_error_propagates(self, tmp_path: Path) -> None:
+        """PathTraversalError on get_install_path stops removal with an error log."""
         from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
         from apm_cli.utils.path_security import PathTraversalError
 
@@ -479,9 +479,9 @@ class TestRemovePackagesFromDiskEdgeCases:
             mock_ref.get_install_path.side_effect = PathTraversalError("traversal!")
             mock_parse.return_value = mock_ref
 
-            removed = _remove_packages_from_disk(["owner/repo"], apm_modules, logger)
+            with pytest.raises(PathTraversalError, match="traversal!"):
+                _remove_packages_from_disk(["owner/repo"], apm_modules, logger)
 
-        assert removed == 0
         logger.error.assert_called()
 
     def test_single_part_package_string(self, tmp_path: Path) -> None:

@@ -16,6 +16,7 @@ Resolution flow:
 On every cache HIT:
 - Run integrity check (verify HEAD == expected SHA)
 - Mismatch -> evict shard, fall through to fresh fetch, log warning
+- Refresh the SHA directory's access timestamp after successful validation
 
 Concurrency:
 - Per-shard file locks (via filelock) for atomic operations
@@ -24,7 +25,6 @@ Concurrency:
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import logging
@@ -195,11 +195,8 @@ class GitCache:
             if verify_checkout_sha(checkout_dir, sha):
                 _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
                 with shard_lock(checkout_dir):
-                    return self._finalize_sparse_checkout(
-                        url,
-                        checkout_dir,
-                        sparse_paths,
-                        env=env,
+                    return self._record_checkout_access(
+                        self._finalize_sparse_checkout(url, checkout_dir, sparse_paths, env=env)
                     )
             else:
                 # Integrity failure -- evict
@@ -225,6 +222,21 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _record_checkout_access(self, checkout_dir: Path) -> Path:
+        """Record successful reuse of a finalized checkout under its shard lock."""
+        # Pruning ages the shared SHA root, not individual checkout variants.
+        try:
+            os.utime(checkout_dir.parent, None)
+        except PermissionError as exc:
+            _log.warning(
+                "[!] Cannot update Git cache recency for %s: %s. "
+                "Continuing with validated checkout; cache prune may evict it. "
+                "Check cache permissions or set APM_CACHE_DIR to a writable directory.",
+                checkout_dir.parent,
+                exc,
+            )
+        return checkout_dir
 
     def _finalize_sparse_checkout(
         self,
@@ -600,11 +612,8 @@ class GitCache:
                     sha[:12],
                     variant,
                 )
-                return self._finalize_sparse_checkout(
-                    url,
-                    final_dir,
-                    sparse_paths,
-                    env=env,
+                return self._record_checkout_access(
+                    self._finalize_sparse_checkout(url, final_dir, sparse_paths, env=env)
                 )
 
             staged = stage_path(final_dir)
@@ -873,30 +882,30 @@ class GitCache:
             "total_size_bytes": total_size,
         }
 
-    def clean_all(self) -> None:
-        """Remove ALL cache content (db + checkouts). Used by ``apm cache clean``."""
-        from ..utils.file_ops import robust_rmtree
+    def clean_all(self) -> list[str]:
+        """Remove db and checkouts, returning details of every incomplete removal."""
+        from .cleanup import clean_cache_buckets
 
-        for bucket in (self._db_root, self._checkouts_root):
-            if bucket.is_dir():
-                for entry in os.scandir(str(bucket)):
-                    if entry.is_dir(follow_symlinks=False):
-                        robust_rmtree(Path(entry.path), ignore_errors=True)
-                    elif entry.is_file(follow_symlinks=False):
-                        with contextlib.suppress(OSError):
-                            os.unlink(entry.path)
+        return clean_cache_buckets((self._db_root, self._checkouts_root))
 
     def prune(self, *, max_age_days: int = 30) -> int:
         """Remove checkout entries older than *max_age_days*.
 
-        Uses mtime of the checkout directory as the access indicator.
+        Uses mtime of the shared SHA directory as the access indicator.
+        Successfully reusing any checkout variant refreshes that timestamp.
 
         Returns:
             Number of entries pruned.
+
+        Raises:
+            ValueError: If max_age_days is negative.
         """
         import time
 
         from ..utils.file_ops import robust_rmtree
+
+        if max_age_days < 0:
+            raise ValueError("max_age_days must be nonnegative; use 0 or a positive number of days")
 
         cutoff = time.time() - (max_age_days * 86400)
         pruned = 0
