@@ -306,6 +306,8 @@ class ContextOptimizer:
         self._file_list_cache = None
         self._glob_cache.clear()
         self._glob_set_cache.clear()
+        self._rel_path_cache.clear()
+        self._resolved_dir_cache.clear()
         # Clear before the timed phase; analysis also clears so direct callers
         # receive the same deterministic rebuild.
         self._files_by_directory.clear()
