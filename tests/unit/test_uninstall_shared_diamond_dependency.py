@@ -127,14 +127,9 @@ def test_uninstall_one_shared_parent_keeps_shared_dependency_alive(
     shared = _dep(lock_data, "_local/shared")
     assert shared is not None, "shared must survive: root-b still declares it"
     assert _shared_manifests_on_disk(project), "shared's on-disk source must survive too"
-    # Note: does NOT assert survival of shared's deployed instructions file
-    # here. A separate, pre-existing defect (confirmed independently on
-    # unmodified main, unrelated to resolved_by/reachability) causes
-    # _sync_integrations_after_uninstall's legacy-glob fallback to wipe ALL
-    # integrated instructions files whenever the removed package's own
-    # deployed_files set is empty -- Phase 2 then only re-integrates DIRECT
-    # dependencies, permanently losing a surviving TRANSITIVE package's
-    # instructions. Out of scope for this isolated fix; tracked separately.
+    # Instruction bytes and ownership across both uninstalls are guarded by
+    # test_required_diamond_uninstall_preserves_shared_instructions_until_last_parent
+    # in the real-CLI lifecycle suite; survivor reintegration already handles them.
 
 
 def test_uninstall_last_shared_parent_removes_shared_dependency(
