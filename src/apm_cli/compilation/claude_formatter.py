@@ -15,6 +15,7 @@ from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import read_constitution
 from .footer import build_generation_footer
+from .link_resolver import UnifiedLinkResolver
 from .template_builder import build_attributed_instructions
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
@@ -80,6 +81,7 @@ class ClaudeFormatter:
 
         self.warnings: builtins.list[str] = []
         self.errors: builtins.list[str] = []
+        self.link_resolver = UnifiedLinkResolver(self.source_dir)
 
     def format_distributed(
         self,
@@ -104,6 +106,11 @@ class ClaudeFormatter:
             config = config or {}
             source_attribution = config.get("source_attribution", True)
             skip_instructions = config.get("skip_instructions", False)
+
+            # Register context/memory fragments so embedded links to them
+            # (e.g. ".context.md") resolve to their actual on-disk location,
+            # mirroring the AGENTS.md distributed compiler.
+            self.link_resolver.register_contexts(primitives)
 
             # Generate Claude placements from the placement map
             placements = self._generate_placements(
@@ -340,7 +347,21 @@ class ClaudeFormatter:
         if source_attribution:
             sections.extend(build_generation_footer())
 
-        return "\n".join(sections)
+        content = "\n".join(sections)
+
+        # Resolve context/memory links (".context.md", ".memory.md") to their
+        # actual on-disk location, mirroring the AGENTS.md distributed
+        # compiler (distributed_compiler.py). Without this, embedded
+        # relative links are emitted verbatim -- correct only when CLAUDE.md
+        # happens to live in the same directory as their source file, and
+        # broken for any dependency-sourced or non-root placement.
+        content = self.link_resolver.resolve_links_for_compilation(
+            content=content,
+            source_file=placement.claude_path.parent,
+            compiled_output=placement.claude_path,
+        )
+
+        return content
 
     def _compile_stats(
         self, placements: builtins.list[ClaudePlacement], primitives: PrimitiveCollection
