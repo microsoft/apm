@@ -77,6 +77,21 @@ Every new issue is automatically labeled `needs-triage`. Maintainers review inco
 
 Labels used for triage: `needs-triage`, `accepted`, `needs-design`, `priority/high`, `priority/low`.
 
+### Code scanning on pull requests and merge queues
+
+The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
+pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
+Keep the workflow path, `analyze` job ID, and language matrix stable: they
+identify the analysis configurations GitHub compares against the base branch.
+PR results do not replace results for the merge queue's separate commit.
+
+If both analysis jobs succeed but Code scanning still reports a missing
+configuration, inspect the CodeQL check summary. An additional `API upload`
+configuration on the base branch belongs to a separate upload producer;
+rerunning this workflow cannot supply that producer's results. Coordinate
+matching PR and queue uploads with its owner rather than deleting findings,
+renaming categories, or weakening the code-scanning ruleset.
+
 ## Development Environment
 
 This project uses uv to manage Python environments and dependencies:
