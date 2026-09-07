@@ -212,11 +212,18 @@ every confirmed product defect into a named regression before extending the
 ledger. The static scenario rows remain valuable for exact reproductions; the
 generated model searches valid orderings that authored rows may miss.
 
-`IsolatedApmEnvironment` builds deterministic child environments for APM and
-its Git/GitHub/ADO/GitLab/SSH flows, then installs a best-effort Python socket
-tripwire. The environment contract is deliberately bounded: it isolates the
-APM, Git, GH, Azure, home, cache, and temporary roots used by these tests. It
-does not scan arbitrary variables or act as a general credential scrubber.
+`IsolatedApmEnvironment` builds deterministic child environments for
+APM/Git/GitHub/ADO/GitLab/SSH flows with a best-effort Python socket guard.
+The guard preserves native optional socket API availability: it defines
+`sendmsg` only when the native socket supports it, keeping feature detection
+platform-correct. It isolates APM, Git, GH, Azure, home, cache, and temporary
+roots, not arbitrary variables; it is not a general credential scrubber.
+
+For deeply nested fixtures that populate real sparse Git caches, use short
+pytest-owned roots such as `tmp_path_factory.mktemp("r")` instead of
+test-named `tmp_path` roots to avoid Git for Windows metadata path limits.
+Retain worker-equivalent directory depth in focused gates so they still
+exercise the paths used by the sharded suite.
 
 It is also not an OS/native-code sandbox: executables found through `PATH`
 remain trusted, reflective access to CPython internals or native extensions can
