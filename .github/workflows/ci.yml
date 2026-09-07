@@ -501,10 +501,10 @@ jobs:
   #
   # Why timeout-minutes: 6
   # ------------------------
-  # Recent hosted runs of the current required selection complete in under
-  # five minutes. The 6-minute job cap includes checkout/setup/sync/cleanup and
-  # still fails fast on accidental network retries or unreviewed marker growth.
-  # Hosted job duration is the release authority.
+  # Two xdist workers share the required selection without widening the cap.
+  # loadgroup preserves xdist_group serialization for HOME-mutating tests,
+  # matching the merge-group integration scheduler. The 6-minute cap includes
+  # checkout/setup/sync/cleanup; hosted job duration is the release authority.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
   # merge-group-only, and required selections and guards their set partition,
@@ -549,4 +549,5 @@ jobs:
         APM_E2E_TESTS: "1"
       run: |
         uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+          -n 2 --dist loadgroup \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration

@@ -361,6 +361,8 @@ environment end-to-end; for local iteration prefer the direct
 
 The required Windows compatibility gate selects `windows_compat` tests. Its collection guard requires a non-empty subset, not a fixed test count, so adding marked regressions does not require raising a ceiling. The workflow's test roots and timeout bound scope and runtime.
 
+Linux Lifecycle Smoke runs the required marker subset with `-n 2 --dist loadgroup`. Grouped tests stay on one worker, and the six-minute job limit remains unchanged.
+
 **On pushed version tag releases:**
 1. Unit tests + Smoke tests
 2. Build binaries (cross-platform)
