@@ -864,7 +864,7 @@ class TestStatsCleanAndPrune:
             return iter(entries)
 
         monkeypatch.setattr(os, "scandir", _fake_scandir)
-        with pytest.raises(CachePruneError, match=r"0 checkout.*1 failed") as caught:
+        with pytest.raises(CachePruneError, match=r"0 SHA group.*1 failed") as caught:
             cache.prune(max_age_days=30)
         assert caught.value.pruned == 0
         assert str(caught.value.failures[0][1]) == "stat failed"

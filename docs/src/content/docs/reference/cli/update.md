@@ -21,7 +21,9 @@ When every ref is already current but the locked `apm_modules/` cache is empty, 
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
-This is the dependency-refresh command. To upgrade the APM CLI binary itself, see [`apm self-update`](../self-update/).
+This command refreshes dependencies, not the CLI. For CLI upgrades, use your
+package manager (`brew upgrade apm` for Homebrew), or
+[`apm self-update`](../self-update/) for standalone installs.
 
 :::note[Consent gate]
 The interactive prompt for ref changes defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to apply ref changes. Restoring an empty cache from unchanged locked refs does not require consent.
@@ -121,12 +123,12 @@ and malformed or ambiguous tag records still fail the update before writes.
 
 In earlier releases, `apm update` self-updated the **APM CLI binary**. That behavior moved to [`apm self-update`](../self-update/) and `apm update` was repurposed as the dependency updater described above.
 
-For one release after the rename, running `apm update` from a directory **without an `apm.yml`** prints a deprecation banner and forwards to `apm self-update` so existing muscle memory and scripts keep working. This shim is removed in the next minor release -- update your scripts to call `apm self-update` directly.
+For one release after the rename, running `apm update` from a directory **without an `apm.yml`** prints a deprecation banner and forwards to `apm self-update`. This shim is removed in the next minor release. Use your package manager for CLI upgrades, or `apm self-update` for standalone installs.
 
 ## Related
 
 - [`apm install --frozen`](../install/) -- read-only install pinned to `apm.lock.yaml`; fails on drift. Use this in CI.
-- [`apm self-update`](../self-update/) -- upgrade the APM CLI binary itself.
+- [CLI upgrades](../../../consumer/update-and-refresh/#update-the-apm-cli-binary) -- package-manager and standalone update paths.
 - [`apm outdated`](../outdated/) -- report dependencies with newer refs available, without changing anything.
 - [Manage dependencies (consumer guide)](../../../consumer/manage-dependencies/) -- task-oriented walkthrough.
 - [Update and refresh](../../../consumer/update-and-refresh/) -- when to use `update`, `install --frozen`, and `self-update`.

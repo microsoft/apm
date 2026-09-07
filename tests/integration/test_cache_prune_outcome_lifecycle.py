@@ -100,7 +100,7 @@ def test_prune_failure_retry_and_convergence(
         )
         output = result.stdout + result.stderr
         assert result.returncode == 1, output
-        assert f"Pruned {count} checkout(s); 1 failed." in output
+        assert f"Pruned {count} SHA group(s); 1 failed." in output
         assert "fixture removal denied" in output
         assert "Check permissions or close programs using the cache, then retry." in output
         assert blocked.name in output
@@ -130,7 +130,7 @@ def test_prune_failure_retry_and_convergence(
         )
         output = result.stdout + result.stderr
         assert result.returncode == 0, output
-        assert f"Pruned {count} checkout(s)." in output
+        assert f"Pruned {count} SHA group(s)." in output
         assert "[x]" not in output
         assert "[!]" not in output
         assert failed_state.diff(ArtifactSnapshot.capture(isolated.cache_root)) == ArtifactDiff(
