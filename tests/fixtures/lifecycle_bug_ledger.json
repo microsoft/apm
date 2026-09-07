@@ -51,6 +51,12 @@
       "law": "Exit status and diagnostics truthfully describe the durable outcome."
     },
     {
+      "id": "cache.successful_reads_refresh_recency",
+      "phase": 0,
+      "oracle_tier": "outcome",
+      "law": "Successful fresh HTTP cache reads protect entries from eviction without extending response TTL or causing a refetch."
+    },
+    {
       "id": "auth.credentials_isolated",
       "phase": 0,
       "oracle_tier": "outcome",
@@ -176,6 +182,38 @@
       "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
       "regression_tests": [
         "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
+      ]
+    },
+    {
+      "issue": 2851,
+      "fixed_in": "Unreleased",
+      "summary": "Successful MCP HTTP cache hits did not refresh LRU recency and were evicted before cold entries.",
+      "failure_modes": ["cache"],
+      "properties": ["cache.successful_reads_refresh_recency"],
+      "regression_tests": [
+        "tests/integration/test_http_cache_recency_lifecycle.py::test_mcp_show_hit_survives_cache_pressure_without_refetch",
+        "tests/unit/cache/test_http_cache.py::TestHttpCacheSizeCap::test_successful_hit_protects_entry_from_eviction",
+        "tests/unit/cache/test_http_cache.py::TestHttpCacheHitMiss::test_hit_updates_recency_without_rewriting_response"
+      ]
+    },
+    {
+      "issue": 2852,
+      "fixed_in": "already fixed at 045f78cd71e56b9029e1b4193f7e4d4a46b00086",
+      "summary": "Regression-only coverage: shared transitive instructions survive either diamond parent's uninstall and are removed after the last parent.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_diamond_uninstall_preserves_shared_instructions_until_last_parent"
+      ]
+    },
+    {
+      "issue": 2853,
+      "fixed_in": "Unreleased",
+      "summary": "Cache clean reported success despite failed Git db, checkout, or HTTP removal.",
+      "failure_modes": ["cache", "cleanup", "outcome"],
+      "properties": ["outcome.status_matches_state", "filesystem.open_world_observation", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_cache_clean_lifecycle.py::test_cache_clean_status_matches_residual_state"
       ]
     }
   ],
