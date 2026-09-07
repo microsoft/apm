@@ -31,8 +31,10 @@ Scripts are defined in three tiers. The **project tier** uses the repository `ap
 manifest under a top-level `lifecycle:` key. The **user tier** uses
 `~/.apm/apm.yml` (or `$APM_HOME/apm.yml`) under the same `lifecycle:` key.
 The **admin** tier uses `/etc/apm/policy.d/*.json` on POSIX systems, or
-`C:\ProgramData\APM\policy.d\*.json` on Windows. It is suited for
-machine- and fleet-managed deployment.
+`%ProgramData%\APM\policy.d\*.json` on Windows. `%ProgramData%` normally
+expands to `C:\ProgramData`; APM uses that default if the value is missing or
+is not an absolute Windows path. The tier is suited for machine- and
+fleet-managed deployment.
 
 ## Supported events
 
@@ -168,7 +170,7 @@ disabled; the global kill switches below suppress all lifecycle scripts.
 
 | Priority     | Path                                                                        | Who controls     | Format |
 |--------------|-----------------------------------------------------------------------------|------------------|--------|
-| 1 (highest)  | POSIX: `/etc/apm/policy.d/*.json`<br />Windows: `C:\ProgramData\APM\policy.d\*.json` | Platform/IT team | JSON   |
+| 1 (highest)  | POSIX: `/etc/apm/policy.d/*.json`<br />Windows: `%ProgramData%\APM\policy.d\*.json` | Platform/IT team | JSON   |
 | 2            | `~/.apm/apm.yml`                                                           | Individual user  | YAML   |
 | 3            | `apm.yml` `lifecycle:`                                                     | Project          | YAML   |
 
@@ -199,7 +201,7 @@ POST body.
 Lifecycle scripts from different sources are subject to different trust rules:
 
 - **Policy scripts** (`/etc/apm/policy.d/*.json` on POSIX systems or
-  `C:\ProgramData\APM\policy.d\*.json` on Windows) -- controlled by
+  `%ProgramData%\APM\policy.d\*.json` on Windows) -- controlled by
   your platform/IT team. Run without any consent gate; they cannot be
   individually disabled by the developer. `APM_NO_SCRIPTS=1` suppresses
   all lifecycle-script tiers for that run.
@@ -234,7 +236,7 @@ policy directory to track which packages are actively used:
 Create `analytics.json` in the platform admin directory:
 
 - POSIX: `/etc/apm/policy.d/analytics.json`
-- Windows: `C:\ProgramData\APM\policy.d\analytics.json`
+- Windows: `%ProgramData%\APM\policy.d\analytics.json`
 
 ```json
 {

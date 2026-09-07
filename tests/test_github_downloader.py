@@ -14,6 +14,7 @@ import requests as requests_lib
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
+from apm_cli.deps.github_rate_limit import GitHubThrottleError
 from apm_cli.models.apm_package import (
     APMPackage,
     DependencyReference,
@@ -93,7 +94,14 @@ class TestGitHubPackageDownloader:
         mock_repo.head.commit.hexsha = "abc123def456"
         mock_repo_class.clone_from.return_value = mock_repo
 
-        with patch("pathlib.Path.exists", return_value=True), patch("shutil.rmtree"):
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("shutil.rmtree"),
+            patch(
+                "apm_cli.utils.git_env.git_worktree_head",
+                return_value="abc123def456",
+            ),
+        ):
             result = self.downloader.resolve_git_reference("user/repo#main")
 
             assert isinstance(result, ResolvedReference)
@@ -110,20 +118,21 @@ class TestGitHubPackageDownloader:
         mock_temp_dir = "/tmp/test"
         mock_mkdtemp.return_value = mock_temp_dir
 
-        from git.exc import GitCommandError
-
-        # First call (shallow clone) fails, second call (full clone) succeeds
         mock_repo = Mock()
         mock_commit = Mock()
         mock_commit.hexsha = "abcdef123456"
         mock_repo.commit.return_value = mock_commit
 
-        mock_repo_class.clone_from.side_effect = [
-            GitCommandError("shallow clone failed"),
-            mock_repo,
-        ]
+        mock_repo_class.clone_from.return_value = mock_repo
 
-        with patch("pathlib.Path.exists", return_value=True), patch("shutil.rmtree"):
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("shutil.rmtree"),
+            patch(
+                "apm_cli.utils.git_env.git_resolve_commit",
+                return_value="abcdef123456",
+            ),
+        ):
             result = self.downloader.resolve_git_reference("user/repo#abcdef1")
 
             assert result.ref_type == GitReferenceType.COMMIT
@@ -143,7 +152,18 @@ class TestGitHubPackageDownloader:
         mock_repo.active_branch.name = "master"
         mock_repo_class.clone_from.return_value = mock_repo
 
-        with patch("pathlib.Path.exists", return_value=True), patch("shutil.rmtree"):
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("shutil.rmtree"),
+            patch(
+                "apm_cli.utils.git_env.git_worktree_head",
+                return_value="deadbeef1234",
+            ),
+            patch(
+                "apm_cli.utils.git_env.git_current_branch",
+                return_value="master",
+            ),
+        ):
             result = self.downloader.resolve_git_reference("user/repo")
 
             assert isinstance(result, ResolvedReference)
@@ -162,7 +182,7 @@ class TestGitHubPackageDownloader:
 
     @patch("apm_cli.deps.github_downloader.Repo")
     @patch("apm_cli.deps.github_downloader.validate_apm_package")
-    @patch("apm_cli.deps.github_downloader.shutil.rmtree")
+    @patch("apm_cli.deps.github_downloader._rmtree")
     def test_download_package_success(self, mock_rmtree, mock_validate, mock_repo_class):
         """Test successful package download and validation."""
         # Setup target directory
@@ -198,7 +218,7 @@ class TestGitHubPackageDownloader:
 
     @patch("apm_cli.deps.github_downloader.Repo")
     @patch("apm_cli.deps.github_downloader.validate_apm_package")
-    @patch("apm_cli.deps.github_downloader.shutil.rmtree")
+    @patch("apm_cli.deps.github_downloader._rmtree")
     def test_download_package_validation_failure(self, mock_rmtree, mock_validate, mock_repo_class):
         """Test package download with validation failure."""
         # Setup target directory
@@ -258,7 +278,7 @@ class TestGitHubPackageDownloader:
 
     @patch("apm_cli.deps.github_downloader.Repo")
     @patch("apm_cli.deps.github_downloader.validate_apm_package")
-    @patch("apm_cli.deps.github_downloader.shutil.rmtree")
+    @patch("apm_cli.deps.github_downloader._rmtree")
     def test_download_package_commit_checkout(self, mock_rmtree, mock_validate, mock_repo_class):
         """Test package download with commit checkout."""
         # Setup target directory
@@ -284,11 +304,21 @@ class TestGitHubPackageDownloader:
             ref_name="abc123",
         )
 
-        with patch.object(self.downloader, "resolve_git_reference", return_value=mock_resolved_ref):
+        with (
+            patch.object(
+                self.downloader,
+                "resolve_git_reference",
+                return_value=mock_resolved_ref,
+            ),
+            patch("apm_cli.deps.github_downloader.checkout_git_worktree") as mock_checkout,
+        ):
             result = self.downloader.download_package("user/repo#abc123", target_path)
 
-            # Verify that git checkout was called for commit
-            mock_repo.git.checkout.assert_called_once_with("abc123def456")
+            mock_checkout.assert_called_once_with(
+                target_path,
+                "abc123def456",
+                env=self.downloader.git_env,
+            )
             assert result.package.name == "test-package"
 
     def test_get_clone_progress_callback(self):
@@ -336,7 +366,12 @@ class TestEnterpriseHostHandling:
     """Test enterprise GitHub host handling (PR #33 bug fixes)."""
 
     @patch("apm_cli.deps.github_downloader.Repo")
-    def test_clone_fallback_respects_enterprise_host(self, mock_repo_class, monkeypatch):
+    def test_clone_fallback_respects_enterprise_host(
+        self,
+        mock_repo_class,
+        monkeypatch,
+        tmp_path,
+    ):
         """Test that fallback clone uses enterprise host, not hardcoded github.com.
 
         This tests the bug fix from PR #33 where Method 3 fallback was hardcoded
@@ -347,7 +382,7 @@ class TestEnterpriseHostHandling:
         monkeypatch.setenv("GITHUB_HOST", "company.ghe.com")
         monkeypatch.setenv("GITHUB_APM_PAT", "test-enterprise-token")
 
-        downloader = GitHubPackageDownloader()
+        downloader = GitHubPackageDownloader(allow_fallback=True)
         downloader.github_host = "company.ghe.com"
 
         # Mock clone attempts: first two fail, third succeeds
@@ -360,7 +395,7 @@ class TestEnterpriseHostHandling:
             mock_repo,  # Method 3 succeeds
         ]
 
-        target_path = Path("/tmp/test_enterprise")
+        target_path = tmp_path / "test-enterprise"
 
         with patch("pathlib.Path.exists", return_value=False):
             downloader._clone_with_fallback("team/internal-repo", target_path)
@@ -372,10 +407,9 @@ class TestEnterpriseHostHandling:
         third_call_url = calls[2][0][0]  # First positional arg of third call
 
         # Should use company.ghe.com, NOT github.com
-        assert "company.ghe.com" in third_call_url
-        assert "team/internal-repo" in third_call_url
-        # Ensure it's NOT using github.com
-        assert "github.com" not in third_call_url or "company.ghe.com" in third_call_url
+        parsed = urlparse(third_call_url)
+        assert parsed.hostname == "company.ghe.com"
+        assert parsed.path.rstrip("/") == "/team/internal-repo.git"
 
     def test_host_persists_through_clone_attempts(self, monkeypatch):
         """Test that github_host attribute persists across fallback attempts."""
@@ -427,13 +461,13 @@ class TestErrorHandling:
         # Would require mocking authentication failures
         pass
 
-    def test_download_raw_file_saml_fallback_retries_without_token(self):
-        """Test that download_raw_file retries without token on 401/403 (SAML/SSO)."""
+    def test_download_raw_file_retries_anonymous_failure_with_token(self):
+        """Public GitHub retries an anonymous 401 with the resolved token."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "saml-blocked-token"}, clear=True):
             downloader = GitHubPackageDownloader()
             dep_ref = DependencyReference.parse("microsoft/some-public-repo/sub/dir")
 
-            # First call (with token) returns 401, second call (without token) returns 200
+            # Two raw-CDN refs and the anonymous API attempt fail before auth.
             mock_response_401 = Mock()
             mock_response_401.status_code = 401
             mock_response_401.raise_for_status = Mock(
@@ -446,18 +480,21 @@ class TestErrorHandling:
             mock_response_200.raise_for_status = Mock()
 
             with patch("apm_cli.deps.github_downloader.requests.get") as mock_get:
-                mock_get.side_effect = [mock_response_401, mock_response_200]
+                mock_get.side_effect = [
+                    mock_response_401,
+                    mock_response_401,
+                    mock_response_401,
+                    mock_response_200,
+                ]
 
                 result = downloader.download_raw_file(dep_ref, "sub/dir/SKILL.md", "main")
                 assert result == b"# SKILL.md content"
 
-                # First call should include auth header
-                first_call_headers = mock_get.call_args_list[0][1].get("headers", {})
-                assert "Authorization" in first_call_headers
-
-                # Second (retry) call should NOT include auth header
-                second_call_headers = mock_get.call_args_list[1][1].get("headers", {})
-                assert "Authorization" not in second_call_headers
+                assert all(
+                    "Authorization" not in call.kwargs.get("headers", {})
+                    for call in mock_get.call_args_list[:3]
+                )
+                assert "Authorization" in mock_get.call_args_list[3].kwargs["headers"]
 
     def test_download_raw_file_saml_fallback_not_used_for_ghe_cloud_dr(self):
         """Test that SAML fallback does NOT apply to *.ghe.com (no public repos)."""
@@ -512,8 +549,8 @@ class TestErrorHandling:
                 second_call_headers = mock_get.call_args_list[1][1].get("headers", {})
                 assert "Authorization" not in second_call_headers
 
-    def test_download_raw_file_saml_fallback_retries_and_still_fails(self):
-        """Test that when both authenticated and unauthenticated attempts fail, an error is raised."""
+    def test_download_raw_file_anonymous_and_token_attempts_fail(self):
+        """An error is raised when anonymous and resolved-token requests fail."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "saml-blocked-token"}, clear=True):
             downloader = GitHubPackageDownloader()
             dep_ref = DependencyReference.parse("microsoft/private-repo/sub/dir")
@@ -524,28 +561,25 @@ class TestErrorHandling:
                 side_effect=requests_lib.exceptions.HTTPError(response=mock_response_401_first)
             )
 
-            mock_response_401_second = Mock()
-            mock_response_401_second.status_code = 401
-            mock_response_401_second.raise_for_status = Mock(
-                side_effect=requests_lib.exceptions.HTTPError(response=mock_response_401_second)
-            )
-
-            with patch("apm_cli.deps.github_downloader.requests.get") as mock_get:
-                mock_get.side_effect = [mock_response_401_first, mock_response_401_second]
+            with (
+                patch("apm_cli.deps.github_downloader.requests.get") as mock_get,
+                patch(
+                    "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_gh_cli",
+                    return_value=None,
+                ),
+                _CRED_FILL_PATCH,
+            ):
+                mock_get.return_value = mock_response_401_first
 
                 with pytest.raises(RuntimeError, match="Authentication failed"):
                     downloader.download_raw_file(dep_ref, "sub/dir/SKILL.md", "main")
 
-                # Both attempts should have been made
-                assert mock_get.call_count == 2
-
-                # First call should include auth header
-                first_call_headers = mock_get.call_args_list[0][1].get("headers", {})
-                assert "Authorization" in first_call_headers
-
-                # Second (retry) call should NOT include auth header
-                second_call_headers = mock_get.call_args_list[1][1].get("headers", {})
-                assert "Authorization" not in second_call_headers
+                assert mock_get.call_count == 4
+                assert all(
+                    "Authorization" not in call.kwargs.get("headers", {})
+                    for call in mock_get.call_args_list[:3]
+                )
+                assert "Authorization" in mock_get.call_args_list[3].kwargs["headers"]
 
     def test_repository_not_found_handling(self):
         """Test handling of repository not found errors."""
@@ -571,15 +605,12 @@ class TestErrorHandling:
                 patch("apm_cli.deps.github_downloader.requests.get") as mock_get,
                 patch("apm_cli.deps.github_downloader.time.sleep"),
             ):
-                # _resilient_get retries 3 times on rate-limit 403, all return same
                 mock_get.return_value = mock_response_403
 
-                with pytest.raises(RuntimeError, match="rate limit exceeded") as exc_info:
+                with pytest.raises(GitHubThrottleError) as exc_info:
                     downloader.download_raw_file(dep_ref, "agents/api-architect.agent.md", "main")
 
-                # Must NOT mention "private repository" — that's the old misleading message
-                assert "private repository" not in str(exc_info.value).lower()
-                assert "60/hour" in str(exc_info.value)
+                assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
 
     def test_download_github_file_403_rate_limit_with_token(self):
         """Test that 403 with X-RateLimit-Remaining: 0 and a token gives a rate-limit error."""
@@ -602,11 +633,10 @@ class TestErrorHandling:
             ):
                 mock_get.return_value = mock_response_403
 
-                with pytest.raises(RuntimeError, match="rate limit exceeded") as exc_info:
+                with pytest.raises(GitHubThrottleError) as exc_info:
                     downloader.download_raw_file(dep_ref, "agents/api-architect.agent.md", "main")
 
-                assert "Authenticated rate limit exhausted" in str(exc_info.value)
-                assert "SSO/SAML" not in str(exc_info.value)
+                assert str(exc_info.value) == "GitHub API throttle for github.com (HTTP 403)"
 
     def test_download_github_file_403_non_rate_limit_still_auth_error(self):
         """Test that 403 WITHOUT rate-limit headers still produces the auth error."""
@@ -736,16 +766,16 @@ class TestAzureDevOpsSupport:
             assert "ConnectTimeout=30" in env["GIT_SSH_COMMAND"]
             assert "-i ~/.ssh/custom_key" in env["GIT_SSH_COMMAND"]
 
-    def test_setup_git_environment_preserves_existing_connect_timeout(self):
-        """Git env should not duplicate ConnectTimeout if already present."""
+    def test_setup_git_environment_preserves_timeout_and_adds_batch_mode(self):
+        """Git env preserves a custom timeout while making SSH noninteractive."""
         with patch.dict(os.environ, {"GIT_SSH_COMMAND": "ssh -o ConnectTimeout=60"}, clear=True):
             downloader = GitHubPackageDownloader()
             env = downloader.git_env
 
-            assert env["GIT_SSH_COMMAND"] == "ssh -o ConnectTimeout=60"
+            assert env["GIT_SSH_COMMAND"] == "ssh -o ConnectTimeout=60 -o BatchMode=yes"
 
-    def test_build_repo_url_for_ado_with_token(self):
-        """Test URL building for ADO packages with token."""
+    def test_build_repo_url_for_ado_keeps_token_out_of_userinfo(self):
+        """ADO package URLs remain credential-free."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "ado-token"}, clear=True):
             downloader = GitHubPackageDownloader()
             dep_ref = DependencyReference.parse("dev.azure.com/myorg/myproject/_git/myrepo")
@@ -753,14 +783,10 @@ class TestAzureDevOpsSupport:
             url = downloader._build_repo_url(dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref)
             parsed = urlparse(url)
 
-            # Should build ADO URL with token embedded in userinfo
             assert parsed.hostname == "dev.azure.com"
-            assert "myorg" in parsed.path
-            assert "myproject" in parsed.path
-            assert "_git" in parsed.path
-            assert "myrepo" in parsed.path
-            # Token should be in the URL (as username in https://token@host format)
-            assert parsed.username == "ado-token" or "ado-token" in (parsed.password or "")
+            assert parsed.path == "/myorg/myproject/_git/myrepo"
+            assert parsed.username is None
+            assert parsed.password is None
 
     def test_build_repo_url_for_ado_without_token(self):
         """Test URL building for ADO packages without token."""
@@ -929,9 +955,9 @@ class TestMixedSourceTokenSelection:
             parsed = urlparse(url)
 
             assert parsed.hostname == "dev.azure.com"
-            # ADO token should be used (as username), GitHub token should not
-            assert parsed.username == "ado-token" or "ado-token" in (parsed.password or "")
-            assert "github-token" not in url
+            assert parsed.username is None
+            assert parsed.password is None
+            assert downloader._resolve_dep_auth_ctx(dep_ref).token == "ado-token"
 
     def test_mixed_tokens_bare_owner_repo_with_github_host(self):
         """Test bare owner/repo uses GITHUB_HOST and GITHUB_APM_PAT."""
@@ -984,13 +1010,15 @@ class TestMixedSourceTokenSelection:
             assert ghe_parsed.hostname == "company.ghe.com"
             assert ado_parsed.hostname == "dev.azure.com"
 
-            # Verify token isolation - ADO token only in ADO URL
-            assert "ado-token" not in github_url
-            assert "ado-token" not in ghe_url
-            assert ado_parsed.username == "ado-token" or "ado-token" in (ado_parsed.password or "")
-
-            # Verify GitHub token not in ADO URL
-            assert "github-token" not in ado_url
+            assert github_parsed.username != "ado-token"
+            assert github_parsed.password != "ado-token"
+            assert ghe_parsed.username != "ado-token"
+            assert ghe_parsed.password != "ado-token"
+            assert ado_parsed.username is None
+            assert ado_parsed.password is None
+            assert downloader._resolve_dep_auth_ctx(github_dep).token == "github-token"
+            assert downloader._resolve_dep_auth_ctx(ghe_dep).token == "github-token"
+            assert downloader._resolve_dep_auth_ctx(ado_dep).token == "ado-token"
 
     def test_github_ado_without_ado_token_falls_back(self):
         """Test ADO without token still builds valid URL."""
@@ -1028,6 +1056,12 @@ class TestMixedSourceTokenSelection:
 class TestSubdirectoryPackageCommitSHA:
     """Test commit SHA handling in download_subdirectory_package."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_materialized_symlink_validation(self):
+        """Keep clone-option tests isolated from real repository inspection."""
+        with patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"):
+            yield
+
     def setup_method(self):
         self.temp_dir = Path(tempfile.mkdtemp())
 
@@ -1064,7 +1098,11 @@ class TestSubdirectoryPackageCommitSHA:
         with patch.dict(os.environ, {}, clear=True):
             downloader = GitHubPackageDownloader()
 
-        with patch.object(downloader, "_clone_with_fallback") as mock_clone:
+        with (
+            patch.object(downloader, "_clone_with_fallback") as mock_clone,
+            patch("apm_cli.deps.github_downloader.checkout_git_worktree") as mock_checkout,
+            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+        ):
             mock_clone.return_value = mock_repo
 
             target = self.temp_dir / "my-skill"
@@ -1089,8 +1127,9 @@ class TestSubdirectoryPackageCommitSHA:
                 "SHA ref should use no_checkout=True"
             )
 
-            # Verify checkout was called with the SHA
-            mock_repo.git.checkout.assert_called_once_with(sha)
+            checkout_call = mock_checkout.call_args
+            assert checkout_call.args[1] == sha
+            assert checkout_call.kwargs["env"] is downloader.git_env
 
     @patch("apm_cli.deps.github_downloader.Repo")
     @patch("apm_cli.deps.github_downloader.validate_apm_package")
@@ -1254,30 +1293,27 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
     + _rmtree, plus _close_repo() before cleanup.
     """
 
+    @pytest.fixture(autouse=True)
+    def _mock_materialized_symlink_validation(self):
+        """Keep cleanup tests isolated from real repository inspection."""
+        with patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"):
+            yield
+
     def _make_dep_ref(self):
         """Return a minimal DependencyReference for a subdirectory package."""
         # owner/repo/skills/test-pkg → virtual subdirectory reference
         return DependencyReference.parse("owner/repo/skills/test-pkg")
 
-    def test_sparse_checkout_success_closes_sha_repo_before_rmtree(self, tmp_path):
-        """When sparse checkout succeeds the SHA-capture Repo is closed before _rmtree."""
-        from apm_cli.deps.github_downloader import _close_repo  # noqa
-
+    def test_sparse_checkout_success_cleans_without_gitpython_handle(self, tmp_path):
+        """Subprocess SHA capture leaves no GitPython handle before cleanup."""
         downloader = GitHubPackageDownloader()
         dep = self._make_dep_ref()
         target = tmp_path / "out"
 
-        call_order = []
-
-        def fake_close_repo(repo):
-            if repo is not None:
-                call_order.append(("close_repo", repo))
+        removed_paths = []
 
         def fake_rmtree(path):
-            call_order.append(("rmtree", path))
-
-        fake_repo = MagicMock()
-        fake_repo.head.commit.hexsha = "abc1234"
+            removed_paths.append(path)
 
         def fake_sparse(dep_ref, clone_path, subdir, ref):
             # Simulate sparse checkout writing the subdir
@@ -1286,22 +1322,16 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
             return True
 
         with (
-            patch("apm_cli.deps.github_downloader._close_repo", side_effect=fake_close_repo),
+            patch("apm_cli.deps.github_downloader._close_repo") as close_repo,
             patch("apm_cli.deps.github_downloader._rmtree", side_effect=fake_rmtree),
             patch.object(downloader, "_try_sparse_checkout", side_effect=fake_sparse),
-            patch("apm_cli.deps.github_downloader.Repo", return_value=fake_repo),
             patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
         ):
             mock_validate.return_value = MagicMock(is_valid=True, errors=[])
             downloader.download_subdirectory_package(dep, target)
 
-        # Verify both _close_repo and _rmtree were called
-        assert any(op == "close_repo" for op, _ in call_order), "_close_repo was not called"
-        assert any(op == "rmtree" for op, _ in call_order), "_rmtree was not called"
-        # Verify _close_repo was called before _rmtree
-        close_repo_idx = next(i for i, (op, _) in enumerate(call_order) if op == "close_repo")
-        rmtree_idx = next(i for i, (op, _) in enumerate(call_order) if op == "rmtree")
-        assert close_repo_idx < rmtree_idx, "_close_repo must be called before _rmtree"
+        close_repo.assert_not_called()
+        assert removed_paths
 
     def test_sparse_checkout_failure_uses_fresh_clone_path(self, tmp_path):
         """When sparse checkout fails the full clone goes to a fresh path (repo_clone/)."""
@@ -1563,13 +1593,11 @@ class TestRawContentCDNDownload:
                 result = downloader._download_github_file(dep_ref, "agents/bot.agent.md", "main")
 
             assert result == b"# Agent content"
-            # Should have hit raw.githubusercontent.com, not API
             call_url = mock_get.call_args[0][0]
-            assert call_url.startswith("https://raw.githubusercontent.com/")
-            assert not call_url.startswith("https://api.github.com/")
+            assert urlparse(call_url).hostname == "raw.githubusercontent.com"
 
-    def test_raw_cdn_not_used_when_token_present(self):
-        """Authenticated requests should go straight to Contents API."""
+    def test_raw_cdn_remains_anonymous_when_token_present(self):
+        """Public GitHub still tries the anonymous CDN before resolving auth."""
         with patch.dict(os.environ, {"GITHUB_APM_PAT": "my-token"}, clear=True):
             downloader = GitHubPackageDownloader()
             dep_ref = DependencyReference.parse("owner/repo/agents/bot.agent.md")
@@ -1586,9 +1614,9 @@ class TestRawContentCDNDownload:
                 result = downloader._download_github_file(dep_ref, "agents/bot.agent.md", "main")
 
             assert result == b"# Agent content"
-            # Should use API with auth, not raw CDN
             call_url = mock_get.call_args[0][0]
-            assert call_url.startswith("https://api.github.com/")
+            assert urlparse(call_url).hostname == "raw.githubusercontent.com"
+            assert "Authorization" not in mock_get.call_args.kwargs.get("headers", {})
 
     def test_raw_cdn_not_used_for_enterprise_host(self):
         """Enterprise hosts should use API directly (no raw.githubusercontent.com)."""
@@ -1610,8 +1638,7 @@ class TestRawContentCDNDownload:
 
             assert result == b"# Agent content"
             call_url = mock_get.call_args[0][0]
-            assert not call_url.startswith("https://raw.githubusercontent.com/")
-            assert call_url.startswith("https://github.mycompany.com/")
+            assert urlparse(call_url).hostname == "github.mycompany.com"
 
     def test_raw_cdn_fallback_to_api_on_404(self):
         """If raw CDN returns 404, should fall through to the API path."""
@@ -1932,6 +1959,11 @@ class TestRefExistsViaLsRemote:
             patch.object(downloader, "_resolve_dep_token", return_value=token),
             patch.object(downloader, "_resolve_dep_auth_ctx", return_value=None),
             patch.object(downloader, "_build_repo_url", return_value="https://example/repo.git"),
+            patch.object(
+                downloader.auth_resolver,
+                "uses_public_github_anonymous_first",
+                return_value=False,
+            ),
         ]
 
     def _enter(self, ctxs):
@@ -2416,8 +2448,8 @@ class TestGiteaRawUrlDownload:
                 f"PAT leaked to {call[0][0]}: headers={req_headers!r}"
             )
 
-    def test_token_still_sent_when_host_is_github(self):
-        """github.com receives the Authorization header (regression trap)."""
+    def test_public_github_stays_anonymous_when_api_succeeds(self):
+        """github.com does not resolve or send a token after anonymous success."""
         dep_ref = DependencyReference.parse("owner/repo")  # default host
         api_ok = _make_resp(200, b"data")
 
@@ -2429,7 +2461,7 @@ class TestGiteaRawUrlDownload:
                     downloader.download_raw_file(dep_ref, "README.md", "main")
 
         api_headers = mock_get.call_args_list[0][1].get("headers", {})
-        assert api_headers.get("Authorization") == "token ghp_real_gh"
+        assert "Authorization" not in api_headers
 
     def test_token_still_sent_when_host_is_ghe(self):
         """*.ghe.com (GHE Cloud / Data Residency) receives the token too."""

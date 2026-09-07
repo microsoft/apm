@@ -43,6 +43,8 @@ class LSPDependency:
     shutdown_timeout: int | None = None
     restart_on_crash: bool | None = None
     max_restarts: int | None = None
+    resolved_by: str | None = None
+    approval_keys: tuple[str, ...] = ()
 
     _VALID_TRANSPORTS = frozenset({"stdio", "socket"})
 

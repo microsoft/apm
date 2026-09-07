@@ -264,6 +264,7 @@ def test_installed_mcp_lifecycle_is_no_write_until_real_target_change(
     baseline = _snapshot(project_root)
     baseline_lock = _lock(project_root)
     baseline_identity = _file_identity(lock_path)
+    assert baseline_lock.generated_at is None
     assert baseline_lock.mcp_target_servers == _TARGET_SERVERS
     assert baseline_lock.mcp_config_provenance == {_SERVER_NAME: "local-mcp"}
     assert baseline_lock.mcp_configs[_SERVER_NAME]["registry"] is False
@@ -301,7 +302,7 @@ def test_installed_mcp_lifecycle_is_no_write_until_real_target_change(
     changed_lock = _lock(project_root)
     changed_identity = _file_identity(lock_path)
     assert changed.lockfile_bytes != baseline.lockfile_bytes
-    assert changed_lock.generated_at != baseline_lock.generated_at
+    assert changed_lock.generated_at is None
     assert changed_lock.mcp_target_servers == {"copilot": [_SERVER_NAME]}
     assert changed_identity != baseline_identity
     assert {

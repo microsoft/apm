@@ -23,6 +23,7 @@ from ..core.deployment_ledger import (
     DeploymentOwnerViolation,
 )
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..install.locking import serialized_lifecycle_when
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
 from ..security.file_scanner import scan_project_files
@@ -556,17 +557,25 @@ def _audit_ci_gate(
     prepared_replay = None
     prepared_replay_error = None
     if (cfg.project_root / "apm.yml").exists() and not (cfg.project_root / "apm_modules").exists():
+        from ..core.scope import get_workspace_deploy_root
         from ..deps.lockfile import get_lockfile_path
         from ..install.audit_replay import CiAuditReplayError, prepare_ci_audit_replay
 
         if get_lockfile_path(cfg.project_root).exists():
-            try:
-                prepared_replay = prepare_ci_audit_replay(
-                    cfg.project_root,
-                    verbose=cfg.verbose,
+            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root:
+                prepared_replay_error = (
+                    "installed package materialization is missing at "
+                    f"{cfg.project_root / 'apm_modules'}; run 'apm install --global' "
+                    "to restore it"
                 )
-            except CiAuditReplayError as exc:
-                prepared_replay_error = str(exc)
+            else:
+                try:
+                    prepared_replay = prepare_ci_audit_replay(
+                        cfg.project_root,
+                        verbose=cfg.verbose,
+                    )
+                except CiAuditReplayError as exc:
+                    prepared_replay_error = str(exc)
 
     # Always run baseline checks
     ci_result = run_baseline_checks(
@@ -1258,6 +1267,7 @@ def _audit_content_scan(
     ),
 )
 @click.pass_context
+@serialized_lifecycle_when("strip", unless_argument="dry_run")
 def audit(  # noqa: PLR0913 -- Click handler
     ctx,
     package,

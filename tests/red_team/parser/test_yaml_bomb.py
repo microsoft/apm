@@ -153,20 +153,19 @@ def test_large_anchor_free_lockfile_loads_successfully(tmp_path: Path):
     positive "billion-laughs expansion bomb" error.  After the fix, anchor-free
     documents bypass the tight expansion cap entirely.
 
-    The generated document contains approximately 6,000,000 scalar bytes across
-    150,000 mapping entries (no anchors, no aliases) -- well above the 5M weight
-    threshold -- and must load without error.
+    The generated document contains more than 5,000,000 scalar bytes across
+    thousands of mapping entries (no anchors, no aliases) -- above the 5M
+    weight threshold -- and must load without error.
     """
     from apm_cli.utils.yaml_io import load_yaml
 
-    # Build a document whose accumulated leaf byte cost exceeds 5_000_000.
-    # Each entry contributes: key (8 bytes) + value (32 bytes hex) = ~40 bytes.
-    # 150_000 entries * 40 bytes = ~6_000_000 -- comfortably above the cap.
-    entry_count = 150_000
+    # Build a document whose accumulated leaf byte cost exceeds 5_000_000
+    # without spending CI time on hundreds of thousands of YAML nodes.
+    entry_count = 6_000
+    value = "abcdef1234567890" * 64
     lines = ["packages:\n"]
     for i in range(entry_count):
-        # 32-char hex value ensures enough byte weight per leaf.
-        lines.append(f"  pkg{i:06d}: abcdef1234567890abcdef1234567890\n")
+        lines.append(f"  pkg{i:06d}: {value}\n")
     doc = tmp_path / "apm.lock.yaml"
     doc.write_text("".join(lines), encoding="utf-8")
 

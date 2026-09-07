@@ -5,6 +5,13 @@ includes: auto
 author: Microsoft
 license: MIT
 
+# Pinned so every contributor's `apm install` deploys the same tree this
+# repo commits (.github/ plus .agents/skills/ via skills convergence),
+# instead of auto-detecting whichever harness their machine signals.
+# Contributors on another harness opt in with `apm install --target <name>`.
+targets:
+  - copilot
+
 # Local-path manifest deps on the extracted skill packages.
 # Each was INLINE in .apm/skills/ until the v2 extraction.
 # Extraction unlocks consumer reuse of each primitive standalone

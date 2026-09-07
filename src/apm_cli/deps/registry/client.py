@@ -21,6 +21,7 @@ Design notes:
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import urllib.parse
 from collections.abc import Mapping
@@ -200,6 +201,34 @@ class PublishResult:
 _DEFAULT_TIMEOUT = (10, 60)  # (connect, read) seconds
 
 
+def _validate_registry_transport(url: str) -> urllib.parse.ParseResult:
+    """Return a parsed registry URL after enforcing the transport boundary."""
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.hostname:
+        raise ValueError("registry URL must include a host")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("registry URLs must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("registry URLs must not contain query strings or fragments")
+    if parsed.scheme == "https":
+        return parsed
+    if parsed.scheme == "http" and parsed.hostname:
+        host = parsed.hostname.lower()
+        try:
+            is_loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            is_loopback = host == "localhost"
+        if is_loopback:
+            return parsed
+    raise ValueError("registry URLs must use HTTPS (HTTP is allowed only for loopback testing)")
+
+
+def _effective_port(parsed: urllib.parse.ParseResult) -> int | None:
+    if parsed.port is not None:
+        return parsed.port
+    return {"http": 80, "https": 443}.get(parsed.scheme.lower())
+
+
 class RegistryClient:
     """Minimal HTTP client for the registry API.
 
@@ -217,6 +246,9 @@ class RegistryClient:
     ) -> None:
         if not base_url:
             raise ValueError("base_url is required")
+        parsed = _validate_registry_transport(base_url)
+        if parsed.scheme == "http" and auth.auth_header() is not None:
+            raise ValueError("registry credentials must not be sent over HTTP")
         # Strip trailing slash so we can join cleanly.
         self._base_url = base_url.rstrip("/")
         self._auth = auth
@@ -257,13 +289,14 @@ class RegistryClient:
                 headers=self._headers(accept=accept),
                 timeout=self._timeout,
                 stream=stream,
+                allow_redirects=False,
             )
         except requests.RequestException as exc:
             raise RegistryError(
                 f"transport error talking to registry: {exc}",
                 url=url,
             ) from exc
-        if response.status_code >= 400:
+        if response.status_code >= 300:
             problem = _safe_problem_json(response)
             raise RegistryError(
                 _format_error(response.status_code, problem, url),
@@ -330,16 +363,37 @@ class RegistryClient:
         Used by ``RegistryPackageResolver.download_from_lockfile`` to fetch
         from the URL recorded in the lockfile without re-querying ``/versions``.
         """
+        _validate_registry_transport(url)
+        base = urllib.parse.urlparse(self._base_url)
+        target = urllib.parse.urlparse(url)
+        if (
+            target.scheme.lower(),
+            (target.hostname or "").lower(),
+            _effective_port(target),
+        ) != (
+            base.scheme.lower(),
+            (base.hostname or "").lower(),
+            _effective_port(base),
+        ):
+            raise RegistryError("lockfile registry URL does not match configured registry", url=url)
+        base_path = base.path.rstrip("/")
+        if base_path and target.path != base_path and not target.path.startswith(base_path + "/"):
+            raise RegistryError(
+                "lockfile registry URL is outside configured registry path", url=url
+            )
+        if target.query or target.fragment:
+            raise RegistryError("lockfile registry URL must not contain query or fragment", url=url)
         try:
             response = self._session.request(
                 "GET",
                 url=url,
                 headers=self._headers(accept="application/gzip, application/zip"),
                 timeout=self._timeout,
+                allow_redirects=False,
             )
         except requests.RequestException as exc:
             raise RegistryError(f"transport error fetching {url}: {exc}", url=url) from exc
-        if response.status_code >= 400:
+        if response.status_code >= 300:
             problem = _safe_problem_json(response)
             raise RegistryError(
                 _format_error(response.status_code, problem, url),

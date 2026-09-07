@@ -6,6 +6,7 @@ Provides deterministic, reproducible installs by capturing exact resolved versio
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,14 @@ _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
 SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
+_REPRODUCIBLE_EPOCH = "1970-01-01T00:00:00+00:00"
+
+
+class _ExistingLockfileUnset:
+    """Sentinel for callers that have not already read the destination."""
+
+
+_EXISTING_LOCKFILE_UNSET = _ExistingLockfileUnset()
 
 
 def installed_apm_version() -> str:
@@ -38,6 +47,25 @@ def installed_apm_version() -> str:
         return version("apm-cli")
     except Exception:
         return "unknown"
+
+
+def resolve_reproducible_timestamp(
+    explicit: str | None,
+    lockfile_generated_at: str | None,
+) -> str:
+    """Resolve stable metadata time from explicit, environment, or legacy input."""
+    if explicit:
+        return explicit
+    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if source_date_epoch:
+        try:
+            return datetime.fromtimestamp(
+                int(source_date_epoch),
+                tz=timezone.utc,
+            ).isoformat()
+        except (ValueError, OverflowError, OSError):
+            pass
+    return lockfile_generated_at or _REPRODUCIBLE_EPOCH
 
 
 class LockfileFormatError(ValueError):
@@ -81,6 +109,7 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
         "mcp_target_servers",
         "mcp_config_provenance",
         "lsp_configs",
+        "lsp_target_servers",
         "lsp_config_provenance",
         "local_deployed_file_hashes",
     )
@@ -97,13 +126,14 @@ def _validate_lockfile_container(data: object) -> dict[str, Any]:
     for index, dependency in enumerate(data.get("dependencies", [])):
         if not isinstance(dependency, dict):
             raise LockfileFormatError(f"Lockfile dependency at index {index} must be a mapping")
-    for target, servers in (data.get("mcp_target_servers") or {}).items():
-        if not isinstance(target, str) or not target or not isinstance(servers, list):
-            raise LockfileFormatError(
-                "Lockfile mcp_target_servers values must be string-to-list mappings"
-            )
-        if not all(isinstance(server, str) and bool(server) for server in servers):
-            raise LockfileFormatError("Lockfile mcp_target_servers entries must be strings")
+    for field_name in ("mcp_target_servers", "lsp_target_servers"):
+        for target, servers in (data.get(field_name) or {}).items():
+            if not isinstance(target, str) or not target or not isinstance(servers, list):
+                raise LockfileFormatError(
+                    f"Lockfile {field_name} values must be string-to-list mappings"
+                )
+            if not all(isinstance(server, str) and bool(server) for server in servers):
+                raise LockfileFormatError(f"Lockfile {field_name} entries must be strings")
     for server, provenance in (data.get("mcp_config_provenance") or {}).items():
         if not isinstance(server, str) or not (
             (isinstance(provenance, str) and bool(provenance))
@@ -706,7 +736,7 @@ class LockFile:
     """APM lock file for reproducible dependency resolution."""
 
     lockfile_version: str = "1"
-    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    generated_at: str | None = None
     apm_version: str | None = None
     dependencies: dict[str, LockedDependency] = field(default_factory=dict)
     mcp_servers: list[str] = field(default_factory=list)
@@ -721,6 +751,7 @@ class LockFile:
     mcp_config_provenance: dict[str, str | list[str]] = field(default_factory=dict)
     lsp_servers: list[str] = field(default_factory=list)
     lsp_configs: dict[str, dict] = field(default_factory=dict)
+    lsp_target_servers: dict[str, list[str]] = field(default_factory=dict)
     lsp_config_provenance: dict[str, str] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
@@ -729,6 +760,7 @@ class LockFile:
     )
     _deployments_present: bool = field(default=False, repr=False, compare=False)
     _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
+    _lsp_target_servers_present: bool = field(default=False, repr=False, compare=False)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -813,8 +845,9 @@ class LockFile:
         try:
             data: dict[str, Any] = {
                 "lockfile_version": emit_version,
-                "generated_at": self.generated_at,
             }
+            if self.generated_at is not None:
+                data["generated_at"] = self.generated_at
             if self.apm_version:
                 data["apm_version"] = self.apm_version
             data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
@@ -823,7 +856,7 @@ class LockFile:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
                 data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
-            if self.mcp_target_servers:
+            if self.mcp_target_servers or self._mcp_target_servers_present:
                 data["mcp_target_servers"] = {
                     target: sorted(servers)
                     for target, servers in sorted(self.mcp_target_servers.items())
@@ -836,6 +869,11 @@ class LockFile:
                 data["lsp_servers"] = sorted(self.lsp_servers)
             if self.lsp_configs:
                 data["lsp_configs"] = dict(sorted(self.lsp_configs.items()))
+            if self.lsp_target_servers:
+                data["lsp_target_servers"] = {
+                    target: sorted(servers)
+                    for target, servers in sorted(self.lsp_target_servers.items())
+                }
             if self.lsp_config_provenance:
                 data["lsp_config_provenance"] = dict(sorted(self.lsp_config_provenance.items()))
             if self.local_deployed_files:
@@ -865,9 +903,14 @@ class LockFile:
         except (yaml.YAMLError, ValueError) as exc:
             raise LockfileFormatError(f"Invalid lockfile YAML: {exc}") from exc
         data = _validate_lockfile_container(loaded)
+        return cls._from_validated_data(data)
+
+    @classmethod
+    def _from_validated_data(cls, data: dict[str, Any]) -> LockFile:
+        """Construct a lockfile from an already validated YAML mapping."""
         lock = cls(
             lockfile_version=data.get("lockfile_version", "1"),
-            generated_at=data.get("generated_at", ""),
+            generated_at=data.get("generated_at"),
             apm_version=data.get("apm_version"),
         )
         for dep_data in data.get("dependencies", []):
@@ -882,6 +925,11 @@ class LockFile:
         lock.mcp_config_provenance = dict(data.get("mcp_config_provenance") or {})
         lock.lsp_servers = list(data.get("lsp_servers", []))
         lock.lsp_configs = dict(data.get("lsp_configs") or {})
+        lock.lsp_target_servers = {
+            target: list(servers)
+            for target, servers in (data.get("lsp_target_servers") or {}).items()
+        }
+        lock._lsp_target_servers_present = "lsp_target_servers" in data
         lock.lsp_config_provenance = dict(data.get("lsp_config_provenance") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
@@ -910,11 +958,62 @@ class LockFile:
             lock.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lock)
         return lock
 
-    def write(self, path: Path) -> None:
-        """Write lock file to disk."""
-        from ..utils.atomic_io import atomic_write_text
+    def write(
+        self,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
+    ) -> None:
+        """Write lock file to disk, preserving legacy timestamp behavior.
 
-        atomic_write_text(path, self.to_yaml())
+        New lockfiles omit ``generated_at``.  When the on-disk lockfile already
+        carries the field, keep it stable for semantic no-ops and refresh it for
+        substantive writes. This behavior should be changed to remove the legacy
+        timestamp in a future APM version, but for now it preserves backward
+        compatibility with older APM builds that expect the field. This method
+        may mutate ``self.generated_at`` to preserve or refresh that metadata.
+        Callers that already loaded the destination can pass ``existing_lockfile``
+        to avoid parsing the same bytes again.
+        """
+        from ..utils.atomic_io import atomic_write_text
+        from ..utils.staging_guard import assert_no_staging_paths
+        from ..utils.yaml_io import load_yaml_str
+
+        existing: LockFile | None
+        legacy_timestamp_present = False
+        if isinstance(existing_lockfile, _ExistingLockfileUnset) and path.exists():
+            existing_text = path.read_text(encoding="utf-8")
+            try:
+                existing_data = load_yaml_str(existing_text)
+            except (yaml.YAMLError, ValueError):
+                existing_data = None
+            existing = None
+            if isinstance(existing_data, dict) and existing_data.get("generated_at") is not None:
+                legacy_timestamp_present = True
+                try:
+                    existing = type(self)._from_validated_data(
+                        _validate_lockfile_container(existing_data)
+                    )
+                except UnsupportedLockfileVersionError:
+                    raise
+                except LockfileFormatError:
+                    existing = None
+        elif isinstance(existing_lockfile, _ExistingLockfileUnset):
+            existing = None
+        else:
+            existing = existing_lockfile
+        if existing is not None and existing.generated_at is not None:
+            if self.is_semantically_equivalent(existing):
+                self.generated_at = existing.generated_at
+            else:
+                self.generated_at = datetime.now(timezone.utc).isoformat()
+        elif legacy_timestamp_present:
+            self.generated_at = datetime.now(timezone.utc).isoformat()
+        else:
+            self.generated_at = None
+        serialized = self.to_yaml()
+        assert_no_staging_paths(serialized, path.name)
+        atomic_write_text(path, serialized)
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
@@ -1020,9 +1119,14 @@ class LockFile:
                 paths.append(rel_path)
         return paths
 
-    def save(self, path: Path) -> None:
+    def save(
+        self,
+        path: Path,
+        *,
+        existing_lockfile: LockFile | None | _ExistingLockfileUnset = (_EXISTING_LOCKFILE_UNSET),
+    ) -> None:
         """Save lock file to disk (alias for write)."""
-        self.write(path)
+        self.write(path, existing_lockfile=existing_lockfile)
 
     def is_semantically_equivalent(self, other: LockFile) -> bool:
         """Return True if *other* has the same deps, MCP/LSP servers, and configs.
@@ -1045,9 +1149,12 @@ class LockFile:
             return False
         if self.mcp_configs != other.mcp_configs:
             return False
-        if self.mcp_target_servers != other.mcp_target_servers or dict(
-            self.deployment_ledger.records
-        ) != dict(other.deployment_ledger.records):
+        if (
+            self.mcp_target_servers != other.mcp_target_servers
+            or (bool(self.mcp_target_servers) or self._mcp_target_servers_present)
+            != (bool(other.mcp_target_servers) or other._mcp_target_servers_present)
+            or dict(self.deployment_ledger.records) != dict(other.deployment_ledger.records)
+        ):
             return False
         if _normalized_mcp_provenance(self.mcp_config_provenance) != _normalized_mcp_provenance(
             other.mcp_config_provenance
@@ -1056,6 +1163,8 @@ class LockFile:
         if sorted(self.lsp_servers) != sorted(other.lsp_servers):
             return False
         if self.lsp_configs != other.lsp_configs:
+            return False
+        if self.lsp_target_servers != other.lsp_target_servers:
             return False
         if self.lsp_config_provenance != other.lsp_config_provenance:
             return False
@@ -1080,12 +1189,7 @@ class LockFile:
                        ordered by depth then repo_url (no duplicates).
         """
         try:
-            lockfile_path = get_lockfile_path(project_root)
-            if not lockfile_path.exists():
-                # Fallback to legacy lockfile for pre-migration reads
-                legacy_path = project_root / LEGACY_LOCKFILE_NAME
-                if legacy_path.exists():
-                    lockfile_path = legacy_path
+            lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
             lockfile = cls.read(lockfile_path)
             if not lockfile:
                 return []
@@ -1103,6 +1207,19 @@ LEGACY_LOCKFILE_NAME = "apm.lock"
 def get_lockfile_path(project_root: Path) -> Path:
     """Get the path to the lock file for a project."""
     return project_root / LOCKFILE_NAME
+
+
+def resolve_lockfile_path_for_read(project_root: Path, *, read_only: bool) -> Path:
+    """Resolve the lockfile path, preserving legacy files for read-only callers."""
+    if read_only:
+        new_path = get_lockfile_path(project_root)
+        legacy_path = project_root / LEGACY_LOCKFILE_NAME
+        if not new_path.exists() and legacy_path.exists():
+            return legacy_path
+        return new_path
+
+    migrate_lockfile_if_needed(project_root)
+    return get_lockfile_path(project_root)
 
 
 def migrate_lockfile_if_needed(project_root: Path) -> bool:

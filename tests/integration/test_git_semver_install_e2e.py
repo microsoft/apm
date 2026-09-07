@@ -26,9 +26,14 @@ did not touch the network" without relying on subprocess sentinels.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -39,14 +44,18 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.core.auth import AuthResolver
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.models.apm_package import (
     APMPackage,
+    DependencyReference,
     PackageInfo,
     clear_apm_yml_cache,
 )
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+from tests.utils.git_credential_shim import GitCredentialShimFactory
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.local_git_http_server import LocalGitHttpServerFactory
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
@@ -158,6 +167,8 @@ class _DownloaderStub:
     def __init__(self, sha_by_tag: dict[str, str]) -> None:
         self.sha_by_tag = sha_by_tag
         self.calls: list[tuple[str, str]] = []  # (owner_repo, reference)
+        self.before_download: Callable[[DependencyReference, Path], None] | None = None
+        self.invalid_tags: set[str] = set()
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         recorder = self
@@ -175,7 +186,24 @@ class _DownloaderStub:
 
             sha = recorder.sha_by_tag.get(ref_value, "f" * 40)
             target_path = Path(target_path)
+            if recorder.before_download is not None:
+                recorder.before_download(dep_ref, target_path)
             target_path.mkdir(parents=True, exist_ok=True)
+
+            if ref_value in recorder.invalid_tags:
+                (target_path / "apm.yml").write_text("not: a-package\n", encoding="utf-8")
+                return type(
+                    "InvalidPackageInfo",
+                    (),
+                    {
+                        "resolved_reference": ResolvedReference(
+                            original_ref=ref_value,
+                            ref_type=GitReferenceType.TAG,
+                            resolved_commit=sha,
+                            ref_name=ref_value,
+                        )
+                    },
+                )()
 
             package_name = dep_ref.repo_url.rsplit("/", 1)[-1]
             (target_path / "apm.yml").write_text(
@@ -266,10 +294,12 @@ def _run_install(
     project: Path,
     monkeypatch: pytest.MonkeyPatch,
     args: list[str] | None = None,
+    *,
+    catch_exceptions: bool = False,
 ):
     monkeypatch.chdir(project)
     with patch(_PATCH_UPDATES, return_value=None):
-        return runner.invoke(cli, ["install", *(args or [])], catch_exceptions=False)
+        return runner.invoke(cli, ["install", *(args or [])], catch_exceptions=catch_exceptions)
 
 
 def _source_cli_environment(child_env: dict[str, str]) -> dict[str, str]:
@@ -529,6 +559,197 @@ class TestPositionalVirtualSubdirectorySemver:
         assert _file_tree_bytes(project) == before
 
 
+def test_real_git_semver_environment_build_is_single_flight(
+    tmp_path: Path,
+) -> None:
+    """Concurrent fixture-backed semver resolution builds one shared Git env."""
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.deps.transport_selection import TransportSelector
+    from apm_cli.install.helpers.ref_reuse import maybe_resolve_git_semver
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    source = isolated.package_root / "mono"
+    source.mkdir(parents=True)
+    (source / "apm.yml").write_text(
+        "name: mono\nversion: 1.2.0\ndescription: fixture package\n",
+        encoding="ascii",
+    )
+    repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
+    repository = repositories.create("mono", source_tree=source)
+    commit = repositories.commit(repository, message="mono v1.2.0")
+    repositories.tag(repository, "v1.2.0", commit)
+    requested = "https://gitlab.com/acme/mono.git"
+    child_env = repositories.url_rewrite_subprocess_env(repository, requested)
+    child_env["GITLAB_APM_PAT"] = "glpat-" + "A" * 24
+
+    class _CountingAuthResolver(AuthResolver):
+        def __init__(self) -> None:
+            super().__init__()
+            self.build_count = 0
+            self.count_lock = threading.Lock()
+
+        def git_env_for_remote(self, ctx, remote_url: str) -> dict[str, str]:
+            with self.count_lock:
+                self.build_count += 1
+            time.sleep(0.02)
+            return super().git_env_for_remote(ctx, remote_url)
+
+    resolver = _CountingAuthResolver()
+    shared_cache: dict = {}
+    shared_lock = threading.Lock()
+    workers = 8
+    barrier = threading.Barrier(workers)
+
+    def resolve_one(_index: int):
+        dep = DependencyReference.parse(f"{requested}#^1.0.0")
+        dep.source = "git"
+        barrier.wait(timeout=10)
+        return maybe_resolve_git_semver(
+            dep_ref=dep,
+            existing_lockfile=None,
+            update_refs=True,
+            auth_resolver=resolver,
+            ref_resolver_cache=shared_cache,
+            ref_resolver_cache_lock=shared_lock,
+            transport_selector=TransportSelector(),
+        )
+
+    with patch.dict(os.environ, child_env, clear=True):
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            resolutions = list(executor.map(resolve_one, range(workers)))
+
+    assert {resolution.resolved_tag for resolution in resolutions} == {"v1.2.0"}
+    assert {resolution.resolved_sha for resolution in resolutions} == {commit.sha}
+    assert resolver.build_count == 1
+    assert len(shared_cache) == 1
+
+
+def test_private_github_semver_resolution_is_single_flight_under_concurrency(
+    tmp_path: Path,
+) -> None:
+    """Concurrent private semver workers share auth, environment, and discovery."""
+    from apm_cli.deps.transport_selection import TransportSelector
+    from apm_cli.install.helpers.ref_reuse import maybe_resolve_git_semver
+    from apm_cli.utils.git_env import get_git_executable, reset_git_cache
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "private", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    source = isolated.package_root / "mono"
+    source.mkdir(parents=True)
+    (source / "apm.yml").write_text(
+        "name: mono\nversion: 1.2.0\ndescription: private fixture\n",
+        encoding="ascii",
+    )
+    repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
+    repository = repositories.create("mono", source_tree=source)
+    commit = repositories.commit(repository, message="private mono v1.2.0")
+    repositories.tag(repository, "v1.2.0", commit)
+    real_git = Path(get_git_executable()).resolve()
+    server_factory = LocalGitHttpServerFactory(
+        isolated.repository_root,
+        real_git=real_git,
+        env=environment,
+    )
+    token = "private-single-flight-token"
+
+    class _CountingAuthResolver(AuthResolver):
+        def __init__(self) -> None:
+            super().__init__()
+            self.credential_resolutions = 0
+            self.managed_environment_builds = 0
+            self.count_lock = threading.Lock()
+
+        def _resolve_token(self, *args, **kwargs):
+            with self.count_lock:
+                self.credential_resolutions += 1
+            return super()._resolve_token(*args, **kwargs)
+
+        def git_env_for_context(self, ctx, *, base_env):
+            with self.count_lock:
+                self.managed_environment_builds += 1
+            return super().git_env_for_context(ctx, base_env=base_env)
+
+    with server_factory.start(
+        (repository,),
+        password=token,
+        private_repositories=(repository,),
+    ) as server:
+        requested = "https://github.com/fixture-private/mono.git"
+        shim = GitCredentialShimFactory(isolated.root / "shims").create(
+            base_env=environment,
+            real_git=real_git,
+            remote_map={"fixture-private/mono": server.remote_url(repository)},
+            credential=token,
+        )
+        child_env = dict(shim.environment)
+        child_env["GIT_ALLOW_PROTOCOL"] = "file:http:https"
+        resolver = _CountingAuthResolver()
+        shared_cache: dict = {}
+        shared_lock = threading.Lock()
+        workers = 8
+        barrier = threading.Barrier(workers)
+
+        def resolve_one(_index: int):
+            dep = DependencyReference.parse(f"{requested}#^1.0.0")
+            dep.source = "git"
+            barrier.wait(timeout=10)
+            return maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                auth_resolver=resolver,
+                ref_resolver_cache=shared_cache,
+                ref_resolver_cache_lock=shared_lock,
+                transport_selector=TransportSelector(),
+            )
+
+        reset_git_cache()
+        try:
+            with patch.dict(os.environ, child_env, clear=True):
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    resolutions = list(executor.map(resolve_one, range(workers)))
+        finally:
+            reset_git_cache()
+
+        observations = server.observations
+        credential_events = [
+            event for event in shim.events() if event.get("event") == "credential-fill"
+        ]
+        remote_events = [
+            event
+            for event in shim.events()
+            if event.get("event") == "git"
+            and event.get("command") == "ls-remote"
+            and event.get("remotes")
+        ]
+
+    assert {resolution.resolved_tag for resolution in resolutions} == {"v1.2.0"}
+    assert {resolution.resolved_sha for resolution in resolutions} == {commit.sha}
+    assert resolver.credential_resolutions == 1
+    assert resolver.managed_environment_builds == 1
+    assert len(shared_cache) == 1
+    assert len(remote_events) == 2
+    assert [event["auth_config_present"] for event in remote_events] == [False, True]
+    tag_discovery = [
+        observation for observation in observations if observation.path.endswith("/info/refs")
+    ]
+    assert len(tag_discovery) >= 2
+    assert tag_discovery[0].accepted is False
+    assert tag_discovery[0].authorization is None
+    assert any(observation.authorization is not None for observation in tag_discovery)
+    assert tag_discovery[-1].accepted is True
+    assert credential_events == [
+        {
+            "credential_interactive": [],
+            "event": "credential-fill",
+            "host": "github.com",
+            "path": "fixture-private/mono",
+            "protocol": "https",
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Promise C: second install is offline (lockfile replay)
 # ---------------------------------------------------------------------------
@@ -752,23 +973,22 @@ class TestLiteralRefUnchanged:
 
 
 # ---------------------------------------------------------------------------
-# Promise H: AuthResolver token threads into RefResolver for private repos
+# Promise H: RefResolver owns public GitHub anonymous-first auth fallback
 # ---------------------------------------------------------------------------
 
 
-class TestAuthTokenThreadedToLsRemote:
-    def test_github_apm_pat_reaches_ref_resolver_for_semver_dep(
+class TestAuthFallbackThreadedToLsRemote:
+    def test_github_semver_defers_pat_until_anonymous_failure(
         self,
         runner: CliRunner,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Regression-trap for the auth-blocking panel finding on PR #1496.
+        """Regression-trap for semver's public GitHub auth fallback.
 
-        With ``GITHUB_APM_PAT`` set, an ``apm install`` of a semver-range
-        git-source dep must pass that token to the ``RefResolver`` that
-        runs ``git ls-remote`` -- otherwise private repos fail in CI
-        environments without a system git credential helper.
+        The resolver receives AuthResolver and starts without eagerly resolving
+        ``GITHUB_APM_PAT``. A unit regression test covers its authenticated retry
+        after an auth-shaped anonymous failure.
         """
         monkeypatch.setenv("GITHUB_APM_PAT", "ghp_e2e_token_abc123")
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -784,13 +1004,11 @@ class TestAuthTokenThreadedToLsRemote:
         result = _run_install(runner, project, monkeypatch)
         assert result.exit_code == 0, result.output
 
-        # At least one RefResolver instance must have been constructed
-        # with the configured PAT.
-        tokens_seen = [kw.get("token") for kw in rr.init_kwargs]
-        assert "ghp_e2e_token_abc123" in tokens_seen, (
-            "AuthResolver did not thread GITHUB_APM_PAT into the "
-            f"RefResolver used for ls-remote. token kwargs seen: {tokens_seen}"
-        )
+        assert rr.init_kwargs
+        resolver_kwargs = rr.init_kwargs[0]
+        assert resolver_kwargs.get("token") is None
+        assert resolver_kwargs.get("unauth_first") is True
+        assert resolver_kwargs.get("auth_resolver") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -908,6 +1126,16 @@ class TestUpdateReResolvesGitSemver:
         assert rr.calls.count("acme/widget") == 1, (
             f"first install should ls-remote once, got: {rr.calls}"
         )
+        live_hook = project / "apm_modules" / "acme" / "widget" / "hooks" / "pre_tool.py"
+        live_hook.parent.mkdir(parents=True)
+        live_hook.write_text("old hook", encoding="ascii")
+
+        def assert_live_hook(_dep_ref: DependencyReference, target_path: Path) -> None:
+            if ".apm-resolution-staging" in target_path.parts:
+                assert target_path != live_hook.parents[1]
+                assert live_hook.read_text(encoding="ascii") == "old hook"
+
+        dl.before_download = assert_live_hook
 
         # Upstream publishes v1.5.0. The install path still exists from
         # the first run -- this is the surface that hid the bug.
@@ -939,6 +1167,144 @@ class TestUpdateReResolvesGitSemver:
         assert locked_after.get("resolved_commit") == "3" * 40, (
             f"--update must update resolved_commit, got: {locked_after}"
         )
+
+    def test_invalid_update_preserves_live_hook_and_lockfile(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A malformed refresh candidate fails without publishing stale metadata."""
+        project = tmp_path / "invalid-update"
+        _write_apm_yml(project, ["acme/widget#^1.2.0"])
+        rr = _RefResolverCallRecorder(
+            {
+                "acme/widget": [
+                    RemoteRef(name="refs/tags/v1.2.3", sha="2" * 40),
+                ]
+            }
+        )
+        dl = _DownloaderStub({"v1.2.3": "2" * 40, "v1.5.0": "3" * 40})
+        rr.install(monkeypatch)
+        dl.install(monkeypatch)
+        first = _run_install(runner, project, monkeypatch)
+        assert first.exit_code == 0, first.output
+        clear_apm_yml_cache()
+
+        live_hook = project / "apm_modules" / "acme" / "widget" / "hooks" / "pre_tool.py"
+        live_hook.parent.mkdir(parents=True)
+        live_hook.write_text("old hook", encoding="ascii")
+        lock_before = (project / "apm.lock.yaml").read_bytes()
+        rr.refs_by_repo["acme/widget"].append(RemoteRef(name="refs/tags/v1.5.0", sha="3" * 40))
+        dl.invalid_tags.add("v1.5.0")
+
+        second = _run_install(runner, project, monkeypatch, args=["--update"])
+
+        assert second.exit_code != 0
+        output = " ".join(second.output.split())
+        assert "Downloaded dependency 'acme/widget' is invalid" in output
+        assert "existing installation remains active" in output
+        assert live_hook.read_text(encoding="ascii") == "old hook"
+        assert (project / "apm.lock.yaml").read_bytes() == lock_before
+
+    @pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
+    def test_activation_error_preserves_live_hook_and_lockfile(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        error_type: type[BaseException],
+    ) -> None:
+        """Activation errors restore the prior hook and leave lock state unchanged."""
+        project = tmp_path / f"activation-{error_type.__name__}"
+        _write_apm_yml(project, ["acme/widget#^1.2.0"])
+        rr = _RefResolverCallRecorder(
+            {"acme/widget": [RemoteRef(name="refs/tags/v1.2.3", sha="2" * 40)]}
+        )
+        dl = _DownloaderStub({"v1.2.3": "2" * 40, "v1.5.0": "3" * 40})
+        rr.install(monkeypatch)
+        dl.install(monkeypatch)
+        first = _run_install(runner, project, monkeypatch)
+        assert first.exit_code == 0, first.output
+        clear_apm_yml_cache()
+
+        live = project / "apm_modules" / "acme" / "widget"
+        live_hook = live / "hooks" / "pre_tool.py"
+        live_hook.parent.mkdir(parents=True)
+        live_hook.write_text("print('old hook')\n", encoding="ascii")
+        settings_path = project / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": f"{sys.executable} {live_hook}",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="ascii",
+        )
+
+        def assert_registered_hook_runs(
+            _dep_ref: DependencyReference,
+            target_path: Path,
+        ) -> None:
+            if ".apm-resolution-staging" not in target_path.parts:
+                return
+            command = json.loads(settings_path.read_text(encoding="ascii"))["hooks"]["PreToolUse"][
+                0
+            ]["hooks"][0]["command"]
+            result = subprocess.run(
+                command.split(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0
+            assert result.stdout.strip() == "old hook"
+
+        dl.before_download = assert_registered_hook_runs
+        lock_before = (project / "apm.lock.yaml").read_bytes()
+        rr.refs_by_repo["acme/widget"].append(RemoteRef(name="refs/tags/v1.5.0", sha="3" * 40))
+        original_replace = Path.replace
+
+        def fail_activation(source: Path, target: Path) -> Path:
+            if (
+                ".apm-resolution-staging" in source.parts
+                and "replacements" in source.parts
+                and target == live
+            ):
+                raise error_type("injected activation failure")
+            return original_replace(source, target)
+
+        monkeypatch.setattr(Path, "replace", fail_activation)
+
+        second = _run_install(
+            runner,
+            project,
+            monkeypatch,
+            args=["--update"],
+            catch_exceptions=True,
+        )
+
+        assert second.exit_code != 0
+        assert live_hook.read_text(encoding="ascii") == "print('old hook')\n"
+        assert_registered_hook_runs(
+            DependencyReference(repo_url="acme/widget"),
+            project / "apm_modules" / ".apm-resolution-staging" / "probe",
+        )
+        assert (project / "apm.lock.yaml").read_bytes() == lock_before
+        assert not (project / "apm_modules" / ".apm-resolution-staging").exists()
 
 
 # ---------------------------------------------------------------------------

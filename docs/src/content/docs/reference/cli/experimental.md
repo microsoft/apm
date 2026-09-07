@@ -75,7 +75,6 @@ Reset one flag (when `NAME` is given) or all flags (when omitted) to registry de
 | `canvas` | Ships Copilot CLI canvas extensions from `.apm/extensions/` bundles. | `apm install` |
 | `external-scanners` | Enables third-party SARIF scanner ingestion in `apm audit` (`--external`, `--external-llm`, `--external-args`), the `external.<name>.{llm,args}` config keys, and `security.audit.scanners` policy governance. | `apm audit --external skillspector` |
 | `openclaw` | Deploys skills to OpenClaw runtime directories. | `apm install --target openclaw` |
-| `hermes` | Deploys skills, `AGENTS.md`, and MCP servers to Hermes. | `apm install --target hermes` |
 
 Run `apm experimental list` to see the live registry; new flags ship in minor releases.
 

@@ -12,6 +12,7 @@ import contextlib
 from unittest.mock import MagicMock, patch
 
 import pytest
+from git import Actor, Repo
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
@@ -46,6 +47,18 @@ def _make_downloader() -> GitHubPackageDownloader:
     dl.persistent_git_cache = None
     dl._tiered_resolver = None
     return dl
+
+
+def _configure_http_remote_env(downloader: GitHubPackageDownloader) -> None:
+    """Make the resolver mock return the canonical plaintext-HTTP fence."""
+    downloader.auth_resolver.git_env_for_remote.return_value = (
+        AuthResolver.build_noninteractive_git_env(
+            base_env=downloader.git_env,
+            host_kind="gitlab",
+            preserve_config_isolation=True,
+            suppress_credential_helpers=True,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +379,15 @@ class TestDownloadSubdirectoryPersistentCache:
         # Put a valid subdirectory in the cache
         pkg_dir = cached_checkout / "packages" / "my-pkg"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text("name: my-pkg\nversion: 1.0.0\n")
+        (pkg_dir / "apm.yml").write_bytes(b"name: my-pkg\nversion: 1.0.0\n")
+        actor = Actor("APM Test", "apm-test@example.invalid")
+        cached_repo = Repo.init(cached_checkout)
+        cached_repo.index.add(["packages/my-pkg/apm.yml"])
+        cached_repo.index.commit(
+            "seed cache",
+            author=actor,
+            committer=actor,
+        )
 
         target_path = tmp_path / "target"
 
@@ -384,6 +405,7 @@ class TestDownloadSubdirectoryPersistentCache:
                 "GIT_HTTP_EXTRAHEADER": "Authorization: Basic secret",
             }
         )
+        _configure_http_remote_env(dl)
 
         persistent_cache = MagicMock()
         persistent_cache.get_checkout.return_value = cached_checkout
@@ -487,6 +509,7 @@ class TestDownloadWholeRepositoryPersistentCache:
                 "GIT_HTTP_EXTRAHEADER": "Authorization: Basic secret",
             }
         )
+        _configure_http_remote_env(dl)
         persistent_cache = MagicMock()
         persistent_cache.get_checkout.return_value = cached_checkout
         dl.persistent_git_cache = persistent_cache

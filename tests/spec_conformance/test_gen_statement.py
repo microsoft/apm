@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -11,6 +12,7 @@ from tests.spec_conformance.gen_statement import (
     CONFORMANCE_MD,
     GENERATOR,
     SPEC_VERSION,
+    USER_SCOPE_DISCLOSURE,
 )
 
 
@@ -69,3 +71,13 @@ def test_gen_statement_md_lists_repository_case_rules():
     assert "GitHub Enterprise Cloud hosts ending in `.ghe.com`" in md
     assert "registry-sourced dependencies (including registry prefixes)" in md
     assert "Local paths, marketplace identities, and every other host remain case-sensitive" in md
+
+
+def test_gen_statement_publishes_user_scope_disclosure():
+    """req-tg-014 locations and capability contract stay generated."""
+    _run_gen()
+    document = json.loads(CONFORMANCE_JSON.read_text(encoding="ascii"))
+    assert document["consumer_user_scope"] == USER_SCOPE_DISCLOSURE
+    markdown = CONFORMANCE_MD.read_text(encoding="ascii")
+    for value in USER_SCOPE_DISCLOSURE.values():
+        assert value in markdown

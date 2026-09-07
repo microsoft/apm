@@ -21,7 +21,9 @@ When every ref is already current but the locked `apm_modules/` cache is empty, 
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
-This is the dependency-refresh command. To upgrade the APM CLI binary itself, see [`apm self-update`](../self-update/).
+This command refreshes dependencies, not the CLI. For CLI upgrades, use your
+package manager (`brew upgrade apm` for Homebrew), or
+[`apm self-update`](../self-update/) for standalone installs.
 
 :::note[Consent gate]
 The interactive prompt for ref changes defaults to **No**. In non-interactive contexts (CI, piped stdin) you must pass `--yes` to apply ref changes. Restoring an empty cache from unchanged locked refs does not require consent.
@@ -91,8 +93,12 @@ apm update
 ## Behavior
 
 - **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
+- **Refreshes preserve the active package.** Replacement content downloads and
+  passes package validation in an isolated transaction path before publication.
+  A failed download, validation, or activation keeps the previous package and
+  lockfile active; fix the reported cause and rerun `apm update`.
 - **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
-- **Registry deps.** Registry semver deps are re-resolved against their configured registry. Deps already at the latest version satisfying their constraint appear as **unchanged** in the plan.
+- **Registry deps.** Updates stay within the manifest constraint and use the configured registry. An exact `1.7.0` or `=1.7.0` pin remains **unchanged** even when `apm outdated` reports `Latest` as `1.8.0`. To take an outside-constraint release, [select it explicitly](../outdated/#registry-reporting). Unlike read-only `outdated`, `update` can write the manifest, lockfile, modules, and deployed files.
 - **Structured plan.** Output is grouped into four sections:
   - **added** -- present in the new resolution but not in the previous lockfile.
   - **updated** -- ref or version moved.
@@ -106,16 +112,23 @@ apm update
 - **No-op and service-only repair.** An accepted update with no dependency ref changes still reconciles missing MCP/LSP config. A manifest with only MCP/LSP dependencies also uses `apm update` as a configuration repair pass; `--dry-run` previews this without writing.
 - **Empty caches are restored.** If the lockfile expects dependencies but `apm_modules/` has no materialized packages, an otherwise unchanged update restores the cache from the same refs and reports `Restored dependency cache without changing refs.` No confirmation is required because dependency refs do not move.
 
+### Missing annotated revision-pin tags
+
+When a revision-pinned dependency has no eligible stable annotated semver tag,
+APM emits one summary warning and retains its current SHA while continuing with
+unrelated updates. Use `--verbose` to list each retained pin. Transport failures
+and malformed or ambiguous tag records still fail the update before writes.
+
 ## Back-compat: `apm update` used to be the self-updater
 
 In earlier releases, `apm update` self-updated the **APM CLI binary**. That behavior moved to [`apm self-update`](../self-update/) and `apm update` was repurposed as the dependency updater described above.
 
-For one release after the rename, running `apm update` from a directory **without an `apm.yml`** prints a deprecation banner and forwards to `apm self-update` so existing muscle memory and scripts keep working. This shim is removed in the next minor release -- update your scripts to call `apm self-update` directly.
+For one release after the rename, running `apm update` from a directory **without an `apm.yml`** prints a deprecation banner and forwards to `apm self-update`. This shim is removed in the next minor release. Use your package manager for CLI upgrades, or `apm self-update` for standalone installs.
 
 ## Related
 
 - [`apm install --frozen`](../install/) -- read-only install pinned to `apm.lock.yaml`; fails on drift. Use this in CI.
-- [`apm self-update`](../self-update/) -- upgrade the APM CLI binary itself.
+- [CLI upgrades](../../../consumer/update-and-refresh/#update-the-apm-cli-binary) -- package-manager and standalone update paths.
 - [`apm outdated`](../outdated/) -- report dependencies with newer refs available, without changing anything.
 - [Manage dependencies (consumer guide)](../../../consumer/manage-dependencies/) -- task-oriented walkthrough.
 - [Update and refresh](../../../consumer/update-and-refresh/) -- when to use `update`, `install --frozen`, and `self-update`.

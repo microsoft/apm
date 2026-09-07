@@ -18,6 +18,11 @@ apm audit [PACKAGE] [OPTIONS]
 - **Content scan mode** (default). Scans deployed files across the project for hidden Unicode, including governed files absent from the lockfile and lockfile-recorded files outside the current target directories. It replays the install pipeline into a scratch tree to detect drift (hand-edits to deployed files, missing integrations, orphaned files vs the lockfile). Can also remediate findings with `--strip` or scan an arbitrary file with `--file`.
 - **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. When `apm_modules/` is absent but `apm.lock.yaml` is present, CI mode self-hydrates a lock-pinned scratch install for `config-consistency` and drift without mutating the checkout. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
+Global audit also checks resolved external deployment roots such as
+`HERMES_HOME` and `CLAUDE_CONFIG_DIR`. Default audit compares tracked files in
+those roots for drift. `apm audit --ci` also scans target-governed external
+subtrees for content integrity. Neither mode modifies those roots.
+
 Both modes also enforce the lockfile's canonical deployment ownership; see
 [Deployment-owner integrity](#deployment-owner-integrity).
 

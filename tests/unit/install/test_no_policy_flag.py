@@ -124,7 +124,10 @@ class TestHelpTextShowsNoPolicy:
         assert "Target a specific runtime only." in normalized
         assert "intellij" in normalized
         assert "kiro" in normalized
-        assert "Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf" in normalized
+        assert (
+            "Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf"
+            in normalized
+        )
 
     def test_help_text_is_plain_ascii(self):
         """Help text must be plain ASCII per cli.instructions.md."""

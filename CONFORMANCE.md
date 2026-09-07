@@ -18,12 +18,18 @@ All four conformance classes (Producer, Consumer, Registry, Governance) carry ac
 
 Repository-coordinate segments are case-insensitive for `github.com`, GitHub Enterprise Cloud hosts ending in `.ghe.com`, the literal GitHub Enterprise Server host selected by `GITHUB_HOST`, and registry-sourced dependencies (including registry prefixes). Local paths, marketplace identities, and every other host remain case-sensitive. Policy matching and repository identity use the same rule (req-rs-016 clause 3; req-pl-018).
 
+## Consumer user-scope disclosure
+
+- Manifest: `~/.apm/apm.yml`
+- Lockfile: `~/.apm/apm.lock.yaml`
+- Target capability declaration: `MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)`
+
 ## Coverage summary
 
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 87 | 1 | 0 | 0 |
+| Consumer | 90 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 18 | 0 | 0 | 0 |
 
@@ -39,7 +45,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-lk-002](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-002) | MUST | 5.4 | consumer | active | 1 | - |
 | [req-lk-003](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-003) | MUST | 5.2 | consumer | active | 2 | - |
 | [req-lk-004](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-004) | MUST | 5.4 | consumer | active | 1 | - |
-| [req-lk-005](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-005) | MUST | 5.5 | consumer | active | 1 | - |
+| [req-lk-005](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-005) | MUST | 5.5 | consumer | active | 2 | - |
 | [req-lk-006](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-006) | MUST | 5.5 | consumer | active | 1 | - |
 | [req-lk-007](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-007) | SHOULD | 5.5 | consumer | active | 1 | - |
 | [req-lk-008](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-008) | MUST | 5.6 | consumer | active | 1 | - |
@@ -54,8 +60,8 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-lk-017](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-017) | MUST | 5.2 | consumer | active | 1 | - |
 | [req-lk-018](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-018) | SHOULD | 5.5 | consumer | active | 1 | - |
 | [req-lk-019](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-019) | MUST | 5.2 | consumer | active | 1 | - |
-| [req-lk-020](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-020) | MUST | 5.2 | consumer | active | 2 | - |
-| [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 1 | - |
+| [req-lk-020](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-020) | MUST | 5.2 | consumer | active | 3 | - |
+| [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 2 | - |
 | [req-lk-022](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-022) | MUST | 5.2 | consumer | active | 4 | - |
 | [req-mf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-001) | MUST | 4.1 | producer | active | 1 | - |
 | [req-mf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-002) | MUST | 4.1 | producer | active | 1 | - |
@@ -117,12 +123,13 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-rs-008](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-008) | MUST | 7.1 | consumer | active | 7 | - |
 | [req-rs-009](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-009) | MUST | 7.5.1 | consumer | active | 1 | - |
 | [req-rs-010](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-010) | MUST | 7.2 | consumer | active | 1 | - |
-| [req-rs-011](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-011) | MUST | 7.7 | consumer | active | 1 | - |
+| [req-rs-011](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-011) | MUST | 7.7 | consumer | active | 4 | - |
 | [req-rs-012](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-012) | MUST | 7.7 | consumer | active | 1 | - |
 | [req-rs-013](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-013) | MUST | 7.2 | consumer | active | 1 | - |
 | [req-rs-014](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-014) | MUST | 7.3.1 | consumer | active | 1 | - |
 | [req-rs-015](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-015) | MUST | 7.5 | consumer | active | 1 | - |
 | [req-rs-016](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-016) | MUST | 7.2 | consumer | active | 7 | - |
+| [req-rs-017](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-017) | MUST | 7.7 | consumer | active | 15 | - |
 | [req-sc-001](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-001) | MUST | 10.4 | consumer | active | 2 | - |
 | [req-sc-002](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-002) | MUST | 10.9 | consumer | active | 1 | - |
 | [req-sc-003](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-003) | MUST | 10.3 | consumer | active | 1 | - |
@@ -150,6 +157,8 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-tg-010](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-010) | MUST | 8.5.4 | consumer | active | 1 | - |
 | [req-tg-011](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-011) | MUST | 8.5.5 | consumer | active | 2 | - |
 | [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 1 | - |
+| [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 7 | - |
+| [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 1 | - |
 
 ## Waivers
 

@@ -110,7 +110,7 @@ class _CandidateResolution:
 
 def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
     """Classify and interpret a native Agent Plugin from its exact root manifest."""
-    from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+    from ..install.primitive_classification import PluginSchemaRoute, classify_plugin_manifest
 
     manifest_path = package_root / "plugin.json"
     try:
@@ -124,8 +124,8 @@ def detect_agent_plugin(package_root: Path) -> AgentPluginDetection | None:
         return None
     document = dict(evidence.document)
     try:
-        route = classify_plugin_manifest_schema(document)
-        if route is PluginSchemaRoute.LEGACY:
+        classification = classify_plugin_manifest(document)
+        if classification.route is PluginSchemaRoute.LEGACY:
             return None
         schema_id = document["$schema"]
         loader = _VERSION_LOADERS[schema_id]
@@ -175,7 +175,7 @@ def reject_agent_plugin_legacy_normalization(package_root: Path) -> None:
 
 def admit_legacy_plugin_manifest(package_root: Path) -> dict[str, Any] | None:
     """Return one admissible schema-less legacy manifest or reject fallback."""
-    from ..bundle.local_bundle import PluginSchemaRoute, classify_plugin_manifest_schema
+    from ..install.primitive_classification import PluginSchemaRoute, classify_plugin_manifest
 
     try:
         evidence = _read_admissible_root_manifest(package_root)
@@ -186,12 +186,12 @@ def admit_legacy_plugin_manifest(package_root: Path) -> dict[str, Any] | None:
     if evidence is None:
         return None
     try:
-        route = classify_plugin_manifest_schema(evidence.document)
+        classification = classify_plugin_manifest(evidence.document)
     except AgentPluginError as exc:
         raise AgentPluginLegacyBoundaryError(
             f"Schema-bearing plugin.json cannot enter Claude plugin normalization: {exc}"
         ) from exc
-    if route is PluginSchemaRoute.AGENT_PLUGIN:
+    if classification.route is PluginSchemaRoute.AGENT_PLUGIN:
         raise AgentPluginLegacyBoundaryError(
             "Agent Plugin input must be interpreted by load_agent_plugin(), "
             "not Claude plugin normalization"

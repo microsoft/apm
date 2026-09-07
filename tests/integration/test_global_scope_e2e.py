@@ -314,6 +314,83 @@ class TestGlobalManifestPlacement:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
+    def test_global_dry_run_with_absent_manifest_does_not_create_user_state(
+        self,
+        apm_binary_path,
+        fake_home,
+        local_package,
+    ):
+        """Dry-run global bootstrap validates without creating ~/.apm state."""
+        work_dir = fake_home / "workdir"
+        work_dir.mkdir()
+
+        result = _run_apm(
+            apm_binary_path,
+            ["install", "--dry-run", "--global", str(local_package)],
+            work_dir,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        unwrapped = combined.replace("\n", "").replace(" ", "")
+        user_manifest = fake_home / ".apm" / "apm.yml"
+        assert result.returncode == 0, combined
+        assert "Dry run: Would create" in combined
+        assert str(user_manifest) in unwrapped
+        assert local_package.name in unwrapped
+        assert not (fake_home / ".apm").exists()
+        assert not (work_dir / "apm.yml").exists()
+
+    def test_global_dry_run_with_target_does_not_persist_targets_or_user_state(
+        self,
+        apm_binary_path,
+        fake_home,
+        local_package,
+    ):
+        """Dry-run global bootstrap previews targets without creating ~/.apm."""
+        work_dir = fake_home / "workdir"
+        work_dir.mkdir()
+
+        result = _run_apm(
+            apm_binary_path,
+            ["install", "--dry-run", "--global", "--target", "claude", str(local_package)],
+            work_dir,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "Dry run: Would create" in combined
+        assert "Dry run: Would set targets: claude" in combined
+        assert not (fake_home / ".apm").exists()
+        assert not (work_dir / "apm.yml").exists()
+
+    def test_global_dry_run_all_targets_does_not_create_user_config(
+        self,
+        apm_binary_path,
+        fake_home,
+        local_package,
+    ):
+        """Dry-run target gating must not create config in an existing ~/.apm."""
+        work_dir = fake_home / "workdir"
+        work_dir.mkdir()
+        apm_dir = fake_home / ".apm"
+        apm_dir.mkdir()
+
+        result = _run_apm(
+            apm_binary_path,
+            ["install", "--dry-run", "--global", "--target", "all", str(local_package)],
+            work_dir,
+            fake_home,
+        )
+
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "Dry run: Would set targets:" in combined
+        assert not (apm_dir / "config.json").exists()
+        assert not (apm_dir / "apm.yml").exists()
+        assert not (work_dir / "apm.yml").exists()
+
     def test_user_manifest_does_not_pollute_cwd(self, apm_binary_path, fake_home, local_package):
         """--global must not create apm.yml in the working directory."""
         work_dir = fake_home / "workdir"
@@ -538,9 +615,9 @@ class TestGlobalOpenCodeScope:
         assert "## Files matching `**/*.py`" in opencode_agents
         assert "SCOPED_OPENCODE_MARKER" in opencode_agents
 
-        claude_agents = (claude_root / "CLAUDE.md").read_text(encoding="utf-8")
-        assert "GLOBAL_OPENCODE_MARKER" in claude_agents
-        assert "SCOPED_OPENCODE_MARKER" not in claude_agents
+        # The global manifest declares only OpenCode, so compile must not
+        # materialize a root context file for the unrelated Claude target.
+        assert not (claude_root / "CLAUDE.md").exists()
 
         lock_path = fake_home / ".apm" / "apm.lock.yaml"
         first_lock = lock_path.read_bytes()
@@ -563,7 +640,7 @@ class TestGlobalOpenCodeScope:
         assert foreign_native_skill.read_text(encoding="utf-8") == "# Foreign native\n"
         assert project_skill.is_file()
         assert (project_root / "AGENTS.md").read_text(encoding="utf-8") == project_agents
-        assert (claude_root / "CLAUDE.md").read_text(encoding="utf-8") == claude_agents
+        assert not (claude_root / "CLAUDE.md").exists()
 
 
 class TestGlobalUninstallLifecycle:
@@ -702,17 +779,33 @@ class TestGlobalUninstallLifecycle:
         assert not (apm_dir / "apm_modules" / "_local" / "removed-target-cleanup").exists()
         assert (apm_dir / "apm_modules" / "_local" / "survivor-target-cleanup").exists()
 
+    @pytest.mark.parametrize("resolution", ["restore", "remove"])
     def test_uninstall_global_preserves_state_for_user_edited_removed_target_file(
         self,
         apm_binary_path,
         fake_home,
         tmp_path,
+        resolution: str,
     ):
-        """A retained edited file leaves all removal state available for retry."""
+        """Retained ownership permits retry after package content was removed."""
         removed, survivor_file, removed_file = self._install_survivor_and_removed_target_packages(
             apm_binary_path, fake_home, tmp_path
         )
-        removed_file.write_text("# user edit\n", encoding="utf-8")
+        apm_dir = fake_home / ".apm"
+        manifest_path = apm_dir / "apm.yml"
+        lockfile_path = apm_dir / "apm.lock.yaml"
+        removed_materialized = apm_dir / "apm_modules" / "_local" / "removed-target-cleanup"
+        survivor_materialized = apm_dir / "apm_modules" / "_local" / "survivor-target-cleanup"
+        assert removed_materialized.is_dir()
+        assert survivor_materialized.is_dir()
+        manifest_before = manifest_path.read_bytes()
+        lockfile_before = lockfile_path.read_bytes()
+        survivor_before = survivor_file.read_bytes()
+        survivor_source = survivor_materialized / ".apm" / "skills" / "survivor" / "SKILL.md"
+        survivor_source_before = survivor_source.read_bytes()
+        managed_bytes = removed_file.read_bytes()
+        edited_bytes = b"# user edit\n"
+        removed_file.write_bytes(edited_bytes)
 
         result = _run_apm(
             apm_binary_path,
@@ -722,15 +815,44 @@ class TestGlobalUninstallLifecycle:
         )
 
         combined = result.stdout + result.stderr
-        apm_dir = fake_home / ".apm"
         assert result.returncode != 0, combined
+        assert "Uninstall complete" not in combined
         assert ".config/opencode/agents/orphan.md" in combined
         assert "retry uninstall" in combined
-        assert removed_file.exists()
-        assert survivor_file.exists()
-        assert "removed-target-cleanup" in (apm_dir / "apm.yml").read_text(encoding="utf-8")
-        assert "removed-target-cleanup" in (apm_dir / "apm.lock.yaml").read_text(encoding="utf-8")
-        assert (apm_dir / "apm_modules" / "_local" / "removed-target-cleanup").exists()
+        assert removed_file.read_bytes() == edited_bytes
+        assert survivor_file.read_bytes() == survivor_before
+        assert manifest_path.read_bytes() == manifest_before
+        assert lockfile_path.read_bytes() == lockfile_before
+        assert survivor_materialized.is_dir()
+        assert survivor_source.read_bytes() == survivor_source_before
+        # Package deletion precedes target cleanup; ownership, not content, survives.
+        assert not removed_materialized.exists()
+
+        if resolution == "restore":
+            removed_file.write_bytes(managed_bytes)
+        else:
+            removed_file.unlink()
+        retry = _run_apm(
+            apm_binary_path,
+            ["uninstall", "--global", str(removed)],
+            fake_home,
+            fake_home,
+        )
+        assert retry.returncode == 0, retry.stdout + retry.stderr
+        assert "Uninstall complete" in retry.stdout
+        assert not removed_file.exists()
+        assert not removed_materialized.exists()
+        assert survivor_file.read_bytes() == survivor_before
+        assert survivor_materialized.is_dir()
+        assert survivor_source.read_bytes() == survivor_source_before
+        manifest_after = manifest_path.read_text(encoding="utf-8")
+        lockfile_after = lockfile_path.read_text(encoding="utf-8")
+        assert "removed-target-cleanup" not in manifest_after
+        assert "removed-target-cleanup" not in lockfile_after
+        assert ".config/opencode/agents/orphan.md" not in lockfile_after
+        assert "survivor-target-cleanup" in manifest_after
+        assert "survivor-target-cleanup" in lockfile_after
+        assert ".agents/skills/survivor/SKILL.md" in lockfile_after
 
 
 # ---------------------------------------------------------------------------

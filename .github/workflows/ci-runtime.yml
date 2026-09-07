@@ -7,7 +7,8 @@ on:
   schedule:
     # Daily at 05:00 UTC — standalone schedule, no dependency on build-release.yml
     - cron: '0 5 * * *'
-  workflow_dispatch:
+  repository_dispatch:
+    types: [manual-runtime-inference]
   push:
     branches: [main]
     paths:
@@ -23,7 +24,7 @@ permissions:
 jobs:
   # Live inference smoke tests — isolated from the release pipeline to avoid
   # false-negative failures from external API flakiness (14.9% per-release risk).
-  # Runs nightly, on manual dispatch, and when runtime code changes.
+  # Runs nightly, on default-branch repository dispatch, and when runtime code changes.
   live-inference-smoke:
     name: Live Inference Smoke (Linux x86_64)
     runs-on: ubuntu-24.04
@@ -64,7 +65,7 @@ jobs:
           echo "$(pwd)" >> $GITHUB_PATH
 
       - name: Run live guardrailing hero
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'schedule' || github.event_name == 'repository_dispatch'
         env:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}

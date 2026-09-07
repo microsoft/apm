@@ -12,6 +12,8 @@ import pytest
 
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
@@ -43,6 +45,8 @@ _GLOBAL_DESCRIPTOR = PurePosixPath(f"hooks/{_PACKAGE_NAME}-esm.json")
 _GLOBAL_SCRIPT = PurePosixPath(f"hooks/scripts/{_PACKAGE_NAME}/esm/entry.mjs")
 _GLOBAL_NESTED_JSON = PurePosixPath(f"hooks/scripts/{_PACKAGE_NAME}/esm/config.json")
 _GLOBAL_FORBIDDEN_SIDECAR = PurePosixPath(f"hooks/scripts/{_PACKAGE_NAME}/package.json")
+_GLOBAL_LOCK_DESCRIPTOR = PurePosixPath(".copilot") / _GLOBAL_DESCRIPTOR
+_GLOBAL_LOCK_SCRIPT = PurePosixPath(".copilot") / _GLOBAL_SCRIPT
 _GLOBAL_LOCK_FORBIDDEN_SIDECAR = PurePosixPath(".copilot") / _GLOBAL_FORBIDDEN_SIDECAR
 _GLOBAL_USER_HOOK = PurePosixPath("hooks/user-authored.json")
 _COPILOT_CAPTURE_PATHS = (
@@ -768,11 +772,21 @@ def test_required_global_copilot_sidecar_lifecycle(
     )
     lockfile = LockFile.read(scenario.isolated.config_root / "apm.lock.yaml")
     assert lockfile is not None
-    assert _GLOBAL_LOCK_FORBIDDEN_SIDECAR.as_posix() not in {
+    locked_deployed_files = {
         path
         for dependency in lockfile.get_package_dependencies()
         for path in dependency.deployed_files
     }
+    assert _GLOBAL_LOCK_FORBIDDEN_SIDECAR.as_posix() not in locked_deployed_files
+    user_target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
+    buckets = BaseIntegrator.partition_managed_files(
+        locked_deployed_files,
+        targets=[user_target],
+    )
+    assert {
+        _GLOBAL_LOCK_DESCRIPTOR.as_posix(),
+        _GLOBAL_LOCK_SCRIPT.as_posix(),
+    } <= buckets["hooks"]
     assert _GLOBAL_LOCK_FORBIDDEN_SIDECAR.as_posix() not in {
         record.locator.value for record in lockfile.deployment_ledger.records.values()
     }
@@ -793,3 +807,33 @@ def test_required_global_copilot_sidecar_lifecycle(
     )
     assert replay.returncode == 0, f"stdout={replay.stdout!r}\nstderr={replay.stderr!r}"
     _assert_exact_state(cleaned, _capture_global(scenario))
+
+    uninstall = scenario.runner.run(
+        ("uninstall", "--global", _REMOTE_URL),
+        scenario_id="global-copilot-uninstall",
+        cwd=cwd,
+        env=published.environment,
+    )
+    assert uninstall.returncode == 0, f"stdout={uninstall.stdout!r}\nstderr={uninstall.stderr!r}"
+    removed = _capture_global(scenario)
+    assert (
+        removed.file(
+            _GLOBAL_DESCRIPTOR.as_posix(),
+            root_id="copilot-user",
+        ).kind
+        == "missing"
+    )
+    assert (
+        removed.file(
+            _GLOBAL_SCRIPT.as_posix(),
+            root_id="copilot-user",
+        ).kind
+        == "missing"
+    )
+    assert (
+        removed.file(
+            _GLOBAL_USER_HOOK.as_posix(),
+            root_id="copilot-user",
+        ).content
+        == user_content.encode()
+    )

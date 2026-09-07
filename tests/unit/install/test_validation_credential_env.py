@@ -14,10 +14,10 @@ HTTP connections where credential leakage is a real risk.  (issue #1013)
 
 from __future__ import annotations
 
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
-from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.install import validation
 
 
@@ -46,38 +46,14 @@ def _ok_run(*args, **kwargs):
 
 
 class TestGenericHostCredentialEnv:
-    """Validate that _build_noninteractive_git_env receives the correct
-    ``preserve_config_isolation`` and ``suppress_credential_helpers`` flags
-    for generic hosts, depending on whether the URL is HTTPS or HTTP."""
+    """Validate that generic hosts route through remote-aware auth policy."""
 
-    def test_https_generic_host_does_not_preserve_config_isolation(self, monkeypatch):
-        """HTTPS generic host: preserve_config_isolation=False so that
-        user-configured credential helpers in ~/.gitconfig can work."""
+    def test_https_generic_host_uses_remote_policy(self, monkeypatch):
         monkeypatch.delenv("APM_ALLOW_PROTOCOL_FALLBACK", raising=False)
         resolver = _make_resolver()
-
-        original_build = GitHubPackageDownloader._build_noninteractive_git_env
-        captured_calls: list[dict] = []
-
-        def _spy(self, *, preserve_config_isolation=False, suppress_credential_helpers=False):
-            captured_calls.append(
-                {
-                    "preserve_config_isolation": preserve_config_isolation,
-                    "suppress_credential_helpers": suppress_credential_helpers,
-                }
-            )
-            return original_build(
-                self,
-                preserve_config_isolation=preserve_config_isolation,
-                suppress_credential_helpers=suppress_credential_helpers,
-            )
+        resolver.git_env_for_remote.return_value = {"GIT_TERMINAL_PROMPT": "0"}
 
         with (
-            patch.object(
-                GitHubPackageDownloader,
-                "_build_noninteractive_git_env",
-                _spy,
-            ),
             patch("subprocess.run", side_effect=_ok_run),
         ):
             validation._validate_package_exists(
@@ -86,63 +62,44 @@ class TestGenericHostCredentialEnv:
                 auth_resolver=resolver,
             )
 
-        assert len(captured_calls) == 1, f"expected exactly one call, got {len(captured_calls)}"
-        assert captured_calls[0]["preserve_config_isolation"] is False
-        assert captured_calls[0]["suppress_credential_helpers"] is False
+        resolver.git_env_for_remote.assert_called_with(
+            resolver.resolve_for_remote.return_value,
+            "https://bitbucket.example.internal/scm/team/repo.git",
+        )
 
-    def test_http_generic_host_preserves_config_isolation(self, monkeypatch):
-        """HTTP (insecure) generic host: preserve_config_isolation=True
-        and suppress_credential_helpers=True to prevent credential leakage."""
+    def test_http_generic_host_uses_remote_policy(self, monkeypatch):
         monkeypatch.delenv("APM_ALLOW_PROTOCOL_FALLBACK", raising=False)
         resolver = _make_resolver()
+        resolver.git_env_for_remote.return_value = {
+            "GIT_ASKPASS": "echo",
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
 
-        original_build = GitHubPackageDownloader._build_noninteractive_git_env
-        captured_calls: list[dict] = []
-
-        def _spy(self, *, preserve_config_isolation=False, suppress_credential_helpers=False):
-            captured_calls.append(
-                {
-                    "preserve_config_isolation": preserve_config_isolation,
-                    "suppress_credential_helpers": suppress_credential_helpers,
-                }
-            )
-            return original_build(
-                self,
-                preserve_config_isolation=preserve_config_isolation,
-                suppress_credential_helpers=suppress_credential_helpers,
-            )
-
-        with (
-            patch.object(
-                GitHubPackageDownloader,
-                "_build_noninteractive_git_env",
-                _spy,
-            ),
-            patch("subprocess.run", side_effect=_ok_run),
-        ):
+        with patch("subprocess.run", side_effect=_ok_run):
             validation._validate_package_exists(
                 "http://bitbucket.example.internal/scm/team/repo.git",
                 verbose=False,
                 auth_resolver=resolver,
             )
 
-        assert len(captured_calls) == 1, f"expected exactly one call, got {len(captured_calls)}"
-        assert captured_calls[0]["preserve_config_isolation"] is True
-        assert captured_calls[0]["suppress_credential_helpers"] is True
+        resolver.git_env_for_remote.assert_called_with(
+            resolver.resolve_for_remote.return_value,
+            "http://bitbucket.example.internal/scm/team/repo.git",
+        )
 
 
 class TestGenericHttpsEnvContents:
-    """Concrete environment check: for a generic HTTPS host the resulting
-    validate_env must NOT contain the config-isolation keys that block
-    credential helpers."""
+    """Concrete environment check for immutable generic helper snapshots."""
 
-    def test_https_env_allows_credential_helpers(self, monkeypatch):
-        """The env produced for a generic HTTPS URL must not contain
-        GIT_CONFIG_GLOBAL=/dev/null or GIT_CONFIG_NOSYSTEM=1, because
-        these prevent git from reading credential helpers from
-        ~/.gitconfig."""
+    def test_https_env_materializes_credential_helper(self, monkeypatch):
         monkeypatch.delenv("APM_ALLOW_PROTOCOL_FALLBACK", raising=False)
         resolver = _make_resolver()
+        resolver.git_env_for_remote.return_value = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "credential.helper",
+            "GIT_CONFIG_VALUE_0": "fixture-helper",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
 
         captured_env: dict[str, str] = {}
 
@@ -163,11 +120,13 @@ class TestGenericHttpsEnvContents:
                 auth_resolver=resolver,
             )
 
-        # The env passed to subprocess.run for the ls-remote probe
-        # must not contain config-isolation keys.
-        assert captured_env.get("GIT_CONFIG_GLOBAL") != "/dev/null", (
-            "GIT_CONFIG_GLOBAL=/dev/null blocks credential helpers"
-        )
-        assert captured_env.get("GIT_CONFIG_NOSYSTEM") != "1", (
-            "GIT_CONFIG_NOSYSTEM=1 blocks system credential helpers"
-        )
+        assert captured_env["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert captured_env["GIT_CONFIG_NOSYSTEM"] == "1"
+        entries = {
+            (
+                captured_env.get(f"GIT_CONFIG_KEY_{index}", ""),
+                captured_env.get(f"GIT_CONFIG_VALUE_{index}", ""),
+            )
+            for index in range(int(captured_env.get("GIT_CONFIG_COUNT", "0")))
+        }
+        assert ("credential.helper", "fixture-helper") in entries

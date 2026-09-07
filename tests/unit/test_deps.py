@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from unittest.mock import mock_open, patch
 
-import frontmatter  # noqa: F401
 import yaml
 
 from apm_cli.deps.aggregator import (
@@ -25,7 +24,7 @@ class TestDependenciesAggregator(unittest.TestCase):
 
     @patch("glob.glob")
     @patch("builtins.open", new_callable=mock_open)
-    @patch("frontmatter.load")
+    @patch("apm_cli.deps.aggregator.load_frontmatter")
     def test_scan_workflows_for_dependencies(self, mock_frontmatter_load, mock_file, mock_glob):
         """Test scanning workflows for dependencies."""
         # Mock glob to return workflow files

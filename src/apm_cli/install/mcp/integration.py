@@ -255,16 +255,16 @@ def run_mcp_integration(  # noqa: PLR0913
         raise SystemExit(2) from exc
 
     if should_install and mcp_deps:
-        old_mcp_target_servers = old_mcp_target_servers or {}
-        if not old_mcp_target_servers_present and old_mcp_servers and old_mcp_configs:
-            from apm_cli.install.mcp.ownership import adopt_legacy_mcp_target_servers
+        from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
 
-            old_mcp_target_servers = adopt_legacy_mcp_target_servers(
-                server_names=builtins.set(old_mcp_servers),
-                stored_configs=old_mcp_configs,
-                project_root=project_root,
-                user_scope=user_scope,
-            )
+        old_mcp_target_servers = resolve_mcp_target_servers(
+            recorded_target_servers=old_mcp_target_servers or {},
+            ownership_present=old_mcp_target_servers_present,
+            server_names=builtins.set(old_mcp_servers),
+            stored_configs=old_mcp_configs,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         if target_decision is not None:
             from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 
@@ -342,14 +342,22 @@ def run_mcp_integration(  # noqa: PLR0913
     elif should_install and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers
         if old_mcp_servers:
-            for cleanup_runtime in _cleanup_runtimes(
-                runtime=runtime,
-                target_decision=target_decision,
-                owned_targets=old_mcp_target_servers,
+            from apm_cli.install.mcp.ownership import resolve_mcp_target_servers
+
+            cleanup_owners = resolve_mcp_target_servers(
+                recorded_target_servers=old_mcp_target_servers or {},
+                ownership_present=old_mcp_target_servers_present,
+                server_names=builtins.set(old_mcp_servers),
+                stored_configs=old_mcp_configs,
+                project_root=project_root,
                 user_scope=user_scope,
-            ):
+            )
+            for cleanup_runtime, managed_servers in sorted(cleanup_owners.items()):
+                scoped_stale = builtins.set(old_mcp_servers).intersection(managed_servers)
+                if not scoped_stale:
+                    continue
                 MCPIntegrator.remove_stale(
-                    old_mcp_servers,
+                    scoped_stale,
                     cleanup_runtime,
                     exclude,
                     project_root=project_root,

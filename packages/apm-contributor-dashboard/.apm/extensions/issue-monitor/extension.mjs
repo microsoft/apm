@@ -10,9 +10,12 @@ import { fileURLToPath } from "node:url";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
 import { classifyIssue, classifyPrStatus, escapeHtml, matchPrsToIssues, classifyPrForTable, classifyPipeline, classifyPanel, parsePanelCounts, parsePanelReview } from "./logic.mjs";
 import { createHandler } from "./server-handler.mjs";
+import { getNextRefreshDelayMs, resolveRefreshIntervalMs } from "./refresh-config.mjs";
 
 const REPO = "microsoft/apm";
-const POLL_INTERVAL_MS = 30_000;
+const REFRESH_INTERVAL_MS = resolveRefreshIntervalMs(
+    process.env.APM_DASHBOARD_REFRESH_INTERVAL_MINUTES,
+);
 const MAX_ISSUES = 100;
 const MAX_CONCURRENT_GH = 8;
 
@@ -24,7 +27,9 @@ let lastUpdated = null;
 let lastError = null;
 let pollTimer = null;
 let openInstanceCount = 0;
-let lastPrFingerprint = null;
+let refreshInFlight = null;
+const prWorkflowCache = new Map();
+const prPanelCache = new Map();
 
 // Persist started sessions to disk so they survive extension reloads
 const __extensionDir = dirname(fileURLToPath(import.meta.url));
@@ -108,10 +113,10 @@ async function fetchIssues() {
         // Mark issues as available immediately (PR enrichment follows)
         lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
         lastError = null;
-        // Enrich with PR data in background (non-blocking)
-        fetchAndMatchPRs().catch(() => {});
+        return true;
     } catch (e) {
         lastError = String(e.message || e);
+        return false;
     }
 }
 
@@ -122,22 +127,18 @@ async function fetchAndMatchPRs() {
             "--repo", REPO,
             "--state", "open",
             "--limit", "100",
-            "--json", "number,title,url,body,state,isDraft,reviewDecision,statusCheckRollup,author,labels,headRefName",
+            "--json", "number,title,url,body,state,isDraft,reviewDecision,statusCheckRollup,author,labels,headRefName,headRefOid,updatedAt",
         ]);
         const prs = JSON.parse(prOut);
 
-        // Change-detection: skip expensive per-PR fetches when PR list is stable
-        const fingerprint = prs.map(p => `${p.number}:${p.headRefName}`).sort().join("|");
-        const listChanged = fingerprint !== lastPrFingerprint;
-        lastPrFingerprint = fingerprint;
-
-        // Fetch workflow runs for each PR branch with semaphore-limited concurrency
+        // Workflow runs use REST and only need refreshing when a PR head changes.
         const branchRunPromises = prs.map(async (pr) => {
             if (!pr.headRefName) return;
-            // Skip per-PR fetches if the list has not changed (use cached data)
-            if (!listChanged) {
-                const cached = prData.find(p => p.number === pr.number);
-                if (cached) { pr.workflowRuns = cached._rawWorkflowRuns || []; return; }
+            const fingerprint = pr.headRefOid || pr.headRefName;
+            const cached = prWorkflowCache.get(pr.number);
+            if (cached?.fingerprint === fingerprint) {
+                pr.workflowRuns = cached.workflowRuns;
+                return;
             }
             const release = await acquireSlot();
             try {
@@ -149,6 +150,10 @@ async function fetchAndMatchPRs() {
                     "--json", "databaseId,name,status,conclusion,event",
                 ]);
                 pr.workflowRuns = JSON.parse(runsOut);
+                prWorkflowCache.set(pr.number, {
+                    fingerprint,
+                    workflowRuns: pr.workflowRuns,
+                });
             } catch (_) {
                 pr.workflowRuns = [];
             } finally {
@@ -156,47 +161,100 @@ async function fetchAndMatchPRs() {
             }
         });
         await Promise.all(branchRunPromises);
-        // Fetch panel review comments for all PRs with semaphore
+
+        // Panel comments use REST, are limited to panel-labelled PRs, and stay
+        // cached until GitHub reports that the PR was updated.
         const panelPromises = prs.map(async (pr) => {
-            if (!listChanged) {
-                const cached = prData.find(p => p.number === pr.number);
-                if (cached && cached.panelCounts) { pr.panelCounts = cached.panelCounts; return; }
+            const hasPanelLabel = (pr.labels || []).some(
+                (label) => (label.name || label) === "panel-review",
+            );
+            if (!hasPanelLabel) {
+                pr.panelCounts = null;
+                prPanelCache.delete(pr.number);
+                return;
+            }
+            const fingerprint = pr.updatedAt || "";
+            const cached = prPanelCache.get(pr.number);
+            if (cached?.fingerprint === fingerprint) {
+                pr.panelCounts = cached.panelCounts;
+                return;
             }
             const release = await acquireSlot();
             try {
-                const cOut = await ghExec([
-                    "pr", "view", String(pr.number),
-                    "--repo", REPO,
-                    "--json", "comments",
+                const commentsOut = await ghExec([
+                    "api",
+                    `repos/${REPO}/issues/${pr.number}/comments`,
+                    "--paginate",
                 ]);
-                const parsed = JSON.parse(cOut);
-                pr.panelCounts = parsePanelCounts(parsed.comments || []);
+                pr.panelCounts = parsePanelCounts(JSON.parse(commentsOut));
+                prPanelCache.set(pr.number, {
+                    fingerprint,
+                    panelCounts: pr.panelCounts,
+                });
             } catch (_) {
-                pr.panelCounts = null;
+                pr.panelCounts = cached?.panelCounts || null;
             } finally {
                 release();
             }
         });
         await Promise.all(panelPromises);
+
+        const openPrNumbers = new Set(prs.map((pr) => pr.number));
+        for (const number of prWorkflowCache.keys()) {
+            if (!openPrNumbers.has(number)) prWorkflowCache.delete(number);
+        }
+        for (const number of prPanelCache.keys()) {
+            if (!openPrNumbers.has(number)) prPanelCache.delete(number);
+        }
         matchPrsToIssues(issueData, prs);
-        // Store raw workflow runs for change-detection cache
-        for (const pr of prs) { pr._rawWorkflowRuns = pr.workflowRuns || []; }
         prData = prs.map(pr => classifyPrForTable(pr));
         lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    } catch (_) {
-        // PR fetch is best-effort; ignore failures
+        lastError = null;
+        return true;
+    } catch (e) {
+        lastError = String(e.message || e);
+        return false;
     }
 }
 
+function refreshData() {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = (async () => {
+        const issuesLoaded = await fetchIssues();
+        if (!issuesLoaded) return { ok: false, error: lastError };
+        const prsLoaded = await fetchAndMatchPRs();
+        return { ok: prsLoaded, error: prsLoaded ? null : lastError };
+    })().finally(() => {
+        refreshInFlight = null;
+    });
+    return refreshInFlight;
+}
+
+function scheduleNextPoll(delayMs) {
+    pollTimer = setTimeout(async () => {
+        pollTimer = null;
+        await refreshData();
+        if (openInstanceCount > 0) {
+            scheduleNextPoll(getNextRefreshDelayMs(REFRESH_INTERVAL_MS, lastError));
+        }
+    }, delayMs);
+}
+
 function startPolling() {
-    if (pollTimer) return;
-    // Skip immediate fetch if data already loaded (initial fetch done in open handler)
-    if (issueData.length === 0) fetchIssues();
-    pollTimer = setInterval(fetchIssues, POLL_INTERVAL_MS);
+    if (pollTimer || refreshInFlight) return;
+    if (issueData.length === 0) {
+        refreshData().finally(() => {
+            if (openInstanceCount > 0 && !pollTimer) {
+                scheduleNextPoll(getNextRefreshDelayMs(REFRESH_INTERVAL_MS, lastError));
+            }
+        });
+        return;
+    }
+    scheduleNextPoll(REFRESH_INTERVAL_MS);
 }
 
 function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
 }
 
 // -- HTTP server --
@@ -214,6 +272,8 @@ async function startServer(instanceId) {
         getPrData: () => prData,
         getLastUpdated: () => lastUpdated,
         getLastError: () => lastError,
+        refreshData,
+        refreshIntervalMs: REFRESH_INTERVAL_MS,
         repo: REPO,
         distDir: DIST_DIR,
     });
@@ -231,7 +291,7 @@ const session = await joinSession({
         createCanvas({
             id: "issue-monitor",
             displayName: "APM Contributor Dashboard",
-            description: "Live dashboard tracking APM issue triage status, session progress, and PR state for active bug fixes. Auto-fetches issues from GitHub every 30 seconds.",
+            description: "Live dashboard tracking APM issue triage status, session progress, and PR state for active bug fixes. Auto-fetches GitHub data every 15 minutes by default.",
             actions: [
                 {
                     name: "update_issues",

@@ -10,6 +10,7 @@ from __future__ import annotations
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
+    EXEC_TYPE_LSP,
     EXEC_TYPE_MCP,
     LAYER_DEFAULT_DENY,
     LAYER_ENFORCE_DEGRADED,
@@ -237,6 +238,29 @@ class TestMaterializeExecMap:
         m = materialize_exec_map(_ctx(project_deny={PKG: {EXEC_TYPE_HOOKS: True}}))
         assert m is not None
         assert m == {}
+
+    def test_content_bound_grant_does_not_widen_to_package_name(self):
+        digest_key = f"{PKG}@sha256:{'a' * 64}"
+        ctx = _ctx(project_allow={digest_key: {EXEC_TYPE_LSP: True}})
+
+        effective = materialize_exec_map(ctx)
+
+        assert effective == {digest_key: {EXEC_TYPE_LSP: True}}
+        assert resolve_exec_decision(ctx, digest_key, EXEC_TYPE_LSP).allowed is True
+        assert resolve_exec_decision(ctx, PKG, EXEC_TYPE_LSP).allowed is False
+        assert resolve_exec_decision(ctx, NAME, EXEC_TYPE_LSP).allowed is False
+
+    def test_org_name_deny_still_blocks_content_bound_grant(self):
+        digest_key = f"{PKG}@sha256:{'a' * 64}"
+        ctx = _ctx(
+            project_allow={digest_key: {EXEC_TYPE_LSP: True}},
+            org_deny=frozenset({NAME}),
+        )
+
+        effective = materialize_exec_map(ctx)
+
+        assert effective == {}
+        assert resolve_exec_decision(ctx, digest_key, EXEC_TYPE_LSP).allowed is False
 
 
 # -------------------------------------------------------------------

@@ -12,10 +12,13 @@ import json
 import tarfile
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
 from click.testing import CliRunner
+
+from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
 
 _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 
@@ -140,6 +143,92 @@ def _invoke_cli(project: Path, monkeypatch, command: str, *args: str):
 
 def _invoke(project: Path, monkeypatch, *args: str):
     return _invoke_cli(project, monkeypatch, "install", *args)
+
+
+def _packed_command_mapping(target: TargetProfile) -> tuple[Any, Any | None]:
+    """Return the target mapping selected for plugin-native commands."""
+    from apm_cli.bundle.plugin_layout import PLUGIN_LAYOUT
+
+    spec = PLUGIN_LAYOUT["commands"]
+    for primitive_kind in spec.primitive_kinds:
+        mapping = target.primitives.get(primitive_kind)
+        if mapping is not None:
+            return spec, mapping
+    return spec, None
+
+
+def _expected_packed_command_warning(target: TargetProfile) -> bool:
+    """Return whether packed command install should warn instead of deploy."""
+    _spec, mapping = _packed_command_mapping(target)
+    return bool(mapping and mapping.format_id == "gemini_command")
+
+
+def _expected_deployed_command_path(project: Path, target: TargetProfile) -> Path | None:
+    """Derive the packed command destination from KNOWN_TARGETS."""
+    spec, mapping = _packed_command_mapping(target)
+    if mapping is None or _expected_packed_command_warning(target):
+        return None
+    extension = mapping.extension
+    if not extension or extension.startswith("/") or not extension.startswith("."):
+        return None
+    apm_name = spec.apm_basename_fn("test-command.md")
+    stem = apm_name
+    for suffix in (
+        ".instructions.md",
+        ".prompt.md",
+        ".agent.md",
+        ".mdc",
+        ".toml",
+        ".json",
+        ".md",
+    ):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    root = project / (mapping.deploy_root or target.root_dir)
+    if not mapping.subdir:
+        return root / f"{stem}{extension}"
+    return root / mapping.subdir / f"{stem}{extension}"
+
+
+def test_local_bundle_receives_enabled_empty_executable_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bundle LSP filtering must distinguish an enabled empty gate from disabled."""
+    bundle = _make_bundle(
+        tmp_path / "source",
+        files={
+            "lsp.json": json.dumps(
+                {
+                    "lspServers": {
+                        "unsafe": {
+                            "command": "unsafe-language-server",
+                            "extensionToLanguage": {".unsafe": "unsafe"},
+                        }
+                    }
+                }
+            )
+        },
+    )
+    project = _make_project(tmp_path / "destination")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["executables"] = {}
+    (project / "apm.yml").write_text(yaml.dump(manifest), encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def _capture(**kwargs) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "apm_cli.install.local_bundle_handler.install_local_bundle",
+        _capture,
+    )
+
+    result = _invoke(project, monkeypatch, str(bundle), "--no-policy")
+
+    assert result.exit_code == 0, result.output
+    assert captured["allow_executables"] == {}
 
 
 # ---------------------------------------------------------------------------
@@ -656,6 +745,61 @@ class TestGrokBuildLocalBundleDeployment:
 class TestLocalBundlePathRouting:
     """Direct contracts for untrusted packed bundle paths."""
 
+    @pytest.mark.parametrize(
+        "target_name",
+        sorted(KNOWN_TARGETS),
+    )
+    def test_packed_commands_follow_each_target_primitive_mapping(
+        self, tmp_path: Path, target_name: str
+    ) -> None:
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.services import integrate_local_bundle
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        bundle = _make_bundle(
+            tmp_path / "src",
+            pack_target="claude",
+            files={"commands/test-command.md": "# Test Command\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+        target = KNOWN_TARGETS[target_name]
+        diagnostics = DiagnosticCollector()
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        bundle_info = LocalBundleInfo(
+            source_dir=bundle,
+            plugin_json={"id": "test-plugin"},
+            package_id="test-plugin",
+            lockfile=lockfile,
+            pack_targets=["claude"],
+        )
+
+        result = integrate_local_bundle(
+            bundle_info,
+            project,
+            targets=(target,),
+            diagnostics=diagnostics,
+            scope=InstallScope.PROJECT,
+        )
+        expected = _expected_deployed_command_path(project, target)
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+
+        if expected is None:
+            assert result["deployed_files"] == []
+            assert not (project / target.root_dir / "commands/test-command.md").exists()
+            if _expected_packed_command_warning(target):
+                assert len(warnings) == 1
+                assert "cannot convert plugin-native files" in warnings[0].message
+            else:
+                assert warnings == []
+            return
+
+        assert result["deployed_files"] == [expected.relative_to(project).as_posix()]
+        assert expected.read_text(encoding="utf-8") == "# Test Command\n"
+        original_path = project / target.root_dir / "commands/test-command.md"
+        if original_path != expected:
+            assert not original_path.exists()
+
     def test_rejects_traversal_before_prefix_routing(self) -> None:
         from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
         from apm_cli.utils.path_security import PathTraversalError
@@ -778,7 +922,7 @@ class TestLocalBundleCanvasTrust:
         result = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
         assert result.exit_code == 0, result.output
         # Agent deploys; canvas is blocked (feature flag off).
-        assert (project / ".github" / "agents" / "a.md").exists()
+        assert (project / ".github" / "agents" / "a.agent.md").exists()
         assert not (project / ".github" / "extensions" / "widget").exists()
 
     def test_canvas_deployed_when_flag_on_no_enforcement(self, tmp_path, monkeypatch):
@@ -804,6 +948,63 @@ class TestLocalBundleCanvasTrust:
         assert result.exit_code == 0, result.output
         assert (project / ".github" / "extensions" / "widget" / "extension.mjs").exists()
 
+    def test_canvas_requires_exact_bundle_content_approval(self, tmp_path, monkeypatch):
+        import apm_cli.config as _conf
+        from apm_cli.bundle.local_bundle import detect_local_bundle
+        from apm_cli.security.executables import local_bundle_approval_key
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"canvas": True}})
+        bundle = _make_bundle(
+            tmp_path / "source",
+            files={"extensions/widget/extension.mjs": "export default {};\n"},
+            include_lockfile=False,
+        )
+        bundle_info = detect_local_bundle(bundle)
+        assert bundle_info is not None
+        approval_key = local_bundle_approval_key(
+            bundle_info.package_id,
+            str(bundle_info.plugin_json.get("version") or ""),
+            bundle_info.source_dir,
+            bundle_info.lockfile,
+        )
+        project = _make_project(tmp_path / "generic")
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {"test-plugin": {"canvas": True}}}
+        manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+        generic = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
+
+        assert generic.exit_code == 0, generic.output
+        assert not (project / ".github" / "extensions" / "widget").exists()
+        assert approval_key in "".join(generic.output.split())
+        assert "executables:" in generic.output
+        assert "allow:" in generic.output
+        assert "canvas: true" in generic.output
+
+        manifest["executables"] = {"allow": {approval_key: {"canvas": True}}}
+        manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+        exact = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
+        assert exact.exit_code == 0, exact.output
+        assert (project / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+
+        (bundle / "extensions" / "widget" / "extension.mjs").write_text(
+            "export default { changed: true };\n",
+            encoding="utf-8",
+        )
+        changed_project = _make_project(tmp_path / "changed")
+        changed_manifest = yaml.safe_load((changed_project / "apm.yml").read_text(encoding="utf-8"))
+        changed_manifest["executables"] = {"allow": {approval_key: {"canvas": True}}}
+        (changed_project / "apm.yml").write_text(
+            yaml.safe_dump(changed_manifest),
+            encoding="utf-8",
+        )
+
+        changed = _invoke(changed_project, monkeypatch, str(bundle), "--target", "copilot")
+
+        assert changed.exit_code == 0, changed.output
+        assert not (changed_project / ".github" / "extensions" / "widget").exists()
+
     def test_canvas_blocked_when_feature_off_regardless(self, tmp_path, monkeypatch):
         """When the experimental flag is off, canvas is always silently dropped."""
         import apm_cli.config as _conf
@@ -825,7 +1026,7 @@ class TestLocalBundleCanvasTrust:
             "copilot",
         )
         assert result.exit_code == 0, result.output
-        assert (project / ".github" / "agents" / "a.md").exists()
+        assert (project / ".github" / "agents" / "a.agent.md").exists()
         assert not (project / ".github" / "extensions" / "widget").exists()
         # Flag OFF: canvas dropped silently -- no trust-specific warning in output.
         assert "trust-canvas-extensions" not in result.output

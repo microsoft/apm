@@ -1,19 +1,13 @@
 ---
-title: "Hermes Agent (Experimental)"
+title: "Hermes Agent"
 description: "Deploy APM skills, AGENTS.md instructions, and MCP servers to the Hermes autonomous agent."
 sidebar:
   order: 8
 ---
 
-:::caution[Frontier preview]
-This integration is experimental and off by default. You must enable the `hermes` flag before using it.
-
-```bash
-apm experimental enable hermes
-```
-
-Until the flag is enabled, the `hermes` target stays inert: it is hidden from active target detection, excluded from `apm compile --all`, and explicit `--target hermes` installs exit cleanly with an enable hint instead of deploying anything.
-:::
+Hermes is a stable explicit-only target. Select it with `--target hermes`; it is
+not included in `--target all` because its project skills use the shared
+`.agents/` root and cannot be safely auto-detected.
 
 ## What it does
 
@@ -28,27 +22,17 @@ So the `hermes` target reuses APM's existing skill and `AGENTS.md` output paths 
 |---------------|----------------|----------|
 | skills | Skills system (agentskills.io) | `.agents/skills/<name>/SKILL.md` (project) or `~/.hermes/skills/<name>/SKILL.md` (`--global`) |
 | instructions | Context file (`AGENTS.md`) | `AGENTS.md` at the project root |
-| MCP servers | `mcp_servers:` block | `~/.hermes/config.yaml` (user scope) |
+| MCP servers | `mcp_servers:` block | `~/.hermes/config.yaml` (home-scoped for every explicit selection) |
 
 At project scope, skills land in `.agents/skills/`, which Hermes reads through its `skills.external_dirs` setting. At user scope (`--global`), skills land directly in the Hermes home.
-
-## Enable the flag
-
-```bash
-apm experimental enable hermes
-apm experimental list
-apm experimental disable hermes
-```
-
-Use `apm experimental list` to confirm whether `hermes` is enabled on the current machine.
 
 ## Install
 
 ```bash
-# Project scope: skills -> .agents/skills/, plus AGENTS.md on compile
+# Project scope: skills -> .agents/skills/, MCP -> ~/.hermes/config.yaml
 apm install --target hermes
 
-# User scope: skills -> ~/.hermes/skills/, MCP servers -> ~/.hermes/config.yaml
+# User scope: skills -> ~/.hermes/skills/, MCP -> ~/.hermes/config.yaml
 apm install --target hermes --global
 ```
 
@@ -67,7 +51,14 @@ When `HERMES_HOME` lives under `$HOME`, APM keeps the deploy root home-relative;
 
 ## MCP servers
 
-When the flag is enabled and Hermes is present (its home directory exists, or the `hermes` binary is on `PATH`), APM writes MCP servers into the `mcp_servers:` block of `~/.hermes/config.yaml`:
+When `hermes` is selected explicitly, APM writes MCP servers into the
+home-scoped `mcp_servers:` block of `$HERMES_HOME/config.yaml` (default
+`~/.hermes/config.yaml`), even when package skills use project scope:
+
+Explicit selection does not require an existing Hermes home or a `hermes`
+binary on `PATH`; APM creates the configured home as needed. Runtime-presence
+signals are only relevant to automatic discovery, and Hermes is never
+auto-discovered.
 
 ```yaml
 mcp_servers:
@@ -89,9 +80,8 @@ HTTP servers are written with `url` and optional `headers` instead of `command`/
 
 ## Troubleshooting
 
-- `The 'hermes' target requires an experimental flag`: run `apm experimental enable hermes`.
-- MCP servers not written: confirm the flag is enabled and that `~/.hermes/` exists (or `hermes` is on `PATH`). APM intentionally skips MCP writes on hosts where Hermes is absent.
+- MCP servers not written: pass `--target hermes`; Hermes is never selected by automatic runtime discovery.
 - Skills not picked up at project scope: ensure Hermes' `skills.external_dirs` includes `.agents/skills/`.
 - Wrong home directory: set `HERMES_HOME` to the Hermes home you want to target.
 
-See also [IDE and Tool Integration](../ide-tool-integration/) and [apm experimental](../../reference/experimental/).
+See also [IDE and Tool Integration](../ide-tool-integration/).

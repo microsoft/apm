@@ -100,11 +100,10 @@ def _generate_content(
     ASCII-only: no Unicode in the generated skeleton; instruction *content*
     is passed through as-is (callers are responsible for encoding checks).
     """
-    from .agents_compiler import _COPILOT_ROOT_GENERATED_MARKER
-    from .constants import BUILD_ID_PLACEHOLDER
+    from .constants import AGENTS_MD_GENERATED_MARKER, BUILD_ID_PLACEHOLDER
 
     sections: list[str] = [
-        _COPILOT_ROOT_GENERATED_MARKER,
+        AGENTS_MD_GENERATED_MARKER,
         BUILD_ID_PLACEHOLDER,
         "",
     ]
@@ -199,7 +198,7 @@ def compile_user_root_contexts(
         * ``"error:<msg>"``          -- OS error during read or write
     """
     from ..utils.path_security import PathTraversalError, ensure_path_within
-    from .agents_compiler import _COPILOT_ROOT_GENERATED_MARKER
+    from .constants import AGENTS_MD_GENERATED_MARKER
 
     log = logger or logging.getLogger(__name__)
 
@@ -270,7 +269,7 @@ def compile_user_root_contexts(
                 results.append(UserRootCompileResult(scoped.name, output_path, f"error:{exc}"))
                 continue
 
-            if not existing.lstrip().startswith(_COPILOT_ROOT_GENERATED_MARKER):
+            if not existing.lstrip().startswith(AGENTS_MD_GENERATED_MARKER):
                 log.info(
                     "user_root_context: %s is hand-authored (no APM marker) -- not overwriting",
                     output_path,

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
+
 from ..utils.constitution_fixtures import DEFAULT_CONSTITUTION, temp_project_with_constitution
 
 
@@ -17,7 +19,10 @@ def test_permission_denied_graceful(tmp_path: Path, apm_binary_path: Path):
     # Use temp project with constitution to force write
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
         agents = Path(proj) / "AGENTS.md"
-        agents.write_text("placeholder", encoding="utf-8")
+        agents.write_text(
+            f"# AGENTS.md\n{AGENTS_MD_GENERATED_MARKER}\n",
+            encoding="utf-8",
+        )
 
         # Make the directory unwriteable (this prevents tempfile creation during atomic write)
         proj_path = Path(proj)

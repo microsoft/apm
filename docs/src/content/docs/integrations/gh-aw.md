@@ -77,7 +77,7 @@ gh-aw v0.87.8 exposes `GH_AW_DEFAULT_OTLP_HEADERS` to the agent and MCP telemetr
 
 **Pinning the apm CLI version (optional):**
 
-By default the import installs APM 0.28.0, the stable CLI version pinned by `shared/apm.md`. That version is action-tested with `microsoft/apm-action@v1.10.0` for explicit-target archive packing and multi-bundle restore. To pin the version explicitly, or install a different one, set the optional `apm-version` input. It is threaded into both the pack and restore steps so the version cannot skew between them, and it survives `gh aw update` (no need to hand-edit the vendored `shared/apm.md`):
+By default the import installs APM 0.28.0, the compatibility-tested version pinned by `shared/apm.md`, not the latest CLI release. That version is action-tested with `microsoft/apm-action@v1.10.0` for explicit-target archive packing and multi-bundle restore. To pin the version explicitly, or install a different one, set the optional `apm-version` input. It is threaded into both the pack and restore steps so the version cannot skew between them, and it survives `gh aw update` (no need to hand-edit the vendored `shared/apm.md`):
 
 ```yaml
 imports:

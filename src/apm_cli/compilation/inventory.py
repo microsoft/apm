@@ -33,12 +33,13 @@ class InventoryDirectory:
 class CompileInventory:
     """Deterministic, read-only filesystem snapshot for one compile invocation.
 
-    The inventory records filesystem facts only. Consumers retain ownership of
-    primitive classification, placement, and orphan-cleanup decisions.
+    The inventory owns the active-checkout boundary. Nested Git repositories
+    remain recorded as roots but their contents are never admitted to consumers.
     """
 
     root: Path
     directories: tuple[InventoryDirectory, ...]
+    nested_repository_roots: frozenset[Path]
     _directory_positions: dict[Path, int]
 
     @classmethod
@@ -55,10 +56,15 @@ class CompileInventory:
             root = root.absolute()
         safe_patterns = validate_exclude_patterns(exclude_patterns)
         directories: list[InventoryDirectory] = []
+        nested_repository_roots: set[Path] = set()
 
         for directory, child_dirs, file_names in os.walk(root, followlinks=False):
             path = Path(directory)
             if should_exclude(path, root, safe_patterns):
+                child_dirs[:] = []
+                continue
+            if path != root and (".git" in file_names or ".git" in child_dirs):
+                nested_repository_roots.add(path)
                 child_dirs[:] = []
                 continue
 
@@ -83,12 +89,30 @@ class CompileInventory:
         return cls(
             root=root,
             directories=tuple(directories),
+            nested_repository_roots=frozenset(nested_repository_roots),
             _directory_positions={entry.path: index for index, entry in enumerate(directories)},
         )
 
     def contains_directory(self, path: Path) -> bool:
         """Return whether *path* was observed as a directory."""
         return path in self._directory_positions
+
+    def nested_repository_root_for(self, path: Path) -> Path | None:
+        """Return the nested repository containing *path*, if any."""
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path.absolute()
+        try:
+            resolved.relative_to(self.root)
+        except ValueError:
+            return None
+        current = resolved
+        while current != self.root:
+            if current in self.nested_repository_roots:
+                return current
+            current = current.parent
+        return None
 
     def files_under(self, roots: frozenset[str] | None = None) -> tuple[Path, ...]:
         """Return non-hidden candidate files, optionally under literal roots."""

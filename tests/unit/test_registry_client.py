@@ -476,6 +476,12 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
         }
         for k in self._saved:
             os.environ.pop(k, None)
+        # The config layer participates in resolution, so pin it to "unset"
+        # rather than reading whatever ~/.apm/config.json the host happens
+        # to carry. Tests that exercise the layer override this patch.
+        patcher = mock.patch("apm_cli.config.get_mcp_registry_url", return_value=None)
+        self.config_url = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         for k, v in self._saved.items():
@@ -501,7 +507,9 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
     def test_schemeless_url_rejected(self):
         with self.assertRaises(ValueError) as cm:
             SimpleRegistryClient("mcp.example.com")
-        self.assertIn("MCP_REGISTRY_URL", str(cm.exception))
+        # The hint names the layer that actually supplied the URL -- here the
+        # caller, so pointing at MCP_REGISTRY_URL would misdirect the fix.
+        self.assertIn("--registry", str(cm.exception))
         self.assertIn("scheme://host", str(cm.exception))
 
     def test_http_url_rejected_without_opt_in(self):
@@ -520,6 +528,32 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
             SimpleRegistryClient("ftp://mcp.example.com")
         self.assertIn("ftp", str(cm.exception))
         self.assertIn("only https://", str(cm.exception))
+
+    def test_validation_error_redacts_credentials_query_and_fragment(self):
+        with self.assertRaises(ValueError) as cm:
+            SimpleRegistryClient(
+                "ftp://name:password-value@mcp.example.com/path?token=query-value#fragment-value"
+            )
+        message = str(cm.exception)
+        self.assertNotIn("name", message)
+        self.assertNotIn("password-value", message)
+        self.assertNotIn("query-value", message)
+        self.assertNotIn("fragment-value", message)
+
+    def test_malformed_url_error_redacts_path_credentials(self):
+        with self.assertRaises(ValueError) as cm:
+            SimpleRegistryClient("https:///name:password-value@registry.example.com")
+        message = str(cm.exception)
+        self.assertNotIn("name", message)
+        self.assertNotIn("password-value", message)
+
+    def test_query_and_fragment_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            SimpleRegistryClient("https://mcp.example.com/path?token=query-value#fragment-value")
+        message = str(cm.exception)
+        self.assertIn("query strings and fragments are not supported", message)
+        self.assertNotIn("query-value", message)
+        self.assertNotIn("fragment-value", message)
 
     def test_empty_env_var_treated_as_unset(self):
         os.environ["MCP_REGISTRY_URL"] = ""
@@ -545,6 +579,54 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
             SimpleRegistryClient()
         self.assertIn("MCP_REGISTRY_URL", str(cm.exception))
 
+    def test_config_layer_supplies_url_when_env_unset(self):
+        """`apm config set mcp-registry-url` reaches every registry consumer.
+
+        Regression trap for #2740: the persisted layer was applied only by the
+        ``apm mcp`` commands, so a manifest-driven ``apm install`` silently
+        queried the public default and reported the server as missing.
+        """
+        self.config_url.return_value = "https://config.example.com/"
+        c = SimpleRegistryClient()
+        self.assertEqual(c.registry_url, "https://config.example.com")
+        self.assertEqual(c.registry_url_source, "config")
+        # A configured registry is a deliberate override: an unreachable one
+        # must fail closed in validate_servers_exist, not assume-valid.
+        self.assertTrue(c._is_custom_url)
+
+    def test_env_layer_outranks_config_layer(self):
+        os.environ["MCP_REGISTRY_URL"] = "https://env.example.com"
+        self.config_url.return_value = "https://config.example.com"
+        c = SimpleRegistryClient()
+        self.assertEqual(urlparse(c.registry_url).hostname, "env.example.com")
+        self.assertEqual(c.registry_url_source, "env")
+
+    def test_caller_url_outranks_config_layer(self):
+        self.config_url.return_value = "https://config.example.com"
+        c = SimpleRegistryClient("https://explicit.example.com")
+        self.assertEqual(urlparse(c.registry_url).hostname, "explicit.example.com")
+        self.assertEqual(c.registry_url_source, "explicit")
+
+    def test_config_layer_may_use_plaintext_http(self):
+        """`apm config set` accepts http://, so resolution must honour it.
+
+        The opt-in env var still gates the ambient env layer and caller-supplied
+        URLs, which include the ``registry:`` field of an untrusted apm.yml.
+        """
+        self.config_url.return_value = "http://config.example.com"
+        c = SimpleRegistryClient()
+        self.assertEqual(urlparse(c.registry_url).scheme, "http")
+        self.assertEqual(c.registry_url_source, "config")
+
+    def test_config_layer_rejection_names_the_config_key(self):
+        self.config_url.return_value = "ftp://config.example.com"
+        with self.assertRaises(ValueError) as cm:
+            SimpleRegistryClient()
+        self.assertIn("apm config get mcp-registry-url", str(cm.exception))
+
+    def test_default_source_recorded_when_no_layer_set(self):
+        self.assertEqual(SimpleRegistryClient().registry_url_source, "default")
+
     def test_userinfo_stripped_from_registry_url(self):
         """SimpleRegistryClient must strip user:pass@ from the stored URL.
 
@@ -567,6 +649,13 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
         self.assertEqual(parsed.port, 8443)
         self.assertIsNone(parsed.username)
         self.assertIsNone(parsed.password)
+
+    def test_userinfo_stripped_preserves_ipv6_brackets(self):
+        c = SimpleRegistryClient("https://name:password-value@[2001:db8::1]:8443/")
+        self.assertEqual(c.registry_url, "https://[2001:db8::1]:8443")
+        parsed = urlparse(c.registry_url)
+        self.assertEqual(parsed.hostname, "2001:db8::1")
+        self.assertEqual(parsed.port, 8443)
 
 
 class TestNormalizeV01Package(unittest.TestCase):

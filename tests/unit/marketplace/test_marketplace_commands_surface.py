@@ -924,6 +924,42 @@ class TestRenderDoctorTable:
         call_arg = logger.tree_item.call_args[0][0]
         assert "[i]" in call_arg
 
+    def test_failed_informational_check_shows_warning_icon(self) -> None:
+        from apm_cli.commands.marketplace import _render_doctor_table
+
+        logger = MagicMock()
+        check = self._make_check(passed=False, informational=True)
+        with patch("apm_cli.commands.marketplace._get_console", return_value=None):
+            _render_doctor_table(logger, [check])
+        call_arg = logger.tree_item.call_args[0][0]
+        assert "[!]" in call_arg
+
+    def test_doctor_status_icon_uses_canonical_console_vocabulary(self) -> None:
+        from apm_cli.commands.marketplace import STATUS_SYMBOLS, _doctor_status_icon
+
+        check = self._make_check(passed=False, informational=True)
+        with patch.dict(STATUS_SYMBOLS, {"warning": "[canonical-warning]"}):
+            assert _doctor_status_icon(check) == "[canonical-warning]"
+
+    def test_rich_detail_is_rendered_as_literal_text(self) -> None:
+        from io import StringIO
+
+        from rich.console import Console
+
+        from apm_cli.commands.marketplace import _render_doctor_table
+
+        logger = MagicMock()
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, width=200)
+        check = self._make_check()
+        check.detail = "[link=https://example.com]click[/link]"
+        with patch("apm_cli.commands.marketplace._get_console", return_value=console):
+            _render_doctor_table(logger, [check])
+
+        rendered = output.getvalue()
+        assert "[link=https://example.com]click[/link]" in rendered
+        assert "\x1b]8;" not in rendered
+
     def test_failed_check_shows_x_icon(self) -> None:
         from apm_cli.commands.marketplace import _render_doctor_table
 

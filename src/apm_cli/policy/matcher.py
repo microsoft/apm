@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import lru_cache
 from typing import Protocol
 
@@ -22,6 +22,52 @@ class _DependencyPolicySubject(Protocol):
     def get_canonical_dependency_string(self) -> str:
         """Return the dependency identity used by policy checks."""
         ...
+
+
+class DependencyPolicyIndex:
+    """Snapshot exact policy names once, retaining each source's casing rule.
+
+    Buckets use the identity owner's prefix length, not a parallel host catalog.
+    A match across buckets retains declaration order, as the original scan did.
+    Legacy supplied name sets remain authoritative and byte-exact: they carry
+    no source metadata, and an empty set must not trigger dependency discovery.
+    """
+
+    def __init__(self) -> None:
+        self._names: dict[int, dict[str, tuple[int, str]]] = {}
+
+    @classmethod
+    def from_dependencies(cls, deps: Iterable[_DependencyPolicySubject]) -> DependencyPolicyIndex:
+        """Project each dependency once into a source-aware lookup bucket."""
+        index = cls()
+        for position, dependency in enumerate(deps):
+            name = dependency.get_canonical_dependency_string().split("#", 1)[0]
+            prefix = dependency.case_insensitive_identity_prefix_segments
+            normalized = normalize_package_policy_identity(
+                name, case_insensitive_prefix_segments=prefix
+            )
+            index._names.setdefault(prefix, {}).setdefault(normalized, (position, name))
+        return index
+
+    @classmethod
+    def from_names(cls, names: set[str]) -> DependencyPolicyIndex:
+        """Snapshot the legacy authoritative name set without inspecting deps."""
+        index = cls()
+        index._names[0] = {name: (0, name) for name in names}
+        return index
+
+    def find_name(self, policy_name: str) -> str | None:
+        """Return the first matching canonical name without re-projecting deps."""
+        name = policy_name.split("#", 1)[0]
+        first: tuple[int, str] | None = None
+        for prefix, names in self._names.items():
+            normalized = normalize_package_policy_identity(
+                name, case_insensitive_prefix_segments=prefix
+            )
+            match = names.get(normalized)
+            if match is not None and (first is None or match[0] < first[0]):
+                first = match
+        return first[1] if first is not None else None
 
 
 @lru_cache(maxsize=512)

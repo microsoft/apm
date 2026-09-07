@@ -43,6 +43,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.install.locking import serialized_lifecycle
+
 from ..core.command_logger import InstallLogger
 from ..core.target_detection import TargetParamType
 from ..export.formats import FORMAT_CYCLONEDX, SUPPORTED_FORMATS
@@ -168,6 +170,7 @@ def lock(
     )
 
 
+@serialized_lifecycle
 def _run_lock(
     *,
     verbose: bool,
@@ -222,7 +225,7 @@ def _run_lock(
     try:
         from apm_cli.commands.install import _install_apm_dependencies
 
-        _install_apm_dependencies(
+        result = _install_apm_dependencies(
             apm_package,
             update_refs=update_refs,
             verbose=verbose,
@@ -238,7 +241,10 @@ def _run_lock(
     except Exception as e:
         _handle_lock_error(e, verbose)
 
-    _rich_success("Lockfile written to apm.lock.yaml", symbol="check")
+    from apm_cli.install.summary import exit_unless_install_result_allows_success
+
+    exit_unless_install_result_allows_success(logger=logger, result=result)
+    logger.success("Lockfile written to apm.lock.yaml", symbol="check")
 
 
 @lock.command(
@@ -277,7 +283,7 @@ def _run_lock(
     help=(
         "Pin the SBOM timestamp (ISO 8601 with timezone required, e.g. "
         "2024-06-01T00:00:00+00:00) for reproducible output. Defaults to "
-        "SOURCE_DATE_EPOCH, then the lockfile's generated_at."
+        "SOURCE_DATE_EPOCH, then the lockfile's legacy generated_at, then the Unix epoch."
     ),
 )
 def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | None) -> None:
@@ -321,8 +327,9 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
     the lockfile's ``generated_at`` > a fixed epoch. Pinning keeps export
     byte-deterministic across runs.
     """
-    import os
-    from datetime import datetime, timezone
+    from datetime import datetime
+
+    from apm_cli.deps.lockfile import resolve_reproducible_timestamp
 
     if explicit is not None:
         try:
@@ -337,15 +344,7 @@ def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str |
                 param_hint="'--timestamp'",
             )
         return dt.isoformat()
-    epoch = os.environ.get("SOURCE_DATE_EPOCH")
-    if epoch:
-        try:
-            return datetime.fromtimestamp(int(epoch), tz=timezone.utc).isoformat()
-        except (ValueError, OverflowError, OSError):
-            pass
-    if lockfile_generated_at:
-        return lockfile_generated_at
-    return "1970-01-01T00:00:00+00:00"
+    return resolve_reproducible_timestamp(None, lockfile_generated_at)
 
 
 def _normalize_utc_designator(value: str) -> str:

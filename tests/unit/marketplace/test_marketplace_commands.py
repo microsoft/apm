@@ -437,6 +437,56 @@ class TestMarketplaceAdd:
         assert "--host is ignored when SOURCE is a hosted marketplace.json URL" in result.output
         assert mock_add.call_args[0][0].name == "catalog"
 
+    @patch("apm_cli.marketplace.registry.add_marketplace")
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_mixed_case_ssh_url_warns_host_flag_is_ignored(
+        self, mock_detect, mock_fetch, mock_add, runner
+    ):
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m",
+            plugins=(MarketplacePlugin(name="p1"),),
+        )
+        result = runner.invoke(
+            marketplace,
+            [
+                "add",
+                "SSH://git@gitea.example.com:2222/org/repo.git",
+                "--host",
+                "other.example.com",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "--host is ignored when SOURCE is a full URL" in result.output
+        registered_url = urlparse(mock_add.call_args[0][0].url)
+        assert registered_url.scheme == "ssh"
+        assert registered_url.hostname == "gitea.example.com"
+        assert registered_url.port == 2222
+
+    @patch("apm_cli.marketplace.registry.add_marketplace")
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_unpinned_ssh_url_warns_about_mutable_ref(
+        self, mock_detect, mock_fetch, mock_add, runner
+    ):
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(name="m", plugins=())
+        result = runner.invoke(
+            marketplace,
+            ["add", "ssh://git@gitea.example.com:2222/org/repo.git"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Pin this git marketplace" in result.output
+        assert "--ref v1.0.0" in result.output
+        assert "#v1.0.0" not in result.output
+
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")
     def test_add_strips_dot_git_suffix(self, mock_detect, mock_fetch, runner):

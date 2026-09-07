@@ -35,7 +35,6 @@ _LEGACY_TARGET_PREFIXES = {
     ".gemini/": "gemini",
     ".codex/": "codex",
     ".opencode/": "opencode",
-    ".agents/": "agents",
 }
 _LEGACY_USER_TARGET_PREFIXES = {
     ".copilot/": "copilot",
@@ -55,6 +54,14 @@ class DeploymentOwnerViolation:
     active_owner: str
     invalid_owners: tuple[str, ...]
     invalid_active_owner: str | None
+
+
+@dataclass(frozen=True)
+class DeploymentCleanupSnapshot:
+    """Canonical paths and hashes selected for one cleanup transition."""
+
+    paths: frozenset[str]
+    hashes: dict[str, str]
 
 
 def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:
@@ -94,6 +101,34 @@ class DeploymentLedgerCodec:
             if owner != ".":
                 paths.update(dependency.deployed_file_hashes)
         return frozenset(paths)
+
+    @staticmethod
+    def cleanup_snapshot(
+        lockfile: LockFile,
+        dependency_keys: Collection[str],
+    ) -> DeploymentCleanupSnapshot:
+        """Return selected cleanup claims with canonical ledger hash precedence."""
+        selected = frozenset(dependency_keys)
+        paths = {
+            path
+            for owner, dependency in lockfile.dependencies.items()
+            if owner in selected
+            for path in dependency.deployed_files
+        }
+        hashes: dict[str, str] = {}
+        for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+            if (
+                record.locator.value in paths
+                and record.content_hash
+                and selected.intersection(record.owners)
+            ):
+                hashes.setdefault(record.locator.value, record.content_hash)
+        for owner, dependency in lockfile.dependencies.items():
+            if owner not in selected:
+                continue
+            for path, content_hash in dependency.deployed_file_hashes.items():
+                hashes.setdefault(path, content_hash)
+        return DeploymentCleanupSnapshot(paths=frozenset(paths), hashes=hashes)
 
     @staticmethod
     def valid_owner_keys(
@@ -193,21 +228,26 @@ class DeploymentLedgerCodec:
             lockfile.local_deployed_files,
             lockfile.local_deployed_file_hashes,
         )
-        for runtime, servers in getattr(lockfile, "mcp_target_servers", {}).items():
-            for server in servers:
-                locator = DeploymentLocator(
-                    kind=LocatorKind.URI,
-                    target="mcp",
-                    value=server,
-                    runtime=runtime,
-                    scope="project",
-                )
-                records[locator.key] = DeploymentRecord(
-                    locator=locator,
-                    owners=(".",),
-                    active_owner=".",
-                    content_hash=None,
-                )
+        service_targets = (
+            ("mcp", getattr(lockfile, "mcp_target_servers", {})),
+            ("lsp", getattr(lockfile, "lsp_target_servers", {})),
+        )
+        for service, target_servers in service_targets:
+            for runtime, servers in target_servers.items():
+                for server in servers:
+                    locator = DeploymentLocator(
+                        kind=LocatorKind.URI,
+                        target=service,
+                        value=server,
+                        runtime=runtime,
+                        scope="project",
+                    )
+                    records[locator.key] = DeploymentRecord(
+                        locator=locator,
+                        owners=(".",),
+                        active_owner=".",
+                        content_hash=None,
+                    )
         return DeploymentLedger(records=records)
 
     @staticmethod
@@ -231,12 +271,14 @@ class DeploymentLedgerCodec:
         }
         local_files: list[str] = []
         local_hashes: dict[str, str] = {}
-        mcp_targets: dict[str, list[str]] = {}
+        service_targets: dict[str, dict[str, list[str]]] = {"mcp": {}, "lsp": {}}
 
         for record in ledger.records.values():
             locator = record.locator
-            if locator.target == "mcp" and locator.runtime:
-                mcp_targets.setdefault(locator.runtime, []).append(locator.value)
+            if locator.target in service_targets and locator.runtime:
+                service_targets[locator.target].setdefault(locator.runtime, []).append(
+                    locator.value
+                )
                 continue
             path = DeploymentLedgerCodec.legacy_value(locator)
             for owner in record.owners:
@@ -258,7 +300,11 @@ class DeploymentLedgerCodec:
         lockfile.local_deployed_file_hashes = dict(sorted(local_hashes.items()))
         lockfile.mcp_target_servers = {
             runtime: sorted(dict.fromkeys(servers))
-            for runtime, servers in sorted(mcp_targets.items())
+            for runtime, servers in sorted(service_targets["mcp"].items())
+        }
+        lockfile.lsp_target_servers = {
+            runtime: sorted(dict.fromkeys(servers))
+            for runtime, servers in sorted(service_targets["lsp"].items())
         }
 
     @staticmethod
@@ -360,6 +406,18 @@ class DeploymentLedgerCodec:
         DeploymentLedgerCodec.refresh_from_legacy(lockfile)
 
     @staticmethod
+    def replace_lsp_target_servers(
+        lockfile: LockFile,
+        target_servers: dict[str, list[str]],
+    ) -> None:
+        """Update the LSP compatibility view and invalidate its projection."""
+        lockfile.lsp_target_servers = {
+            runtime: list(servers) for runtime, servers in target_servers.items()
+        }
+        lockfile._lsp_target_servers_present = True
+        DeploymentLedgerCodec.refresh_from_legacy(lockfile)
+
+    @staticmethod
     def replace_context_local_files(context: Any, files: list[str]) -> None:
         """Route transitional install-context ownership mutation through one owner."""
         context.local_deployed_files = list(files)
@@ -429,6 +487,7 @@ class DeploymentLedgerCodec:
             previous_by_locator = {
                 (
                     record.locator.kind,
+                    (record.locator.target if record.locator.kind == LocatorKind.URI else None),
                     record.locator.value,
                     record.locator.runtime,
                     record.locator.scope,
@@ -439,7 +498,13 @@ class DeploymentLedgerCodec:
             for record in lockfile.deployment_ledger.records.values():
                 locator = record.locator
                 previous = previous_by_locator.get(
-                    (locator.kind, locator.value, locator.runtime, locator.scope)
+                    (
+                        locator.kind,
+                        locator.target if locator.kind == LocatorKind.URI else None,
+                        locator.value,
+                        locator.runtime,
+                        locator.scope,
+                    )
                 )
                 if previous is None:
                     records[locator.key] = record

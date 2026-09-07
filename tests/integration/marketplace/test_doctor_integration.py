@@ -135,6 +135,32 @@ class TestDoctorAllPass:
         assert "Traceback" not in result.output
 
 
+def test_malformed_executable_key_is_safely_rendered(tmp_path: Path, monkeypatch):
+    """Doctor renders project-controlled parser details as literal ASCII."""
+    monkeypatch.setattr(
+        "apm_cli.config.CONFIG_FILE",
+        str(tmp_path / ".apm" / "config.json"),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+        Path("apm.yml").write_text(
+            "name: t\n"
+            "version: 0.0.1\n"
+            "executables:\n"
+            "  allow:\n"
+            '    "caf\\u00e9[link=https://evil.example]click[/link]": bogus\n',
+            encoding="utf-8",
+        )
+        with patch("subprocess.run", side_effect=_fake_git_ok):
+            result = runner.invoke(doctor, [], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "executable trust" in result.output
+    assert "caf?" in result.output
+    assert "Fix 'executables' in apm.yml" in result.output
+    assert "\x1b]8;" not in result.output
+
+
 class TestDoctorGitNotFound:
     """When git is not on PATH, doctor exits 1."""
 

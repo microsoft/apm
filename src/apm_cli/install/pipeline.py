@@ -47,6 +47,7 @@ from functools import wraps
 from typing import TYPE_CHECKING
 
 from ..agent_plugins.errors import AgentPluginError
+from ..copilot_plugins.settings import CopilotSettingsCollisionError
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
@@ -124,6 +125,8 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     """
     import subprocess as _sp
 
+    from ..models.dependency.host_virtual import dependency_repository_owner
+    from ..utils.git_env import redact_git_diagnostic
     from ..utils.github_host import (
         is_ado_auth_failure_signal,
         is_azure_devops_hostname,
@@ -145,7 +148,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         host = dep.host
         if not host or is_github_hostname(host):
             continue  # github.com uses API probe with unauth fallback
-        org = dep.repo_url.split("/")[0] if dep.repo_url and "/" in dep.repo_url else None
+        org = dependency_repository_owner(dep)
         key = (host, dep.port, org)
         if key in seen:
             continue
@@ -175,24 +178,13 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             dep.repo_url,
             use_ssh=_use_ssh,
             dep_ref=dep,
-            token=dep_ctx.token,
+            token="",
             auth_scheme=_auth_scheme,
         )
-        probe_env = auth_resolver.git_env_for_context(
+        probe_env = auth_resolver.git_env_for_remote(
             dep_ctx,
-            base_env=_dl.git_env,
+            probe_url,
         )
-        # GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM carve-out: GitAuthEnvBuilder
-        # forces an empty global gitconfig for ALL hosts to prevent a user's
-        # ~/.gitconfig insteadOf rewrites or credential helpers from leaking
-        # tokens during a clone. But for preflight probes (a single ls-remote
-        # against the same host the dep targets), the redirection surface is
-        # nil and killing the user's global config kills Git Credential
-        # Manager along with it. This carve-out applies only to generic hosts;
-        # ADO credentials come exclusively from AuthResolver.
-        if is_generic:
-            for _key in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ASKPASS"):
-                probe_env.pop(_key, None)
 
         endpoint = dep_ctx.host_info.display_name
         host_display = endpoint if not org else f"{endpoint}/{org}"
@@ -201,13 +193,13 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             # auth-delegated: invoked via _primary_op/_bearer_op below, both
             # routed through auth_resolver.execute_with_bearer_fallback.
             try:
-                return _sp.run(
-                    ["git", "ls-remote", "--heads", "--exit-code", url],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
+                from ..utils.git_env import git_remote_refs
+
+                return git_remote_refs(
+                    url,
                     timeout=30,
                     env=env,
+                    options=("--heads", "--exit-code"),
                 )
             except _sp.TimeoutExpired:
                 return None  # network timeout sentinel; treated as non-auth
@@ -294,7 +286,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                         f"    Ensure your SSH key is loaded in ssh-agent "
                         f"(ssh-add -l) and that the\n"
                         f"    public key is authorised on the server.\n\n"
-                        f"    git output: {stderr_text.strip()}\n\n"
+                        f"    git output: {redact_git_diagnostic(stderr_text.strip())}\n\n"
                         f"    No files were modified.\n"
                         f"    apm.yml, apm.lock.yaml, and apm_modules/ are unchanged."
                     ),
@@ -643,11 +635,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         # --------------------------------------------------------------
         # Phase 2: Target detection + integrator initialization.
         # Skipped in lockfile_only mode -- no primitives are deployed.
+        #
+        # Phase 2.1 (native Copilot plugin registration capability) shares
+        # this guard: it publishes the capability so the Agent Plugin
+        # deployment boundary can admit a verified plugin (issue #2703). In
+        # lockfile_only mode no primitives are deployed, so no native plugin
+        # can be admitted and resolving the capability would be pure waste.
         # --------------------------------------------------------------
         if not lockfile_only:
+            from .phases import copilot_plugins as _copilot_plugins_phase
             from .phases import targets as _targets_phase
 
             _run_phase("targets", _targets_phase, ctx)
+            _run_phase("copilot_activate", _copilot_plugins_phase.ActivatePhase, ctx)
 
         # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)
@@ -918,6 +918,18 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
             except PolicyViolationError:
                 raise
 
+        # ------------------------------------------------------------------
+        # Phase: Native GitHub Copilot Agent Plugin registration (#2703).
+        # Runs LAST -- after the lockfile is canonical, after the require-hashes
+        # integrity gate, and after the content-audit gate -- so the APM-owned
+        # marketplace catalog, ownership ledger, and enabled-plugin settings
+        # entries are written only for an install those gates actually allowed
+        # to complete. Writing earlier would leave Copilot loading a plugin a
+        # later gate refused.
+        # ------------------------------------------------------------------
+        if not lockfile_only:
+            _run_phase("copilot_plugins", _copilot_plugins_phase, ctx)
+
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
 
@@ -951,11 +963,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, RUF100
         raise
     except InstallFailureAlreadyRendered:
         raise
-    except (PathTraversalError, MaterializationPathCollisionError):
-        # Path-safety and package-directory collision errors already include
-        # actionable guidance; preserve them instead of adding generic wrappers.
+    except (PathTraversalError, MaterializationPathCollisionError, CopilotSettingsCollisionError):
+        # Path-safety, package-directory collision, and Copilot settings
+        # collision errors already include actionable guidance; re-raise them
+        # verbatim. A settings collision in particular means dependency
+        # resolution SUCCEEDED and the lockfile is written -- only the Copilot
+        # merge collided -- so wrapping it into "Failed to resolve APM
+        # dependencies: ..." would mis-attribute the failure and double-wrap
+        # once commands/install.py prefixes again.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
     finally:
+        from .phases import copilot_plugins as _copilot_plugins_cleanup
+
+        _copilot_plugins_cleanup.deactivate(ctx)
         ctx.tui.__exit__()

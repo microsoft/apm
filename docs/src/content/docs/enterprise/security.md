@@ -124,6 +124,7 @@ These controls make the decision visible, but they do **not** make HTTP safe:
 - HTTP has no transport encryption or server authentication. A machine-in-the-middle can modify repository contents or refs in transit.
 - On the first HTTP fetch (or any update fetched over HTTP), the lockfile's `resolved_commit` and `content_hash` come from that same untrusted channel. They improve replay detection later, but they do not establish trustworthy provenance for the initial fetch.
 - APM explicitly suppresses git credential helpers for HTTP clone and `ls-remote` operations so stored tokens from Keychain, Credential Manager, `gh auth`, or other helpers are not sent over plaintext HTTP.
+- `apm config set mcp-registry-url http://...` is also explicit consent to plaintext registry metadata. A machine-in-the-middle can change the MCP package configuration returned by that registry; use HTTPS outside isolated development networks.
 
 For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](../registry-proxy/).
 
@@ -250,11 +251,28 @@ The experimental `external-scanners` feature can invoke a third-party SARIF scan
 
 ## Policy gates that block install
 
-`apm-policy.yml` is evaluated before any download or write. The install preflight walks the resolved dependency graph -- including transitive MCP servers -- and fails the install if a dep is not in the allow list, falls under a deny rule, uses a forbidden source/scope, or violates a configured trust rule. In CI, `apm audit --ci` runs the same baseline plus policy checks (allow/deny lists, target restrictions, MCP transport restrictions). Tighten-only inheritance (enterprise -> org -> repo) is enforced so a downstream layer can never loosen an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and [Policy Reference](../policy-reference/).
+`apm-policy.yml` is evaluated after dependency resolution and before target
+integration. The policy gate walks the resolved dependency graph -- including
+transitive MCP servers -- and fails the install if a dep is not in the allow
+list, falls under a deny rule, uses a forbidden source/scope, or violates a
+configured trust rule. Target-aware and integrity checks run later in the same
+transaction and roll resolution replacements back on failure. In CI,
+`apm audit --ci` runs the same baseline plus policy checks (allow/deny lists,
+target restrictions, MCP transport restrictions). Tighten-only inheritance
+(enterprise -> org -> repo) is enforced so a downstream layer can never loosen
+an upstream rule. See [Get started with apm-policy.yml](../apm-policy/) and
+[Policy Reference](../policy-reference/).
 
 ## Content integrity hashing
 
 APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). Use `apm install --update` to accept new upstream content and refresh the lockfile.
+
+Replacement packages download and pass package-shape validation in an isolated
+staging directory while the current package remains in place. APM publishes the
+staged tree only after those checks succeed, so a failed download does not
+unlink live hook scripts from the current package. Integrity and policy gates
+still run later in the install transaction and roll the replacement back on
+failure.
 
 ```yaml
 # apm.lock.yaml
@@ -312,9 +330,8 @@ Trust boundaries:
 
 ### Symlink handling
 
-Symlinks are rejected in most APM operations; the only context where in-package
-symlinks are followed is local-path install, under a per-symlink containment
-check (see below):
+Symlinks are rejected in most APM operations. They are followed only
+during contained package materialization:
 
 - **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
@@ -324,6 +341,12 @@ check (see below):
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
+
+Remote Git subdirectory installs can dereference a symlink whose target is a
+tracked file in the same checked-out commit. If sparse checkout excluded that
+target, APM widens the checkout before copying the package. Generated Git
+metadata, targets outside the repository, and links that remain broken after
+widening hard-fail the install.
 
 #### Local-install symlink dereference and containment guarantee
 
@@ -397,10 +420,13 @@ across targets.
 
 ## Executable trust gate
 
-APM blocks executable primitives from dependency packages by default: hooks,
-`bin/` executables, self-defined MCP servers (`registry: false`), and canvas
-extensions. Text primitives (skills, agents, instructions) are never gated, and
-local root `.apm/` content is always trusted.
+When the executable trust gate is enabled, APM blocks unapproved executable
+primitives from dependency packages: hooks, `bin/` executables, self-defined
+MCP servers (`registry: false`), LSP servers, and canvas extensions. The gate is
+opt-in for backward compatibility; a project `executables:` block or org policy
+enables it. Text primitives (skills, agents, instructions) are never gated, and
+local root `.apm/` content is always trusted. Supported runtimes may start an
+approved generated LSP command automatically after install.
 
 Trust is expressed through one noun, `executables`, across three layers, and the
 install gate and `apm audit` resolve it through a single deny-wins,
@@ -423,14 +449,17 @@ first-match-wins ladder:
 - **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
   shared with the team.
 - **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest
-  authority -- a machine-local override that can only narrow, never widen past
-  an org or project deny.
+  authority. `apm approve --user` can grant machine-local trust when no org or
+  project deny blocks it; `apm deny --user` narrows trust on one machine.
 
 Personal consent can never widen past an org deny, and the default (rung 7) is
 **gated pending approval** -- a package with executables and no opinion anywhere
 is parked until approved, not hard-denied. This release ships no `enforce`
-mandate runtime, no signing, and no content-hash binding; an org
-`executables.enforce` rung degrades to `recommend`.
+mandate runtime or package signing; an org `executables.enforce` rung degrades
+to `recommend`. Local bundle MCP, LSP, and canvas approvals are narrower: APM
+prints an exact `executables.allow` key containing the bundle's SHA-256 content
+digest, so another bundle that claims the same package name cannot inherit that
+consent.
 
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, or `absent`).
@@ -459,6 +488,17 @@ APM integrates MCP (Model Context Protocol) server configurations from packages.
 
 For Codex remote transport requirements, see
 [stdio vs HTTP servers](../../consumer/install-mcp-servers/#stdio-vs-http-servers).
+
+### Direct registry installs at user scope
+
+`apm install -g --mcp NAME` can use an MCP registry endpoint to update
+account-wide runtime configuration. APM requires HTTPS for registry URLs from
+the environment or saved config unless `MCP_REGISTRY_ALLOW_HTTP=1` is set, and
+rejects embedded credentials, query strings, and fragments. When a non-default
+registry supplies the entry, APM saves that registry URL for reproducible
+replay, but registry metadata is not signed or content-hash verified. Treat a
+custom registry as a trusted source with access to every global runtime selected
+for the install.
 
 ### Direct dependencies
 

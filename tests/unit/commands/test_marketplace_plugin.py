@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.commands.marketplace.plugin import _SHA_RE, _resolve_ref  # noqa: F401
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.install.locking import lifecycle_lock
 from apm_cli.marketplace.ref_resolver import RemoteRef
 
 # ---------------------------------------------------------------------------
@@ -152,6 +153,26 @@ class TestPackageAdd:
 
 
 class TestPackageSet:
+    @pytest.mark.windows_compat
+    def test_holds_lifecycle_lock_during_update(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+
+        def assert_locked(*args, **kwargs):
+            assert lifecycle_lock().is_locked
+
+        with patch(
+            "apm_cli.marketplace.yml_editor.update_plugin_entry",
+            side_effect=assert_locked,
+        ):
+            result = runner.invoke(
+                marketplace,
+                ["package", "set", "existing-package", "--version", ">=2.0.0"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert not lifecycle_lock().is_locked
+
     def test_happy_path_update_version(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)

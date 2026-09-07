@@ -1,4 +1,4 @@
-"""Unit tests for the MCP flag-conflict matrix (E1-E15).
+"""Unit tests for the MCP flag-conflict matrix.
 
 Covers ``apm_cli.install.mcp.conflicts.validate_mcp_conflicts`` and the
 ``MCP_REQUIRED_FLAGS`` constant.  All tests are pure-Python with no I/O.
@@ -31,7 +31,6 @@ def _call(**overrides) -> None:
         headers={},
         mcp_version=None,
         command_argv=None,
-        global_=False,
         only=None,
         update=False,
         any_transport_flag=False,
@@ -158,20 +157,6 @@ class TestE1PositionalPackagesMixedWithMcp:
 
     def test_empty_pre_dash_packages_ok(self) -> None:
         _call(pre_dash_packages=[])
-
-
-# ---------------------------------------------------------------------------
-# E2 - --global not supported for MCP entries
-# ---------------------------------------------------------------------------
-
-
-class TestE2GlobalNotSupportedForMcp:
-    def test_global_raises(self) -> None:
-        with pytest.raises(click.UsageError, match=r"--global is not supported"):
-            _call(global_=True)
-
-    def test_not_global_ok(self) -> None:
-        _call(global_=False)
 
 
 # ---------------------------------------------------------------------------

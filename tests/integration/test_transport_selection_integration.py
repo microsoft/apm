@@ -108,7 +108,8 @@ def _attempt_clone(
         allow_fallback=allow_fallback,
     )
 
-    with patch("apm_cli.deps.github_downloader.Repo.clone_from", side_effect=_record):
+    with patch("apm_cli.deps.github_downloader.Repo") as repo_cls:
+        repo_cls.clone_from.side_effect = _record
         try:
             dl._clone_with_fallback(
                 repo_url_base=dep.repo_url,

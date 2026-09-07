@@ -140,6 +140,7 @@ class InstallContext:
     # Integrate phase outputs (written by integrate, read by cleanup/lockfile/summary)
     # ------------------------------------------------------------------
     intended_dep_keys: set[str] = field(default_factory=set)
+    # Absent means integration skipped; empty means it completed with no files.
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.
@@ -184,6 +185,14 @@ class InstallContext:
     exec_trust_ctx: ExecTrustContext | None = None  # lazily built in template
     exec_allow_map: dict[str, dict[str, bool]] | None = None  # None means gate disabled
     package_exec_status: dict[str, str] = field(default_factory=dict)  # dep_key -> exec_status
+
+    # ------------------------------------------------------------------
+    # copilot_plugins (#2703)
+    # ------------------------------------------------------------------
+    # Native GitHub Copilot Agent Plugin registration capability, published
+    # once per install so the deployment boundary and the registrar agree.
+    copilot_registration: Any = None  # Optional[NativeRegistrationCapability]
+    _copilot_registration_token: Any = field(default=None, repr=False, compare=False)
 
     # ------------------------------------------------------------------
     # policy_gate

@@ -3228,6 +3228,8 @@ class TestScopeResolvedHookDeployment:
         t = MagicMock()
         t.name = name
         t.root_dir = root_dir
+        t.prefix = f"{root_dir}/"
+        t.user_root_resolver = None
         t.supports = lambda prim: prim in (primitives or {"hooks"})
         if primitives is None:
             primitives = {"hooks"}

@@ -26,7 +26,7 @@ from unittest.mock import patch
 
 import pytest
 
-from apm_cli.core.auth import AuthResolver
+from apm_cli.core.auth import AuthResolver, HostInfo
 from apm_cli.marketplace.models import (
     MarketplaceManifest,
     MarketplacePlugin,
@@ -55,7 +55,14 @@ def _make_manifest(plugin: MarketplacePlugin) -> MarketplaceManifest:
     return MarketplaceManifest(name=_REPO, plugins=(plugin,), plugin_root="")
 
 
-def _stub_resolve_token(self, host_info, org):
+def _stub_resolve_token(
+    self: AuthResolver,
+    host_info: HostInfo,
+    org: str | None,
+    *,
+    path: str | None = None,
+    allow_generic_credential_lookup: bool = True,
+) -> tuple[None, str, str]:
     """Replacement for ``AuthResolver._resolve_token``.
 
     Returns ``(None, "none", "basic")`` so ``resolve`` builds an ``AuthContext``

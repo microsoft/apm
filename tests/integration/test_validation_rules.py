@@ -372,7 +372,10 @@ class TestDirectValidators:
 
     def test_validate_claude_skill_surfaces_exception(self, tmp_path: Path) -> None:
         skill_md = _write_skill_md(tmp_path)
-        with patch("frontmatter.load", side_effect=ValueError("broken frontmatter")):
+        with patch(
+            "apm_cli.utils.yaml_io.load_frontmatter",
+            side_effect=ValueError("broken frontmatter"),
+        ):
             result = _validate_claude_skill(tmp_path, skill_md, ValidationResult())
         assert result.is_valid is False
         assert "broken frontmatter" in result.errors[0]
@@ -410,7 +413,10 @@ class TestDirectValidators:
 
     def test_validate_skill_bundle_surfaces_frontmatter_parse_error(self, tmp_path: Path) -> None:
         _write(tmp_path / "skills" / "alpha" / "SKILL.md", "---\nname: alpha\n")
-        with patch("frontmatter.load", side_effect=ValueError("bad frontmatter")):
+        with patch(
+            "apm_cli.utils.yaml_io.load_frontmatter",
+            side_effect=ValueError("bad frontmatter"),
+        ):
             result = _validate_skill_bundle(tmp_path, ValidationResult())
         assert result.is_valid is False
         assert "failed to parse frontmatter" in result.errors[0]
@@ -493,7 +499,10 @@ class TestDirectValidators:
     def test_validate_hybrid_warns_when_frontmatter_cannot_be_parsed(self, tmp_path: Path) -> None:
         _write_apm_yml(tmp_path)
         skill_md = _write_skill_md(tmp_path)
-        with patch("frontmatter.load", side_effect=ValueError("bad frontmatter")):
+        with patch(
+            "apm_cli.utils.yaml_io.load_frontmatter",
+            side_effect=ValueError("bad frontmatter"),
+        ):
             result = _validate_hybrid_package(tmp_path, tmp_path / "apm.yml", ValidationResult())
         assert result.package is not None
         assert any(str(skill_md.name) in warning for warning in result.warnings)

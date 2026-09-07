@@ -255,6 +255,8 @@ def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
 
 def detect_package_type(
     package_path: Path,
+    *,
+    agent_plugin_detection: AgentPluginDetection | None = None,
 ) -> tuple[PackageType, Path | None]:
     """Classify a package directory into a ``PackageType``.
 
@@ -265,14 +267,16 @@ def detect_package_type(
 
     Cascade order (first match wins -- implemented in NormalizationPlanner):
 
-    1. ``AGENT_PLUGIN`` -- root ``plugin.json`` with the Agent Plugins schema.
-    2. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
+    1. Eligible ``apm.yml`` -- preserve root or nested skill semantics,
+       otherwise select ``APM_PACKAGE``.
+    2. ``AGENT_PLUGIN`` -- root ``plugin.json`` with the Agent Plugins schema.
+    3. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
        OR ``.claude-plugin/`` directory.
-    3. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` present.
-    4. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
-    5. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
+    4. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` (eligible or
+       metadata-only).
+    5. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
+    6. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
        ``apm.yml`` optional; no ``.apm/`` required.
-    6. ``APM_PACKAGE`` -- ``apm.yml`` present with ``.apm/`` or declared deps.
     7. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
     8. ``INVALID`` -- nothing recognisable.
 
@@ -283,7 +287,10 @@ def detect_package_type(
     """
     from .format_detection import NormalizationPlanner, PackageFormatRegistry
 
-    report = PackageFormatRegistry().detect(package_path)
+    report = PackageFormatRegistry().detect(
+        package_path,
+        agent_plugin_detection=agent_plugin_detection,
+    )
     pkg_type, plugin_json_path = NormalizationPlanner().plan(report)
     return pkg_type, plugin_json_path
 
@@ -372,13 +379,12 @@ def validate_apm_package(
     native_detection = agent_plugin_detection
     if native_detection is None:
         native_detection = detect_agent_plugin(package_path)
-    if native_detection is not None:
-        pkg_type = (
-            PackageType.AGENT_PLUGIN if native_detection.error is None else PackageType.INVALID
-        )
-        plugin_json_path = native_detection.manifest_path
-    else:
-        pkg_type, plugin_json_path = detect_package_type(package_path)
+    pkg_type, plugin_json_path = detect_package_type(
+        package_path,
+        agent_plugin_detection=native_detection,
+    )
+    if pkg_type not in {PackageType.AGENT_PLUGIN, PackageType.INVALID}:
+        native_detection = None
     result.package_type = pkg_type
 
     if pkg_type == PackageType.INVALID:
@@ -433,7 +439,12 @@ def validate_apm_package(
 
     # Handle Marketplace Plugins (no apm.yml) - synthesize apm.yml from plugin.json
     if result.package_type == PackageType.MARKETPLACE_PLUGIN:
-        return _validate_marketplace_plugin(package_path, plugin_json_path, result)
+        return _validate_marketplace_plugin(
+            package_path,
+            plugin_json_path,
+            result,
+            source_path=source_path,
+        )
 
     # Handle Skill Bundles (nested skills/<name>/SKILL.md)
     if result.package_type == PackageType.SKILL_BUNDLE:
@@ -774,7 +785,11 @@ def _validate_hybrid_package(
 
 
 def _validate_marketplace_plugin(
-    package_path: Path, plugin_json_path: Path | None, result: ValidationResult
+    package_path: Path,
+    plugin_json_path: Path | None,
+    result: ValidationResult,
+    *,
+    source_path: Path | None = None,
 ) -> ValidationResult:
     """Validate a Claude plugin and synthesize apm.yml.
 
@@ -786,6 +801,7 @@ def _validate_marketplace_plugin(
         package_path: Path to the package directory
         plugin_json_path: Path to plugin.json if found, or None
         result: ValidationResult to populate
+        source_path: Original source directory for resolving relative dependencies
 
     Returns:
         ValidationResult: Updated validation result with MARKETPLACE_PLUGIN type
@@ -798,7 +814,7 @@ def _validate_marketplace_plugin(
         apm_yml_path = normalize_plugin_directory(package_path, plugin_json_path)
 
         # Load the synthesized apm.yml
-        package = APMPackage.from_apm_yml(apm_yml_path)
+        package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
         result.package = package
         result.package_type = PackageType.MARKETPLACE_PLUGIN
 
@@ -807,6 +823,21 @@ def _validate_marketplace_plugin(
         return result
 
     return result
+
+
+def validate_legacy_marketplace_plugin(
+    package_path: Path,
+    plugin_json_path: Path | None,
+    *,
+    source_path: Path | None = None,
+) -> ValidationResult:
+    """Normalize a detected legacy plugin without changing format precedence."""
+    return _validate_marketplace_plugin(
+        package_path,
+        plugin_json_path,
+        ValidationResult(),
+        source_path=source_path,
+    )
 
 
 def _validate_apm_package_with_yml(
