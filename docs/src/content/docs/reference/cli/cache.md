@@ -6,7 +6,7 @@ sidebar:
 ---
 
 Inspect and maintain the local cache APM uses to avoid redundant
-network I/O during `apm install`.
+network I/O during dependency installs and MCP registry lookups.
 
 ## Synopsis
 
@@ -23,12 +23,19 @@ root. The cache holds two independent stores:
 
 - **Git cache** -- bare repository databases plus per-SHA worktree
   checkouts, keyed by resolved commit.
-- **HTTP cache** -- conditional-GET responses for the GitHub release
-  and API endpoints APM polls during install.
+- **HTTP cache** -- conditional-GET responses for MCP registry
+  endpoints.
+
+A fresh, integrity-verified HTTP cache hit updates only the entry
+directory's `mtime`. This recency marker drives LRU eviction; it does
+not rewrite stored metadata or extend the response TTL. If the
+`mtime` update fails, APM logs the failure at debug level and returns
+the verified cached response. Stores and successful 304 refreshes
+also update the directory `mtime`.
 
 The cache is purely a performance optimization. Removing it never
-breaks correctness; the next `apm install` re-fetches whatever it
-needs.
+breaks correctness; the next dependency install or MCP registry
+lookup re-fetches whatever it needs.
 
 Plain and frozen installs can replay locked SHAs and reuse local bare
 repositories or per-SHA checkouts when upstream is unavailable. Commands that
@@ -75,12 +82,19 @@ apm cache clean --yes        # alias for --force
 
 | Flag | Description |
 |---|---|
-| `--force`, `-f` | Skip the confirmation prompt. |
+| `--force`, `-f` | Skip the confirmation prompt. Does not suppress deletion failures or make the command succeed. |
 | `--yes`, `-y` | Alias for `--force`. Use in CI scripts so the command never blocks on stdin. |
+
+If an entry can't be deleted -- a locked file, a permissions error --
+`clean` still removes every other entry, then reports the incomplete
+cleanup with the affected paths and exits non-zero. Successful
+removals are not rolled back. Close the process holding the lock or
+fix permissions, then retry.
 
 :::caution
 `clean` removes every cached commit and every cached HTTP response.
-The next `apm install` will re-fetch everything from the network.
+The next dependency install or MCP registry lookup will re-fetch the
+required data from the network.
 Use `prune` when you only want to reclaim space from stale entries.
 :::
 
@@ -161,10 +175,12 @@ absolute with no NUL bytes before use.
 ## Coming from npm?
 
 `apm cache clean` mirrors `npm cache clean`: it nukes the local cache
-and forces re-download on next install. There is no `--dry-run` and
-no per-package targeting; cleaning is all-or-nothing.
+and forces dependencies and registry responses to be downloaded again
+when next needed. There is no `--dry-run` and no per-package targeting;
+cleaning is all-or-nothing.
 
 ## Related
 
 - [`apm install`](../install/) -- populates the cache during dependency resolution.
+- [`apm mcp`](../mcp/) -- resolves MCP servers through registry lookups.
 - [Lockfile spec](../../lockfile-spec/) -- what gets pinned and re-fetched.

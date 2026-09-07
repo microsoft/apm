@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- macOS onboarding now recommends Homebrew core (`brew install apm`, no tap) for existing Homebrew users, with `brew upgrade apm` for updates and visible standalone alternatives. (#2846)
+
 ### Fixed
 
 - Public CLI release discovery can recover from a rejected environment token: one anonymous retry after a selected token's 401/non-rate-limit 403 only for canonical public APM metadata; metadata redirects require `APM_RELEASE_METADATA_URL` at the final JSON endpoint or a `VERSION` pin. (#2843)
+- Successful HTTP cache hits now refresh LRU recency without extending response freshness, retaining frequently used MCP registry responses. (#2859)
 
 ## [0.29.1] - 2026-09-06
 

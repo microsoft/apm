@@ -60,34 +60,42 @@ def info() -> None:
 def clean(force: bool, yes: bool) -> None:
     """Remove all cache content (git repos, checkouts, HTTP responses)."""
     from ..cache.paths import get_cache_root
-    from ..utils.console import _rich_info, _rich_success
+    from ..core.command_logger import CommandLogger
 
+    logger = CommandLogger("cache clean")
     try:
         root = get_cache_root()
     except (ValueError, OSError) as exc:
-        from ..utils.console import _rich_error
-
-        _rich_error(f"Cannot resolve cache root: {exc}", symbol="error")
+        logger.error(f"Cannot resolve cache root: {exc}")
         raise SystemExit(1) from exc
 
     if not force and not yes:
         confirmed = click.confirm(f"Remove all cache content in {root}?", default=False)
         if not confirmed:
-            _rich_info("Aborted.", symbol="info")
+            logger.progress("Aborted.")
             return
 
-    _rich_info("Cleaning cache...", symbol="gear")
+    logger.start("Cleaning cache...", symbol="gear")
 
     from ..cache.git_cache import GitCache
     from ..cache.http_cache import HttpCache
 
-    git_cache = GitCache(root)
-    git_cache.clean_all()
+    failures: list[str] = []
+    for cache_type in (GitCache, HttpCache):
+        try:
+            failures.extend(cache_type(root).clean_all())
+        except OSError as exc:
+            failures.append(f"{cache_type.__name__}: {exc}")
+    if failures:
+        logger.error("Cache cleanup incomplete; some cached content could not be removed.")
+        for failure in failures:
+            logger.error(failure)
+        logger.error(
+            "Close processes using the cache, check permissions, then retry apm cache clean."
+        )
+        raise SystemExit(1)
 
-    http_cache = HttpCache(root)
-    http_cache.clean_all()
-
-    _rich_success("Cache cleaned.", symbol="check")
+    logger.success("Cache cleaned.", symbol="check")
 
 
 @cache.command(help="Remove cache entries older than N days")

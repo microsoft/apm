@@ -567,6 +567,7 @@ fi
 # Make binary executable
 chmod +x "$TMP_DIR/$EXTRACTED_DIR/$BINARY_NAME"
 
+# INSTALL_BINARY_CHECK_BEGIN
 # Test the binary
 # Use if/else to capture exit code without triggering set -e.
 # When glibc is too old the binary exits 255 immediately;
@@ -628,7 +629,7 @@ else
         echo ""
     fi
     
-    echo "2. Homebrew (macOS/Linux): brew install microsoft/apm/apm"
+    echo "2. Homebrew (macOS/Linux): brew install apm (no tap needed)"
     echo ""
     echo "3. From source:"
     echo "   git clone $GITHUB_URL/$APM_REPO.git"
@@ -644,6 +645,8 @@ else
     echo "Need help? Create an issue at: $GITHUB_URL/$APM_REPO/issues"
     exit 1
 fi
+
+# INSTALL_BINARY_CHECK_END
 
 # Install binary directory structure
 echo -e "${YELLOW}Installing APM CLI to $APM_INSTALL_DIR...${NC}"

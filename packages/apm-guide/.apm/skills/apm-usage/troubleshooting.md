@@ -2,7 +2,7 @@
 
 | Problem | Fix |
 |---------|-----|
-| `apm: command not found` | Install APM: `curl -sSL https://aka.ms/apm-unix \| sh` (macOS/Linux) or `irm https://aka.ms/apm-windows \| iex` (Windows). Ensure `/usr/local/bin` is in `$PATH`. |
+| `apm: command not found` | On macOS with Homebrew, use `brew install apm` (no tap). For Linux/macOS without Homebrew or Windows, see [Installation](./installation.md). Ensure the chosen installation's executable directory is in `$PATH`. |
 | Authentication errors (401/403) | Set the correct token. Run `apm install --verbose` to see which token source is used. See [Authentication](./authentication.md). |
 | File collision on install | A local file conflicts with a dependency file. Use `--force` to overwrite, or rename the local file. |
 | Stale dependencies | Run `apm install --update` to refresh to latest refs. |

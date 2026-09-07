@@ -13,9 +13,28 @@ sidebar:
 
 On **Windows ARM64**, the one-line installer currently downloads the **x86_64** ZIP (same as the GitHub Release asset); it runs via emulation. Native ARM64 Windows binaries are not selected yet.
 
-## Quick install (recommended)
+## Homebrew (macOS/Linux)
 
-**macOS / Linux:**
+Already use Homebrew on macOS? Install from Homebrew core (also available on Linux):
+
+```bash
+brew install apm
+```
+
+No custom tap needed. Homebrew manages the APM CLI installation and updates.
+Package-manager ownership does not eliminate supply-chain risk.
+Use `brew upgrade apm`, not `apm self-update`; see the
+[Homebrew core update policy](../../reference/cli/self-update/#description).
+
+Homebrew is optional. Use the standalone installer below, [pip](#pip-install),
+[Scoop](#package-managers), or a [manual binary install](#manual-binary-install).
+
+Already installed from `microsoft/apm/apm`? See
+[Migrate from the Microsoft tap](#migrate-from-the-microsoft-tap).
+
+## Standalone installer
+
+**Linux / macOS without Homebrew:**
 
 ```bash
 curl -sSL https://aka.ms/apm-unix | sh
@@ -220,11 +239,7 @@ For `apm self-update`, run `apm self-update --check` with the same env vars and 
 
 ## Package managers
 
-**Homebrew (macOS/Linux):**
-
-```bash
-brew install microsoft/apm/apm
-```
+**Homebrew (macOS/Linux):** See [Homebrew](#homebrew-macoslinux) above.
 
 **Scoop (Windows):**
 
@@ -232,6 +247,84 @@ brew install microsoft/apm/apm
 scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
 ```
+
+### Migrate from the Microsoft tap
+
+This procedure covers a linked, unpinned `microsoft/apm/apm` installation in the
+current Homebrew prefix. It does not cover unlinked kegs, multiple prefixes, or
+standalone installs.
+
+1. Inspect the installation before changing it:
+
+   ```bash
+   type -a apm
+   brew --prefix
+   brew list --formula --full-name
+   brew list --pinned
+   ls -l "$(brew --prefix)/bin/apm"
+   ```
+
+   Confirm the list contains `microsoft/apm/apm`, APM is not pinned, and your
+   shell resolves `apm` to that prefix's `bin/apm`, linked to its Homebrew-managed
+   APM keg. If another installation owns or shadows the path, stop and resolve
+   ownership separately. Back up
+   `~/.apm/config.json` using your normal process.
+
+2. Compare the installed version with core's available version:
+
+   ```bash
+   brew list --versions apm
+   brew info --formula homebrew/core/apm
+   ```
+
+   :::caution[Stop if core is older]
+   Reinstall can downgrade without a separate warning. If core's version is
+   older than your installed version, stop and wait for core to catch up.
+   An older APM may not understand your configuration; preserving the file's
+   bytes does not prove runtime compatibility.
+   :::
+
+3. Reinstall with the explicit core name:
+
+   ```bash
+   brew reinstall homebrew/core/apm
+   ```
+
+   Unqualified `brew reinstall apm` stays on the tap. No preliminary uninstall
+   or tap removal is needed.
+
+4. Verify the receipt and active command:
+
+   ```bash
+   brew list --formula --full-name
+   brew --prefix
+   command -v apm
+   type -a apm
+   apm --version
+   ```
+
+   The formula list must now show `apm`, not `microsoft/apm/apm`, and the shell
+   must resolve to the intended prefix's `bin/apm`. A successful reinstall alone
+   does not rule out another copy earlier on `PATH`.
+
+The migration leaves `~/.apm/config.json` unchanged on disk. Update through
+`brew upgrade apm`.
+
+:::caution[Link conflict is not rollback]
+If linking fails on a conflicting file or symlink, core is already installed
+but unlinked; the tap installation is not restored. The conflicting file is
+preserved. Stop and do not use `--overwrite`. Have the file's owner resolve the
+conflict, then run `brew link homebrew/core/apm` and repeat step 4.
+:::
+
+:::note[Verification scope]
+Homebrew 6.0.22 (`29b882c`) was exercised on macOS with isolated fixture bottles,
+covering same-version replacement, upgrades, downgrades, and link conflicts. The pinned
+[tap](https://github.com/microsoft/homebrew-apm/blob/421e62fae382774648ac7bf0103d98c686b117af/Formula/apm.rb)
+and [core](https://github.com/Homebrew/homebrew-core/blob/99c61d24d4d3ade034b6542761977fed5cd1cc62/Formula/a/apm.rb)
+formulas have no config-removal hooks. Production APM/Python bottles and
+arbitrary older versions were not end-to-end tested.
+:::
 
 ## pip install
 
@@ -315,17 +408,32 @@ apm --version
 
 ### `apm: command not found` (macOS / Linux)
 
-Ensure your install directory is in your `PATH`. The default is `/usr/local/bin`:
+Use the `PATH` for your installation method:
 
-```bash
-echo $PATH | tr ':' '\n' | grep /usr/local/bin
-```
+- **Homebrew:** If `brew` works, add its `bin` directory to your shell profile:
 
-If missing, add it to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.):
+  ```bash
+  export PATH="$(brew --prefix)/bin:$PATH"
+  ```
 
-```bash
-export PATH="/usr/local/bin:$PATH"
-```
+  If `brew` is also missing, complete Homebrew's shell setup first.
+- **pip:** Activate the Python environment where you installed APM, or add its
+  scripts directory to `PATH`.
+- **Standalone installer:** The default is `/usr/local/bin`. Check it with:
+
+  ```bash
+  echo $PATH | tr ':' '\n' | grep /usr/local/bin
+  ```
+
+  If missing, add it to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.):
+
+  ```bash
+  export PATH="/usr/local/bin:$PATH"
+  ```
+
+If the wrong APM version runs, use `type -a apm` to find competing installations.
+Put the intended installation first on `PATH`; update it with its owning package
+manager, or use [self-update](../../reference/cli/self-update/) for standalone installs.
 
 ### Permission denied during install (macOS / Linux)
 
