@@ -133,12 +133,18 @@ def _package_token_step() -> dict:
 def _run_bash(script: str, *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Execute an extracted workflow step with its declared test environment."""
     # Windows' ambient bash.exe can be the WSL launcher, not Git Bash.
-    search_path = (
-        str(Path(os.environ["PROGRAMFILES"]) / "Git" / "bin") if sys.platform == "win32" else None
-    )
+    search_path = None
+    if sys.platform == "win32":
+        program_files = os.environ.get("PROGRAMFILES")
+        if not program_files:
+            raise FileNotFoundError(
+                "Workflow contract tests require PROGRAMFILES to locate Git for Windows Bash"
+            )
+        search_path = str(Path(program_files) / "Git" / "bin")
     executable = shutil.which("bash", path=search_path)
     if executable is None:
-        raise FileNotFoundError("Workflow contract tests require native Bash (Git for Windows)")
+        recovery = "install Git for Windows" if sys.platform == "win32" else "install bash on PATH"
+        raise FileNotFoundError(f"Workflow contract tests require native Bash; {recovery}")
     return subprocess.run(
         (executable, "-c", script),
         capture_output=True,
@@ -183,6 +189,59 @@ def test_workflow_shell_does_not_fall_back_when_native_bash_is_missing() -> None
     with patch("shutil.which", return_value=None), patch("subprocess.run") as run:
         with pytest.raises(FileNotFoundError, match="require native Bash"):
             _run_bash("exit 0", env={})
+    run.assert_not_called()
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("platform", "program_files", "message"),
+    [
+        (
+            "win32",
+            None,
+            "Workflow contract tests require PROGRAMFILES to locate Git for Windows Bash",
+        ),
+        (
+            "win32",
+            "",
+            "Workflow contract tests require PROGRAMFILES to locate Git for Windows Bash",
+        ),
+        (
+            "win32",
+            "C:/Program Files",
+            "Workflow contract tests require native Bash; install Git for Windows",
+        ),
+        (
+            "linux",
+            None,
+            "Workflow contract tests require native Bash; install bash on PATH",
+        ),
+        (
+            "darwin",
+            None,
+            "Workflow contract tests require native Bash; install bash on PATH",
+        ),
+    ],
+)
+def test_workflow_shell_reports_missing_native_bash_prerequisites(
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    program_files: str | None,
+    message: str,
+) -> None:
+    """Missing prerequisites fail explicitly without dispatching another shell."""
+    monkeypatch.setattr(sys, "platform", platform)
+    if program_files is None:
+        monkeypatch.delenv("PROGRAMFILES", raising=False)
+    else:
+        monkeypatch.setenv("PROGRAMFILES", program_files)
+
+    with patch("shutil.which", return_value=None) as which, patch("subprocess.run") as run:
+        with pytest.raises(FileNotFoundError, match=f"^{re.escape(message)}$"):
+            _run_bash("exit 0", env={})
+
+    if platform == "win32" and not program_files:
+        which.assert_not_called()
     run.assert_not_called()
 
 
