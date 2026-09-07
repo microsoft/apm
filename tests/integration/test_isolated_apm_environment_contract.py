@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import _socket
 import inspect
 import os
-import socket
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -724,17 +724,15 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
             "socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)"
             ".sendto(b'x', ('2001:db8::1', 9))"
         ),
-        *(
-            (
-                "import socket; "
-                "socket.socket(socket.AF_INET, socket.SOCK_DGRAM)"
-                ".sendmsg([b'x'], [], 0, ('203.0.113.1', 9))",
-                "import socket; "
-                "socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)"
-                ".sendmsg([b'x'], [], 0, ('2001:db8::1', 9))",
-            )
-            if hasattr(socket.socket, "sendmsg")
-            else ()
+        (
+            "import socket; "
+            "socket.socket(socket.AF_INET, socket.SOCK_DGRAM)"
+            ".sendmsg([b'x'], [], 0, ('203.0.113.1', 9))"
+        ),
+        (
+            "import socket; "
+            "socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)"
+            ".sendmsg([b'x'], [], 0, ('2001:db8::1', 9))"
         ),
         "import socket; socket.getaddrinfo('example.invalid', 443)",
     )
@@ -750,7 +748,12 @@ def test_python_child_network_is_denied(tmp_path: Path) -> None:
         )
 
         assert result.returncode != 0
-        assert result.stderr.count("IP network disabled by test environment") == 1
+        if ".sendmsg(" in script and not hasattr(_socket.socket, "sendmsg"):
+            assert "AttributeError:" in result.stderr
+            assert "has no attribute 'sendmsg'" in result.stderr
+            assert "IP network disabled by test environment" not in result.stderr
+        else:
+            assert result.stderr.count("IP network disabled by test environment") == 1
 
 
 @pytest.mark.parametrize(

@@ -76,7 +76,7 @@ class _GuardedSocketOperations:
         return super().sendto(*args, **kwargs)
 
     # asyncio uses sendmsg availability to detect Unix-only socket features.
-    if hasattr(_REAL_SOCKET, "sendmsg"):
+    if hasattr(_REAL_RAW_SOCKET, "sendmsg"):
         def sendmsg(self, *args, **kwargs):
             if self.family in (socket.AF_INET, socket.AF_INET6):
                 raise OSError(_MESSAGE)

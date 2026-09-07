@@ -220,8 +220,10 @@ platform-correct. It isolates APM, Git, GH, Azure, home, cache, and temporary
 roots, not arbitrary variables; it is not a general credential scrubber.
 
 For deeply nested fixtures that populate real sparse Git caches, use short
-pytest-owned roots such as `tmp_path_factory.mktemp("recency")` instead of
+pytest-owned roots such as `tmp_path_factory.mktemp("r")` instead of
 test-named `tmp_path` roots to avoid Git for Windows metadata path limits.
+Retain worker-equivalent directory depth in focused gates so they still
+exercise the paths used by the sharded suite.
 
 It is also not an OS/native-code sandbox: executables found through `PATH`
 remain trusted, reflective access to CPython internals or native extensions can
