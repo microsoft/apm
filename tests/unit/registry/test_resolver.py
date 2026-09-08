@@ -200,22 +200,29 @@ class TestHappyPath:
         # by build metadata (e.g. a branch-build git hash). Range matching
         # ignores build metadata entirely, so without an exact-match check
         # first, this selector could resolve to the *other* build depending on
-        # version-list order (microsoft/apm#2877).
-        raw, digest = _make_apm_tarball(version="1.0.2")
+        # version-list order (microsoft/apm#2877). Each build gets its own
+        # tarball (apm.yml version matches its VersionEntry) so a wrong pick
+        # would surface as a hash/content mismatch, not just a mock-call check.
+        raw_863e, digest_863e = _make_apm_tarball(version="1.0.2+863e11af")
+        raw_fa16, digest_fa16 = _make_apm_tarball(version="1.0.2+fa163e16")
         fake = MagicMock(spec=RegistryClient)
         fake.list_versions.return_value = [
             VersionEntry(
                 version="1.0.2+863e11af",
-                digest=f"sha256:{digest}",
+                digest=f"sha256:{digest_863e}",
                 published_at="2026-01-01T00:00:00Z",
             ),
             VersionEntry(
                 version="1.0.2+fa163e16",
-                digest=f"sha256:{digest}",
+                digest=f"sha256:{digest_fa16}",
                 published_at="2026-01-02T00:00:00Z",
             ),
         ]
-        fake.download_archive.return_value = (raw, "application/gzip")
+        archives = {
+            "1.0.2+863e11af": (raw_863e, "application/gzip"),
+            "1.0.2+fa163e16": (raw_fa16, "application/gzip"),
+        }
+        fake.download_archive.side_effect = lambda owner, repo, version: archives[version]
         fake.archive_url.return_value = "https://x/download"
 
         resolver = _make_resolver(fake)
@@ -227,7 +234,7 @@ class TestHappyPath:
         # A selector with no build metadata still resolves via range matching
         # when no published version literally equals the selector string --
         # the exact-match fast path must not change this existing behavior.
-        raw, digest = _make_apm_tarball(version="1.0.2")
+        raw, digest = _make_apm_tarball(version="1.0.2+aaa")
         fake = MagicMock(spec=RegistryClient)
         fake.list_versions.return_value = [
             VersionEntry(
