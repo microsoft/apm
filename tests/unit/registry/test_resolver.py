@@ -11,7 +11,8 @@ from __future__ import annotations
 import hashlib
 import io
 import tarfile
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -71,6 +72,50 @@ def _make_dep(version: str = "^1.2.0") -> DependencyReference:
 
 
 class TestHappyPath:
+    @pytest.mark.parametrize(
+        ("selector", "expected"),
+        [("1.7.0", "1.7.0"), ("=1.7.0", "1.7.0"), ("^1.7.0", "1.8.0")],
+    )
+    def test_refresh_keeps_constraint_even_when_outdated_reports_newer(
+        self, tmp_path: Path, selector: str, expected: str
+    ) -> None:
+        """The install/update download boundary must not consume reporting latest."""
+        from apm_cli.deps.lockfile import LockedDependency
+        from apm_cli.deps.registry.outdated import (
+            RegistryOutdatedContext,
+            check_registry_locked_dep,
+        )
+
+        raw, digest = _make_apm_tarball(version=expected)
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(version=v, digest=f"sha256:{digest}", published_at="")
+            for v in ["1.7.0", "1.8.0", "2.0.0"]
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        dep = _make_dep(selector)
+        ctx = RegistryOutdatedContext(
+            manifest_index={dep.get_unique_key(): dep},
+            registries={"corp-main": "https://reg.example.com/apm"},
+            default_registry="corp-main",
+        )
+        with patch("apm_cli.deps.registry.outdated.is_package_registry_enabled", return_value=True):
+            row = check_registry_locked_dep(
+                LockedDependency(repo_url=dep.repo_url, source="registry", version="1.7.0"),
+                ctx,
+                client_factory=lambda url, auth: fake,
+            )
+        assert row.latest == "2.0.0"
+        assert row.wanted == expected
+
+        resolver = _make_resolver(fake)
+        info = resolver.download_package(dep, tmp_path / "package")
+
+        fake.download_archive.assert_called_once_with("acme", "web-skills", expected)
+        assert resolver.last_resolutions[dep.get_unique_key()].version == expected
+        assert info.resolved_reference.ref_name == expected
+        assert dep.reference == selector
+
     def test_install_full_package(self, tmp_path):
         raw, digest = _make_apm_tarball()
         fake = MagicMock(spec=RegistryClient)

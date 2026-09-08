@@ -174,6 +174,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="An Agent Plugin consumer reimplements the reproducible timestamp fallback.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-policy-content-hash",
+        rule_id="contracts-tooling-policy-content-hash",
+        path="src/apm_cli/policy/discovery.py",
+        old="actual_hex = compute_policy_hash(raw_bytes, algo)",
+        new="actual_hex = _local_policy_hash(raw_bytes, algo)",
+        intent="Policy verification bypasses the canonical SHA-2 digest owner.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-project-yaml-write-delegation",
         rule_id="contracts-tooling-project-yaml-write-delegation",
         path="src/apm_cli/utils/yaml_io.py",
@@ -681,6 +689,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Direct Artifactory entry requests regain ambient netrc credentials.",
     ),
     MutationCase(
+        guard_id="transport-platform-cache-cleanup-outcome",
+        rule_id="transport-platform-cache-cleanup-outcome",
+        path="src/apm_cli/cache/git_cache.py",
+        old="return clean_cache_buckets((self._db_root, self._checkouts_root))",
+        new="return [str(entry) for entry in self._db_root.iterdir()]",
+        intent="GitCache reintroduces its own traversal and outcome authority.",
+    ),
+    MutationCase(
         guard_id="transport-platform-clone-connect-retry",
         rule_id="transport-platform-clone-connect-retry",
         path="src/apm_cli/deps/clone_engine.py",
@@ -950,6 +966,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Ref seeding makes a parallel freshness decision outside RefFreshnessPolicy.",
     ),
     MutationCase(
+        guard_id="transport-platform-release-metadata-discovery",
+        rule_id="transport-platform-release-metadata-discovery",
+        path="src/apm_cli/utils/version_checker.py",
+        old="and effective_repo == _DEFAULT_REPO",
+        new="and True",
+        intent="Release metadata recovery drops the exact public repository boundary.",
+    ),
+    MutationCase(
         guard_id="transport-platform-revision-pin-outcome",
         rule_id="transport-platform-revision-pin-outcome",
         path="src/apm_cli/commands/update.py",
@@ -972,6 +996,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="            return _repair(env)\n",
         new="            return True\n",
         intent="Downloader skips the dangling-cone-symlink repair owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-unix-install-ownership",
+        rule_id="transport-platform-unix-install-ownership",
+        path="install.sh",
+        old="\napm_require_owned_bundle\n",
+        new="\n:\n",
+        intent="Unix installation skips bundle ownership preflight before destructive replacement.",
     ),
     MutationCase(
         guard_id="transport-platform-url-path-security",

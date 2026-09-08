@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- gh-aw's shared APM import now supports `token-source: github-token`; after consumers re-vendor the workflow, its read-only current-repository identity can fetch same-repository private packages, while `cascade` remains the default and cross-repository packages still require a dedicated token or GitHub App. (#2706)
+- OpenAPM v0.1 adds `req-pl-018` for dependency-policy identity casing and amends `req-rs-016` clause (3), the Section 6.4 merge rules, and the Section 6.5 pattern grammar so repository identity and policy matching cannot diverge; Section 11.2 item 6 now requires the per-host case rule in `CONFORMANCE.md`. (#2706)
+
+### Changed
+
+- **BREAKING:** after consumers re-vendor the shared gh-aw `apm.md`, its import requires an explicit `target` instead of deprecated `all`; `apm-action` otherwise writes `all` into the isolated `apm.yml`, where it degrades to auto-detection without harness markers. Set the workflow engine's target and recompile; see the [gh-aw migration recipe](https://microsoft.github.io/apm/integrations/gh-aw/#shared-apmmd-import-recommended). (#2706)
+- Re-vendored shared gh-aw workflows now default to APM 0.28.0 for both pack and restore, the version used for the recorded `microsoft/apm-action@v1.10.0` compatibility proof, not the latest CLI release; an explicit `apm-version` still overrides it. (#2706)
+
+### Security
+
+- The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
+- Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
+
+## [0.30.0] - 2026-09-07
+
+### Security
+
+- **BREAKING:** Unix binary installs now require matching original publisher SHA-256 sidecars before extraction or execution, with no pip fallback after integrity failures. For historical releases or mirrors, select a release with sidecars or update the mirrored installer and publish the original publisher sidecars alongside its archives. (#2842)
+
+### Changed
+
+- **BREAKING:** Fresh Unix native installs default to `~/.local`, add `install.sh --prefix PATH`, and configure eligible bash/zsh/fish profiles without implicit `sudo`; set `APM_NO_MODIFY_PATH=1` to opt out of shell setup. Existing destinations are preserved, and root-owned or package-managed installs require their original administrator or package manager to update or uninstall before [migration](https://microsoft.github.io/apm/getting-started/installation/#unix-install-ownership-and-migration). (#2844)
+- macOS onboarding now recommends Homebrew core (`brew install apm`, no tap) for existing Homebrew users, with `brew upgrade apm` for updates and visible standalone alternatives. (#2846)
+
+### Fixed
+
+- Public CLI release discovery can recover from a rejected environment token: one anonymous retry after a selected token's 401/non-rate-limit 403 only for canonical public APM metadata; metadata redirects require `APM_RELEASE_METADATA_URL` at the final JSON endpoint or a `VERSION` pin. (#2843)
+- `apm cache prune` now counts only successfully deleted SHA groups, continues after removal errors, and exits `1` with failed paths and causes when pruning is incomplete. Fix permissions or release file locks, then rerun the command. (#2865)
+- `apm prune` now exits `1` when orphan deletion fails, continues processing remaining packages, and retains failed packages' lockfile entries. Resolve the reported deletion errors and rerun `apm prune`. (#2863)
+- `apm cache prune --days` now rejects negative ages before touching the cache, preventing accidental eviction from invalid input. (#2862)
+- `apm cache prune` now retains recently reused Git checkouts by refreshing shared SHA-group recency when either a full or sparse variant is reused. (#2861)
+- `apm uninstall` now preserves declarations and deployed ownership after package deletion failures, keeping retry and reinstall recovery available after partial removal. (#2860)
+- Successful HTTP cache hits now refresh LRU recency without extending response freshness, retaining frequently used MCP registry responses. (#2859)
+- `apm cache clean` now continues removing other entries after deletion errors, reports affected paths, and exits non-zero instead of claiming complete cleanup. Resolve permissions or file locks and retry; `--force` only skips confirmation. (#2864)
+
+### Performance
+
+- Dependency policy checks now reuse canonical dependency names across required-package and executable checks, avoiding repeated name computation without changing policy results. (by @aryansk, #2588)
+- `apm compile` now reuses the resolved project base path during instruction matching and placement, avoiding repeated filesystem path resolution. (by @aryansk, #2587)
+
 ## [0.29.1] - 2026-09-06
 
 ### Security

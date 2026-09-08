@@ -611,7 +611,10 @@ contracts-tooling-lockfile-read
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-policy-content-hash
+contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
+contracts-tooling-python-artifact-membership
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
@@ -710,6 +713,7 @@ registry_delegation.runtime_descriptors
 registry_delegation.target_vocabulary
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
+transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
@@ -719,11 +723,13 @@ transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
+transport-platform-release-metadata-discovery
 transport-platform-revision-pin-outcome
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
 transport-platform-tls-trust-injection
+transport-platform-unix-install-ownership
 transport-platform-url-path-security
 transport-platform-windows-stable-path
 """

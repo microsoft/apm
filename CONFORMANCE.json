@@ -769,6 +769,17 @@
       ]
     },
     {
+      "conformance_class": "governance",
+      "id": "req-pl-018",
+      "keyword": "MUST",
+      "section": "6.3.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics"
+      ]
+    },
+    {
       "conformance_class": "consumer",
       "id": "req-pr-001",
       "keyword": "MUST",
@@ -987,8 +998,11 @@
       "keyword": "MUST",
       "section": "7.7",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[1.7.0-1.7.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[=1.7.0-1.7.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[^1.7.0-1.8.0]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_source_url_in_lockfile"
       ]
     },
@@ -1418,7 +1432,7 @@
       "xfail": 0
     },
     "governance": {
-      "active": 17,
+      "active": 18,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0
@@ -1436,5 +1450,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 121
+  "total_requirements": 122
 }

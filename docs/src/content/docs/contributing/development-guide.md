@@ -54,6 +54,19 @@ Enhancement suggestions are welcome! Please:
 4. Update documentation if needed.
 5. PRs must pass all CI checks before they can be merged.
 
+### Workflow dependency updates
+
+When updating actions in generated `.github/workflows/*.lock.yml` files,
+keep their `gh-aw-manifest` headers, human-readable action lists, and
+`.github/aw/actions-lock.json` entries aligned with the runtime `uses:` pins.
+Dependabot does not update those metadata records. Preserve the compiler
+version and source hashes for dependency-only edits; recompile with
+`gh aw compile` when changing workflow source.
+
+Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py`
+to check setup and app-token action pin consistency across the manifest-bearing
+workflows.
+
 ### Issue Triage
 
 Every new issue is automatically labeled `needs-triage`. Maintainers review incoming issues and:
@@ -63,6 +76,21 @@ Every new issue is automatically labeled `needs-triage`. Maintainers review inco
 3. **Close** — if it's a duplicate (`duplicate`) or out of scope, close with a comment explaining why.
 
 Labels used for triage: `needs-triage`, `accepted`, `needs-design`, `priority/high`, `priority/low`.
+
+### Code scanning on pull requests and merge queues
+
+The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
+pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
+Keep the workflow path, `analyze` job ID, and language matrix stable: they
+identify the analysis configurations GitHub compares against the base branch.
+PR results do not replace results for the merge queue's separate commit.
+
+If both analysis jobs succeed but Code scanning still reports a missing
+configuration, inspect the CodeQL check summary. An additional `API upload`
+configuration on the base branch belongs to a separate upload producer;
+rerunning this workflow cannot supply that producer's results. Coordinate
+matching PR and queue uploads with its owner rather than deleting findings,
+renaming categories, or weakening the code-scanning ruleset.
 
 ## Development Environment
 

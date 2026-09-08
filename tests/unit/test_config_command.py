@@ -253,13 +253,41 @@ class TestConfigSet:
         mock_set.assert_called_once_with("prerelease")
 
     def test_set_self_update_install_dir(self):
-        """Set self-update install target directory preference."""
-        with patch(
-            "apm_cli.config.set_self_update_install_dir", return_value="/opt/apm/bin"
-        ) as mock_set:
-            result = self.runner.invoke(config, ["set", "self-update.install-dir", "/opt/apm/bin"])
+        """Windows retains the existing saved-directory confirmation."""
+        with (
+            patch("apm_cli.commands.self_update._is_windows_platform", return_value=True),
+            patch(
+                "apm_cli.config.set_self_update_install_dir",
+                return_value="/opt/apm/bin",
+            ) as mock_set,
+        ):
+            result = self.runner.invoke(
+                config,
+                ["set", "self-update.install-dir", "/opt/apm/bin"],
+            )
         assert result.exit_code == 0
         mock_set.assert_called_once_with("/opt/apm/bin")
+        assert "Self-update install directory saved: /opt/apm/bin" in result.output
+
+    def test_set_self_update_install_dir_describes_unix_preservation(self):
+        """Unix describes the value as a matching preservation preference."""
+        with (
+            patch("apm_cli.commands.self_update._is_windows_platform", return_value=False),
+            patch(
+                "apm_cli.config.set_self_update_install_dir",
+                return_value="/opt/apm/bin",
+            ),
+        ):
+            result = self.runner.invoke(
+                config,
+                ["set", "self-update.install-dir", "/opt/apm/bin"],
+            )
+
+        assert result.exit_code == 0
+        assert (
+            "Self-update launcher directory preference saved: /opt/apm/bin "
+            "(must match the existing Unix installation)"
+        ) in " ".join(result.output.split())
 
     @pytest.mark.parametrize(
         "key",
@@ -434,6 +462,30 @@ class TestConfigGet:
             result = self.runner.invoke(config, ["get", "self-update.install-dir"])
         assert result.exit_code == 0
         assert "self-update.install-dir: /opt/apm/bin" in result.output
+
+    def test_get_unset_self_update_install_dir_preserves_unix_installation(self):
+        """Unix unset state describes preservation, not a default destination."""
+        with (
+            patch("apm_cli.commands.self_update._is_windows_platform", return_value=False),
+            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
+        ):
+            result = self.runner.invoke(config, ["get", "self-update.install-dir"])
+
+        assert result.exit_code == 0
+        assert (
+            "self-update.install-dir: Not set (preserving the detected Unix installation)"
+        ) in result.output
+
+    def test_get_unset_self_update_install_dir_keeps_windows_default_wording(self):
+        """Windows retains its installer-default description."""
+        with (
+            patch("apm_cli.commands.self_update._is_windows_platform", return_value=True),
+            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
+        ):
+            result = self.runner.invoke(config, ["get", "self-update.install-dir"])
+
+        assert result.exit_code == 0
+        assert "self-update.install-dir: Not set (using installer default)" in result.output
 
 
 class TestAutoIntegrateFunctions:
@@ -941,11 +993,30 @@ class TestConfigUnsetSubcommand:
         mock_unset.assert_called_once()
 
     def test_unset_self_update_install_dir_exits_0(self):
-        """apm config unset self-update.install-dir exits 0."""
-        with patch("apm_cli.config.unset_self_update_install_dir") as mock_unset:
+        """Windows retains the existing removed-directory confirmation."""
+        with (
+            patch("apm_cli.commands.self_update._is_windows_platform", return_value=True),
+            patch("apm_cli.config.unset_self_update_install_dir") as mock_unset,
+        ):
             result = self.runner.invoke(config, ["unset", "self-update.install-dir"])
         assert result.exit_code == 0
         mock_unset.assert_called_once()
+        assert "Self-update install directory removed (will use installer default)" in result.output
+
+    def test_unset_self_update_install_dir_describes_unix_preservation(self):
+        """Unix removal describes preservation of the detected installation."""
+        with (
+            patch("apm_cli.commands.self_update._is_windows_platform", return_value=False),
+            patch("apm_cli.config.unset_self_update_install_dir") as mock_unset,
+        ):
+            result = self.runner.invoke(config, ["unset", "self-update.install-dir"])
+
+        assert result.exit_code == 0
+        mock_unset.assert_called_once()
+        assert (
+            "Self-update launcher directory preference removed "
+            "(will preserve the detected Unix installation)"
+        ) in " ".join(result.output.split())
 
     def test_unset_unknown_key_exits_1(self):
         """Unsetting an unknown key exits 1 with an informative error."""

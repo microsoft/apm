@@ -44,7 +44,7 @@ APM uses a tiered approach to integration testing:
 - **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs unfiltered `pytest tests/integration/`, so the complete lifecycle family remains exercised.
 - **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, and required selections; verifies their set partition; and preserves the required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
 - **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection. These are internal test controls, not user-facing APM settings.
-- **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` records representative escaped defects, their generalized laws, oracle tiers, implementation phases, and executable regression node IDs. It is deliberately not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links in the required ratchet job.
+- **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
 - **Generated lifecycle model**: `test_generated_lifecycle_state_machine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, and prune sequences against the real CLI. The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Every transition captures complete project and user roots, and mutating commands must stay inside reviewed write sets. It stays in the merge-group family until hosted runtime supports promotion to the bounded PR-time smoke set.
 - **Known gap**: a late lockfile replacement failure can leave target files on the newly declared target while retaining the prior lockfile. The required lifecycle suite bounds that blast radius and proves the next install converges; expanding the install transaction is a separate design decision recorded in the ledger.
 - **Run it locally** (the exact command CI runs):
@@ -212,11 +212,18 @@ every confirmed product defect into a named regression before extending the
 ledger. The static scenario rows remain valuable for exact reproductions; the
 generated model searches valid orderings that authored rows may miss.
 
-`IsolatedApmEnvironment` builds deterministic child environments for APM and
-its Git/GitHub/ADO/GitLab/SSH flows, then installs a best-effort Python socket
-tripwire. The environment contract is deliberately bounded: it isolates the
-APM, Git, GH, Azure, home, cache, and temporary roots used by these tests. It
-does not scan arbitrary variables or act as a general credential scrubber.
+`IsolatedApmEnvironment` builds deterministic child environments for
+APM/Git/GitHub/ADO/GitLab/SSH flows with a best-effort Python socket guard.
+The guard preserves native optional socket API availability: it defines
+`sendmsg` only when the native socket supports it, keeping feature detection
+platform-correct. It isolates APM, Git, GH, Azure, home, cache, and temporary
+roots, not arbitrary variables; it is not a general credential scrubber.
+
+For deeply nested fixtures that populate real sparse Git caches, use short
+pytest-owned roots such as `tmp_path_factory.mktemp("r")` instead of
+test-named `tmp_path` roots to avoid Git for Windows metadata path limits.
+Retain worker-equivalent directory depth in focused gates so they still
+exercise the paths used by the sharded suite.
 
 It is also not an OS/native-code sandbox: executables found through `PATH`
 remain trusted, reflective access to CPython internals or native extensions can
@@ -300,6 +307,13 @@ system install:
 2. `./dist/apm-<os>-<arch>/apm` (the layout produced by `scripts/build-binary.sh`)
 3. `shutil.which("apm")`
 
+`apm_engine_command` is the canonical fixture for narrowly scoped Python
+filesystem-boundary fault injection: it returns `(sys.executable, "-m",
+"apm_cli.cli")` so `ApmLifecycleRunner` executes the installed Python engine.
+This is an explicit engine contract, not packaged-binary coverage, and it is
+independent of `APM_BINARY_PATH` so frozen CI cannot bypass the instrumentation.
+Packaged executable tests must continue to use `apm_binary_path`.
+
 ### Adding an integration test that needs a precondition
 
 1. Apply the marker at module or test level:
@@ -351,6 +365,10 @@ environment end-to-end; for local iteration prefer the direct
 
 **On PR and merge queue:**
 1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
+
+The required Windows compatibility gate selects `windows_compat` tests. Its collection guard requires a non-empty subset, not a fixed test count, so adding marked regressions does not require raising a ceiling. The workflow's test roots and timeout bound scope and runtime.
+
+Linux Lifecycle Smoke runs the required marker subset with `-n 2 --dist loadgroup`. Grouped tests stay on one worker, and the six-minute job limit remains unchanged.
 
 **On pushed version tag releases:**
 1. Unit tests + Smoke tests

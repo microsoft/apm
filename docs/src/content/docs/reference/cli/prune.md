@@ -135,13 +135,19 @@ Notes:
 
 | Code | Meaning                                                                       |
 |------|--------------------------------------------------------------------------------|
-| 0    | Prune completed (including "nothing to prune").                              |
-| 1    | `apm.yml` missing, parse failure, lockfile write failure, or unhandled error. |
+| 0    | Prune completed with no orphan deletion failures (including "nothing to prune"). |
+| 1    | An orphan deletion failed, `apm.yml` is missing, parsing or lockfile writing failed, or an unhandled error occurred. |
 
-Per-package removal failures are logged but do not abort the run; remaining
-orphans still process. A lockfile write failure after filesystem cleanup has
-already started exits `1` with a partial-cleanup warning: rerun `apm prune`,
-then run `apm audit` to confirm the resulting state.
+Orphan deletion failures are logged without stopping the remaining packages.
+The final error reports how many packages were removed and how many failed.
+Successful deletions are not rolled back; failed deletions can leave partial
+content, and their lockfile entries are retained. Resolve the reported removal
+errors, then rerun `apm prune`. Best-effort hook warnings alone do not change
+the exit status.
+
+A lockfile write failure after filesystem cleanup has started also exits `1`
+with a partial-cleanup warning: rerun `apm prune`, then run `apm audit` to
+confirm the resulting state.
 
 ## Related
 
