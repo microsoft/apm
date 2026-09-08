@@ -186,6 +186,12 @@ jobs:
             const expected = [
               ...catalog.map(row => `candidate-${attempt}-${row.binary_name}`),
               `wallclock-proposed-docs-${attempt}`, `wallclock-proposed-python-${attempt}`,
+              ...catalog.flatMap(row => [
+                `test-results-${attempt}-${row.binary_name}-core`,
+                `test-results-${attempt}-${row.binary_name}-unit`,
+                ...Array.from({length: row.integration_shard_count}, (_, index) =>
+                  `test-results-${attempt}-${row.binary_name}-integration-shard-${index + 1}`),
+              ]),
             ];
             const selected = expected.map(name => {
               const matches = artifacts.filter(artifact => artifact.name === name && !artifact.expired);
@@ -198,6 +204,8 @@ jobs:
             }
             core.setOutput('docs_id', selected[catalog.length].id);
             core.setOutput('python_id', selected[catalog.length + 1].id);
+            core.setOutput('observation_ids',
+              selected.slice(catalog.length + 2).map(artifact => artifact.id).join(','));
             fs.mkdirSync('wallclock-results', {recursive: true});
             fs.writeFileSync('wallclock-results/authorities.json', JSON.stringify({
               promotable: false, required, artifacts: selected,
@@ -241,6 +249,11 @@ jobs:
               evidence, catalog, artifactRoot: 'wallclock-inputs/native',
               outputRoot: 'wallclock-verified-native',
             });
+      - name: Download exact native runner observations
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.authorities.outputs.observation_ids }}
+          path: wallclock-inputs/native/observations
       - name: Verify built bytes without granting release qualification
         run: >-
           python -m scripts.release_wallclock verify

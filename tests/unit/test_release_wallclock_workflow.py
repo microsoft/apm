@@ -108,6 +108,18 @@ def _assert_single_world(workflow: dict) -> None:
     assert "matches.length !== 1" in authorities
     assert "!artifact.expired" in authorities
     assert "nativeIds !== process.env.NATIVE_IDS" in authorities
+    for suffix in ("core", "unit", "integration-shard-${index + 1}"):
+        assert f"test-results-${{attempt}}-${{row.binary_name}}-{suffix}" in authorities
+    assert "row.integration_shard_count" in authorities
+    assert "core.setOutput('observation_ids'" in authorities
+    observations = workflow_step(verify, "Download exact native runner observations")
+    assert observations["with"] == {
+        "artifact-ids": "${{ steps.authorities.outputs.observation_ids }}",
+        "path": "wallclock-inputs/native/observations",
+    }
+    assert verify["steps"].index(observations) < verify["steps"].index(
+        workflow_step(verify, "Verify built bytes without granting release qualification")
+    )
     assert (
         workflow_step(verify, "Download exact current-run native artifacts")["with"]["artifact-ids"]
         == "${{ needs.candidate-ready.outputs.native_ids }}"
@@ -221,6 +233,7 @@ def test_runner_observation_is_opt_in_and_records_the_executing_source(
         "collapsed-native-index",
         "pr-only-job",
         "broad-push-trigger",
+        "missing-observation-download",
     ],
 )
 def test_wallclock_cannot_silently_change_the_measured_work(fault: str) -> None:
@@ -229,6 +242,10 @@ def test_wallclock_cannot_silently_change_the_measured_work(fault: str) -> None:
     jobs = workflow["jobs"]
     if fault == "publish":
         workflow["permissions"]["contents"] = "write"
+    elif fault == "missing-observation-download":
+        jobs["verify"]["steps"].remove(
+            workflow_step(jobs["verify"], "Download exact native runner observations")
+        )
     elif fault == "secret":
         jobs["platforms"]["secrets"] = "inherit"
     elif fault == "cancel":

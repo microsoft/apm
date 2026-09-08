@@ -666,8 +666,10 @@ the terminal `Verify wall-clock artifacts` job `completed_at` minus workflow
 `run_started_at`. Accept no result unless both workflows succeed, every included
 gate succeeds, all five native archives plus docs and wheel artifacts verify,
 and observer case inventory plus runner environment proof are present. The
-proposed wrapper preserves separate candidate-ready native evidence capture and
-serial verify / verified-native upload. All `wallclock-*` storage names are
+terminal verifier must download native observation artifacts, not only archives,
+and rejects missing or malformed runner job records through the shared validator.
+The proposed wrapper preserves separate candidate-ready native evidence capture
+and serial verify / verified-native upload. All `wallclock-*` storage names are
 non-promotable. Workflow success alone is not a savings claim; cite two accepted
 run IDs and their actual primary and secondary clocks before claiming an
 improvement.

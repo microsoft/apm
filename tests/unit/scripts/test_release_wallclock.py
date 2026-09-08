@@ -194,6 +194,9 @@ def _verified_fixture(
     python = _python_distributions(tmp_path / "python")
     monkeypatch.setattr(release_wallclock, "_git_head", lambda root: source_sha)
     _set_workflow_env(monkeypatch, tmp_path, controller)
+    (native / "runner.json").write_text(
+        json.dumps(record_job(side, source, source_sha)), encoding="ascii"
+    )
     return source, native, docs, python
 
 
@@ -280,8 +283,30 @@ def test_verify_artifacts_emits_nonpromotable_real_archive_proof(
     assert proof["controller_sha"] == controller
     assert proof["counts"]["native_archives"] == 5
     assert proof["counts"]["candidate_metadata"] == metadata_count
+    assert proof["counts"]["job_records"] == 1
     assert proof["filehashes"]["docs"]["format"] == "tar"
     assert proof["filehashes"]["python"]["wheel"]["version"] == VERSION
+
+
+@pytest.mark.parametrize(
+    "side,sha,controller",
+    [
+        ("baseline", BASE_SHA, BASE_CONTROLLER),
+        ("proposed", PROPOSED_SHA, PROPOSED_CONTROLLER),
+    ],
+)
+def test_verify_rejects_missing_observations_before_emitting_a_proof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    side: str,
+    sha: str,
+    controller: str,
+) -> None:
+    source, native, docs, python = _verified_fixture(tmp_path, monkeypatch, side, sha, controller)
+    (native / "runner.json").unlink()
+
+    with pytest.raises(ValueError, match="must contain at least one job record"):
+        verify_artifacts(side, source, sha, native, docs, python)
 
 
 def test_verify_proof_keeps_pull_request_head_distinct_from_execution_sha(
@@ -298,6 +323,9 @@ def test_verify_proof_keeps_pull_request_head_distinct_from_execution_sha(
         PROPOSED_CONTROLLER,
         event_name="pull_request",
         run_head_sha=PROPOSED_RUN_HEAD,
+    )
+    (native / "runner.json").write_text(
+        json.dumps(record_job("proposed", source, PROPOSED_SHA)), encoding="ascii"
     )
 
     proof = verify_artifacts("proposed", source, PROPOSED_SHA, native, docs, python)
@@ -343,6 +371,9 @@ def test_verify_baseline_archives_raw_layout_binds_archives_to_original_executab
     monkeypatch.setattr(release_wallclock, "_git_head", lambda root: BASE_SHA)
     _set_workflow_env(monkeypatch, tmp_path, BASE_CONTROLLER)
 
+    (native / "runner.json").write_text(
+        json.dumps(record_job("baseline", source, BASE_SHA)), encoding="ascii"
+    )
     proof = verify_artifacts("baseline", source, BASE_SHA, native, docs, python)
 
     observed = proof["filehashes"]["native"]["apm-linux-x86_64"]

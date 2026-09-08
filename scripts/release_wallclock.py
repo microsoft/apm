@@ -743,6 +743,7 @@ def _job_records(
     names = [(item["github_job"], item["runner_name"]) for item in records]
     if len(names) != len(set(names)):
         raise ValueError("Duplicate wall-clock job record identity")
+    _validate_job_records({"job_records": records}, {"job_records": len(records)})
     return records
 
 
