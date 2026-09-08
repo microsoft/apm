@@ -1227,7 +1227,7 @@ class APMDependencyResolver:
             )
 
         package_type, _ = detect_package_type(install_path)
-        if package_type is PackageType.MARKETPLACE_PLUGIN:
+        if package_type in (PackageType.MARKETPLACE_PLUGIN, PackageType.SKILL_BUNDLE):
             validation = validate_apm_package(
                 install_path,
                 source_path=dep_source_path,

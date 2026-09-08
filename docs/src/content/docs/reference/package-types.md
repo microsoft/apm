@@ -111,8 +111,9 @@ A multi-skill package following the [agentskills.io](https://agentskills.io) /
 `npx skills` convention. Each skill lives in its own subdirectory under
 `skills/` with its own `SKILL.md`.
 
-An optional `apm.yml` at the root provides version metadata and dependencies.
-If absent, APM synthesizes minimal metadata from the directory name.
+A Git repo with `skills/<name>/SKILL.md` needs neither root `apm.yml` nor
+root `SKILL.md` for `skills: [name]`. An optional root `apm.yml` supplies
+metadata and dependencies; otherwise APM synthesizes minimal metadata.
 
 ```
 azure-skills/
@@ -128,13 +129,14 @@ azure-skills/
 ```
 
 **What gets installed:** each `skills/<name>/` directory is promoted to
-`<target>/skills/<name>/`, preserving internal structure. Equivalent to
-installing N separate CLAUDE_SKILL packages.
+`<target>/skills/<name>/`, preserving internal structure.
 
 **Selective install:** use `--skill <name>` to install only specific skills
 from the bundle (repeatable). The selection is **persisted** in `apm.yml`
 (as a `skills:` field) and `apm.lock.yaml` (as `skill_subset`), so
 subsequent bare `apm install` commands are deterministic.
+Selection controls deployed skills, not sparse checkout or the package root;
+use `path` to select a subdirectory instead.
 For nested skill bundles, the selector must match a deployable skill path;
 for example, use `productivity/grill-me`, not an invented prefix.
 Use `--skill '*'` to reset and install all skills. `--skill` is additive
