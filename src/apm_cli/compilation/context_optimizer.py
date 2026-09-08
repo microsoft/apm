@@ -894,12 +894,9 @@ class ContextOptimizer:
                     return True
             else:
                 # For non-recursive patterns, use fnmatch as before.
-                try:
-                    rel_str = self._portable_rel_path(file_path)
-                    if fnmatch.fnmatch(rel_str, expanded_pattern):
-                        return True
-                except ValueError:
-                    pass
+                rel_str = self._portable_rel_path(file_path)
+                if fnmatch.fnmatch(rel_str, expanded_pattern):
+                    return True
 
                 # Only use filename match for patterns without directory structure
                 # This prevents "docs/**/*.md" from matching any "*.md" file anywhere
@@ -1268,12 +1265,9 @@ class ContextOptimizer:
         Like ``_calculate_hierarchical_coverage`` but short-circuits on the
         first miss instead of scanning every target.
         """
-        for target in target_directories:
-            try:
-                target.relative_to(placement_dir)
-            except ValueError:
-                return False
-        return True
+        return all(
+            self._is_hierarchically_covered(target, placement_dir) for target in target_directories
+        )
 
     def _is_hierarchically_covered(self, target_dir: Path, placement_dir: Path) -> bool:
         """Check if target_dir can inherit instructions from placement_dir through hierarchy.

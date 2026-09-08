@@ -474,7 +474,7 @@ class TestFindMinimalCoveragePlacement:
     def test_single_dir_returns_that_dir(self, tmp_path: Path) -> None:
         _touch(tmp_path, "src/a.py")
         opt = ContextOptimizer(str(tmp_path))
-        src = tmp_path / "src"
+        src = (tmp_path / "src").resolve()
         result = opt._find_minimal_coverage_placement({src})
         assert result == src
 
