@@ -195,6 +195,53 @@ class TestHappyPath:
         # Confirm download_archive was asked for the highest matching version.
         fake.download_archive.assert_called_once_with("acme", "web-skills", "1.5.3")
 
+    def test_build_metadata_selector_matches_exact_build(self, tmp_path):
+        # Two published builds share the same major.minor.patch and differ only
+        # by build metadata (e.g. a branch-build git hash). Range matching
+        # ignores build metadata entirely, so without an exact-match check
+        # first, this selector could resolve to the *other* build depending on
+        # version-list order (microsoft/apm#2877).
+        raw, digest = _make_apm_tarball(version="1.0.2")
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.2+863e11af",
+                digest=f"sha256:{digest}",
+                published_at="2026-01-01T00:00:00Z",
+            ),
+            VersionEntry(
+                version="1.0.2+fa163e16",
+                digest=f"sha256:{digest}",
+                published_at="2026-01-02T00:00:00Z",
+            ),
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = "https://x/download"
+
+        resolver = _make_resolver(fake)
+        resolver.download_package(_make_dep("1.0.2+fa163e16"), tmp_path / "p")
+
+        fake.download_archive.assert_called_once_with("acme", "web-skills", "1.0.2+fa163e16")
+
+    def test_bare_version_selector_unaffected_by_exact_match(self, tmp_path):
+        # A selector with no build metadata still resolves via range matching
+        # when no published version literally equals the selector string --
+        # the exact-match fast path must not change this existing behavior.
+        raw, digest = _make_apm_tarball(version="1.0.2")
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.2+aaa", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            ),
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = "https://x/download"
+
+        resolver = _make_resolver(fake)
+        resolver.download_package(_make_dep("1.0.2"), tmp_path / "p")
+
+        fake.download_archive.assert_called_once_with("acme", "web-skills", "1.0.2+aaa")
+
 
 class TestFailurePaths:
     def test_hash_mismatch_fails_closed(self, tmp_path):
