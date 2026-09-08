@@ -27,6 +27,7 @@ see [Primitive types](../primitive-types/).
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
+| pi              | `.pi/` + `.agents/`    |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [ ]  | [ ] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
@@ -34,7 +35,7 @@ see [Primitive types](../primitive-types/).
 | hermes          | `.agents/` (`~/.hermes/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [x] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
-Gemini, Antigravity, Codex, Hermes project scope, and Windsurf by default (see
+Gemini, Antigravity, Codex, Pi, Hermes project scope, and Windsurf by default (see
 [Skills convergence](#skills-convergence) below). Claude, Grok Build, Kiro, and
 Hermes user scope keep target-native skill directories.
 
@@ -50,7 +51,7 @@ stable but explicit-only. See [Experimental](../experimental/).
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, `opencode`, and `hermes`.
+separate root-context compile for `codex`, `gemini`, `opencode`, `pi`, and `hermes`.
 It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
@@ -88,6 +89,7 @@ runtime-specific configuration while compile only generates project output. Use
 | codex    | `.codex/` directory                           |
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |
 | opencode | `.opencode/` directory                        |
+| pi       | `.pi/` directory                              |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
 | intellij | Global `github-copilot/intellij/` config directory (MCP runtime discovery only) |
@@ -224,6 +226,37 @@ OpenCode.
 - **Global compile.** `apm compile -g` writes
   `~/.config/opencode/AGENTS.md`. OpenCode also retains `applyTo` sections
   in that generated file; other user-root targets compile only global instructions.
+
+## pi
+
+Pi coding agent (`@earendil-works/pi-coding-agent`).
+
+- **Detection.** `.pi/` directory.
+- **Deploy directory.** `.pi/` at project scope; `~/.pi/agent/` at user scope. Skills converge on `.agents/skills/` at project scope (`~/.pi/agent/skills/` at user scope).
+- **Supported primitives.** skills, commands.
+- **File conventions.**
+  - skills: `.agents/skills/<name>/SKILL.md` (project) or
+    `~/.pi/agent/skills/<name>/SKILL.md` (user). Pi implements the
+    [Agent Skills standard](https://agentskills.io/specification) and natively
+    reads both `.pi/skills/` and `.agents/skills/`; APM converges on the shared
+    `.agents/skills/` root, matching codex/opencode/gemini.
+  - commands: `.pi/prompts/<name>.md`. These are Pi *prompt templates*, invoked
+    as `/name` slash commands. Pi's `description`/`argument-hint` frontmatter and
+    `$1`/`$@`/`$ARGUMENTS` substitution match Claude commands exactly, so APM
+    reuses the shared `claude_command` transformer.
+    Ref: [prompt-templates](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
+    (`docs/prompt-templates.md`, accessed 2026-09).
+- **Agents.** Not deployed. Pi has no native agent-definition directory -- its
+  loadable project resources are skills, prompt templates, themes, and
+  extensions (verified against the shipped `core/resource-loader.js`). Pi
+  sub-agents are an extension capability, not markdown agent files, so a `.pi/agents/`
+  directory is never read. Ship personas as skills instead.
+- **Instructions.** Compile-only. Pi reads `AGENTS.md` (compile family `agents`),
+  not a per-file rule directory, so instructions are not an installed primitive.
+- **Caveats.** Pi has no hooks concept (extensions cover that), so the `hooks`
+  primitive is silently skipped. MCP integration is not yet wired for this
+  target.
+- **Global compile.** `apm compile -g` writes `~/.pi/agent/AGENTS.md`.
 
 ## windsurf
 

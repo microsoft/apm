@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `pi` as a first-class target for the Pi coding agent (`@earendil-works/pi-coding-agent`). Skills converge on the cross-tool `.agents/skills/` directory and prompt templates deploy to `.pi/prompts/` as `/name` slash commands (reusing the Claude command transform). Pi auto-detects on a `.pi/` directory, is included in `--target all`, and compiles to the `AGENTS.md` family. Instructions are compile-only and Pi exposes no native agents or hooks primitives. (#2907)
 - gh-aw's shared APM import now supports `token-source: github-token`; after consumers re-vendor the workflow, its read-only current-repository identity can fetch same-repository private packages, while `cascade` remains the default and cross-repository packages still require a dedicated token or GitHub App. (#2706)
 - OpenAPM v0.1 adds `req-pl-018` for dependency-policy identity casing and amends `req-rs-016` clause (3), the Section 6.4 merge rules, and the Section 6.5 pattern grammar so repository identity and policy matching cannot diverge; Section 11.2 item 6 now requires the per-host case rule in `CONFORMANCE.md`. (#2706)
 

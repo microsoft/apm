@@ -675,6 +675,55 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         },
         include_scoped_in_user_root_context=True,
     ),
+    # Pi coding agent (earendil-works/pi-coding-agent) -- project config lives
+    # under .pi/; the global agent dir is ~/.pi/agent/.
+    # Loadable project resources (verified against the shipped dist
+    # core/resource-loader.js) are skills, prompts, themes, and extensions --
+    # there is NO native agent-definition directory, so this target does not
+    # expose an ``agents`` primitive (a .pi/agents/ dir is never read by Pi;
+    # sub-agents are an extension capability, not markdown files).
+    # Skills follow the Agent Skills standard and converge onto the cross-tool
+    # .agents/skills/<name>/SKILL.md path (deploy_root=".agents"), matching
+    # codex/opencode/gemini; Pi natively reads both .pi/skills/ and
+    # .agents/skills/.
+    # Prompt templates are Pi's slash-command surface (/name), read from
+    # .pi/prompts/*.md.  They use description/argument-hint frontmatter and
+    # $1/$@/$ARGUMENTS substitution -- identical to Claude commands -- so the
+    # APM ``commands`` primitive reuses the shared claude_command transformer
+    # and deploys to .pi/prompts/.
+    # Instructions are compile-only: Pi reads AGENTS.md (compile_family
+    # "agents"), not per-file rule directories, so instructions are not an
+    # installed primitive.
+    # Pi has no hooks concept (extensions cover that), so no hooks primitive.
+    # User scope: ~/.pi/agent/ -- skills -> ~/.pi/agent/skills/,
+    # prompts -> ~/.pi/agent/prompts/.
+    # Ref: https://www.npmjs.com/package/@earendil-works/pi-coding-agent
+    # Ref: docs/skills.md (skill locations), docs/prompt-templates.md
+    #      (prompt-template locations + argument substitution),
+    #      docs/usage.md (AGENTS.md context files), docs/settings.md
+    #      (~/.pi/agent global config).
+    "pi": TargetProfile(
+        capability=TARGET_CAPABILITIES["pi"],
+        root_dir=".pi",
+        primitives={
+            "commands": PrimitiveMapping("prompts", ".md", "claude_command"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".pi/agent",
+        pack_prefixes=(".pi/", ".agents/"),
+        user_primitive_overrides={
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+        },
+        include_scoped_in_user_root_context=True,
+    ),
     # Gemini CLI -- ~/.gemini/ is the documented user-level config directory.
     # Instructions are compile-only (GEMINI.md) -- Gemini CLI does not read
     # per-file rules from .gemini/rules/.

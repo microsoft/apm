@@ -318,6 +318,7 @@ class TestExhaustivenessChecks:
             "commands_cursor",
             "commands_gemini",
             "commands_opencode",
+            "commands_pi",
             "commands_windsurf",
             "instructions",  # was instructions_copilot, aliased
             "instructions_windsurf",

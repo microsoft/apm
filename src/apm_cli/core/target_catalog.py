@@ -141,6 +141,13 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="agents",
         ),
         _capability(
+            "pi",
+            "Pi coding agent native .pi configuration",
+            in_all=True,
+            primitive_profile="pi",
+            compile_family="agents",
+        ),
+        _capability(
             "gemini",
             "Gemini CLI native .gemini configuration",
             in_all=True,

@@ -169,6 +169,7 @@ class TestTargetProfileUserScope:
             "claude",
             "cursor",
             "opencode",
+            "pi",
             "codex",
             "gemini",
             "grok-build",

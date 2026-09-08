@@ -46,6 +46,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "grok-build",
                 "kiro",
                 "opencode",
+                "pi",
                 "vscode",
                 "windsurf",
             }
@@ -88,6 +89,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "kiro",
                 "openclaw",
                 "opencode",
+                "pi",
                 "vscode",
                 "windsurf",
             }
@@ -177,6 +179,15 @@ def test_current_native_profiles_are_characterized() -> None:
             {
                 "agents": ("agents", ".md", "opencode_agent", None, False),
                 "commands": ("commands", ".md", "opencode_command", None, False),
+                "skills": ("skills", "/SKILL.md", "skill_standard", ".agents", False),
+            },
+            "agents",
+            None,
+        ),
+        "pi": (
+            ".pi",
+            {
+                "commands": ("prompts", ".md", "claude_command", None, False),
                 "skills": ("skills", "/SKILL.md", "skill_standard", ".agents", False),
             },
             "agents",
