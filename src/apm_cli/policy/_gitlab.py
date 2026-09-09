@@ -137,31 +137,36 @@ def _fetch_gitlab_chain_parent(
         org = current_org
     else:
         parts = [p for p in parent_ref.strip("/").split("/") if p]
-        # Strip an explicit leaf-host prefix so ``host/namespace/.../repo`` and
-        # ``namespace/.../repo`` are treated the same. Only the leaf host (with
-        # matching port) is accepted; cross-host refs are rejected upstream by
-        # ``_validate_extends_host``. Requires at least host + namespace + repo.
-        if len(parts) >= 3:
+        invalid = PolicyFetchResult(
+            source=f"org:{parent_ref}",
+            error=f"Invalid GitLab policy reference: {parent_ref}",
+            outcome="cache_miss_fetch_fail",
+        )
+        # A host-like first segment (FQDN or ``host:port``) MUST match the leaf
+        # host and port exactly, then it is stripped so ``host/namespace/.../repo``
+        # and ``namespace/.../repo`` are treated the same. A host-like segment
+        # that does not match the leaf -- or carries a malformed port -- is a
+        # cross-host/invalid ref and is rejected, never silently folded into the
+        # namespace. A bare single-label first segment is a namespace segment
+        # (GitLab nested subgroups, see #2753) and is left in place.
+        if len(parts) >= 3 and ("." in parts[0] or ":" in parts[0]):
             try:
                 explicit = urlsplit(f"//{parts[0]}")
+                same_leaf = (
+                    explicit.hostname is not None
+                    and explicit.hostname.lower() == leaf_host.lower()
+                    and explicit.port == port
+                )
             except ValueError:
-                explicit = None
-            if (
-                explicit is not None
-                and explicit.hostname is not None
-                and explicit.hostname.lower() == leaf_host.lower()
-                and explicit.port == port
-            ):
-                parts = parts[1:]
-        # A GitLab namespace may be nested (subgroups, see #2753): everything
-        # before the final segment is the namespace, the final segment is the
-        # policy repo. Requires at least ``namespace/repo``.
+                same_leaf = False
+            if not same_leaf:
+                return invalid
+            parts = parts[1:]
+        # A GitLab namespace may be nested (subgroups): everything before the
+        # final segment is the namespace, the final segment is the policy repo.
+        # Requires at least ``namespace/repo``.
         if len(parts) < 2:
-            return PolicyFetchResult(
-                source=f"org:{parent_ref}",
-                error=f"Invalid GitLab policy reference: {parent_ref}",
-                outcome="cache_miss_fetch_fail",
-            )
+            return invalid
         org = "/".join(parts[:-1])
         repo = parts[-1]
     return _fetch_from_gitlab_repo(

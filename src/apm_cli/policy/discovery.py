@@ -389,13 +389,17 @@ def _derive_leaf_host(source: str, project_root: Path) -> str | None:
     return _derive_leaf_identity(source, project_root)[0]
 
 
-def _extract_extends_host(ref: str) -> str | None:
+def _extract_extends_host(ref: str, leaf_host: str | None = None) -> str | None:
     """Return the host an ``extends:`` ref resolves against, if explicit.
 
     * Full URL -> URL host (lowercase)
     * ``<host>/<owner>/<repo>`` (3+ slash-segments) -> ``<host>`` (lowercase)
     * ``<owner>/<repo>`` shorthand -> None (intrinsically same-host)
     * ``<org>`` shorthand (no slash) -> None (intrinsically same-host)
+
+    ``leaf_host`` gates the GitLab-only relaxation for nested-subgroup refs
+    (see the 3-segment branch below); it defaults to ``None`` so non-GitLab
+    callers keep the strict host-pin behaviour.
     """
     if not ref:
         return None
@@ -411,19 +415,21 @@ def _extract_extends_host(ref: str) -> str | None:
         return None
     parts = ref.split("/")
     if len(parts) >= 3:
-        # Only treat the first segment as a host when it is host-like: an FQDN
-        # (contains a dot) or an explicit ``host:port``. A bare single label is
-        # a namespace segment, not a host -- e.g. a GitLab nested-subgroup ref
-        # ``extends: "acme/dept-a/apm-policy"`` (#2753), whose first segment is
-        # the top-level group, must NOT trip the cross-host guard. A real
-        # attacker host (``evil.example.com/org/repo``) is an FQDN and is still
-        # detected and rejected.
         first = parts[0]
-        if "." in first or ":" in first:
-            try:
-                return (urlsplit(f"//{first}").hostname or "").lower() or None
-            except ValueError:
-                return None
+        host_like = "." in first or ":" in first
+        # A bare single-label first segment is a namespace segment ONLY on
+        # GitLab, where nested subgroups make ``acme/dept-a/apm-policy`` a valid
+        # same-host ``extends:`` ref (#2753). On every other provider a
+        # 3-segment ref is ``host/owner/repo``; treating a single label as a
+        # namespace there would let ``extends: "evil/org/repo"`` bypass the
+        # host-pin and route a credential to ``evil`` (Security Finding F1), so
+        # the first segment is parsed as a (cross-)host and rejected.
+        if is_gitlab_hostname(leaf_host) and not host_like:
+            return None
+        try:
+            return (urlsplit(f"//{first}").hostname or "").lower() or None
+        except ValueError:
+            return None
     return None
 
 
@@ -441,7 +447,7 @@ def _validate_extends_host(leaf_host: str | None, extends_ref: str) -> None:
     """
     from . import inheritance as _inheritance_mod
 
-    extends_host = _extract_extends_host(extends_ref)
+    extends_host = _extract_extends_host(extends_ref, leaf_host)
     if extends_host is None:
         return  # shorthand: intrinsically same-host, allowed.
 
@@ -854,7 +860,10 @@ def _auto_discover(
        - Found -> return (first match wins)
     5. All candidates exhausted -> outcome="absent"
     """
-    identity = _extract_org_host_port_from_git_remote(project_root)
+    # Read origin once and reuse it for both identity and the GitLab namespace
+    # walk so discovery never invokes ``git remote get-url`` more than once.
+    remote_url = _git_remote_origin_url(project_root)
+    identity = _extract_org_host_port_from_git_remote(project_root, remote_url=remote_url)
     if identity is None:
         return PolicyFetchResult(
             error="Could not determine org from git remote",
@@ -871,7 +880,7 @@ def _auto_discover(
     # GitLab discovery walks the subgroup tree from the deepest subgroup up to
     # the top-level group (closest policy wins, see #2753). Fall back to the
     # single top-level org when the namespace cannot be derived.
-    gitlab_namespaces = (_gitlab_namespace_descending(project_root) or [org]) if is_gitlab else []
+    gitlab_namespaces = (_gitlab_namespace_descending(remote_url) or [org]) if is_gitlab else []
 
     for candidate_repo in candidates:
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
@@ -951,6 +960,13 @@ def _extract_org_from_git_remote(
     return (identity[0], identity[1]) if identity is not None else None
 
 
+class _Unset:
+    """Sentinel type: an argument was not provided (distinct from ``None``)."""
+
+
+_UNSET = _Unset()
+
+
 def _git_remote_origin_url(project_root: Path) -> str | None:
     """Return the ``origin`` remote URL, or ``None`` when unavailable.
 
@@ -976,9 +992,18 @@ def _git_remote_origin_url(project_root: Path) -> str | None:
 
 def _extract_org_host_port_from_git_remote(
     project_root: Path,
+    *,
+    remote_url: str | None | _Unset = _UNSET,
 ) -> tuple[str, str, int | None] | None:
-    """Extract ``(org, host, port)`` from git remote origin."""
-    remote_url = _git_remote_origin_url(project_root)
+    """Extract ``(org, host, port)`` from git remote origin.
+
+    ``remote_url`` lets a caller that already read ``origin`` (e.g.
+    :func:`_auto_discover`) pass it in so the ``git remote get-url`` subprocess
+    runs exactly once per discovery. When left unset the origin is read here;
+    an explicit ``None`` means "no remote" and is not re-read.
+    """
+    if isinstance(remote_url, _Unset):
+        remote_url = _git_remote_origin_url(project_root)
     if not remote_url:
         return None
     try:
@@ -996,7 +1021,7 @@ def _extract_org_host_port_from_git_remote(
     return parsed_identity[0], parsed_identity[1], port
 
 
-def _gitlab_namespace_descending(project_root: Path) -> list[str] | None:
+def _gitlab_namespace_descending(remote_url: str | None) -> list[str] | None:
     """Return GitLab policy namespaces from the deepest subgroup to the top.
 
     Probe order is closest-first. For a project remote
@@ -1005,9 +1030,9 @@ def _gitlab_namespace_descending(project_root: Path) -> list[str] | None:
     ``acme/my-project`` returns ``["acme"]`` (identical to top-level-only
     discovery). Returns ``None`` when the origin remote is missing or has no
     namespace segment (a degenerate remote with no owner), so callers can fall
-    back to their existing single-org behaviour.
+    back to their existing single-org behaviour. Takes the already-read
+    ``origin`` URL so discovery reads the remote exactly once.
     """
-    remote_url = _git_remote_origin_url(project_root)
     if not remote_url:
         return None
     parts = _remote_url_parts(remote_url)

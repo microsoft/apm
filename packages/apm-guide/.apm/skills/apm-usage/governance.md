@@ -679,7 +679,8 @@ as `[x]` errors and exit `1`.
 Checklist to publish a policy:
 
 1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `apm`
-   project and `apm-policy` repository on Azure DevOps, or `apm-policy` under the top-level GitLab group).
+   project and `apm-policy` repository on Azure DevOps, or an `apm-policy` project under the GitLab
+   group you want it to govern -- any ancestor namespace of the project, closest wins).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming

@@ -148,15 +148,9 @@ def test_policy_gitlab_discovery_walks_subgroups_closest_first():
     """req-pl-011: the GitLab provider probes the subgroup tree in a defined,
     ordered manner (closest subgroup first, up to the top-level group), rather
     than hard-coding a single top-level-only convention (#2753)."""
-    from unittest.mock import patch
-
     from apm_cli.policy.discovery import _gitlab_namespace_descending
 
-    with patch(
-        "apm_cli.policy.discovery._git_remote_origin_url",
-        return_value="https://gitlab.com/acme/dept-a/team-x/my-project.git",
-    ):
-        order = _gitlab_namespace_descending(object())
+    order = _gitlab_namespace_descending("https://gitlab.com/acme/dept-a/team-x/my-project.git")
 
     # Deepest subgroup first, then each shallower group, ending at the
     # top-level group -- a deterministic, documented probe order.

@@ -205,33 +205,28 @@ class TestRemoteUrlParts(unittest.TestCase):
 
 
 class TestGitlabNamespaceDescending(unittest.TestCase):
-    """Test _gitlab_namespace_descending -- subgroup probe order (#2753)."""
+    """Test _gitlab_namespace_descending -- subgroup probe order (#2753).
 
-    @patch("apm_cli.policy.discovery._git_remote_origin_url")
-    def test_nested_subgroups_deepest_first(self, mock_url):
-        mock_url.return_value = "https://gitlab.com/acme/dept-a/team-x/my-project.git"
-        result = _gitlab_namespace_descending(Path("/fake"))
-        self.assertEqual(
-            result,
-            ["acme/dept-a/team-x", "acme/dept-a", "acme"],
+    The helper is pure: it takes the already-read ``origin`` URL so discovery
+    reads the remote exactly once.
+    """
+
+    def test_nested_subgroups_deepest_first(self):
+        result = _gitlab_namespace_descending(
+            "https://gitlab.com/acme/dept-a/team-x/my-project.git"
         )
+        self.assertEqual(result, ["acme/dept-a/team-x", "acme/dept-a", "acme"])
 
-    @patch("apm_cli.policy.discovery._git_remote_origin_url")
-    def test_flat_project_yields_single_top_level(self, mock_url):
-        mock_url.return_value = "git@gitlab.com:acme/my-project.git"
-        result = _gitlab_namespace_descending(Path("/fake"))
+    def test_flat_project_yields_single_top_level(self):
+        result = _gitlab_namespace_descending("git@gitlab.com:acme/my-project.git")
         self.assertEqual(result, ["acme"])
 
-    @patch("apm_cli.policy.discovery._git_remote_origin_url")
-    def test_no_remote_returns_none(self, mock_url):
-        mock_url.return_value = None
-        self.assertIsNone(_gitlab_namespace_descending(Path("/fake")))
+    def test_no_remote_returns_none(self):
+        self.assertIsNone(_gitlab_namespace_descending(None))
 
-    @patch("apm_cli.policy.discovery._git_remote_origin_url")
-    def test_no_namespace_segment_returns_none(self, mock_url):
+    def test_no_namespace_segment_returns_none(self):
         # A remote with only one path segment has no owning namespace.
-        mock_url.return_value = "https://gitlab.com/solo"
-        self.assertIsNone(_gitlab_namespace_descending(Path("/fake")))
+        self.assertIsNone(_gitlab_namespace_descending("https://gitlab.com/solo"))
 
 
 class TestExtractOrgFromGitRemote(unittest.TestCase):
@@ -1492,6 +1487,51 @@ class TestGitlabPolicyInheritance(unittest.TestCase):
         self.assertIn("Invalid GitLab policy reference", result.error)
         mock_fetch.assert_not_called()
 
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_rejects_host_prefix_with_mismatched_port(self, mock_fetch):
+        """A host-like prefix that does not match the leaf host+port is rejected,
+        never silently folded into the namespace."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="found", policy=ApmPolicy())
+
+        with (
+            patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            result = _fetch_chain_parent(
+                "gitlab.example.test/acme/apm-policy",  # host prefix, but leaf has :8443
+                current_source="org:gitlab.example.test:8443/acme/team/apm-policy",
+                leaf_host="gitlab.example.test",
+                leaf_port=8443,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIn("Invalid GitLab policy reference", result.error)
+        mock_fetch.assert_not_called()
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_rejects_malformed_port_without_crashing(self, mock_fetch):
+        """A host-like prefix with a malformed port fails closed, not raises."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="found", policy=ApmPolicy())
+
+        with (
+            patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            result = _fetch_chain_parent(
+                "gitlab.example.test:not-a-port/acme/apm-policy",
+                current_source="org:gitlab.example.test/acme/team/apm-policy",
+                leaf_host="gitlab.example.test",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIn("Invalid GitLab policy reference", result.error)
+        mock_fetch.assert_not_called()
+
 
 class TestValidateExtendsHostNestedNamespace(unittest.TestCase):
     """The pre-fetch host-pin guard must allow nested GitLab namespaces (#2753).
@@ -1501,19 +1541,31 @@ class TestValidateExtendsHostNestedNamespace(unittest.TestCase):
     misread as a cross-host reference -- while a real attacker FQDN still is.
     """
 
-    def test_nested_namespace_ref_is_not_a_host(self):
-        # First segment is a top-level group, not a host -> shorthand.
-        self.assertIsNone(_extract_extends_host("acme/dept-a/apm-policy"))
+    def test_nested_namespace_ref_is_not_a_host_on_gitlab_leaf(self):
+        # First segment is a top-level group, not a host -> shorthand (GitLab).
+        self.assertIsNone(_extract_extends_host("acme/dept-a/apm-policy", "gitlab.com"))
+
+    def test_single_label_first_segment_stays_a_host_on_github_leaf(self):
+        # F1: on a non-GitLab leaf a single-label first segment is a host, so a
+        # cross-host ``extends: "evil/org/repo"`` must NOT be treated as
+        # same-host (which would route a credential to ``evil``).
+        self.assertEqual(_extract_extends_host("evil/org/.github", "github.com"), "evil")
 
     def test_host_qualified_nested_ref_extracts_host(self):
         self.assertEqual(
-            _extract_extends_host("gitlab.com/acme/dept-a/apm-policy"),
+            _extract_extends_host("gitlab.com/acme/dept-a/apm-policy", "gitlab.com"),
             "gitlab.com",
         )
 
     def test_validate_allows_nested_same_host_reference(self):
         # Must NOT raise: this is the exact ref the subgroup feature enables.
         _validate_extends_host("gitlab.com", "acme/dept-a/apm-policy")
+
+    def test_validate_rejects_single_label_cross_host_on_github_leaf(self):
+        import apm_cli.policy.inheritance as _inh
+
+        with self.assertRaisesRegex(_inh.PolicyInheritanceError, "cross-host"):
+            _validate_extends_host("github.com", "evil/org/.github")
 
     def test_validate_still_rejects_cross_host_fqdn(self):
         import apm_cli.policy.inheritance as _inh
