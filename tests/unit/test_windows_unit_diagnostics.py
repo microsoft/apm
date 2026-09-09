@@ -43,9 +43,7 @@ def _assert_windows_diagnostics(workflow: dict) -> None:
     assert windows["if"] == "inputs.platform == 'windows'"
     assert windows["timeout-minutes"] == 60
     assert shell_commands(linux) == [TEST_COMMAND + PARALLEL_ARGS]
-    assert shell_commands(windows) == [
-        [*TEST_COMMAND, *PARALLEL_ARGS, *DIAGNOSTIC_ARGS]
-    ]
+    assert shell_commands(windows) == [[*TEST_COMMAND, *PARALLEL_ARGS, *DIAGNOSTIC_ARGS]]
     assert windows["env"] == {
         "PYTHONUNBUFFERED": "1",
         "GITHUB_TOKEN": "${{ secrets.GH_MODELS_PAT }}",

@@ -391,9 +391,7 @@ def _assert_integration(workflow: dict, integration: dict) -> None:
     assert job["with"]["xdist-workers"] == "${{ inputs.integration-xdist-workers }}"
     assert job["with"]["splitting-algorithm"] == "${{ inputs.integration-splitting-algorithm }}"
     assert job["with"]["timeout-minutes"] == UNIX_TIMEOUT
-    assert job["with"]["artifact-prefix"] == (
-        "${{ github.run_attempt }}-${{ inputs.binary-name }}"
-    )
+    assert job["with"]["artifact-prefix"] == ("${{ github.run_attempt }}-${{ inputs.binary-name }}")
     assert job["with"]["runtime-prerequisites"] == "none"
     for removed_key in (
         "evidence-variant",
@@ -445,9 +443,7 @@ def _assert_integration(workflow: dict, integration: dict) -> None:
             for step in integration_job["steps"]
             if isinstance(step, dict) and step.get("name") == removed_name
         ]
-        assert matches == [], (
-            f"experimental integration step {removed_name!r} must be removed"
-        )
+        assert matches == [], f"experimental integration step {removed_name!r} must be removed"
     timings_upload = workflow_step(integration_job, "Upload integration timings and outcomes")
     assert timings_upload["if"] == "always() && inputs.platform != 'windows'"
     assert timings_upload["with"]["if-no-files-found"] == "error"
