@@ -30,14 +30,22 @@ Fresh ordinary-user Unix native installs use `~/.local/bin/apm` and `~/.local/li
 ```bash
 # Homebrew (macOS / Linux)
 brew install apm
+```
 
+WinGet requires [WinGet / App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget) on Windows 10 version 1809 or later.
+
+```powershell
 # WinGet (Windows)
-winget install Microsoft.APM
+winget install --id Microsoft.APM --exact --source winget
+```
 
+```powershell
 # Scoop (Windows)
 scoop bucket add apm https://github.com/microsoft/scoop-apm
 scoop install apm
+```
 
+```bash
 # pip (all platforms, requires Python 3.10+)
 python3 -m pip install apm-cli
 ```
@@ -56,6 +64,7 @@ Use the same tool that installed APM:
 |--------------|----------------|
 | Homebrew core | `brew upgrade apm` |
 | pip | `pip install --upgrade apm-cli` |
+| WinGet | `winget upgrade --id Microsoft.APM --exact --source winget` |
 | Scoop | `scoop update apm` |
 | Standalone installer | `apm self-update` |
 

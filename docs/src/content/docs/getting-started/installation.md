@@ -27,7 +27,7 @@ Use `brew upgrade apm`, not `apm self-update`; see the
 [Homebrew core update policy](../../reference/cli/self-update/#description).
 
 Homebrew is optional. Use the standalone installer below, [pip](#pip-install),
-[Scoop](#package-managers), or a [manual binary install](#manual-binary-install).
+[WinGet or Scoop](#package-managers), or a [manual binary install](#manual-binary-install).
 
 Already installed from `microsoft/apm/apm`? See
 [Migrate from the Microsoft tap](#migrate-from-the-microsoft-tap).
@@ -320,9 +320,13 @@ For `apm self-update`, run `apm self-update --check` with the same env vars and 
 
 **WinGet (Windows):**
 
+Requires [WinGet / App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget) on Windows 10 version 1809 or later.
+
 ```powershell
-winget install Microsoft.APM
+winget install --id Microsoft.APM --exact --source winget
 ```
+
+Update with `winget upgrade --id Microsoft.APM --exact --source winget`, not `apm self-update`.
 
 **Scoop (Windows):**
 
