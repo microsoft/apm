@@ -143,9 +143,9 @@ For own-project and Git-backed package installs, symlinked agent source
 files and directories (including `.apm/agents -> ../agents`) are skipped.
 `apm install` warns with the skipped source path. Use real files and
 directories under `.apm/agents/` or real `*.agent.md` files at the package
-root, then rerun `apm install`. Local-path dependencies retain their
-existing validated, contained symlink dereferencing during copying, before
-discovery.
+root, then rerun `apm install`. Local-path dependencies (`./...` or `../...`)
+still work: contained symlinks are validated and copied as real files into
+`apm_modules/` before agent discovery.
 
 ### Frontmatter
 

@@ -33,7 +33,7 @@ def _is_safe_source_path(
     source_root: Path,
     on_symlink: Callable[[Path], None] | None = None,
 ) -> bool:
-    """Return whether a source candidate stays in the real package tree."""
+    """Check containment; notify on_symlink only for symlink-component rejection."""
     try:
         path.relative_to(source_root)
     except ValueError:
@@ -101,7 +101,7 @@ class DeployableSourcePlan:
                     message=(
                         "Skipped symlinked agent source: "
                         f"{printable_ascii_text(relative)}. "
-                        "APM does not deploy symlinked files or traverse symlinked directories. "
+                        "Symlinked agent sources are not deployed. "
                         "Use real files and directories in .apm/agents/ "
                         "(or real *.agent.md files at the package root), then rerun apm install."
                     ),

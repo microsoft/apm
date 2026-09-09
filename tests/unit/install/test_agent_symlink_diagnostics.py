@@ -142,6 +142,7 @@ def test_agent_source_skip_is_actionable_without_deployment_expansion(
         assert len(warnings) == 1
         assert warnings[0].package == ("_local" if own_project else "owner/bundle")
         assert "Skipped symlinked agent source: .apm/agents" in warnings[0].message
+        assert "Symlinked agent sources are not deployed." in warnings[0].message
         assert "real files" in warnings[0].message
         assert "apm install" in warnings[0].message
         diagnostics.render_summary()
