@@ -1022,6 +1022,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("gemini", "file", "GEMINI.md"),
     ("grok-build", "dir", ".grok"),
     ("opencode", "dir", ".opencode"),
+    ("pi", "dir", ".pi"),
     ("windsurf", "dir", ".windsurf"),
     ("kiro", "dir", ".kiro"),
 ]
@@ -1035,6 +1036,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
     "gemini",
     "grok-build",
     "opencode",
+    "pi",
     "windsurf",
     "kiro",
 ]
@@ -1048,6 +1050,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
     "gemini": ".gemini/",
     "grok-build": ".grok/",
     "opencode": ".opencode/",
+    "pi": ".pi/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",
 }
@@ -1062,6 +1065,7 @@ CANONICAL_SIGNAL: dict[str, str] = {
     "gemini": "GEMINI.md",
     "grok-build": ".grok/",
     "opencode": ".opencode/",
+    "pi": ".pi/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",
 }

@@ -518,7 +518,12 @@ def test_copilot_per_file_routing_under_dep_targets(tmp_path: Path, foreign: str
     assert result["hooks"] == 1
     deployed = sorted(p.name for p in (project / ".github" / "hooks").glob("*.json"))
     assert deployed and all("copilot" in name for name in deployed), deployed
-    assert not any(foreign in name for name in deployed), f"{foreign} file leaked into Copilot"
+    # Match the delimited source marker (`pkg-<target>-hooks.json`) rather than a
+    # bare substring so short target names that are substrings of another
+    # (e.g. "pi" within "copilot") do not produce a false leak.
+    assert not any(f"pkg-{foreign}-" in name for name in deployed), (
+        f"{foreign} file leaked into Copilot"
+    )
 
 
 def test_kiro_per_file_routing_under_dep_targets(tmp_path: Path) -> None:
