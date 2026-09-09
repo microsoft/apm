@@ -220,7 +220,18 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
         ),
         ("src/apm_cli/marketplace/builder.py", ("hardened_git_env_for_context",)),
         ("src/apm_cli/marketplace/auth_helpers.py", ('ctx.token or ctx.host_info.kind == "ado"',)),
-        ("src/apm_cli/commands/marketplace/check.py", ("hardened_git_env_for_context",)),
+        (
+            "src/apm_cli/commands/marketplace/check.py",
+            (
+                "hardened_git_env_for_context",
+                'resolved_host = host or default_host() or "github.com"',
+                "key = (resolved_host, org)",
+                "if host is None and offline:",
+                "resolve_auth_for_host(\n                    resolved_host,",
+                "host=resolved_host,",
+                "auth_target=resolved_host,",
+            ),
+        ),
         ("src/apm_cli/policy/discovery.py", ("auth_resolver.try_with_fallback(",)),
         (
             "src/apm_cli/install/validation.py",

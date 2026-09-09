@@ -157,7 +157,8 @@ def check(offline, verbose):
                 else:
                     remote_label = f"https://{host}/{owner_repo}.git" if host else owner_repo
                 logger.verbose_detail(
-                    f"Resolving {entry.name} via {host or 'default host'}: {remote_label}"
+                    f"Resolving {entry.name} via "
+                    f"{host or default_host() or 'github.com'}: {remote_label}"
                 )
                 refs = _resolver_for(host, org).list_remote_refs(owner_repo)
 

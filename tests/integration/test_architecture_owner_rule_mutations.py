@@ -1175,6 +1175,33 @@ def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> 
     )
 
 
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("if host is None and offline:", "if host is None:"),
+        ('resolved_host = host or default_host() or "github.com"', 'resolved_host = "github.com"'),
+        ("key = (resolved_host, org)", "key = (host, org)"),
+        (
+            "resolve_auth_for_host(\n                    resolved_host,",
+            "resolve_auth_for_host(\n                    host,",
+        ),
+        ("host=resolved_host,", "host=host,"),
+        ("auth_target=resolved_host,", "auth_target=host,"),
+    ],
+)
+def test_marketplace_check_guard_rejects_default_host_auth_bypass(old: str, new: str) -> None:
+    """The credential-owner guard must defend shorthand routing, not just ADO."""
+    path = "src/apm_cli/commands/marketplace/check.py"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_id = "transport-platform-host-credential-resolution"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @pytest.mark.parametrize("case", MUTATIONS, ids=CASE_IDS)
 def test_owner_rule_catches_its_guard_mutation(
     case: MutationCase, baseline_violated_rule_ids: frozenset[str]

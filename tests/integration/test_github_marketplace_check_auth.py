@@ -1,7 +1,8 @@
-"""Hermetic end-to-end coverage for default-host marketplace authentication."""
+"""Hermetic command-to-auth coverage for default-host marketplace checks."""
 
 from __future__ import annotations
 
+import base64
 import subprocess
 from urllib.parse import urlparse
 
@@ -9,6 +10,8 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
+
+pytestmark = pytest.mark.component
 
 
 @pytest.mark.parametrize(
@@ -58,14 +61,15 @@ marketplace:
         assert parsed.password is None
         assert token not in command[-1]
         env = kwargs["env"]
-        headers = [
-            value
+        headers = {
+            env[f"GIT_CONFIG_KEY_{index}"]: value
             for index in range(int(env["GIT_CONFIG_COUNT"]))
             if "Authorization" in (value := env[f"GIT_CONFIG_VALUE_{index}"])
-        ]
-        assert len(headers) == 1
-        assert headers[0].startswith("Authorization: Basic ")
-        assert token not in headers[0]
+        }
+        expected_auth = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        assert headers == {
+            f"http.{command[-1]}.extraheader": f"Authorization: Basic {expected_auth}"
+        }
         return subprocess.CompletedProcess(
             command,
             0,
@@ -75,6 +79,10 @@ marketplace:
 
     monkeypatch.setattr("apm_cli.marketplace.ref_resolver.subprocess.run", fake_git)
 
-    result = CliRunner().invoke(marketplace, ["check"])
+    result = CliRunner().invoke(marketplace, ["check", "--verbose"])
 
     assert result.exit_code == 0, result.output
+    routing_line = next(
+        line for line in result.output.splitlines() if "Resolving private-package via " in line
+    )
+    assert routing_line.split(" via ", 1)[1].split(":", 1)[0] == expected_host
