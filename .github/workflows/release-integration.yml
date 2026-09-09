@@ -54,18 +54,6 @@ on:
       coverage-enabled:
         type: boolean
         default: false
-      evidence-variant:
-        type: string
-        default: ''
-      evidence-selection:
-        type: string
-        default: ''
-      performance-cohort:
-        type: string
-        default: ''
-      wallclock-evidence:
-        type: boolean
-        default: false
     secrets:
       GH_CLI_PAT:
         required: false
@@ -95,13 +83,6 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Record actual integration runner for wall-clock proof
-        if: inputs.wallclock-evidence
-        shell: bash
-        run: >-
-          python -m scripts.release_wallclock record-job
-          --side proposed --source-root . --source-sha "$GITHUB_SHA"
-          --output test-results/integration-environment.json
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
@@ -130,15 +111,6 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ inputs.timing-snapshot-artifact }}
-      - name: Require matched actual test runners before the performance experiment
-        if: inputs.performance-cohort != ''
-        uses: ./.github/actions/performance-cohort
-        with:
-          cohort: ${{ inputs.performance-cohort }}
-          member: ${{ inputs.evidence-variant }}-${{ inputs.shard-index }}
-          source-sha: ${{ inputs.candidate-sha }}
-          selection: ${{ inputs.evidence-selection || format('tests/integration/ -m {0}', inputs.integration-markers) }}
-          candidate-metadata: release-assets/${{ inputs.binary-name }}.json
       - name: Compute cache week bucket
         if: inputs.cache-apm-fetches
         id: cache-bucket
@@ -164,7 +136,6 @@ jobs:
           PYTEST_MARK_EXPR: ${{ inputs.integration-markers }}
           APM_TEST_RUNTIMES: ${{ inputs.runtime-prerequisites }}
           PYTEST_EXTRA_ARGS: >-
-            ${{ (inputs.evidence-variant != '' || inputs.wallclock-evidence) && '-p scripts.pytest_performance_evidence' || '' }}
             --splits ${{ inputs.shard-count }} --group ${{ inputs.shard-index }}
             --splitting-algorithm ${{ inputs.splitting-algorithm }}
             -n ${{ inputs.xdist-workers }} --dist loadgroup
@@ -181,25 +152,8 @@ jobs:
           GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: uv run --frozen pwsh scripts/windows/test-integration.ps1 -SkipBuild
-      - name: Capture integration performance evidence
-        if: always() && inputs.platform != 'windows' && inputs.evidence-variant != ''
-        env:
-          EVIDENCE_SELECTION: ${{ inputs.evidence-selection }}
-          PYTEST_MARK_EXPR: ${{ inputs.integration-markers }}
-        run: |
-          mkdir -p performance-evidence
-          selection="${EVIDENCE_SELECTION:-tests/integration/ -m $PYTEST_MARK_EXPR}"
-          python -m scripts.compare_test_runs capture \
-            --junit "test-results/integration-shard-${{ inputs.shard-index }}.xml" \
-            --output "performance-evidence/${{ inputs.evidence-variant }}-shard-${{ inputs.shard-index }}.json" \
-            --source-sha "${{ inputs.candidate-sha }}" \
-            --selection "$selection" \
-            --variant "${{ inputs.evidence-variant }}" \
-            --shard "${{ inputs.shard-index }}" \
-            --shard-count "${{ inputs.shard-count }}" \
-            --candidate-metadata "release-assets/${{ inputs.binary-name }}.json"
       - name: Upload integration timings and outcomes
-        if: always() && (inputs.platform != 'windows' || inputs.wallclock-evidence)
+        if: always() && inputs.platform != 'windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results-${{ inputs.artifact-prefix }}-integration-shard-${{ inputs.shard-index }}
@@ -207,14 +161,6 @@ jobs:
             test-results/
             .test_durations
           include-hidden-files: true
-          retention-days: 30
-          if-no-files-found: error
-      - name: Upload integration performance evidence
-        if: always() && inputs.platform != 'windows' && inputs.evidence-variant != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: performance-evidence-${{ inputs.artifact-prefix }}-${{ inputs.evidence-variant }}-shard-${{ inputs.shard-index }}
-          path: performance-evidence/
           retention-days: 30
           if-no-files-found: error
       - name: Rename coverage data for shard

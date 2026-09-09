@@ -84,18 +84,6 @@ def shell_commands(step: WorkflowNode) -> list[list[str]]:
     ]
 
 
-def wallclock_unit_commands(step: WorkflowNode, *, enabled: bool) -> list[list[str]]:
-    """Resolve only the explicitly supported, observation-only pytest choice."""
-    expression = (
-        "${{ inputs.wallclock-evidence && "
-        "'python -m pytest -p scripts.pytest_performance_evidence' || 'pytest' }}"
-    )
-    command = step["run"]
-    assert command.count(expression) == 1
-    invocation = "python -m pytest -p scripts.pytest_performance_evidence" if enabled else "pytest"
-    return shell_commands({**step, "run": command.replace(expression, invocation)})
-
-
 def assert_exact_command(
     commands: list[list[str]],
     expected: list[str],

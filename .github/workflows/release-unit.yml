@@ -12,15 +12,6 @@ on:
       binary-name:
         type: string
         required: true
-      performance-probe:
-        type: boolean
-        default: false
-      proposed-workers:
-        type: number
-        default: 4
-      wallclock-evidence:
-        type: boolean
-        default: false
     secrets:
       GH_CLI_PAT:
         required: false
@@ -36,7 +27,7 @@ env:
 
 jobs:
   unit-tests:
-    name: Unit Tests Baseline
+    name: Unit Tests
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 65
     steps:
@@ -44,55 +35,25 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Record actual unit runner for wall-clock proof
-        if: inputs.wallclock-evidence
-        shell: bash
-        run: >-
-          python -m scripts.release_wallclock record-job
-          --side proposed --source-root . --source-sha "$GITHUB_SHA"
-          --output test-results/unit-environment.json
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
       - name: Install dependencies
         run: uv sync --frozen --extra dev
       - name: Restore unit scheduling hints
-        if: ${{ !inputs.performance-probe }}
         uses: ./.github/actions/pytest-timing
         with:
           suite: unit
-      - name: Initialize cold unit scheduling hints
-        if: inputs.performance-probe && inputs.platform != 'windows'
-        run: printf '{}\n' > .test_durations
-      - name: Require matched actual test runners before the unit performance experiment
-        if: inputs.performance-probe && inputs.platform != 'windows'
-        uses: ./.github/actions/performance-cohort
-        with:
-          cohort: unit-${{ github.run_attempt }}-${{ inputs.binary-name }}
-          member: baseline-1
-          source-sha: ${{ github.sha }}
-          selection: tests/unit tests/test_console.py
       - name: Run unit tests
-        if: inputs.platform != 'windows' && !inputs.performance-probe
+        if: inputs.platform != 'windows'
         env:
           GITHUB_TOKEN: ${{ inputs.platform == 'linux' && secrets.GH_MODELS_PAT || '' }}
           GITHUB_APM_PAT: ${{ inputs.platform == 'linux' && secrets.GH_CLI_PAT || '' }}
         run: >-
-          uv run --frozen
-          ${{ inputs.wallclock-evidence && 'python -m pytest -p scripts.pytest_performance_evidence' || 'pytest' }}
+          uv run --frozen pytest
           tests/unit tests/test_console.py
           -n auto --dist worksteal --durations=50 --store-durations
           --junitxml=test-results/unit.xml
-      - name: Run unit performance baseline
-        if: inputs.platform != 'windows' && inputs.performance-probe
-        env:
-          GITHUB_TOKEN: ${{ inputs.platform == 'linux' && secrets.GH_MODELS_PAT || '' }}
-          GITHUB_APM_PAT: ${{ inputs.platform == 'linux' && secrets.GH_CLI_PAT || '' }}
-        run: >-
-          uv run --frozen python -m pytest -p scripts.pytest_performance_evidence
-          tests/unit tests/test_console.py
-          -n auto --dist worksteal --durations=50 --store-durations
-          --junitxml=test-results/unit-baseline-shard-1.xml
       - name: Run unit tests (Windows diagnostics)
         if: inputs.platform == 'windows'
         timeout-minutes: 60
@@ -101,26 +62,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
         run: >-
-          uv run --frozen
-          ${{ inputs.wallclock-evidence && 'python -m pytest -p scripts.pytest_performance_evidence' || 'pytest' }}
+          uv run --frozen pytest
           tests/unit tests/test_console.py
           -n auto --dist worksteal --durations=50 --store-durations
           --junitxml=test-results/unit.xml
           -vv --tb=short --show-capture=no --no-showlocals
-      - name: Capture unit performance evidence
-        if: always() && inputs.platform != 'windows' && inputs.performance-probe
-        run: |
-          mkdir -p performance-evidence
-          python -m scripts.compare_test_runs capture \
-            --junit test-results/unit-baseline-shard-1.xml \
-            --output performance-evidence/baseline-shard-1.json \
-            --source-sha "${{ github.sha }}" \
-            --selection "tests/unit tests/test_console.py" \
-            --variant baseline \
-            --shard 1 \
-            --shard-count 1
       - name: Upload unit timings and outcomes
-        if: always() && !inputs.performance-probe
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results-${{ github.run_attempt }}-${{ inputs.binary-name }}-unit
@@ -130,111 +78,3 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
-      - name: Upload unit performance timings and outcomes
-        if: always() && inputs.platform != 'windows' && inputs.performance-probe
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: test-results-unit-${{ github.run_attempt }}-${{ inputs.binary-name }}-baseline-shard-1
-          path: |
-            test-results/
-            .test_durations
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
-      - name: Upload unit performance evidence
-        if: always() && inputs.platform != 'windows' && inputs.performance-probe
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: performance-evidence-unit-${{ github.run_attempt }}-${{ inputs.binary-name }}-baseline-shard-1
-          path: performance-evidence/
-          if-no-files-found: error
-          retention-days: 30
-
-  unit-tests-proposed:
-    name: Unit Tests Proposed Shard ${{ matrix.shard }}
-    if: inputs.performance-probe && inputs.platform != 'windows'
-    runs-on: ${{ inputs.runner }}
-    timeout-minutes: 65
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --frozen --extra dev
-      - name: Initialize cold unit scheduling hints
-        run: printf '{}\n' > .test_durations
-      - name: Require matched actual test runners before the unit performance experiment
-        uses: ./.github/actions/performance-cohort
-        with:
-          cohort: unit-${{ github.run_attempt }}-${{ inputs.binary-name }}
-          member: proposed-${{ matrix.shard }}
-          source-sha: ${{ github.sha }}
-          selection: tests/unit tests/test_console.py
-      - name: Run unit performance proposed shard
-        env:
-          GITHUB_TOKEN: ${{ inputs.platform == 'linux' && secrets.GH_MODELS_PAT || '' }}
-          GITHUB_APM_PAT: ${{ inputs.platform == 'linux' && secrets.GH_CLI_PAT || '' }}
-        run: >-
-          uv run --frozen python -m pytest -p scripts.pytest_performance_evidence
-          tests/unit tests/test_console.py
-          --splits 2 --group ${{ matrix.shard }} --splitting-algorithm least_duration
-          -n ${{ inputs.proposed-workers }} --dist worksteal --durations=50 --store-durations
-          --junitxml=test-results/unit-proposed-shard-${{ matrix.shard }}.xml
-      - name: Capture unit performance evidence
-        if: always()
-        run: |
-          mkdir -p performance-evidence
-          python -m scripts.compare_test_runs capture \
-            --junit "test-results/unit-proposed-shard-${{ matrix.shard }}.xml" \
-            --output "performance-evidence/proposed-shard-${{ matrix.shard }}.json" \
-            --source-sha "${{ github.sha }}" \
-            --selection "tests/unit tests/test_console.py" \
-            --variant proposed \
-            --shard "${{ matrix.shard }}" \
-            --shard-count 2
-      - name: Upload unit performance timings and outcomes
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: test-results-unit-${{ github.run_attempt }}-${{ inputs.binary-name }}-proposed-shard-${{ matrix.shard }}
-          path: |
-            test-results/
-            .test_durations
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
-      - name: Upload unit performance evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: performance-evidence-unit-${{ github.run_attempt }}-${{ inputs.binary-name }}-proposed-shard-${{ matrix.shard }}
-          path: performance-evidence/
-          if-no-files-found: error
-          retention-days: 30
-
-  unit-performance-probe:
-    name: Unit Performance Probe
-    needs: [unit-tests, unit-tests-proposed]
-    if: always() && inputs.performance-probe && inputs.platform != 'windows'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Require every unit performance member
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-        with:
-          script: |
-            const results = JSON.parse(process.env.RESULTS);
-            for (const name of ['unit-tests', 'unit-tests-proposed']) {
-              if (results[name]?.result !== 'success') {
-                core.setFailed(`${name} did not succeed`);
-              }
-            }

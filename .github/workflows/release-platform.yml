@@ -24,18 +24,6 @@ on:
       integration-splitting-algorithm:
         type: string
         default: duration_based_chunks
-      unit-performance-probe:
-        type: boolean
-        default: false
-      integration-performance-probe:
-        type: boolean
-        default: false
-      performance-workers:
-        type: number
-        default: 4
-      wallclock-evidence:
-        type: boolean
-        default: false
       full-validation:
         type: boolean
         required: true
@@ -66,9 +54,6 @@ jobs:
       runner: ${{ inputs.runner }}
       platform: ${{ inputs.platform }}
       binary-name: ${{ inputs.binary-name }}
-      performance-probe: ${{ inputs.unit-performance-probe }}
-      proposed-workers: ${{ inputs.performance-workers }}
-      wallclock-evidence: ${{ inputs.wallclock-evidence }}
     secrets:
       GH_CLI_PAT: ${{ secrets.GH_CLI_PAT }}
       GH_MODELS_PAT: ${{ secrets.GH_MODELS_PAT }}
@@ -82,13 +67,6 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Record actual build runner for wall-clock proof
-        if: inputs.wallclock-evidence
-        shell: bash
-        run: >-
-          python -m scripts.release_wallclock record-job
-          --side proposed --source-root . --source-sha "$GITHUB_SHA"
-          --output test-results/build-environment.json
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
@@ -124,23 +102,11 @@ jobs:
           python scripts/package_release.py pack
           --binary-name "$BINARY_NAME" --sha "$CANDIDATE_SHA"
       - name: Freeze integration scheduling hints
-        if: inputs.full-validation && inputs.platform != 'windows' && !inputs.integration-performance-probe
+        if: inputs.full-validation && inputs.platform != 'windows'
         uses: ./.github/actions/pytest-timing
         with:
           suite: integration
           snapshot: integration-duration-snapshot-${{ github.run_attempt }}-${{ inputs.binary-name }}
-      - name: Freeze cold integration scheduling hints for performance probe
-        if: inputs.full-validation && inputs.platform != 'windows' && inputs.integration-performance-probe
-        run: printf '{}\n' > .test_durations
-      - name: Upload cold integration scheduling hints for performance probe
-        if: inputs.full-validation && inputs.platform != 'windows' && inputs.integration-performance-probe
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: integration-duration-snapshot-${{ github.run_attempt }}-${{ inputs.binary-name }}
-          path: .test_durations
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -189,63 +155,10 @@ jobs:
       xdist-workers: ${{ inputs.integration-xdist-workers }}
       splitting-algorithm: ${{ inputs.integration-splitting-algorithm }}
       timeout-minutes: ${{ inputs.integration-markers == 'lifecycle_smoke and not live' && 30 || 60 }}
-      artifact-prefix: ${{ inputs.integration-performance-probe && inputs.platform != 'windows' && format('{0}-{1}-baseline', github.run_attempt, inputs.binary-name) || format('{0}-{1}', github.run_attempt, inputs.binary-name) }}
+      artifact-prefix: ${{ github.run_attempt }}-${{ inputs.binary-name }}
       runtime-prerequisites: none
-      evidence-variant: ${{ inputs.integration-performance-probe && inputs.platform != 'windows' && 'baseline' || '' }}
-      evidence-selection: tests/integration/ -m ${{ inputs.integration-markers }}
-      wallclock-evidence: ${{ inputs.wallclock-evidence }}
-      performance-cohort: ${{ inputs.integration-performance-probe && inputs.platform != 'windows' && format('integration-{0}-{1}', github.run_attempt, inputs.binary-name) || '' }}
     secrets:
       GH_CLI_PAT: ${{ secrets.GH_CLI_PAT }}
-
-  integration-tests-proposed-shard:
-    name: Integration Tests Proposed Shard ${{ matrix.shard }}
-    needs: [build]
-    if: inputs.full-validation && inputs.platform != 'windows' && inputs.integration-performance-probe
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    uses: ./.github/workflows/release-integration.yml
-    with:
-      runner: ${{ inputs.runner }}
-      platform: ${{ inputs.platform }}
-      binary-name: ${{ inputs.binary-name }}
-      candidate-artifact-name: candidate-${{ github.run_attempt }}-${{ inputs.binary-name }}
-      candidate-sha: ${{ github.sha }}
-      timing-snapshot-artifact: integration-duration-snapshot-${{ github.run_attempt }}-${{ inputs.binary-name }}
-      integration-markers: ${{ inputs.integration-markers }}
-      shard-count: 2
-      shard-index: ${{ matrix.shard }}
-      xdist-workers: ${{ inputs.performance-workers }}
-      splitting-algorithm: least_duration
-      timeout-minutes: ${{ inputs.integration-markers == 'lifecycle_smoke and not live' && 30 || 60 }}
-      artifact-prefix: ${{ github.run_attempt }}-${{ inputs.binary-name }}-proposed
-      runtime-prerequisites: none
-      evidence-variant: proposed
-      evidence-selection: tests/integration/ -m ${{ inputs.integration-markers }}
-      performance-cohort: integration-${{ github.run_attempt }}-${{ inputs.binary-name }}
-    secrets:
-      GH_CLI_PAT: ${{ secrets.GH_CLI_PAT }}
-
-  integration-performance-probe:
-    name: Integration Performance Probe
-    needs: [integration-tests-shard, integration-tests-proposed-shard]
-    if: always() && inputs.full-validation && inputs.platform != 'windows' && inputs.integration-performance-probe
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Require every integration performance member
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-        with:
-          script: |
-            const results = JSON.parse(process.env.RESULTS);
-            for (const name of ['integration-tests-shard', 'integration-tests-proposed-shard']) {
-              if (results[name]?.result !== 'success') {
-                core.setFailed(`${name} did not succeed`);
-              }
-            }
 
   integration-tests:
     name: Integration Tests
@@ -305,11 +218,11 @@ jobs:
         timeout-minutes: 20
         env:
           GITHUB_API_TOKEN: ${{ github.token }}
-          GITHUB_APM_PAT: ${{ !inputs.wallclock-evidence && secrets.GH_CLI_PAT || '' }}
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           APM_E2E_TESTS: '1'
         run: |
           $env:PATH = "$PWD\dist\apm-windows-x86_64;$env:PATH"
-          .\scripts\windows\test-release-validation.ps1 -PublicApiOnly:('${{ inputs.wallclock-evidence }}' -eq 'true')
+          .\scripts\windows\test-release-validation.ps1
 
   windows-installer:
     name: Candidate Windows Installer
@@ -364,7 +277,7 @@ jobs:
       - name: Require executed installer assertions
         shell: pwsh
         run: >-
-          scripts/windows/run-installer-proof.ps1
+          scripts/windows/validate-installer-result.ps1
           -ValidateInstallerJUnit test-results/installer.xml -InstallerExitCode 0
       - name: Upload installer outcomes
         if: always()

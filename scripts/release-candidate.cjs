@@ -89,7 +89,7 @@ function isTagPush(context) {
 }
 
 function isPrereleaseTag(context) {
-  return isTagPush(context) && refName(context.ref).includes("-");
+  return isTagPush(context) && !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(refName(context.ref));
 }
 
 function tagVersion(context) {

@@ -20,7 +20,6 @@ from tests.workflow_contracts import (
     load_workflow,
     shell_commands,
     shell_tokens,
-    wallclock_unit_commands,
     workflow_job,
     workflow_step,
     workflow_step_index,
@@ -33,8 +32,6 @@ INTEGRATION_WORKFLOW = ROOT / ".github/workflows/release-integration.yml"
 RELEASE_WORKFLOW = ROOT / ".github/workflows/build-release.yml"
 UNIX_TIMEOUT = "${{ inputs.integration-markers == 'lifecycle_smoke and not live' && 30 || 60 }}"
 UNIX_ARGS = (
-    "${{ (inputs.evidence-variant != '' || inputs.wallclock-evidence) "
-    "&& '-p scripts.pytest_performance_evidence' || '' }} "
     "--splits ${{ inputs.shard-count }} --group ${{ inputs.shard-index }} "
     "--splitting-algorithm ${{ inputs.splitting-algorithm }} "
     "-n ${{ inputs.xdist-workers }} --dist loadgroup "
@@ -141,29 +138,6 @@ def _execute_integration_gate(results: dict) -> list[str]:
     return json.loads(completed.stdout)
 
 
-def _execute_integration_probe_gate(results: dict) -> list[str]:
-    gate = workflow_job(_workflow(), "integration-performance-probe")
-    script = workflow_step(gate, "Require every integration performance member")["with"]["script"]
-    harness = (
-        "const failures = [];"
-        "const core = {setFailed: message => failures.push(message)};"
-        f"(new Function('core', {json.dumps(script)}))(core);"
-        "process.stdout.write(JSON.stringify(failures));"
-    )
-    completed = subprocess.run(
-        ["node", "-e", harness],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=15,
-        env={
-            **os.environ,
-            "RESULTS": json.dumps(results),
-        },
-    )
-    return json.loads(completed.stdout)
-
-
 @pytest.mark.parametrize(
     "job_name",
     ["unit-tests", "build", "integration-tests", "release-validation", "windows-installer"],
@@ -202,24 +176,6 @@ def test_native_integration_fan_in_requires_shard_matrix_success(result: str | N
     else:
         results["integration-tests-shard"]["result"] = result
     assert _execute_integration_gate(results) == ["integration-tests-shard did not succeed"]
-
-
-@pytest.mark.parametrize(
-    "job_name", ["integration-tests-shard", "integration-tests-proposed-shard"]
-)
-@pytest.mark.parametrize("result", ["failure", "cancelled", "skipped", "neutral", None])
-def test_integration_probe_fan_in_requires_baseline_and_proposed_success(
-    job_name: str, result: str | None
-) -> None:
-    results = {
-        "integration-tests-shard": {"result": "success"},
-        "integration-tests-proposed-shard": {"result": "success"},
-    }
-    if result is None:
-        del results[job_name]
-    else:
-        results[job_name]["result"] = result
-    assert _execute_integration_probe_gate(results) == [f"{job_name} did not succeed"]
 
 
 def _assert_native_startup(workflow: dict) -> None:
@@ -309,7 +265,7 @@ def _assert_windows_installer(workflow: dict) -> None:
     assert_exact_command(
         shell_commands(executed),
         [
-            "scripts/windows/run-installer-proof.ps1",
+            "scripts/windows/validate-installer-result.ps1",
             "-ValidateInstallerJUnit",
             "test-results/installer.xml",
             "-InstallerExitCode",
@@ -354,9 +310,6 @@ def _assert_unit_call(workflow: dict, unit: dict) -> None:
         "runner": "${{ inputs.runner }}",
         "platform": "${{ inputs.platform }}",
         "binary-name": "${{ inputs.binary-name }}",
-        "performance-probe": "${{ inputs.unit-performance-probe }}",
-        "proposed-workers": "${{ inputs.performance-workers }}",
-        "wallclock-evidence": "${{ inputs.wallclock-evidence }}",
     }
     assert job["secrets"] == {
         "GH_CLI_PAT": "${{ secrets.GH_CLI_PAT }}",
@@ -366,12 +319,12 @@ def _assert_unit_call(workflow: dict, unit: dict) -> None:
     baseline = workflow_job(unit, "unit-tests")
     assert baseline["runs-on"] == "${{ inputs.runner }}"
     restore = workflow_step(baseline, "Restore unit scheduling hints")
-    assert restore["if"] == "${{ !inputs.performance-probe }}"
+    assert "if" not in restore
     assert restore["with"] == {"suite": "unit"}
     standard = workflow_step(baseline, "Run unit tests")
-    assert standard["if"] == "inputs.platform != 'windows' && !inputs.performance-probe"
+    assert standard["if"] == "inputs.platform != 'windows'"
     assert_exact_command(
-        wallclock_unit_commands(standard, enabled=False),
+        shell_commands(standard),
         [
             "uv",
             "run",
@@ -390,107 +343,10 @@ def _assert_unit_call(workflow: dict, unit: dict) -> None:
         label="standard release unit tests",
     )
     upload = workflow_step(baseline, "Upload unit timings and outcomes")
-    assert upload["if"] == "always() && !inputs.performance-probe"
+    assert upload["if"] == "always()"
     assert upload["with"]["name"] == (
         "test-results-${{ github.run_attempt }}-${{ inputs.binary-name }}-unit"
     )
-
-
-def _assert_unit_probe(unit: dict) -> None:
-    baseline = workflow_job(unit, "unit-tests")
-    cold = workflow_step(baseline, "Initialize cold unit scheduling hints")
-    assert cold["if"] == "inputs.performance-probe && inputs.platform != 'windows'"
-    assert cold["run"] == "printf '{}\\n' > .test_durations"
-    cohort = workflow_step(
-        baseline, "Require matched actual test runners before the unit performance experiment"
-    )
-    assert cohort["if"] == "inputs.performance-probe && inputs.platform != 'windows'"
-    assert cohort["with"] == {
-        "cohort": "unit-${{ github.run_attempt }}-${{ inputs.binary-name }}",
-        "member": "baseline-1",
-        "source-sha": "${{ github.sha }}",
-        "selection": "tests/unit tests/test_console.py",
-    }
-    run = workflow_step(baseline, "Run unit performance baseline")
-    assert run["if"] == "inputs.platform != 'windows' && inputs.performance-probe"
-    assert_exact_command(
-        shell_commands(run),
-        [
-            "uv",
-            "run",
-            "--frozen",
-            "python",
-            "-m",
-            "pytest",
-            "-p",
-            "scripts.pytest_performance_evidence",
-            "tests/unit",
-            "tests/test_console.py",
-            "-n",
-            "auto",
-            "--dist",
-            "worksteal",
-            "--durations=50",
-            "--store-durations",
-            "--junitxml=test-results/unit-baseline-shard-1.xml",
-        ],
-        label="unit performance baseline",
-    )
-    capture = workflow_step(baseline, "Capture unit performance evidence")
-    assert "--variant baseline" in capture["run"]
-    assert "--shard-count 1" in capture["run"]
-    evidence = workflow_step(baseline, "Upload unit performance evidence")
-    assert evidence["with"]["name"] == (
-        "performance-evidence-unit-${{ github.run_attempt }}-${{ inputs.binary-name }}-"
-        "baseline-shard-1"
-    )
-
-    proposed = workflow_job(unit, "unit-tests-proposed")
-    assert proposed["if"] == "inputs.performance-probe && inputs.platform != 'windows'"
-    assert proposed["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2]}}
-    proposed_cohort = workflow_step(
-        proposed, "Require matched actual test runners before the unit performance experiment"
-    )
-    assert proposed_cohort["with"] == {
-        "cohort": "unit-${{ github.run_attempt }}-${{ inputs.binary-name }}",
-        "member": "proposed-${{ matrix.shard }}",
-        "source-sha": "${{ github.sha }}",
-        "selection": "tests/unit tests/test_console.py",
-    }
-    proposed_run = workflow_step(proposed, "Run unit performance proposed shard")
-    tokens = shell_tokens(proposed_run)
-    for token in (
-        "python",
-        "-m",
-        "pytest",
-        "-p",
-        "scripts.pytest_performance_evidence",
-        "tests/unit",
-        "tests/test_console.py",
-        "--splits",
-        "2",
-        "--group",
-        "matrix.shard",
-        "--splitting-algorithm",
-        "least_duration",
-        "-n",
-        "inputs.proposed-workers",
-        "--dist",
-        "worksteal",
-        "--durations=50",
-        "--store-durations",
-    ):
-        assert token in tokens
-    assert "unit-proposed-shard-${{" in proposed_run["run"]
-    assert "}}.xml" in proposed_run["run"]
-    proposed_evidence = workflow_step(proposed, "Upload unit performance evidence")
-    assert proposed_evidence["with"]["name"] == (
-        "performance-evidence-unit-${{ github.run_attempt }}-${{ inputs.binary-name }}-"
-        "proposed-shard-${{ matrix.shard }}"
-    )
-    fan_in = workflow_job(unit, "unit-performance-probe")
-    assert fan_in["needs"] == ["unit-tests", "unit-tests-proposed"]
-    assert fan_in["if"] == "always() && inputs.performance-probe && inputs.platform != 'windows'"
 
 
 def _assert_parallel_paths(workflow: dict) -> None:
@@ -536,41 +392,24 @@ def _assert_integration(workflow: dict, integration: dict) -> None:
     assert job["with"]["splitting-algorithm"] == "${{ inputs.integration-splitting-algorithm }}"
     assert job["with"]["timeout-minutes"] == UNIX_TIMEOUT
     assert job["with"]["artifact-prefix"] == (
-        "${{ inputs.integration-performance-probe && inputs.platform != 'windows' && "
-        "format('{0}-{1}-baseline', github.run_attempt, inputs.binary-name) || "
-        "format('{0}-{1}', github.run_attempt, inputs.binary-name) }}"
+        "${{ github.run_attempt }}-${{ inputs.binary-name }}"
     )
     assert job["with"]["runtime-prerequisites"] == "none"
-    assert job["with"]["evidence-variant"] == (
-        "${{ inputs.integration-performance-probe && inputs.platform != 'windows' && "
-        "'baseline' || '' }}"
-    )
-    assert job["with"]["evidence-selection"] == (
-        "tests/integration/ -m ${{ inputs.integration-markers }}"
-    )
-    assert job["with"]["wallclock-evidence"] == "${{ inputs.wallclock-evidence }}"
-    assert job["with"]["performance-cohort"] == (
-        "${{ inputs.integration-performance-probe && inputs.platform != 'windows' && "
-        "format('integration-{0}-{1}', github.run_attempt, inputs.binary-name) || '' }}"
-    )
+    for removed_key in (
+        "evidence-variant",
+        "evidence-selection",
+        "wallclock-evidence",
+        "performance-cohort",
+    ):
+        assert removed_key not in job["with"], (
+            f"experimental input {removed_key!r} must not resurface on integration-tests-shard"
+        )
     build = workflow_job(workflow, "build")
     snapshot = workflow_step(build, "Freeze integration scheduling hints")
-    assert snapshot["if"] == (
-        "inputs.full-validation && inputs.platform != 'windows' && "
-        "!inputs.integration-performance-probe"
-    )
+    assert snapshot["if"] == "inputs.full-validation && inputs.platform != 'windows'"
     assert snapshot["with"]["snapshot"] == (
         "integration-duration-snapshot-${{ github.run_attempt }}-${{ inputs.binary-name }}"
     )
-    cold_upload = workflow_step(
-        build, "Upload cold integration scheduling hints for performance probe"
-    )
-    assert cold_upload["if"] == (
-        "inputs.full-validation && inputs.platform != 'windows' && "
-        "inputs.integration-performance-probe"
-    )
-    assert cold_upload["with"]["name"] == snapshot["with"]["snapshot"]
-    assert cold_upload["with"]["path"] == ".test_durations"
 
     integration_job = workflow_job(integration, "integration-tests")
     unpack = workflow_step(integration_job, "Extract checked candidate archive")
@@ -597,108 +436,24 @@ def _assert_integration(workflow: dict, integration: dict) -> None:
         assert step["env"]["GITHUB_APM_PAT"] == "${{ secrets.GH_CLI_PAT }}"
         assert "APM_RUN_INFERENCE_TESTS" not in effective_env(integration, integration_job, step)
     assert "-IncludeLiveADO" not in shell_tokens(windows)
-    capture = workflow_step(integration_job, "Capture integration performance evidence")
-    assert capture["if"] == (
-        "always() && inputs.platform != 'windows' && inputs.evidence-variant != ''"
-    )
-    assert capture["env"] == {
-        "EVIDENCE_SELECTION": "${{ inputs.evidence-selection }}",
-        "PYTEST_MARK_EXPR": "${{ inputs.integration-markers }}",
-    }
-    capture_tokens = shell_tokens(capture)
-    for token in (
-        "scripts.compare_test_runs",
-        "capture",
-        "--junit",
-        "test-results/integration-shard-${{ inputs.shard-index }}.xml",
-        "--source-sha",
-        "${{ inputs.candidate-sha }}",
-        "--variant",
-        "${{ inputs.evidence-variant }}",
-        "--shard-count",
-        "${{ inputs.shard-count }}",
-        "--candidate-metadata",
-        "release-assets/${{ inputs.binary-name }}.json",
+    for removed_name in (
+        "Capture integration performance evidence",
+        "Upload integration performance evidence",
     ):
-        assert token in capture_tokens
-    proof_upload = workflow_step(integration_job, "Upload integration performance evidence")
-    assert proof_upload["if"] == capture["if"]
-    assert proof_upload["with"]["name"] == (
-        "performance-evidence-${{ inputs.artifact-prefix }}-"
-        "${{ inputs.evidence-variant }}-shard-${{ inputs.shard-index }}"
-    )
+        matches = [
+            step
+            for step in integration_job["steps"]
+            if isinstance(step, dict) and step.get("name") == removed_name
+        ]
+        assert matches == [], (
+            f"experimental integration step {removed_name!r} must be removed"
+        )
     timings_upload = workflow_step(integration_job, "Upload integration timings and outcomes")
-    assert timings_upload["if"] == (
-        "always() && (inputs.platform != 'windows' || inputs.wallclock-evidence)"
-    )
+    assert timings_upload["if"] == "always() && inputs.platform != 'windows'"
     assert timings_upload["with"]["if-no-files-found"] == "error"
     coverage_upload = workflow_step(integration_job, "Upload coverage data")
     assert coverage_upload["with"]["name"] == (
         "integration-coverage-${{ inputs.artifact-prefix }}-shard-${{ inputs.shard-index }}"
-    )
-
-
-def _assert_integration_probe(workflow: dict) -> None:
-    inputs = workflow["on"]["workflow_call"]["inputs"]
-    assert inputs["unit-performance-probe"] == {"type": "boolean", "default": False}
-    assert inputs["integration-performance-probe"] == {"type": "boolean", "default": False}
-    assert inputs["performance-workers"] == {"type": "number", "default": 4}
-    assert workflow["permissions"] == {"contents": "read", "actions": "read"}
-
-    baseline = workflow_job(workflow, "integration-tests-shard")
-    proposed = workflow_job(workflow, "integration-tests-proposed-shard")
-    assert proposed["uses"] == "./.github/workflows/release-integration.yml"
-    assert proposed["needs"] == ["build"]
-    assert proposed["if"] == (
-        "inputs.full-validation && inputs.platform != 'windows' && "
-        "inputs.integration-performance-probe"
-    )
-    assert proposed["strategy"] == {
-        "fail-fast": False,
-        "matrix": {"shard": [1, 2]},
-    }
-    for key in (
-        "runner",
-        "platform",
-        "binary-name",
-        "candidate-artifact-name",
-        "candidate-sha",
-        "timing-snapshot-artifact",
-        "integration-markers",
-        "runtime-prerequisites",
-        "timeout-minutes",
-        "evidence-selection",
-    ):
-        assert proposed["with"][key] == baseline["with"][key]
-    assert proposed["with"]["shard-count"] == 2
-    assert proposed["with"]["shard-index"] == "${{ matrix.shard }}"
-    assert proposed["with"]["xdist-workers"] == "${{ inputs.performance-workers }}"
-    assert proposed["with"]["splitting-algorithm"] == "least_duration"
-    assert proposed["with"]["artifact-prefix"] == (
-        "${{ github.run_attempt }}-${{ inputs.binary-name }}-proposed"
-    )
-    assert proposed["with"]["evidence-variant"] == "proposed"
-    assert baseline["with"]["evidence-variant"] == (
-        "${{ inputs.integration-performance-probe && inputs.platform != 'windows' && "
-        "'baseline' || '' }}"
-    )
-    assert baseline["with"]["performance-cohort"] == (
-        "${{ inputs.integration-performance-probe && inputs.platform != 'windows' && "
-        "format('integration-{0}-{1}', github.run_attempt, inputs.binary-name) || '' }}"
-    )
-    assert proposed["with"]["performance-cohort"] == (
-        "integration-${{ github.run_attempt }}-${{ inputs.binary-name }}"
-    )
-
-    fan_in = workflow_job(workflow, "integration-performance-probe")
-    assert fan_in["needs"] == ["integration-tests-shard", "integration-tests-proposed-shard"]
-    assert (
-        fan_in["if"] == "always() && inputs.full-validation && inputs.platform != 'windows' && "
-        "inputs.integration-performance-probe"
-    )
-    assert (
-        "integration-tests-proposed-shard"
-        in workflow_step(fan_in, "Require every integration performance member")["with"]["script"]
     )
 
 
@@ -718,16 +473,8 @@ def test_native_unit_runner_is_canonical_and_preserves_standard_abi() -> None:
     _assert_unit_call(_workflow(), _unit_workflow())
 
 
-def test_native_unit_performance_probe_runs_parallel_baseline_and_proposed_halves() -> None:
-    _assert_unit_probe(_unit_workflow())
-
-
 def test_native_integration_preserves_grouping_bounds_and_artifact_identity() -> None:
     _assert_integration(_workflow(), _integration_workflow())
-
-
-def test_native_integration_performance_probe_uses_same_candidate_and_cold_snapshot() -> None:
-    _assert_integration_probe(_workflow())
 
 
 def test_platform_catalog_retains_all_native_and_non_live_selections() -> None:

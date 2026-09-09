@@ -407,9 +407,13 @@ the build independently; all remain required at the final gate.
 5. Promote only those exact, verified, unpacked, tested archives.
 
 Unix integration uses `release-integration.yml`: one shard, four workers, and
-`duration_based_chunks` assignment per native lane. Multi-runner ARM sharding
-remains experimental pending a matched performance comparison. Every shard
-must succeed.
+`duration_based_chunks` assignment per native lane. Every shard must succeed.
+
+For tag pushes, `rc.plan` in `scripts/release-candidate.cjs` treats only names
+matching `/^v[0-9]+\.[0-9]+\.[0-9]+$/` as stable. All other `v*` tag pushes,
+including PEP 440 `v1.2.3a1`, `v1.2.3b1`, and `v1.2.3rc1`, are classified as
+prereleases: they do not build or publish stable docs or PyPI distributions.
+Classification does not guarantee successful qualification.
 
 Stable-tag read-only docs and wheel builds start after planning. Publishers
 require successful GitHub Release creation and their own builds; prebuilding
@@ -521,6 +525,11 @@ The Windows isolation root is `tmp_path_factory.mktemp("wi") / "i"`: a short,
 nonexistent child for the shared helper, while the PowerShell install prefix
 still includes spaces and `&`.
 
+Production uses the short `RUNNER_TEMP/apm-windows-installer` base directory.
+`scripts/windows/validate-installer-result.ps1` requires a JUnit report with
+at least one concrete test case, no skips, and no failures or errors. Pytest
+exit 0 alone is insufficient.
+
 ### Windows unit hang diagnostics
 
 The Windows full-unit step in `.github/workflows/release-unit.yml` runs:
@@ -574,129 +583,21 @@ They do not restore a rolling cache or present the shards as timing-balanced:
 the shared planner job required for that can cost more runner allocation time
 than it saves in balancing.
 
-Native builds also freeze any available timing history through
-`.github/actions/pytest-timing`; all shards consume that one immutable
-snapshot. Measured shard histories are retained as artifacts, not independently
+Native Unix builds also freeze any available timing history through
+`.github/actions/pytest-timing`. All shards for that build consume the same
+immutable snapshot. Measured shard histories are retained as artifacts, not independently
 restored or written back by each shard. Hints never replace test execution or
 act as an allowlist. Grouped tests still use `--dist loadgroup` so
 HOME-mutating fixtures stay on one worker within each isolated job.
 
 Inspect expensive fixtures by opening the slowest `--durations=50` entries and
 correlating fixture-heavy node IDs with JUnit XML for the same OS, architecture,
-suite, and shard. Historical release run `34104956270` completed in 39m16s;
-compare a later complete release before claiming an end-to-end improvement.
+suite, and shard.
 
-#### Opt-in performance comparisons
-
-Apply the `ci-performance` PR label to run `ci-release-performance.yml` and
-`ci-source-performance.yml`. The native probe builds one current macOS ARM
-candidate, then compares one four-worker run against two three-worker shards.
-This proposed topology is probe-only; it does not change native release policy.
-All three consume the same verified archive and the same empty timing
-snapshot, testing cold-history behavior rather than assuming a warm cache.
-The Windows probe compares serial and two-worker execution of the unchanged
-`windows_compat` selection. The probes use read-only permissions and no
-production secrets; they cannot publish or qualify a release candidate.
-
-`scripts.compare_test_runs` checks original pytest node IDs, outcomes, complete
-disjoint shard coverage, source/candidate identity, and runtime/lockfile
-fingerprints before accepting a measured execution improvement of at least
-5%. New skips, missing tests, failures, or different environments fail the
-comparison. JUnit controller elapsed time is reported separately from summed
-runner time; neither includes runner allocation or setup.
-The opt-in evidence plugin emits `unittest.subTest` outcomes as distinct
-parent-relative ordinal cases, so JUnit summary counts must still exactly
-match the concrete inventory; subtests are not discarded to make counts fit.
-
-Download `arm-performance-comparison-<attempt>` or
-`windows-compat-performance-comparison-<attempt>` for the JSON verdict, and
-the corresponding per-variant artifacts for raw JUnit and timings. Use Actions
-job timestamps to include setup and queue delays. Remove the opt-in label
-before unrelated pushes; these measurements are evidence, not required
-release gates or cached pass results.
-
-### Whole-pipeline rehearsal
-
-For whole-pipeline release rehearsal, apply the `ci-release-rehearsal` PR label.
-`ci-release-rehearsal.yml` reuses the five native release-platform workflows,
-canonical source CI, and read-only docs/wheel builds at one current PR merge
-SHA, with no PATs, signing secrets, publishing, or production topology change:
-
-| Surface | Current shape | Rehearsal shape |
-| --- | --- | --- |
-| macOS ARM integration | 1 shard x 4 workers | 2 shards x 3 workers |
-| Linux x64 integration | 1 shard x 4 workers | 2 shards x 4 workers |
-| macOS Intel unit | 1 shard x auto workers | 2 shards x 4 workers |
-
-Each actual runner records image, Python, OS, CPU, lockfile, source, candidate
-identity, runner trace, and timestamp proof, then waits up to 15 minutes for
-all three matching cohort members before pytest. Missing, stale, or mismatched proof stops before
-expensive tests. Integration pairs use exact archive bytes from the same build;
-source-unit pairs use the identical SHA; final comparison still requires exact
-original case/outcome parity.
-
-Windows public release validation accepts `GITHUB_API_TOKEN` without mapping
-the read-only job token to PAT/Models variables. Private-module and inference
-validation still need their existing credentials. The native installer fixture
-uses a short temporary root while retaining spaces and `&` in its install
-prefix, leaving room for staged bundle DLL paths.
-
-The comparison retains all five production
-`Integration Tests` fan-ins and `Native Candidate Gate` jobs, measures each
-observed dependency-to-verdict delay, and propagates the selected variant
-through the per-platform DAG while unchanged platforms keep their actual gate
-completion floor. Proposed native-gate completion timestamps are modeled, not
-independently measured; report that assumption. Only experiment-specific
-both-world checkers, such as `Intel Unit Performance Probe`, are excluded.
-Qualification recording, asset verification, signing, and publishing remain
-outside the unprivileged measurement. Read `release-rehearsal-comparison-<attempt>`,
-`performance-evidence*`, and `performance-cohort*`.
-
-Thresholds are 15% per
-paired pytest lane and 10% overall evidence-ready improvement, with 30% as the
-target. Do not treat workflow duration as proposed release time: it waits for
-both variants, and experimental concurrency/cohort waits can add allocation
-cost. Remove the label before unrelated pushes. For a new full attempt, remove
-and reapply `ci-release-rehearsal` to launch a fresh workflow run; do not rely
-on rerunning the same run ID. Rehearsal proofs are attempt-scoped, but canonical
-source CI artifacts use bare names. Limit an evaluation to three full attempts,
-including invalid or image-inconclusive attempts. Production rollout requires
-passing proof plus a maintainer decision.
-
-### Actual release wall-clock proof
-
-Do not use modeled counterfactuals as proof. To measure real GitHub wall time
-before merge, apply the `ci-release-wallclock` PR label for an ad hoc run, or
-push the reviewed SHA to the workflow's dedicated control branch for a frozen
-comparison. The control ref avoids a moving PR merge ref changing the tested
-source after the baseline starts. Each trigger runs one proposed
-production-default DAG in `ci-release-wallclock.yml`, while a separate frozen
-baseline controller branch runs the original dependency ordering from the
-selected `main` source. Both sides are non-promotable and use no PATs, signing
-secrets, private-service acceptance, publication, or deployment scope.
-
-Compare only fresh attempt-1 run IDs recorded by the wall-clock protocol. Source
-identity and controller identity are recorded separately. The primary clock is
-the terminal `Verify wall-clock artifacts` job `completed_at` minus workflow
-`created_at`, including queue time; the secondary clock starts at actual
-`run_started_at`. Accept no result unless both workflows succeed, every included
-gate succeeds, all five native archives plus docs and wheel artifacts verify,
-and observer case inventory plus runner environment proof are present. The
-terminal verifier must download native observation artifacts, not only archives,
-and rejects missing or malformed runner job records through the shared validator.
-The proposed wrapper preserves separate candidate-ready native evidence capture
-and serial verify / verified-native upload. All `wallclock-*` storage names are
-non-promotable. Workflow success alone is not a savings claim; cite two accepted
-run IDs and their actual primary and secondary clocks before claiming an
-improvement.
-
-For native Windows installer diagnostics, apply the optional
-`ci-windows-installer-proof` PR label. It runs one candidate through the same
-assertions at long and short roots, checks native exit/stderr controls, and
-retains the archive; this is diagnostic evidence, not whole-pipeline savings
-proof. Production Windows installer tests use a short pytest-owned
-`RUNNER_TEMP/apm-windows-installer` base temp, keep spaces and `&` fixture
-cases, and reject zero/skipped JUnit instead of treating pytest exit 0 as proof.
+A historical comparison at source commit `1687380d7` measured 34m41s -> 24m53s
+(about 28% lower wall time) with 22.77% more unweighted runner time. The
+experiments are retired; these results do not qualify the current code or
+guarantee a speedup.
 
 ## Debugging Test Failures
 

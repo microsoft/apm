@@ -5,10 +5,6 @@ env:
 
 on:
   workflow_call:
-    inputs:
-      suppress-pr-only-checks:
-        type: boolean
-        default: false
   pull_request:
     branches: [ main ]
   # Tier 1 also runs in merge queue context so the same unit + build checks
@@ -398,7 +394,7 @@ jobs:
   # and in build-release.yml on release.
   pr-binary-smoke:
     name: PR Binary Smoke (Linux)
-    if: github.event_name == 'pull_request' && !inputs.suppress-pr-only-checks
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

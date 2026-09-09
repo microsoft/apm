@@ -24,7 +24,7 @@ RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release-platform.yml"
 AUTH_WORKFLOW = ROOT / ".github" / "workflows" / "auth-acceptance.yml"
 INTEGRATION_SCRIPT = ROOT / "scripts" / "test-integration.sh"
 LIVE_ADO_SELECTOR = "live and requires_ado_pat"
-RELEASE_INTEGRATION_JOBS = ("integration-tests-shard", "integration-tests-proposed-shard")
+RELEASE_INTEGRATION_JOBS = ("integration-tests-shard",)
 
 
 def _walk_nodes(value: Any) -> list[dict[str, Any]]:
@@ -137,15 +137,6 @@ def test_integration_script_exports_explicit_candidate_binary_path() -> None:
     """The integration harness must not rely on PATH-only candidate discovery."""
     script = INTEGRATION_SCRIPT.read_text(encoding="utf-8")
     assert 'export APM_BINARY_PATH="$(pwd)/dist/$BINARY_NAME/apm"' in script
-
-
-def test_integration_script_uses_module_pytest_for_performance_plugin() -> None:
-    """The proof plugin must load through repo-root module imports, not console pytest."""
-    script = INTEGRATION_SCRIPT.read_text(encoding="utf-8")
-    assert "pytest_command=(pytest)" in script
-    assert 'scripts.pytest_performance_evidence "*' in script
-    assert "pytest_command=(python -m pytest)" in script
-    assert 'if "${pytest_command[@]}" tests/integration/ -v --tb=short \\' in script
 
 
 def test_auth_acceptance_explicitly_selects_live_ado_nodes() -> None:

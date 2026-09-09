@@ -335,9 +335,6 @@ run_e2e_tests() {
     # shellcheck disable=SC2206
     extra_args=(${PYTEST_EXTRA_ARGS:-})
     pytest_command=(pytest)
-    if [[ " ${extra_args[*]} " == *" scripts.pytest_performance_evidence "* ]]; then
-        pytest_command=(python -m pytest)
-    fi
     marker_args=()
     if [[ -n "${PYTEST_MARK_EXPR:-}" ]]; then
         marker_args=(-m "$PYTEST_MARK_EXPR")

@@ -236,6 +236,32 @@ async function withQualifiedReusableCandidate(fn) {
 }
 
 describe("release candidate planning", () => {
+  for (const [tag, prerelease] of [
+    ["v1.2.3", false],
+    ["v0.28.0", false],
+    ["v1.2.3a1", true],
+    ["v1.2.3b1", true],
+    ["v1.2.3rc1", true],
+    ["v1.2.3-alpha.1", true],
+    ["v1.2.3-beta.1", true],
+    ["v1.2.3-rc.1", true],
+    ["v1.2.3.dev1", true],
+    ["v1.2.3+build.1", true],
+    ["v1.2", true],
+    ["vnext", true],
+  ]) {
+    it(`classifies release publication for ${tag} through the planner`, async () => {
+      const outputs = {};
+      await rc.plan({
+        github: fakeGithub(),
+        context: context({ ref: `refs/tags/${tag}` }),
+        core: { setOutput(name, value) { outputs[name] = value; } },
+      });
+      assert.equal(outputs.is_prerelease, String(prerelease));
+      assert.equal(outputs.full_validation, "true");
+    });
+  }
+
   for (const unavailable of ["missing evidence", "missing platform", "expired evidence", "expired platform", "old run"]) {
     it(`builds fresh when automatic discovery finds ${unavailable}`, async () => {
       const outputs = {};
