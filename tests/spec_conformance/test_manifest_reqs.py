@@ -1124,7 +1124,7 @@ def test_agent_plugin_target_exclusion_materializes_without_projection(
 ) -> None:
     """Bind req-tg-011 to the real excluded-target install lifecycle."""
     from tests.unit.copilot_plugins.test_install_lifecycle import (
-        test_non_copilot_target_skips_the_plugin_without_aborting as _run_boundary_contract,
+        test_non_copilot_target_plugin_noop_fails_without_committing_state as _run_boundary_contract,
     )
 
     _run_boundary_contract(tmp_path, monkeypatch)
