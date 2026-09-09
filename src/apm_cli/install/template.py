@@ -13,6 +13,7 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -273,21 +274,15 @@ def _agent_plugin_skill_name_for_hint(
     materialization: Materialization,
 ) -> str | None:
     """Return one skill name that can be installed through the subpath route."""
-    requested = getattr(source.ctx, "skill_subset", None)
-    if requested:
-        for value in requested:
-            skill_name = str(value)
-            if skill_name and skill_name != "*":
-                return skill_name
-
     package = getattr(materialization.package_info, "package", None)
     plugin = getattr(package, "agent_plugin", None)
-    components = getattr(plugin, "components", None)
-    for skill in getattr(components, "skills", ()) or ():
-        skill_name = getattr(skill, "directory_name", None) or getattr(skill, "name", None)
-        if skill_name:
-            return str(skill_name)
-    return None
+    if plugin is None or not plugin.components.skills:
+        return None
+    requested = frozenset(getattr(source.ctx, "skill_subset", None) or ())
+    for skill in plugin.components.skills:
+        if skill.directory_name in requested or skill.name in requested:
+            return skill.directory_name
+    return plugin.components.skills[0].directory_name
 
 
 def _agent_plugin_target_skip_message(
@@ -306,11 +301,13 @@ def _agent_plugin_target_skip_message(
 
     dep_base, ref_suffix = _dependency_parts_for_skill_subpath(source.dep_ref)
     target_arg = _target_names_for_hint(source.ctx)
-    command = f"apm install {dep_base}/skills/{skill_name}{ref_suffix} --target {target_arg}"
+    dependency = f"{dep_base}/skills/{skill_name}{ref_suffix}"
+    command = f"apm install {shlex.quote(dependency)} --target {shlex.quote(target_arg)}"
+    shell_note = " (POSIX shell)" if shlex.quote(dependency) != dependency else ""
     return (
         f"{message} No selected target received this package. "
-        "To install this skill as a plain skill bundle, use "
-        f"'{command}'."
+        f"To install available skill '{skill_name}' as a plain skill bundle, "
+        f"use{shell_note}: {command}"
     )
 
 

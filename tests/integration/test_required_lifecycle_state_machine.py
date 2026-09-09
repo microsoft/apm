@@ -665,7 +665,7 @@ def test_required_agent_plugin_target_exclusion_noop_fails_without_mutating_stat
     output = f"{install.stdout} {install.stderr}"
     output_compact = "".join(output.split())
     expected_command = (
-        f"apm install {_OWNER}/native-plugin/skills/native#{native.commit.sha} --target codex"
+        f"apm install '{_OWNER}/native-plugin/skills/native#{native.commit.sha}' --target codex"
     )
 
     assert install.returncode == 1, _result_evidence(install)
@@ -706,6 +706,20 @@ def test_required_agent_plugin_target_exclusion_noop_fails_without_mutating_stat
         dependency.name == "ordinary-after-native" and dependency.deployed_files
         for dependency in locked_dependencies
     )
+    ordinary_dependency = next(
+        dependency
+        for dependency in locked_dependencies
+        if dependency.name == "ordinary-after-native"
+    )
+    ordinary_skills = [
+        path for path in ordinary_dependency.deployed_files if path.endswith("/SKILL.md")
+    ]
+    assert ordinary_skills
+    expected_skill = ordinary.package.root / "skills" / "ordinary" / "SKILL.md"
+    for relative_path in ordinary_skills:
+        deployed_skill = mixed_consumer.root / relative_path
+        assert deployed_skill.is_file()
+        assert deployed_skill.read_bytes() == expected_skill.read_bytes()
 
 
 def test_required_lsp_only_dry_run_reports_plan_without_writing_state(

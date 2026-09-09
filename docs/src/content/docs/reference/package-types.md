@@ -298,15 +298,12 @@ dissects a recognized Agent Plugin through its normal primitive integrators.
 Older Copilot clients may copy plugins into private state outside APM ownership,
 so APM cannot guarantee cleanup of those client-created copies.
 
-When target exclusion leaves a full Agent Plugins v1 package deployed to no
-target, `apm install` exits `1` with a recovery command. To install one skill as
-a plain skill bundle for another target, use
-`apm install <owner>/<repo>/skills/<skill> --target <target>`; refs stay after
-the skill path, for example
-`apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`. A mixed
-install that deploys at least one other package still exits `0`. Publishers can
-also provide a Claude-compatible package (`apm pack --claude-plugin`) for
-non-Copilot targets.
+On non-dry-run installs, target exclusion exits `1` only when no package
+deploys; mixed installs that deploy another package still exit `0`.
+`--dry-run` remains a successful preview, not proof of real install success.
+See [`apm install` notes](../cli/install/#notes) for recovery commands and
+dry-run diagnostic behavior. Publishers can also provide a Claude-compatible
+package (`apm pack --claude-plugin`) for non-Copilot targets.
 :::
 
 **When to choose:** you are producing a portable package with

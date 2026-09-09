@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -568,19 +569,32 @@ def test_target_exclusion_fails_when_no_package_is_deployed(
     assert not (project / ".agents" / "skills" / "native").exists()
 
 
-def test_target_exclusion_hint_names_remote_skill_subpath_form() -> None:
+@pytest.mark.parametrize("requested", (("lavish",), ("missing",), ("safe",), ("*",), ()))
+def test_target_exclusion_hint_names_remote_skill_subpath_form(
+    requested: tuple[str, ...],
+) -> None:
     """The no-op error must name the working subpath workaround from #2796."""
     source = SimpleNamespace(
         ctx=SimpleNamespace(
             targets=[SimpleNamespace(name="codex")],
-            skill_subset=("lavish",),
+            skill_subset=requested,
         ),
         dep_ref=SimpleNamespace(
             is_local=False,
             to_display_reference=lambda: "kunchenguid/lavish-axi#main",
         ),
     )
-    materialization = SimpleNamespace(package_info=SimpleNamespace(package=None))
+    materialization = SimpleNamespace(
+        package_info=SimpleNamespace(
+            package=SimpleNamespace(
+                agent_plugin=SimpleNamespace(
+                    components=SimpleNamespace(
+                        skills=(SimpleNamespace(directory_name="lavish", name="lavish"),)
+                    )
+                )
+            )
+        )
+    )
 
     message = _agent_plugin_target_skip_message(
         source,
@@ -588,8 +602,72 @@ def test_target_exclusion_hint_names_remote_skill_subpath_form() -> None:
         AgentPluginTargetExcludedError("target excluded"),
     )
 
-    assert "apm install kunchenguid/lavish-axi/skills/lavish#main --target codex" in message
+    assert "apm install 'kunchenguid/lavish-axi/skills/lavish#main' --target codex" in message
     assert "#main/skills" not in message
+
+
+@pytest.mark.parametrize(
+    "dependency",
+    ("owner/plugin#feature;echo-surprise", "owner/plugin#feature'quoted", "../plugin with spaces"),
+)
+def test_target_exclusion_hint_quotes_the_complete_dependency_argument(
+    tmp_path: Path,
+    dependency: str,
+) -> None:
+    package_info = _write_adversarial_agent_plugin(tmp_path / "native", tmp_path / "outside")
+    source = SimpleNamespace(
+        ctx=SimpleNamespace(targets=[SimpleNamespace(name="codex")], skill_subset=("native",)),
+        dep_ref=SimpleNamespace(
+            is_local=dependency.startswith("."),
+            local_path=dependency if dependency.startswith(".") else None,
+            to_display_reference=lambda: dependency,
+        ),
+    )
+    message = _agent_plugin_target_skip_message(
+        source,
+        SimpleNamespace(package_info=package_info),
+        AgentPluginTargetExcludedError("target excluded"),
+    )
+    base, separator, ref = dependency.partition("#")
+    command = message.split("use (POSIX shell): ", 1)[1]
+    tokens = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()")
+    tokens.whitespace_split = True
+    tokens.commenters = ""
+    assert list(tokens) == [
+        "apm",
+        "install",
+        f"{base}/skills/native{separator}{ref}",
+        "--target",
+        "codex",
+    ]
+
+
+def test_target_exclusion_hint_matches_skill_name_but_uses_inventory_directory(
+    tmp_path: Path,
+) -> None:
+    package_info = _write_adversarial_agent_plugin(tmp_path / "native", tmp_path / "outside")
+    plugin = package_info.package.agent_plugin
+    assert plugin is not None
+    from dataclasses import replace
+
+    first = plugin.components.skills[0]
+    package_info.package.agent_plugin = replace(
+        plugin,
+        components=replace(
+            plugin.components,
+            skills=(first, replace(first, directory_name="other-directory", name="selected")),
+        ),
+    )
+    source = SimpleNamespace(
+        ctx=SimpleNamespace(targets=[SimpleNamespace(name="codex")], skill_subset=("selected",)),
+        dep_ref=SimpleNamespace(is_local=False, to_display_reference=lambda: "owner/plugin#v1"),
+    )
+    message = _agent_plugin_target_skip_message(
+        source,
+        SimpleNamespace(package_info=package_info),
+        AgentPluginTargetExcludedError("excluded"),
+    )
+    assert "apm install 'owner/plugin/skills/other-directory#v1' --target codex" in message
 
 
 @pytest.mark.parametrize("include_ordinary", (False, True))

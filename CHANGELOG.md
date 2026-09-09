@@ -14,20 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- BREAKING: `apm install` now exits non-zero when target exclusion leaves an
-  Agent Plugins v1.0.0 package deployed to no target. Migration: install an
-  individual skill subpath such as
-  `apm install <owner>/<repo>/skills/<skill> --target <target>` (for example,
-  `apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`), or
-  select `--target copilot` for native registration; mixed installs still exit
-  0 when at least one package deploys. (closes #2796) (#2806)
-- Hermes is now a stable explicit-only target, and state-mutating APM commands
-  share one per-user cross-process lock to prevent concurrent updates from losing state.
-  (by @lkshrk; closes #2608) (#2655)
-- Architecture ownership guards now use a sharded JSON registry and a
-  single-process Python linter while preserving exact-revision compatibility
-  and reducing warm median lint time by 75%. (#2739)
-- This repository now pins the `copilot` target so plain `apm install` is deterministic across contributor environments. (by @tillig, #2771)
+- **BREAKING:** Non-dry-run `apm install` now exits `1` when Agent Plugins v1 target exclusion leaves no package deployed; mixed installs that deploy another package still succeed. Install a direct skill subpath (`apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`) or select `--target copilot` for native registration. (closes #2796) (#2806)
 - **BREAKING:** after consumers re-vendor the shared gh-aw `apm.md`, its import requires an explicit `target` instead of deprecated `all`; `apm-action` otherwise writes `all` into the isolated `apm.yml`, where it degrades to auto-detection without harness markers. Set the workflow engine's target and recompile; see the [gh-aw migration recipe](https://microsoft.github.io/apm/integrations/gh-aw/#shared-apmmd-import-recommended). (#2706)
 - Re-vendored shared gh-aw workflows now default to APM 0.28.0 for both pack and restore, the version used for the recorded `microsoft/apm-action@v1.10.0` compatibility proof, not the latest CLI release; an explicit `apm-version` still overrides it. (#2706)
 
