@@ -843,6 +843,12 @@ class PackageInfo:
         return False
 
 
+def restore_installed_package_source(package: APMPackage, dep_ref: DependencyReference) -> None:
+    """Restore Git acquisition provenance after loading installed authored metadata."""
+    if dep_ref.source in (None, "git"):
+        package.source = dep_ref.to_github_url()
+
+
 def build_installed_package_info(
     dep_ref: DependencyReference, apm_modules_dir: Path
 ) -> PackageInfo | None:
@@ -864,6 +870,8 @@ def build_installed_package_info(
     package = result.package if result and result.package else None
     if not package:
         return None
+
+    restore_installed_package_source(package, dep_ref)
 
     return PackageInfo(
         package=package,
