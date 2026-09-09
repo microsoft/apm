@@ -153,6 +153,13 @@ def test_warm_aggregate_root_carry_work_is_linear(
     observations = []
     relative = ".copilot/copilot-instructions.md"
     original_record = codec.DeploymentRecord
+    counts = {"records": 0, "owners": 0}
+
+    def record(**kwargs: Any) -> DeploymentRecord:
+        counts["records"] += 1
+        counts["owners"] += len(kwargs["owners"])
+        return original_record(**kwargs)
+
     for size in (50, 500):
         root = tmp_path / str(size)
         aggregate = root / relative
@@ -188,13 +195,7 @@ def test_warm_aggregate_root_carry_work_is_linear(
         ctx.logger = None
         builder = LockfileBuilder(ctx)
         builder._attach_deployed_files(current)
-        counts = {"records": 0, "owners": 0}
-
-        def record(**kwargs: Any) -> DeploymentRecord:
-            counts["records"] += 1
-            counts["owners"] += len(kwargs["owners"])
-            return original_record(**kwargs)
-
+        counts.update(records=0, owners=0)
         with monkeypatch.context() as patch:
             patch.setattr(codec, "DeploymentRecord", record)
             builder._preserve_existing_local_state(current)
@@ -211,9 +212,7 @@ def test_warm_aggregate_root_carry_work_is_linear(
             for dep in current.dependencies.values()
         )
         assert current.local_deployed_files == ([relative] if has_root else [])
-        assert current.local_deployed_file_hashes == (
-            {relative: current_hash} if has_root else {}
-        )
+        assert current.local_deployed_file_hashes == ({relative: current_hash} if has_root else {})
         restored = LockFile.from_yaml(current.to_yaml())
         assert restored.deployment_ledger == current.deployment_ledger
     small, large = observations

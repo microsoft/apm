@@ -14,6 +14,7 @@ import pytest
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import DeploymentLedger
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.selection import parse_dependency_entry
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
@@ -31,6 +32,56 @@ pytestmark = [
 _HEADER = "<!-- apm-managed: copilot-instructions.md -->"
 _NOTES = b"# Independent notes\nDo not attribute or modify these user bytes.\n"
 _ROOT_BODY = "# Root contribution\nKeep the actual root-local instruction.\n"
+
+
+def _assert_installed_sources(
+    lock: LockFile,
+    refs: dict[str, DependencyReference],
+    commits: dict[str, str],
+    sources: dict[str, dict[str, bytes]],
+    modules_root: Path,
+) -> None:
+    """Check the installed declarations, commits, and authored bytes."""
+    assert {dep.get_unique_key() for dep in lock.get_package_dependencies()} == {
+        ref.get_unique_key() for ref in refs.values()
+    }
+    for name, ref in refs.items():
+        locked = lock.dependencies[ref.get_unique_key()]
+        assert locked.resolved_commit == commits[name]
+        assert locked.to_dependency_ref().get_unique_key() == ref.get_unique_key()
+        for relative, content in sources[name].items():
+            assert (ref.get_install_path(modules_root) / relative).read_bytes() == content
+
+
+def _persist_legacy_last_writer_receipt(
+    lock: LockFile,
+    lock_path: Path,
+    aggregate: Path,
+    primary_key: str,
+    survivor_key: str,
+) -> None:
+    """Persist a survivor-only old receipt without changing rendered sections."""
+    initial = aggregate.read_text(encoding="utf-8")
+    record = next(iter(lock.deployment_ledger.records.values()))
+    legacy_record = replace(record, owners=(survivor_key,), active_owner=survivor_key)
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger(records={legacy_record.locator.key: legacy_record}), lock
+    )
+    lock.save(lock_path)
+    legacy = LockFile.read(lock_path)
+    assert legacy is not None
+    assert list(legacy.deployment_ledger.records.values()) == [legacy_record]
+    assert legacy.dependencies[primary_key].deployed_files == []
+    assert legacy.dependencies[primary_key].deployed_file_hashes == {}
+    aggregate_rel = ".copilot/copilot-instructions.md"
+    assert legacy.dependencies[survivor_key].deployed_files == [aggregate_rel]
+    assert legacy.dependencies[survivor_key].deployed_file_hashes == {
+        aggregate_rel: legacy_record.content_hash
+    }
+    assert aggregate.read_text(encoding="utf-8") == initial
+    assert (
+        legacy_record.content_hash == "sha256:" + hashlib.sha256(aggregate.read_bytes()).hexdigest()
+    )
 
 
 def _assert_recovered_sections(
@@ -53,6 +104,17 @@ def _assert_recovered_sections(
     }
     assert recovered.count(survivor_body.strip()) == 1
     assert recovered.count(_ROOT_BODY.strip()) == 1
+
+
+def _assert_root_only_state(aggregate: Path, lock_path: Path) -> None:
+    """Verify exact root content and its sole surviving receipt."""
+    assert aggregate.read_text(encoding="utf-8") == (
+        f"{_HEADER}\n<!-- apm:source:local -->\n{_ROOT_BODY.strip()}\n<!-- /apm:source -->\n"
+    )
+    root_lock = LockFile.read(lock_path)
+    assert root_lock is not None
+    assert root_lock.get_package_dependencies() == []
+    assert [record.owners for record in root_lock.deployment_ledger.records.values()] == [(".",)]
 
 
 @pytest.mark.parametrize(
@@ -151,15 +213,7 @@ def test_generated_copilot_aggregate_lifecycle(
     lock = LockFile.read(isolated.config_root / "apm.lock.yaml")
     assert lock is not None
     expected_keys = {refs[name].get_unique_key() for name in refs}
-    assert {dep.get_unique_key() for dep in lock.get_package_dependencies()} == expected_keys
-    for name, ref in refs.items():
-        locked = lock.dependencies[ref.get_unique_key()]
-        assert locked.resolved_commit == commits[name]
-        assert locked.to_dependency_ref().get_unique_key() == ref.get_unique_key()
-        for relative, content in sources[name].items():
-            assert (
-                ref.get_install_path(isolated.config_root / "apm_modules") / relative
-            ).read_bytes() == content
+    _assert_installed_sources(lock, refs, commits, sources, isolated.config_root / "apm_modules")
     assert load_yaml(isolated.config_root / "apm.yml") == manifest
     initial = aggregate.read_text(encoding="utf-8")
     print("INITIAL AGGREGATE", initial)
@@ -184,27 +238,12 @@ def test_generated_copilot_aggregate_lifecycle(
         assert initial.count(_ROOT_BODY.strip()) == 1
     aggregate_rel = ".copilot/copilot-instructions.md"
     if obligation == "legacy-last-writer":
-        # Reproduce an old receipt without changing the two rendered sections.
-        survivor_key = refs["survivor"].get_unique_key()
-        legacy_record = replace(records[0], owners=(survivor_key,), active_owner=survivor_key)
-        DeploymentLedgerCodec.apply_to_lockfile(
-            DeploymentLedger(records={legacy_record.locator.key: legacy_record}), lock
-        )
-        lock_path = isolated.config_root / "apm.lock.yaml"
-        lock.save(lock_path)
-        legacy = LockFile.read(lock_path)
-        assert legacy is not None
-        assert list(legacy.deployment_ledger.records.values()) == [legacy_record]
-        assert legacy.dependencies[refs["primary"].get_unique_key()].deployed_files == []
-        assert legacy.dependencies[refs["primary"].get_unique_key()].deployed_file_hashes == {}
-        assert legacy.dependencies[survivor_key].deployed_files == [aggregate_rel]
-        assert legacy.dependencies[survivor_key].deployed_file_hashes == {
-            aggregate_rel: legacy_record.content_hash
-        }
-        assert aggregate.read_text(encoding="utf-8") == initial
-        assert (
-            legacy_record.content_hash
-            == "sha256:" + hashlib.sha256(aggregate.read_bytes()).hexdigest()
+        _persist_legacy_last_writer_receipt(
+            lock,
+            isolated.config_root / "apm.lock.yaml",
+            aggregate,
+            refs["primary"].get_unique_key(),
+            refs["survivor"].get_unique_key(),
         )
     survivor_path = refs["survivor"].get_install_path(isolated.config_root / "apm_modules")
     installed_instruction = survivor_path / ".apm/instructions/survivor.instructions.md"
@@ -356,15 +395,7 @@ def test_generated_copilot_aggregate_lifecycle(
         assert remaining.count(_ROOT_BODY.strip()) == 1, "Actual root-local contribution lost"
         assert root_instruction.read_text(encoding="utf-8") == _ROOT_BODY
         command("uninstall", declarations[1]["git"], "--global")
-        assert aggregate.read_text(encoding="utf-8") == (
-            f"{_HEADER}\n<!-- apm:source:local -->\n{_ROOT_BODY.strip()}\n<!-- /apm:source -->\n"
-        )
-        root_lock = LockFile.read(isolated.config_root / "apm.lock.yaml")
-        assert root_lock is not None
-        assert root_lock.get_package_dependencies() == []
-        assert [record.owners for record in root_lock.deployment_ledger.records.values()] == [
-            (".",)
-        ]
+        _assert_root_only_state(aggregate, isolated.config_root / "apm.lock.yaml")
     else:
         survivor = refs["survivor"]
         lock = assert_survivor_state()
