@@ -1360,7 +1360,7 @@ apm_resolve_install_paths /usr/local/bin/apm /opt/homebrew/bin/apm /usr/local/li
 if [ "$PLATFORM" = "linux" ]; then
     # Get glibc version
     GLIBC_VERSION=$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    REQUIRED_GLIBC="2.35"
+    REQUIRED_GLIBC="2.38"
     
     if [ -n "$GLIBC_VERSION" ]; then
         # Compare versions
@@ -1378,7 +1378,7 @@ if [ "$PLATFORM" = "linux" ]; then
             print_pip_recovery_guidance
             echo ""
             echo "Other installation options:"
-            echo "  1. Use a system with glibc 2.35+ for the prebuilt binary"
+            echo "  1. Use a system with glibc $REQUIRED_GLIBC+ for the prebuilt binary"
             echo "  2. Build from source: git clone $GITHUB_URL/$APM_REPO.git && cd apm && uv sync && uv run pip install -e ."
             exit 1
         fi
@@ -1812,7 +1812,7 @@ else
     if echo "$BINARY_TEST_OUTPUT" | grep -q "GLIBC"; then
         apm_echo "${YELLOW}[!] glibc version incompatibility detected${NC}"
         if [ -n "$GLIBC_VERSION" ]; then
-            echo "Your system has glibc $GLIBC_VERSION but the binary requires glibc 2.35+"
+            echo "Your system has glibc $GLIBC_VERSION but the binary requires glibc $REQUIRED_GLIBC+"
         fi
         echo ""
     fi
