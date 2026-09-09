@@ -14,7 +14,9 @@ control. The claim decision belongs to ``DeploymentReconciler``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -135,6 +137,89 @@ def test_aggregate_attachment_invalidates_digest_after_cleanup(tmp_path, monkeyp
         next(iter(lock.deployment_ledger.records.values())).content_hash
         == compute_deployed_hashes([relative], tmp_path)[relative]
     )
+
+
+@pytest.mark.parametrize("has_root", [False, True], ids=["no-root", "root"])
+def test_warm_aggregate_root_carry_work_is_linear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_root: bool
+) -> None:
+    """Count actual codec owner freezing through the existing-local-state chain."""
+    from apm_cli.core import deployment_ledger as codec
+    from apm_cli.core.deployment_state import DeploymentLedger, DeploymentRecord
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.phases.lockfile import compute_deployed_hashes
+    from apm_cli.integration.targets import resolve_targets
+
+    observations = []
+    relative = ".copilot/copilot-instructions.md"
+    original_record = codec.DeploymentRecord
+    for size in (50, 500):
+        root = tmp_path / str(size)
+        aggregate = root / relative
+        aggregate.parent.mkdir(parents=True)
+        aggregate.write_bytes(b"current contribution\n" * size)
+        current_hash = compute_deployed_hashes([relative], root)[relative]
+        current, previous = LockFile(), LockFile()
+        claims = {}
+        for index in range(size):
+            owner = f"fixture/package-{index}"
+            current.add_dependency(LockedDependency(repo_url=owner))
+            previous.add_dependency(LockedDependency(repo_url=owner))
+            claims[owner] = [relative]
+        owners = (*claims, ".") if has_root else tuple(claims)
+        locator = codec.DeploymentLedgerCodec._legacy_locator(relative)
+        prior_record = DeploymentRecord(
+            locator=locator,
+            owners=owners,
+            active_owner=owners[-1],
+            content_hash="sha256:" + "a" * 64,
+        )
+        codec.DeploymentLedgerCodec.apply_to_lockfile(
+            DeploymentLedger(records={locator.key: prior_record}), previous
+        )
+        ctx = _ctx(
+            package_deployed_files=claims,
+            existing_lockfile=previous,
+            targets=resolve_targets(root, user_scope=True, explicit_target=["copilot"]),
+            project_root=root,
+        )
+        ctx.scope = InstallScope.USER
+        ctx.local_deployed_files = [relative] if has_root else []
+        ctx.logger = None
+        builder = LockfileBuilder(ctx)
+        builder._attach_deployed_files(current)
+        counts = {"records": 0, "owners": 0}
+
+        def record(**kwargs: Any) -> DeploymentRecord:
+            counts["records"] += 1
+            counts["owners"] += len(kwargs["owners"])
+            return original_record(**kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(codec, "DeploymentRecord", record)
+            builder._preserve_existing_local_state(current)
+        observations.append(dict(counts))
+        assert counts["records"] > 0, "The warm codec route was not exercised"
+        assert len(current.deployment_ledger.records) == 1
+        final = next(iter(current.deployment_ledger.records.values()))
+        assert final.owners == owners
+        assert final.active_owner == owners[-1]
+        assert final.content_hash == current_hash
+        assert all(dep.deployed_files == [relative] for dep in current.dependencies.values())
+        assert all(
+            dep.deployed_file_hashes == {relative: current_hash}
+            for dep in current.dependencies.values()
+        )
+        assert current.local_deployed_files == ([relative] if has_root else [])
+        assert current.local_deployed_file_hashes == (
+            {relative: current_hash} if has_root else {}
+        )
+        restored = LockFile.from_yaml(current.to_yaml())
+        assert restored.deployment_ledger == current.deployment_ledger
+    small, large = observations
+    print("WARM CODEC OWNER WORK", observations)
+    assert large["owners"] < 15 * small["owners"]
+    assert large["records"] == small["records"]
 
 
 def _target(name, root_dir=".claude"):

@@ -2,6 +2,8 @@
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 
@@ -553,6 +555,94 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
 
     assert rebuilt.deployment_ledger == ledger
     assert rebuilt.is_semantically_equivalent(lockfile)
+
+
+@pytest.mark.parametrize("value", [".copilot/copilot-instructions.md", "unknown://entry"])
+@pytest.mark.parametrize(
+    "first_hash,second_hash,root_hash,expected_hash",
+    [
+        ("sha256:first", "sha256:second", None, "sha256:first"),
+        (None, "sha256:second", None, "sha256:second"),
+        (None, None, None, None),
+        ("sha256:first", "", "", "sha256:first"),
+        ("sha256:first", "sha256:second", "sha256:root", "sha256:root"),
+    ],
+)
+def test_legacy_accumulation_preserves_revisited_owner_and_hash_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+    first_hash: str | None,
+    second_hash: str | None,
+    root_hash: str | None,
+    expected_hash: str | None,
+) -> None:
+    """A repeated owner moves last; absent/empty hashes retain the latest proof."""
+    lock = LockFile()
+    for owner, content_hash in (("first", first_hash), ("second", second_hash)):
+        lock.add_dependency(
+            LockedDependency(
+                repo_url=f"fixture/{owner}",
+                deployed_files=[value, value],
+                deployed_file_hashes={value: content_hash} if content_hash is not None else {},
+            )
+        )
+    entries = list(lock.dependencies.items())
+    lock.local_deployed_files = [value]
+    lock.local_deployed_file_hashes = {value: root_hash} if root_hash is not None else {}
+    # Revisit an owner in the codec's input stream, including duplicate paths.
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            lock, "dependencies", SimpleNamespace(items=lambda: [*entries, entries[0]])
+        )
+        ledger = DeploymentLedgerCodec.from_lockfile(lock)
+    assert len(ledger.records) == 1
+    record = next(iter(ledger.records.values()))
+    assert record.owners == ("fixture/second", "fixture/first", ".")
+    assert record.active_owner == "."
+    assert record.content_hash == expected_hash
+    if value.startswith("unknown:"):
+        assert record.locator.kind == LocatorKind.URI
+        assert record.locator.target == "unknown"
+        assert urlparse(record.locator.value) == urlparse(value)
+    else:
+        assert record.locator.kind == LocatorKind.PROJECT_RELATIVE
+        assert record.locator.scope == "user"
+        assert record.locator.value == value
+    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock)
+    assert DeploymentLedgerCodec.legacy_deployed_file_claims(lock) == {value: "fixture/first"}
+    assert all(dep.deployed_files == [value] for dep in lock.dependencies.values())
+    expected_hashes = {value: expected_hash} if expected_hash is not None else {}
+    assert all(
+        dep.deployed_file_hashes == expected_hashes for dep in lock.dependencies.values()
+    )
+    assert lock.local_deployed_file_hashes == expected_hashes
+    assert LockFile.from_yaml(lock.to_yaml()).deployment_ledger == ledger
+
+
+@pytest.mark.parametrize("kind", [LocatorKind.TARGET_RELATIVE, LocatorKind.URI])
+@pytest.mark.parametrize("content_hash", [None, "sha256:current"])
+def test_canonical_native_rows_bypass_legacy_accumulation(
+    kind: LocatorKind, content_hash: str | None
+) -> None:
+    """Canonical native/unknown-URI rows keep their non-last active owner and null hash."""
+    locator = DeploymentLocator(
+        kind=kind,
+        target="native-fixture",
+        value="unknown://entry" if kind == LocatorKind.URI else "native/output.md",
+        runtime="fixture-runtime",
+        scope="user",
+    )
+    record = DeploymentRecord(
+        locator=locator,
+        owners=("fixture/first", "fixture/second"),
+        active_owner="fixture/first",
+        content_hash=content_hash,
+    )
+    ledger = DeploymentLedger(records={locator.key: record})
+    lock = LockFile()
+    DeploymentLedgerCodec.apply_to_lockfile(ledger, lock, write_legacy_views=False)
+    assert DeploymentLedgerCodec.from_lockfile(lock) is ledger
+    assert DeploymentLedgerCodec.from_rows(DeploymentLedgerCodec.rows(ledger)) == ledger
 
 
 def test_legacy_shared_agents_path_has_unattributable_target() -> None:

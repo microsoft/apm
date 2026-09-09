@@ -217,22 +217,31 @@ class DeploymentLedgerCodec:
         ):
             return current
 
-        records: dict[str, DeploymentRecord] = {}
+        legacy_records: dict[str, tuple[DeploymentLocator, dict[str, None], str | None]] = {}
         for owner, dependency in lockfile.dependencies.items():
             if owner == ".":
                 continue
             DeploymentLedgerCodec._add_legacy_paths(
-                records,
+                legacy_records,
                 owner,
                 dependency.deployed_files,
                 dependency.deployed_file_hashes,
             )
         DeploymentLedgerCodec._add_legacy_paths(
-            records,
+            legacy_records,
             ".",
             lockfile.local_deployed_files,
             lockfile.local_deployed_file_hashes,
         )
+        records = {
+            key: DeploymentRecord(
+                locator=locator,
+                owners=tuple(owners),
+                active_owner=next(reversed(owners)),
+                content_hash=content_hash,
+            )
+            for key, (locator, owners, content_hash) in legacy_records.items()
+        }
         service_targets = (
             ("mcp", getattr(lockfile, "mcp_target_servers", {})),
             ("lsp", getattr(lockfile, "lsp_target_servers", {})),
@@ -726,7 +735,7 @@ class DeploymentLedgerCodec:
 
     @staticmethod
     def _add_legacy_paths(
-        records: dict[str, DeploymentRecord],
+        records: dict[str, tuple[DeploymentLocator, dict[str, None], str | None]],
         owner: str,
         paths: list[str],
         hashes: dict[str, str],
@@ -734,15 +743,14 @@ class DeploymentLedgerCodec:
         for value in paths:
             locator = DeploymentLedgerCodec._legacy_locator(value)
             prior = records.get(locator.key)
-            owners = list(prior.owners) if prior else []
-            if owner in owners:
-                owners.remove(owner)
-            owners.append(owner)
-            records[locator.key] = DeploymentRecord(
-                locator=locator,
-                owners=tuple(owners),
-                active_owner=owner,
-                content_hash=hashes.get(value) or (prior.content_hash if prior else None),
+            owners = prior[1] if prior else {}
+            # Move repeats to the end without copying an expanding owner tuple.
+            owners.pop(owner, None)
+            owners[owner] = None
+            records[locator.key] = (
+                locator,
+                owners,
+                hashes.get(value) or (prior[2] if prior else None),
             )
 
     @staticmethod
