@@ -229,4 +229,5 @@ def test_real_split_and_xdist_preserve_complete_disjoint_coverage(
         assert stored
         assert all(duration >= 0 for duration in stored.values())
     assert observed[0].isdisjoint(observed[1])
-    assert observed[0] | observed[1] == expected
+    # xdist loadgroup retains the fixture-affinity suffix in standard JUnit names.
+    assert observed[0] | observed[1] == {f"{node}@shared_home" for node in expected}
