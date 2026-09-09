@@ -619,8 +619,9 @@ found in the organization cascade: `.github-private`, `.github`, `.apm`, then
 `_apm`. Azure DevOps remotes use the org `apm` project and `apm-policy`
 repository. Legacy `_apm/_apm` is a temporary fallback after a 404 from the
 primary coordinate.
-GitLab remotes use `<top-level-group>/apm-policy/apm-policy.yml`, using the
-first path segment of the remote; nested subgroup scopes are not searched. Set
+GitLab walks the subgroup tree from the project's own group up to the top-level
+group and applies the closest `apm-policy` project; a flat `<group>/<project>`
+remote probes only `<group>/apm-policy`. Set
 `GITLAB_HOST` or `APM_GITLAB_HOSTS` to recognize a self-managed host, and use
 `APM_GITLAB_POLICY_REPO` to select another project name. Plain git remotes
 fall through with no policy applied. Repositories with no detectable git remote

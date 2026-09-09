@@ -411,10 +411,19 @@ def _extract_extends_host(ref: str) -> str | None:
         return None
     parts = ref.split("/")
     if len(parts) >= 3:
-        try:
-            return (urlsplit(f"//{parts[0]}").hostname or "").lower() or None
-        except ValueError:
-            return None
+        # Only treat the first segment as a host when it is host-like: an FQDN
+        # (contains a dot) or an explicit ``host:port``. A bare single label is
+        # a namespace segment, not a host -- e.g. a GitLab nested-subgroup ref
+        # ``extends: "acme/dept-a/apm-policy"`` (#2753), whose first segment is
+        # the top-level group, must NOT trip the cross-host guard. A real
+        # attacker host (``evil.example.com/org/repo``) is an FQDN and is still
+        # detected and rejected.
+        first = parts[0]
+        if "." in first or ":" in first:
+            try:
+                return (urlsplit(f"//{first}").hostname or "").lower() or None
+            except ValueError:
+                return None
     return None
 
 
@@ -858,6 +867,11 @@ def _auto_discover(
     except ValueError as exc:
         return PolicyFetchResult(error=str(exc), outcome="cache_miss_fetch_fail")
     is_ado = is_azure_devops_hostname(host)
+    is_gitlab = is_gitlab_hostname(host)
+    # GitLab discovery walks the subgroup tree from the deepest subgroup up to
+    # the top-level group (closest policy wins, see #2753). Fall back to the
+    # single top-level org when the namespace cannot be derived.
+    gitlab_namespaces = (_gitlab_namespace_descending(project_root) or [org]) if is_gitlab else []
 
     for candidate_repo in candidates:
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
@@ -871,10 +885,10 @@ def _auto_discover(
                 expected_hash=expected_hash,
                 cache_only=cache_only,
             )
-        elif is_gitlab_hostname(host):
-            result = _gitlab._fetch_from_gitlab_repo(
-                org=org,
-                repo=candidate_repo,
+        elif is_gitlab:
+            result = _gitlab_walk_candidate(
+                candidate_repo=candidate_repo,
+                namespaces=gitlab_namespaces,
                 host=host,
                 port=port,
                 project_root=project_root,
@@ -937,10 +951,13 @@ def _extract_org_from_git_remote(
     return (identity[0], identity[1]) if identity is not None else None
 
 
-def _extract_org_host_port_from_git_remote(
-    project_root: Path,
-) -> tuple[str, str, int | None] | None:
-    """Extract ``(org, host, port)`` from git remote origin."""
+def _git_remote_origin_url(project_root: Path) -> str | None:
+    """Return the ``origin`` remote URL, or ``None`` when unavailable.
+
+    Canonical reader of the project's ``origin`` remote, shared by
+    :func:`_extract_org_host_port_from_git_remote` and GitLab subgroup
+    discovery so the ``git remote get-url`` subprocess lives in one place.
+    """
     try:
         result = subprocess.run(
             [get_git_executable(), "remote", "get-url", "origin"],
@@ -950,21 +967,147 @@ def _extract_org_host_port_from_git_remote(
             cwd=project_root,
             timeout=5,
         )
-        if result.returncode != 0:
-            return None
-        remote_url = result.stdout.strip()
-        parsed_identity = _parse_remote_url(remote_url)
-        if parsed_identity is None:
-            return None
-        port = None
-        if "://" in remote_url:
-            try:
-                port = urlparse(remote_url).port
-            except ValueError:
-                return None
-        return parsed_identity[0], parsed_identity[1], port
-    except (ValueError, subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _extract_org_host_port_from_git_remote(
+    project_root: Path,
+) -> tuple[str, str, int | None] | None:
+    """Extract ``(org, host, port)`` from git remote origin."""
+    remote_url = _git_remote_origin_url(project_root)
+    if not remote_url:
+        return None
+    try:
+        parsed_identity = _parse_remote_url(remote_url)
+    except ValueError:
+        return None
+    if parsed_identity is None:
+        return None
+    port = None
+    if "://" in remote_url:
+        try:
+            port = urlparse(remote_url).port
+        except ValueError:
+            return None
+    return parsed_identity[0], parsed_identity[1], port
+
+
+def _gitlab_namespace_descending(project_root: Path) -> list[str] | None:
+    """Return GitLab policy namespaces from the deepest subgroup to the top.
+
+    Probe order is closest-first. For a project remote
+    ``gitlab.com/acme/dept-a/team-x/my-project`` this returns
+    ``["acme/dept-a/team-x", "acme/dept-a", "acme"]``; a flat
+    ``acme/my-project`` returns ``["acme"]`` (identical to top-level-only
+    discovery). Returns ``None`` when the origin remote is missing or has no
+    namespace segment (a degenerate remote with no owner), so callers can fall
+    back to their existing single-org behaviour.
+    """
+    remote_url = _git_remote_origin_url(project_root)
+    if not remote_url:
+        return None
+    parts = _remote_url_parts(remote_url)
+    if parts is None:
+        return None
+    _host, segments = parts
+    # The final segment is the project; everything before it is the namespace.
+    namespace_segments = segments[:-1]
+    if not namespace_segments:
+        return None
+    return ["/".join(namespace_segments[:n]) for n in range(len(namespace_segments), 0, -1)]
+
+
+def _gitlab_walk_candidate(
+    *,
+    candidate_repo: str,
+    namespaces: list[str],
+    host: str,
+    port: int | None,
+    project_root: Path,
+    no_cache: bool,
+    expected_hash: str | None,
+    cache_only: bool,
+) -> PolicyFetchResult:
+    """Probe one GitLab policy repo up the subgroup tree (closest wins, #2753).
+
+    Fetches ``<namespace>/<candidate_repo>/apm-policy.yml`` for each namespace
+    in *namespaces* (already ordered deepest-first). The first non-``absent``
+    outcome wins; an ``absent`` level continues to the next-shallower group.
+    When every level is absent the last ``absent`` result is returned so the
+    caller's candidate cascade can proceed unchanged.
+    """
+    result = PolicyFetchResult(error=None, outcome="absent")
+    for namespace in namespaces:
+        result = _gitlab._fetch_from_gitlab_repo(
+            org=namespace,
+            repo=candidate_repo,
+            host=host,
+            port=port,
+            project_root=project_root,
+            no_cache=no_cache,
+            expected_hash=expected_hash,
+            cache_only=cache_only,
+        )
+        if result.outcome != "absent":
+            return result
+        logger.debug(
+            "GitLab policy absent at %s/%s; trying parent group",
+            namespace,
+            candidate_repo,
+        )
+    return result
+
+
+def _remote_url_parts(url: str) -> tuple[str, list[str]] | None:
+    """Split a git remote URL into ``(host, path_segments)``.
+
+    Canonical splitter shared by :func:`_parse_remote_url` (which applies
+    host-specific org interpretation on top) and GitLab subgroup discovery
+    (:func:`_gitlab_namespace_descending`). Handles SCP-like SSH URLs with any
+    username (not just ``git@``) and ``scheme://`` URLs. Path segments are
+    cleaned of empty parts and the trailing ``.git`` suffix; no host-specific
+    interpretation (ADO ``v3/`` prefix, visualstudio subdomain, ...) is applied
+    here -- that stays the caller's responsibility.
+
+    Returns ``None`` when the URL cannot be split.
+    """
+    if not url:
+        return None
+
+    # SCP-like SSH: <user>@<host>:<path> -- any user, not just `git`.
+    # Closes #1159 for non-`git` SSH users (EMU, custom GHE accounts).
+    scp_match = SCP_LIKE_RE.match(url)
+    if scp_match:
+        host = scp_match.group("host")
+        path_part = scp_match.group("path")
+        segments = [p for p in path_part.rstrip("/").removesuffix(".git").split("/") if p]
+        if not host or not segments:
+            return None
+        return (host, segments)
+
+    # HTTPS: https://github.com/owner/repo.git
+    if "://" in url:
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            # urlparse only raises ValueError in practice, but the legacy
+            # parser swallowed any exception here; preserve that. The
+            # ``/tfs/`` ValueError comes from parse_ado_repo_url (in
+            # _parse_remote_url), never from urlparse, so nothing to re-raise.
+            return None
+        host = parsed.hostname or ""
+        segments = [
+            p for p in parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/") if p
+        ]
+        if not host or not segments:
+            return None
+        return (host, segments)
+
+    return None
 
 
 def _parse_remote_url(url: str) -> tuple[str, str] | None:
@@ -978,52 +1121,36 @@ def _parse_remote_url(url: str) -> tuple[str, str] | None:
 
     Returns None if URL can't be parsed.
     """
-    if not url:
+    parts = _remote_url_parts(url)
+    if parts is None:
         return None
+    host, segments = parts
 
     # SCP-like SSH: <user>@<host>:<path> -- any user, not just `git`.
-    # Closes #1159 for non-`git` SSH users (EMU, custom GHE accounts).
-    scp_match = SCP_LIKE_RE.match(url)
-    if scp_match:
-        host = scp_match.group("host")
-        path_part = scp_match.group("path")
-        try:
-            parts = path_part.rstrip("/").removesuffix(".git").split("/")
-            parts = [p for p in parts if p]
-            if not parts:
-                return None
-            # Azure DevOps SSH carries a leading 'v3/' segment that is
-            # NOT the org. The org is the second segment.
-            if host == "ssh.dev.azure.com" and parts[0] == "v3" and len(parts) >= 2:
-                return (parts[1], host)
-            return (parts[0], host)
-        except (ValueError, IndexError):
-            return None
+    if SCP_LIKE_RE.match(url):
+        # Azure DevOps SSH carries a leading 'v3/' segment that is
+        # NOT the org. The org is the second segment.
+        if host == "ssh.dev.azure.com" and segments[0] == "v3" and len(segments) >= 2:
+            return (segments[1], host)
+        return (segments[0], host)
 
     # HTTPS: https://github.com/owner/repo.git
     # ADO:   https://dev.azure.com/org/project/_git/repo
-    if "://" in url:
-        try:
-            parsed = urlparse(url)
-            host = parsed.hostname or ""
-            if is_azure_devops_hostname(host):
-                ado_coordinates = parse_ado_repo_url(url)
-                if ado_coordinates is None:
-                    return None
-                return ado_coordinates[0], host
-            path_parts = parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/")
-            if is_visualstudio_legacy_hostname(host):
-                return (host[: -len(".visualstudio.com")], host)
-            if host and path_parts and path_parts[0]:
-                return (path_parts[0], host)
-        except ValueError as exc:
-            if "mounted below '/tfs/'" in str(exc):
-                raise
-            return None
-        except Exception:
-            return None
-
-    return None
+    try:
+        if is_azure_devops_hostname(host):
+            ado_coordinates = parse_ado_repo_url(url)
+            if ado_coordinates is None:
+                return None
+            return ado_coordinates[0], host
+        if is_visualstudio_legacy_hostname(host):
+            return (host[: -len(".visualstudio.com")], host)
+        return (segments[0], host)
+    except ValueError as exc:
+        if "mounted below '/tfs/'" in str(exc):
+            raise
+        return None
+    except Exception:
+        return None
 
 
 def _fetch_from_url(

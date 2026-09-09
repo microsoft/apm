@@ -136,8 +136,12 @@ def _fetch_gitlab_chain_parent(
             )
         org = current_org
     else:
-        parts = parent_ref.strip("/").split("/")
-        if len(parts) == 3:
+        parts = [p for p in parent_ref.strip("/").split("/") if p]
+        # Strip an explicit leaf-host prefix so ``host/namespace/.../repo`` and
+        # ``namespace/.../repo`` are treated the same. Only the leaf host (with
+        # matching port) is accepted; cross-host refs are rejected upstream by
+        # ``_validate_extends_host``. Requires at least host + namespace + repo.
+        if len(parts) >= 3:
             try:
                 explicit = urlsplit(f"//{parts[0]}")
             except ValueError:
@@ -149,13 +153,17 @@ def _fetch_gitlab_chain_parent(
                 and explicit.port == port
             ):
                 parts = parts[1:]
-        if len(parts) != 2:
+        # A GitLab namespace may be nested (subgroups, see #2753): everything
+        # before the final segment is the namespace, the final segment is the
+        # policy repo. Requires at least ``namespace/repo``.
+        if len(parts) < 2:
             return PolicyFetchResult(
                 source=f"org:{parent_ref}",
                 error=f"Invalid GitLab policy reference: {parent_ref}",
                 outcome="cache_miss_fetch_fail",
             )
-        org, repo = parts
+        org = "/".join(parts[:-1])
+        repo = parts[-1]
     return _fetch_from_gitlab_repo(
         org=org,
         repo=repo,

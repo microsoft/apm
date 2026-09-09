@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitLab org-policy discovery now walks the subgroup tree from the project's own group up to the top-level group and applies the closest `apm-policy` project, so a team can scope its own governance under a subgroup instead of only the top-level group; a subgroup policy can `extends:` an ancestor group's policy (including nested-namespace references). Flat `<group>/<project>` remotes are unchanged. (closes #2753) (#PR)
 - gh-aw's shared APM import now supports `token-source: github-token`; after consumers re-vendor the workflow, its read-only current-repository identity can fetch same-repository private packages, while `cascade` remains the default and cross-repository packages still require a dedicated token or GitHub App. (#2706)
 - OpenAPM v0.1 adds `req-pl-018` for dependency-policy identity casing and amends `req-rs-016` clause (3), the Section 6.4 merge rules, and the Section 6.5 pattern grammar so repository identity and policy matching cannot diverge; Section 11.2 item 6 now requires the per-host case rule in `CONFORMANCE.md`. (#2706)
 

@@ -97,7 +97,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-pl-008](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-008) | MUST | 6.3.1 | governance | active | 1 | - |
 | [req-pl-009](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-009) | MUST | 6.6 | governance | active | 1 | - |
 | [req-pl-010](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-010) | MUST | 6.2 | governance | active | 1 | - |
-| [req-pl-011](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-011) | MUST | 6.1.1 | governance | active | 2 | - |
+| [req-pl-011](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-011) | MUST | 6.1.1 | governance | active | 3 | - |
 | [req-pl-012](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-012) | MUST | 6.1.1 | governance | active | 1 | - |
 | [req-pl-013](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-013) | MUST | 6.8 | governance | active | 1 | - |
 | [req-pl-014](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-014) | MUST | 6.8 | governance | active | 1 | - |

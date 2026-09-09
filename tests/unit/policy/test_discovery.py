@@ -29,6 +29,7 @@ from apm_cli.policy.discovery import (
     PolicyFetchResult,
     _auto_discover,
     _cache_key,
+    _extract_extends_host,
     _extract_org_from_git_remote,
     _extract_org_host_port_from_git_remote,
     _fetch_ado_contents,
@@ -39,11 +40,14 @@ from apm_cli.policy.discovery import (
     _fetch_from_url,
     _fetch_github_contents,
     _get_cache_dir,
+    _gitlab_namespace_descending,
     _load_from_file,
     _parse_remote_url,
     _policy_repo_candidates,
     _read_cache,
     _read_cache_entry,
+    _remote_url_parts,
+    _validate_extends_host,
     _write_cache,
     discover_policy,
 )
@@ -156,6 +160,78 @@ class TestParseRemoteUrl(unittest.TestCase):
     def test_ado_ssh_v3_prefix_with_git_suffix(self):
         result = _parse_remote_url("git@ssh.dev.azure.com:v3/myorg/myproject/myrepo.git")
         self.assertEqual(result, ("myorg", "ssh.dev.azure.com"))
+
+    # --- Nested GitLab subgroups: org stays the top-level group (#2753) ---
+
+    def test_https_gitlab_nested_subgroups_org_is_top_level(self):
+        result = _parse_remote_url("https://gitlab.com/acme/dept-a/team-x/my-project.git")
+        self.assertEqual(result, ("acme", "gitlab.com"))
+
+    def test_ssh_gitlab_nested_subgroups_org_is_top_level(self):
+        result = _parse_remote_url("git@gitlab.com:acme/dept-a/team-x/my-project.git")
+        self.assertEqual(result, ("acme", "gitlab.com"))
+
+
+class TestRemoteUrlParts(unittest.TestCase):
+    """Test _remote_url_parts -- the shared host + path-segments splitter."""
+
+    def test_https_nested_segments(self):
+        result = _remote_url_parts("https://gitlab.com/acme/dept-a/team-x/my-project.git")
+        self.assertEqual(result, ("gitlab.com", ["acme", "dept-a", "team-x", "my-project"]))
+
+    def test_ssh_nested_segments(self):
+        result = _remote_url_parts("git@gitlab.com:acme/dept-a/team-x/my-project.git")
+        self.assertEqual(result, ("gitlab.com", ["acme", "dept-a", "team-x", "my-project"]))
+
+    def test_https_flat_segments(self):
+        result = _remote_url_parts("https://gitlab.com/acme/my-project")
+        self.assertEqual(result, ("gitlab.com", ["acme", "my-project"]))
+
+    def test_https_trailing_slash_is_cleaned(self):
+        result = _remote_url_parts("https://gitlab.com/acme/my-project/")
+        self.assertEqual(result, ("gitlab.com", ["acme", "my-project"]))
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(_remote_url_parts(""))
+
+    def test_non_url_returns_none(self):
+        self.assertIsNone(_remote_url_parts("not-a-url"))
+
+    def test_ssh_empty_path_returns_none(self):
+        self.assertIsNone(_remote_url_parts("git@gitlab.com:"))
+
+    def test_https_no_path_returns_none(self):
+        self.assertIsNone(_remote_url_parts("https://gitlab.com/"))
+
+
+class TestGitlabNamespaceDescending(unittest.TestCase):
+    """Test _gitlab_namespace_descending -- subgroup probe order (#2753)."""
+
+    @patch("apm_cli.policy.discovery._git_remote_origin_url")
+    def test_nested_subgroups_deepest_first(self, mock_url):
+        mock_url.return_value = "https://gitlab.com/acme/dept-a/team-x/my-project.git"
+        result = _gitlab_namespace_descending(Path("/fake"))
+        self.assertEqual(
+            result,
+            ["acme/dept-a/team-x", "acme/dept-a", "acme"],
+        )
+
+    @patch("apm_cli.policy.discovery._git_remote_origin_url")
+    def test_flat_project_yields_single_top_level(self, mock_url):
+        mock_url.return_value = "git@gitlab.com:acme/my-project.git"
+        result = _gitlab_namespace_descending(Path("/fake"))
+        self.assertEqual(result, ["acme"])
+
+    @patch("apm_cli.policy.discovery._git_remote_origin_url")
+    def test_no_remote_returns_none(self, mock_url):
+        mock_url.return_value = None
+        self.assertIsNone(_gitlab_namespace_descending(Path("/fake")))
+
+    @patch("apm_cli.policy.discovery._git_remote_origin_url")
+    def test_no_namespace_segment_returns_none(self, mock_url):
+        # A remote with only one path segment has no owning namespace.
+        mock_url.return_value = "https://gitlab.com/solo"
+        self.assertIsNone(_gitlab_namespace_descending(Path("/fake")))
 
 
 class TestExtractOrgFromGitRemote(unittest.TestCase):
@@ -1112,6 +1188,134 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertEqual(result.outcome, "absent")
             self.assertIsNone(result.error)
 
+    # --- GitLab subgroup walk: closest policy wins (#2753) ---
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_subgroup_closest_wins(self, mock_extract, mock_ns, mock_gitlab_fetch):
+        """The deepest subgroup with a policy wins; parents are not probed."""
+        mock_extract.return_value = ("acme", "gitlab.com", None)
+        mock_ns.return_value = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        mock_gitlab_fetch.return_value = PolicyFetchResult(
+            policy=ApmPolicy(),
+            source="org:gitlab.com/acme/dept-a/team-x/apm-policy",
+            outcome="found",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertTrue(result.found)
+        mock_gitlab_fetch.assert_called_once()
+        self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "acme/dept-a/team-x")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_subgroup_absent_ascends_to_parent(
+        self, mock_extract, mock_ns, mock_gitlab_fetch
+    ):
+        """Absent at the deepest levels -> ascend until a policy is found."""
+        mock_extract.return_value = ("acme", "gitlab.com", None)
+        mock_ns.return_value = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        mock_gitlab_fetch.side_effect = [
+            PolicyFetchResult(outcome="absent"),  # team-x: no policy
+            PolicyFetchResult(outcome="absent"),  # dept-a: no policy
+            PolicyFetchResult(
+                policy=ApmPolicy(),
+                source="org:gitlab.com/acme/apm-policy",
+                outcome="found",
+            ),  # acme: top-level policy
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertTrue(result.found)
+        self.assertEqual(mock_gitlab_fetch.call_count, 3)
+        probed = [c.kwargs["org"] for c in mock_gitlab_fetch.call_args_list]
+        self.assertEqual(probed, ["acme/dept-a/team-x", "acme/dept-a", "acme"])
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_subgroup_all_absent_is_clean_absent(
+        self, mock_extract, mock_ns, mock_gitlab_fetch
+    ):
+        """No policy at any level -> clean absent, every level probed once."""
+        mock_extract.return_value = ("acme", "gitlab.com", None)
+        mock_ns.return_value = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(result.outcome, "absent")
+        self.assertIsNone(result.error)
+        self.assertEqual(mock_gitlab_fetch.call_count, 3)
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_subgroup_error_fails_closed(self, mock_extract, mock_ns, mock_gitlab_fetch):
+        """A fetch error at the deepest level fails closed -- parents not probed."""
+        mock_extract.return_value = ("acme", "gitlab.com", None)
+        mock_ns.return_value = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        mock_gitlab_fetch.side_effect = [
+            PolicyFetchResult(error="403: Access denied", outcome="cache_miss_fetch_fail"),
+            PolicyFetchResult(policy=ApmPolicy(), outcome="found"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertFalse(result.found)
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        mock_gitlab_fetch.assert_called_once()
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_subgroup_error_at_inner_level_fails_closed(
+        self, mock_extract, mock_ns, mock_gitlab_fetch
+    ):
+        """Fail-closed holds when the error appears after ascending (not first)."""
+        mock_extract.return_value = ("acme", "gitlab.com", None)
+        mock_ns.return_value = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        mock_gitlab_fetch.side_effect = [
+            PolicyFetchResult(outcome="absent"),  # team-x: no policy -> ascend
+            PolicyFetchResult(error="403: Access denied", outcome="cache_miss_fetch_fail"),
+            PolicyFetchResult(policy=ApmPolicy(), outcome="found"),  # must NOT be reached
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertFalse(result.found)
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertEqual(mock_gitlab_fetch.call_count, 2)
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_flat_project_falls_back_to_top_level_org(
+        self, mock_extract, mock_ns, mock_gitlab_fetch
+    ):
+        """No derivable namespace -> single top-level org probe (back-compat)."""
+        mock_extract.return_value = ("contoso", "gitlab.com", None)
+        mock_ns.return_value = None  # namespace not derivable
+        mock_gitlab_fetch.return_value = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:gitlab.com/contoso/apm-policy", outcome="found"
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertTrue(result.found)
+        mock_gitlab_fetch.assert_called_once()
+        self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "contoso")
+
 
 class TestPolicyRepoCandidates(unittest.TestCase):
     """Test _policy_repo_candidates host profile selection."""
@@ -1231,6 +1435,91 @@ class TestGitlabPolicyInheritance(unittest.TestCase):
 
         self.assertEqual(mock_fetch.call_args.kwargs["org"], "platform")
         self.assertEqual(mock_fetch.call_args.kwargs["repo"], "baseline")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_accepts_nested_namespace_reference(self, mock_fetch):
+        """An extends: ref into an intermediate subgroup resolves (#2753)."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _fetch_chain_parent(
+                "acme/dept-a/apm-policy",
+                current_source="org:gitlab.com/acme/dept-a/team-x/apm-policy",
+                leaf_host="gitlab.com",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        # Namespace is everything before the final segment; repo is the last.
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "acme/dept-a")
+        self.assertEqual(mock_fetch.call_args.kwargs["repo"], "apm-policy")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_accepts_host_qualified_nested_namespace(self, mock_fetch):
+        """A host-qualified extends: ref into a nested subgroup strips the host."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _fetch_chain_parent(
+                "gitlab.com/acme/dept-a/apm-policy",
+                current_source="org:gitlab.com/acme/dept-a/team-x/apm-policy",
+                leaf_host="gitlab.com",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "acme/dept-a")
+        self.assertEqual(mock_fetch.call_args.kwargs["repo"], "apm-policy")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_rejects_single_segment_reference(self, mock_fetch):
+        """A bare single-segment extends: ref fails closed, never probes."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="found", policy=ApmPolicy())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_chain_parent(
+                "apm-policy",
+                current_source="org:gitlab.com/acme/apm-policy",
+                leaf_host="gitlab.com",
+                leaf_port=None,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIn("Invalid GitLab policy reference", result.error)
+        mock_fetch.assert_not_called()
+
+
+class TestValidateExtendsHostNestedNamespace(unittest.TestCase):
+    """The pre-fetch host-pin guard must allow nested GitLab namespaces (#2753).
+
+    ``_validate_extends_host`` runs BEFORE the GitLab adapter fetch, so a bare
+    nested-namespace ``extends:`` ref (single-label first segment) must not be
+    misread as a cross-host reference -- while a real attacker FQDN still is.
+    """
+
+    def test_nested_namespace_ref_is_not_a_host(self):
+        # First segment is a top-level group, not a host -> shorthand.
+        self.assertIsNone(_extract_extends_host("acme/dept-a/apm-policy"))
+
+    def test_host_qualified_nested_ref_extracts_host(self):
+        self.assertEqual(
+            _extract_extends_host("gitlab.com/acme/dept-a/apm-policy"),
+            "gitlab.com",
+        )
+
+    def test_validate_allows_nested_same_host_reference(self):
+        # Must NOT raise: this is the exact ref the subgroup feature enables.
+        _validate_extends_host("gitlab.com", "acme/dept-a/apm-policy")
+
+    def test_validate_still_rejects_cross_host_fqdn(self):
+        import apm_cli.policy.inheritance as _inh
+
+        with self.assertRaisesRegex(_inh.PolicyInheritanceError, "cross-host"):
+            _validate_extends_host("gitlab.com", "evil.example.com/org/apm-policy")
 
 
 class TestFetchAdoContents(unittest.TestCase):
