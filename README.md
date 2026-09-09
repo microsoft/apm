@@ -124,7 +124,7 @@ For standalone installations, `apm self-update` reuses the matching platform ins
 You do not need Homebrew to use APM.
 
 <details>
-<summary>Other install methods: pip and Scoop</summary>
+<summary>Other install methods: pip, WinGet, and Scoop</summary>
 
 #### Linux / macOS
 
@@ -134,6 +134,11 @@ pip install apm-cli
 ```
 
 #### Windows
+
+```powershell
+# WinGet
+winget install --id Microsoft.APM --exact --source winget
+```
 
 ```powershell
 # Scoop
