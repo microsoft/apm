@@ -9,10 +9,6 @@
 
 ## Dependency management
 
-For `apm install -g`, direct local dependencies require absolute paths
-(`~/path` works). Relative children of local packages resolve from the
-declaring package's original source directory; see [local-path anchoring](dependencies.md).
-
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm install [PKGS...]` | Install APM, MCP, and LSP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json)); one effective target decision drives package, MCP, and LSP phases; plain/frozen installs replay locked refs and cache state, while `--update` and `--refresh` require current upstream mutable refs; a successful non-dry-run install also reconciles deployed artifacts, lockfile ownership, and merge-hook config/sidecar entries for any target dropped from `targets:` | `--update` (deprecated; prefer `apm update`) refresh refs without accepting stale bare-cache answers, `--refresh` re-fetch all deps from upstream and re-resolve all ref pins, `--force` overwrite collisions and permit deployment after critical built-in scan findings (does NOT refresh refs by itself; `apm update --force` still requires upstream truth), `--frozen` CI-safe install that fails before any durable write when `apm.lock.yaml` is missing or out of sync with `apm.yml`, including MCP config state (mutually exclusive with `--update`, package additions, and `--mcp`; use normal install to create or repair lock state, then `apm audit` for SHA integrity), `--dry-run` (no package/deployment writes; positional packages and ref changes are previewed without changing an existing `apm.yml`; a newly bootstrapped manifest and explicit targets are kept), `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated, e.g. `--target claude,cursor`; resolution chain `--target` > apm.yml `targets:` > `apm config set target ...` > auto-detect; this decision is reused by package, MCP, and LSP phases; unresolved required service work fails non-zero before manifest or package writes, and native MCP/LSP write failures also fail non-zero; `intellij` is MCP-only and writes JetBrains Copilot's user-scope config; explicit lists are exact, so `intellij,claude` writes those two MCP configs and `all,intellij` adds JetBrains to `all`; on auto-bootstrap when no `apm.yml` exists, recognized manifest target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` reuses them; `--target all` deprecated, see `apm compile --all`; use `kiro` for Kiro IDE; use `grok-build` for stable Grok Build rules, agents, commands, skills, and `AGENTS.md`; use `copilot-cowork` with `--global` after `apm experimental enable copilot-cowork`; use `grok-cloud` after `apm experimental enable grok-cloud` to deploy skills only to `.grok/skills/`; use explicit target `hermes` to deploy skills and home-scoped MCP servers to `$HERMES_HOME/config.yaml` (or `~/.hermes/config.yaml` when unset or blank); run `apm compile` separately for `AGENTS.md`), `--dev`, `-g` global (MCP deploys only to user-scope runtimes: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot, and Hermes when selected explicitly), `--trust-transitive-mcp`, `--parallel-downloads N`, `--trust-bin` / `--no-trust-bin` (per-invocation consent for marketplace-plugin bin/ deployment: `--trust-bin` suppresses the trust-posture warning, `--no-trust-bin` skips bin/ even if policy allows; default deploys with a warning), `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--skill NAME` install named skills from a dependency that exposes selectable skills (repeatable; plugin manifests accept a leaf name or source-relative path under skills/; a CLI name or path that matches no declared skill fails before manifest or lockfile commit with available names; a stale persisted `skills:` pin that no longer matches an available source skill warns with the package, declared request names, and available names, and directs the user to edit `skills:` in apm.yml; persisted in apm.yml only on a successful CLI match; additive across separate installs -- a later `--skill X` adds to the existing pin (union) rather than replacing it, so previously deployed skills are never silently removed; `'*'` resets to the full bundle; drop a single skill by editing the `skills:` list in apm.yml then re-running install), `--legacy-skill-paths` restore per-client skill dirs, `--mcp NAME` add MCP entry using that same effective target decision (the shared decision applies, so `apm install --mcp NAME --target intellij` writes only JetBrains Copilot's MCP config; compilation target policy applies to every explicitly selected target; `apm install -g --mcp NAME` writes user-scope and bypasses the project-scope gate by design), `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry, `--root DIR` redirect writes (`apm_modules/`, lockfile, `.gitignore`, integrated harness files) under DIR while `apm.yml`/`.apm/`/local deps resolve from `$PWD` (mirrors `pip install --target`; created if missing; not valid with `-g`/`--global`, which exits 2). Explicit plugin component paths must resolve inside the plugin root; missing declarations fail before deployment and lockfile commit. |
@@ -33,7 +29,7 @@ declaring package's original source directory; see [local-path anchoring](depend
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
 | `apm find <PATH>` | Trace a deployed file back to the package(s) that contributed it (inverse of install; reads `apm.lock.yaml` only) | `--source` show OCI/git/local origin, `--path` show full why-chain (same as `apm deps why`) |
 | `apm view PKG [FIELD]` | View package details, git refs, or registry versions | `-g` global, `FIELD=versions`, `--registry [NAME]` forces registry path for versions |
-| `apm outdated` | Check locked deps against authenticated upstream state via SHA/semver comparison; stale bare-cache refs are never reported as current, and unavailable remotes report `unknown` | `-g` global, `-v` verbose, `-j N` parallel checks |
+| `apm outdated` | Read-only upstream check: does not modify `apm.yml`, the lockfile, `apm_modules/`, or deployed files; legacy `apm.lock` is read in place. Registry `Latest` is highest published parseable semver (existing prerelease/build ordering); `Wanted` is highest within the constraint. `Source` adds `(outside constraint)` when Latest fails it. Unknown remotes never fall back to stale cached refs. Completed checks exit `0`, including outdated/unknown. | `-g` global, `-v` verbose (matching registry versions within the constraint; lockfile-only rows list newer published versions), `-j N` parallel checks; no `--json` or package filter |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm cache prune` | Remove stale SHA groups; partial failures exit `1`, so fix permissions or release locks and rerun | `--days N` |
@@ -41,12 +37,11 @@ declaring package's original source directory; see [local-path anchoring](depend
 | `apm cache prune` | Remove Git checkout SHA groups outside the retention window; all full and sparse variants share recency and eviction | `--days N` (default `30`) |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
-`apm uninstall -g PKG` rebuilds APM-managed
-`~/.copilot/copilot-instructions.md` from eligible surviving-package and
-root contributions. If no eligible instruction content remains,
-successful cleanup and lockfile persistence remove the managed aggregate
-and clear its ownership records. By default, APM leaves an unmanaged file
-unchanged without taking ownership.
+For conditional columns, lockfile-only rows, unknown selectors, and explicit
+outside-constraint upgrades, see the
+[outdated reference](https://microsoft.github.io/apm/reference/cli/outdated/#registry-reporting).
+`apm update` remains constraint-respecting and writable; it does not take an
+outside-constraint `Latest`.
 
 For `apm install -g --mcp`, mixed target selections warn and skip
 workspace-only runtimes. If no selected target supports user scope, the command
@@ -157,6 +152,14 @@ writes only `.vscode/mcp.json`.
 
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
 
+Agent Plugins v1 packages register natively only with the effective `copilot`
+target today. If target exclusion leaves a non-dry-run install with no deployed package,
+`apm install` exits `1` and prints a recovery command such as
+`apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`; mixed
+installs that deploy at least one other package still exit `0`. For this target
+exclusion, `--dry-run` succeeds as a preview without the per-package recovery
+diagnostic; it does not certify real install success.
+
 ## Cache management
 
 | Command | Purpose | Key flags |
@@ -241,50 +244,16 @@ descendants, are skipped.
 
 ## Security and audit
 
-Audit replays current target intent: manifest `target(s)` > saved `apm config
-set target` > existing directory detection. A selected malformed saved target
-fails resolution; a valid manifest target overrides irrelevant invalid saved
-configuration. Audit does not recover unsaved historical `install --target`
-overrides or create missing user configuration.
-Audit skips startup update checks and their cache writes; use
-`apm self-update --check` separately.
-
-Saved target names do not guarantee scratch replay support. Native nonfilesystem
-targets without an isolated filesystem backend (currently `copilot-app`) fail
-replay explicitly without invoking the live workflow writer or changing its
-database or sidecars. Filesystem-backed native layouts are rebased into scratch;
-old native claims remain comparison-only, and unavailable former roots fail
-closed. Missing ownership never removes source-derived expectations. See the
-[audit reference](https://microsoft.github.io/apm/reference/cli/audit/#drift-detection)
-for target prerequisites and replay boundaries.
-
-Known replay limitation: an internal local resource link copied as a regular
-file during install can be falsely reported as `orphaned` by unchanged CI audit.
-Escaping resource links remain rejected; this is not a containment exception.
-
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm audit [PKG]` | Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations | `--file PATH`, `--strip`, `--dry-run`, `-v`, `-f [text\|json\|sarif\|md]`, `-o PATH`, `--ci`, `--policy SOURCE`, `--no-cache`, `--no-fail-fast`, `--no-drift`, `--external NAME` (experimental; ingest a third-party SARIF scanner, e.g. `skillspector`), `--external-sarif PATH`, `--external-llm/--no-external-llm`, `--external-args TEXT` |
 
-Drift detection runs by default without modifying the project, lockfile, or live
-`apm_modules/`. It compares replayed output for `modified`, `unintegrated`,
-`orphaned`, and `unrecorded` files, normalizing build IDs, CRLF, and BOMs.
-Bare audit uses the local cache and skips drift on a cache miss. With a lockfile,
-`apm audit --ci` self-hydrates a lock-pinned scratch install for
-`config-consistency` and drift when `apm_modules/` is absent. Gitignored deployed
-outputs must still exist for `deployed-files-present`.
+`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` into a temporary scratch tree and diffs the result against your working tree. Catches three failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed. The scan is read-only -- never writes to your project, lockfile, or live `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives. Bare `apm audit` still uses the warmed local cache and skips with an informational message when the cache is absent. `apm audit --ci` is stricter: when `apm_modules/` is missing but `apm.lock.yaml` is present, it self-hydrates a lock-pinned scratch install for `config-consistency` and drift without touching the checkout. That closes the setup-only CI gap for repos that commit deployed files. Repos that gitignore deployed outputs still need those files present on disk for `deployed-files-present`, so keep the full-install CI pattern there. Use `--no-drift` to opt out (e.g. fast inner loops); the flag is mutually exclusive with `--strip`/`--file`. Ordinary drift remains advisory in bare audit and fails only in `--ci` mode or when policy promotes it. A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`).
+`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives. If the install cache has not been warmed (e.g. a fresh checkout before the first `apm install`), the drift check is skipped with an informational message and can still exit 0; run `apm install` before relying on drift until cold-cache replay lands. Use `--no-drift` to opt out with reduced coverage; the flag is mutually exclusive with `--strip`/`--file`. Ordinary drift remains advisory in bare audit and fails in `--ci` mode. Remediate `unrecorded` with `apm install`, then commit the regenerated `apm.lock.yaml`. A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`/`unrecorded`).
+`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives. If the install cache has not been warmed (e.g. a fresh checkout before the first `apm install`), the drift check is skipped with an informational message and can still exit 0; run `apm install` before relying on drift until cold-cache replay lands. Use `--no-drift` to opt out with reduced coverage; the flag is mutually exclusive with `--strip`/`--file`. Drift is advisory in bare audit by default unless policy enables `security.audit.fail_on_drift`; `--ci` always gates on drift. Remediate `unrecorded` with `apm install`, then commit the regenerated `apm.lock.yaml`. A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`/`unrecorded`).
+`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives.
 
-`--no-drift` skips replay with reduced coverage and cannot accompany `--strip`
-or `--file`. Ordinary drift is advisory in bare audit unless policy enables
-`security.audit.fail_on_drift`; `--ci` gates on drift. For `unrecorded` files,
-run `apm install` and commit the regenerated `apm.lock.yaml`. This does not
-provide a missing native replay backend. JSON reports use the top-level `drift`
-key; SARIF uses `apm/drift/<kind>` rule IDs.
-
-Invalid canonical deployment owners remain a hard `deployment-ledger-owners`
-failure in both modes: exit 1, owner/path diagnostics, and `--strip` blocked.
-Run `apm prune`, then rerun `apm audit`; invalid owner records never authorize
-deleting files.
+If the install cache has not been warmed (e.g. a fresh checkout before the first `apm install`), the drift check is skipped with an informational message and can still exit 0; run `apm install` before relying on drift until cold-cache replay lands. Use `--no-drift` to opt out with reduced coverage; the flag is mutually exclusive with `--strip`/`--file`. Drift is advisory in bare audit by default unless policy enables `security.audit.fail_on_drift`; `--ci` always gates on drift. Remediate `unrecorded` with `apm install`, then commit the regenerated `apm.lock.yaml`. A stale canonical deployment owner is different: `deployment-ledger-owners` is a hard integrity failure in both modes, exits 1, names the owner and path in text/JSON/SARIF, and blocks `--strip`. Remediate it with `apm prune`, then rerun `apm audit`. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`/`unrecorded`).
 
 **External scanners (experimental, behind `apm experimental enable external-scanners`).** `--external NAME` runs a third-party SARIF scanner (e.g. `skillspector`) and merges its findings. `--external-llm/--no-external-llm` toggles LLM-powered analysis (default off; sends scanned content to a third-party API, so APM prints a `[!]` egress banner and forwards `OPENAI_API_KEY`/`NVIDIA_INFERENCE_KEY` only when on). `--external-args TEXT` is a single shlex-split string of extra scanner flags, validated against a per-adapter allowlist -- non-allowlisted flags, secret-looking flags, and out-of-cwd paths are rejected fail-closed. `--external-llm`/`--external-args` without `--external` is a usage error (exit 2). Scanner configuration or infrastructure errors (feature disabled, scanner not found, malformed SARIF) exit **3**. Persist defaults with `apm config set external.<name>.llm true` and `apm config set external.<name>.args -- "--model gpt-4o"`. Precedence: CLI > config > policy floor.
 

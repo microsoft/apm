@@ -10,7 +10,7 @@ Two assertion shapes carry the weight:
    matching test breaks at PR time.
 
 There is also `waive(...)`. Use it ONLY when the requirement is
-genuinely beyond the selected revision's active testability and the rationale is
+genuinely beyond v0.1 active testability and the rationale is
 written down. Every waiver appears in CONFORMANCE.md as debt.
 """
 
@@ -25,7 +25,7 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
-from tests.spec_conformance._manifest import FIXTURE_ROOT, SPEC_DIR, selected_assessment
+from tests.spec_conformance._manifest import FIXTURE_ROOT, SPEC_DIR, SPEC_PATH
 
 
 def waive(reason: str) -> None:
@@ -67,7 +67,7 @@ _SPEC_TEXT_CACHE: str | None = None
 def spec_text() -> str:
     global _SPEC_TEXT_CACHE
     if _SPEC_TEXT_CACHE is None:
-        _SPEC_TEXT_CACHE = selected_assessment().spec_path.read_text(encoding="utf-8")
+        _SPEC_TEXT_CACHE = SPEC_PATH.read_text(encoding="utf-8")
     return _SPEC_TEXT_CACHE
 
 

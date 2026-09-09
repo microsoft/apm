@@ -35,6 +35,7 @@ dependencies:
   - .agents/skills/apm-issue-autopilot/evals/real-task-refinement.md
   - .agents/skills/apm-issue-autopilot/evals/triggers.json
   - .agents/skills/apm-issue-autopilot/scripts/run_evals.py
+  - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
   deployed_file_hashes:
     .agents/skills/apm-issue-autopilot/SKILL.md: sha256:9872bd7ada9903073c663a5b1d1bfaa15743d4bcb2f450631a4da610b1fd0a6e
     .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
@@ -94,6 +95,7 @@ dependencies:
   - .agents/skills/batch-bug-shepherd/references/invariants.md
   - .agents/skills/batch-bug-shepherd/references/strategic-alignment-gate.md
   - .agents/skills/batch-bug-shepherd/scripts/run_evals.py
+  - copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
   deployed_file_hashes:
     .agents/skills/batch-bug-shepherd/SKILL.md: sha256:c5b0f8752e726d123f61491c959681134882dfddbc9f5d15ac5c47e55931375f
     .agents/skills/batch-bug-shepherd/assets/final-report-template.md: sha256:ea280a4d1e15a9b56ba8d3ef5f0e931754cc44ae29d5615da58da8d445f455c2
@@ -1647,6 +1649,24 @@ deployments:
   - .
   active_owner: .
   content_hash: sha256:55ef10cd0f6b68e0db5a435a79851c055eab74d93fd552c6626df631deb51df4
+- kind: uri
+  target: copilot-app
+  value: copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/apm-issue-autopilot
+  active_owner: ./packages/apm-issue-autopilot
+  content_hash: null
+- kind: uri
+  target: copilot-app
+  value: copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
+  runtime: null
+  scope: project
+  owners:
+  - ./packages/batch-bug-shepherd
+  active_owner: ./packages/batch-bug-shepherd
+  content_hash: null
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot
@@ -2573,7 +2593,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:d1ea2d038e2af8be11d6c95b3213b03b9777fae46f0438efa95d5a803e6c3765
+  content_hash: sha256:eb3a1e3e12e7a8709191d1dcb6b195c7d14b0471b895d58bb59412a7d8a6de3d
 - kind: project-relative
   target: copilot
   value: .github/agents/algorithmic-patterns.agent.md
@@ -3248,7 +3268,7 @@ local_deployed_file_hashes:
   .agents/skills/oss-growth/SKILL.md: sha256:90b5d0369032de850f2255910f4cf5caafb7d60f07bda8a2146d394bfa459918
   .agents/skills/python-architecture/SKILL.md: sha256:f06e50b8c40d7e5a732a5405a603efd80da58de2b6f6b293f0f6b58f28eefe7b
   .agents/skills/supply-chain-security/SKILL.md: sha256:55ef10cd0f6b68e0db5a435a79851c055eab74d93fd552c6626df631deb51df4
-  .github/agents/agentic-workflows.agent.md: sha256:d1ea2d038e2af8be11d6c95b3213b03b9777fae46f0438efa95d5a803e6c3765
+  .github/agents/agentic-workflows.agent.md: sha256:eb3a1e3e12e7a8709191d1dcb6b195c7d14b0471b895d58bb59412a7d8a6de3d
   .github/agents/algorithmic-patterns.agent.md: sha256:278321484288eb8965a42c20cfa65ff055d250579849b1c48cbd3f553883fe5d
   .github/agents/apm-ceo.agent.md: sha256:484da64428ea46a6183dffd3f30c9fc5fc5c747639c0c79e55be69dba0899323
   .github/agents/apm-primitives-architect.agent.md: sha256:0c8f04297b14e144f84211b5b881b099233a9847c0fca257b9aa69c4d43d1eef

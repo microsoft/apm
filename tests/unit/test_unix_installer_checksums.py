@@ -12,7 +12,7 @@ import sys
 import tarfile
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 import pytest
 
@@ -41,6 +41,7 @@ def _run_installer(
     private_archive: bool = False,
     asset_id: int | str = 123,
     metadata_format: str = "pretty",
+    metadata_auth_status: int | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[dict], Path]:
     """Run the worktree installer; only fixture-local marker execution is allowed."""
     for directory in ("bin", "home", "scratch"):
@@ -135,6 +136,7 @@ def _run_installer(
         "grep",
         "sed",
         "awk",
+        "tail",
         "tr",
         "sort",
         "head",
@@ -182,6 +184,8 @@ def _run_installer(
         )
     if auth_required:
         env["FIXTURE_AUTH_REQUIRED"] = "1"
+    if metadata_auth_status is not None:
+        env["FIXTURE_METADATA_AUTH_STATUS"] = str(metadata_auth_status)
     # Redirect only historical discovery arguments, not the ownership authority.
     source = (ROOT / "install.sh").read_text(encoding="ascii")
     historical = (
@@ -263,6 +267,53 @@ def _assert_verified(
     assert "[+] Archive checksum verified" in result.stdout
     assert marker.read_text(encoding="ascii") == "executed:--version\n"
     assert [event["tool"] for event in trace if event["tool"] in DENIED_TOOLS] == ["mkdir"]
+
+
+def _single_https_url(args: list[str]) -> ParseResult:
+    urls = [urlparse(arg) for arg in args if urlparse(arg).scheme == "https"]
+    assert len(urls) == 1
+    return urls[0]
+
+
+@pytest.mark.parametrize("checksum", ["matching", "mismatch"])
+def test_rejected_public_latest_metadata_reuses_anonymous_tag_for_checksum_and_archive(
+    tmp_path: Path, checksum: str
+) -> None:
+    """Rejected public latest metadata recovers once, then binds sidecar/archive to that tag."""
+    result, trace, marker = _run_installer(
+        tmp_path, selection="latest", checksum=checksum, metadata_auth_status=401
+    )
+    metadata_requests = [
+        event for event in trace if event["tool"] == "curl" and "-i" in event["args"]
+    ]
+    assert [
+        "Authorization: token fixture-token" in event["args"] for event in metadata_requests
+    ] == [
+        True,
+        False,
+    ]
+    metadata_urls = [_single_https_url(event["args"]) for event in metadata_requests]
+    assert {(url.hostname, url.path) for url in metadata_urls} == {
+        ("api.github.com", "/repos/microsoft/apm/releases/latest")
+    }
+    downloads = [
+        _single_https_url(event["args"])
+        for event in trace
+        if event["tool"] == "curl" and "-o" in event["args"]
+    ]
+    assert [url.path for url in downloads] == [
+        "/microsoft/apm/releases/download/v0.29.0/apm-darwin-x86_64.tar.gz.sha256",
+        "/microsoft/apm/releases/download/v0.29.0/apm-darwin-x86_64.tar.gz",
+    ]
+    assert {url.hostname for url in downloads} == {"github.com"}
+    assert "retrying once anonymously" in result.stdout
+    if checksum == "matching":
+        _assert_verified(result, trace, marker)
+        tools = [event["tool"] for event in trace]
+        assert tools.index("sha256sum") < tools.index("tar") < tools.index("chmod")
+    else:
+        _assert_refused(result, trace, marker)
+        assert "Archive checksum verification failed" in result.stdout
 
 
 @pytest.mark.parametrize("platform", ["darwin", "linux"])

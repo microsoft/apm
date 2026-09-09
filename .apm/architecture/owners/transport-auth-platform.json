@@ -103,6 +103,13 @@
       "guards": ["transport-platform-self-update-resolution"]
     },
     {
+      "id": "release-metadata-discovery",
+      "decision": "Public release metadata discovery and bounded rejected-credential recovery",
+      "owner": "utils/version_checker.py (get_latest_version_from_github)",
+      "selectors": ["src/apm_cli/utils/version_checker.py"],
+      "guards": ["transport-platform-release-metadata-discovery"]
+    },
+    {
       "id": "git-clone-connect-retry",
       "decision": "Bounded same-action HTTPS connection retry below auth and protocol selection",
       "owner": "deps/clone_engine.py (CloneEngine)",

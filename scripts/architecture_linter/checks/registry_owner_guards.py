@@ -250,7 +250,7 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
     if failures:
         return failures
 
-    findings = list(_check_audit_target_selection(provider, rule_id))
+    findings: list[Violation] = []
     owner = facts_by_path[_EFFECTIVE_TARGET_OWNER]
     install = facts_by_path[_INSTALL_CMD]
     pipeline = facts_by_path[_INSTALL_PIPELINE]
@@ -330,99 +330,6 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
                 )
             )
     return findings
-
-
-def _check_audit_target_selection(provider: FactsProvider, rule_id: str) -> Iterable[Violation]:
-    """Audit adapts the canonical decision and never redetects scratch targets."""
-    adapter = "src/apm_cli/install/audit_target_roots.py"
-    native_discovery = "src/apm_cli/integration/copilot_cowork_paths.py"
-    required = {
-        adapter: {
-            "resolve_effective_target_decision",
-            "read_declared_target_names",
-            "resolve_targets",
-        },
-        "src/apm_cli/install/drift.py": {"resolve_audit_targets", "replay_target"},
-        "src/apm_cli/install/audit_replay.py": {"resolve_audit_targets"},
-        "src/apm_cli/policy/ci_checks.py": {"resolve_audit_targets", "audit_comparison_targets"},
-        native_discovery: {"get_copilot_cowork_skills_dir"},
-    }
-    for path, expected_calls in required.items():
-        _facts, failures = checked_facts(provider, path, rule_id, require_python=True)
-        if failures:
-            yield from failures
-            continue
-        index = provider.tree_index(path)
-        if index is None:
-            yield violation(rule_id, path, "audit target delegation has no parsed source")
-            continue
-        calls = [
-            node
-            for node in index.walk(index.root)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        ]
-        missing = expected_calls - {node.func.id for node in calls}
-        if missing:
-            yield violation(
-                rule_id,
-                path,
-                f"audit target delegation is missing calls: {', '.join(sorted(missing))}",
-            )
-        for call in calls:
-            if path != adapter and call.func.id in {"resolve_targets", "_read_apm_yml_target"}:
-                yield violation(
-                    rule_id,
-                    path,
-                    "audit consumers must use resolve_audit_targets",
-                    line=call.lineno,
-                )
-            if path in {adapter, native_discovery} and call.func.id in {
-                "resolve_effective_target_decision",
-                "resolve_targets",
-                "get_copilot_cowork_skills_dir",
-            }:
-                keywords = {keyword.arg: keyword.value for keyword in call.keywords}
-                value = keywords.get("create_config")
-                if not isinstance(value, ast.Constant) or value.value is not False:
-                    yield violation(
-                        rule_id,
-                        path,
-                        "audit target resolution must not create config",
-                        line=call.lineno,
-                    )
-                if call.func.id == "resolve_effective_target_decision":
-                    strict = keywords.get("strict_config")
-                    if not isinstance(strict, ast.Constant) or strict.value is not True:
-                        yield violation(
-                            rule_id,
-                            path,
-                            "audit target resolution must reject invalid saved configuration",
-                            line=call.lineno,
-                        )
-        if path == adapter:
-            for definition in direct_definitions(index, "replay_target", kinds=FUNCTION_NODES):
-                if not any(
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "_require_filesystem_replay"
-                    for node in index.own_scope(definition)
-                ):
-                    yield violation(
-                        rule_id, path, "audit projection must reject unsafe native replay"
-                    )
-        if path != adapter:
-            for node in index.walk(index.root):
-                if (
-                    isinstance(node, ast.ImportFrom)
-                    and (node.module or "").endswith("integration.targets")
-                    and any(alias.name == "resolve_targets" for alias in node.names)
-                ):
-                    yield violation(
-                        rule_id,
-                        path,
-                        "audit target consumers must not import a parallel resolver",
-                        line=node.lineno,
-                    )
 
 
 def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:

@@ -15,11 +15,9 @@ from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
-    _GUARD_COPILOT_AGGREGATE,
     _GUARD_PROVENANCE,
     _GUARD_TARGET_CONTRACTION,
     check_base_integrator,
-    check_copilot_aggregate,
     check_provenance_state,
     check_target_file_contraction,
 )
@@ -55,13 +53,11 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
-    _GUARD_LOCAL_SCOPE,
     _GUARD_OUTCOME,
     _GUARD_PRIMITIVE_CLASSIFICATION,
     _GUARD_REQUEST_DEFAULTS,
     _GUARD_SOURCE_PLAN,
     check_install_scope_selection,
-    check_local_scope_admission,
     check_outcome,
     check_primitive_classification,
     check_request_defaults,
@@ -76,11 +72,6 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
-    _rule(
-        _GUARD_COPILOT_AGGREGATE,
-        "Generated Copilot aggregates use canonical ownership, cleanup and source reconstruction.",
-        check_copilot_aggregate,
-    ),
     _rule(
         _GUARD_PACKAGE_TARGET,
         "Restriction-only package target authorization has one owner (install/target_filter.py).",
@@ -140,11 +131,6 @@ RULES: tuple[Rule, ...] = (
         _GUARD_INSTALL_SCOPE,
         "Direct MCP installs consume the install command's single scope decision.",
         check_install_scope_selection,
-    ),
-    _rule(
-        _GUARD_LOCAL_SCOPE,
-        "Local USER-scope admission routes through user_scope_rejection_reason.",
-        check_local_scope_admission,
     ),
     _rule(
         _GUARD_BASE_INTEGRATOR,

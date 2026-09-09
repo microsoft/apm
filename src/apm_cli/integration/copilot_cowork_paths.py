@@ -111,7 +111,7 @@ def resolve_copilot_cowork_skills_dir() -> Path | None:
     # --- persisted config value ---
     from apm_cli.config import get_copilot_cowork_skills_dir
 
-    config_value = get_copilot_cowork_skills_dir(create_config=False)
+    config_value = get_copilot_cowork_skills_dir()
     if config_value:
         from apm_cli.utils.path_security import (
             PathTraversalError,

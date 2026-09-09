@@ -65,7 +65,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
-| `target` | target token | unset | Default target for package, MCP, and LSP phases of `apm install` and `apm update` when `--target` and `apm.yml target(s)` are absent. Also supplies [audit's current target intent](../audit/#drift-detection) when the manifest declares no targets. Uses the `apm install --target` parser (single or comma-separated). |
+| `target` | target token | unset | Default target for package, MCP, and LSP phases of `apm install` and `apm update` when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
 | `self-update.channel` | enum | `stable` | Default release channel for `apm self-update`: `stable` selects the latest stable release; `prerelease` selects the newest non-draft prerelease. Both pass the selected release to the installer as one normalized `VERSION`. `APM_SELF_UPDATE_CHANNEL` overrides config. |
 | `self-update.install-dir` | path | unset | Optional launcher preference; `APM_INSTALL_DIR` overrides it. On Unix, a set value must match the existing launcher and unset preserves it; neither migrates. Windows uses the installer destination/default. |
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
@@ -246,7 +246,7 @@ See [External scanners](../../../integrations/external-scanners/).
 
 - **Location:** `~/.apm/config.json`
 - **Format:** JSON object, one entry per stored key.
-- **Created on first read** with `{"default_client": "vscode"}`, except during [audit](../audit/#drift-detection), which leaves absent configuration absent. Prefer `apm config set` over hand-editing: it validates input and normalizes paths.
+- **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
 Internal JSON keys use snake_case (`auto_integrate`, `install_target`, `self_update_channel`, `self_update_install_dir`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `copilot_cowork_skills_dir`); CLI keys use kebab-case or dotted namespaces (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
 

@@ -2,7 +2,7 @@
 
 import os  # noqa: F401
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import click
 from click.testing import CliRunner
@@ -114,17 +114,6 @@ class TestUpdateCheckSkippedOnInvalidCommand(unittest.TestCase):
         with ctx:
             cli.callback(verbose=False)
 
-        mock_check.assert_not_called()
-
-    @patch("apm_cli.cli._check_and_notify_updates")
-    def test_audit_callback_skips_startup_update_check(self, mock_check: MagicMock) -> None:
-        """Read-only audit must not invoke update-cache or configuration writes."""
-        from apm_cli.cli import cli
-
-        ctx = click.Context(cli, info_name="apm")
-        ctx.invoked_subcommand = "audit"
-        with ctx:
-            cli.callback(verbose=False)
         mock_check.assert_not_called()
 
 

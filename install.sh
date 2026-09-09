@@ -1188,6 +1188,38 @@ pip_index_args() {
     fi
 }
 
+fetch_release_metadata() {
+    # Capture status and headers as well as the body; HTTP errors are not JSON errors.
+    # -q ignores ambient curlrc auth/redirect settings. No redirects or token logging.
+    CURL_EXIT_CODE=0
+    if [ "$1" = "authenticated" ]; then
+        METADATA_RESPONSE=$(curl -q -s -i --suppress-connect-headers --connect-timeout 10 --max-time 30 \
+            -w '\n%{http_code}' -H "Authorization: token $AUTH_HEADER_VALUE" "$LATEST_RELEASE_URL") || CURL_EXIT_CODE=$?
+    else
+        METADATA_RESPONSE=$(curl -q -s -i --suppress-connect-headers --connect-timeout 10 --max-time 30 \
+            -w '\n%{http_code}' "$LATEST_RELEASE_URL") || CURL_EXIT_CODE=$?
+    fi
+    # Skip informational header blocks, then stream the final response unchanged.
+    # Never repeatedly concatenate the body: pretty-printed mirrors can be large.
+    METADATA_RESPONSE=$(printf '%s\n' "$METADATA_RESPONSE" | awk '
+        BEGIN { headers=1 }
+        headers && /^HTTP\/[0-9.]+ [0-9][0-9][0-9]/ { interim=($2 >= 100 && $2 < 200) }
+        headers && /^\r?$/ && !interim { headers=0 }
+        !interim { print }')
+    METADATA_STATUS=$(printf '%s\n' "$METADATA_RESPONSE" | tail -n 1)
+    METADATA_HEADERS=$(printf '%s\n' "$METADATA_RESPONSE" | sed -n '1,/^\r\{0,1\}$/p')
+    LATEST_RELEASE=$(printf '%s\n' "$METADATA_RESPONSE" | sed '1,/^\r\{0,1\}$/d' | sed '$d')
+}
+
+metadata_is_rate_limited() {
+    [ "$METADATA_STATUS" = "429" ] || {
+        [ "$METADATA_STATUS" = "403" ] && {
+            printf '%s\n' "$METADATA_HEADERS" | grep -Eiq '^x-ratelimit-remaining: *0[[:space:]]*$|^retry-after: *[1-9][0-9]*[[:space:]]*$' ||
+            printf '%s\n' "$LATEST_RELEASE" | grep -Eiq 'API rate limit exceeded|secondary rate limit|abuse detection mechanism'
+        }
+    }
+}
+
 # Function to check Python availability and version
 check_python_requirements() {
     PYTHON_CMD=""
@@ -1400,52 +1432,54 @@ LATEST_RELEASE_URL=$(release_metadata_url)
 # stays UNAUTHENTICATED so the GitHub token is never transmitted cross-host (matches
 # install.ps1, which fetches mirror metadata unauthenticated).
 if [ -n "$AUTH_HEADER_VALUE" ] && [ -z "$APM_RELEASE_METADATA_URL" ]; then
-    LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "$LATEST_RELEASE_URL")
+    fetch_release_metadata authenticated
 else
-    LATEST_RELEASE=$(curl -s "$LATEST_RELEASE_URL")
+    fetch_release_metadata anonymous
 fi
-CURL_EXIT_CODE=$?
 
-if [ -n "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ]; }; then
-    apm_echo "${RED}Error: Failed to fetch release metadata from APM_RELEASE_METADATA_URL${NC}"
-    echo "Mirror URL: $(redact_url_credentials "$APM_RELEASE_METADATA_URL")"
-    echo "Check that the mirror is reachable and publishes GitHub-compatible latest.json."
+# Only the known public APM repository may recover from a rejected ambient token.
+# Keep accepted tokens first for shared-IP rate limits; never downgrade throttles.
+if [ "$CURL_EXIT_CODE" -eq 0 ] && [ -n "$AUTH_HEADER_VALUE" ] &&
+    [ -z "$APM_RELEASE_METADATA_URL" ] && is_public_github_url &&
+    [ "$APM_REPO" = "microsoft/apm" ] && ! is_truthy "$APM_NO_DIRECT_FALLBACK" &&
+    { [ "$METADATA_STATUS" = "401" ] || [ "$METADATA_STATUS" = "403" ]; } &&
+    ! metadata_is_rate_limited; then
+    apm_echo "${BLUE}Credential rejected for public APM metadata (HTTP $METADATA_STATUS); retrying once anonymously.${NC}"
+    fetch_release_metadata anonymous
+fi
+
+if [ "$CURL_EXIT_CODE" -ne 0 ]; then
+    apm_echo "${RED}Error: Release metadata network request failed (curl $CURL_EXIT_CODE).${NC}"
+    echo "Check connectivity, proxy and TLS settings, then retry."
     exit 1
 fi
 
-# Check if the response indicates authentication is required (private repo)
-# Only try authentication if curl failed OR we got a "Not Found" message OR response is empty.
-# Skip this retry entirely in mirror metadata mode: the GitHub token must not be sent to an
-# operator-configured mirror host (mirror failures already exited above with guidance).
-if [ -z "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ] || echo "$LATEST_RELEASE" | grep -q '"message".*"Not Found"'; }; then
-    apm_echo "${BLUE}Repository appears to be private, trying with authentication...${NC}"
-
-    # Check if we have GitHub token for private repo access
-    AUTH_HEADER_VALUE=""
-    if [ -n "$GITHUB_APM_PAT" ]; then
-        apm_echo "${BLUE}Using GITHUB_APM_PAT for private repository access${NC}"
-        AUTH_HEADER_VALUE="$GITHUB_APM_PAT"
-    elif [ -n "$GITHUB_TOKEN" ]; then
-        apm_echo "${BLUE}Using GITHUB_TOKEN for private repository access${NC}"
-        AUTH_HEADER_VALUE="$GITHUB_TOKEN"
-    else
-        apm_echo "${RED}Error: Repository is private but no authentication token found${NC}"
-        echo "Please set GITHUB_APM_PAT or GITHUB_TOKEN environment variable:"
-        echo "  export GITHUB_APM_PAT=your_token_here"
-        echo "  curl -sSL -H \"Authorization: token \$GITHUB_APM_PAT\" \\"
-        echo "    https://raw.githubusercontent.com/microsoft/apm/main/install.sh | \\"
-        echo "    GITHUB_APM_PAT=\$GITHUB_APM_PAT sh"
-        exit 1
-    fi
-
-    # Retry with authentication
-    LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "$LATEST_RELEASE_URL")
-    CURL_EXIT_CODE=$?
+if metadata_is_rate_limited; then
+    apm_echo "${RED}Error: Release metadata rate limit (HTTP $METADATA_STATUS).${NC}"
+    echo "Wait for the limit to reset; for anonymous shared-IP limits, configure an accepted GitHub token."
+    exit 1
 fi
 
-if [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ]; then
-    apm_echo "${RED}Error: Failed to fetch release information${NC}"
-    echo "Please check your internet connection and try again."
+case "$METADATA_STATUS" in
+    200) ;;
+    401|403)
+        apm_echo "${RED}Error: Release metadata authentication/authorization failed (HTTP $METADATA_STATUS).${NC}"
+        echo "Check the credential's validity and repository access, or pin VERSION."
+        exit 1 ;;
+    3??)
+        apm_echo "${RED}Error: Release metadata redirects are not followed (HTTP $METADATA_STATUS).${NC}"
+        echo "Set APM_RELEASE_METADATA_URL to the final JSON endpoint, or pin VERSION."
+        exit 1 ;;
+    *)
+        apm_echo "${RED}Error: Release metadata request failed (HTTP $METADATA_STATUS).${NC}"
+        echo "Check the configured host/repository or metadata mirror, or pin VERSION."
+        exit 1 ;;
+esac
+
+if [ -n "$APM_RELEASE_METADATA_URL" ] && [ -z "$LATEST_RELEASE" ]; then
+    apm_echo "${RED}Error: Empty release metadata from APM_RELEASE_METADATA_URL${NC}"
+    echo "Mirror URL: $(redact_url_credentials "$APM_RELEASE_METADATA_URL")"
+    echo "Check that the mirror is reachable and publishes GitHub-compatible latest.json."
     exit 1
 fi
 
@@ -1457,13 +1491,8 @@ if ! echo "$LATEST_RELEASE" | grep -q '"tag_name":'; then
         echo "Publish a GitHub-compatible JSON document with a tag_name field."
         exit 1
     fi
-    apm_echo "${RED}Error: Invalid API response received${NC}"
-
-    # Check if the response contains an error message
-    if echo "$LATEST_RELEASE" | grep -q '"message"'; then
-        apm_echo "${RED}GitHub API Error:${NC}"
-        echo "$LATEST_RELEASE" | grep '"message"' | sed 's/.*"message": *"\([^"]*\)".*/\1/'
-    fi
+    apm_echo "${RED}Error: Invalid release metadata; expected a tag_name field.${NC}"
+    echo "Check the configured metadata source or pin VERSION to a known release."
     exit 1
 fi
 
@@ -1484,8 +1513,6 @@ fi
 
 if [ -z "$TAG_NAME" ]; then
     apm_echo "${RED}Error: Could not determine latest release version${NC}"
-    apm_echo "${BLUE}Debug: Full API response:${NC}" >&2
-    echo "$LATEST_RELEASE" >&2
     echo ""
     echo "This could mean:"
     echo "  1. No releases found in the repository"

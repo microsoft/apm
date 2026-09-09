@@ -83,13 +83,13 @@ class GitAuthEnvBuilder:
 
     @staticmethod
     def isolated_global_config_path() -> str:
-        """Return an empty Git config path without bootstrapping user config."""
+        """Return a cross-platform empty Git config path."""
         if sys.platform == "win32":
             import tempfile
 
             from ..config import get_apm_temp_dir
 
-            temp_base = get_apm_temp_dir(create_config=False) or tempfile.gettempdir()
+            temp_base = get_apm_temp_dir() or tempfile.gettempdir()
             empty_cfg = os.path.join(temp_base, ".apm_empty_gitconfig")
             with open(empty_cfg, "w", encoding="ascii"):
                 pass

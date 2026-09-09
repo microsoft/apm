@@ -6,11 +6,12 @@ import json
 import subprocess
 import sys
 
-from tests.spec_conformance._manifest import REPO_ROOT, selected_assessment
+from tests.spec_conformance._manifest import REPO_ROOT
 from tests.spec_conformance.gen_statement import (
     CONFORMANCE_JSON,
     CONFORMANCE_MD,
     GENERATOR,
+    SPEC_VERSION,
     USER_SCOPE_DISCLOSURE,
 )
 
@@ -50,7 +51,7 @@ def test_gen_statement_emits_ascii_only():
 def test_gen_statement_md_advertises_spec_version_and_generator():
     _run_gen()
     md = CONFORMANCE_MD.read_text(encoding="ascii")
-    assert selected_assessment().version in md
+    assert SPEC_VERSION in md, f"missing '{SPEC_VERSION}' in CONFORMANCE.md"
     assert GENERATOR in md, f"missing '{GENERATOR}' in CONFORMANCE.md"
 
 
@@ -61,6 +62,15 @@ def test_gen_statement_md_contains_honesty_phrase():
     assert "NO automated CI detector" in md, (
         "CONFORMANCE.md MUST carry the literal phrase 'NO automated CI detector' (honesty contract)"
     )
+
+
+def test_gen_statement_md_lists_repository_case_rules():
+    _run_gen()
+    md = CONFORMANCE_MD.read_text(encoding="ascii")
+    assert "## Repository case rules" in md
+    assert "GitHub Enterprise Cloud hosts ending in `.ghe.com`" in md
+    assert "registry-sourced dependencies (including registry prefixes)" in md
+    assert "Local paths, marketplace identities, and every other host remain case-sensitive" in md
 
 
 def test_gen_statement_publishes_user_scope_disclosure():

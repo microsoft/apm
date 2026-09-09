@@ -2,22 +2,22 @@
   "version": 1,
   "owners": [
     {
-      "id": "spec-assessment-selection",
-      "decision": "One active specification artifact, informative manifest, exact assessment identity, and fresh static binding inventory",
-      "owner": "tests/spec_conformance/_manifest.py",
-      "selectors": ["tests/spec_conformance/_manifest.py"],
-      "guards": ["contracts-tooling-spec-assessment"]
-    },
-    {
       "id": "dependency-identity-materialization",
-      "decision": "Dependency comparison identity vs display-cased materialization path; embedded git URL subpath validation",
+      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; embedded git URL subpath validation",
       "owner": "models/dependency/identity.py + materialization.py + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py)",
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",
         "src/apm_cli/models/dependency/materialization.py",
         "src/apm_cli/models/dependency/reference.py"
       ],
-      "guards": ["contracts-tooling-dependency-identity"]
+      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-policy-identity"]
+    },
+    {
+      "id": "generated-python-artifact-membership",
+      "decision": "Generated Python bytecode membership across copy, inventory, and cleanup",
+      "owner": "security/gate.py (is_generated_python_artifact, is_python_bytecode_cache_path)",
+      "selectors": ["src/apm_cli/security/gate.py"],
+      "guards": ["contracts-tooling-python-artifact-membership"]
     },
     {
       "id": "cached-policy-shape",
@@ -25,6 +25,13 @@
       "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY)",
       "selectors": ["src/apm_cli/policy/discovery.py"],
       "guards": ["contracts-tooling-cached-policy-shape"]
+    },
+    {
+      "id": "policy-content-hash",
+      "decision": "SHA-2 digest computation for policy pin verification and cache metadata",
+      "owner": "policy/project_config.py (compute_policy_hash)",
+      "selectors": ["src/apm_cli/policy/project_config.py"],
+      "guards": ["contracts-tooling-policy-content-hash"]
     },
     {
       "id": "apply-to-hidden-tool-placement",

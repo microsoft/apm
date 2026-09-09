@@ -46,54 +46,6 @@ def _make_logger():
     return logger
 
 
-@pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
-@pytest.mark.parametrize("phase", ["cleanup", "rebuild"])
-def test_aggregate_recovery_is_visible_sanitized_and_scope_correct(tmp_path, user_scope, phase):
-    """Default semantic output preserves safe failure facts and the selected scope."""
-    from apm_cli.commands.uninstall.cli import _sync_integrations_for_manifest
-    from apm_cli.commands.uninstall.engine import AggregateIntegrationError
-
-    logger = _make_logger()
-    error = AggregateIntegrationError(
-        phase, frozenset({".copilot/copilot-instructions.md\x1b[31m"})
-    )
-    error.__cause__ = ValueError("private-source-token")
-    with (
-        patch("apm_cli.commands.uninstall.cli.APMPackage.from_apm_yml"),
-        patch(
-            "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall", side_effect=error
-        ),
-    ):
-        outcome, reported_error = _sync_integrations_for_manifest(
-            manifest_path=tmp_path / "apm.yml",
-            deploy_root=tmp_path,
-            all_deployed_files=set(),
-            logger=logger,
-            user_scope=user_scope,
-            lockfile=None,
-            modules_dir=tmp_path / "apm_modules",
-            deployed_file_hashes={},
-            default_counts={},
-        )
-    messages = "\n".join(call.args[0] for call in logger.warning.call_args_list)
-    assert f"aggregate {phase}" in messages
-    assert ".copilot/copilot-instructions.md" in messages
-    assert "\x1b" not in messages and "private-source-token" not in messages
-    assert "removal completed" in messages
-    expected = "apm install --global" if user_scope else "apm install"
-    assert f"Run '{expected}'" in messages
-    if not user_scope:
-        assert "--global" not in messages
-    assert "--force" not in messages
-    if phase == "cleanup":
-        assert "Back up and move" in messages
-    else:
-        assert "source errors" in messages
-    assert reported_error is error
-    assert outcome.removed_paths == frozenset()
-    logger.success.assert_not_called()
-
-
 # ===========================================================================
 # _parse_dependency_entry
 # ===========================================================================

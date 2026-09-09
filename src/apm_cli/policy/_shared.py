@@ -27,7 +27,7 @@ def _parse_apm_yml_safe(apm_yml_path: Path, result) -> object | None:
 
     try:
         clear_apm_yml_cache()
-        return APMPackage.from_apm_yml(apm_yml_path, create_config=False)
+        return APMPackage.from_apm_yml(apm_yml_path)
     except (ValueError, yaml.YAMLError, OSError) as exc:
         result.checks.append(
             CheckResult(

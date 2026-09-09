@@ -105,12 +105,12 @@ class TestDebug:
         assert "[DEBUG]" not in out.out
 
     def test_debug_redacts_git_credentials(self, capsys: pytest.CaptureFixture[str]) -> None:
-        secret = "github_pat_" + "A" * 30
+        sentinel = "github_pat_" + "A" * 30
         with patch.dict(os.environ, {"APM_DEBUG": "1"}):
-            _debug(f"git failed with {secret}")
+            _debug(f"git failed with {sentinel}")
 
         out = capsys.readouterr()
-        assert secret not in out.err
+        assert sentinel not in out.err
         assert "[DEBUG] git failed with ***" in out.err
 
 

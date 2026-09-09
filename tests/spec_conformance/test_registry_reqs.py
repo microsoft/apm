@@ -2,8 +2,8 @@
 
 req-rg-001 (trust anchor): the SHA-256 of the archive bytes the
 Registry serves MUST equal the digest the Registry advertises for
-that version. This is the ONE substantive normative statement this revision
-places on Registry implementations; the broader wire contract remains reserved.
+that version. This is the ONE substantive normative statement v0.1
+places on Registry implementations; the rest is reserved for v0.2.
 
 The fixture `integrity/security-baseline-2.3.1.tar.gz` simulates
 a Registry's published archive; its paired

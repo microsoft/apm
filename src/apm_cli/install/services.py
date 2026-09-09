@@ -225,7 +225,6 @@ def integrate_package_primitives(  # noqa: PLR0913
     dep_target_subset: list[str] | None = None,
     trust_bin: bool | None = None,
     bin_skip_reason_override: str | None = None,
-    show_force_hint: bool = True,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -366,7 +365,6 @@ def integrate_package_primitives(  # noqa: PLR0913
         package_name=package_name,
         force=force,
         logger=logger,
-        show_force_hint=show_force_hint,
     ):
         return result
 
@@ -691,7 +689,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     return result
 
 
-def integrate_local_content(  # noqa: PLR0913 -- explicit integration collaborator facade
+def integrate_local_content(
     project_root: Path,
     *,
     targets: Any,
@@ -708,7 +706,6 @@ def integrate_local_content(  # noqa: PLR0913 -- explicit integration collaborat
     scope: InstallScope | None = None,
     source_root: Path | None = None,
     ctx: InstallContext | None = None,
-    show_force_hint: bool = True,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
 
@@ -772,7 +769,6 @@ def integrate_local_content(  # noqa: PLR0913 -- explicit integration collaborat
         scope=scope,
         ctx=ctx,
         is_first_party=True,
-        show_force_hint=show_force_hint,
     )
 
 

@@ -127,6 +127,59 @@ _RID_SELF_UPDATE = "transport-platform-self-update-resolution"
 
 
 _SELF_UPDATE_OWNER = "src/apm_cli/commands/self_update.py"
+_VERSION_CHECKER = "src/apm_cli/utils/version_checker.py"
+_RID_RELEASE_METADATA = "transport-platform-release-metadata-discovery"
+
+
+def _check_release_metadata_discovery(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep startup and self-update on one metadata/auth recovery policy."""
+    inv = frozenset(provider.inventory)
+    return (
+        *_require_subs(
+            provider,
+            inv,
+            _RID_RELEASE_METADATA,
+            _VERSION_CHECKER,
+            (
+                "def get_latest_version_from_github(",
+                "def _release_http_error(",
+                "resolver.resolve(host, org=org)",
+                "classify_github_throttle(",
+                "release_metadata_public_lookup_blocked(github_url)",
+                "and effective_repo == _DEFAULT_REPO",
+                "and github_url == _PUBLIC_GITHUB_URL",
+                "and release_metadata_url is None",
+                "and not no_direct_fallback_enabled()",
+            ),
+            "Release metadata must keep bounded recovery, AuthResolver and throttle owners",
+        ),
+        *_require_subs(
+            provider,
+            inv,
+            _RID_RELEASE_METADATA,
+            _SELF_UPDATE_OWNER,
+            ("return get_latest_version_from_github(",),
+            "Self-update must consume the canonical release metadata lookup",
+        ),
+        *_forbid_scan(
+            provider,
+            inv,
+            _RID_RELEASE_METADATA,
+            _src_python(provider, exclude={_VERSION_CHECKER}),
+            re.compile(r"^def (?:get_latest_version_from_github|_release_http_error)\("),
+            "Release metadata discovery must stay owned by utils/version_checker.py",
+            exempt=False,
+        ),
+        *_forbid_scan(
+            provider,
+            inv,
+            _RID_RELEASE_METADATA,
+            (_SELF_UPDATE_OWNER,),
+            re.compile(r"/releases/latest|/releases\?|_build_releases_(?:list_)?api_url\("),
+            "Self-update must not add a parallel release metadata HTTP path",
+            exempt=False,
+        ),
+    )
 
 
 _SELF_UPDATE_DEFS = re.compile(
@@ -437,6 +490,13 @@ def _check_self_update_resolution(provider: FactsProvider) -> tuple[Violation, .
 
 
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_RID_RELEASE_METADATA,
+        group=GROUP,
+        guard_ids=(_RID_RELEASE_METADATA,),
+        description="Public release metadata discovery shares version_checker and auth/throttle owners.",
+        check=_check_release_metadata_discovery,
+    ),
     Rule(
         id=_RID_UNIX_INSTALL,
         group=GROUP,

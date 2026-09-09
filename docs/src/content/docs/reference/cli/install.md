@@ -19,16 +19,6 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 `PACKAGE_REF` accepts: shorthand (`owner/repo`), HTTPS or SSH Git URLs, FQDN shorthand (`host/owner/repo`), local paths (`./path`, `/abs/path`, `~/path`), packed bundles (`./bundle.zip`, `./bundle.tar.gz`), and marketplace refs (`NAME@MARKETPLACE[#ref]`).
 
-With `--global`, direct local dependencies must use absolute paths (`~/path`
-also works). A local package can still declare a relative child such as
-`../child`: APM resolves it from that declaring package's original source
-directory, not the current working directory or `~/.apm/`. Direct or unanchored
-relative local references remain unsupported at user scope.
-This source anchor does not change deployment scope. APM does not look in
-another scope's installed packages for a missing local source. Remote-declared
-relative paths stay inside their authenticated repository; symlinks within a
-selected local package must stay inside that package's resolved source directory.
-
 :::caution
 `http://` dependencies are refused unless you pass `--allow-insecure` (direct) or `--allow-insecure-host HOSTNAME` (transitive).
 :::
@@ -276,13 +266,14 @@ apm install owner/skill-bundle --skill '*'         # reset to all skills
 
 | Code | Meaning |
 |---|---|
-| `0` | Success. All requested dependencies and local content deployed. |
-| `1` | Install failure: security scan blocked a critical finding, auth error, manifest or required MCP/LSP config write error, dependency resolution error, `--frozen` with a missing lockfile or a direct dependency absent from `apm.lock.yaml`, any reported install error (the diagnostic summary closes with `Installation failed with N error(s)`), or unhandled exception. `--force` does **not** suppress general install errors. The diagnostic summary names the cause. |
+| `0` | Successful install or `--dry-run` preview. A preview does not certify real install success. For Agent Plugins v1 packages, a mixed install still succeeds when target exclusion skips one package but at least one other package deploys. |
+| `1` | Install failure: security scan blocked a critical finding, auth error, manifest or required MCP/LSP config write error, dependency resolution error, Agent Plugins v1 target exclusion left no package deployed on a non-dry-run install, `--frozen` with a missing lockfile or a direct dependency absent from `apm.lock.yaml`, any reported install error (the diagnostic summary closes with `Installation failed with N error(s)`), or unhandled exception. `--force` does **not** suppress general install errors. The diagnostic summary names the cause. |
 | `2` | Usage error: no deployment target detectable (no `--target`, no `target(s):` in `apm.yml`, no default target configured via `apm config set target <value>`, and no harness signal in the project), `--ssh` and `--https` both passed, `--frozen` and `--update` both passed, `--root` combined with `--global`, or a Click flag conflict. |
 
 ## Notes
 
 - **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. It does **not** suppress general install errors -- any error reported in the diagnostic summary still exits `1` (matches `npm` / `pip` / `cargo`). It does **not** refresh remote refs -- for routine ref updates, run [`apm update`](../update/). To remediate a blocked package, fix the reported source files and reinstall; `apm audit --strip` only remediates files that are already deployed. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
+- **Agent Plugin target exclusion is fail-loud on non-dry-run total no-ops.** Agent Plugins v1 packages register natively only with the effective `copilot` target today. If every selected target excludes native registration and no other package deploys, a non-dry-run install exits `1` and prints a skill-subpath recovery command such as `apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`. Keep refs after the skill path to install a plain skill bundle, or select `--target copilot` for native registration. Mixed installs that deploy at least one other package still exit `0`. For this target exclusion, `--dry-run` remains a successful preview without the per-package recovery diagnostic; it does not certify that a real install will succeed.
 - **Target contraction is reconciled.** A narrowed `targets:` in `apm.yml` is reconciled on the next non-dry-run install: deployed files, lockfile ownership, and merge-hook config/sidecar entries for the dropped target are cleaned up, even when no dependency itself changed. A package's own `target:` / `targets:` declaration applies an additional restriction within that effective set. See [Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks) for the full intersection and merge-hook config/sidecar details. `apm lock` may refresh the lockfile rows, but it never deletes deployed files from disk.
 - **Claude target prompt rewrite.** When deploying to `.claude/commands/`, prompt files with an `input:` front-matter key are rewritten to Claude's `arguments:` shape and `${input:name}` placeholders become `$name`. Argument names must match `^[A-Za-z][\w-]{0,63}$`; rejected names are dropped with a warning.
 - **MCP env-var passthrough.** Copilot CLI and Kiro translate `${env:VAR}` and `<VAR>` to `${VAR}` in their MCP configs. Kiro writes `.kiro/settings/mcp.json` and `~/.kiro/settings/mcp.json` with `0o600` permissions. JetBrains Copilot preserves env references as `${env:VAR}` in `github-copilot/intellij/mcp.json`. Plaintext secrets are never written to disk for these runtime-resolved targets; legacy targets resolve placeholders at install time.

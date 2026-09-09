@@ -25,6 +25,14 @@ _FRESH_NS = 4102444800000000000
 _REMOTE = "https://gitlab.example.invalid/cache/recency.git"
 
 
+@pytest.fixture
+def recency_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Keep Git metadata below MAX_PATH, including main's worker-depth layout."""
+    # Per-test names exhaust Git's config.worktree path budget. Retain an extra
+    # worker component so the unsharded Windows gate also exercises main's depth.
+    return tmp_path_factory.mktemp("r") / "popen-gw0"
+
+
 def _populated_cache(
     tmp_path: Path, sparse_paths: list[str] | None
 ) -> tuple[GitCache, dict[str, str], tuple[Path, Path, Path]]:
@@ -42,29 +50,38 @@ def _populated_cache(
         commits.append(repositories.commit(repository, message=name))
     environment = repositories.url_rewrite_subprocess_env(repository, _REMOTE)
     cache = GitCache(isolated.cache_root)
-    used, stale, fresh = (
-        cache.get_checkout(
-            _REMOTE, None, locked_sha=commit.sha, env=environment, sparse_paths=sparse_paths
+    try:
+        used, stale, fresh = (
+            cache.get_checkout(
+                _REMOTE, None, locked_sha=commit.sha, env=environment, sparse_paths=sparse_paths
+            )
+            for commit in commits
         )
-        for commit in commits
-    )
+    except RuntimeError as exc:
+        if isinstance(exc.__cause__, subprocess.CalledProcessError):
+            pytest.fail(f"Local Git fixture failed: {exc.__cause__.stderr}")
+        raise
     return cache, environment, (used, stale, fresh)
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize(
     ("refresh", "sparse_paths"),
     [
-        pytest.param(False, None, id="hit-full", marks=pytest.mark.windows_compat),
+        pytest.param(False, None, id="hit-full"),
         pytest.param(False, ["skills"], id="hit-sparse"),
         pytest.param(True, None, id="write-dedup-full"),
         pytest.param(True, ["skills"], id="write-dedup-sparse"),
     ],
 )
 def test_successful_checkout_reuse_survives_prune(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparse_paths: list[str] | None, refresh: bool
+    recency_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sparse_paths: list[str] | None,
+    refresh: bool,
 ) -> None:
     """Access refreshes the shared SHA root, not merely its variant directory."""
-    cache, environment, (used, stale, fresh) = _populated_cache(tmp_path, sparse_paths)
+    cache, environment, (used, stale, fresh) = _populated_cache(recency_root, sparse_paths)
     original_inode = used.stat().st_ino
     lock_path = Path(shard_lock(used).lock_file)
     lock_path.touch()
@@ -121,6 +138,7 @@ def test_failed_sparse_validation_does_not_refresh_access(
     record_access.assert_not_called()
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize("refresh", [False, True], ids=["hit", "write-dedup"])
 @pytest.mark.parametrize("sparse_paths", [None, ["skills"]], ids=["full", "sparse"])
 @pytest.mark.parametrize(
@@ -132,7 +150,7 @@ def test_failed_sparse_validation_does_not_refresh_access(
     ],
 )
 def test_checkout_recency_error_contract(
-    tmp_path: Path,
+    recency_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     refresh: bool,
@@ -142,7 +160,7 @@ def test_checkout_recency_error_contract(
     message: str,
 ) -> None:
     """Only denied recency metadata is non-fatal, with a visible recovery hint."""
-    cache, environment, (used, _stale, _fresh) = _populated_cache(tmp_path, sparse_paths)
+    cache, environment, (used, _stale, _fresh) = _populated_cache(recency_root, sparse_paths)
     error = error_type(error_number, message)
     original_inode = used.stat().st_ino
     original_utime = os.utime
@@ -183,9 +201,10 @@ def test_checkout_recency_error_contract(
             assert not caplog.records
 
 
-def test_recency_permission_warning_reaches_default_cli_stderr(tmp_path: Path) -> None:
+@pytest.mark.windows_compat
+def test_recency_permission_warning_reaches_default_cli_stderr(recency_root: Path) -> None:
     """The real CLI logging configuration exposes the backend warning by default."""
-    cache, environment, (used, _stale, _fresh) = _populated_cache(tmp_path, None)
+    cache, environment, (used, _stale, _fresh) = _populated_cache(recency_root, None)
     environment.pop("APM_LOG_LEVEL", None)
     result = subprocess.run(
         [

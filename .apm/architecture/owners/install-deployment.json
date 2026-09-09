@@ -19,8 +19,8 @@
       "id": "deployment-provenance-state",
       "decision": "Deployment provenance / state",
       "owner": "deployment_ledger.py",
-      "selectors": ["src/apm_cli/core/deployment_ledger.py", "src/apm_cli/core/deployment_state.py"],
-      "guards": ["install-deployment-provenance-state", "install-deployment-copilot-aggregate"]
+      "selectors": ["src/apm_cli/core/deployment_ledger.py"],
+      "guards": ["install-deployment-provenance-state"]
     },
     {
       "id": "target-scoped-deployed-file-contraction",
@@ -96,16 +96,6 @@
       "guards": ["install-deployment-install-scope-selection"]
     },
     {
-      "id": "local-dependency-scope-admission",
-      "decision": "Declaring-source provenance and local dependency scope admission",
-      "owner": "deps/apm_resolver.py (_source_kind_for_dependency) projects acquisition provenance onto APMPackage; install/package_resolution.py (user_scope_rejection_reason) owns admission",
-      "selectors": [
-        "src/apm_cli/install/package_resolution.py",
-        "src/apm_cli/deps/apm_resolver.py"
-      ],
-      "guards": ["install-deployment-local-scope-admission"]
-    },
-    {
       "id": "mcp-registry-url-resolution",
       "decision": "MCP registry URL resolution precedence",
       "owner": "registry/client.py (resolve_mcp_registry_url)",
@@ -116,7 +106,7 @@
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
       "owner": "BaseIntegrator (see integrators.instructions.md)",
-      "selectors": ["src/apm_cli/integration/base_integrator.py", "src/apm_cli/integration/instruction_integrator.py"],
+      "selectors": ["src/apm_cli/integration/base_integrator.py"],
       "guards": ["install-deployment-base-integrator"]
     },
     {

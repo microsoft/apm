@@ -30,7 +30,9 @@ import yaml
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver, DownloadedPackageError
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.models.validation import PackageContentType, PackageType, validate_apm_package
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,6 +69,129 @@ def _make_dep_ref(repo_url: str = "org/pkg", *, is_local: bool = False) -> Magic
     ref.is_parent_repo_inheritance = False
     ref.is_azure_devops.return_value = False
     return ref
+
+
+class TestManifestlessSkillBundleResolution:
+    """Downloaded collections use canonical validation before staged activation (#2888)."""
+
+    @pytest.mark.parametrize("existing", [False, True], ids=["fresh", "replacement"])
+    def test_valid_bundle_activates_and_reloads(self, tmp_path: Path, existing: bool) -> None:
+        """Valid nested skills need neither a root SKILL.md nor a generated manifest."""
+        modules = tmp_path / "apm_modules"
+        ref = DependencyReference(repo_url="org/collection", reference="main")
+        live = ref.get_install_path(modules)
+        if existing:
+            live.mkdir(parents=True)
+            (live / "old.txt").write_text("previous install", encoding="utf-8")
+        staging = ResolutionStagingSession(modules)
+        candidate = staging.prepare_replacement(live)
+        skill = candidate / "skills/find-skills/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text(
+            "---\nname: find-skills\ndescription: Find skills\n---\n# Find skills\n",
+            encoding="utf-8",
+        )
+        activate = MagicMock(side_effect=staging.publish_replacement)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=modules,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=activate,
+        )
+
+        try:
+            package = resolver._try_load_dependency_package(ref)
+            assert package is not None
+            assert package.package_path == live.resolve()
+            assert package.source == "org/collection"
+            assert package.type is PackageContentType.SKILL
+            assert package.version == "0.0.0"
+            assert package.get_apm_dependencies() == []
+            activate.assert_called_once_with(candidate)
+            assert (live / "skills/find-skills/SKILL.md").is_file()
+            assert not (live / "apm.yml").exists()
+            assert not (live / "SKILL.md").exists()
+            assert not (live / "old.txt").exists()
+            reloaded = APMDependencyResolver(apm_modules_dir=modules)._try_load_dependency_package(
+                ref
+            )
+            assert reloaded is not None
+            assert reloaded.source == package.source
+            assert reloaded.package_path == package.package_path
+            assert staging.commit() == []
+        finally:
+            staging.rollback()
+
+    @pytest.mark.parametrize("existing", [False, True], ids=["fresh", "replacement"])
+    @pytest.mark.parametrize(
+        "invalid", ["malformed", "invalid-manifest", "escaping-symlink", "escaping-directory"]
+    )
+    def test_invalid_bundle_preserves_state(
+        self, tmp_path: Path, existing: bool, invalid: str
+    ) -> None:
+        """Invalid candidates retain validator diagnostics and never replace live bytes."""
+        modules = tmp_path / "apm_modules"
+        ref = DependencyReference(repo_url="org/collection", reference="main")
+        live = ref.get_install_path(modules)
+        if existing:
+            live.mkdir(parents=True)
+            (live / "old.txt").write_bytes(b"previous install")
+        staging = ResolutionStagingSession(modules)
+        candidate = staging.prepare_replacement(live)
+        skill = candidate / "skills/find-skills/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        sibling = candidate / "skills/valid-skill/SKILL.md"
+        sibling.parent.mkdir()
+        sibling.write_text(
+            "---\nname: valid-skill\ndescription: Valid sibling\n---\n",
+            encoding="utf-8",
+        )
+        outside = tmp_path / "outside/SKILL.md"
+        outside.parent.mkdir()
+        outside.write_bytes(b"outside must remain untouched")
+        if invalid == "malformed":
+            skill.write_text("---\nname: [unterminated\n---\n", encoding="utf-8")
+        elif invalid == "invalid-manifest":
+            skill.write_text(
+                "---\nname: find-skills\ndescription: Find skills\n---\n", encoding="utf-8"
+            )
+            (candidate / "apm.yml").write_text("name: [unterminated\n", encoding="utf-8")
+        elif invalid == "escaping-directory":
+            skill.parent.rmdir()
+            skill.parent.symlink_to(outside.parent, target_is_directory=True)
+        else:
+            skill.symlink_to(outside)
+        validation = validate_apm_package(candidate)
+        assert validation.package_type is PackageType.SKILL_BUNDLE
+        assert validation.is_valid is False
+        if invalid != "invalid-manifest":
+            assert validation.package is not None
+        activate = MagicMock(side_effect=staging.publish_replacement)
+        resolver = APMDependencyResolver(
+            apm_modules_dir=modules,
+            download_callback=lambda *_args, **_kwargs: candidate,
+            activation_callback=activate,
+        )
+
+        try:
+            with pytest.raises(DownloadedPackageError) as error:
+                resolver._try_load_dependency_package(ref)
+            assert "; ".join(validation.errors) in str(error.value)
+            hint = (
+                "existing installation remains active"
+                if existing
+                else "downloaded candidate was not activated"
+            )
+            assert hint in str(error.value)
+            activate.assert_not_called()
+        finally:
+            assert staging.rollback() == []
+        assert not candidate.exists()
+        assert outside.read_bytes() == b"outside must remain untouched"
+        if existing:
+            assert sorted(path.name for path in live.iterdir()) == ["old.txt"]
+            assert (live / "old.txt").read_bytes() == b"previous install"
+        else:
+            assert not live.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -437,15 +562,14 @@ class TestIsRemoteParent:
     def test_none_parent_returns_false(self) -> None:
         assert APMDependencyResolver._is_remote_parent(None) is False
 
-    def test_parent_with_unknown_provenance_requires_backstop(self) -> None:
+    def test_parent_with_no_source_returns_false(self) -> None:
         pkg = MagicMock()
         pkg.source = None
-        assert APMDependencyResolver._is_remote_parent(pkg) is True
+        assert APMDependencyResolver._is_remote_parent(pkg) is False
 
     def test_local_prefix_returns_false(self) -> None:
         pkg = MagicMock()
         pkg.source = "_local/mypkg"
-        pkg.proven_source_kind = "local"
         assert APMDependencyResolver._is_remote_parent(pkg) is False
 
     def test_https_source_returns_true(self) -> None:
@@ -466,13 +590,11 @@ class TestIsRemoteParent:
     def test_relative_local_path_returns_false(self) -> None:
         pkg = MagicMock()
         pkg.source = "../relative/path"
-        pkg.proven_source_kind = "local"
         assert APMDependencyResolver._is_remote_parent(pkg) is False
 
     def test_absolute_local_path_returns_false(self) -> None:
         pkg = MagicMock()
         pkg.source = "/abs/local/path"
-        pkg.proven_source_kind = "local"
         assert APMDependencyResolver._is_remote_parent(pkg) is False
 
 

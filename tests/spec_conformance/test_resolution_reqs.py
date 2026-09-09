@@ -39,6 +39,7 @@ from apm_cli.deps.tiered_ref_resolver import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+from apm_cli.utils.yaml_io import load_yaml
 from tests.integration.test_install_subdir_dedup_e2e import (
     test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
 )
@@ -47,6 +48,7 @@ from tests.spec_conformance._helpers import (
     load_json_fixture,
     load_schema,
 )
+from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
 
 # --- req-rs-001..014 ---------------------------------------------------
 
@@ -153,6 +155,22 @@ def test_resolver_records_source_url_in_lockfile():
     )
 
 
+@pytest.mark.req("req-rs-011")
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [("1.7.0", "1.7.0"), ("=1.7.0", "1.7.0"), ("^1.7.0", "1.8.0")],
+)
+def test_registry_refresh_preserves_constraint_after_outdated(
+    tmp_path: Path, selector: str, expected: str
+) -> None:
+    """Bind req-rs-011's constraint-bound selection clause to real archive resolution."""
+    _RegistryResolverContract().test_refresh_keeps_constraint_even_when_outdated_reports_newer(
+        tmp_path, selector, expected
+    )
+    installed_manifest = load_yaml(tmp_path / "package" / "apm.yml")
+    assert installed_manifest["version"] == expected
+
+
 @pytest.mark.req("req-rs-012")
 def test_resolver_records_resolved_ref_in_lockfile():
     assert_spec_contains(
@@ -162,18 +180,18 @@ def test_resolver_records_resolved_ref_in_lockfile():
 
 @pytest.mark.req("req-rs-013")
 def test_resolver_fails_closed_on_ambiguous_resolution():
-    """`conflict_resolution: nest` remains refused in the corrective revision."""
+    """`conflict_resolution: nest` MUST be rejected in v0.1."""
     assert_spec_contains(
         "conflict_resolution: nest",
-        "reserved for a future revision",
+        "reserved for v0.2",
     )
     # Schema enum pin (round-3 fold): the manifest schema MUST admit
-    # only `intersection-pick`; `nest` remains reserved.
+    # only `intersection-pick` in v0.1; `nest` is reserved for v0.2.
     schema = load_schema("manifest-v0.1.schema.json")
     enum = schema["$defs"]["depsBlock"]["properties"]["conflict_resolution"]["enum"]
     assert enum == ["intersection-pick"], (
         f"manifest schema conflict_resolution enum MUST be exactly "
-        f"['intersection-pick']; got {enum!r}"
+        f"['intersection-pick'] in v0.1; got {enum!r}"
     )
 
 

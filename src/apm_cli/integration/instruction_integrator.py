@@ -29,7 +29,6 @@ from apm_cli.utils.yaml_io import loads_frontmatter
 if TYPE_CHECKING:
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.integration.targets import TargetProfile
-    from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
 @dataclass(frozen=True)
@@ -495,35 +494,16 @@ class InstructionIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
-        *,
-        managed_file_hashes: dict[str, str] | None = None,
-        diagnostics: DiagnosticCollector | None = None,
-    ) -> dict[str, int | tuple[str, ...]]:
+    ) -> dict[str, int]:
         """Remove APM-managed instruction files for a single *target*."""
         mapping = target.primitives.get("instructions")
         if not mapping:
             return {"files_removed": 0, "errors": 0}
         effective_root = mapping.deploy_root or target.root_dir
         if mapping.format_id == "copilot_user_instructions":
-            from apm_cli.integration.cleanup import remove_stale_deployed_files
-            from apm_cli.utils.diagnostics import DiagnosticCollector
-
-            # Generated aggregates are whole-file rebuilds, but only after
-            # the cleanup owner's containment and recorded-hash checks pass.
-            cleanup = remove_stale_deployed_files(
-                project_root=project_root,
-                stale_paths=self.aggregate_paths([target]).intersection(managed_files or ()),
-                recorded_hashes=managed_file_hashes or {},
-                diagnostics=diagnostics or DiagnosticCollector(),
-                dep_key="<instruction aggregate>",
-                targets=[target],
-                user_scope=True,
-            )
-            return {
-                "files_removed": len(cleanup.deleted),
-                "errors": len(cleanup.retained),
-                "removed_paths": tuple(cleanup.deleted),
-            }
+            prefix = f"{effective_root}/copilot-instructions.md"
+            legacy_pattern = None
+            legacy_dir = None
         else:
             prefix = f"{effective_root}/{mapping.subdir}/"
             legacy_dir = project_root / effective_root / mapping.subdir
@@ -554,16 +534,6 @@ class InstructionIntegrator(BaseIntegrator):
     # ------------------------------------------------------------------
     # Copilot user-scope concat support
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def aggregate_paths(targets: list[TargetProfile]) -> frozenset[str]:
-        """Return generated instruction paths whose contributions share ownership."""
-        return frozenset(
-            (Path(mapping.deploy_root or target.root_dir) / "copilot-instructions.md").as_posix()
-            for target in targets
-            if (mapping := target.primitives.get("instructions")) is not None
-            and mapping.format_id == "copilot_user_instructions"
-        )
 
     # Sentinel line written as the first line of every APM-managed
     # copilot-instructions.md.  Its presence distinguishes the file from

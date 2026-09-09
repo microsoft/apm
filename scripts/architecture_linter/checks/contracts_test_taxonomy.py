@@ -60,6 +60,9 @@ _GUARD_DEPENDENCY_IDENTITY = "contracts-tooling-dependency-identity"
 _GUARD_CACHED_POLICY = "contracts-tooling-cached-policy-shape"
 
 
+_GUARD_POLICY_HASH = "contracts-tooling-policy-content-hash"
+
+
 _GUARD_APPLY_TO = "contracts-tooling-apply-to-placement"
 
 
@@ -83,48 +86,6 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
-_GUARD_SPEC_ASSESSMENT = "contracts-tooling-spec-assessment"
-
-
-def check_spec_assessment_authority(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Keep selected artifact, exact identity, and collection decisions in one owner."""
-    required_calls = {
-        "tests/spec_conformance/_helpers.py": ("selected_assessment(",),
-        "tests/spec_conformance/conftest.py": ("coverage_document(", "coverage_output_path("),
-        "tests/spec_conformance/orphan_check.py": ("collect_coverage(",),
-        "tests/spec_conformance/gen_statement.py": ("collect_coverage(", "selected_assessment("),
-        "tests/spec_conformance/mode_b_detector.sh": ("-m tests.spec_conformance._manifest",),
-    }
-    findings: list[Violation] = []
-    for path, calls in required_calls.items():
-        facts, failures = _facts_for(provider, path, _GUARD_SPEC_ASSESSMENT)
-        findings.extend(failures)
-        if failures:
-            continue
-        if any(not _present(facts, call) for call in calls):
-            findings.append(
-                _summary(
-                    _GUARD_SPEC_ASSESSMENT,
-                    path,
-                    "Spec assessment consumers must route through tests/spec_conformance/_manifest.py",
-                )
-            )
-        if _present_re(
-            facts,
-            re.compile(
-                r"""(?:openapm-v[0-9]+\.[0-9]+|["']v[0-9]+\.[0-9]+\.[0-9]+["']"""
-                r"|^\s*(?:SPEC_PATH|MANIFEST_PATH|SPEC_VERSION|_SELECTED_MINOR)\s*=)"
-            ),
-        ):
-            findings.append(
-                _summary(
-                    _GUARD_SPEC_ASSESSMENT,
-                    path,
-                    "Selected spec paths and exact revision must not be independently hard-coded",
-                )
-            )
-    return tuple(findings)
-
 
 _SRC_PREFIX = "src/apm_cli/"
 
@@ -134,6 +95,7 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/bundle/packer.py",
     "src/apm_cli/bundle/plugin_exporter.py",
     "src/apm_cli/bundle/agent_plugin_exporter.py",
+    "src/apm_cli/commands/outdated.py",
 )
 
 
@@ -286,10 +248,15 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
             consumer.tree_index.nodes,
             "resolve_lockfile_path_for_read",
         )
-        routes_read_only = len(calls) == 1 and _keyword_is_name(
-            calls[0],
-            "read_only",
-            "dry_run",
+        routes_read_only = len(calls) == 1 and (
+            any(
+                keyword.arg == "read_only"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+                for keyword in calls[0].keywords
+            )
+            if consumer_path == "src/apm_cli/commands/outdated.py"
+            else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (
             "resolve_lockfile_path_for_read" not in imported
@@ -300,7 +267,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 _summary(
                     rule_id,
                     consumer_path,
-                    "Bundle lockfile reads must route through the read-only owner",
+                    "Lockfile reads must route through the read-only owner",
                 )
             )
     return tuple(findings)
@@ -743,6 +710,35 @@ def check_cached_policy_shape(provider: FactsProvider) -> tuple[Violation, ...]:
         _ado_coordinate_findings(provider, policy, rule_id)
         + _cached_policy_shape_findings(provider, policy, rule_id)
     )
+
+
+def check_policy_content_hash(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Policy verification and cache digests must use the same SHA-2 owner."""
+    rule_id = _GUARD_POLICY_HASH
+    policy, failures = _facts_for(provider, _POLICY_OWNER, rule_id)
+    if failures:
+        return tuple(failures)
+    findings: list[Violation] = []
+    for name in ("_verify_hash_pin", "_compute_hash_normalized"):
+        function = policy.tree_index.function(name)
+        nodes = policy.tree_index.own_scope(function) if function is not None else ()
+        calls = _named_calls(nodes, "compute_policy_hash")
+        direct_hashes = [
+            node
+            for node in nodes
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "hashlib"
+        ]
+        if len(calls) != 1 or direct_hashes:
+            findings.append(
+                _summary(
+                    rule_id,
+                    _POLICY_OWNER,
+                    f"{name} must delegate digest computation to compute_policy_hash",
+                )
+            )
+    return tuple(findings)
 
 
 _APPLY_TO_OWNER = "src/apm_cli/utils/patterns.py"
@@ -1335,11 +1331,6 @@ def _structural_rule(rule_id: str, description: str, check) -> Rule:
 
 RULES: tuple[Rule, ...] = (
     _owner_rule(
-        _GUARD_SPEC_ASSESSMENT,
-        "Selected specification and fresh binding inventory have one canonical owner.",
-        check_spec_assessment_authority,
-    ),
-    _owner_rule(
         _GUARD_TAXONOMY,
         "Behavioral test taxonomy classification stays owned by module-level pytestmark.",
         check_taxonomy_classification,
@@ -1353,6 +1344,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_CACHED_POLICY,
         "Cached policy shape and ADO coordinate stay owned by policy/discovery.py.",
         check_cached_policy_shape,
+    ),
+    _owner_rule(
+        _GUARD_POLICY_HASH,
+        "Policy pin verification and cache digests use project_config.compute_policy_hash.",
+        check_policy_content_hash,
     ),
     _owner_rule(
         _GUARD_APPLY_TO,

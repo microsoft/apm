@@ -168,7 +168,6 @@ class DeploymentReconciler:
         current_claims: Mapping[str, Iterable[str]],
         prior_files: Mapping[str, Iterable[str]],
         prior_hashes: Mapping[str, Mapping[str, str]],
-        shared_paths: frozenset[str] = frozenset(),
     ) -> dict[str, PackageDeploymentClaims]:
         """Resolve legacy last-writer claims and prior carry-forward eligibility."""
         normalized_current = {owner: tuple(paths) for owner, paths in current_claims.items()}
@@ -180,14 +179,10 @@ class DeploymentReconciler:
         claims: dict[str, PackageDeploymentClaims] = {}
         for owner in package_keys:
             current = tuple(
-                path
-                for path in normalized_current.get(owner, ())
-                if path in shared_paths or last_owner[path] == owner
+                path for path in normalized_current.get(owner, ()) if last_owner[path] == owner
             )
             eligible_prior = tuple(
-                path
-                for path in prior_files.get(owner, ())
-                if path in shared_paths or last_owner.get(path, owner) == owner
+                path for path in prior_files.get(owner, ()) if last_owner.get(path, owner) == owner
             )
             eligible_prior_set = set(eligible_prior)
             claims[owner] = PackageDeploymentClaims(
@@ -200,30 +195,6 @@ class DeploymentReconciler:
                 },
             )
         return claims
-
-    @staticmethod
-    def merge_aggregate_records(
-        batches: Iterable[Mapping[str, DeploymentRecord]],
-        shared_paths: frozenset[str],
-    ) -> dict[str, DeploymentRecord]:
-        """Collect ordered aggregate owners, freezing each final record only once."""
-        records: dict[str, DeploymentRecord] = {}
-        aggregate_owners: dict[str, dict[str, None]] = {}
-        for batch in batches:
-            for key, record in batch.items():
-                if record.locator.value in shared_paths:
-                    owners = aggregate_owners.setdefault(key, {})
-                    owners.update(dict.fromkeys(record.owners))
-                records[key] = record
-        for key, owners in aggregate_owners.items():
-            record = records[key]
-            records[key] = DeploymentRecord(
-                locator=record.locator,
-                owners=tuple(owners),
-                active_owner=record.active_owner,
-                content_hash=record.content_hash,
-            )
-        return records
 
     def reconcile(
         self,

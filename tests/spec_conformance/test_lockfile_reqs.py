@@ -269,7 +269,7 @@ def test_lockfile_tree_sha256_canonicalisation_invariant():
 
 @pytest.mark.req("req-lk-016")
 def test_lockfile_reader_tolerates_bare_hex_hash():
-    """The unchanged wire schema and corrective revision retain bare-hex readers."""
+    """v0.1 schema tolerates bare-hex; v0.2 will require envelope."""
     schema = load_schema("lockfile-v0.1.schema.json")
     pattern = schema["properties"]["local_deployed_file_hashes"]["additionalProperties"]["pattern"]
     assert "[0-9a-f]{64}" in pattern
@@ -314,7 +314,7 @@ def test_lockfile_should_record_publish_timestamp():
         "requires registry interaction to exercise end-to-end. The "
         "schema affordance (generated_at) is asserted above; full "
         "publisher coverage requires the registry wire conformance "
-        "module which remains outside this revision's scope."
+        "module which is not in v0.1 scope."
     )
 
 

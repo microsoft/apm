@@ -130,7 +130,9 @@ APM does not keep previous binaries. Reinstall with a [version pin](../../../get
 
 ## Failure modes
 
-Download or installer failures exit with code `1`. Unix ownership/destination refusals leave the existing installation untouched; follow the reported administrator/package-manager update action.
+Release metadata failures exit `1`, including with `--check`: authentication (refresh credentials), rate limits (wait), HTTP/network errors (check endpoint/connectivity), or malformed JSON/metadata (verify source). Malformed `GITHUB_URL` produces a sanitized configuration diagnostic: use a valid HTTPS URL. HTTP 3xx reports that redirects are not followed, without echoing `Location`; see [mirror migration](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode). See [Public release metadata](../../../getting-started/installation/#public-release-metadata) for retry restrictions.
+
+Download failures or non-zero installer exits also return `1` with mirror or manual update guidance. Unix ownership/destination refusals leave the existing installation untouched; follow the reported administrator/package-manager update action.
 
 ## Startup update notification
 
@@ -141,7 +143,7 @@ A new version of APM is available: 0.7.0 (current: 0.6.3)
 Run apm self-update to upgrade
 ```
 
-The check is cached and non-blocking. It is suppressed in distributions that disable self-update.
+The check is cached and non-blocking. Lookup, network, and metadata failures stay quiet. It is suppressed in distributions that disable self-update.
 
 ## Related
 

@@ -1,8 +1,8 @@
-"""Generate the selected OpenAPM revision's static binding inventory.
+"""Generate the OpenAPM v0.1 conformance statement.
 
 Reads:
-  - a fresh, version-stamped full-suite collection
-  - the selected requirements manifest
+  - build/conformance-coverage.json (written by conftest at collection)
+  - docs/.../openapm-v0.1.requirements.yml (manifest)
   - test source files (for waiver/assertion extraction via ast)
 
 Writes:
@@ -17,23 +17,23 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 import sys
 from collections import defaultdict
 
 from tests.spec_conformance._manifest import (
     ALLOWED_CLASSES,
+    COVERAGE_PATH,
     REPO_ROOT,
-    Coverage,
-    collect_coverage,
+    SPEC_PATH,
     load_requirements,
-    selected_assessment,
 )
-from tests.spec_conformance.orphan_check import check_bindings
 
 CONFORMANCE_JSON = REPO_ROOT / "CONFORMANCE.json"
 CONFORMANCE_MD = REPO_ROOT / "CONFORMANCE.md"
 
-GENERATOR = "gen_statement.py v2"
+SPEC_VERSION = "v0.1.1"
+GENERATOR = "gen_statement.py v1"
 USER_SCOPE_DISCLOSURE = {
     "manifest_location": "~/.apm/apm.yml",
     "lockfile_location": "~/.apm/apm.lock.yaml",
@@ -41,40 +41,31 @@ USER_SCOPE_DISCLOSURE = {
         "MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)"
     ),
 }
-ASSESSMENT_LIMITATIONS = [
-    "The reference CLI's bare content audit uses source-derived drift replay, not the "
-    "stored-hash baseline required by req-lk-017's unqualified audit obligation. "
-    "The stored-hash and full-SHA consistency baselines are exercised in CI/conformance "
-    "audit. This inventory does not claim full Consumer conformance in bare audit mode.",
-    "The native Cowork audit controls use a controlled pre-existing standalone-skill "
-    "snapshot; they do not establish a successful Cowork install/audit round trip. "
-    "The Grok user-scope control does exercise install and audit.",
-    "A selected native runtime without an isolated replay backend is reported as "
-    "unsupported before its live writer. No new native database scratch backend "
-    "or hosted-runtime evidence is supplied by this inventory.",
-    "A source-only coupled probe shows that local acquisition dereferences an admitted "
-    "internal resource symlink, but inherited replay plans from the original source "
-    "representation and can falsely report the deployed regular file as orphaned "
-    "during unchanged CI audit. The narrowly expected-failing regression separately "
-    "verifies content integrity and unchanged live state; an escaping-link refusal "
-    "control remains unsuppressed. This is a replay limitation, not evidence of an "
-    "escape, external-file read or security bypass.",
-    "The retained manifest schema rejects git entries with a path modifier and id "
-    "entries with an explicit registry modifier. It also accepts malformed or "
-    "wrong-length policy.hash strings structurally. Schema acceptance is not evidence "
-    "of Consumer digest-envelope enforcement under req-mf-018 or req-lk-016.",
-    "Inherited Git-tree boundaries for symlink blobs, gitlinks/submodules and "
-    "CRLF/LFS-filtered checkout bytes lack cross-platform execution evidence in this "
-    "assessment. The req-lk-015 obligation and digest construction remain unchanged.",
-]
 
 
-def _ensure_coverage() -> Coverage:
-    """Require fresh collection and exact four-way binding before rendering."""
-    coverage = collect_coverage()
-    if check_bindings(coverage):
-        raise ValueError("gen_statement refuses to write while the four-way bind fails")
-    return coverage
+def _ensure_coverage() -> dict[str, list[dict[str, str]]]:
+    if not COVERAGE_PATH.exists():
+        res = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests/spec_conformance",
+                "--collect-only",
+                "-q",
+                "-p",
+                "no:randomly",
+                "--no-header",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if not COVERAGE_PATH.exists():
+            sys.stderr.write(res.stderr)
+            raise SystemExit(2)
+    with COVERAGE_PATH.open(encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _extract_waivers() -> dict[str, list[str]]:
@@ -130,7 +121,6 @@ def _aggregate_status(rows: list[dict[str, str]]) -> str:
 
 def build_json() -> dict:
     coverage = _ensure_coverage()
-    assessment = selected_assessment()
     waivers = _extract_waivers()
     reqs = load_requirements()
     entries = []
@@ -160,14 +150,11 @@ def build_json() -> dict:
         for c in ALLOWED_CLASSES
     }
     return {
-        **assessment.stamp(),
-        "spec_path": assessment.spec_path.relative_to(REPO_ROOT).as_posix(),
-        "spec_citation": assessment.citation,
+        "spec_version": SPEC_VERSION,
         "generator": GENERATOR,
         "total_requirements": len(entries),
         "summary_by_class": summary,
         "consumer_user_scope": USER_SCOPE_DISCLOSURE,
-        "assessment_limitations": ASSESSMENT_LIMITATIONS,
         "requirements": entries,
     }
 
@@ -186,37 +173,40 @@ def _md_class_summary(summary: dict) -> str:
 
 def build_md(doc: dict) -> str:
     preamble = (
-        f"# OpenAPM Conformance Binding Inventory -- {doc['spec_version']}\n\n"
+        f"# OpenAPM Conformance Statement -- {SPEC_VERSION}\n\n"
         f"Generator: {GENERATOR}.\n"
-        f"Spec: [{doc['spec_path']}]({doc['spec_path']})\n"
-        f"Exact revision citation: {doc['spec_citation']}\n\n"
+        "Spec: [docs/src/content/docs/specs/openapm-v0.1.md]"
+        "(docs/src/content/docs/specs/openapm-v0.1.md)\n\n"
         "This file is generated. Do NOT edit by hand. Run\n"
         "`uv run python -m tests.spec_conformance.gen_statement` to regenerate.\n\n"
         "## Honesty contract\n\n"
         "There is NO automated CI detector for spec-vs-behaviour drift "
         "beyond the four sets enforced by `orphan_check.py`: spec anchors, "
         "manifest entries, Appendix C rows, and `@pytest.mark.req` markers. "
-        "Statuses are a static binding inventory from fresh full-suite collection, "
-        "not executed test results or a runtime pass certificate. `status=active` "
-        "means a collected binding is not statically marked skipped or xfail; "
-        "it does not prove that an assertion ran or passed. `status=skipped` "
-        "and `status=xfail` describe static markers or waiver calls, not measured "
-        "execution outcomes. Waivers are listed below as debt. Separate test "
-        "execution and implementation evidence remain necessary.\n\n"
-        "This inventory assesses only the selected corrective revision. It does "
-        "not establish historical CLI conformance to the previous minor's "
-        "req-mf-016 blanket project-root refusal. A prepared specification and "
-        "collected bindings do not establish publication or ratification.\n\n"
+        "A requirement marked `status=active` is exercised by at least one "
+        "assertion. A requirement marked `status=skipped` carries a written "
+        "waiver below; this is debt, not coverage. A requirement with "
+        "`status=xfail` is asserted-but-known-broken.\n\n"
         "## Conformance classes\n\n"
-        "The four conformance classes (Producer, Consumer, Registry, "
-        "Governance) are inventoried below, not certified by this report. The "
-        "Registry binding includes the trust-anchor invariant "
+        "All four conformance classes (Producer, Consumer, Registry, "
+        "Governance) carry active coverage in this statement. The "
+        "Registry class is exercised via the trust-anchor invariant "
         "test in `tests/spec_conformance/test_registry_reqs.py`, "
         "which hashes the committed Registry-archive fixture and "
         "asserts equality with the digest the paired lockfile "
         "advertises (sec.11.3.3, req-rg-001).\n\n"
+        "## Repository case rules\n\n"
+        "Repository-coordinate segments are case-insensitive for "
+        "`github.com`, GitHub Enterprise Cloud hosts ending in `.ghe.com`, "
+        "the literal GitHub Enterprise Server host selected by `GITHUB_HOST`, "
+        "and registry-sourced dependencies (including registry prefixes). "
+        "Local paths, marketplace identities, and every other host remain "
+        "case-sensitive. Policy matching and repository identity use the same "
+        "rule (req-rs-016 clause 3; req-pl-018).\n\n"
     )
-    summary_section = "## Binding summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"
+    summary_section = (
+        "## Coverage summary\n\n" + _md_class_summary(doc["summary_by_class"]) + "\n\n"
+    )
     user_scope = doc["consumer_user_scope"]
     scope_section = (
         "## Consumer user-scope disclosure\n\n"
@@ -226,13 +216,13 @@ def build_md(doc: dict) -> str:
         f"`{user_scope['target_capability_declaration']}`\n\n"
     )
     rows = [
-        "## Per-requirement bindings\n",
+        "## Per-requirement coverage\n",
         "| Req ID | Keyword | Sec | Class | Status | Tests | Oracle |",
         "|--------|---------|----:|-------|--------|------:|--------|",
     ]
     for e in doc["requirements"]:
         rows.append(
-            f"| [{e['id']}]({doc['spec_path']}#{e['id']}) "
+            f"| [{e['id']}](docs/src/content/docs/specs/openapm-v0.1.md#{e['id']}) "
             f"| {e['keyword']} | {e['section']} | {e['conformance_class']} "
             f"| {e['status']} | {e['test_count']} | {e.get('oracle', '-')} |"
         )
@@ -245,10 +235,7 @@ def build_md(doc: dict) -> str:
                 waivers_section.append(f"- {w}")
             waivers_section.append("")
     waivers_md = "\n".join(waivers_section) + "\n"
-    limitations = (
-        "## Assessment limitations\n\n" + "\n\n".join(doc["assessment_limitations"]) + "\n\n"
-    )
-    return preamble + limitations + scope_section + summary_section + table + waivers_md
+    return preamble + scope_section + summary_section + table + waivers_md
 
 
 def _is_ascii(text: str) -> bool:
@@ -269,11 +256,26 @@ def write_outputs() -> None:
 
 
 def main() -> int:
-    try:
-        write_outputs()
-    except (ValueError, RuntimeError, OSError) as error:
-        sys.stderr.write(f"[x] gen_statement: {error}\n")
-        return 2
+    # F11 honesty: refuse to generate if spec anchors disagree with the
+    # manifest. The orphan_check is the canonical gate, so we run it.
+    res = subprocess.run(
+        [sys.executable, "-m", "tests.spec_conformance.orphan_check"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        sys.stderr.write(res.stderr)
+        sys.stderr.write(
+            "\n[x] gen_statement refuses to write while orphan_check fails. "
+            "Fix the 4-way bind first.\n"
+        )
+        return 1
+    sanity = SPEC_PATH.read_text(encoding="utf-8").count('<a id="req-')
+    if sanity == 0:
+        sys.stderr.write("[x] spec has zero req anchors; aborting\n")
+        return 1
+    write_outputs()
     return 0
 
 

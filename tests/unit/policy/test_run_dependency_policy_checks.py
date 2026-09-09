@@ -190,6 +190,28 @@ class TestRequiredPackages:
 class TestSharedDependencyNames:
     """Exercise the real runner and helpers without replacing policy checks."""
 
+    def test_runner_shares_source_aware_names_with_version_and_executable_checks(self) -> None:
+        deps = _make_dep_refs(["Contoso/Pkg#v1", "org/other"])
+        lock = _make_lockfile(
+            [{"repo_url": "contoso/pkg", "resolved_ref": "v1", "exec_status": "deployed"}]
+        )
+        policy = ApmPolicy(
+            dependencies=DependencyPolicy(require=("CONTOSO/PKG#v1",)),
+            executables=ExecutablesPolicy(require=("Contoso/Pkg",)),
+        )
+        with patch.object(
+            DependencyReference,
+            "get_canonical_dependency_string",
+            autospec=True,
+            side_effect=DependencyReference.get_canonical_dependency_string,
+        ) as canonical:
+            result = run_dependency_policy_checks(iter(deps), lockfile=lock, policy=policy)
+
+        assert result.passed
+        assert canonical.call_count == len(deps)
+        assert [call.args[0] for call in canonical.call_args_list] == deps
+        assert all(check.passed for check in result.checks[2:6])
+
     @pytest.mark.parametrize(
         "require_packages,require_executables,has_lock",
         [(True, True, True), (True, False, True), (True, False, False), (False, True, True)],

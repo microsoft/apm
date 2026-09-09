@@ -232,22 +232,12 @@ class LockfileBuilder:
                 previous.deployed_file_hashes if previous is not None else {}
             )
         from apm_cli.core.deployment_state import DeploymentReconciler
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
 
-        shared_paths = InstructionIntegrator.aggregate_paths(self.ctx.targets)
-        current_claims = dict(self.ctx.package_deployed_files)
-        local_aggregates = shared_paths.intersection(getattr(self.ctx, "local_deployed_files", ()))
-        if local_aggregates:
-            current_claims["."] = sorted(local_aggregates)
-        package_keys = list(lockfile.dependencies)
-        if local_aggregates and "." not in package_keys:
-            package_keys.append(".")
         package_claims = DeploymentReconciler.reconcile_package_claims(
-            package_keys=package_keys,
-            current_claims=current_claims,
+            package_keys=lockfile.dependencies,
+            current_claims=self.ctx.package_deployed_files,
             prior_files=prior_files_by_package,
             prior_hashes=prior_hashes_by_package,
-            shared_paths=shared_paths,
         )
         declared = declared_target_profiles(self.ctx)
         diagnostics = getattr(self.ctx, "diagnostics", None)
@@ -265,30 +255,16 @@ class LockfileBuilder:
         # not removed, so a "Repaired inactive-target entries" report would be
         # misleading.
         lockfile_only = getattr(self.ctx, "lockfile_only", False)
-        canonical_batches = []
-        aggregate_hashes: dict[str, str | None] = {}
-
-        def _invalidate_aggregate_hashes(cleanup) -> None:
-            for path in (*cleanup.deleted, *cleanup.retained):
-                aggregate_hashes.pop(path, None)
-
+        canonical_records = {}
         ghost_count = 0
-        for dep_key in package_keys:
+        for dep_key in lockfile.dependencies:
             claim = package_claims[dep_key]
             current = list(claim.current_files)
             retained_hashes = cleanup_retained.get(dep_key, {})
-            hashable = [path for path in current if path not in retained_hashes]
             current_hashes = compute_deployed_hashes(
-                (path for path in hashable if path not in shared_paths),
+                (path for path in current if path not in retained_hashes),
                 self.ctx.project_root,
             )
-            for path in shared_paths.intersection(hashable):
-                if path not in aggregate_hashes:
-                    aggregate_hashes[path] = compute_deployed_hashes(
-                        [path], self.ctx.project_root
-                    ).get(path)
-                if aggregate_hashes[path] is not None:
-                    current_hashes[path] = aggregate_hashes[path]
             prior_files = list(claim.prior_files)
             prior_hashes = claim.prior_hashes
 
@@ -313,7 +289,6 @@ class LockfileBuilder:
                 declared_targets=declared,
                 diagnostics=diagnostics,
                 on_ghost_drop=None if lockfile_only else _log_ghost_drop,
-                on_cleanup=_invalidate_aggregate_hashes,
                 prior_ledger=prior_ledger,
                 cleanup_retained_hashes=retained_hashes,
                 current_run_trusted=diagnostics.count_for_package(dep_key, "error") == 0,
@@ -327,13 +302,9 @@ class LockfileBuilder:
                 # leave deployed_files untouched so the whole-dep
                 # _merge_existing path can preserve it intact.
                 continue
-            canonical_batches.append(ledger.records)
-        if canonical_batches:
+            canonical_records.update(ledger.records)
             from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
-            canonical_records = DeploymentReconciler.merge_aggregate_records(
-                canonical_batches, shared_paths
-            )
             DeploymentLedgerCodec.apply_to_lockfile(
                 DeploymentLedger(records=canonical_records),
                 lockfile,
@@ -522,32 +493,17 @@ class LockfileBuilder:
         """Keep local fields until post_deps_local reconciles content hashes."""
         if self.ctx.existing_lockfile:
             from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-            from apm_cli.integration.instruction_integrator import InstructionIntegrator
 
-            # Attachment already proved the completed aggregate. Unlike other
-            # local outputs, USER aggregate hashes have no later local persist
-            # pass; never replace their current proof with a stale root hash.
-            current_aggregates = InstructionIntegrator.aggregate_paths(
-                self.ctx.targets
-            ).intersection(lockfile.local_deployed_files)
-            local_files = sorted(
-                set(self.ctx.existing_lockfile.local_deployed_files) | current_aggregates
+            DeploymentLedgerCodec.replace_legacy_owner(
+                lockfile,
+                ".",
+                list(self.ctx.existing_lockfile.local_deployed_files),
+                copy.deepcopy(self.ctx.existing_lockfile.local_deployed_file_hashes),
             )
-            local_hashes = copy.deepcopy(self.ctx.existing_lockfile.local_deployed_file_hashes)
-            for path in current_aggregates:
-                local_hashes.pop(path, None)
-                if path in lockfile.local_deployed_file_hashes:
-                    local_hashes[path] = lockfile.local_deployed_file_hashes[path]
             if "." in self.ctx.existing_lockfile.dependencies:
                 lockfile.dependencies["."] = copy.deepcopy(
                     self.ctx.existing_lockfile.dependencies["."]
                 )
-            DeploymentLedgerCodec.replace_legacy_owner(
-                lockfile,
-                ".",
-                local_files,
-                local_hashes,
-            )
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(
                     "Carrying forward local .apm state pending hash reconciliation: "

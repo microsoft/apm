@@ -2,8 +2,8 @@
 
 Registers and enforces the `req` marker. Every marker MUST resolve to
 an id in the requirements manifest; unknown ids fail collection. The
-static binding map is version-qualified and stamped by the shared
-assessment owner. Statement generation always requests fresh full collection.
+marker coverage map is written to build/conformance-coverage.json for
+gen_statement.py consumption.
 """
 
 from __future__ import annotations
@@ -17,9 +17,8 @@ from collections import defaultdict
 import pytest
 
 from tests.spec_conformance._manifest import (
+    COVERAGE_PATH,
     REPO_ROOT,
-    coverage_document,
-    coverage_output_path,
     requirements_by_id,
 )
 
@@ -101,13 +100,12 @@ def pytest_collection_modifyitems(config, items: list[pytest.Item]) -> None:
     if errors:
         joined = "\n".join(f"  - {e}" for e in errors)
         raise pytest.UsageError("Spec-conformance marker validation failed:\n" + joined)
-    output = coverage_output_path()
-    output.parent.mkdir(parents=True, exist_ok=True)
+    COVERAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
     canonical = {
         rid: sorted(rows, key=lambda r: r["test_nodeid"]) for rid, rows in sorted(coverage.items())
     }
-    with output.open("w", encoding="ascii", newline="\n") as f:
-        json.dump(coverage_document(canonical), f, indent=2, sort_keys=True)
+    with COVERAGE_PATH.open("w", encoding="ascii", newline="\n") as f:
+        json.dump(canonical, f, indent=2, sort_keys=True)
         f.write("\n")
 
 

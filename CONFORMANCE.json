@@ -1,20 +1,10 @@
 {
-  "assessment_limitations": [
-    "The reference CLI's bare content audit uses source-derived drift replay, not the stored-hash baseline required by req-lk-017's unqualified audit obligation. The stored-hash and full-SHA consistency baselines are exercised in CI/conformance audit. This inventory does not claim full Consumer conformance in bare audit mode.",
-    "The native Cowork audit controls use a controlled pre-existing standalone-skill snapshot; they do not establish a successful Cowork install/audit round trip. The Grok user-scope control does exercise install and audit.",
-    "A selected native runtime without an isolated replay backend is reported as unsupported before its live writer. No new native database scratch backend or hosted-runtime evidence is supplied by this inventory.",
-    "A source-only coupled probe shows that local acquisition dereferences an admitted internal resource symlink, but inherited replay plans from the original source representation and can falsely report the deployed regular file as orphaned during unchanged CI audit. The narrowly expected-failing regression separately verifies content integrity and unchanged live state; an escaping-link refusal control remains unsuppressed. This is a replay limitation, not evidence of an escape, external-file read or security bypass.",
-    "The retained manifest schema rejects git entries with a path modifier and id entries with an explicit registry modifier. It also accepts malformed or wrong-length policy.hash strings structurally. Schema acceptance is not evidence of Consumer digest-envelope enforcement under req-mf-018 or req-lk-016.",
-    "Inherited Git-tree boundaries for symlink blobs, gitlinks/submodules and CRLF/LFS-filtered checkout bytes lack cross-platform execution evidence in this assessment. The req-lk-015 obligation and digest construction remain unchanged."
-  ],
   "consumer_user_scope": {
     "lockfile_location": "~/.apm/apm.lock.yaml",
     "manifest_location": "~/.apm/apm.yml",
     "target_capability_declaration": "MCPClientAdapter.supports_user_scope (OpenAPM Target Registry v0.1 implementation profile)"
   },
-  "generator": "gen_statement.py v2",
-  "inventory_kind": "static-test-bindings",
-  "manifest_sha256": "699fa2eaec138d150d24f18fe9fd6254bab86e46319c4880fdcaad304fe18046",
+  "generator": "gen_statement.py v1",
   "requirements": [
     {
       "conformance_class": "consumer",
@@ -269,7 +259,7 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_publish_timestamp"
       ],
       "waivers": [
-        "Publish-timestamp recording is a publisher-side SHOULD that requires registry interaction to exercise end-to-end. The schema affordance (generated_at) is asserted above; full publisher coverage requires the registry wire conformance module which remains outside this revision's scope."
+        "Publish-timestamp recording is a publisher-side SHOULD that requires registry interaction to exercise end-to-end. The schema affordance (generated_at) is asserted above; full publisher coverage requires the registry wire conformance module which is not in v0.1 scope."
       ]
     },
     {
@@ -320,50 +310,6 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_materialization_spelling_collision_fails_without_deleting_candidates",
         "tests/spec_conformance/test_lockfile_reqs.py::test_materialization_spelling_does_not_change_lockfile_sort_order",
         "tests/spec_conformance/test_lockfile_reqs.py::test_materialization_spelling_migrates_one_case_variant_transactionally"
-      ]
-    },
-    {
-      "conformance_class": "consumer",
-      "id": "req-lk-023",
-      "keyword": "MUST",
-      "section": "5.5",
-      "status": "active",
-      "test_count": 34,
-      "tests": [
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_admitted_internal_resource_link_survives_unchanged_audit",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_configured_target_keeps_integrity_and_membership_checks[content]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_configured_target_keeps_integrity_and_membership_checks[missing-claim]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_current_intent_overrides_old_target_ownership[config]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_current_intent_overrides_old_target_ownership[detection]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_current_intent_overrides_old_target_ownership[manifest]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_full_audit_does_not_recreate_absent_configuration",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_historical_native_claims_cannot_pass_filesystem_only_audit[both]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_historical_native_claims_cannot_pass_filesystem_only_audit[canonical]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_historical_native_claims_cannot_pass_filesystem_only_audit[legacy]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_invalid_current_selection_cannot_pass_empty_replay[disabled]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_invalid_current_selection_cannot_pass_empty_replay[manifest]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_malformed_saved_intent_fails_only_when_selected[False-42]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_malformed_saved_intent_fails_only_when_selected[False-None]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_malformed_saved_intent_fails_only_when_selected[False-claudee]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_malformed_saved_intent_fails_only_when_selected[False-invalid1]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_malformed_saved_intent_fails_only_when_selected[True-42]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_malformed_saved_intent_fails_only_when_selected[True-None]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_malformed_saved_intent_fails_only_when_selected[True-claudee]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_malformed_saved_intent_fails_only_when_selected[True-invalid1]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[clean]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[contracted]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[forged-content]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[legacy-contracted]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[legacy-directory]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[missing-claim]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[symlink]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[unavailable-root-no-config]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_user_skill_replay_preserves_layout_and_comparison[unavailable-root]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_native_workflow_replay_fails_before_writer",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_saved_explicit_only_target_replays_without_detection",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_saved_target_drives_read_only_source_replay[cold]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_saved_target_drives_read_only_source_replay[warm]",
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_user_scope_replay_keeps_user_target_bytes"
       ]
     },
     {
@@ -533,60 +479,16 @@
     },
     {
       "conformance_class": "consumer",
-      "fixture": "tests/fixtures/spec-conformance/manifest/valid-local-parent.yml",
       "id": "req-mf-016",
       "keyword": "MUST",
       "section": "4.3.5",
-      "status": "active",
-      "test_count": 47,
+      "status": "skipped",
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_local_resource_escape_is_rejected_before_audit",
-        "tests/spec_conformance/test_local_path_reqs.py::test_direct_local_source_is_anchored_before_copy[project-relative]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_direct_local_source_is_anchored_before_copy[user-absolute]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_direct_local_source_is_anchored_before_copy[user-home]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_package_rejects_file_symlink_cycle",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_package_rejects_uncontained_or_unresolvable_symlink[broken]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_package_rejects_uncontained_or_unresolvable_symlink[directory-cycle]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_package_rejects_uncontained_or_unresolvable_symlink[outside-directory]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_package_rejects_uncontained_or_unresolvable_symlink[outside-file]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_path_prefixes_are_recognized[../child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_path_prefixes_are_recognized[..\\\\child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_path_prefixes_are_recognized[./child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_path_prefixes_are_recognized[.\\\\child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_path_prefixes_are_recognized[/child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_path_prefixes_are_recognized[~/child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_path_prefixes_are_recognized[~\\\\child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_sibling_uses_original_source_in_each_scope[InstallScope.PROJECT]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_local_sibling_uses_original_source_in_each_scope[InstallScope.USER]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_missing_user_anchor_does_not_use_other_scope_install",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_parent_cannot_expand_into_host_files[absolute-inside]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_parent_cannot_expand_into_host_files[absolute]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_parent_cannot_expand_into_host_files[escape]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_parent_cannot_expand_into_host_files[home]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_parent_cannot_expand_into_host_files[symlink]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_parent_cannot_expand_into_host_files[windows-absolute]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[absolute-_local/parent-InstallScope.PROJECT]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[absolute-_local/parent-InstallScope.USER]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[absolute-org/repo-InstallScope.PROJECT]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[absolute-org/repo-InstallScope.USER]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[escape-_local/parent-InstallScope.PROJECT]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[escape-_local/parent-InstallScope.USER]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[escape-org/repo-InstallScope.PROJECT]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[escape-org/repo-InstallScope.USER]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[sibling-_local/parent-InstallScope.PROJECT]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[sibling-_local/parent-InstallScope.USER]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[sibling-org/repo-InstallScope.PROJECT]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_paths_are_routed_before_local_admission[sibling-org/repo-InstallScope.USER]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_relative_child_retains_repository_and_ref[../child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_remote_relative_child_retains_repository_and_ref[..\\\\child]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_selected_local_root_allows_only_internal_symlink_content[resolved-source-alias]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_selected_local_root_allows_only_internal_symlink_content[source-directory]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_user_multihop_chain_keeps_each_original_anchor",
-        "tests/spec_conformance/test_local_path_reqs.py::test_user_relative_admission_requires_proven_local_parent[direct]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_user_relative_admission_requires_proven_local_parent[missing-parent]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_user_relative_admission_requires_proven_local_parent[missing-source]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_user_relative_admission_requires_proven_local_parent[relative-source]",
-        "tests/spec_conformance/test_local_path_reqs.py::test_user_relative_admission_requires_proven_local_parent[remote]"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_absolute_paths_in_apm_source"
+      ],
+      "waivers": [
+        "Path-shape negative test requires apm_cli's path-policy loader to be invokable from the test harness; the JSON Schema currently models `path` as a free-form string. Tracked as a follow-up: tighten the schema to forbid leading `/` and document the absolute-path rejection in the schema additionalProperties."
       ]
     },
     {
@@ -606,11 +508,9 @@
       "keyword": "MUST",
       "section": "4.6.1",
       "status": "active",
-      "test_count": 3,
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_restricts_policy_hash_algorithm_to_strong_set",
-        "tests/spec_conformance/test_manifest_reqs.py::test_retained_schema_accepts_invalid_policy_hash_without_semantic_evidence[not-a-digest]",
-        "tests/spec_conformance/test_manifest_reqs.py::test_retained_schema_accepts_invalid_policy_hash_without_semantic_evidence[sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]"
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_restricts_policy_hash_algorithm_to_strong_set"
       ]
     },
     {
@@ -643,7 +543,7 @@
       "status": "active",
       "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_producer_workspaces_remain_reserved"
+        "tests/spec_conformance/test_manifest_reqs.py::test_producer_workspaces_must_not_use_in_v0_1"
       ]
     },
     {
@@ -852,9 +752,8 @@
       "keyword": "MUST",
       "section": "6.8",
       "status": "active",
-      "test_count": 2,
+      "test_count": 1,
       "tests": [
-        "tests/spec_conformance/test_audit_current_intent_contract.py::test_configured_target_does_not_authorize_invalid_owners",
         "tests/spec_conformance/test_policy_reqs.py::test_deployment_ledger_owner_is_hard_integrity_failure"
       ]
     },
@@ -867,6 +766,17 @@
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_ado_policy_coordinate_fallback_is_404_only"
+      ]
+    },
+    {
+      "conformance_class": "governance",
+      "id": "req-pl-018",
+      "keyword": "MUST",
+      "section": "6.3.1",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics"
       ]
     },
     {
@@ -1088,8 +998,11 @@
       "keyword": "MUST",
       "section": "7.7",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[1.7.0-1.7.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[=1.7.0-1.7.0]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_registry_refresh_preserves_constraint_after_outdated[^1.7.0-1.8.0]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_records_source_url_in_lockfile"
       ]
     },
@@ -1510,19 +1423,16 @@
       ]
     }
   ],
-  "spec_citation": "https://microsoft.github.io/apm/spec/v0.2.0",
-  "spec_path": "docs/src/content/docs/specs/openapm-v0.2.md",
-  "spec_sha256": "71c7a98b62d1aae7cbcd70f93ec2d59c17e5e2caefbc0810198366510302610e",
-  "spec_version": "v0.2.0",
+  "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 92,
-      "skipped": 0,
+      "active": 90,
+      "skipped": 1,
       "unbound": 0,
       "xfail": 0
     },
     "governance": {
-      "active": 17,
+      "active": 18,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0

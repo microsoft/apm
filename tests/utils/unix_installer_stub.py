@@ -11,6 +11,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
+def _emit_http_response(status: int, payload: bytes, args: list[str]) -> None:
+    """Emit curl -i/-w shaped output for production metadata parsing."""
+    sys.stdout.buffer.write(f"HTTP/1.1 {status} Synthetic\r\n\r\n".encode("ascii"))
+    sys.stdout.buffer.write(payload)
+    if "-w" in args:
+        sys.stdout.buffer.write(f"\n{status}\n".encode("ascii"))
+
+
 def _download(root: Path, args: list[str]) -> int:
     """Serve only declared fixture routes, including private-sidecar retries."""
     urls = [arg for arg in args if urlparse(arg).scheme == "https"]
@@ -35,6 +43,15 @@ def _download(root: Path, args: list[str]) -> int:
         output = Path(args[args.index("-o") + 1])
         assert output.resolve().is_relative_to(root / "scratch")
         output.write_bytes(payload)
+    elif "-i" in args or "-w" in args:
+        if os.environ.get("FIXTURE_METADATA_AUTH_STATUS") and "-H" in args:
+            _emit_http_response(
+                int(os.environ["FIXTURE_METADATA_AUTH_STATUS"]),
+                b'{"message":"Bad credentials"}\n',
+                args,
+            )
+        else:
+            _emit_http_response(200, payload, args)
     else:
         sys.stdout.buffer.write(payload)
     return 0

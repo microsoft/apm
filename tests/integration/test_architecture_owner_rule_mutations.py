@@ -174,6 +174,30 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="An Agent Plugin consumer reimplements the reproducible timestamp fallback.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-policy-content-hash",
+        rule_id="contracts-tooling-policy-content-hash",
+        path="src/apm_cli/policy/discovery.py",
+        old="actual_hex = compute_policy_hash(raw_bytes, algo)",
+        new="actual_hex = _local_policy_hash(raw_bytes, algo)",
+        intent="Policy verification bypasses the canonical SHA-2 digest owner.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-policy-identity",
+        rule_id="contracts-tooling-policy-identity",
+        path="src/apm_cli/policy/matcher.py",
+        old=(
+            "                name, case_insensitive_prefix_segments=prefix\n"
+            "            )\n"
+            "            index._names"
+        ),
+        new=(
+            "                name, case_insensitive_prefix_segments=0\n"
+            "            )\n"
+            "            index._names"
+        ),
+        intent="Policy index construction ignores the source-owned casing prefix.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-project-yaml-write-delegation",
         rule_id="contracts-tooling-project-yaml-write-delegation",
         path="src/apm_cli/utils/yaml_io.py",
@@ -182,20 +206,20 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The atomic project YAML writer bypasses the canonical atomic writer.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-python-artifact-membership",
+        rule_id="contracts-tooling-python-artifact-membership",
+        path="src/apm_cli/install/deployed_paths.py",
+        old="is_generated_python_artifact(relative)",
+        new="False",
+        intent="Skill lockfile inventory stops excluding generated Python artifacts.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",
         path="src/apm_cli/compilation/agents_compiler.py",
         old="def _hand_authored_root_context_blocks_write(",
         new="def _hand_authored_root_context_blocks_write_disabled(",
         intent="Root context writes lose the canonical hand-authored ownership gate.",
-    ),
-    MutationCase(
-        guard_id="contracts-tooling-spec-assessment",
-        rule_id="contracts-tooling-spec-assessment",
-        path="tests/spec_conformance/_helpers.py",
-        old="selected_assessment().spec_path",
-        new="local_assessment().spec_path",
-        intent="Spec-text helper stops using the canonical selected assessment.",
     ),
     MutationCase(
         guard_id="hooks-integrations-copilot-cli-mcp-paths",
@@ -294,14 +318,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
-        guard_id="install-deployment-copilot-aggregate",
-        rule_id="install-deployment-copilot-aggregate",
-        path="src/apm_cli/install/phases/lockfile.py",
-        old="DeploymentReconciler.merge_aggregate_records(",
-        new="parallel_aggregate_merge(",
-        intent="Aggregate ledger accumulation bypasses the canonical ownership reconciler.",
-    ),
-    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",
@@ -332,14 +348,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="@serialized_lifecycle\ndef set(",
         new="def set(",
         intent="Config mutation stops routing through the canonical lifecycle lock.",
-    ),
-    MutationCase(
-        guard_id="install-deployment-local-scope-admission",
-        rule_id="install-deployment-local-scope-admission",
-        path="src/apm_cli/deps/apm_resolver.py",
-        old="proven_source_kind=self._source_kind_for_dependency(dep_ref)",
-        new='proven_source_kind="local"',
-        intent="Resolver assigns trusted-local provenance without acquisition evidence.",
     ),
     MutationCase(
         guard_id="install-deployment-lsp-lifecycle",
@@ -982,6 +990,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Ref seeding makes a parallel freshness decision outside RefFreshnessPolicy.",
     ),
     MutationCase(
+        guard_id="transport-platform-release-metadata-discovery",
+        rule_id="transport-platform-release-metadata-discovery",
+        path="src/apm_cli/utils/version_checker.py",
+        old="and effective_repo == _DEFAULT_REPO",
+        new="and True",
+        intent="Release metadata recovery drops the exact public repository boundary.",
+    ),
+    MutationCase(
         guard_id="transport-platform-revision-pin-outcome",
         rule_id="transport-platform-revision-pin-outcome",
         path="src/apm_cli/commands/update.py",
@@ -1137,21 +1153,6 @@ def test_owner_rules_report_nothing_before_mutation(
     assert baseline_violated_rule_ids == frozenset()
 
 
-def test_local_scope_guard_retains_declaring_parent_delegation() -> None:
-    """Retain the earlier admission mutation alongside the stronger provenance case."""
-    case = MutationCase(
-        guard_id="install-deployment-local-scope-admission",
-        rule_id="install-deployment-local-scope-admission",
-        path="src/apm_cli/install/phases/resolve.py",
-        old="user_scope_rejection_reason(dep_ref, scope, parent_pkg=parent_pkg)",
-        new="user_scope_rejection_reason(dep_ref, scope, parent_pkg=None)",
-        intent="Resolution drops the declaring local parent's source context from admission.",
-    )
-    report = run_selected_rules(ROOT, (case.rule_id,), source_overrides={case.path: _mutate(case)})
-    assert not report.failures
-    assert {finding.rule_id for finding in report.violations} == {case.rule_id}
-
-
 def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> None:
     """AC13 must retain the selected transport attempt as the requested-URL owner."""
     path = "src/apm_cli/install/helpers/ref_reuse.py"
@@ -1204,44 +1205,3 @@ def test_owner_rule_catches_its_guard_mutation(
         f"({case.intent}) -- the guard has no teeth for this owner. "
         f"failures={[(f.stage, f.message) for f in report.failures]}"
     )
-
-
-@pytest.mark.parametrize(
-    ("path", "old", "new"),
-    [
-        (
-            "src/apm_cli/deps/git_auth_env.py",
-            "get_apm_temp_dir(create_config=False)",
-            "get_apm_temp_dir()",
-        ),
-        (
-            "src/apm_cli/config.py",
-            "get_temp_dir(create_config=create_config)",
-            "get_temp_dir()",
-        ),
-        (
-            "src/apm_cli/config.py",
-            'get_config(create=create_config).get("temp_dir")',
-            'get_config().get("temp_dir")',
-        ),
-    ],
-    ids=["sentinel-owner-route", "temp-owner-forwarding", "config-owner-forwarding"],
-)
-def test_auth_guard_requires_noncreating_sentinel_config_reads(
-    path: str, old: str, new: str
-) -> None:
-    """Reject a bootstrap bypass at each edge of the existing temp-config owner."""
-    rule_id = "transport-platform-host-credential-resolution"
-    baseline = run_selected_rules(ROOT, (rule_id,))
-    assert baseline.failures == ()
-    assert baseline.violations == ()
-    source = _source(path)
-    assert source.count(old) == 1
-    mutated = source.replace(old, new, 1)
-    ast.parse(mutated, filename=path)
-
-    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
-
-    assert report.failures == ()
-    assert {finding.rule_id for finding in report.violations} == {rule_id}
-    assert {finding.path for finding in report.violations} == {path}

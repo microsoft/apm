@@ -150,6 +150,126 @@ def test_policy_provides_default_deny_list_shape():
     assert "deny" in deps and deps["deny"]["oneOf"][0]["type"] == "array"
 
 
+@pytest.mark.req("req-pl-018")
+def test_policy_identity_casing_matches_dependency_source_semantics():
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.matcher import check_mcp_allowed, first_matching_pattern
+    from apm_cli.policy.policy_checks import (
+        _check_dependency_allowlist,
+        _check_dependency_denylist,
+        _check_registry_source,
+        _check_required_package_version,
+        _check_required_packages,
+    )
+    from apm_cli.policy.schema import (
+        DependencyPolicy,
+        McpPolicy,
+        RegistrySourcePolicy,
+    )
+
+    github_dep = DependencyReference.parse("DevExpGbb/Secure-Baseline/Packages/My-Skill")
+    matching = DependencyPolicy(
+        allow=("DevExpGbb/**",),
+        require=("DevExpGbb/Secure-Baseline/Packages/My-Skill",),
+    )
+    denied = DependencyPolicy(
+        allow=("DevExpGbb/**",),
+        deny=("devexpgbb/**",),
+    )
+    wrong_virtual_case = DependencyPolicy(allow=("devexpgbb/secure-baseline/packages/**",))
+    exact_virtual_case = DependencyPolicy(allow=("devexpgbb/secure-baseline/Packages/**",))
+
+    assert _check_dependency_allowlist([github_dep], matching).passed
+    assert _check_required_packages([github_dep], matching).passed
+    assert not _check_dependency_denylist([github_dep], denied).passed
+    assert not _check_dependency_allowlist(
+        [github_dep],
+        wrong_virtual_case,
+    ).passed
+    assert _check_dependency_allowlist(
+        [github_dep],
+        exact_virtual_case,
+    ).passed
+
+    fused_dep = DependencyReference.parse("Contoso/Repo/Docs/Secret")
+    fused_wrong_case = DependencyPolicy(allow=("contoso**/docs/**",))
+    assert not _check_dependency_allowlist([fused_dep], fused_wrong_case).passed
+
+    gitlab_dep = DependencyReference.parse("gitlab.com/DevExpGbb/Secure-Baseline")
+    matching_gitlab = DependencyPolicy(allow=("DevExpGbb/**",))
+    lower_pattern = DependencyPolicy(allow=("devexpgbb/**",))
+    lower_deny = DependencyPolicy(deny=("devexpgbb/**",))
+    assert _check_dependency_allowlist([gitlab_dep], matching_gitlab).passed
+    assert not _check_dependency_allowlist([gitlab_dep], lower_pattern).passed
+    assert _check_dependency_denylist([gitlab_dep], lower_deny).passed
+
+    registry_dep = DependencyReference(
+        repo_url="DevExpGbb/Team/Secure-Baseline",
+        source="registry",
+        registry_name="Corp",
+    )
+    registry_package = DependencyPolicy(
+        allow=("devexpgbb/team/secure-baseline",),
+        require=("DEVEXPGbb/TEAM/SECURE-BASELINE",),
+    )
+    registry_deny = DependencyPolicy(deny=("devexpgbb/team/**",))
+    assert _check_dependency_allowlist([registry_dep], registry_package).passed
+    assert _check_required_packages([registry_dep], registry_package).passed
+    assert not _check_dependency_denylist([registry_dep], registry_deny).passed
+    registry_source = RegistrySourcePolicy(
+        require=("corp",),
+        allow_non_registry=False,
+    )
+    assert not _check_registry_source(
+        [registry_dep],
+        registry_source,
+        {"corp": "https://registry.example.test"},
+    ).passed
+
+    exact_require = DependencyPolicy(require=("DevExpGbb/*",))
+    assert not _check_required_packages([github_dep], exact_require).passed
+
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency.from_dict(
+            {
+                "repo_url": "devexpgbb/secure-baseline",
+                "resolved_ref": "v1.0.0",
+            }
+        )
+    )
+    version_policy = DependencyPolicy(
+        require=("DevExpGbb/Secure-Baseline#V1.0.0",),
+        require_resolution="block",
+    )
+    version_dep = DependencyReference.parse("DevExpGbb/Secure-Baseline#V1.0.0")
+    assert not _check_required_package_version(
+        [version_dep],
+        lock,
+        version_policy,
+    ).passed
+
+    mcp_allowed, _reason = check_mcp_allowed(
+        "github-mcp",
+        McpPolicy(allow=("GitHub-MCP",)),
+    )
+    assert not mcp_allowed
+    assert first_matching_pattern("Docs/readme.md", ("docs/**",)) is None
+    assert first_matching_pattern("[D]ocs/readme.md", ("[D]ocs/**",)) == "[D]ocs/**"
+    assert first_matching_pattern("Docs/readme.md", ("[D]ocs/**",)) is None
+    assert first_matching_pattern("{Docs}/readme.md", ("{Docs}/**",)) == "{Docs}/**"
+
+    assert_spec_contains(
+        "repository path case rule disclosed under",
+        "first pattern segment",
+        "U+0041 through U+005A",
+        "`dependencies.deny` MUST retain precedence",
+        "whole subject and are anchored at",
+        "source rule takes precedence",
+    )
+
+
 @pytest.mark.req("req-pl-013")
 def test_policy_require_hashes_parses_and_is_specified():
     """req-pl-013: security.integrity.require_hashes fail-closed install.

@@ -22,7 +22,6 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _duplicate_definition_lines,
     _facts_for,
     _lines,
-    _name_calls_in,
     _present,
     _present_re,
     _summary,
@@ -46,93 +45,12 @@ _GUARD_REQUEST_DEFAULTS = "install-deployment-request-defaults"
 
 _GUARD_INSTALL_SCOPE = "install-deployment-install-scope-selection"
 
-_GUARD_LOCAL_SCOPE = "install-deployment-local-scope-admission"
-
 
 _REQUEST_OWNER = "src/apm_cli/install/request.py"
 _MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
 
 
 _ALLOWED_WRAPPER_DEFAULTS = frozenset({"update_refs", "verbose", "only_packages"})
-
-
-def check_local_scope_admission(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Local scope admission must delegate to one owner with parent context."""
-    owner_path = "src/apm_cli/install/package_resolution.py"
-    owner_name = "user_scope_rejection_reason"
-    owner, failures = _facts_for(provider, owner_path, _GUARD_LOCAL_SCOPE)
-    findings = list(failures)
-    if not failures and not _present(owner, f"def {owner_name}("):
-        findings.append(_summary(_GUARD_LOCAL_SCOPE, owner_path, "Missing local admission owner"))
-    if not failures and not _present(owner, 'parent_pkg.proven_source_kind == "local"'):
-        findings.append(
-            _summary(_GUARD_LOCAL_SCOPE, owner_path, "Local admission requires positive provenance")
-        )
-    resolver_path = "src/apm_cli/deps/apm_resolver.py"
-    resolver, failures = _facts_for(provider, resolver_path, _GUARD_LOCAL_SCOPE)
-    findings.extend(failures)
-    if not failures:
-        index = provider.tree_index(resolver_path)
-        calls = (
-            _attribute_calls(tuple(index.walk(index.root)), "_activate_validated_package")
-            if index is not None and index.root is not None
-            else []
-        )
-        if (
-            len(calls) != 4
-            or not all(
-                len(call.args) == 4
-                and isinstance(call.args[3], ast.Name)
-                and call.args[3].id == "dep_ref"
-                for call in calls
-            )
-            or not _present(
-                resolver, "proven_source_kind=self._source_kind_for_dependency(dep_ref)"
-            )
-            or not _present(resolver, "kind = self._source_kind_for_dependency(parent_dep)")
-            or not _present(resolver, 'parent_pkg.proven_source_kind != "local"')
-        ):
-            findings.append(
-                _summary(
-                    _GUARD_LOCAL_SCOPE,
-                    resolver_path,
-                    "All package load paths must project actual dependency origin; "
-                    "expansion and backstop must consume established provenance",
-                )
-            )
-    consumers = (
-        (_INSTALL_ADAPTER, "_resolve_package_references", False),
-        ("src/apm_cli/install/phases/resolve.py", "download_callback", True),
-        ("src/apm_cli/install/sources.py", "acquire", True),
-    )
-    for path, function_name, needs_parent in consumers:
-        facts, failures = _facts_for(provider, path, _GUARD_LOCAL_SCOPE)
-        findings.extend(failures)
-        if failures:
-            continue
-        delegated = owner_name in _name_calls_in(facts, function_name)
-        if needs_parent:
-            index = provider.tree_index(path)
-            calls = (
-                _named_calls(tuple(index.walk(index.root)), owner_name)
-                if index is not None and index.root is not None
-                else []
-            )
-            delegated = (
-                delegated
-                and any(_has_name_keyword(call, "parent_pkg", "parent_pkg") for call in calls)
-                and not _present(facts, "scope is InstallScope.USER")
-            )
-        if not delegated:
-            findings.append(
-                _summary(
-                    _GUARD_LOCAL_SCOPE,
-                    path,
-                    "Local scope admission must call user_scope_rejection_reason "
-                    "and retain declaring-parent context instead of an inline scope predicate",
-                )
-            )
-    return tuple(findings)
 
 
 def _wrapper_default_args(index: TreeIndex) -> list[str]:

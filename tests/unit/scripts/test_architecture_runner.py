@@ -611,15 +611,16 @@ contracts-tooling-lockfile-read
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-policy-content-hash
+contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
-contracts-tooling-spec-assessment
+contracts-tooling-python-artifact-membership
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cached-claude-skill-metadata
-install-deployment-copilot-aggregate
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-executable-trust-context
@@ -631,7 +632,6 @@ install-deployment-incomplete-chain-routing
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
-install-deployment-local-scope-admission
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-lifecycle
 install-deployment-lsp-target-contract
@@ -723,6 +723,7 @@ transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-network-host-parsing
 transport-platform-ref-freshness
+transport-platform-release-metadata-discovery
 transport-platform-revision-pin-outcome
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution

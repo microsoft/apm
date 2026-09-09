@@ -146,9 +146,7 @@ def _scan_deployed_trees(
     from ..install.manifest_reconcile import install_governance
     from ..integration.targets import resolve_targets
 
-    file_prefixes, _uri_schemes = install_governance(
-        resolve_targets(project_root, create_config=False)
-    )
+    file_prefixes, _uri_schemes = install_governance(resolve_targets(project_root))
     result = _empty_scan()
 
     for rel_path in _minimal_governed_prefixes(file_prefixes):

@@ -101,7 +101,7 @@ def test_prerelease_channel_uses_releases_endpoint(monkeypatch):
                 {"tag_name": "v1.0.0", "prerelease": False},
             ]
 
-    def fake_get(url, headers, timeout):
+    def fake_get(url, headers, timeout, **kwargs):
         captured["url"] = url
         captured["headers"] = headers
         captured["timeout"] = str(timeout)

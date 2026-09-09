@@ -14,7 +14,6 @@ from ...install.locking import serialized_lifecycle
 from ...models.apm_package import APMPackage
 from ...utils.path_security import PathTraversalError
 from .engine import (
-    AggregateIntegrationError,
     IntegrationCleanupOutcome,
     LocalSurvivorRefreshError,
     MCPUninstallCleanupError,
@@ -90,12 +89,11 @@ def _sync_integrations_for_manifest(
         failed_paths=[],
         error_count=0,
     )
-    recovery_command = "apm install --global" if user_scope else "apm install"
     try:
         apm_package = APMPackage.from_apm_yml(manifest_path)
     except Exception as manifest_err:
         logger.warning("Integration cleanup did not finish.")
-        logger.warning(f"Run '{recovery_command}' to resync remaining integrations.")
+        logger.warning("Run 'apm install' to resync remaining integrations.")
         logger.verbose_detail(
             f"Integration cleanup skipped: {type(manifest_err).__name__}: {manifest_err}"
         )
@@ -116,30 +114,8 @@ def _sync_integrations_for_manifest(
             None,
         )
     except Exception as sync_err:
-        if isinstance(sync_err, AggregateIntegrationError):
-            from ...utils.diagnostics import printable_ascii_text
-
-            logger.warning(str(sync_err))
-            logger.warning(
-                "Package removal and declaration removal completed; integration cleanup is incomplete."
-            )
-            prefix = "~/" if user_scope else ""
-            for path in sorted(sync_err.paths):
-                logger.warning(f"Managed path: {printable_ascii_text(prefix + path)}")
-            if sync_err.phase == "cleanup":
-                logger.warning(
-                    "Back up and move the refused generated file out of the managed path "
-                    "before regeneration; do not restore the stale multi-owner file."
-                )
-                source_path = "~/.apm/instructions/" if user_scope else ".apm/instructions/"
-                logger.warning(
-                    f"Keep genuine authoring in {source_path}. Repair unsafe paths before retrying."
-                )
-            else:
-                logger.warning("Fix the reported source errors before retrying.")
-        else:
-            logger.warning("Integration cleanup did not finish.")
-        logger.warning(f"Run '{recovery_command}' to resync remaining integrations.")
+        logger.warning("Integration cleanup did not finish.")
+        logger.warning("Run 'apm install' to resync remaining integrations.")
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
         logger.verbose_detail(traceback.format_exc().rstrip())
         return default_outcome, sync_err
@@ -606,11 +582,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                         deploy_root=deploy_root,
                         all_deployed_files=all_deployed_files,
                         surviving_deployed_files=surviving_deployed_files,
-                        removed_paths=(
-                            integration_cleanup.removed_paths
-                            if integration_cleanup.complete and integration_cleanup_error is None
-                            else frozenset()
-                        ),
                         fully_refreshed_dependency_keys=refreshed_survivor_keys,
                     )
                     or lockfile_updated

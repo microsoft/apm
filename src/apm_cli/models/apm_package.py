@@ -10,7 +10,7 @@ import logging
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -344,8 +344,6 @@ class APMPackage:
     # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
     allow_executables: dict[str, dict[str, bool]] | None = None
     agent_plugin: "AgentPlugin | None" = None
-    # Acquisition-only provenance; never parsed from or serialized to a manifest.
-    proven_source_kind: Literal["local", "git", "registry"] | None = None
 
     def __post_init__(self) -> None:
         """Derive the canonical target projection for compatibility callers."""
@@ -845,12 +843,6 @@ class PackageInfo:
         return False
 
 
-def restore_installed_package_source(package: APMPackage, dep_ref: DependencyReference) -> None:
-    """Restore Git acquisition provenance after loading installed authored metadata."""
-    if dep_ref.source in (None, "git"):
-        package.source = dep_ref.to_github_url()
-
-
 def build_installed_package_info(
     dep_ref: DependencyReference, apm_modules_dir: Path
 ) -> PackageInfo | None:
@@ -872,8 +864,6 @@ def build_installed_package_info(
     package = result.package if result and result.package else None
     if not package:
         return None
-
-    restore_installed_package_source(package, dep_ref)
 
     return PackageInfo(
         package=package,

@@ -124,16 +124,15 @@ def test_no_private_copilot_state_is_created(
     assert not (copilot_home / "settings.json").exists()
 
 
-def test_non_copilot_target_skips_the_plugin_without_aborting(
+def test_non_copilot_target_plugin_noop_fails_without_committing_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A project that does not target copilot skips the plugin, exit 0.
+    """Issue #2796: target exclusion cannot be a successful no-op.
 
     Admission is a pure function of resolved target names -- a project-level
-    target set that excludes copilot is a non-applicability, not a failure. It
-    is skipped with one warning and the install still succeeds (Item 4). The
-    fatal path is reserved for a package that WAS selected for copilot but
-    cannot be registered.
+    target set that excludes copilot is a per-package skip, not a structural
+    package failure. When that skip leaves the command with nothing deployed,
+    install fails loudly and commits no durable state.
     """
     project = tmp_path / "project"
     write_agent_plugin(tmp_path / "source" / "sentinel", name="sentinel")
@@ -147,14 +146,11 @@ def test_non_copilot_target_skips_the_plugin_without_aborting(
     )
 
     output = " ".join(result.output.split())
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "'copilot' target" in output
-    materialized = _modules(project) / "_local" / "sentinel"
-    assert (materialized / "plugin.json").is_file()
-    lock = LockFile.from_yaml((project / "apm.lock.yaml").read_text(encoding="utf-8"))
-    locked = lock.get_package_dependencies()
-    assert len(locked) == 1
-    assert locked[0].package_type == "agent_plugin"
+    assert "No selected target received this package" in output
+    assert "apm install" in output
+    assert not (project / "apm.lock.yaml").exists()
     assert not catalog_path_for(_modules(project)).exists()
     assert not ledger_path_for(_modules(project)).exists()
     assert not _settings_path(project).exists()

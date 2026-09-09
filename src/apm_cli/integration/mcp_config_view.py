@@ -336,7 +336,6 @@ def _collect_locked_dependencies(
             package = APMPackage.from_apm_yml(
                 manifest_path,
                 source_path=manifest_path.parent,
-                create_config=False,
             )
         except (OSError, ValueError, UnicodeError) as exc:
             problems.append(

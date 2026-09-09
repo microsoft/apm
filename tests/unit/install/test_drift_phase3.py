@@ -26,7 +26,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.drift import (
@@ -305,11 +304,12 @@ class TestReadApmYmlTarget:
         (tmp_path / "apm.yml").write_text("name: pkg\n", encoding="utf-8")
         assert _read_apm_yml_target(tmp_path) is None
 
-    def test_apm_yml_unreadable_fails_closed(self, tmp_path: Path) -> None:
+    def test_apm_yml_unreadable_returns_none(self, tmp_path: Path) -> None:
         p = tmp_path / "apm.yml"
         p.write_bytes(b"\xff not yaml [[[")
-        with pytest.raises(yaml.YAMLError, match="bounded YAML parse failed"):
-            _read_apm_yml_target(tmp_path)
+        # Should not raise
+        result = _read_apm_yml_target(tmp_path)
+        assert result is None
 
     def test_apm_yml_with_singular_target_returns_list(self, tmp_path: Path) -> None:
         # Singular 'target: copilot' form -- returns a one-element list.
@@ -317,16 +317,14 @@ class TestReadApmYmlTarget:
         result = _read_apm_yml_target(tmp_path)
         assert result == ["copilot"]
 
-    def test_parse_targets_field_exception_propagates(self, tmp_path: Path) -> None:
+    def test_parse_targets_field_exception_returns_none(self, tmp_path: Path) -> None:
         (tmp_path / "apm.yml").write_text("name: pkg\ntarget: copilot\n", encoding="utf-8")
-        with (
-            patch(
-                "apm_cli.core.apm_yml.parse_targets_field",
-                side_effect=ValueError("bad"),
-            ),
-            pytest.raises(ValueError, match="bad"),
+        with patch(
+            "apm_cli.core.apm_yml.parse_targets_field",
+            side_effect=ValueError("bad"),
         ):
-            _read_apm_yml_target(tmp_path)
+            result = _read_apm_yml_target(tmp_path)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------

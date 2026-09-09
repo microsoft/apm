@@ -930,7 +930,6 @@ def resolve_effective_target_decision(
     user_scope: bool = False,
     auto_detect: bool = True,
     create_config: bool = True,
-    strict_config: bool = False,
 ) -> EffectiveTargetDecision:
     """Choose the effective install target once using the public precedence.
 
@@ -948,11 +947,7 @@ def resolve_effective_target_decision(
 
     from apm_cli.config import get_install_target
 
-    configured_target = (
-        get_install_target(create_config=create_config, strict=True)
-        if strict_config
-        else get_install_target(create_config=create_config)
-    )
+    configured_target = get_install_target(create_config=create_config)
     if configured_target is not None:
         return EffectiveTargetDecision(configured_target, "apm config target")
 
