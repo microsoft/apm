@@ -1,7 +1,7 @@
 # OpenAPM v0.2.0 -- informative requirements manifest (draft).
 #
 # Inherits the prospective #2901 inventory at exact commit
-# d1dd63c6d1e4a4b0af95f490c111270d56a16bdd, not a published or ratified baseline.
+# 5a0d872b9dd63b78b08923eddfad0ed1f9b369b4, not a published or ratified baseline.
 # Projects ID/keyword/section/class from the spec body's canonical anchors;
 # Appendix C derives from the same source.
 #

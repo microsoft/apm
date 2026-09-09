@@ -1,6 +1,6 @@
 ---
-title: OpenAPM v0.2.0
-description: Normative specification for the Agent Package Manager (APM) format and conformance.
+title: OpenAPM v0.2.0 (inactive editor's draft)
+description: Inactive editor's draft of OpenAPM v0.2.0; v0.1 remains active.
 slug: specs/openapm-v020
 sidebar:
   order: 1
@@ -14,9 +14,9 @@ This document is an **editor's Working Draft** of OpenAPM, exact revision
 **v0.2.0**. It is the **inactive corrective-spec foundation** retained in
 [microsoft/apm#2820](https://github.com/microsoft/apm/pull/2820), not an
 implementation-conformance statement or an active replacement for v0.1.
-It inherits alias safety prospectively from
+It inherits alias safety and independently versioned schemas prospectively from
 [microsoft/apm#2901](https://github.com/microsoft/apm/pull/2901) at exact commit
-[`d1dd63c6d1e4a4b0af95f490c111270d56a16bdd`](https://github.com/microsoft/apm/commit/d1dd63c6d1e4a4b0af95f490c111270d56a16bdd),
+[`5a0d872b9dd63b78b08923eddfad0ed1f9b369b4`](https://github.com/microsoft/apm/commit/5a0d872b9dd63b78b08923eddfad0ed1f9b369b4),
 not a published or ratified baseline.
 [microsoft/apm#2919](https://github.com/microsoft/apm/pull/2919) owns the coupled
 local-source and audit executable assessment and bindings against this exact
@@ -910,9 +910,11 @@ This section's normative statements are:
 - Producer: [req-mf-001](#req-mf-001), [req-mf-002](#req-mf-002),
   [req-mf-003](#req-mf-003), [req-mf-005](#req-mf-005),
   [req-mf-014](#req-mf-014), [req-mf-015](#req-mf-015),
-  [req-mf-017](#req-mf-017), [req-mf-021](#req-mf-021).
+  [req-mf-017](#req-mf-017), [req-mf-021](#req-mf-021),
+  [req-ext-002](#req-ext-002).
 - Producer (SHOULD): [req-mf-004](#req-mf-004).
-- Consumer: [req-mf-006](#req-mf-006), [req-mf-007](#req-mf-007),
+- Consumer: [req-mf-001](#req-mf-001),
+  [req-mf-006](#req-mf-006), [req-mf-007](#req-mf-007),
   [req-mf-008](#req-mf-008), [req-mf-009](#req-mf-009),
   [req-mf-010](#req-mf-010), [req-mf-011](#req-mf-011),
   [req-mf-012](#req-mf-012), [req-mf-013](#req-mf-013),
@@ -922,8 +924,9 @@ This section's normative statements are:
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
   [req-mf-025](#req-mf-025),
   [req-ext-001](#req-ext-001),
-  [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
+- Consumer (SHOULD): [req-mf-004](#req-mf-004), limited to its existing
+  Consumer version-validation diagnostic clause.
 
 ---
 
@@ -1476,12 +1479,21 @@ envelope.
 > are not imported into Git hashing. A canonical-byte clarification and
 > cross-platform fixtures require separately scoped work.
 
+> **Unresolved encoding defect (informative).** The retained LF-delimited
+> encoding permits distinct trees to have identical canonical bytes when a
+> filename contains LF, without a SHA-256 collision. This newly demonstrated
+> inherited specification debt is not a local-source/audit regression or a
+> demonstrated reference-CLI exploit. A separately authorized normative
+> canonical-byte brief is required. Disclosure does not repair the defect or
+> waive [req-lk-015](#req-lk-015); the finding remains unresolved.
+
 > **Editorial note.** `resolved_commit` is a SHA-1 identifier. The
 > git project's SHA-1-to-SHA-256 object-format transition is
 > ongoing; until SHA-1 collisions are observed in the wild against
 > the git object format, `resolved_commit` is retained as the
-> canonical pointer, with `tree_sha256` providing collision-resistant
-> integrity. A future revision will track `resolved_commit_sha256`
+> canonical pointer. The unresolved LF-filename encoding defect above limits
+> `tree_sha256` integrity despite SHA-256's collision resistance.
+> A future revision will track `resolved_commit_sha256`
 > once git's SHA-256 object-format is widely deployed.
 
 > **Editorial note.** Canonical-tree definition for local-path
@@ -1612,7 +1624,7 @@ The `dependencies` policy block governs APM dependency declarations.
 |------------------------|-------------------------------------------------------------------------------------------|
 | `allow`                | List of patterns matched against the canonical host-blind dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
 | `deny`                 | Always wins over `allow`; case treatment per [req-pl-018](#req-pl-018).                   |
-| `require`              | Exact packages every consumer manifest must include; case treatment per [req-pl-018](#req-pl-018). |
+| `require`              | Exact packages required in the consumer manifest; case treatment per [req-pl-018](#req-pl-018). |
 | `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
 | `max_depth`            | Maximum transitive dependency depth. Default 50.                                          |
 | `require_pinned_constraint` | When true, flags unbounded direct deps as violations.                                 |
@@ -1692,7 +1704,7 @@ sharing a segment with one or more other characters, for example
 `dependencies.allow` after normalization. Where clause (b) or clause
 (d) requires byte-exact matching, a deny pattern that differs only in
 case does not match. Policy authors who intend to deny multiple
-distinct spellings on such a source or after such a truncation must
+distinct spellings on such a source or after such a truncation need to
 enumerate those spellings. The residual security boundary is described
 in [Section 10.8](#108-policy-bypass-via-crafted-manifest).
 
@@ -3209,7 +3221,7 @@ acceptable name space.
 **[req-sc-003]** A conforming **consumer** implementation MUST
 resolve credentials per host class (as defined in
 [Section 3](#3-terminology) and as alias-extended via
-[req-sc-006](#req-sc-006)), and MUST NOT forward a credential
+[req-sc-005](#req-sc-005)), and MUST NOT forward a credential
 resolved for one host class to a request targeting another host
 class. Credential scope MUST be observable in the consumer's
 diagnostic surface. When a fetch follows an HTTP redirect (3xx)
@@ -3381,7 +3393,7 @@ thwart amplification attacks. [req-pl-018](#req-pl-018) prevents a
 case-variant repository spelling from bypassing an allow-list or
 deny-list when resolution treats both spellings as one package
 identity. On a case-sensitive source, differently cased repository
-paths remain distinct and policy authors must enumerate the spellings
+paths remain distinct and policy authors need to enumerate the spellings
 they intend to deny. The same normalization widens `dependencies.allow`
 matching on a case-insensitive source, so an upgrade can admit a
 case-variant spelling that previously missed. Clause (d) of
@@ -3466,6 +3478,18 @@ modes; and the registry HTTP wire envelope (alongside
 
 The declaring-source context in [req-mf-016](#req-mf-016) is not
 cryptographic publisher provenance and does not activate this reservation.
+
+:::note[Planned]
+**Trust boundary (informative).** Digest comparisons assume a trusted expected
+digest or lockfile; they do not authenticate simultaneous replacement of
+record and payload. The reserved attestation subject comprises canonical
+package/source identity and version, the applicable archive or Git-tree
+content digest, and publisher identity. Trust-root selection, verification
+policy, and an interoperable envelope require separately scoped design.
+Attestation verification and enforcement remain reserved. Trusted records
+do not repair the distinct Git-tree encoding defect in
+[Section 5.6.4](#564-git-source-tree-integrity-hash).
+:::
 
 ### 10.13 Executable primitive approval gate
 
@@ -3629,10 +3653,12 @@ Section-level conformance summaries
 [Section 6.9](#69-conformance-requirements-governance),
 [Section 7.11](#711-conformance-requirements-resolution),
 [Section 8.7](#87-conformance-requirements-primitives-and-targets))
-are reader-aids that restate the Appendix C rows for the section's
-class. Appendix C is the canonical source of truth; on any
-conflict between a section summary and Appendix C, Appendix C
-wins.
+are reader-aids for existing role applicability. Appendix C and the
+informative inventory record primary index classification, not exclusive
+role applicability. Appendix C takes precedence over section summaries on
+primary classification; it does not exempt a secondary role expressly bound
+by the requirement body. Cross-role references enumerate existing clauses,
+not additional requirements.
 
 ### 11.2 How to claim conformance
 
@@ -3696,8 +3722,15 @@ These disclosures are not waivers of any normative obligation.
 [req-mf-021](#req-mf-021), [req-ext-002](#req-ext-002),
 [req-pr-004](#req-pr-004), [req-pr-005](#req-pr-005) (SHOULD).
 
+Also applicable: [req-sc-007](#req-sc-007), limited to the existing Producer
+secret-pattern packing refusal clause; [req-cf-002](#req-cf-002), for the
+existing Producer conformance-claim duties.
+
 #### 11.3.2 Consumer
 
+[req-mf-001](#req-mf-001) (existing Consumer mapping-validation clause),
+[req-mf-004](#req-mf-004) (SHOULD; existing Consumer version-validation
+diagnostic clause only),
 [req-mf-006](#req-mf-006), [req-mf-007](#req-mf-007),
 [req-mf-008](#req-mf-008), [req-mf-009](#req-mf-009),
 [req-mf-010](#req-mf-010), [req-mf-011](#req-mf-011),
@@ -4029,11 +4062,14 @@ prepared under the docs site; draft availability does not imply ratification:
 | `https://microsoft.github.io/apm/spec/latest`       | Newest ratified version      | Human citation in prose. Toolchains MUST NOT pin to `latest`; pin to a versioned URL. |
 | `https://microsoft.github.io/apm/spec`              | Alias of `latest`            | Short prose citation. Same restriction as `latest` -- do not pin tooling. |
 
-The JSON Schemas published alongside this specification (Appendix
-A) are themselves identified by the `$id` URL embedded in each
-schema. Toolchains MUST pin to the `$id` URL verbatim; the schema
-files are byte-immortal at those URLs for the lifetime of this
-version. The exact v0.2.0 content route is `/specs/openapm-v020/`.
+Each schema's embedded `$id` identifies it. Toolchains MUST pin to that
+URL verbatim; schema files are byte-immortal there for this version's
+lifetime. The published [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json) and
+[`lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json) URLs and bytes remain unchanged and available;
+[Appendix A](#appendix-a-normative-json-schemas-inline) selects the distinct
+alias-aware resources inherited by this draft.
+
+The exact v0.2.0 content route is `/specs/openapm-v020/`.
 Any future patch needs a distinct artifact and exact route; it MUST NOT
 replace this artifact at that route. The existing `latest` and `/spec`
 aliases are unchanged during preparation and may advance only at actual
@@ -4041,15 +4077,20 @@ ratification.
 
 ## Appendix A. Normative JSON Schemas (inline)
 
-The machine-readable schemas backing this specification are
-reused unchanged from the previous minor and are normative. This corrective
-revision introduces no wire-schema change; schema identities do not follow
-the specification's version number.
+The schemas below define this draft's normative structural contract.
+They inherit the prospective dependency identified in [Status](#status-of-this-document):
+independent alias-aware manifest and lockfile resources, with distinct `$id`
+URLs. The local-source/audit correction adds no wire-schema changes;
+schema revisions are independent of specification versions.
 
-The unchanged wire-schema `$id` values are:
+The prerequisite's human approval and public-comment period under
+[Section 9.3](#93-amendment-process) remain pending. Listing these URLs
+establishes neither approval nor publication.
 
-- `https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json`
-- `https://microsoft.github.io/apm/specs/schemas/lockfile-v0.1.schema.json`
+The selected wire-schema `$id` values are:
+
+- `https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.41.schema.json`
+- `https://microsoft.github.io/apm/specs/schemas/lockfile-v0.1.41.schema.json`
 - `https://microsoft.github.io/apm/specs/schemas/policy-v0.1.schema.json`
 
 The informative requirements format separately reuses
@@ -4057,18 +4098,20 @@ The informative requirements format separately reuses
 
 | Schema                | Authoritative source (in-tree)                                                                       |
 |-----------------------|------------------------------------------------------------------------------------------------------|
-| Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json) (JSON Schema 2020-12).    |
-| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json) (JSON Schema 2020-12). |
+| Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.41.schema.json`](/apm/specs/schemas/manifest-v0.1.41.schema.json) (JSON Schema 2020-12).    |
+| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.41.schema.json`](/apm/specs/schemas/lockfile-v0.1.41.schema.json) (JSON Schema 2020-12). |
 | Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
 | Claude-Code marketplace (informational, emitted output) | `tests/fixtures/schemas/claude-code-marketplace.schema.json`         |
 | Claude-Code plugin (informational, emitted output)      | `tests/fixtures/schemas/claude-code-plugin.schema.json`              |
 
-The reference Python validator `src/apm_cli/policy/schema.py`
-remains in-tree as a **non-normative cross-reference** for
-implementers; the JSON Schema is authoritative. Schemas for
-manifest and lockfile validation are JSON-Schema-only in this revision; a
-reference Python validator MAY be added in a future minor revision
-without normative effect.
+Consumers checking the structural constraints for [req-mf-025](#req-mf-025)
+choose the distinct 0.1.41 `$id` URLs above. Validation against the older
+structural schemas does not waive newer prose or runtime requirements.
+
+`src/apm_cli/policy/schema.py` is a **non-normative cross-reference**;
+the policy JSON Schema is authoritative. Manifest and lockfile validation
+are JSON-Schema-only in this revision; a reference Python validator MAY be
+added in a future minor revision without normative effect.
 
 Where a JSON Schema and the prose of this specification disagree,
 the **prose** is authoritative and the schema is treated as an
@@ -4270,7 +4313,7 @@ clarifications.
 
 **Prospective dependency.** This draft inherits
 [microsoft/apm#2901](https://github.com/microsoft/apm/pull/2901) at exact commit
-[`d1dd63c6d1e4a4b0af95f490c111270d56a16bdd`](https://github.com/microsoft/apm/commit/d1dd63c6d1e4a4b0af95f490c111270d56a16bdd),
+[`5a0d872b9dd63b78b08923eddfad0ed1f9b369b4`](https://github.com/microsoft/apm/commit/5a0d872b9dd63b78b08923eddfad0ed1f9b369b4),
 not a published or ratified baseline. Its 0.1.41 candidate adds
 [req-mf-025](#req-mf-025) and the optional lock-entry `alias` field.
 Under Section 9.2 this is additive optional support and a defensive definition
@@ -4280,7 +4323,9 @@ whitespace is canonicalized; recorded aliases determine replay placement;
 absent aliases retain the unaliased layout. Source identity and source-path
 permissions do not change. Unknown-field preservation is not placement support.
 The requirement and its disclosure, cleanup, and threat mappings are inherited,
-not introduced by the local-source/audit correction.
+not introduced by the local-source/audit correction. Its distinct schema
+resources and pending amendment status are recorded in
+[Appendix A](#appendix-a-normative-json-schemas-inline).
 
 Statement count from that prospective dependency: **123 -> 124**
 (119 MUST, 5 SHOULD); only [req-lk-023](#req-lk-023) is added to its inventory.
@@ -4290,10 +4335,12 @@ allowance, remains inherited. No other identifier is added, removed, or renumber
 
 **Classification and preservation.** The local-source and audit corrections
 are substantive conformance changes under Sections 9.1, 9.2, and 9.4, not same-minor
-errata. The retained v0.1 artifact, requirements manifest, and all four public
-schemas match that exact prospective dependency byte-for-byte. The import
-establishes no publication or ratification. v0.1 remains active, available,
-and supported indefinitely, with no removal date.
+errata. The retained v0.1 artifact and requirements manifest match that exact
+prospective dependency byte-for-byte. Appendix A selects its two new schema
+resources; the four original v0.1 schemas retain their URLs and exact bytes
+from `e38261c5db4d893d6ddebc3925742e4e3bd2ba74`. The import establishes no
+publication or ratification. v0.1 remains active, available, and supported
+indefinitely, with no removal date.
 Section 9.5 constrains announcement-to-removal, not parallel availability
 of a new minor; no migration exception is claimed.
 
@@ -4320,8 +4367,7 @@ or latest alias and records no announcement, publication, or ratification date.
 
 No previously reserved workspace, nesting, attestation, HTTP wire,
 internationalization, range-widening, withdrawal, or default-frozen feature
-is activated. Existing schema identities and independently versioned
-companions are reused without alteration.
+is activated. Independently versioned companions remain unchanged.
 
 ### Previous-minor history (informative)
 
