@@ -232,8 +232,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_aggregate_lockfile_reqs.py::test_aggregate_install_serializes_current_hash_envelopes",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reader_tolerates_bare_hex_hash"
       ]
     },
@@ -279,8 +280,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 3,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_aggregate_lockfile_reqs.py::test_nonfrozen_orphan_cleanup_preserves_fresh_aggregate",
         "tests/spec_conformance/test_lockfile_reqs.py::TestFinalLockfileTargetContraction::test_removes_dropped_target_instruction_file",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe"
