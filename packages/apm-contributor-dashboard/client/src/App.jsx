@@ -8,6 +8,8 @@ import Toast from "./components/Toast";
 import { issueResource, refetchIssues } from "./stores/issues";
 import { prResource, refetchPrs } from "./stores/prs";
 import { triageResource, refetchTriage, activateTriage } from "./stores/triage";
+import { refreshData } from "./services/api";
+import { formatRefreshInterval, refreshIntervalMs } from "./config";
 
 export default function App() {
   const [activeTab, setActiveTab] = createSignal("issues");
@@ -27,10 +29,14 @@ export default function App() {
     setActiveTab(id);
   }
 
-  function handleRefresh() {
-    refetchIssues();
-    refetchPrs();
-    if (activeTab() === "triage") refetchTriage();
+  async function handleRefresh() {
+    try {
+      await refreshData();
+    } finally {
+      refetchIssues();
+      refetchPrs();
+      if (activeTab() === "triage") refetchTriage();
+    }
   }
 
   const lastUpdated = () => issueResource()?.lastUpdated || prResource()?.lastUpdated;
@@ -40,7 +46,7 @@ export default function App() {
       <Navbar onRefresh={handleRefresh} />
       <div class="subtitle">
         <span class="live-dot"></span>
-        {lastUpdated() ? `Live -- last fetched ${lastUpdated()} (auto-refresh 30s)` : "Connecting to GitHub..."}
+        {lastUpdated() ? `Live -- last fetched ${lastUpdated()} (auto-refresh ${formatRefreshInterval(refreshIntervalMs)})` : "Connecting to GitHub..."}
       </div>
       <Show when={issueResource()?.error}>
         <div class="error-bar">{issueResource().error}</div>

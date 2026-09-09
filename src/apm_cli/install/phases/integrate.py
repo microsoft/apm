@@ -26,7 +26,11 @@ from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import integrate_local_content
 from apm_cli.install.sources import make_dependency_source
-from apm_cli.install.template import run_integration_template
+from apm_cli.install.template import (
+    preflight_agent_plugin_materializations,
+    prepare_integration_materialization,
+    run_integration_template,
+)
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -604,6 +608,7 @@ def run(ctx: InstallContext) -> None:
     # routed through ``ctx.tui`` (workstream B, #1116); when the TUI is
     # disabled every method is a no-op.
     # ------------------------------------------------------------------
+    prepared_integrations = []
     for dep_ref in deps_to_install:
         # Determine installation directory using namespaced structure
         # e.g., microsoft/apm-sample-package -> apm_modules/microsoft/apm-sample-package/
@@ -638,12 +643,9 @@ def run(ctx: InstallContext) -> None:
             resolved_ref, skip_download, dep_locked_chk, ref_changed = _resolve_download_strategy(
                 ctx, dep_ref, install_path
             )
-            # F2 (#1116): when the resolver callback already
-            # downloaded this package during the parallel resolve
-            # phase, ``skip_download`` will be True but the bytes
-            # arrived in this run. Tell the cached source so it
-            # does not falsely tag the line ``(cached)``.
-            _fetched_now = dep_key in ctx.callback_downloaded
+            # A callback or pre-download can materialize bytes before
+            # this loop while still selecting CachedDependencySource.
+            _fetched_now = dep_key in ctx.callback_downloaded or dep_key in ctx.pre_downloaded_keys
             source = make_dependency_source(
                 ctx,
                 dep_ref,
@@ -656,7 +658,23 @@ def run(ctx: InstallContext) -> None:
                 fetched_this_run=_fetched_now,
             )
 
-        deltas = run_integration_template(source)
+        materialization, terminal_deltas = prepare_integration_materialization(source)
+        prepared_integrations.append(
+            (dep_key, install_path, source, materialization, terminal_deltas)
+        )
+
+    materialized = [
+        (source, materialization)
+        for _, _, source, materialization, _ in prepared_integrations
+        if materialization is not None
+    ]
+    preflight_agent_plugin_materializations(materialized)
+
+    for dep_key, install_path, source, materialization, terminal_deltas in prepared_integrations:
+        if terminal_deltas is not None:
+            deltas = terminal_deltas
+        else:
+            deltas = run_integration_template(source, materialization=materialization)
 
         if deltas is None:
             # Direct dependency failure: surface a single concise

@@ -327,6 +327,7 @@ class TestResolve:
             patch("apm_cli.config.get_apm_temp_dir", return_value="/tmp"),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("tempfile.mkdtemp", return_value="/tmp/t123"),
+            patch("apm_cli.utils.git_env.git_worktree_head", return_value="a" * 40),
         ):
             result = resolver.resolve(dep)
         assert result.ref_type == GitReferenceType.BRANCH
@@ -351,6 +352,7 @@ class TestResolve:
             patch("apm_cli.config.get_apm_temp_dir", return_value="/tmp"),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("tempfile.mkdtemp", return_value="/tmp/t999"),
+            patch("apm_cli.utils.git_env.git_resolve_commit", return_value=sha),
         ):
             result = resolver.resolve(dep)
         assert result.ref_type == GitReferenceType.COMMIT
@@ -395,6 +397,7 @@ class TestResolve:
             patch("apm_cli.config.get_apm_temp_dir", return_value="/tmp"),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("tempfile.mkdtemp", return_value="/tmp/t456"),
+            patch("apm_cli.utils.git_env.git_resolve_commit", return_value=sha),
         ):
             result = resolver.resolve(dep)
         assert result.resolved_commit == sha

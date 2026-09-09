@@ -102,3 +102,26 @@ def test_no_op_when_package_is_none(tmp_path):
     )
 
     assert "version: 0.0.0" in apm_yml.read_text(encoding="utf-8")
+
+
+@pytest.mark.windows_compat
+def test_stamped_manifest_bytes_are_lf_only(tmp_path):
+    """The stamped apm.yml lands inside a package tree hashed raw by
+    ``compute_package_hash``, so its bytes must be LF-only on every OS
+    (apm#2619) -- a platform-native CRLF rewrite on Windows made the
+    lockfile ``content_hash`` diverge from POSIX."""
+    pkg = _pkg("0.0.0")
+    apm_yml = tmp_path / "apm.yml"
+    apm_yml.write_bytes(b"name: foo\nversion: 0.0.0\n")
+
+    stamp_plugin_version(
+        pkg,
+        PackageType.MARKETPLACE_PLUGIN,
+        "abcdef1234567890aabbccddeeff00112233abcd",
+        tmp_path,
+    )
+
+    raw = apm_yml.read_bytes()
+    assert b"version: abcdef1" in raw
+    assert b"\r" not in raw
+    assert raw.endswith(b"\n")

@@ -75,7 +75,7 @@ def _load() -> list[MarketplaceSource]:
         for entry in data.get("marketplaces", []):
             try:
                 sources.append(MarketplaceSource.from_dict(entry))
-            except (KeyError, TypeError) as exc:
+            except (KeyError, TypeError, ValueError) as exc:
                 logger.debug("Skipping invalid marketplace entry: %s", exc)
         _registry_cache = sources
         return list(sources)

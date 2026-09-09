@@ -14,9 +14,6 @@ Public API::
     yaml_to_str(data)               -- serialize dict -> YAML string
 """
 
-import os
-import secrets
-from contextlib import suppress
 from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn
@@ -64,6 +61,14 @@ class _BoundedSafeLoader(yaml.SafeLoader):
     ``load_yaml`` consumer uniformly, including the non-trust
     ``apm lifecycle validate`` / ``test`` paths that never run
     ``_is_fingerprint_safe``.
+
+    **Two-budget strategy (fix for issue #2389):** ``_guard_expansion`` now
+    pre-scans for aliases via ``_has_aliases`` before computing expansion
+    weights. Anchor-free documents (no shared node objects in the composed
+    graph) cannot amplify -- their weight scales linearly with input size -- so the
+    tight expansion budget is skipped entirely for them. Only documents that
+    contain aliases are subjected to the 5M weight cap. The merge-entry and
+    depth guards are orthogonal and unaffected.
     """
 
     _MAX_MERGE_ENTRIES = 100_000
@@ -85,36 +90,99 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             getattr(node, "start_mark", None),
         )
 
+    @staticmethod
+    def _has_aliases(root: yaml.nodes.Node) -> bool:
+        """Return True if the composed node graph contains any shared nodes.
+
+        PyYAML represents every ``*alias`` reference as a pointer to the same
+        node object.  If any node's ``id()`` is encountered more than once
+        during a full graph traversal the document contains aliases (or a
+        self-referential cycle), meaning alias-expansion amplification is
+        possible.  Anchor-free documents are pure trees whose node objects are
+        never shared, so this returns False for them.
+
+        The traversal is iterative (no Python recursion) so it is safe for
+        deeply nested anchor-free documents that would otherwise hit the
+        default 1000-frame recursion limit.  It uses two sets:
+
+        * ``active`` -- node IDs currently on the active DFS path (pre-order
+          entered, post-order not yet exited).  A hit here means a back-edge
+          (cycle / self-referential anchor).
+        * ``seen`` -- node IDs fully visited from a previous DFS path.  A hit
+          here means a cross-edge (classic alias reachable from two parents).
+
+        Both cases indicate shared nodes; we return True immediately.
+        """
+        seen: set[int] = set()
+        active: set[int] = set()
+        # Work stack entries: (node, entering).
+        #   entering=True  -> first visit; check for alias, push exit + children.
+        #   entering=False -> post-visit; move node from active to seen.
+        work: list[tuple[yaml.nodes.Node, bool]] = [(root, True)]
+        while work:
+            node, entering = work.pop()
+            nid = id(node)
+            if entering:
+                if nid in active or nid in seen:
+                    return True
+                active.add(nid)
+                # Schedule post-visit before children so it fires after them.
+                work.append((node, False))
+                if isinstance(node, yaml.nodes.MappingNode):
+                    # Push in reverse so leftmost key is processed first.
+                    for key_node, value_node in reversed(node.value):
+                        work.append((value_node, True))
+                        work.append((key_node, True))
+                elif isinstance(node, yaml.nodes.SequenceNode):
+                    for child in reversed(node.value):
+                        work.append((child, True))
+            else:
+                active.discard(nid)
+                seen.add(nid)
+        return False
+
     def _guard_expansion(self, root: Any) -> None:
-        # Bound the LOGICAL (alias-expanded) size of the composed node graph
-        # BEFORE construction. PyYAML shares one node object across every
-        # ``*alias`` reference, so a pure-alias billion-laughs graph
-        # (``lN: &lN [*l(N-1), *l(N-1)]``) is only O(N) objects yet expands
-        # to O(2^N) the moment any consumer materializes it (``str()``,
-        # deepcopy, re-serialize). It carries no ``<<`` so the merge-entry
-        # budget never engages, and non-trust consumers
-        # (``apm lifecycle validate`` / ``test``) never run the post-parse
-        # ``_is_fingerprint_safe`` guard -- so without this the bomb wedges
-        # them. We compute a memoized per-node expansion weight (shared nodes
-        # are walked once but summed per occurrence by each parent) and fail
-        # closed as a ``yaml.YAMLError`` the instant the running total crosses
-        # the budget. A self-referential anchor (``a: &a [*a]``) is a cycle in
-        # the node graph; the in-progress sentinel detects it and fails closed
-        # rather than recursing forever. The budget is orders of magnitude
-        # above any legitimate config, so real anchors/aliases still resolve.
+        # Two-budget alias-expansion guard (issue #2389):
+        #
+        # Anchor-free documents (no shared node objects in the composed graph)
+        # cannot produce alias-expansion amplification -- their total weight
+        # scales linearly with literal input size (O(N)).  Applying the tight 5M cap to
+        # them produces false-positive rejections of legitimate large lockfiles
+        # (APM's own generated output).  We therefore pre-scan with
+        # _has_aliases: if the graph is alias-free, return immediately.
+        #
+        # Only alias-containing documents proceed to the full weight check:
+        # PyYAML shares one node object across every ``*alias`` reference, so
+        # a pure-alias billion-laughs graph (``lN: &lN [*l(N-1), *l(N-1)]``)
+        # is only O(N) objects yet expands to O(2^N) the moment any consumer
+        # materializes it (``str()``, deepcopy, re-serialize).  It carries no
+        # ``<<`` so the merge-entry budget never engages, and non-trust
+        # consumers (``apm lifecycle validate`` / ``test``) never run the
+        # post-parse ``_is_fingerprint_safe`` guard -- so without this the
+        # bomb wedges them.  We compute a memoized per-node expansion weight
+        # (shared nodes are walked once but summed per occurrence by each
+        # parent) and fail closed as a ``yaml.YAMLError`` the instant the
+        # running total crosses the budget.  A self-referential anchor
+        # (``a: &a [*a]``) is detected as aliases-present by _has_aliases and
+        # then caught by the in-progress sentinel below.
         #
         # Leaf weight is BYTE-AWARE, not a flat 1: PyYAML's representer reports
         # ``ignore_aliases() == True`` for ``str`` / ``int`` / ``float`` /
         # ``bytes`` / ``bool``, so on the dump side (``dump_yaml`` /
         # ``yaml_to_str``) a shared scalar is NOT re-anchored -- its full text
-        # is re-emitted once PER alias occurrence. A single ~50KB anchored
+        # is re-emitted once PER alias occurrence.  A single ~50KB anchored
         # scalar aliased tens of thousands of times therefore composes as only
         # O(N) nodes (passing a node-count guard) yet re-serializes to ~GBs and
         # hangs/OOMs the emitter -- reachable pre-trust on the
-        # ``apm install`` / ``apm uninstall`` apm.yml round-trip. Charging each
-        # scalar occurrence its emitted byte length makes the budget model the
-        # real dump-amplification cost, so the bomb fails closed at parse while
-        # a single large scalar (referenced a handful of times) still resolves.
+        # ``apm install`` / ``apm uninstall`` apm.yml round-trip.  Charging
+        # each scalar occurrence its emitted byte length makes the budget model
+        # the real dump-amplification cost, so the bomb fails closed at parse
+        # while a single large scalar (referenced a handful of times) still
+        # resolves.
+        if not self._has_aliases(root):
+            # Anchor-free document: literal tree, no amplification possible.
+            return
+
         weights: dict[int, int] = {}
 
         def weight(node: Any) -> int:
@@ -337,15 +405,24 @@ def load_yaml_roundtrip(path: str | Path) -> Any:
 
 
 def dump_yaml_roundtrip(data: Any, path: str | Path) -> None:
-    """Write ruamel round-trip YAML data with explicit UTF-8 encoding."""
+    """Write ruamel round-trip YAML data with explicit UTF-8 encoding.
+
+    Deterministic LF line endings (apm#2624): the project-file rewrite
+    paths that use this (install / uninstall / package-resolution
+    rewriting ``apm.yml``) previously wrote platform-native newlines, so
+    on Windows the file flip-flopped between CRLF and LF depending on
+    which command last touched it, churning git diffs. Windows files
+    already in the CRLF domain incur a one-time line-ending-only diff on
+    their next rewrite.
+    """
+    from .atomic_io import write_text_lf
+
     stream = StringIO()
     try:
         _roundtrip_yaml().dump(data, stream)
     except Exception as exc:
         _raise_as_pyyaml_error(exc)
-    text = stream.getvalue()
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    write_text_lf(Path(path), stream.getvalue())
 
 
 class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
@@ -366,6 +443,14 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     ``apm install`` / ``apm audit``.
     """
 
+    def detect(self, text: str) -> bool:
+        """Strip one leading UTF-8 BOM before detecting front matter."""
+        return super().detect(text.removeprefix("\ufeff"))
+
+    def split(self, text: str) -> tuple[str, str]:
+        """Strip one leading UTF-8 BOM before locating the front matter."""
+        return super().split(text.removeprefix("\ufeff"))
+
     def load(self, fm: str, **kwargs: Any) -> Any:
         kwargs["Loader"] = _BoundedSafeLoader
         try:
@@ -381,7 +466,36 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
 
 
-def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
+def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:
+    """Parse Markdown text through the bounded handler.
+
+    ``preserve_body`` retains body whitespace after consuming the delimiter's
+    first line break. Integrators use it when target conversion must not alter
+    the authored body.
+    """
+    import frontmatter
+
+    if not _BOUNDED_FRONTMATTER_HANDLER.detect(text):
+        return frontmatter.Post(text)
+
+    try:
+        split = _BOUNDED_FRONTMATTER_HANDLER.split(text)
+        post = frontmatter.loads(text, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    except yaml.YAMLError:
+        raise
+    except (IndexError, ValueError) as exc:
+        raise yaml.YAMLError(f"malformed frontmatter delimiters: {exc}") from exc
+    if preserve_body:
+        _, body = split
+        if body.startswith("\r\n"):
+            body = body[2:]
+        elif body.startswith("\n"):
+            body = body[1:]
+        post.content = body
+    return post
+
+
+def load_frontmatter(fd: Any, encoding: str = "utf-8-sig") -> Any:
     """Parse Markdown front matter with the bounded YAML loader.
 
     Drop-in for ``frontmatter.load(fd)``: accepts a path string or an open
@@ -392,10 +506,23 @@ def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
     the same ``frontmatter.Post`` (``.metadata`` / ``.content``) as the stock
     call; raises ``yaml.YAMLError`` on malformed or over-budget front matter,
     which every existing caller already treats as fail-closed.
-    """
-    import frontmatter
 
-    return frontmatter.load(fd, encoding=encoding, handler=_BOUNDED_FRONTMATTER_HANDLER)
+    ``utf-8-sig`` strips a leading BOM from path inputs, while the bounded
+    handler strips it from already-open streams. A BOM'd instruction file
+    (written by PowerShell's ``Out-File``, ``>``, or Notepad) therefore cannot
+    hide the ``---`` fence and silently drop its ``applyTo`` scope (apm#2683).
+    """
+    text = ""
+    if isinstance(fd, (str, Path)):
+        text = Path(fd).read_text(encoding=encoding)
+    elif hasattr(fd, "read"):
+        text = fd.read()
+        if isinstance(text, bytes):
+            text = text.decode(encoding)
+    else:
+        text = str(fd)
+
+    return loads_frontmatter(text)
 
 
 def dump_yaml(
@@ -412,10 +539,21 @@ def dump_yaml(
     octal literal that ``safe_load`` materialised without a digit cap) is
     therefore raised BEFORE the file is opened, so an unserialisable payload
     can never truncate the existing file to zero bytes.
+
+    The file is written with deterministic LF line endings (via
+    :func:`apm_cli.utils.atomic_io.write_text_lf`, the codebase's single
+    LF-write policy). Several callers rewrite ``apm.yml`` INSIDE an
+    installed package tree that
+    :func:`apm_cli.utils.content_hash.compute_package_hash` hashes raw
+    (``stamp_plugin_version``, the persistent-cache version stamp), so a
+    platform-native write would make ``content_hash`` -- and therefore the
+    lockfile -- diverge between Windows and POSIX (apm#2619, same class as
+    apm#1952/apm#2187).
     """
+    from .atomic_io import write_text_lf
+
     text = yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    write_text_lf(Path(path), text)
 
 
 def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:
@@ -435,30 +573,17 @@ def write_yaml_text_atomic(
 ) -> None:
     """Atomically replace a YAML file with already-rendered text.
 
-    The replacement is written to a sibling file first and then moved into
-    place with ``os.replace``. If the write or replace fails, the original
-    file remains untouched.
+    The canonical atomic writer creates the replacement beside the target
+    before moving it into place. If the write or replace fails, the original
+    file remains untouched. Its deterministic LF policy keeps the on-disk
+    bytes identical on every OS.
     """
+    from .atomic_io import atomic_write_text
+
     target = Path(path)
-    tmp_path: Path | None = None
-    try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        for _attempt in range(10):
-            candidate = target.with_name(f".{target.name}.{secrets.token_hex(8)}{tmp_suffix}")
-            try:
-                fd = os.open(candidate, flags, 0o600)
-            except FileExistsError:
-                continue
-            tmp_path = candidate
-            break
-        else:
-            raise FileExistsError(f"Could not create a unique temp file for {target}")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-        os.replace(tmp_path, target)
-        tmp_path = None
-    except Exception:
-        if tmp_path is not None:
-            with suppress(OSError):
-                tmp_path.unlink()
-        raise
+    atomic_write_text(
+        target,
+        content,
+        temp_prefix=f".{target.name}.",
+        temp_suffix=tmp_suffix,
+    )

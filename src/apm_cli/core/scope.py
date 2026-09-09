@@ -134,6 +134,14 @@ def get_deploy_root(scope: InstallScope) -> Path:
     return Path.cwd()
 
 
+def get_workspace_deploy_root(workspace_root: Path) -> Path:
+    """Return the live deployment root for an APM metadata workspace."""
+    workspace_root = workspace_root.resolve()
+    if workspace_root == get_apm_dir(InstallScope.USER).resolve():
+        return get_deploy_root(InstallScope.USER).resolve()
+    return workspace_root
+
+
 def get_apm_dir(scope: InstallScope) -> Path:
     """Return the directory that holds APM metadata (lockfile, modules).
 

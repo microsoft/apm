@@ -44,6 +44,7 @@ pytestmark = [
 _HOST = "github.com"
 _OWNER_REPO = "acme/ssh-semver-contract"
 _SSH_REMOTE = f"git@{_HOST}:{_OWNER_REPO}.git"
+_SSH_CUSTOM_REMOTE = f"ssh://deploy@{_HOST}:2222/{_OWNER_REPO}.git"
 _HTTPS_REMOTE = f"https://{_HOST}/{_OWNER_REPO}.git"
 _SHORTHAND_SOURCE = _OWNER_REPO
 _SKILL_NAME = "ssh-semver-contract"
@@ -99,6 +100,7 @@ class _TransportCase:
     install_args: tuple[str, ...]
     expect_success: bool
     expected_transport: str
+    expected_requested_remote: str | None = None
 
 
 _CASES = (
@@ -110,6 +112,16 @@ _CASES = (
         install_args=_INSTALL_ARGS,
         expect_success=True,
         expected_transport="ssh",
+    ),
+    _TransportCase(
+        id="explicit-ssh-custom-port",
+        manifest_source=_SSH_CUSTOM_REMOTE,
+        rewritten_remote=_SSH_CUSTOM_REMOTE,
+        prefer_ssh=False,
+        install_args=_INSTALL_ARGS,
+        expect_success=True,
+        expected_transport="ssh",
+        expected_requested_remote=_SSH_CUSTOM_REMOTE,
     ),
     _TransportCase(
         id="prefer-ssh",
@@ -150,7 +162,7 @@ class _Scenario:
     repository_origin: Path
     repository_url: str
     rewritten_remote: str
-    trace_path: Path
+    trace_root: Path
     manifest_entry: dict[str, str]
     expected_commit: GitCommit
     expected_skill_bytes: bytes
@@ -254,7 +266,8 @@ def _create_scenario(root: Path, case: _TransportCase) -> _Scenario:
         source_inputs=(consumer.manifest_path, repository.origin),
         lifecycle_actions=tuple(actions),
     )
-    trace_path = isolated.temp_root / "git-trace.json"
+    trace_root = isolated.temp_root / "git-traces"
+    trace_root.mkdir()
     # Frozen binaries can bypass both PYTHONPATH sitecustomize and proxy
     # isolation. Disable the unrelated HTTP metadata tier so this transport
     # contract has a deterministic Git-only network boundary.
@@ -262,7 +275,7 @@ def _create_scenario(root: Path, case: _TransportCase) -> _Scenario:
         overrides={"APM_TIERED_RESOLVER": "0"},
     )
     environment.update(_HERMETIC_ENVIRONMENT)
-    environment["GIT_TRACE2_EVENT"] = str(trace_path)
+    environment["GIT_TRACE2_EVENT"] = f"{trace_root}{os.sep}"
     return _Scenario(
         row=row,
         environment=environment,
@@ -271,7 +284,7 @@ def _create_scenario(root: Path, case: _TransportCase) -> _Scenario:
         repository_origin=repository.origin,
         repository_url=repository.file_url,
         rewritten_remote=case.rewritten_remote,
-        trace_path=trace_path,
+        trace_root=trace_root,
         manifest_entry=manifest_entry,
         expected_commit=expected_commit,
         expected_skill_bytes=expected_skill_bytes,
@@ -399,6 +412,8 @@ def _transport_for_argument(argument: str) -> str | None:
     if argument == _SSH_REMOTE:
         return "ssh"
     parsed = urlparse(argument)
+    if parsed.scheme == "ssh" and parsed.hostname == _HOST:
+        return "ssh"
     expected = urlparse(_HTTPS_REMOTE)
     if (
         parsed.scheme,
@@ -413,10 +428,24 @@ def _transport_for_argument(argument: str) -> str | None:
     return None
 
 
-def _invoked_transports(trace_path: Path) -> tuple[str, ...]:
+def _trace_events(trace_root: Path) -> tuple[dict[str, object], ...]:
+    """Load collision-free per-process Trace2 events."""
+    discarded = trace_root / "git-trace2-discard"
+    assert not discarded.exists()
+    events: list[dict[str, object]] = []
+    trace_paths = tuple(sorted(path for path in trace_root.iterdir() if path.is_file()))
+    assert trace_paths
+    for trace_path in trace_paths:
+        for line in trace_path.read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            assert isinstance(event, dict)
+            events.append(event)
+    return tuple(events)
+
+
+def _invoked_transports(trace_root: Path) -> tuple[str, ...]:
     transports = []
-    for line in trace_path.read_text(encoding="utf-8").splitlines():
-        event = json.loads(line)
+    for event in _trace_events(trace_root):
         if event.get("event") != "start":
             continue
         arguments = tuple(str(argument) for argument in event.get("argv", ()))
@@ -429,10 +458,23 @@ def _invoked_transports(trace_path: Path) -> tuple[str, ...]:
     return tuple(transports)
 
 
+def _semver_remote_arguments(trace_root: Path) -> tuple[str, ...]:
+    remotes = []
+    for event in _trace_events(trace_root):
+        if event.get("event") != "start":
+            continue
+        arguments = tuple(str(argument) for argument in event.get("argv", ()))
+        if "ls-remote" not in arguments or "--tags" not in arguments:
+            continue
+        remotes.extend(
+            argument for argument in arguments if _transport_for_argument(argument) is not None
+        )
+    return tuple(remotes)
+
+
 def _git_transport_children(scenario: _Scenario) -> tuple[tuple[str, Path], ...]:
     children: list[tuple[str, Path]] = []
-    for line in scenario.trace_path.read_text(encoding="utf-8").splitlines():
-        event = json.loads(line)
+    for event in _trace_events(scenario.trace_root):
         if event.get("event") != "child_start":
             continue
         child_class = str(event.get("child_class", ""))
@@ -530,9 +572,18 @@ def test_git_semver_resolution_honors_consume_transport_contract(
     else:
         _assert_failure_contract(scenario, observation)
 
-    transports = _invoked_transports(scenario.trace_path)
+    transports = _invoked_transports(scenario.trace_root)
     assert transports
     assert set(transports) == {case.expected_transport}
+    if case.expected_requested_remote is not None:
+        observed_remotes = _semver_remote_arguments(scenario.trace_root)
+        observed_remote = next(
+            remote for remote in observed_remotes if remote == case.expected_requested_remote
+        )
+        parsed = urlparse(observed_remote)
+        assert parsed.username == "deploy"
+        assert parsed.hostname == _HOST
+        assert parsed.port == 2222
     if case.expect_success:
         _assert_file_transport_children(scenario)
     else:

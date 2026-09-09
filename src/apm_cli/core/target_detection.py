@@ -70,9 +70,11 @@ TargetType = Literal[
     "codex",
     "gemini",
     "antigravity",
+    "grok-build",
     "windsurf",
     "kiro",
     "agent-skills",
+    "hermes",
     "all",
     "minimal",
 ]
@@ -115,6 +117,7 @@ UserTargetType = Literal[
     "windsurf",
     "kiro",
     "agent-skills",
+    "hermes",
     "all",
     "minimal",
 ]
@@ -164,6 +167,8 @@ def detect_target(  # noqa: PLR0911
             return "grok-build", "explicit --target flag"
         elif explicit_target == "agent-skills":
             return "agent-skills", "explicit --target flag"
+        elif explicit_target == "hermes":
+            return "hermes", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
 
@@ -191,6 +196,8 @@ def detect_target(  # noqa: PLR0911
             return "grok-build", "apm.yml target"
         elif config_target == "agent-skills":
             return "agent-skills", "apm.yml target"
+        elif config_target == "hermes":
+            return "hermes", "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
 
@@ -414,7 +421,7 @@ def get_target_description(target: UserTargetType) -> str:
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
-        "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
+        "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
@@ -715,16 +722,12 @@ def parse_target_field(
     if len(raw_parts) == 1:
         return raw_parts[0]
 
-    # Multi-token: resolve aliases + dedupe, preserving input order.
+    # Multi-token: preserve the distinct Copilot and VS Code MCP destinations
+    # while resolving every other alias to its canonical profile.
     seen: set[str] = set()
     result: list[str] = []
     for p in raw_parts:
-        capability = get_target_capability(p)
-        canonical = (
-            capability.compile_family
-            if capability.compile_family in capability.aliases
-            else normalize_target_name(p)
-        )
+        canonical = p if p in {"copilot", "vscode"} else normalize_target_name(p)
         if canonical not in seen:
             seen.add(canonical)
             result.append(canonical)
@@ -859,10 +862,12 @@ class EffectiveTargetDecision:
         seen: set[str] = set()
         for target, capability in _target_capabilities(self.value):
             runtime = (
-                capability.compile_family
+                "vscode"
+                if target == "vscode" and "vscode" in capability.runtimes
+                else capability.name
+                if capability.name in capability.runtimes
+                else capability.compile_family
                 if capability.compile_family in capability.runtimes
-                else target
-                if target in capability.runtimes
                 else capability.runtimes[0]
                 if capability.runtimes
                 else capability.name
@@ -874,15 +879,19 @@ class EffectiveTargetDecision:
 
     def runtime_targets_for_scope(self, *, user_scope: bool) -> tuple[str, ...] | None:
         """Return MCP runtime identifiers adjusted for project or user scope."""
-        runtimes = self.runtime_targets
-        if (
-            not user_scope
-            or runtimes is None
-            or self.canonical_targets is None
-            or "copilot" not in self.canonical_targets
-        ):
-            return runtimes
-        return tuple("copilot" if target == "vscode" else target for target in runtimes)
+        targets = self.runtime_targets
+        if not user_scope or targets is None:
+            return targets
+
+        from apm_cli.core.experimental import is_enabled
+
+        eligible: list[str] = []
+        for runtime in targets:
+            capability = get_target_capability(runtime)
+            if capability.experimental_flag and not is_enabled(capability.experimental_flag):
+                continue
+            eligible.append(runtime)
+        return tuple(eligible)
 
     @cached_property
     def runtime_equivalents(self) -> tuple[str, ...] | None:
@@ -920,6 +929,7 @@ def resolve_effective_target_decision(
     manifest_target: str | list[str] | None,
     user_scope: bool = False,
     auto_detect: bool = True,
+    create_config: bool = True,
 ) -> EffectiveTargetDecision:
     """Choose the effective install target once using the public precedence.
 
@@ -937,7 +947,7 @@ def resolve_effective_target_decision(
 
     from apm_cli.config import get_install_target
 
-    configured_target = get_install_target()
+    configured_target = get_install_target(create_config=create_config)
     if configured_target is not None:
         return EffectiveTargetDecision(configured_target, "apm config target")
 
@@ -955,6 +965,7 @@ def resolve_package_target_decision(
     explicit_target: str | list[str] | None,
     user_scope: bool = False,
     auto_detect: bool = True,
+    create_config: bool = True,
 ) -> EffectiveTargetDecision:
     """Resolve one effective target decision from a parsed package manifest."""
     from apm_cli.models.apm_package import package_target_selection
@@ -965,6 +976,7 @@ def resolve_package_target_decision(
         manifest_target=package_target_selection(package) if package is not None else None,
         user_scope=user_scope,
         auto_detect=auto_detect,
+        create_config=create_config,
     )
 
 
@@ -973,6 +985,8 @@ def resolve_manifest_target_decision(
     *,
     manifest_path: Path,
     explicit_target: str | list[str] | None,
+    user_scope: bool = False,
+    create_config: bool = True,
 ) -> EffectiveTargetDecision:
     """Resolve one effective target decision from an optional manifest path."""
     package = None
@@ -984,6 +998,8 @@ def resolve_manifest_target_decision(
         project_root,
         package=package,
         explicit_target=explicit_target,
+        user_scope=user_scope,
+        create_config=create_config,
     )
 
 
@@ -996,6 +1012,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("cursor", "dir", ".cursor"),
     ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
     ("copilot", "file", ".github/copilot-instructions.md"),
+    ("copilot", "file", ".github/mcp.json"),  # architecture-authority-exempt: detection signal
     ("copilot", "dir", ".github/instructions"),
     ("copilot", "dir", ".github/agents"),
     ("copilot", "dir", ".github/prompts"),

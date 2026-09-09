@@ -496,7 +496,7 @@ class TestFullInstallTransitiveMCPIntegration:
 
 class TestStaleRemovalAfterUpdate:
     """When a package drops/renames an MCP server, stale entries must be
-    removed from .vscode/mcp.json during install --update."""
+    removed from .github/mcp.json during install --update."""
 
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
@@ -537,13 +537,13 @@ class TestStaleRemovalAfterUpdate:
                 mcp_servers=["ghcr.io/acme/mcp-alpha", "ghcr.io/acme/mcp-beta"],
             )
 
-            # Pre-existing .vscode/mcp.json has both servers
-            mcp_json = tmp_path / ".vscode" / "mcp.json"
+            # Pre-existing .github/mcp.json has both servers
+            mcp_json = tmp_path / ".github" / "mcp.json"
             mcp_json.parent.mkdir(parents=True, exist_ok=True)
             mcp_json.write_text(
                 json.dumps(
                     {
-                        "servers": {
+                        "mcpServers": {
                             "ghcr.io/acme/mcp-alpha": {"command": "npx", "args": ["alpha"]},
                             "ghcr.io/acme/mcp-beta": {"command": "npx", "args": ["beta"]},
                         }
@@ -570,8 +570,8 @@ class TestStaleRemovalAfterUpdate:
 
             # Stale server must be removed from mcp.json
             updated = json.loads(mcp_json.read_text(encoding="utf-8"))
-            assert "ghcr.io/acme/mcp-alpha" not in updated["servers"]
-            assert "ghcr.io/acme/mcp-beta" in updated["servers"]
+            assert "ghcr.io/acme/mcp-alpha" not in updated["mcpServers"]
+            assert "ghcr.io/acme/mcp-beta" in updated["mcpServers"]
 
             # Lockfile must only list the remaining server
             lockfile = LockFile.read(tmp_path / "apm.lock.yaml")

@@ -75,12 +75,40 @@ def _load_config(tmp_path: Path, source_base: str | None, packages: str) -> Mark
 
 
 class TestSourceBaseSchema:
+    @pytest.mark.parametrize(
+        ("source_base", "normalized"),
+        [
+            (
+                "https://gitlab.example.com/platform/marketplaces/",
+                "https://gitlab.example.com/platform/marketplaces",
+            ),
+            (
+                "https://dev.azure.com/contoso/platform/_git/",
+                "https://dev.azure.com/contoso/platform/_git",
+            ),
+        ],
+    )
+    def test_normalizes_trailing_slash_before_validating_source_base(
+        self, tmp_path: Path, source_base: str, normalized: str
+    ) -> None:
+        config = _load_config(
+            tmp_path,
+            source_base,
+            f"""
+            - name: tool
+              source: tool
+              ref: {_SHA}
+            """,
+        )
+
+        assert config.source_base == normalized
+
     def test_accepts_single_and_nested_relative_sources_when_source_base_is_set(
         self, tmp_path: Path
     ) -> None:
         config = _load_config(
             tmp_path,
-            "https://gitlab.example.com/platform/marketplaces/",
+            "https://gitlab.example.com/platform/marketplaces",
             f"""
             - name: single
               source: single-tool
@@ -96,6 +124,20 @@ class TestSourceBaseSchema:
         assert config.packages[0].host is None
         assert config.packages[1].source == "team/tools/nested-tool"
         assert config.packages[1].host is None
+
+    def test_accepts_percent_encoded_space_in_ado_source_base(self, tmp_path: Path) -> None:
+        config = _load_config(
+            tmp_path,
+            "https://dev.azure.com/contoso/My%20Projects/_git",
+            f"""
+            - name: ado-tool
+              source: agent-skills
+              ref: {_SHA}
+            """,
+        )
+
+        assert config.source_base == "https://dev.azure.com/contoso/My%20Projects/_git"
+        assert config.packages[0].source == "agent-skills"
 
     def test_absent_source_base_keeps_owner_repo_source_unchanged(self, tmp_path: Path) -> None:
         config = _load_config(
@@ -125,6 +167,12 @@ class TestSourceBaseSchema:
             ("https://gitlab.example.com/group//repo", "empty"),
             ("https://gitlab.example.com/group//", "empty"),
             ("https://gitlab.example.com/group/../repo", "traversal"),
+            ("https://gitlab.example.com/group/%", "malformed"),
+            ("https://gitlab.example.com/group/%FF", "UTF-8"),
+            ("https://gitlab.example.com/group/%2Frepo", "path separator"),
+            ("https://gitlab.example.com/group/%252E%252E", "residual"),
+            ("https://dev.azure.com/contoso/%2e%2e/_git", "traversal"),
+            ("https://dev.azure.com/contoso/My%2FProjects/_git", "path separator"),
         ],
     )
     def test_rejects_source_base_security_guard_violations(
@@ -149,6 +197,18 @@ class TestSourceBaseSchema:
                 f"""
                 - name: tool
                   source: tool
+                  ref: {_SHA}
+                """,
+            )
+
+    def test_rejects_literal_space_relative_source_with_source_base(self, tmp_path: Path) -> None:
+        with pytest.raises(MarketplaceYmlError, match="must be one of"):
+            _load_config(
+                tmp_path,
+                "https://gitlab.example.com/platform/marketplaces",
+                f"""
+                - name: tool
+                  source: team/My Group
                   ref: {_SHA}
                 """,
             )
@@ -317,7 +377,7 @@ class TestSourceBaseBuildComposition:
 
         builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
         resolved = builder._resolve_entry(config.packages[0])
-        assert resolved.source_repo == "contoso/platform/_git/agent-skills"
+        assert resolved.source_repo == "contoso/platform/agent-skills"
         assert resolved.host == "dev.azure.com"
         parsed = urlparse(resolved.source_url or "")
         assert parsed.scheme == "https"
@@ -373,6 +433,118 @@ class TestSourceBaseBuildComposition:
 
         assert resolved.source_repo == "contoso/marketplaces/tool"
         assert auth.calls == [("github.com", "contoso")]
+
+    def test_encoded_ado_sources_preserve_urls_and_share_decoded_identity(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "base").mkdir()
+        (tmp_path / "direct").mkdir()
+        source_base = _load_config(
+            tmp_path / "base",
+            "https://dev.azure.com/contoso/My%20Projects/_git",
+            f"""
+            - name: from-base
+              source: agent-skills
+              ref: {_SHA}
+            """,
+        )
+        direct_source = _load_config(
+            tmp_path / "direct",
+            None,
+            f"""
+            - name: direct
+              source: https://dev.azure.com/contoso/My%20Projects/_git/agent-skills
+              ref: {_SHA}
+            """,
+        )
+
+        base_builder = MarketplaceBuilder.from_config(
+            source_base, tmp_path / "base", BuildOptions(offline=True)
+        )
+        direct_builder = MarketplaceBuilder.from_config(
+            direct_source, tmp_path / "direct", BuildOptions(offline=True)
+        )
+        base_resolved = base_builder._resolve_entry(source_base.packages[0])
+        direct_resolved = direct_builder._resolve_entry(direct_source.packages[0])
+
+        assert base_resolved.source_repo == "contoso/My Projects/agent-skills"
+        assert direct_resolved.source_repo == base_resolved.source_repo
+        assert urlparse(base_resolved.source_url or "").path == (
+            "/contoso/My%20Projects/_git/agent-skills"
+        )
+        assert urlparse(direct_resolved.source_url or "").path == (
+            "/contoso/My%20Projects/_git/agent-skills"
+        )
+        for builder, resolved in (
+            (base_builder, base_resolved),
+            (direct_builder, direct_resolved),
+        ):
+            source = builder.compose_marketplace_json([resolved])["plugins"][0]["source"]
+            assert urlparse(source["url"]).path == "/contoso/My%20Projects/_git/agent-skills"
+
+    def test_encoded_generic_source_base_preserves_transport_path(self, tmp_path: Path) -> None:
+        config = _load_config(
+            tmp_path,
+            "https://gitlab.example.com/team/My%20Group",
+            f"""
+            - name: encoded-gitlab
+              source: agent-skills
+              ref: {_SHA}
+            """,
+        )
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+
+        resolved = builder._resolve_entry(config.packages[0])
+
+        assert resolved.source_repo == "team/My%20Group/agent-skills"
+        assert urlparse(resolved.source_url or "").path == "/team/My%20Group/agent-skills"
+        source = builder.compose_marketplace_json([resolved])["plugins"][0]["source"]
+        assert urlparse(source["url"]).path == "/team/My%20Group/agent-skills"
+
+    def test_encoded_ado_organization_is_used_for_auth_lookup(self, tmp_path: Path) -> None:
+        config = _load_config(
+            tmp_path,
+            "https://dev.azure.com/cont%6Fso/platform/_git",
+            f"""
+            - name: ado-tool
+              source: agent-skills
+              ref: {_SHA}
+            """,
+        )
+        auth = _RecordingAuthResolver()
+        builder = MarketplaceBuilder.from_config(
+            config,
+            tmp_path,
+            BuildOptions(offline=False),
+            auth_resolver=auth,
+        )
+
+        builder._resolve_entry(config.packages[0])
+
+        assert auth.calls == [("dev.azure.com", "contoso")]
+
+    @pytest.mark.parametrize(
+        ("source", "error"),
+        [
+            ("https://dev.azure.com/contoso/%/_git/repo", "malformed percent-encoding"),
+            ("https://dev.azure.com/contoso/%FF/_git/repo", "valid UTF-8"),
+            ("https://dev.azure.com/contoso/%2F/_git/repo", "path separator"),
+            ("https://dev.azure.com/contoso/%252E%252E/_git/repo", "residual percent-encoding"),
+        ],
+    )
+    def test_unsafe_full_https_source_is_rejected_before_resolution(
+        self, tmp_path: Path, source: str, error: str
+    ) -> None:
+        with pytest.raises(MarketplaceYmlError, match=error):
+            _load_config(
+                tmp_path,
+                None,
+                f"""
+                - name: unsafe
+                  source: {source}
+                  ref: {_SHA}
+                """,
+            )
 
 
 class TestSourceBaseEditor:

@@ -68,13 +68,14 @@ class TestCopilotRuntime:
             assert "copilot-default" in models
             assert models["copilot-default"]["provider"] == "github-copilot"
 
-    def test_get_mcp_config_path(self):
-        """Test getting MCP configuration path."""
+    def test_get_mcp_config_path_uses_copilot_home(self, monkeypatch, tmp_path):
+        """The runtime reads the adapter-owned global Copilot configuration."""
+        monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "copilot-home"))
         with patch.object(CopilotRuntime, "is_available", return_value=True):
             runtime = CopilotRuntime()
             config_path = runtime.get_mcp_config_path()
 
-            assert config_path.as_posix().endswith(".copilot/mcp-config.json")
+            assert config_path == tmp_path / "copilot-home" / "mcp-config.json"
 
     def test_execute_prompt_basic(self):
         """Test basic prompt execution."""
@@ -164,7 +165,7 @@ class TestMcpConfigUtf8RoundTrip:
 
         mcp_path = tmp_path / "mcp-config.json"
         servers = {
-            "servers": {
+            "mcpServers": {
                 "demo-cafe": {
                     "command": "node",
                     "args": ["server.js"],

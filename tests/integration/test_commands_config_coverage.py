@@ -22,6 +22,9 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.deps.revision_pins import RevisionPinResolutionResult
+
+_EMPTY_REVISION_PIN_RESOLUTION = RevisionPinResolutionResult()
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -577,7 +580,7 @@ class TestUpdateCommand:
             with (
                 patch(
                     "apm_cli.commands.update.resolve_revision_pin_updates",
-                    return_value=[],
+                    return_value=_EMPTY_REVISION_PIN_RESOLUTION,
                 ),
                 patch(
                     "apm_cli.commands.install._install_apm_dependencies",
@@ -631,7 +634,7 @@ class TestUpdateCommand:
             with (
                 patch(
                     "apm_cli.commands.update.resolve_revision_pin_updates",
-                    return_value=[],
+                    return_value=_EMPTY_REVISION_PIN_RESOLUTION,
                 ),
                 patch("apm_cli.commands.install._install_apm_dependencies") as mock_install,
             ):
@@ -1679,7 +1682,7 @@ class TestUpdateCommandAdditional:
             )
             with patch(
                 "apm_cli.commands.update.resolve_revision_pin_updates",
-                return_value=[],
+                return_value=_EMPTY_REVISION_PIN_RESOLUTION,
             ):
                 result = runner.invoke(cli, ["update", "--yes"], catch_exceptions=False)
         assert result.exit_code in (0, 1)
@@ -2141,7 +2144,7 @@ class TestUpdateGlobalAndCheckPaths:
             patch("apm_cli.core.scope.get_apm_dir", return_value=fake_apm_dir),
             patch(
                 "apm_cli.commands.update.resolve_revision_pin_updates",
-                return_value=[],
+                return_value=_EMPTY_REVISION_PIN_RESOLUTION,
             ),
         ):
             result = runner.invoke(cli, ["update", "--global", "--yes"], catch_exceptions=False)
@@ -2163,7 +2166,7 @@ class TestUpdateGlobalAndCheckPaths:
             patch("apm_cli.core.scope.get_apm_dir", return_value=fake_apm_dir),
             patch(
                 "apm_cli.commands.update.resolve_revision_pin_updates",
-                return_value=[],
+                return_value=_EMPTY_REVISION_PIN_RESOLUTION,
             ),
         ):
             result = runner.invoke(

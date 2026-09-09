@@ -5,7 +5,8 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path  # noqa: F401
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock, call, patch
+from urllib.parse import urlparse
 
 import pytest
 from click.testing import CliRunner
@@ -550,6 +551,127 @@ class TestCheckRefHeadsPrefix:
 
 
 class TestCheckPerHostResolution:
+    @patch(
+        "apm_cli.commands.marketplace.check.resolve_auth_for_host",
+        return_value=SimpleNamespace(
+            token="ado-pat",
+            auth_scheme="bearer",
+            host_info=SimpleNamespace(kind="azure_devops"),
+        ),
+    )
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_encoded_ado_source_base_and_https_source_share_decoded_identity(
+        self, MockResolver, mock_token, runner, tmp_path, monkeypatch
+    ):
+        """Use the same decoded ADO identity and org hint for both source forms."""
+        monkeypatch.chdir(tmp_path)
+        encoded_source = "https://dev.azure.com/cont%6Fso/My%20Projects/_git/agent-skills"
+        (tmp_path / "marketplace.yml").write_text(
+            textwrap.dedent(f"""\
+                name: encoded-ado
+                description: Encoded Azure DevOps sources
+                version: 1.0.0
+                owner:
+                  name: Contoso
+                sourceBase: https://dev.azure.com/cont%6Fso/My%20Projects/_git
+                packages:
+                  - name: from-base
+                    source: agent-skills
+                    version: "^1.0.0"
+                  - name: direct
+                    source: {encoded_source}
+                    version: "^1.0.0"
+                """),
+            encoding="utf-8",
+        )
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = _REFS_GOOD
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check", "--verbose"])
+
+        assert result.exit_code == 0
+        displayed_paths = [
+            urlparse(token.strip("(),.;'\"")).path
+            for token in result.output.split()
+            if token.startswith("https://")
+        ]
+        assert displayed_paths == [
+            "/cont%6Fso/My%20Projects/_git/agent-skills",
+            "/cont%6Fso/My%20Projects/_git/agent-skills",
+        ]
+        mock_token.assert_called_once_with(
+            "dev.azure.com", offline=False, org="contoso", auth_resolver=ANY
+        )
+        mock_inst.list_remote_refs.assert_has_calls(
+            [
+                call("contoso/My Projects/agent-skills"),
+                call("contoso/My Projects/agent-skills"),
+            ]
+        )
+
+    @patch(
+        "apm_cli.commands.marketplace.check.resolve_auth_for_host",
+        return_value=SimpleNamespace(
+            token="glpat-xyz",
+            auth_scheme="basic",
+            host_info=SimpleNamespace(kind="gitlab"),
+        ),
+    )
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_encoded_gitlab_source_base_and_https_source_keep_transport_path(
+        self, MockResolver, mock_token, runner, tmp_path, monkeypatch
+    ):
+        """Keep encoded non-ADO paths intact through check and git resolution."""
+        monkeypatch.chdir(tmp_path)
+        encoded_source = "https://gitlab.example.com/team/My%20Group/direct-tool"
+        (tmp_path / "marketplace.yml").write_text(
+            textwrap.dedent(f"""\
+                name: encoded-gitlab
+                description: Encoded GitLab sources
+                version: 1.0.0
+                owner:
+                  name: Team
+                sourceBase: https://gitlab.example.com/team/My%20Group
+                packages:
+                  - name: from-base
+                    source: agent-skills
+                    version: "^1.0.0"
+                  - name: direct
+                    source: {encoded_source}
+                    version: "^1.0.0"
+                """),
+            encoding="utf-8",
+        )
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = _REFS_GOOD
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check", "--verbose"])
+
+        assert result.exit_code == 0
+        displayed_paths = [
+            urlparse(token.strip("(),.;'\"")).path
+            for token in result.output.split()
+            if token.startswith("https://")
+        ]
+        assert displayed_paths == [
+            "/team/My%20Group/agent-skills",
+            "/team/My%20Group/direct-tool",
+        ]
+        mock_token.assert_has_calls(
+            [
+                call("gitlab.example.com", offline=False, org="team", auth_resolver=ANY),
+                call("gitlab.example.com", offline=False, org=None, auth_resolver=ANY),
+            ]
+        )
+        mock_inst.list_remote_refs.assert_has_calls(
+            [
+                call("team/My%20Group/agent-skills"),
+                call("team/My%20Group/direct-tool"),
+            ]
+        )
+
     @patch(
         "apm_cli.commands.marketplace.check.resolve_auth_for_host",
         return_value=SimpleNamespace(

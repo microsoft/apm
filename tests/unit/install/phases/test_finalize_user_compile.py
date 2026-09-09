@@ -31,6 +31,7 @@ def _make_target(name, compile_family, *, user_supported=True):
     that does not support user scope.
     """
     profile = SimpleNamespace(name=name, compile_family=compile_family)
+    profile.include_scoped_in_user_root_context = False
     profile.for_scope = MagicMock(return_value=profile if user_supported else None)
     return profile
 
@@ -90,6 +91,53 @@ class TestHintGlobalRootContext:
         assert "Claude Code" in message
         assert "root context files" in message
         assert ctx.logger.info.call_args.kwargs.get("symbol") == "info"
+
+    def test_hint_fires_for_opencode_scoped_instruction(self):
+        """OpenCode's profile policy makes scoped instructions compile-eligible."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_global_root_context
+
+        target = _make_target("OpenCode", "agents")
+        target.include_scoped_in_user_root_context = True
+        ctx = _make_install_context(scope=InstallScope.USER, targets=[target])
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=Path.home() / ".apm"),
+            patch(
+                "apm_cli.compilation.user_root_context.discover_global_instructions",
+                return_value=[SimpleNamespace(apply_to="**/*.py")],
+            ) as discover,
+        ):
+            _hint_global_root_context(ctx)
+
+        discover.assert_called_once_with(Path.home() / ".apm", include_scoped=True)
+        assert "apm compile -g" in ctx.logger.info.call_args.args[0]
+        assert "OpenCode" in ctx.logger.info.call_args.args[0]
+
+    def test_hint_excludes_global_only_targets_for_scoped_only_instructions(self):
+        """Scoped-only OpenCode instructions do not promise updates for Claude."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_global_root_context
+
+        opencode = _make_target("OpenCode", "agents")
+        opencode.include_scoped_in_user_root_context = True
+        ctx = _make_install_context(
+            scope=InstallScope.USER,
+            targets=[opencode, _make_target("Claude Code", "claude")],
+        )
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=Path.home() / ".apm"),
+            patch(
+                "apm_cli.compilation.user_root_context.discover_global_instructions",
+                return_value=[SimpleNamespace(apply_to="**/*.py")],
+            ),
+        ):
+            _hint_global_root_context(ctx)
+
+        message = ctx.logger.info.call_args.args[0]
+        assert "OpenCode" in message
+        assert "Claude Code" not in message
 
     def test_hint_lists_multiple_root_context_targets(self):
         """All distinct root-context target names are listed once each."""

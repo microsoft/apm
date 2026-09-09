@@ -1,17 +1,17 @@
 ---
 name: apm-triage-panel
 description: >-
-  Use this skill to triage a single newly opened, reopened, or
-  `status/needs-triage`-labelled issue in microsoft/apm. Emit one
-  synthesized comment with a triage decision, label set, milestone,
-  and suggested next action.
+  Use this skill to triage one microsoft/apm issue selected by the
+  daily sweep, the `status/needs-triage` fast path, or manual dispatch.
+  Emit one synthesized comment with a decision, label set, exact
+  milestone, and suggested next action.
 ---
 
 # APM Triage Panel -- Single-Issue Triage Orchestration
 
-The panel is fixed at **3 mandatory specialist lenses + up to 3
-conditional lenses + 1 arbiter lens = up to 6 active persona sections
-in one triage comment** (3 mandatory + 3 conditional). You play each
+The panel is fixed at **2 mandatory specialist lenses + up to 3
+conditional lenses + 1 always-active arbiter = 6 persona sections in
+one triage comment**. You play each
 lens in turn from inside a single agent loop (progressive-disclosure
 skill model -- no sub-agent dispatch). Routing chooses *which* lenses
 execute; it never changes which headings appear in the final comment.
@@ -72,7 +72,7 @@ by `apm-review-panel` once a PR exists.
 Three personas are conditional: OSS Growth Hacker, Python Architect,
 and Doc Writer. Each follows the same shape: an explicit YES/NO
 activation rule plus an inactive-reason fallback. Maximum lenses in a
-single triage = 6 (3 mandatory + 3 conditional).
+single triage = 6 (2 mandatory + 3 conditional + 1 arbiter).
 
 ### OSS Growth Hacker
 
@@ -172,7 +172,7 @@ Routing rule:
 The CEO arbiter picks exactly ONE outcome from this rubric:
 
 - `accept` -- direction is clear and aligned with the README spine and
-  the roadmap. Assigns full label set + milestone if a current
+  active release priorities. Assigns full label set + milestone if a current
   candidate exists.
 - `needs-design` -- direction is sound but the design must be settled
   before code lands. Apply `status/needs-design` and name in the
@@ -224,8 +224,9 @@ Construction rules:
   pure infra (only `area/cli`, `area/ci-cd`, `area/testing`, or
   `area/docs-site` apply, with no product surface implication). State
   this explicitly in the per-lens notes when omitting the theme.
-- Multi-theme labels are allowed; the **primary theme** is listed
-  first and drives the milestone.
+- Multi-theme labels are not allowed. When an issue crosses promises,
+  the CEO chooses the primary theme and records secondary implications
+  in the per-lens notes.
 - Exactly one `type/*` label.
 - Exactly one `status/*` label. The default `status/needs-triage` is
   always replaced by the triage outcome (`status/accepted`,
@@ -236,21 +237,21 @@ Construction rules:
 
 ## Milestone assignment rules
 
-- **Current patch milestone** (e.g., `0.9.x`) for bug fixes and small
-  DX work that fits a patch release.
-- **Next minor** (e.g., `0.10.0`) for `type/feature` accepted with
-  `priority/high`.
+- **Current release milestone** for accepted work explicitly committed
+  to the active release cohort.
 - **No milestone (`null`)** for `defer-later` and `needs-design`.
 
-The orchestrator looks up open milestones with:
+The orchestrator MUST provide the exact titles of open milestones from
+an authenticated GitHub API read before panel reasoning begins. Choose
+a milestone only by exact string match against that list. Never compute,
+infer, or extrapolate a version number, and never invent an
+`x`-suffixed title. Closed milestones are ineligible.
 
-```
-gh api repos/microsoft/apm/milestones --jq '.[]|select(.state=="open")|.title'
-```
-
-The lowest-numbered open patch milestone is "current patch"; the
-lowest-numbered open minor is "next minor". If neither exists, set
-milestone to `null` and note it.
+If the orchestrator did not provide the list, the read failed, or no
+open milestone matches the current release cohort, set milestone to
+`null` and state: `Milestone: none -- no matching open release
+milestone.` Do not emit a milestone string that was not read from the
+API.
 
 ## Quality gates
 
@@ -291,9 +292,9 @@ in order, in a single agent loop. Do not skip ahead and do not emit
 any output before the final step.
 
 1. Read the issue context (title, body, labels, author,
-   `author_association`, prior comments). The orchestrating workflow
-   already fetches this with `gh issue view --json` -- do not
-   re-fetch from inside the skill.
+   `author_association`, prior comments) and the orchestrator-provided
+   list of exact open milestone titles. Do not re-fetch either from
+   inside the skill.
 2. Resolve the **three conditional cases** -- OSS Growth Hacker,
    Python Architect, Doc Writer -- using the rules in "Conditional
    panelists" above. For each, record either an activation decision
@@ -318,13 +319,19 @@ any output before the final step.
    `area/*` set, `type/*`, `status/*`, optional `priority/*`,
    milestone, and reply tone. Still in your own context. CEO
    arbitration may run only after the completeness gate has passed.
-6. If the rubric outcome is `duplicate-of #N`, verify the candidate
-   issue exists and is open with `gh issue view N --json state,title`
-   before committing the link.
+6. If the rubric outcome is `duplicate-of #N`, use the caller's
+   authenticated GitHub issue-read tool to verify the candidate exists
+   and is open before committing the link. If it cannot be verified,
+   use `accept` or `needs-design` as appropriate and mention the
+   suspected duplicate only in prose.
 7. Now (and only now) load `assets/triage-template.md` and fill it
    in with the collected findings, decision, label set, milestone,
    and proposed comment body.
-8. Emit the filled template as exactly ONE comment via the workflow's
+8. Verify the rendered comment contains every top-level heading from
+   the template, all six persona `<details>` sections, and the closing
+   `triage-decision` JSON block. If any element is missing, re-render
+   from the template instead of posting a hand-composed substitute.
+9. Emit the filled template as exactly ONE comment via the workflow's
    `safe-outputs.add-comment` channel. For direct (non-workflow)
    invocation, return the comment text and the structured
    `triage-decision` JSON tail so an orchestrator can apply labels
@@ -382,7 +389,7 @@ per-persona noise.
   `needs-design` and `defer-later` are explicitly milestone-free.
 - **Silent decline.** Do not auto-close or `decline-with-reason`
   without a courteous reason linked to the README spine, the
-  manifesto, or the public roadmap. Every decline names where the
+  manifesto, or the active milestone. Every decline names where the
   user can go instead.
 - **Vague needs-design.** Never apply `status/needs-design` without
   naming, in the suggested comment, exactly what must be designed
@@ -410,12 +417,9 @@ per-persona noise.
   `oss-growth-hacker`, `python-architect`, and `doc-writer`. Do not
   create a `triage-*` persona; the README spine plus the label
   taxonomy plus the existing CEO arbiter are sufficient grounding.
-- **Bundle layout on the runner.** When this skill runs inside an
-  agentic workflow, the APM bundle is unpacked under
-  `.github/skills/apm-triage-panel/` first, with `.apm/skills/...`
-  as a fallback. The asset path is the same relative to the skill
-  root (`assets/triage-template.md`) in both layouts -- prefer the
-  `.github/...` path when present.
+- **Bundle layout on the runner.** Resolve
+  `assets/triage-template.md` relative to the loaded `SKILL.md`.
+  Never hard-code an installation directory.
 - **No multi-persona-in-one-pass.** Each persona has its own
   `.agent.md` for a reason -- read it when you take that lens, write
   the findings, then drop the lens before moving on.

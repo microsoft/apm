@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from collections import deque
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
+    has_symlink_component,
     validate_path_segments,
 )
 
@@ -59,6 +60,72 @@ def extract_apm_source_sidecar(hooks: dict) -> dict[str, list[dict[str, Any]]]:
             if isinstance(entry, dict):
                 entry.pop("_apm_source", None)
     return sidecar
+
+
+def project_apm_owned_hook_entries(
+    config_bytes: bytes,
+    sidecar_bytes: bytes,
+    event_container_key: str,
+) -> bytes:
+    """Return a canonical structural projection of the APM-owned hook entries.
+
+    Merged hook configs are shared with users, so comparing their whole JSON
+    documents makes unrelated user hooks look like deployment drift. The
+    sidecar is APM-owned and maps matching native entries back to their
+    ``_apm_source`` markers; retain only that marked slice for comparison.
+    """
+
+    def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    config = json.loads(config_bytes, object_pairs_hook=_reject_duplicate_keys)
+    sidecar = json.loads(sidecar_bytes, object_pairs_hook=_reject_duplicate_keys)
+    if not isinstance(config, dict) or not isinstance(sidecar, dict):
+        raise ValueError("merged hook config and ownership sidecar must be JSON objects")
+
+    raw_container = config.get(event_container_key)
+    if not isinstance(raw_container, dict):
+        raise ValueError(f"merged hook config requires a {event_container_key} object")
+    if any(not isinstance(entries, list) for entries in raw_container.values()):
+        raise ValueError("merged hook events must be lists")
+    container = {event_name: list(entries) for event_name, entries in raw_container.items()}
+    for event_name, sidecar_entries in sidecar.items():
+        if not isinstance(sidecar_entries, list):
+            if sidecar_entries:
+                raise ValueError("ownership sidecar events must be lists")
+            continue
+        owned_counts = Counter(
+            json.dumps(
+                {key: value for key, value in entry.items() if key != "_apm_source"},
+                sort_keys=True,
+            )
+            for entry in sidecar_entries
+            if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
+        )
+        config_counts = Counter(
+            json.dumps(entry, sort_keys=True)
+            for entry in container.get(event_name, [])
+            if isinstance(entry, dict)
+        )
+        if any(config_counts[key] > count for key, count in owned_counts.items()):
+            raise ValueError("ambiguous duplicate APM-owned hook entry")
+    reinject_apm_source_from_sidecar(container, sidecar)
+
+    owned: dict[str, list[dict[str, Any]]] = {}
+    for event_name, entries in container.items():
+        owned_entries = [
+            entry
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
+        ]
+        if owned_entries:
+            owned[event_name] = owned_entries
+    return json.dumps(owned, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def dependency_hook_source_marker(dependency_ref) -> str:
@@ -116,20 +183,6 @@ def safe_dependency_path(apm_modules: Path, relative_path: str) -> Path | None:
         return package_path
     except (OSError, PathTraversalError, RuntimeError, TypeError):
         return None
-
-
-def has_symlink_component(apm_modules: Path, package_path: Path) -> bool:
-    """Return True when any component below apm_modules is a symlink."""
-    try:
-        relative = package_path.relative_to(apm_modules)
-        current = apm_modules
-        for part in relative.parts:
-            current /= part
-            if current.is_symlink():
-                return True
-        return False
-    except (OSError, ValueError):
-        return True
 
 
 def is_dependency_package_dir(path: Path) -> bool:

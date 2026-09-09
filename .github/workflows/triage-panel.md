@@ -1,6 +1,9 @@
 ---
 name: Triage Panel
 description: Auto-invoke the apm-triage-panel skill on a daily sweep of untriaged issues plus an opt-in fast path for explicit re-triage. Posts one synthesized verdict per issue and applies the panel-decided labels and milestone, with explicit "agentic proposal pending human ratification" framing.
+engine:
+  id: copilot
+  version: 1.0.80
 
 # Trigger model -- two paths plus manual dispatch:
 #
@@ -37,12 +40,10 @@ description: Auto-invoke the apm-triage-panel skill on a daily sweep of untriage
 #     triage on a specific issue apply `status/needs-triage` (fast
 #     path) -- one click, instant.
 #
-# Front-gates for the labeled fast path (enforced via the top-level
-# `if:` field below, not via `on.steps:` -- see comment block on `if:`):
-#   - Triggering label must be `status/needs-triage`. Any other label
-#     change is dropped at zero cost (no runner, no agent).
-#   - Issue author must not be a Bot.
-#   - Issue must be open and unlocked.
+# Front-gates for the labeled fast path:
+#   - `on.labels` drops unrelated label changes before runner allocation.
+#   - The top-level `if:` requires a non-Bot author and an open,
+#     unlocked issue.
 on:
   issues:
     types: [labeled]
@@ -57,9 +58,11 @@ on:
         description: "Optional: specific issue number to triage (overrides sweep). Leave blank to run the daily sweep on demand."
         required: false
         type: string
+  labels: [status/needs-triage]
   roles: [admin, maintainer, write]
 
-# Label-name + issue-state gate for the `issues.labeled` fast path.
+# Author + issue-state gate for the `issues.labeled` fast path.
+# `on.labels` rejects unrelated label events before a runner starts.
 # gh-aw propagates this top-level `if:` to BOTH `pre_activation` and
 # `activation`, so unmatched events render as a clean gray Skipped
 # status (no failed CI check, no runner cold-start). schedule and
@@ -68,14 +71,10 @@ on:
 #
 # Previously this gate lived in an `on.steps:` step that called `exit 1`
 # on every non-matching label change, which marked each unrelated
-# `issues.labeled` event as a Failed run on the CI dashboard. Replace
-# with `on.labels: [status/needs-triage]` once gh-aw releases a version
-# that supports it on `issues` (see github/gh-aw ADR-28737, currently
-# unreleased post-v0.71.1).
+# `issues.labeled` event as a Failed run on the CI dashboard.
 if: >-
   ${{ github.event_name != 'issues'
-      || (github.event.label.name == 'status/needs-triage'
-          && github.event.issue.user.type != 'Bot'
+      || (github.event.issue.user.type != 'Bot'
           && github.event.issue.locked != true
           && github.event.issue.state == 'open') }}
 
@@ -108,7 +107,7 @@ tools:
     # Integrity exemption for external contributor issues.
     #
     # Write-class safe-outputs (add-comment, add-labels, remove-labels,
-    # assign-milestone, dispatch-workflow) cause gh-aw's integrity
+    # assign-milestone) cause gh-aw's integrity
     # filter to elevate the minimum integrity for MCP reads to
     # `approved` by default on public repos. Issues filed by external
     # contributors (FIRST_TIME_CONTRIBUTOR / NONE author association)
@@ -153,14 +152,6 @@ network:
 #     humans apply, only humans remove.
 #   - assign-milestone: lets the panel set the milestone when the
 #     issue has none. The prompt forbids overwriting an existing one.
-#   - dispatch-workflow `project-sync`: triggers the PGS project board
-#     sync per themed issue. Required because gh-aw safe-output label
-#     writes run under GITHUB_TOKEN, and GitHub does NOT fan out
-#     downstream workflow events from GITHUB_TOKEN-driven label changes.
-#     Without this dispatch, themed issues silently miss the project
-#     board (Theme/Area/Kind/Priority columns stay blank). max:10 mirrors
-#     the SCHEDULED_SWEEP issue cap; gh-aw enforces a 5s delay between
-#     dispatches so the worst-case latency add is ~50s per sweep.
 safe-outputs:
   add-comment:
     max: 12
@@ -219,16 +210,6 @@ safe-outputs:
     target: "*"
   assign-milestone:
     max: 12
-  # Same-repo only; compile-time validated (project-sync.yml must exist
-  # and declare workflow_dispatch). The agent passes `content_id` (the
-  # issue's GraphQL node ID, e.g. I_kwDO...) as the dispatch input.
-  # max:10 matches SCHEDULED_SWEEP issue ceiling (one dispatch per
-  # themed issue, worst case). gh-aw enforces a 5s delay between
-  # consecutive dispatches.
-  dispatch-workflow:
-    workflows:
-      - project-sync
-    max: 10
 
 # (Integrity exemption is configured under tools.github.min-integrity above.)
 
@@ -261,6 +242,21 @@ decisions). They differ only in Step 1 (which issues to triage) and
 post-run housekeeping.
 
 ## Universal preconditions
+
+Before reading any issue body, fetch the repository's open milestones
+once from the GitHub REST API:
+
+```
+curl --fail --silent --show-error \
+  --header "Accept: application/vnd.github+json" \
+  --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+  "https://api.github.com/repos/microsoft/apm/milestones?state=open&per_page=100"
+```
+
+Record only each returned milestone's exact `title` in
+`OPEN_MILESTONE_TITLES`. If the request fails, use an empty list and do
+not assign any milestone in this run. Never infer a title from the
+package version, issue text, roadmap, or previous triage comments.
 
 Regardless of mode, before invoking the panel on any single issue you
 MUST verify and skip with no comment if:
@@ -421,10 +417,10 @@ labels; treat as first-pass triage otherwise.
 
 ## Step 2: Run the panel via the apm-triage-panel skill
 
-Load the **apm-triage-panel** skill from
-`.apm/skills/apm-triage-panel/SKILL.md` (made available via the
-`shared/apm.md` import) and follow its execution checklist and output
-contract exactly. The skill owns:
+Load the **apm-triage-panel** skill made available by the
+`shared/apm.md` import. Resolve its assets relative to the loaded
+`SKILL.md`; do not hard-code an installation path. Follow its execution
+checklist and output contract exactly. The skill owns:
 
 - The mandatory persona roster (DevX UX Expert, Supply Chain Security
   Expert, APM CEO arbiter)
@@ -492,8 +488,15 @@ verdict template followed by this footer (verbatim, ASCII only):
 >   by removing `status/triaged` to enroll the issue in the next
 >   daily sweep.
 >
-> _Posted by the [Triage Panel workflow](https://github.com/${{ github.repository }}/actions/workflows/triage-panel.lock.yml). See [.apm/skills/apm-triage-panel](https://github.com/microsoft/apm/tree/main/.apm/skills/apm-triage-panel) for the panel skill._
+> _Posted by the [Triage Panel workflow](https://github.com/${{ github.repository }}/actions/workflows/triage-panel.lock.yml). See [packages/apm-triage-panel](https://github.com/microsoft/apm/tree/main/packages/apm-triage-panel) for the panel skill._
 ```
+
+Before posting, verify the comment contains, in order:
+`## Triage decision`, `## Proposed labels`, `## Milestone`,
+`## Suggested next action`, `## Suggested issue comment`,
+`## Per-lens notes (collapsed)`, all six persona `<details>` sections,
+and the closing `triage-decision` JSON block. If any element is missing,
+re-render from the template. Do not post a hand-composed substitute.
 
 Then apply the panel's decided labels + milestone using the dedicated
 safe-output tools. Required label-set hygiene per issue:
@@ -512,27 +515,12 @@ safe-output tools. Required label-set hygiene per issue:
 - **`assign-milestone`**: Apply the panel's recommended milestone
   IF AND ONLY IF the issue has no milestone today. Never overwrite an
   existing milestone -- that is a maintainer call. Use
-  `milestone_title` (e.g. "0.9.4"), not `milestone_number`. **If your
-  verdict comment names a milestone (e.g. "Milestone: 0.9.4"), you
-  MUST emit a corresponding `assign_milestone` call -- the verdict
-  text and the applied state must agree.** Only skip emission if you
-  explicitly omitted milestone from the verdict.
-- **`dispatch_workflow` (project-sync)**: For every issue where you
-  added at least one `theme/*` label in this run, you MUST also call
-  `dispatch_workflow` with `workflow_name: "project-sync"` and inputs
-  `{"content_id": "<issue node id>"}` -- where `<issue node id>` is
-  the `id` field from the MCP `search_issues` or `get_issue` response
-  (it looks like `I_kwDO...`, NOT the integer issue number). This triggers the PGS project board sync for that issue.
-  It is required because gh-aw applies `add-labels` under
-  `GITHUB_TOKEN`, and GitHub does NOT fire downstream workflow events
-  from `GITHUB_TOKEN`-driven label changes -- so without this dispatch
-  the issue gets the right labels but never lands on the project
-  board. If you did NOT add any `theme/*` label (for example a
-  re-triage that only touches `status/*`), do NOT dispatch -- the
-  project-sync workflow only acts on themed items, so the dispatch
-  would be a no-op. Cap is 10 dispatches per run (matches sweep
-  ceiling); gh-aw enforces a 5s delay between consecutive dispatches.
-
+  `milestone_title`, not `milestone_number`, and only use an exact
+  value from `OPEN_MILESTONE_TITLES`. Closed, computed, inferred, and
+  `x`-suffixed milestones are forbidden. **If your verdict comment
+  names a milestone, you MUST emit a corresponding
+  `assign_milestone` call -- the verdict text and the applied state
+  must agree.** Skip emission when the verdict milestone is `null`.
 If the panel decides on a label that does not exist in APM's
 taxonomy (the `add-labels` allow-list, which is enumerated literally
 in the workflow frontmatter -- `allowed` does NOT support glob

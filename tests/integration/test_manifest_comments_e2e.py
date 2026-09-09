@@ -33,7 +33,7 @@ def test_install_preserves_manifest_comments_and_formatting(tmp_path, monkeypatc
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("APM_PROGRESS", "never")
     manifest = tmp_path / "apm.yml"
-    manifest.write_text(
+    manifest.write_bytes(
         """\
 # project intent: keep this manifest annotated
 name: comment-roundtrip
@@ -47,8 +47,7 @@ dependencies:
 targets:
   # target comment remains attached
   - copilot
-""",
-        encoding="utf-8",
+""".replace("\n", "\r\n").encode()
     )
 
     install_result = SimpleNamespace(installed_count=1, diagnostics=None)
@@ -66,6 +65,7 @@ targets:
         )
 
     assert result.exit_code == 0, result.output
+    assert b"\r" not in manifest.read_bytes()
     rendered = manifest.read_text(encoding="utf-8")
     parsed = yaml.safe_load(rendered)
 

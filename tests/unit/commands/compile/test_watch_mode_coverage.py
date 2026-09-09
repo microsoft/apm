@@ -48,6 +48,7 @@ class TestWatchModeFullLoop:
             logger_mock = _make_logger()
             mock_result = SimpleNamespace(success=True, output_path="AGENTS.md", errors=[])
             mock_observer = _make_observer()
+            operation = MagicMock()
 
             # Raise KeyboardInterrupt from time.sleep (inside the while True loop)
             with (
@@ -60,6 +61,10 @@ class TestWatchModeFullLoop:
                     return_value=MagicMock(),
                 ),
                 patch("apm_cli.commands.compile.watcher.AgentsCompiler") as mock_compiler_cls,
+                patch(
+                    "apm_cli.commands.compile.watcher.lifecycle_operation",
+                    return_value=operation,
+                ) as mock_lifecycle,
                 patch("apm_cli.commands.compile.watcher.time") as mock_time,
                 patch("watchdog.observers.Observer", return_value=mock_observer),
             ):
@@ -78,6 +83,9 @@ class TestWatchModeFullLoop:
             # Verify clean stop was called
             mock_observer.stop.assert_called_once()
             mock_observer.join.assert_called_once()
+            mock_lifecycle.assert_called_once_with()
+            operation.__enter__.assert_called_once_with()
+            operation.__exit__.assert_called_once()
         finally:
             os.chdir(old_cwd)
 

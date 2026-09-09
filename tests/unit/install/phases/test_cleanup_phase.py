@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from apm_cli.install.phases import cleanup
+from apm_cli.install.sources import Materialization
+from apm_cli.install.template import run_integration_template
 from apm_cli.integration.cleanup import CleanupResult
 
 
@@ -325,6 +328,55 @@ class TestStaleCleanupNoPackageDeployedFiles:
         ctx = _make_ctx(existing_lockfile=lf, package_deployed_files={})
         cleanup.run(ctx)
         ctx.logger.stale_cleanup.assert_not_called()
+
+    def test_skipped_integration_does_not_mark_prior_skills_stale(self):
+        prior_skills = [f".agents/skills/skill-{index:02d}/SKILL.md" for index in range(24)]
+        previous = _make_orphan_dep(prior_skills)
+        ctx = _make_ctx(
+            existing_lockfile=_make_lockfile({"pkg": previous}),
+            intended_dep_keys={"pkg"},
+            package_deployed_files={},
+        )
+        source = SimpleNamespace(
+            ctx=ctx,
+            dep_ref=SimpleNamespace(is_local=False, local_path=None),
+            INTEGRATE_ERROR_PREFIX="Failed to integrate primitives",
+        )
+        ctx.skill_subset_from_cli = False
+        ctx.skill_subset = None
+
+        run_integration_template(
+            source,
+            materialization=Materialization(
+                package_info=None,
+                install_path=Path("/unused"),
+                dep_key="pkg",
+                deltas={"installed": 0},
+            ),
+        )
+
+        with patch(
+            "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+            return_value=CleanupResult(),
+        ) as remove_stale:
+            cleanup.run(ctx)
+
+        assert ctx.package_deployed_files == {}
+        remove_stale.assert_not_called()
+
+    def test_completed_integration_with_same_prior_skills_has_no_stale_cleanup(self):
+        deployed_skills = [f".agents/skills/skill-{index:02d}/SKILL.md" for index in range(24)]
+        previous = _make_orphan_dep(deployed_skills)
+        ctx = _make_ctx(
+            existing_lockfile=_make_lockfile({"pkg": previous}),
+            intended_dep_keys={"pkg"},
+            package_deployed_files={"pkg": list(deployed_skills)},
+        )
+
+        with patch("apm_cli.install.phases.cleanup.remove_stale_deployed_files") as remove_stale:
+            cleanup.run(ctx)
+
+        remove_stale.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

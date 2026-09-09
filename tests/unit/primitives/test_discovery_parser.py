@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from apm_cli.compilation.inventory import CompileInventory
 from apm_cli.primitives.discovery import (
     _discover_local_skill,
     _discover_skill_in_directory,
@@ -308,6 +309,45 @@ class TestScanDirectoryWithSource(unittest.TestCase):
         scan_directory_with_source(dep_dir, collection, source="dependency:owner/repo")
         self.assertEqual(len(collection.instructions), 1)
         self.assertEqual(collection.instructions[0].source, "dependency:owner/repo")
+
+    def test_inventory_scan_skips_symlinked_dependency_primitive(self):
+        """Inventory-backed dependency discovery does not dereference file links."""
+        dep_dir = Path(self.tmp) / "owner" / "repo"
+        target = Path(self.tmp) / "outside.instructions.md"
+        _write(target, INSTRUCTION_CONTENT)
+        link = dep_dir / ".apm" / "instructions" / "linked.instructions.md"
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(target)
+        except OSError:
+            self.skipTest("file symlinks are unavailable on this platform")
+
+        collection = PrimitiveCollection()
+        scan_directory_with_source(
+            dep_dir,
+            collection,
+            source="dependency:owner/repo",
+            inventory=CompileInventory.collect(Path(self.tmp)),
+        )
+
+        self.assertEqual(len(collection.instructions), 0)
+
+    def test_dependency_skill_symlink_is_not_discovered(self):
+        """Dependency skills do not load content from outside their package."""
+        dep_dir = Path(self.tmp) / "owner" / "repo"
+        target = Path(self.tmp) / "outside-skill.md"
+        _write(target, SKILL_CONTENT)
+        link = dep_dir / "SKILL.md"
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(target)
+        except OSError:
+            self.skipTest("file symlinks are unavailable on this platform")
+
+        collection = PrimitiveCollection()
+        scan_directory_with_source(dep_dir, collection, source="dependency:owner/repo")
+
+        self.assertEqual(len(collection.skills), 0)
 
     def test_parse_error_in_dep_primitive_warns_and_continues(self):
         dep_dir = Path(self.tmp) / "owner" / "repo"

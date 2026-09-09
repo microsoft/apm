@@ -49,8 +49,9 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
         Args:
             registry_url (str, optional): URL of the MCP registry.
-                If not provided, uses the MCP_REGISTRY_URL environment variable
-                or falls back to the default demo registry.
+                If not provided, resolves the MCP_REGISTRY_URL env var,
+                then ``apm config set mcp-registry-url``, then the public
+                default (see ``registry.client.resolve_mcp_registry_url``).
             project_root: Project root used to resolve the repository-local
                 `.vscode/mcp.json` path.
             user_scope: Whether to resolve user-scope config paths instead of
@@ -277,6 +278,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 "command": raw["command"],
                 "args": raw["args"],
             }
+            if raw.get("cwd") is not None:
+                server_config["cwd"] = raw["cwd"]
             if raw.get("env"):
                 # Translate bare ${VAR} -> ${env:VAR} so VS Code's runtime env
                 # interpolation resolves them at server-start. ${input:...}

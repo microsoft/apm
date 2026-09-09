@@ -9,6 +9,7 @@ This module is intentionally dependency-free (no APM internals) so it can
 be tested and used independently.
 """
 
+import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,13 @@ class ScanFinding:
 # range_end is inclusive.
 _SUSPICIOUS_RANGES: list[tuple[int, int, str, str, str]] = [
     # ── Critical: no legitimate use in prompt/instruction files ──
+    (
+        0xD800,
+        0xDFFF,
+        "critical",
+        "invalid-surrogate",
+        "Unpaired UTF-16 surrogate code unit",
+    ),
     # Unicode tag characters — invisible ASCII mapping
     (
         0xE0001,
@@ -145,6 +153,28 @@ def _zwj_in_emoji_context(text: str, idx: int) -> bool:
     return prev_ok and next_ok
 
 
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
+def _combine_surrogate_pairs(text: str) -> str:
+    """Combine valid UTF-16 surrogate pairs while preserving unpaired units."""
+    if _SURROGATE_RE.search(text) is None:
+        return text
+    combined: list[str] = []
+    index = 0
+    while index < len(text):
+        high = ord(text[index])
+        if 0xD800 <= high <= 0xDBFF and index + 1 < len(text):
+            low = ord(text[index + 1])
+            if 0xDC00 <= low <= 0xDFFF:
+                combined.append(chr(0x10000 + ((high - 0xD800) << 10) + low - 0xDC00))
+                index += 2
+                continue
+        combined.append(text[index])
+        index += 1
+    return "".join(combined)
+
+
 class ContentScanner:
     """Scans text content for hidden or suspicious Unicode characters."""
 
@@ -165,6 +195,7 @@ class ContentScanner:
         if content.isascii():
             return []
 
+        content = _combine_surrogate_pairs(content)
         findings: list[ScanFinding] = []
         lines = content.split("\n")
 

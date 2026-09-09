@@ -35,6 +35,8 @@ class InstallResult:
     committed: bool = False
     error: BaseException | None = field(default=None, repr=False)
     target_decision: EffectiveTargetDecision | None = None
+    exec_allow_map: dict[str, dict[str, bool]] | None = None
+    exec_allow_resolved: bool = False
 
 
 @dataclass

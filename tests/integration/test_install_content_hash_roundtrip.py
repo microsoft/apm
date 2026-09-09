@@ -84,6 +84,58 @@ class _ContentHashOnlyDownloader:
         )
 
 
+class _NestedSkillDownloader(_ContentHashOnlyDownloader):
+    """Materialize a selected nested skill plus a source-only fixture."""
+
+    def __init__(self, *, hostile_skill: bool) -> None:
+        super().__init__()
+        self.hostile_skill = hostile_skill
+
+    def download_package(
+        self, repo_ref: object, target_path: Path, *args: Any, **kwargs: Any
+    ) -> PackageInfo:
+        self.calls += 1
+        dep_ref = (
+            repo_ref
+            if isinstance(repo_ref, DependencyReference)
+            else DependencyReference.parse(str(repo_ref))
+        )
+        target_path = Path(target_path)
+        target_path.mkdir(parents=True, exist_ok=True)
+        (target_path / "apm.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "nested-skill-fixture",
+                    "version": "1.0.0",
+                    "description": "nested skill security fixture",
+                }
+            ),
+            encoding="utf-8",
+        )
+        skill = target_path / "skills" / "clean" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text(
+            "clean \u202e skill\n" if self.hostile_skill else "clean skill\n",
+            encoding="utf-8",
+        )
+        source_only = target_path / "src" / "fixture.txt"
+        source_only.parent.mkdir()
+        source_only.write_text("source-only \u202e fixture\n", encoding="utf-8")
+        package = APMPackage.from_apm_yml(target_path / "apm.yml")
+        return PackageInfo(
+            package=package,
+            install_path=target_path,
+            installed_at=datetime.now().isoformat(),
+            dependency_ref=dep_ref,
+            resolved_reference=ResolvedReference(
+                original_ref="default",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit=_VIRTUAL_COMMIT,
+                ref_name="default",
+            ),
+        )
+
+
 def _write_project(project: Path, *, target: str = "copilot") -> None:
     project.mkdir(parents=True, exist_ok=True)
     (project / ".github").mkdir()
@@ -153,6 +205,54 @@ def _locked_virtual_dep(project: Path) -> dict:
         if dep.get("repo_url") == "acme/fixture"
         and dep.get("virtual_path") == "instructions/fixture.instructions.md"
     )
+
+
+@pytest.mark.lifecycle_smoke
+def test_source_only_hidden_character_allows_skill_install_and_records_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source fixture cannot block or become part of a selected skill deploy."""
+    project = tmp_path / "source-only"
+    _write_project(project)
+    downloader = _NestedSkillDownloader(hostile_skill=False)
+
+    from apm_cli.deps import github_downloader as _ghd
+
+    monkeypatch.setattr(
+        _ghd.GitHubPackageDownloader, "download_package", downloader.download_package
+    )
+    result = _run_install(CliRunner(), project, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    deployed = project / ".agents" / "skills" / "clean" / "SKILL.md"
+    assert deployed.read_text(encoding="utf-8") == "clean skill\n"
+    assert not (project / ".agents" / "skills" / "clean" / "src" / "fixture.txt").exists()
+    locked = _locked_dep(project)
+    assert ".agents/skills/clean/SKILL.md" in locked["deployed_files"]
+
+
+@pytest.mark.lifecycle_smoke
+def test_hidden_character_in_selected_skill_blocks_without_deployment_or_lock_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployable hidden character fails closed before target or lock writes."""
+    project = tmp_path / "hostile-skill"
+    _write_project(project)
+    before_manifest = (project / "apm.yml").read_bytes()
+    downloader = _NestedSkillDownloader(hostile_skill=True)
+
+    from apm_cli.deps import github_downloader as _ghd
+
+    monkeypatch.setattr(
+        _ghd.GitHubPackageDownloader, "download_package", downloader.download_package
+    )
+    result = _run_install(CliRunner(), project, monkeypatch)
+
+    assert result.exit_code != 0
+    assert not (project / ".agents" / "skills" / "clean").exists()
+    assert not (project / "apm.lock.yaml").exists()
+    assert (project / "apm.yml").read_bytes() == before_manifest
+    assert "Fix the reported file(s) in the package source, then reinstall" in result.output
 
 
 @pytest.mark.lifecycle_smoke
@@ -322,3 +422,52 @@ def test_virtual_lock_replays_across_synthetic_manifest_newline_domains(
     assert audit_payload["passed"] is True
     checks = {check["name"]: check for check in audit_payload["checks"]}
     assert checks["content-integrity"]["passed"] is True
+
+
+@pytest.mark.windows_compat
+def test_marketplace_plugin_synthetic_manifest_hash_is_newline_invariant(
+    tmp_path: Path,
+) -> None:
+    """apm#2619: the synthesize + stamp chain must yield LF manifests.
+
+    Marketplace-plugin downloads (both ``download_package`` and
+    ``download_subdirectory_package``) run ``validate_apm_package`` --
+    which synthesizes ``apm.yml`` and serializes inline hooks to
+    ``.apm/hooks/hooks.json`` -- and then ``stamp_plugin_version`` --
+    which rewrites ``apm.yml`` with the short commit SHA. All of these
+    writes land inside the tree ``compute_package_hash`` hashes raw, so
+    platform-native line endings made the lockfile ``content_hash`` differ
+    between Windows (CRLF) and POSIX (LF) for byte-identical upstream
+    content.
+
+    The fixture is imported from the CRLF-invariance probe so the 3-OS CI
+    workflow and this test always exercise the same tree shape.
+    """
+    from apm_cli.deps.package_validator import stamp_plugin_version
+    from apm_cli.models.validation import PackageType, validate_apm_package
+    from scripts.crlf_invariance_probe import PROBE_STAMP_SHA, build_synthetic_plugin_fixture
+
+    pkg = tmp_path / "pkg"
+    build_synthetic_plugin_fixture(pkg)
+
+    result = validate_apm_package(pkg)
+    assert result.is_valid, result.errors
+    assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+    stamp_plugin_version(
+        result.package,
+        result.package_type,
+        PROBE_STAMP_SHA,
+        pkg,
+    )
+    assert result.package.version == PROBE_STAMP_SHA[:7]
+
+    manifest = (pkg / "apm.yml").read_bytes()
+    assert b"\r" not in manifest  # LF-deterministic on every OS
+    hooks_json = (pkg / ".apm" / "hooks" / "hooks.json").read_bytes()
+    assert b"\r" not in hooks_json  # inline hooks writer, second fix site
+
+    lf_hash = compute_package_hash(pkg)
+    # The manifest is hash-visible: CRLF-ifying it changes the package
+    # hash. This is exactly why the production writers must emit LF bytes.
+    (pkg / "apm.yml").write_bytes(manifest.replace(b"\n", b"\r\n"))
+    assert compute_package_hash(pkg) != lf_hash

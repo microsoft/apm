@@ -564,6 +564,25 @@ class TestUpdateLockfile:
         lf = LockFile.read(lock_path)
         assert set(lf.mcp_servers) == {"server-a", "server-b"}
 
+    def test_update_reuses_preloaded_lockfile(self, tmp_path, monkeypatch):
+        from apm_cli.utils import yaml_io
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        self._write_minimal_lockfile(lock_path)
+        real_load_yaml_str = yaml_io.load_yaml_str
+        load_calls = 0
+
+        def counting_load_yaml_str(text):
+            nonlocal load_calls
+            load_calls += 1
+            return real_load_yaml_str(text)
+
+        monkeypatch.setattr(yaml_io, "load_yaml_str", counting_load_yaml_str)
+
+        MCPIntegrator.update_lockfile({"server-a"}, lock_path=lock_path)
+
+        assert load_calls == 1
+
     def test_updates_mcp_configs_when_provided(self, tmp_path):
         lock_path = tmp_path / "apm.lock.yaml"
         self._write_minimal_lockfile(lock_path)
@@ -585,6 +604,8 @@ class TestUpdateLockfile:
         lock = LockFile.read(missing)
         assert lock is not None
         assert lock.mcp_servers == ["svc"]
+        assert lock.generated_at is None
+        assert "generated_at" not in missing.read_text(encoding="utf-8")
 
     def test_mcp_servers_sorted_in_lockfile(self, tmp_path):
         lock_path = tmp_path / "apm.lock.yaml"
@@ -818,7 +839,7 @@ class TestInstallProjectRootDetection:
 
         `.vscode/` exists on disk (as it would on one developer's machine
         but not another's). The declared Copilot target intentionally projects
-        to the VS Code project runtime; no additional runtime may be inferred.
+        to the Copilot CLI project runtime; no additional runtime may be inferred.
         """
         nested = tmp_path / "nested-project"
         (nested / ".vscode").mkdir(parents=True)
@@ -843,7 +864,7 @@ class TestInstallProjectRootDetection:
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert called_runtimes == {"vscode", "cursor", "opencode"}
+        assert called_runtimes == {"copilot", "cursor", "opencode"}
 
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
@@ -907,8 +928,8 @@ class TestInstallProjectRootDetection:
             )
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
-        assert called_runtimes == {"vscode"}
-        logger.progress.assert_any_call("Targeting declared target from apm.yml: vscode")
+        assert called_runtimes == {"copilot"}
+        logger.progress.assert_any_call("Targeting declared target from apm.yml: copilot")
 
     @pytest.mark.parametrize(
         "apm_config",
@@ -1326,7 +1347,7 @@ class TestGateProjectScopedRuntimes:
         scsec R2: the previous catch only handled ConflictingTargets and
         EmptyTargets; UnknownTargetError leaked uncaught past the gate
         on entry paths that bypass the upstream manifest validator
-        (mcp_integrator_install.py, _wire_bundle_mcp_servers).
+        (mcp_integrator_install.py, _wire_legacy_bundle_mcp_servers).
         """
         result = self._gate(
             ["copilot", "claude"],
@@ -1341,7 +1362,7 @@ class TestGateProjectScopedRuntimes:
         assert "apm.yml 'targets' field is invalid" in out
 
     def test_explicit_target_csv_string_normalized(self, tmp_path):
-        """Legacy `_wire_bundle_mcp_servers` CSV input must normalize first.
+        """Legacy `_wire_legacy_bundle_mcp_servers` CSV input must normalize first.
 
         The canonical-name validator inside resolve_targets would reject
         the whole CSV "claude,copilot" as one unknown token -- the gate

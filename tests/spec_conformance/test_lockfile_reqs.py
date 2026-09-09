@@ -104,6 +104,17 @@ def test_lockfile_dependency_carries_resolved_field():
     )
 
 
+@pytest.mark.req("req-lk-005")
+def test_new_lockfile_omits_generated_at_by_default():
+    from apm_cli.deps.lockfile import LockFile
+
+    assert "generated_at:" not in LockFile().to_yaml()
+    assert_spec_contains(
+        "MUST omit `generated_at` from newly created\nlockfiles",
+        "MUST\nNOT reintroduce it solely as metadata",
+    )
+
+
 @pytest.mark.req("req-lk-013")
 def test_lockfile_dependency_carries_integrity_field_when_remote():
     doc = load_yaml_fixture(*TRUST_LOCKFILE)
@@ -611,6 +622,53 @@ class TestFinalLockfileTargetContraction:
             "This reconciliation applies identically to",
             "per-entry `deployed_files` and top-level `local_deployed_files`",
         )
+
+
+@pytest.mark.req("req-lk-021")
+@pytest.mark.req("req-lk-020")
+def test_cli_target_without_manifest_targets_preserves_inactive_state(tmp_path: Path) -> None:
+    """An active CLI target does not authorize pruning undeclared inactive targets."""
+    import json
+
+    from apm_cli.install.manifest_reconcile import (
+        declared_target_profiles,
+        reconcile_dropped_merge_hook_targets,
+        union_preserving,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (tmp_path / "apm.yml").write_text("name: preserve-targets\nversion: 1.0.0\n", encoding="utf-8")
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": "owned"}]}
+    config = codex_dir / "hooks.json"
+    ownership = codex_dir / "apm-hooks.json"
+    config.write_text(json.dumps({"hooks": {"PreToolUse": [entry]}}), encoding="utf-8")
+    ownership.write_text(
+        json.dumps({"PreToolUse": [{**entry, "_apm_source": "req-lk-021-fixture"}]}),
+        encoding="utf-8",
+    )
+    prior_bytes = {path: path.read_bytes() for path in (config, ownership)}
+    active_targets = [KNOWN_TARGETS["claude"]]
+    declared = declared_target_profiles(tmp_path, active_targets=active_targets)
+    prior_path = ".codex/skills/demo/SKILL.md"
+    prior_hashes = {prior_path: "sha256:" + "a" * 64}
+
+    paths, hashes = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=[prior_path],
+        prior_hashes=prior_hashes,
+        targets=active_targets,
+        declared_targets=declared,
+    )
+    stats = reconcile_dropped_merge_hook_targets(tmp_path, active_targets, declared)
+
+    assert declared is None
+    assert paths == [prior_path]
+    assert hashes == prior_hashes
+    assert stats == {"files_removed": 0, "errors": 0}
+    assert {path: path.read_bytes() for path in prior_bytes} == prior_bytes
 
 
 @pytest.mark.req("req-lk-021")

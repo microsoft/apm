@@ -6,7 +6,7 @@ Think `package.json`, `requirements.txt`, or `Cargo.toml` — but for AI agent c
 
 GitHub Copilot | Claude Code | Grok Build | Cursor | OpenCode | Codex | Gemini | Windsurf | Kiro
 
-**[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)** · **[Roadmap](https://github.com/orgs/microsoft/projects/2304)**
+**[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)** · **[v0.29 Roadmap](https://github.com/microsoft/apm/milestone/17)**
 
 ---
 
@@ -98,7 +98,16 @@ apm-policy.yml governs what gets installed; your agent harness governs what runs
 
 ## Get Started
 
-#### Linux / macOS
+#### macOS with Homebrew
+
+```bash
+brew install apm
+```
+
+No custom tap is required. Homebrew manages installation and updates:
+use `brew upgrade apm`, not `apm self-update`.
+
+#### Linux / macOS without Homebrew
 
 ```bash
 curl -sSL https://aka.ms/apm-unix | sh
@@ -110,17 +119,17 @@ curl -sSL https://aka.ms/apm-unix | sh
 irm https://aka.ms/apm-windows | iex
 ```
 
-Native release binaries are published for macOS, Linux, and Windows x86_64. `apm self-update` reuses the matching platform installer.
+Native release binaries are published for macOS, Linux, and Windows x86_64.
+For standalone installations, `apm self-update` reuses the matching platform installer.
+You do not need Homebrew to use APM.
 
 <details>
-<summary>Other install methods</summary>
+<summary>Other install methods: pip and Scoop</summary>
 
 #### Linux / macOS
 
 ```bash
-# Homebrew
-brew install microsoft/apm/apm
-# pip
+# pip (Python 3.10+)
 pip install apm-cli
 ```
 
@@ -137,6 +146,9 @@ pip install apm-cli
 ```
 
 </details>
+
+Already using the Microsoft Homebrew tap? See the
+[migration guide](https://microsoft.github.io/apm/getting-started/installation/#migrate-from-the-microsoft-tap).
 
 Then start adding packages:
 
@@ -169,7 +181,8 @@ Use agentrc to author high-quality instructions, then package them with APM to s
 
 Created by [@danielmeppiel](https://github.com/danielmeppiel). Maintained by [@danielmeppiel](https://github.com/danielmeppiel) and [@sergio-sisternes-epam](https://github.com/sergio-sisternes-epam).
 
-- [Roadmap & Discussions](https://github.com/microsoft/apm/discussions/116)
+- [v0.29 Roadmap](https://github.com/microsoft/apm/milestone/17)
+- [Discussions](https://github.com/microsoft/apm/discussions)
 - [Contributing](CONTRIBUTING.md)
 - [AI Native Development guide](https://danielmeppiel.github.io/awesome-ai-native) — a practical learning path for AI-native development
 

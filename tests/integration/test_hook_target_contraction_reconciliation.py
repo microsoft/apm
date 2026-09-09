@@ -617,6 +617,8 @@ def test_declared_targets_absent_is_a_noop_preserve_all(
         json.dumps({"PreToolUse": [{"matcher": "Bash", "hooks": [], "_apm_source": _MARKER}]}),
         encoding="utf-8",
     )
+    original_config = (codex_dir / "hooks.json").read_bytes()
+    original_sidecar = (codex_dir / "apm-hooks.json").read_bytes()
 
     result = _run_install(
         project,
@@ -631,3 +633,5 @@ def test_declared_targets_absent_is_a_noop_preserve_all(
         "sidecar must survive untouched"
     )
     assert _MARKER in _sidecar_sources(codex_dir / "apm-hooks.json")
+    assert (codex_dir / "hooks.json").read_bytes() == original_config
+    assert (codex_dir / "apm-hooks.json").read_bytes() == original_sidecar

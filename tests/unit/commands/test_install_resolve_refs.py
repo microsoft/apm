@@ -183,6 +183,110 @@ class TestResolvePackageReferencesDuplicateDetection:
         assert changed is True
         assert current_deps == ["danielmeppiel/genesis#v0.4.0"]
 
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.DependencyReference")
+    def test_git_semver_range_skips_literal_ref_preflight(self, mock_dep_cls, mock_validate):
+        ref = _make_dep_ref(
+            "owner/repo/packages/skill#>=1.0.0",
+            "github.com/owner/repo/packages/skill",
+        )
+        ref.ref_kind = "semver"
+        ref.source = "git"
+        ref.artifactory_prefix = None
+        mock_dep_cls.parse.return_value = ref
+        mock_dep_cls.is_local_path.return_value = False
+        _disable_gitlab_direct_probe(mock_dep_cls)
+
+        valid, invalid, validated, _mkt, _entries, _changed = _resolve_package_references(
+            ["owner/repo/packages/skill#>=1.0.0"],
+            [],
+            set(),
+        )
+
+        mock_validate.assert_not_called()
+        assert invalid == []
+        assert valid == [("owner/repo/packages/skill#>=1.0.0", False)]
+        assert validated == ["owner/repo/packages/skill#>=1.0.0"]
+
+    @patch("apm_cli.install.registry_wiring.validate_registry_ref", return_value=(True, ""))
+    @patch(
+        "apm_cli.install.registry_wiring.should_skip_github_probe_for_dep",
+        return_value=True,
+    )
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.DependencyReference")
+    def test_registry_semver_range_keeps_registry_validation(
+        self, mock_dep_cls, mock_validate, mock_skip_probe, mock_validate_registry
+    ):
+        ref = _make_dep_ref("owner/repo#^1.0.0", "registry.example/owner/repo")
+        ref.ref_kind = "semver"
+        ref.source = "git"
+        ref.artifactory_prefix = None
+        mock_dep_cls.parse.return_value = ref
+        mock_dep_cls.is_local_path.return_value = False
+        _disable_gitlab_direct_probe(mock_dep_cls)
+
+        valid, invalid, validated, _mkt, _entries, _changed = _resolve_package_references(
+            ["owner/repo#^1.0.0"],
+            [],
+            set(),
+        )
+
+        mock_skip_probe.assert_called_once_with(ref, None)
+        mock_validate_registry.assert_called_once_with(ref)
+        mock_validate.assert_not_called()
+        assert invalid == []
+        assert valid == [("owner/repo#^1.0.0", False)]
+        assert validated == ["owner/repo#^1.0.0"]
+
+    @patch(
+        "apm_cli.install.registry_wiring.should_skip_github_probe_for_dep",
+        return_value=True,
+    )
+    @patch(
+        "apm_cli.install.registry_wiring.validate_registry_ref",
+        return_value=(False, "Invalid semver range"),
+    )
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.DependencyReference")
+    def test_default_registry_invalid_semver_range_fails_closed(
+        self, mock_dep_cls, mock_validate, mock_validate_registry, mock_skip_probe
+    ):
+        ref = _make_dep_ref("owner/repo#^1.0", "registry.example/owner/repo")
+        ref.source = "git"
+        ref.artifactory_prefix = None
+        mock_dep_cls.parse.return_value = ref
+        mock_dep_cls.is_local_path.return_value = False
+        _disable_gitlab_direct_probe(mock_dep_cls)
+
+        valid, invalid, validated, _mkt, _entries, _changed = _resolve_package_references(
+            ["owner/repo#^1.0"],
+            [],
+            set(),
+        )
+
+        mock_skip_probe.assert_called_once_with(ref, None)
+        mock_validate_registry.assert_called_once_with(ref)
+        mock_validate.assert_not_called()
+        assert valid == []
+        assert invalid == [("owner/repo#^1.0", "Invalid semver range")]
+        assert validated == []
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    @patch("apm_cli.commands.install.DependencyReference")
+    def test_literal_git_ref_keeps_exact_ref_preflight(self, mock_dep_cls, mock_validate):
+        ref = _make_dep_ref("owner/repo#v1.2.0", "github.com/owner/repo")
+        ref.ref_kind = "literal"
+        ref.source = "git"
+        ref.artifactory_prefix = None
+        mock_dep_cls.parse.return_value = ref
+        mock_dep_cls.is_local_path.return_value = False
+        _disable_gitlab_direct_probe(mock_dep_cls)
+
+        _resolve_package_references(["owner/repo#v1.2.0"], [], set())
+
+        mock_validate.assert_called_once()
+
 
 class TestResolvePackageReferencesInvalidInput:
     """Invalid packages must not mutate the identity set."""

@@ -4,13 +4,16 @@ Tests the full install/uninstall/deps workflow using local path dependencies.
 These tests create real file structures and invoke CLI commands via subprocess.
 """
 
-import os  # noqa: F401
+import os
 import subprocess
 import sys  # noqa: F401
 import tempfile  # noqa: F401
 
 import pytest
 import yaml
+
+from apm_cli.primitives.parser import parse_primitive_file
+from apm_cli.utils.yaml_io import loads_frontmatter
 
 pytestmark = pytest.mark.requires_apm_binary
 
@@ -165,6 +168,31 @@ class TestLocalInstall:
     def test_install_local_deploys_instructions(self, temp_workspace, apm_binary_path):
         """Verify that instructions from a local package are deployed to .github/instructions/."""
         consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        unfenced_markdown = """# Test Skill
+
+This instruction has no frontmatter.
+
+---
+
+## Examples
+
+```python
+print("ordinary Markdown")
+```
+
+---
+
+## Next steps
+"""
+        source.write_text(unfenced_markdown, encoding="utf-8")
         result = subprocess.run(
             [apm_binary_path, "install", "../packages/local-skills"],
             cwd=consumer,
@@ -180,6 +208,364 @@ class TestLocalInstall:
         assert deployed.exists(), (
             f"Instructions not deployed. Files in .github/: {all_files}\nstdout: {result.stdout}"
         )
+        assert deployed.read_text(encoding="utf-8") == unfenced_markdown
+        assert parse_primitive_file(deployed).content == unfenced_markdown
+
+    @pytest.mark.parametrize(
+        ("target", "deployed_path", "scope_marker"),
+        [
+            ("claude", ".claude/rules/test-skill.md", '  - "src/**"'),
+            ("cursor", ".cursor/rules/test-skill.mdc", 'globs: "src/**"'),
+            ("windsurf", ".windsurf/rules/test-skill.md", 'globs: "src/**"'),
+            ("kiro", ".kiro/steering/test-skill.md", 'fileMatchPattern: "src/**"'),
+            ("antigravity", ".agents/rules/test-skill.md", 'globs: "src/**"'),
+        ],
+    )
+    def test_install_four_hyphen_frontmatter_preserves_scope_across_targets(
+        self,
+        temp_workspace,
+        apm_binary_path,
+        target,
+        deployed_path,
+        scope_marker,
+    ):
+        """Converted targets consume the canonical three-or-more-hyphen grammar."""
+        consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        source.write_text(
+            "----\napplyTo: src/**\n----\n# Scoped rule\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                target,
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        deployed = consumer / deployed_path
+        assert deployed.exists()
+        rendered = deployed.read_text(encoding="utf-8")
+        assert scope_marker in rendered
+        assert "# Scoped rule" in rendered
+        assert "----" not in rendered
+
+    def test_install_multi_target_consumes_all_preflight_plans(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """One preflight prepares every selected converted target."""
+        consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        source.write_text(
+            "----\napplyTo: src/**\n----\n# Scoped rule\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "claude,cursor,windsurf,kiro,antigravity",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        expected_paths = [
+            ".claude/rules/test-skill.md",
+            ".cursor/rules/test-skill.mdc",
+            ".windsurf/rules/test-skill.md",
+            ".kiro/steering/test-skill.md",
+            ".agents/rules/test-skill.md",
+        ]
+        for path in expected_paths:
+            rendered = (consumer / path).read_text(encoding="utf-8")
+            assert "# Scoped rule" in rendered
+
+    def test_install_ignores_unplanned_root_instruction_during_preflight(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Only instructions authorized by the deployment plan affect preflight."""
+        consumer = temp_workspace / "consumer"
+        package = temp_workspace / "packages" / "local-skills"
+        (package / "ignored.instructions.md").write_text(
+            "---\napplyTo: [\n---\n# Excluded rule\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "cursor",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (consumer / ".cursor/rules/test-skill.mdc").exists()
+        assert not (consumer / ".cursor/rules/ignored.mdc").exists()
+
+    def test_install_copilot_rejects_frontmatter_before_project_writes(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Copilot identity deployment validates instructions before prompts write."""
+        consumer = temp_workspace / "consumer"
+        package = temp_workspace / "packages" / "local-skills"
+        source = package / ".apm/instructions/test-skill.instructions.md"
+        source.write_text("---\napplyTo: [\n---\n# Invalid rule\n", encoding="utf-8")
+        prompt = package / ".apm/prompts/good.prompt.md"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("# Good prompt\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "copilot",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not (consumer / ".github/prompts/good.prompt.md").exists()
+        assert not (consumer / ".github/instructions/test-skill.instructions.md").exists()
+
+    def test_install_copilot_user_rejects_frontmatter_before_global_writes(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Copilot user deployment validates instructions before prompts write."""
+        consumer = temp_workspace / "consumer"
+        package = temp_workspace / "packages" / "local-skills"
+        source = package / ".apm/instructions/test-skill.instructions.md"
+        source.write_text("---\napplyTo: [\n---\n# Invalid rule\n", encoding="utf-8")
+        prompt = package / ".apm/prompts/good.prompt.md"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("# Good prompt\n", encoding="utf-8")
+        fake_home = temp_workspace / "home"
+        fake_home.mkdir()
+        env = os.environ.copy()
+        env["HOME"] = str(fake_home)
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                str(package.resolve()),
+                "--target",
+                "copilot",
+                "--global",
+            ],
+            cwd=consumer,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not (fake_home / ".copilot/prompts/good.prompt.md").exists()
+        assert not (fake_home / ".copilot/copilot-instructions.md").exists()
+
+    @pytest.mark.parametrize(
+        "escaped_hidden_unicode",
+        [r"\u202e", r"\uDB40\uDC01"],
+        ids=["bidi-override", "surrogate-pair-tag"],
+    )
+    def test_install_rejects_yaml_escaped_hidden_unicode_before_writes(
+        self,
+        temp_workspace,
+        apm_binary_path,
+        escaped_hidden_unicode,
+    ):
+        """Decoded frontmatter metadata crosses the same security gate as source."""
+        consumer = temp_workspace / "consumer"
+        package = temp_workspace / "packages" / "local-skills"
+        source = package / ".apm/instructions/test-skill.instructions.md"
+        source.write_text(
+            f'---\napplyTo: src/**\ndescription: "{escaped_hidden_unicode}hidden"\n---\n# Rule\n',
+            encoding="utf-8",
+        )
+        prompt = package / ".apm/prompts/good.prompt.md"
+        prompt.parent.mkdir(parents=True, exist_ok=True)
+        prompt.write_text("# Good prompt\n", encoding="utf-8")
+        command = [
+            apm_binary_path,
+            "install",
+            "../packages/local-skills",
+            "--target",
+            "cursor",
+        ]
+
+        rejected = subprocess.run(
+            command,
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert rejected.returncode != 0, rejected.stdout + rejected.stderr
+        assert not (consumer / ".github/prompts/good.prompt.md").exists()
+        assert not (consumer / ".cursor/rules/test-skill.mdc").exists()
+
+        forced = subprocess.run(
+            [*command, "--force"],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert forced.returncode == 0, forced.stdout + forced.stderr
+        output = " ".join((forced.stdout + forced.stderr).split())
+        assert "hidden characters detected" in output
+        assert "edit the escaped value in test-skill.instructions.md" in output
+        assert "Deployed with --force" not in output
+        assert (consumer / ".cursor/rules/test-skill.mdc").exists()
+
+    def test_install_rejects_bounded_frontmatter_bomb(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Rejected YAML must not be copied into an agent-readable target."""
+        consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        good_source = source.with_name("a-good.instructions.md")
+        good_source.write_text("# Good rule\n", encoding="utf-8")
+        prompt_source = source.parents[1] / "prompts" / "good.prompt.md"
+        prompt_source.parent.mkdir(parents=True, exist_ok=True)
+        prompt_source.write_text("# Good prompt\n", encoding="utf-8")
+        lines = ["a0: &a0 {k: v}"]
+        previous = "a0"
+        for index in range(1, 40):
+            current = f"a{index}"
+            lines.append(f"{current}: &{current}")
+            lines.append(f"  <<: [*{previous}, *{previous}]")
+            previous = current
+        source.write_text(
+            "---\n" + "\n".join(lines) + "\n---\n# Hostile rule\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "copilot,cursor",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode != 0, result.stdout + result.stderr
+        output = result.stdout + result.stderr
+        assert not (consumer / ".github/prompts/good.prompt.md").exists()
+        assert not (consumer / ".github/instructions/a-good.instructions.md").exists()
+        assert not (consumer / ".github/instructions/test-skill.instructions.md").exists()
+        assert not (consumer / ".cursor/rules/a-good.mdc").exists()
+        assert not (consumer / ".cursor/rules/test-skill.mdc").exists()
+        assert "Fix or remove the invalid frontmatter, then rerun apm install." in output
+
+    def test_install_cursor_quotes_multiline_control_characters(
+        self,
+        temp_workspace,
+        apm_binary_path,
+    ):
+        """Cursor output remains valid YAML for decoded control characters."""
+        consumer = temp_workspace / "consumer"
+        source = (
+            temp_workspace
+            / "packages"
+            / "local-skills"
+            / ".apm"
+            / "instructions"
+            / "test-skill.instructions.md"
+        )
+        source.write_text(
+            '---\napplyTo: src/**\ndescription: "safe\\n---\\n\\0suffix"\n---\n# Scoped rule\n',
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [
+                apm_binary_path,
+                "install",
+                "../packages/local-skills",
+                "--target",
+                "cursor",
+            ],
+            cwd=consumer,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        deployed = consumer / ".cursor/rules/test-skill.mdc"
+        rendered = deployed.read_text(encoding="utf-8")
+        assert "\0" not in rendered
+        post = loads_frontmatter(rendered)
+        assert post.metadata["description"] == "safe\n---\n\0suffix"
+        assert post.metadata["globs"] == "src/**"
 
     def test_install_local_package_no_manifest_fails(self, temp_workspace, apm_binary_path):
         """Installing a path with no apm.yml or SKILL.md should fail gracefully."""

@@ -118,10 +118,11 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
 
     Reads ``targets:``/``target:`` from the consumer's ``apm.yml``, maps the
     canonical names to :class:`~apm_cli.integration.targets.TargetProfile`
-    instances scoped the same way ``ctx.targets`` is, and augments them with the
-    non-canonical gated/dynamic targets (see below). Returns ``None`` when the
-    manifest declares no targets (auto-detect or ``--target``-only consumers) --
-    the signal for lockfile reconciliation to fall back to legacy preserve-all.
+    instances scoped the same way ``ctx.targets`` is, and augments them with
+    non-canonical gated/dynamic target metadata without probing inactive roots
+    (see below). Returns ``None`` when the manifest declares no targets
+    (auto-detect or ``--target``-only consumers) -- the signal for lockfile
+    reconciliation to fall back to legacy preserve-all.
 
     Motivation (issue #2059): ``union_preserving`` must distinguish a target the
     consumer legitimately uses but did not install in THIS run (e.g. a
@@ -138,19 +139,17 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
         declared_target_profiles as profiles_for_project,
     )
 
-    try:
-        names = _read_yaml_targets(ctx)
-    except (AttributeError, KeyError, OSError, TypeError, ValueError):
-        # Any resolution error (missing apm_package, conflicting keys already
-        # surfaced by the targets phase) -> unknown universe, preserve-all.
-        return None
-    if not names:
-        return None
     is_user = getattr(ctx, "scope", None) is InstallScope.USER
-    package_path = getattr(ctx.apm_package, "package_path", None)
+    apm_package = getattr(ctx, "apm_package", None)
+    package_path = getattr(apm_package, "package_path", None)
     if package_path is None:
         return None
-    return profiles_for_project(Path(package_path), user_scope=is_user)
+    return profiles_for_project(
+        Path(package_path),
+        user_scope=is_user,
+        active_targets=getattr(ctx, "targets", None),
+        diagnostics=getattr(ctx, "diagnostics", None),
+    )
 
 
 def _create_target_dirs(
@@ -201,15 +200,6 @@ def _check_openclaw_flag_gate(
     _check_experimental_target_hint(explicit, targets, ctx, target_name="openclaw")
 
 
-def _check_hermes_flag_gate(
-    explicit: str | list[str] | None,
-    targets: list,
-    ctx: InstallContext,
-) -> None:
-    """Emit an enable-hint when the user asks for hermes but the flag is OFF."""
-    _check_experimental_target_hint(explicit, targets, ctx, target_name="hermes")
-
-
 def _check_grok_cloud_flag_gate(
     explicit: str | list[str] | None,
     targets: list,
@@ -247,7 +237,12 @@ def _check_experimental_target_hint(
 
     from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-    emit_disabled_experimental_target_hint(target_name, targets, ctx.logger)
+    emit_disabled_experimental_target_hint(
+        target_name,
+        targets,
+        ctx.logger,
+        create_config=getattr(ctx, "create_config", True),
+    )
 
 
 def _gate_cowork_target(
@@ -275,7 +270,12 @@ def _gate_cowork_target(
         if not _cowork_resolved:
             from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-            if not emit_disabled_experimental_target_hint("copilot-cowork", targets, ctx.logger):
+            if not emit_disabled_experimental_target_hint(
+                "copilot-cowork",
+                targets,
+                ctx.logger,
+                create_config=getattr(ctx, "create_config", True),
+            ):
                 import sys as _sys
 
                 if _sys.platform.startswith("linux"):
@@ -333,7 +333,12 @@ def _gate_copilot_app_target(
 
     from apm_cli.install.target_hints import emit_disabled_experimental_target_hint
 
-    if not emit_disabled_experimental_target_hint("copilot-app", targets, ctx.logger):
+    if not emit_disabled_experimental_target_hint(
+        "copilot-app",
+        targets,
+        ctx.logger,
+        create_config=getattr(ctx, "create_config", True),
+    ):
         _app_msg = (
             "GitHub Copilot desktop App not detected.\n"
             "Expected ~/.copilot/data.db but the file is missing.\n"
@@ -498,6 +503,7 @@ def run(ctx: InstallContext) -> None:
             manifest_target=config_target,
             user_scope=ctx.scope is InstallScope.USER,
             auto_detect=False,
+            create_config=getattr(ctx, "create_config", True),
         )
         ctx.target_decision = target_decision
         ctx.target_override = target_decision.value
@@ -539,11 +545,10 @@ def run(ctx: InstallContext) -> None:
             ctx.logger.error(str(exc), symbol="cross")
         raise SystemExit(1) from exc
 
-    # Target gating: cowork, copilot-app, openclaw, hermes, grok-cloud.
+    # Target gating: cowork, copilot-app, openclaw, grok-cloud.
     _gate_cowork_target(ctx, _targets, _explicit, _is_user)
     _gate_copilot_app_target(ctx, _targets, _explicit)
     _check_openclaw_flag_gate(_explicit, _targets, ctx)
-    _check_hermes_flag_gate(_explicit, _targets, ctx)
     _check_grok_cloud_flag_gate(_explicit, _targets, ctx)
 
     # Resolve v2 targets for project scope, or set up user-scope dirs.

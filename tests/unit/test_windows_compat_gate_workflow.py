@@ -52,12 +52,6 @@ GATE_MARKER = "windows_compat"
 # would silently regress into a duplicate full-suite run.
 FULL_SUITE_ROOTS = ("tests/unit", "tests/test_console.py", "tests/red_team")
 
-# A generous but real ceiling: the gate is a "load-bearing contract
-# family", not a second full-suite run. If the marked set ever grows
-# past this, that is a signal to re-examine scope, not to raise the
-# ceiling reflexively.
-MAX_BOUNDED_FAMILY_SIZE = 200
-
 
 def _ci_workflow() -> dict:
     return load_workflow(CI_WORKFLOW)
@@ -125,7 +119,17 @@ def _collect_gate_family(args: list[str]) -> subprocess.CompletedProcess[str]:
     collection_env = _COLLECTION_ENV_BASELINE.copy()
     collection_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     return subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q", *args],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "--collect-only",
+            "--color=no",
+            "-q",
+            *args,
+        ],
         cwd=ROOT,
         env=collection_env,
         capture_output=True,
@@ -147,7 +151,7 @@ def test_windows_compat_gate_runs_on_windows_with_bounded_timeout() -> None:
 
 def test_windows_compat_gate_selects_tests_via_registered_marker() -> None:
     """The gate must select tests declaratively via `-m windows_compat`,
-    not by enumerating file paths in the workflow.
+    with one explicit integration contract outside the unit-test root.
 
     This is the core anti-pattern guard: a future edit that reverts to
     a hardcoded file list (functionally equivalent to the old
@@ -168,17 +172,15 @@ def test_windows_compat_gate_selects_tests_via_registered_marker() -> None:
 
 
 def test_windows_compat_gate_runs_over_narrowest_maintainable_root() -> None:
-    """The gate's positional pytest arguments must be exactly the
-    narrowest root that contains every `windows_compat`-marked test
-    (`tests/unit`), not the repo-wide `tests/` root and not a
-    per-file enumeration."""
+    """Run the unit root plus the one load-bearing subprocess integration contract."""
     job = workflow_job(_ci_workflow(), GATE_JOB)
     step = workflow_step(job, GATE_STEP)
     args = _gate_pytest_args(step)
     positional = _positional_test_paths(args)
-    assert positional == ["tests/unit"], (
-        f"{GATE_STEP!r} must scope to exactly the narrowest maintainable "
-        f"root ['tests/unit'], got: {positional!r}"
+    expected = ["tests/unit", "tests/integration/test_lifecycle_workspace_lock.py"]
+    assert positional == expected, (
+        f"{GATE_STEP!r} must scope to the unit contracts and lifecycle subprocess "
+        f"contract {expected!r}, got: {positional!r}"
     )
 
 
@@ -205,30 +207,75 @@ def test_windows_compat_gate_does_not_duplicate_full_suite() -> None:
     )
 
 
-def test_windows_compat_gate_marker_selects_nonempty_bounded_family() -> None:
-    """The gate's own declared invocation must collect a real,
-    non-empty, bounded set of tests when actually run.
+def _assert_gate_family_collection(result: subprocess.CompletedProcess[str]) -> None:
+    """Require live marker selection that does not select the entire collected suite."""
+    assert result.returncode == 0, (
+        f"collection failed for the gate's own declared invocation "
+        f"(args={result.args!r}):\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    match = re.search(r"^(\d+)(?:/(\d+))?\s+tests?\s+collected\b", result.stdout, re.MULTILINE)
+    assert match, f"could not parse a collected-test count from:\n{result.stdout}"
+    selected = int(match.group(1))
+    # Pytest omits the denominator when every collected test is selected.
+    total = int(match.group(2)) if match.group(2) is not None else selected
+    assert 0 < selected < total, (
+        f"expected a non-empty {GATE_MARKER!r} strict subset, "
+        f"got {selected} selected out of {total} collected tests"
+    )
 
-    This proves the marker is wired to live test code (not just
-    declared in the workflow with nothing behind it) and that the
-    contract family stays a *focused* subset rather than silently
-    growing into a second full-suite run.
+
+def test_windows_compat_gate_marker_selects_nonempty_subset() -> None:
+    """Allow marked regressions to grow without duplicating the full collected suite.
+
+    The workflow's root and timeout guards bound scope and runtime, not an
+    arbitrary test-count ceiling that breaks when legitimate coverage grows.
     """
     job = workflow_job(_ci_workflow(), GATE_JOB)
     step = workflow_step(job, GATE_STEP)
-    args = _gate_pytest_args(step)
-    result = _collect_gate_family(args)
-    assert result.returncode == 0, (
-        f"collection failed for the gate's own declared invocation "
-        f"(args={args!r}):\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    match = re.search(r"(\d+)(?:/\d+)?\s+tests?\s+collected", result.stdout)
-    assert match, f"could not parse a collected-test count from:\n{result.stdout}"
-    collected = int(match.group(1))
-    assert 0 < collected <= MAX_BOUNDED_FAMILY_SIZE, (
-        f"expected a non-empty, bounded {GATE_MARKER!r} contract family "
-        f"(1..{MAX_BOUNDED_FAMILY_SIZE}), got {collected}"
-    )
+    _assert_gate_family_collection(_collect_gate_family(_gate_pytest_args(step)))
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        pytest.param("1/2 test collected\n", id="single-test"),
+        pytest.param("351/1000 tests collected\n", id="former-ceiling"),
+        pytest.param("1000/10000 tests collected\n", id="family-growth"),
+        pytest.param(
+            "tests/unit/test_example.py::test_summary[200 tests collected]\n"
+            "351/1000 tests collected\n",
+            id="ignore-node-id-text",
+        ),
+    ],
+)
+def test_gate_collection_accepts_growing_proper_subsets(summary: str) -> None:
+    """Growth past the old ceiling is valid while marker selection stays narrower."""
+    _assert_gate_family_collection(subprocess.CompletedProcess([], 0, summary, ""))
+
+
+@pytest.mark.parametrize(
+    ("summary", "returncode", "message"),
+    [
+        pytest.param("0/1000 tests collected\n", 0, "strict subset", id="empty-selection"),
+        pytest.param("351 tests collected\n", 0, "strict subset", id="entire-suite"),
+        pytest.param("351/351 tests collected\n", 0, "strict subset", id="equal-counts"),
+        pytest.param("351/350 tests collected\n", 0, "strict subset", id="invalid-counts"),
+        pytest.param("unexpected output\n", 0, "could not parse", id="missing-summary"),
+        pytest.param(
+            "tests/unit/test_example.py::test_summary[1/2 tests collected]\n",
+            0,
+            "could not parse",
+            id="node-id-is-not-summary",
+        ),
+        pytest.param("no tests collected\n", 5, "collection failed", id="collection-failure"),
+    ],
+)
+def test_gate_collection_rejects_invalid_selections(
+    summary: str, returncode: int, message: str
+) -> None:
+    """Empty, unfiltered, malformed and failed collection cannot satisfy the gate."""
+    with pytest.raises(AssertionError, match=message):
+        _assert_gate_family_collection(subprocess.CompletedProcess([], returncode, summary, ""))
 
 
 def test_nested_collection_disables_plugin_autoload(

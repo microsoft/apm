@@ -114,6 +114,8 @@ marketplace:
       version: 1.0.0
 """
 
+_APM_ALIGNED_WITH_BUNDLE = _APM_ALIGNED + "dependencies: {}\n"
+
 _APM_MISALIGNED = """\
 name: my-project
 description: A project.
@@ -219,11 +221,16 @@ class TestCheckCleanFlag:
 
     def test_skip_when_no_marketplace_block(self, tmp_path: _Path, monkeypatch) -> None:
         (tmp_path / "apm.yml").write_text(
-            "name: x\ndescription: y\nversion: 1.0.0\n", encoding="utf-8"
+            "name: x\ndescription: y\nversion: 1.0.0\ndependencies: {}\n",
+            encoding="utf-8",
         )
         monkeypatch.chdir(tmp_path)
-        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run"])
+        result = CliRunner().invoke(pack_cmd, ["--check-clean"])
         assert result.exit_code != 4
+        assert "Marketplace drift check skipped" in result.output
+        assert (
+            "[dry-run] --check-clean is read-only; no pack outputs were written." in result.output
+        )
 
     def test_fails_when_on_disk_missing(self, tmp_path: _Path, monkeypatch) -> None:
         _write_project(tmp_path, _APM_ALIGNED)
@@ -231,6 +238,64 @@ class TestCheckCleanFlag:
         result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
         # No marketplace.json on disk -> "missing" -> exit 4.
         assert result.exit_code == 4
+
+    def test_detects_drift_without_mutating_existing_output(
+        self, tmp_path: _Path, monkeypatch
+    ) -> None:
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        initial_pack = CliRunner().invoke(pack_cmd, ["--offline"])
+        assert initial_pack.exit_code == 0, initial_pack.output
+        output = tmp_path / ".claude-plugin" / "marketplace.json"
+        initial_bytes = output.read_bytes()
+
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "      version: 1.0.0", "      version: 1.0.1"
+            ),
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--offline"])
+
+        assert result.exit_code == 4, result.output
+        assert output.read_bytes() == initial_bytes
+        assert "[dry-run] Would write" not in result.output
+
+    def test_reports_suppressed_bundle_output_as_read_only(
+        self, tmp_path: _Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_project(tmp_path, _APM_ALIGNED_WITH_BUNDLE)
+        monkeypatch.chdir(tmp_path)
+        initial_pack = CliRunner().invoke(pack_cmd, ["--offline"])
+        assert initial_pack.exit_code == 0, initial_pack.output
+
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--offline"])
+
+        assert result.exit_code == 0, result.output
+        assert (
+            "[dry-run] --check-clean is read-only; no pack outputs were written." in result.output
+        )
+        assert "Packed" not in result.output
+
+    def test_explicit_dry_run_keeps_full_bundle_and_marketplace_preview(
+        self, tmp_path: _Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_project(tmp_path, _APM_ALIGNED_WITH_BUNDLE)
+        monkeypatch.chdir(tmp_path)
+        initial_pack = CliRunner().invoke(pack_cmd, ["--offline"])
+        assert initial_pack.exit_code == 0, initial_pack.output
+
+        result = CliRunner().invoke(
+            pack_cmd,
+            ["--check-clean", "--dry-run", "--offline"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "[dry-run] Would pack" in result.output
+        assert "[dry-run] Would write marketplace.json" in result.output
+        assert "[dry-run] --check-clean is read-only" not in result.output
 
     def test_json_envelope_carries_drift(self, tmp_path: _Path, monkeypatch) -> None:
         _write_project(tmp_path, _APM_ALIGNED)

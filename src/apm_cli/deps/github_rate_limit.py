@@ -28,6 +28,8 @@ class GitHubThrottleError(RuntimeError):
 def classify_github_throttle(
     status_code: int,
     headers: Mapping[str, str] | None,
+    *,
+    message: str | None = None,
 ) -> GitHubThrottle | None:
     """Return a throttle only for GitHub's unambiguous exhaustion signals."""
     values = headers or {}
@@ -43,6 +45,19 @@ def classify_github_throttle(
 
     if retry_after_seconds is not None:
         return GitHubThrottle(status_code, "retry-after", retry_after_seconds)
+    # Public bootstrap can opt into documented body signals when proxies strip
+    # rate-limit headers. Package transport retains its header-only contract.
+    if isinstance(message, str):
+        normalized = message.lower()
+        if any(
+            signal in normalized
+            for signal in (
+                "api rate limit exceeded",
+                "secondary rate limit",
+                "abuse detection mechanism",
+            )
+        ):
+            return GitHubThrottle(status_code, "message")
     return None
 
 

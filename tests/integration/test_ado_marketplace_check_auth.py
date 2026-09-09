@@ -59,7 +59,12 @@ marketplace:
             for i in range(int(env["GIT_CONFIG_COUNT"]))
             if "Authorization" in (v := env[f"GIT_CONFIG_VALUE_{i}"])
         ]
-        assert headers == [("http.extraheader", f"Authorization: Bearer {bearer}")]
+        assert headers == [
+            (
+                "http.https://dev.azure.com/contoso/platform/_git/my-package.extraheader",
+                f"Authorization: Bearer {bearer}",
+            )
+        ]
         return subprocess.CompletedProcess(
             command,
             0,

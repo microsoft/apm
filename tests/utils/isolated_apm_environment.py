@@ -75,10 +75,12 @@ class _GuardedSocketOperations:
             raise OSError(_MESSAGE)
         return super().sendto(*args, **kwargs)
 
-    def sendmsg(self, *args, **kwargs):
-        if self.family in (socket.AF_INET, socket.AF_INET6):
-            raise OSError(_MESSAGE)
-        return super().sendmsg(*args, **kwargs)
+    # asyncio uses sendmsg availability to detect Unix-only socket features.
+    if hasattr(_REAL_RAW_SOCKET, "sendmsg"):
+        def sendmsg(self, *args, **kwargs):
+            if self.family in (socket.AF_INET, socket.AF_INET6):
+                raise OSError(_MESSAGE)
+            return super().sendmsg(*args, **kwargs)
 
 
 class _GuardedSocket(_GuardedSocketOperations, _REAL_SOCKET):
@@ -399,6 +401,10 @@ class IsolatedApmEnvironment:
         git_config = root / "gitconfig"
         git_config.write_text(
             '[protocol "file"]\n\tallow = always\n',
+            encoding="utf-8",
+        )
+        (home / ".gitconfig").write_text(
+            "[credential]\n\thelper =\n",
             encoding="utf-8",
         )
         (guard_root / "sitecustomize.py").write_text(

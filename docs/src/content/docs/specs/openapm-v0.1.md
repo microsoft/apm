@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **110 normative statements** indexed in
+- OpenAPM v0.1 carries **122 normative statements (117 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -218,8 +218,9 @@ type"), the definition section is cross-linked.
 
 | Term | Definition |
 |---|---|
-| **Manifest** | The `apm.yml` file at the root of a package. Defined in [Section 4](#4-manifest-format-apmyml). |
-| **Lockfile** | The `apm.lock.yaml` file at the root of a project. Defined in [Section 5](#5-lockfile-format-apmlockyaml). |
+| **Manifest** | The `apm.yml` file for one package or installation scope. Defined in [Section 4](#4-manifest-format-apmyml). |
+| **Lockfile** | The `apm.lock.yaml` file recording one installation scope's resolved state. Defined in [Section 5](#5-lockfile-format-apmlockyaml). |
+| **Installation scope** | The isolated manifest, lockfile, and target-configuration boundary for an install. A project scope is rooted at the consumer project. A user scope is independent of any project root and uses an implementation-defined user location disclosed by the consumer's conformance statement. |
 | **Policy** | An `apm-policy.yml` file evaluated by a Governance implementation. Defined in [Section 6](#6-policy-format-apm-policyyml). |
 | **Package** | A unit identified by a manifest (`apm.yml`) or by a recognised package layout (see [Section 8.1](#81-primitive-types)). |
 | **Primitive** | A typed unit of agent configuration (instruction, prompt, agent, skill, command, hook, or mcp server). Defined in [Section 8.1](#81-primitive-types). |
@@ -250,8 +251,9 @@ type"), the definition section is cross-linked.
 
 ### 4.1 Document structure and required fields
 
-The manifest is a single YAML 1.2 document located at the project root,
-filename `apm.yml`.
+The project-scope manifest is a single YAML 1.2 document located at the
+project root, filename `apm.yml`. A user-scope manifest, when supported,
+uses the user location declared under [req-tg-014](#req-tg-014).
 
 <a id="req-mf-001"></a>
 **[req-mf-001]** A conforming **producer** implementation MUST emit a
@@ -798,10 +800,12 @@ This section's normative statements are:
 
 ### 5.1 Top-level structure
 
-The lockfile is a single YAML 1.2 document at the project root,
-filename `apm.lock.yaml`. It records the pinned resolved state of
-every dependency the consumer has resolved from the manifest, plus
-the set of files the consumer itself contributes (the self-entry).
+The project-scope lockfile is a single YAML 1.2 document at the project
+root, filename `apm.lock.yaml`. A user-scope lockfile, when supported,
+uses the user location declared under [req-tg-014](#req-tg-014). A
+lockfile records the pinned resolved state of every dependency the
+consumer has resolved from the manifest, plus the set of files the
+consumer itself contributes (the self-entry).
 
 <a id="req-lk-001"></a>
 **[req-lk-001]** A conforming **consumer** implementation MUST emit a
@@ -819,7 +823,6 @@ Example (informative, minimal):
 
 ```yaml
 lockfile_version: "1"
-generated_at: "2026-05-10T20:14:00+00:00"
 apm_version: "0.6.4"
 dependencies:
   - repo_url: github.com/octocat/example
@@ -866,8 +869,8 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `local_path`              | Original path for local deps.                                                   |
 | `content_hash`            | Hash envelope (`sha256:<hex>`) of a local package's source tree.                |
 | `is_dev`                  | True when declared under `devDependencies`.                                     |
-| `constraint`              | git-semver: the original semver range from the manifest (verbatim).             |
-| `resolved_tag`            | git-semver: the literal tag the range resolved to.                              |
+| `constraint`              | git-semver discriminator: the original semver range from the manifest (verbatim). |
+| `resolved_tag`            | git-semver selected tag, or advisory tag provenance for a full-SHA git-literal update under [req-rs-017](#req-rs-017). |
 | `resolved_at`             | git-semver: ISO 8601 UTC timestamp; advisory (see [Section 7.3](#73-git-semver-resolution)). |
 | `name`                    | Self-asserted display/inventory name; non-identity (see [req-lk-019](#req-lk-019)). |
 | `attestations`            | Reserved for v0.2 (publisher provenance).                                       |
@@ -1141,16 +1144,17 @@ against.
 <a id="req-lk-005"></a>
 **[req-lk-005]** A conforming **consumer** implementation MUST treat
 two lockfiles as semantically equivalent if they differ only in the
-values of `generated_at` and `apm_version`. A no-op install
-operation MUST NOT rewrite a lockfile whose only changed fields
-would be these two. Consumers operating in privacy-sensitive
-deployments MAY omit `generated_at` and `apm_version` entirely;
-their absence MUST NOT affect content-equivalence comparison.
-Consumers SHOULD expose a `--no-provenance` (or equivalent) flag
-that suppresses these fields on write. Consumers SHOULD NOT include
-`generated_at` or `apm_version` in lockfiles persisted by
-deployments that have declared privacy sensitivity. When a
-consumer writes a lockfile, the `dependencies` list MUST be
+presence or values of `generated_at` and `apm_version`. A no-op
+install operation MUST NOT rewrite a lockfile whose only changed
+fields would be these two. `generated_at` is optional, advisory
+metadata. Consumers MUST omit `generated_at` from newly created
+lockfiles unless explicit user or deployment configuration requests
+it. When an existing lockfile omits `generated_at`, a consumer MUST
+NOT reintroduce it solely as metadata during a later write unless
+that configuration opts in. Consumers operating in privacy-sensitive
+deployments SHOULD omit both provenance fields to avoid leaking tool
+version or build-time information. When a consumer writes a
+lockfile, the `dependencies` list MUST be
 ordered ascending lexicographically by the tuple (`repo_url`,
 `virtual_path`); entries without `virtual_path` sort as if
 `virtual_path` were the empty string. Two lockfiles differing
@@ -1206,6 +1210,10 @@ When the resolver picks a git tag from a semver range (see
 [Section 7.3](#73-git-semver-resolution)), it records three
 additional fields on the resolved entry. These fields are valid in
 both `lockfile_version: "1"` and `"2"` (see [req-lk-002](#req-lk-002)).
+The presence of `constraint` identifies the git-semver shape. A
+git-literal entry updated under [req-rs-017](#req-rs-017) has no
+`constraint`; its optional `resolved_tag` is advisory provenance and
+does not change replay or trust semantics.
 
 <a id="req-lk-008"></a>
 **[req-lk-008]** A conforming **consumer** implementation MUST
@@ -1399,9 +1407,9 @@ The `dependencies` policy block governs APM dependency declarations.
 
 | Field                  | Semantic                                                                                  |
 |------------------------|-------------------------------------------------------------------------------------------|
-| `allow`                | List of patterns matched against `<owner>/<repo>`. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)). |
-| `deny`                 | Always wins over `allow`.                                                                 |
-| `require`              | Packages every consumer manifest must include.                                            |
+| `allow`                | List of patterns matched against the canonical host-blind dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
+| `deny`                 | Always wins over `allow`; case treatment per [req-pl-018](#req-pl-018).                   |
+| `require`              | Exact packages every consumer manifest must include; case treatment per [req-pl-018](#req-pl-018). |
 | `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
 | `max_depth`            | Maximum transitive dependency depth. Default 50.                                          |
 | `require_pinned_constraint` | When true, flags unbounded direct deps as violations.                                 |
@@ -1422,6 +1430,74 @@ as **pinned** (no violation): (a) a 40-character commit SHA; (b) a
 literal semver tag matching `v?\d+\.\d+\.\d+`; (c) a bounded semver
 range (containing an upper bound); (d) a dependency with
 `source: registry`; (e) a local-path dependency.
+
+<a id="req-pl-018"></a>
+**[req-pl-018]** A conforming **governance** implementation MUST apply
+the following dependency-policy identity rules:
+
+(a) The match subject is the canonical, host-blind dependency package
+path: its repository coordinate plus any virtual in-repository path,
+with any `#` reference suffix excluded. A registry name is never part
+of this match subject and is compared literally wherever it appears in
+policy operands. This
+statement governs glob matching for `dependencies.allow` and
+`dependencies.deny`, plus exact identity matching for
+`dependencies.require`. A `require` entry is exact: `*` characters
+are literal, and its package portion is the text before the first
+`#`. This statement changes case treatment only; it does not change
+which subject string is matched. Normalization under this statement
+applies at match time only. Policy-chain intersection, union, and
+deduplication under [Section 6.4](#64-inheritance-and-merge-rules)
+compare authored entries byte-exactly.
+
+(b) A Governance implementation MUST apply to policy operands the
+repository path case rule disclosed under
+[Section 11.2 item 6](#conformance-statement-case-rule). This is the same
+rule governed by [req-rs-016](#req-rs-016) clause (3) where the
+implementation also claims the Consumer class. A
+registry-sourced dependency, including one resolved through a
+registry prefix, has case-insensitive repository-coordinate segments;
+this source rule applies regardless of the case rule for its host.
+Local-path and marketplace dependencies, plus dependencies on every
+host not documented as case-insensitive under
+[Section 11.2](#112-how-to-claim-conformance), remain case-sensitive.
+The Governance implementation MUST NOT substitute a different case
+rule from the one disclosed for that host or registry source.
+
+(c) The dependency subject determines a repository-coordinate segment
+count N, before any virtual in-repository path. The same N bounds both
+operands: only the first N U+002F-separated segments of the subject and
+pattern are eligible for case-insensitive comparison. Normalization
+maps only U+0041 through U+005A to U+0061 through U+007A. Every other
+code point is compared literally; Unicode
+case folding, locale-sensitive mapping, and normalization forms are
+outside v0.1 per [Section 1.4](#14-terminology-preliminaries).
+For the avoidance of doubt, this statement never applies outside the
+fields named in clause (a): normalization MUST NOT extend into a
+virtual in-repository path, a reference suffix after `#`, a registry
+name, an MCP server name, or an unmanaged-file workspace path.
+
+(d) For a glob pattern, the eligible prefix from clause (c) is further
+truncated to the segments strictly before the first pattern segment
+that contains `**`. The effective case-insensitive prefix is therefore
+the lesser of N and that segment index; every remaining segment on
+both operands is compared byte-exactly. A fused `**` is a `**` token
+sharing a segment with one or more other characters, for example
+`Sec**`.
+
+(e) `dependencies.deny` MUST retain precedence over
+`dependencies.allow` after normalization. Where clause (b) or clause
+(d) requires byte-exact matching, a deny pattern that differs only in
+case does not match. Policy authors who intend to deny multiple
+distinct spellings on such a source or after such a truncation must
+enumerate those spellings. The residual security boundary is described
+in [Section 10.8](#108-policy-bypass-via-crafted-manifest).
+
+(f) A conforming governance implementation MUST evaluate every
+pattern-bearing policy field named in
+[Section 6.5](#65-allow-list--deny-list-tri-state-semantics) under that
+section's pattern grammar. It MUST NOT add character-class, brace, or
+escape expansion.
 
 #### 6.3.2 `mcp`
 
@@ -1449,9 +1525,10 @@ directories that are not recorded in `apm.lock.yaml`. `directories`
 names the managed primitive target trees to scan, `action` selects
 the response (`ignore` | `warn` | `deny`), and `exclude` is a glob
 allow-list of workspace paths to suppress from the report. Its glob
-patterns are matched with the same pattern semantics as the policy
-allow-list and deny-list fields (see
-[Section 6.5](#65-allow-list--deny-list-tri-state-semantics)).
+patterns use the syntax in
+[Section 6.5](#65-allow-list--deny-list-tri-state-semantics), but
+workspace paths remain byte-exact and case-sensitive; dependency
+identity normalization under [req-pl-018](#req-pl-018) does not apply.
 
 <a id="req-pl-015"></a>
 **[req-pl-015]** A conforming **governance** implementation MUST,
@@ -1530,9 +1607,9 @@ merge a policy chain per the following table:
 |---------------------------------------|------------------------------------------------------------------------|
 | `enforcement`                         | Stricter wins (`block` > `warn` > `off`).                              |
 | `fetch_failure`                       | Child overrides if set.                                                |
-| `*.allow` lists                       | Set intersection. `null` is transparent.                               |
-| `*.deny` lists                        | Union, deduplicated, parent order preserved.                           |
-| `*.require` lists                     | Union, deduplicated, parent order preserved.                           |
+| `*.allow` lists                       | Set intersection, byte-exact on each entry's UTF-8 text. `null` is transparent. |
+| `*.deny` lists                        | Union, deduplicated byte-exact, parent order preserved.                |
+| `*.require` lists                     | Union, deduplicated byte-exact, parent order preserved.                |
 | `dependencies.max_depth`              | `min(parent, child)`.                                                  |
 | `dependencies.require_resolution`     | Stricter wins (`block` > `policy-wins` > `project-wins`).              |
 | `mcp.self_defined`                    | Stricter wins (`deny` > `warn` > `allow`).                             |
@@ -1542,6 +1619,12 @@ merge a policy chain per the following table:
 | `unmanaged_files.exclude`             | Union, deduplicated (byte-exact on each pattern's UTF-8 string), parent order preserved (additive: a child adds exclusions and cannot clear a parent's; `null` and `[]` both preserve the parent list). |
 | `security.integrity.require_hashes`   | Logical OR (once `true`, stays `true`).                                |
 | `security.audit.fail_on_drift`        | Logical OR (once `true`, stays `true`).                                |
+
+These merge operations compare authored entries before dependency
+evaluation. Case-variant entries remain distinct during union and
+deduplication, and case-variant `allow` entries can intersect to an
+empty list. [req-pl-018](#req-pl-018) normalization applies only when
+the merged policy is matched against a dependency subject.
 
 ### 6.5 Allow-list / deny-list tri-state semantics
 
@@ -1553,6 +1636,17 @@ transparent during merge; (b) explicit empty list `[]` means
 "explicitly empty" and overrides the parent for that field; (c)
 non-empty list `[...]` carries the listed entries and merges per the
 table in [Section 6.4](#64-inheritance-and-merge-rules).
+
+**Pattern grammar (normative through [req-pl-018](#req-pl-018)
+clause (f)).** Pattern-bearing `dependencies.allow`,
+`dependencies.deny`, MCP allow/deny, and `unmanaged_files.exclude`
+entries are matched against the whole subject and are anchored at
+both ends. `*` matches zero or more characters other than U+002F
+(`/`). `**` matches zero or more characters including U+002F,
+including when fused with other characters in one segment. Every
+other character is literal; there is no character-class, brace,
+or escape expansion. [req-pl-018](#req-pl-018) changes only case
+treatment for dependency identities and does not change this grammar.
 
 ### 6.6 Forward compatibility
 
@@ -1651,6 +1745,19 @@ together with its invalid owner reference(s), and MUST carry a single
 remediation directing the operator to reconcile ownership (prune the
 departed owners, then re-audit).
 
+<a id="req-pl-017"></a>
+**[req-pl-017]** A conforming **governance** implementation discovering
+an organization policy from Azure DevOps MUST request
+`apm/apm-policy` as its primary project and repository coordinate. It
+MAY use a fresh cache entry for that primary coordinate; primary and
+legacy cache entries MUST remain distinct. It MAY request or use the
+legacy `_apm/_apm` coordinate only when the primary request received
+an HTTP 404 response. It MUST NOT try that legacy coordinate after
+authentication, authorization, network, timeout, rate-limit,
+malformed-response, or other non-404 failures. When the legacy
+coordinate supplies a policy, the implementation MUST emit one
+actionable migration warning naming `apm/apm-policy`.
+
 ### 6.9 Conformance requirements (governance)
 
 This section's normative statements are:
@@ -1662,7 +1769,8 @@ This section's normative statements are:
   [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
   [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
   [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
-  [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016).
+  [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
+  [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018).
 
 ---
 
@@ -1760,13 +1868,20 @@ safety boundary, not a wire artifact. It consists of:
 3. the complete repository path after first removing all trailing
    U+002F (`/`) characters and then removing at most one trailing
    literal `.git` suffix. Path comparison MUST be case-sensitive by
-   default. A consumer MAY case-fold paths for a host it documents as
+   default. A dependency with `source: registry`, including one resolved
+   through a registry prefix, has case-insensitive
+   repository-coordinate segments regardless of host documentation;
+   the source rule takes precedence over the host rule. A consumer MUST
+   apply that registry rule at every cache layer. For every other source,
+   a consumer MAY case-fold paths for a host it documents as
    case-insensitive in its conformance statement (see
    [Section 11.2](#112-how-to-claim-conformance)) only when every cache
-   layer applies the same rule. Before comparison, a consumer MUST NOT
-   percent-decode the path, collapse `.` or `..` segments, or coalesce
-   repeated internal slashes; traversal-bearing dependency paths remain
-   subject to parse-time rejection.
+   layer applies the same rule. The same source and host rules govern
+   policy operands under [req-pl-018](#req-pl-018); repository identity
+   and policy matching MUST NOT diverge. Before comparison, a consumer
+   MUST NOT percent-decode the path, collapse `.` or `..` segments, or
+   coalesce repeated internal slashes; traversal-bearing dependency
+   paths remain subject to parse-time rejection.
 
 Credential material in URL userinfo, query strings, and fragments MUST
 NOT contribute to repository identity; credential handling remains
@@ -1969,14 +2084,15 @@ re-resolution.
 **[req-rs-015]** A conforming **consumer** implementation performing a
 non-update install (that is, not an `apm update` and not an explicit
 `--refresh`/re-resolution invocation) MUST replay a lockfile entry
-that records a `resolved_commit` without a corresponding `resolved_tag`
-(that is, git-literal and untagged-branch entries per
-[req-rs-003](#req-rs-003)) by reusing that recorded commit as the
+that records a `resolved_commit` for a git-literal or untagged-branch
+entry per [req-rs-003](#req-rs-003) by reusing that recorded commit as the
 resolution result WITHOUT issuing a network ref-resolution -- no
 commits-API query, no `git ls-remote`, and no clone for ref discovery
 (illustrative, not exhaustive) -- for that entry, provided drift
 detection against the manifest reference does not require
-re-resolution. Object fetch to materialise content at the
+re-resolution. An advisory `resolved_tag` recorded under
+[req-rs-017](#req-rs-017) does not change this requirement's
+applicability. Object fetch to materialise content at the
 already-resolved commit is not constrained by this requirement. When
 the manifest reference for the entry has changed so that the recorded
 pin no longer matches (drift -- defined for entries scoped by this
@@ -2052,13 +2168,15 @@ delta from the same inputs.
 <a id="req-rs-011"></a>
 **[req-rs-011]** A conforming **consumer** implementation that
 exposes an `apm update` (or equivalent) command MUST, when invoked
-without a package argument, re-resolve every direct dependency
-against its **current** manifest constraint (holding the manifest
-unchanged), MUST rewrite the lockfile pins to the new highest
-matching version for each direct dep, MUST re-resolve all
-transitive dependencies as a side-effect, and MUST honour the
-active Governance policy's `require_pinned_constraint` rule
-([req-pl-007](#req-pl-007)).
+without a package argument, re-resolve every direct dependency.
+Dependencies other than full-SHA git-literal entries MUST resolve
+against their **current** manifest constraint while leaving that
+constraint unchanged, and the consumer MUST rewrite their lockfile
+pins to the new highest matching version. A full-SHA git-literal entry
+follows [req-rs-017](#req-rs-017) when the consumer offers that update
+extension. The consumer MUST re-resolve all transitive dependencies as
+a side-effect and MUST honour the active Governance policy's
+`require_pinned_constraint` rule ([req-pl-007](#req-pl-007)).
 
 <a id="req-rs-012"></a>
 **[req-rs-012]** A conforming **consumer** implementation that
@@ -2066,7 +2184,64 @@ exposes `apm update <name>` MUST scope re-resolution to the named
 package and its subtree only, MUST hold every other resolved entry
 at its prior pin, and MUST refuse to operate on a frozen install
 (see [req-lk-006](#req-lk-006)) without an explicit override
-flag.
+flag. When the named package is a direct full-SHA git-literal entry
+and the consumer offers the [req-rs-017](#req-rs-017) extension, that
+entry follows req-rs-017; the consumer MUST NOT rewrite a transitive
+package manifest.
+
+<a id="req-rs-017"></a>
+**[req-rs-017]** A conforming **consumer** implementation that offers
+an update extension for a git-literal dependency pinned to a full
+hexadecimal commit ID MUST form one candidate set from annotated tags
+whose peeled object has been verified as a commit and whose parsed
+semantic version has an empty pre-release identifier under
+[Section 7.3.1](#731-semver-dialect-normative). A `0.x.y` version with
+an empty pre-release identifier remains eligible. The consumer MUST NOT
+select a branch or lightweight tag.
+
+A candidate tag name MUST use one of `v{version}`,
+`{name}--v{version}`, `{name}-v{version}`, or the bare `{version}`.
+For a repository dependency, `name` is the final repository path
+component after removing at most one trailing `.git`; for a selected
+virtual subdirectory, it is the final non-empty virtual-path component.
+The consumer MUST select the candidate with the highest version under
+Section 7.3.1 precedence. When candidates have equal precedence, it
+MUST apply the bytewise ASCII full-tag-string tie break in
+[req-rs-014](#req-rs-014), independently of remote record order. A
+winning candidate whose peeled commit equals the current pin is a
+no-op.
+
+When the authoritative upstream contains no eligible tag, the consumer
+MUST retain the current commit ID, emit a default-visible diagnostic,
+and continue resolving other dependencies in the requested update
+scope. A transport failure, an invalid or all-zero object ID, an invalid
+tag refname, a duplicate tag ref record, or a peeled tag record without
+its base record MUST fail the update before any manifest or lockfile
+write. An otherwise eligible annotated tag that peels to a tree, blob,
+or other non-commit object is also a fatal outcome, not an ignored
+candidate. These failures MUST NOT be converted into the retained-pin
+outcome.
+
+For a successful replacement, the consumer MUST rewrite only the
+direct root-manifest entry's `ref` to the selected peeled commit. The
+matching lockfile entry MUST record that same commit in `resolved_ref`
+and `resolved_commit`, and MUST record the selected tag in
+`resolved_tag` as advisory provenance. The tag does not change the
+entry's git-literal reference kind and does not become a trust anchor.
+A later non-update install MUST replay the full commit without remote
+tag enumeration under [req-rs-015](#req-rs-015). A retained-pin outcome
+MUST leave the direct manifest entry and its resolved lock values
+unchanged.
+
+A no-argument update applies this rule to every direct full-SHA
+git-literal entry. A package-scoped update applies it only to the named
+direct entry; ordinary subtree resolution continues, but transitive
+package manifests MUST NOT be rewritten. The consumer MUST finish
+candidate validation for every scoped direct entry before writing
+either the manifest or lockfile. A retained-pin outcome is entry-local
+and does not stop unrelated scoped updates. Any fatal outcome named
+above aborts the requested update scope and leaves both files
+unchanged.
 
 Range-widening update modes (for example `apm update --aggressive`,
 which would mutate the manifest's range upper bounds) are
@@ -2135,7 +2310,6 @@ resolves to the lockfile:
 
 ```yaml
 lockfile_version: "2"
-generated_at: "2026-05-10T20:14:00+00:00"
 apm_version: "0.7.0"
 dependencies:
   - repo_url: github.com/contoso/security-baseline
@@ -2169,7 +2343,8 @@ This section's normative statements are:
   [req-rs-009](#req-rs-009), [req-rs-010](#req-rs-010),
   [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
   [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
-  [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016).
+  [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
+  [req-rs-017](#req-rs-017).
 - Producer: [req-pr-004](#req-pr-004).
 - Producer (SHOULD): [req-pr-005](#req-pr-005).
 
@@ -2193,8 +2368,37 @@ the recognised package layouts:
 - **Skill collection** (`skills/<name>/SKILL.md` nested). Each
   nested skill is promoted to `<deploy>/skills/<name>/`.
 - **Plugin collection** (`plugin.json` / `.claude-plugin/`).
-  Artifacts are mapped into deploy directories per the plugin
-  manifest.
+  Artifacts are mapped into deploy directories per the plugin manifest.
+
+<a id="req-pr-006"></a>
+**[req-pr-006]** For a Plugin collection, a conforming **consumer**
+MUST resolve `plugin.json` `skills` as follows. Only an omitted
+`skills` key permits conventional `skills/<name>/SKILL.md` discovery.
+A present key MUST be a string or a list of strings and replaces that
+discovery: an explicit empty list contributes no skills. The plugin root
+is the collection root containing `.claude-plugin/`, not the manifest
+directory. Each declared path MUST be relative to that root; every
+traversed path component, derived child, and `SKILL.md` MUST remain
+within that root and MUST NOT be a symlink. A declared directory
+containing a regular `SKILL.md` is one skill named by its final path
+component; a declared directory without `SKILL.md` contributes only
+immediate child directories containing a regular `SKILL.md`, each named
+by its final path component. A missing, unreadable, malformed, escaping,
+or symlinked entry MUST contribute no skill, and a consumer MUST NOT
+fall back to undeclared root discovery. Consumers MUST canonicalize
+accepted paths relative to the plugin root: repeated spellings of one
+canonical source deduplicate to one leaf, while every contribution whose
+derived leaf name maps to more than one canonical source contributes no
+skill. Only the resulting names are eligible for enumeration, selection,
+or deployment.
+
+<a id="req-pr-007"></a>
+**[req-pr-007]** A conforming **consumer** implementation MUST, when
+copying a declared Plugin collection component source, canonicalize the
+non-symlink source root selected for that component. A consumer-generated
+staging subtree is the materialization root created by the current operation
+and every descendant of that root. The consumer MUST prune every such staging
+subtree before traversing the source.
 
 A package **exposes selectable skills** when layout resolution identifies a
 container for individually addressable named skill entries, whether that
@@ -2414,7 +2618,8 @@ implementation MUST integrate target-scoped primitives only into the
 intersection of (a) the project's currently active targets, (b) the
 target subset authorized by the consumer for that dependency, and (c)
 the dependency package's declared `target:` or `targets:` set when that
-set is restrictive. The mechanism for (b) is implementation-defined;
+set is restrictive. This computed set is the dependency's **effective target
+intersection**. The mechanism for (b) is implementation-defined;
 when the consumer has no explicit per-dependency authorization
 mechanism or subset, (b) adds no restriction.
 
@@ -2469,6 +2674,167 @@ cause the target shell to reinterpret a path component.
 > PowerShell commands. This requirement permits target-specific command syntax;
 > it does not prescribe a shell for other targets.
 
+#### 8.5.5 Agent Plugins v1 native-lifecycle deployment boundary
+
+<a id="req-tg-011"></a>
+**[req-tg-011]** A conforming **consumer** implementation MUST treat a
+schema-bearing Agent Plugins v1 dependency as opaque at the deployment
+boundary unless an applicable target-native lifecycle admits it. Dependency
+acquisition, materialization beneath the resolved dependency root, and lock
+identity recording MAY occur before that boundary. When the effective target
+intersection computed under [req-tg-008](#req-tg-008) does not select an
+applicable native lifecycle, the consumer MUST skip deployment of that
+dependency and emit one actionable diagnostic, MUST NOT run a legacy primitive
+integrator for it, and MUST NOT create target-native registration, settings,
+catalog, or ownership state for it. The materialized package and lock state MAY
+remain. This skip is
+dependency-scoped: ordinary dependencies in the same install MUST remain
+eligible for their normal deployment, and a `--dry-run` invocation MUST report
+the same per-dependency deployment decision without mutating state.
+If an earlier operation registered the dependency but the current effective
+target intersection no longer selects that native lifecycle, the consumer MUST
+retire the dependency's consumer-owned catalog, activation, and ownership
+entries through the rollback unit in [req-tg-013](#req-tg-013).
+
+> **Editorial note.** This requirement governs the deployment boundary
+> only. A machine-verifiable consumer lifecycle now exists:
+> [req-tg-013](#req-tg-013) defines native registration for a consumer
+> that exposes one. "Applicable" is determined from successful Agent Plugins
+> schema parsing, the effective target intersection in
+> [req-tg-008](#req-tg-008), and the admission gates referenced by
+> [req-tg-013](#req-tg-013), not from whether a host binary happens to be
+> installed. This requirement still does not itself define that lifecycle, and
+> it does not mandate any preferred-default change.
+
+#### 8.5.6 Plugin-root hook command resolution
+
+<a id="req-tg-012"></a>
+**[req-tg-012]** When a conforming **consumer** implementation resolves an
+implementation-defined plugin-root placeholder in a hook command, it MUST treat
+a placeholder enclosed in matching quotation marks and followed by a forward
+slash (`/`) or backslash (`\`) path separator outside the closing quote as
+equivalent to the placeholder and path enclosed together in one double-quoted
+span, regardless of the source quote character. The generated command MUST
+preserve balanced quoting, and any environment-variable expression retained in
+that command MUST remain live for target expansion. If any
+implementation-defined plugin-root placeholder remains unresolved, the consumer
+MUST emit a default-visible diagnostic before the operation returns; it MUST
+NOT silently deploy the unresolved command.
+
+> **Editorial note.** A plugin-root placeholder has the form `${NAME}`; each
+> consumer documents the fixed set of names it recognizes for its targets.
+> `${PLUGIN_ROOT}` is an illustrative spelling. For example,
+> `"${PLUGIN_ROOT}"/hooks/probe.py` normalizes to
+> `"${PLUGIN_ROOT}/hooks/probe.py"`.
+
+#### 8.5.7 Agent Plugins v1 native-lifecycle registration
+
+<a id="req-tg-013"></a>
+**[req-tg-013]** A conforming **consumer** implementation that exposes a
+machine-verifiable native lifecycle for a schema-bearing Agent Plugins v1
+dependency MAY register that dependency with a target-native plugin host when
+the acquired and materialized dependency has passed Agent Plugins schema
+parsing, the effective target intersection computed under
+[req-tg-008](#req-tg-008) selects that host, and the applicable lock-integrity
+obligations ([req-lk-013](#req-lk-013), [req-lk-015](#req-lk-015)),
+authorized source-plan scan ([req-sc-015](#req-sc-015)), and executable
+authorization ([req-sc-009](#req-sc-009), [req-sc-010](#req-sc-010),
+[req-sc-011](#req-sc-011), and [req-sc-014](#req-sc-014)) admit the
+package. Admission during install,
+update, restore, uninstall, and prune MUST NOT locate, invoke, or version-check
+the target-native host binary. When the dependency is registered, the consumer
+MUST NOT additionally project that package's primitives, so a single dependency
+is deployed exactly once. The consumer MUST NOT copy the package into the
+target's private plugin state; the registration MUST reference the materialized
+package in place beneath the resolved dependency root. A single aggregate
+registration per install scope MUST cover both directly declared and
+transitively resolved Agent Plugin dependencies that passed the admission
+conditions above, without changing their
+`depth` and `resolved_by` lockfile fields defined in
+[Section 5.2](#52-per-entry-fields).
+
+A consumer MUST exclude from plugin-name claimant selection every Agent Plugin
+dependency that did not pass the admission conditions above. It MUST NOT
+register such a dependency. Among admitted dependencies that declare the same
+plugin name, a directly declared dependency MUST win over a transitive
+dependency. Two admitted claimants at the same precedence MUST cause the
+aggregate registration to fail with an actionable diagnostic naming both
+claimants. A consumer MUST NOT silently repoint a ledger-recorded owner to a
+different admitted transitive claimant. An admitted directly declared claimant
+MAY replace a recorded transitive owner under the direct-precedence rule, but
+the ownership record and registration MUST update in the same rollback unit.
+A post-lifecycle reconciliation after uninstall, prune, or restore MAY
+downgrade a residual same-precedence or transitive-repoint collision to an
+actionable diagnostic so cleanup can continue, but it MUST omit every ambiguous
+or changed-owner entry and MUST NOT commit a new owner for that plugin name.
+
+The consumer MUST record registration ownership in consumer-owned state. A
+consumer that reserves a marketplace identifier and activation-key suffix for
+its generated registration MAY treat that namespace as consumer-owned only
+while its exact expected directory-marketplace entry is present or being
+created. It MUST refuse an existing conflicting entry that uses the reserved
+marketplace identifier before treating the activation-key suffix as owned. Its
+ownership record is the primary evidence for later reconciliation and removal.
+If that record is missing, the consumer MAY re-adopt an existing entry only
+when it is exactly the directory-marketplace entry the consumer would generate.
+It MAY then reconcile the reserved activation-key suffix from the aggregate
+registration. Its conformance statement MUST identify any reserved marketplace
+identifier and activation-key suffix. Registration and removal MUST preserve
+unrelated host JSON keys and values semantically; stable JSON serialization MAY
+reformat the document. Invalid JSON, including JSONC comments, MUST fail closed
+before overwrite. Catalog, ownership-record, and settings writes MUST commit as
+one rollback unit so a failed write leaves no partial new registration.
+Removal MUST retire only entries in that consumer-owned rollback unit and MUST
+preserve settings outside the reserved marketplace identifier and activation
+suffix.
+
+> **Editorial note.** "Machine-verifiable" qualifies the consumer lifecycle,
+> not the runtime present on an operator's machine. A consumer can qualify
+> compatibility at release or build time with a pinned real-host lifecycle
+> suite; this implementation uses
+> `tests/integration/test_copilot_native_plugin_binary_lifecycle.py`. Operators
+> remain responsible for supplying a compatible runtime. In this implementation
+> the host is GitHub Copilot CLI, the reserved marketplace identifier is `apm`,
+> activation keys use the `@apm` suffix, and the ownership ledger lives under
+> `apm_modules`. Manual `*@apm` activation keys are unsupported while the exact
+> APM directory-marketplace entry is present because reconciliation owns that
+> reserved namespace. This requirement does not prescribe that host, namespace,
+> or compatibility version for other consumers.
+> A directory-marketplace entry points the host at a generated catalog rooted in
+> the materialized dependency directory; it does not copy package content into
+> the host's private plugin state.
+
+#### 8.5.8 User-scoped MCP target selection
+
+<a id="req-tg-014"></a>
+**[req-tg-014]** A conforming **consumer** implementation that supports a user
+installation scope MUST disclose in its conformance statement the user-scope
+manifest and lockfile locations and the versioned target-capability declaration
+it uses to determine user-scope MCP support. The consumer MUST treat a target
+without that declared capability as unsupported.
+
+When the consumer installs an MCP server into a user scope, it MUST resolve the
+effective target selection from the first applicable source in this order: an
+explicit target selection; a non-empty user-scope manifest restriction that
+does not contain the literal no-restriction sentinel `all`; a configured user
+default; then user-scope runtime discovery. Once a source selects one or more
+targets, the consumer MUST NOT consult a lower-precedence source. Project-scoped
+target-detection signals outside the user scope MUST NOT constrain the discovery
+step. A manifest `all` token is treated as no restriction and therefore does
+not suppress lower-precedence user-scope defaults or discovery.
+
+Before creating or modifying the user-scope manifest, lockfile, or target
+configuration for the attempted MCP entry, the consumer MUST partition the
+selected targets by the declared user-scope MCP capability. If no supported
+target remains, it MUST emit an actionable diagnostic and MUST NOT make a
+persistent mutation or fall back to discovery. For a mixed set, the supported
+subset MUST become the effective target set; the consumer MUST diagnose every
+unsupported target, MUST NOT write its target configuration, and MUST NOT fall
+back to discovery. If it persists an explicit mixed selection as a user-scope
+manifest restriction, it MUST serialize only the supported subset using target
+identifiers whose replay selects the same runtimes; it MUST NOT persist an
+unsupported member or remap one to a different supported runtime.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2483,7 +2849,11 @@ without a spec revision. The current matrix is in the companion
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
   [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
   [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
-  [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009).
+  [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
+  [req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
+  [req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
+  [req-tg-014](#req-tg-014), [req-pr-006](#req-pr-006),
+  [req-pr-007](#req-pr-007).
 
 ---
 
@@ -2508,6 +2878,13 @@ OpenAPM follows the semver discipline at the document level:
   example a new target name registered in the Target Registry
   companion).
 - Adding a new conformance test for behaviour already required.
+- Making an evaluation deterministic when no normative statement
+  previously defined it, the specification already named the field
+  and its purpose, no field is removed, renamed, or retyped, and no
+  existing fail-closed obligation is relaxed. The Appendix D row for
+  the amendment MUST name every verdict class that can change. This
+  does not license changing an evaluation already defined by a
+  normative statement.
 
 **Breaking** (requires a minor bump with migration window):
 
@@ -2790,7 +3167,19 @@ keys a warning, not a silent acceptance, and preserves them as
 `x-*` extensions. [req-pl-010](#req-pl-010) fails closed on fetch
 failure when configured. [req-pl-002](#req-pl-002) blocks before
 disk write. [req-pl-003](#req-pl-003) caps `extends:` depth to
-thwart amplification attacks.
+thwart amplification attacks. [req-pl-018](#req-pl-018) prevents a
+case-variant repository spelling from bypassing an allow-list or
+deny-list when resolution treats both spellings as one package
+identity. On a case-sensitive source, differently cased repository
+paths remain distinct and policy authors must enumerate the spellings
+they intend to deny. The same normalization widens `dependencies.allow`
+matching on a case-insensitive source, so an upgrade can admit a
+case-variant spelling that previously missed. Clause (d) of
+[req-pl-018](#req-pl-018) leaves segments at and after recursive-glob
+ambiguity byte-exact, including on a case-insensitive source. The
+match subject is host-blind, so one policy entry governs the same
+repository path on every reachable host; governance authors relying
+on host separation need an independent host-level control.
 
 ### 10.9 Archive path-traversal (zip-slip / symlink escape)
 
@@ -2831,7 +3220,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
 | 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); self-entry isolation | Consumer-default  |
-| 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010) | Governance-only   |
+| 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010), [req-pl-018](#req-pl-018) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
 | 11| Unauthorised executable primitive deployment | [req-sc-009](#req-sc-009)                                         | Consumer-default  |
@@ -2842,6 +3231,9 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 16| Silent capability-scope widening via lossy target conversion | [req-tg-006](#req-tg-006); default-visible conversion diagnostic | Consumer-default  |
 | 17| Cross-target primitive deployment                    | [req-tg-008](#req-tg-008), [req-lk-021](#req-lk-021)               | Consumer-default  |
 | 18| Case-collision materialization confusion             | [req-lk-022](#req-lk-022), [req-rs-016](#req-rs-016)               | Consumer-default  |
+| 19| Executable deployment in non-interactive contexts    | [req-sc-014](#req-sc-014)                                          | Consumer-default  |
+| 20| Source-only or symlinked package content materialization | [req-sc-015](#req-sc-015)                                      | Consumer-default  |
+| 21| Native plugin namespace collision or ownership-ledger loss | [req-tg-013](#req-tg-013)                                      | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2929,6 +3321,67 @@ from deployment by the trust resolution of
 requirement as satisfied and MUST surface each withheld executable as
 a diagnostic signal distinct from any missing-package violation.
 
+### 10.15 Per-invocation executable consent
+
+**Threat.** An operator runs `apm install` in a non-interactive context
+(piped output, CI pipeline, `--frozen` mode) and a marketplace plugin
+deploys `bin/` executables to the developer tool's PATH without any
+visible consent signal, because the per-invocation warning is swallowed
+by log redirection.
+
+**Mitigation.**
+
+<a id="req-sc-014"></a>
+**[req-sc-014]** A conforming **consumer** implementation that supports
+a per-invocation consent flag for `bin/` executable deployment MUST deny
+that deployment by default when its standard output is not connected to a
+terminal (i.e., the output stream is not a TTY), unless the operator has
+explicitly opted in for that invocation. An explicit per-invocation opt-in
+(for example `--trust-bin`) overrides the non-interactive default and
+permits deployment. An explicit per-invocation opt-out (for example
+`--no-trust-bin`) overrides the non-interactive default and denies
+deployment even when the output IS a terminal. The `allowExecutables`
+policy gate [req-sc-009](#req-sc-009) is evaluated before per-invocation
+consent and always takes precedence: a policy-level denial cannot be
+overridden by a per-invocation opt-in.
+
+### 10.16 Authorized source-plan materialization
+
+**Threat.** A package can hide hostile content in a source-only file or a
+symlink entry, then reach a primitive target through a lifecycle path that
+does not reuse the authorization and scan decision made for ordinary install.
+
+**Mitigation.**
+
+<a id="req-sc-015"></a>
+**[req-sc-015]** A conforming **consumer** implementation MUST derive exactly
+one authorized source-file set after target, package-subset, and executable
+authorization for every primitive-materialization lifecycle, including
+install and re-integration after uninstall. The set MUST exclude symlink
+files and MUST NOT traverse symlinked directories. The consumer MUST apply
+any pre-deployment content security scan to the full set before any
+source-derived target write and MUST materialize primitive files only from that
+same set; each primitive-integrator materialization path MUST consume the
+canonical set rather than derive a second classifier. If a selected file
+violates a blocking scan policy, the consumer MUST reject that materialization
+before writing a source-derived target file unless the operator explicitly
+forces the install. The consumer MUST NOT scan or materialize a
+source-only file merely because it is present in the package tree. The
+executable authorization used to derive the set remains governed by
+[req-sc-009](#req-sc-009).
+
+### 10.17 Native plugin namespace and ownership recovery
+
+**Threat.** A foreign marketplace entry captures a consumer's reserved
+identifier, or loss of the consumer-owned ledger causes registration cleanup
+to overwrite unrelated host settings or retain stale activation keys.
+
+**Mitigation.** [req-tg-013](#req-tg-013) permits namespace recovery only from
+the exact directory-marketplace entry the consumer would generate, refuses a
+foreign collision, reconciles only the declared reserved activation-key
+suffix, preserves unrelated JSON values semantically, and commits catalog,
+ledger, and settings writes as one rollback unit.
+
 ---
 
 ## 11. Conformance
@@ -2972,6 +3425,19 @@ conformance statement identifying:
 2. The version of the specification it conforms to (`v0.1`).
 3. The list of OPTIONAL features it implements.
 4. Any limitations or non-conformance points, with rationale.
+5. Any additional conformance-statement content required by a specific
+   requirement, including reserved namespace disclosure under
+   [req-tg-013](#req-tg-013) and fixture citations under
+   [req-cf-002](#req-cf-002).
+6. <a id="conformance-statement-case-rule"></a>If it claims the Governance class, or documents a case-insensitive
+   host under [req-rs-016](#req-rs-016), the repository-coordinate
+   case rule for every such host. Registry sources are
+   case-insensitive under [req-rs-016](#req-rs-016) and
+   [req-pl-018](#req-pl-018); the conformance statement records that
+   fixed rule rather than choosing it. The declared host rule MUST
+   agree across repository identity and policy matching. In v0.1 this
+   information is a named prose section; a machine-readable carrier is
+   reserved in [Section 12.6](#126-machine-readable-conformance-manifest-reserved-for-v02).
 
 ### 11.3 Enumerated requirements by class
 
@@ -3014,19 +3480,25 @@ conformance statement identifying:
 [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
 [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
 [req-rs-015](#req-rs-015), [req-rs-016](#req-rs-016),
+[req-rs-017](#req-rs-017),
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
+[req-pr-006](#req-pr-006), [req-pr-007](#req-pr-007),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
 [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
 [req-tg-006](#req-tg-006), [req-tg-007](#req-tg-007),
 [req-tg-008](#req-tg-008), [req-tg-009](#req-tg-009),
-[req-tg-010](#req-tg-010), [req-sc-001](#req-sc-001),
+[req-tg-010](#req-tg-010), [req-tg-011](#req-tg-011),
+[req-tg-012](#req-tg-012), [req-tg-013](#req-tg-013),
+[req-tg-014](#req-tg-014),
+[req-sc-001](#req-sc-001),
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
 [req-sc-008](#req-sc-008) (SHOULD), [req-sc-009](#req-sc-009),
 [req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011),
 [req-sc-012](#req-sc-012), [req-sc-013](#req-sc-013),
+[req-sc-014](#req-sc-014), [req-sc-015](#req-sc-015),
 [req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
 
@@ -3057,7 +3529,8 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010),
 [req-pl-011](#req-pl-011), [req-pl-012](#req-pl-012),
 [req-pl-013](#req-pl-013), [req-pl-014](#req-pl-014),
-[req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016).
+[req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
+[req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -3088,7 +3561,6 @@ A Consumer reading the manifest above produces the lockfile:
 
 ```yaml
 lockfile_version: "2"
-generated_at: "2026-05-10T20:14:00+00:00"
 apm_version: "0.7.0"
 dependencies:
   - repo_url: github.com/contoso/common-prompts
@@ -3227,6 +3699,8 @@ tests/fixtures/spec-conformance/
     invalid-extends-cycle.yml
   resolution/
     semver-dialect.json
+  source-plan/
+    req-sc-015.json
 ```
 
 Conformance-suite expansion (additional fixtures for archive
@@ -3239,6 +3713,13 @@ The lockfile fixture `materialization-sort-exclusion.yml` exercises
 `v1-git-only.yml` exercises transactional spelling migration and
 collision refusal through the [req-lk-022](#req-lk-022) conformance
 oracles.
+
+The `source-plan/req-sc-015.json` oracle describes selected materialized
+content, source-only content, and excluded symlink files and directories
+for [req-sc-015](#req-sc-015). A consumer uses the oracle to demonstrate
+that scanning and materialization share the same authorized source set
+through both install and re-integration; each lifecycle result matches
+the oracle's authorized paths.
 
 ### 12.5 Round-trip conformance (normative)
 
@@ -3421,6 +3902,8 @@ renumbering of conformance classes.
 | [req-pl-014](#req-pl-014)                | MUST    | 6.8     | governance  |
 | [req-pl-015](#req-pl-015)                | MUST    | 6.3.5   | governance  |
 | [req-pl-016](#req-pl-016)                | MUST    | 6.8     | governance  |
+| [req-pl-017](#req-pl-017)                | MUST    | 6.8     | governance  |
+| [req-pl-018](#req-pl-018)                | MUST    | 6.3.1   | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -3437,11 +3920,14 @@ renumbering of conformance classes.
 | [req-rs-014](#req-rs-014)                | MUST    | 7.3.1   | consumer    |
 | [req-rs-015](#req-rs-015)                | MUST    | 7.5     | consumer    |
 | [req-rs-016](#req-rs-016)                | MUST    | 7.2     | consumer    |
+| [req-rs-017](#req-rs-017)                | MUST    | 7.7     | consumer    |
 | [req-pr-001](#req-pr-001)                | MUST    | 8.2     | consumer    |
 | [req-pr-002](#req-pr-002)                | MUST    | 8.3     | consumer    |
 | [req-pr-003](#req-pr-003)                | MUST    | 8.3     | consumer    |
 | [req-pr-004](#req-pr-004)                | MUST    | 7.8     | producer    |
 | [req-pr-005](#req-pr-005)                | SHOULD  | 7.8     | producer    |
+| [req-pr-006](#req-pr-006)                | MUST    | 8.1     | consumer    |
+| [req-pr-007](#req-pr-007)                | MUST    | 8.1     | consumer    |
 | [req-tg-001](#req-tg-001)                | MUST    | 8.4     | consumer    |
 | [req-tg-002](#req-tg-002)                | MUST    | 8.5     | consumer    |
 | [req-tg-003](#req-tg-003)                | MUST    | 8.5     | consumer    |
@@ -3452,6 +3938,10 @@ renumbering of conformance classes.
 | [req-tg-008](#req-tg-008)                | MUST    | 8.5.3   | consumer    |
 | [req-tg-009](#req-tg-009)                | MUST    | 8.5.1   | consumer    |
 | [req-tg-010](#req-tg-010)                | MUST    | 8.5.4   | consumer    |
+| [req-tg-011](#req-tg-011)                | MUST    | 8.5.5   | consumer    |
+| [req-tg-012](#req-tg-012)                | MUST    | 8.5.6   | consumer    |
+| [req-tg-013](#req-tg-013)                | MUST    | 8.5.7   | consumer    |
+| [req-tg-014](#req-tg-014)                | MUST    | 8.5.8   | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -3465,11 +3955,13 @@ renumbering of conformance classes.
 | [req-sc-011](#req-sc-011)                | MUST    | 10.14   | consumer    |
 | [req-sc-012](#req-sc-012)                | MUST    | 10.14   | consumer    |
 | [req-sc-013](#req-sc-013)                | MUST    | 10.3    | consumer    |
+| [req-sc-014](#req-sc-014)                | MUST    | 10.15   | consumer    |
+| [req-sc-015](#req-sc-015)                | MUST    | 10.16   | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 111** (106 MUST, 5 SHOULD).
+**Total normative statements: 122** (117 MUST, 5 SHOULD).
 
 ---
 
@@ -3506,6 +3998,19 @@ renumbering of conformance classes.
 | 0.1.25  | 2026-08-03 | Spec-citation fold for portable project-scoped Claude hooks (closes #2408 Mode-B silent-extension gate). Added [req-tg-010] (Section 8.5.4, consumer MUST): a project-scoped native hook that may launch outside the consumer project anchors its generated command through the target portable project-directory environment variable, preserves the relative hook path, executes successfully when the variable identifies the consumer project, and never embeds an absolute checkout path; shell-expansion path syntax is rejected. Claude uses `CLAUDE_PROJECT_DIR` in POSIX and `$env:CLAUDE_PROJECT_DIR` in PowerShell. Section 8.7, Section 11.3.2 Consumer enumeration, and Appendix C updated. Statement count: 108 -> 109 (104 MUST, 5 SHOULD). |
 | 0.1.26  | 2026-08-03 | Spec-citation fold for VS Code OCI/Docker MCP runtime argument resolution (closes #2438). Added [req-mf-023] (Section 4.5, consumer MUST): a non-secret runtime variable resolves every `{name}` occurrence across package runtime and package arguments, an unresolved template is never written literally, and package-scoped secret metadata uses VS Code secret-input references instead of generated config bytes. Section 4.9, Section 11.3.2, and Appendix C updated. Statement count: 109 -> 110 (105 MUST, 5 SHOULD). |
 | 0.1.27  | 2026-08-03 | Spec-citation fold for object-form registry identity preservation on CLI-driven manifest updates (closes the PR #2166 Mode-B silent-extension gate). Added [req-mf-024] (Section 4.3.2, consumer MUST): a consumer MUST NOT silently rewrite an existing `id:`-form (registry-sourced) manifest entry into a `git:`-form entry when persisting a subsequent CLI-driven update (e.g. an additive `--skill` pin) for the same dependency identity; when a CLI-parsed reference is ambiguous about its source but an existing manifest entry for the same identity already resolves to the `registry` source, the existing entry's source MUST be honored, and an update that would otherwise replace a registry-sourced entry with a non-registry-shaped entry MUST be rejected with a diagnostic naming the identity. Section 4.9 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 110 -> 111 (106 MUST, 5 SHOULD). |
+| 0.1.28  | 2026-08-06 | Spec-citation fold for per-invocation executable consent in non-interactive contexts (closes #1620 Mode-B silent-extension gate). Added [req-sc-014] (Section 10.15, consumer MUST): a consumer that supports a per-invocation consent flag for bin/ executable deployment MUST deny deployment by default when stdout is not a TTY, unless the operator has explicitly opted in for that invocation; an explicit opt-in overrides the non-interactive default and permits deployment; an explicit opt-out overrides the default and denies deployment even in a terminal; the allowExecutables policy gate [req-sc-009] is evaluated first and always takes precedence. Added row 19 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 111 -> 112 (107 MUST, 5 SHOULD). |
+| 0.1.29  | 2026-08-22 | Spec-citation fold for the Agent Plugins v1 native-lifecycle deployment boundary (closes #2522 Mode-B silent-extension gate). Added [req-tg-011] (Section 8.5.5, consumer MUST): a consumer treats a schema-bearing Agent Plugins v1 dependency as opaque to legacy primitive projection and requires an applicable target-native lifecycle for deployment. The original boundary wording was refined by 0.1.35 to permit acquisition, materialization, and lock recording before a dependency-scoped deployment skip, while ordinary dependencies in the same install remain eligible for deployment and `--dry-run` reports the same decision without mutation. Section 8.7 and Appendix C updated. Statement count: 112 -> 113 (108 MUST, 5 SHOULD). |
+| 0.1.30  | 2026-08-23 | Spec-citation fold for plugin-root hook command resolution (closes #2639 Mode-B silent-extension gate). Added [req-tg-012] (Section 8.5.6, consumer MUST): a consumer that resolves plugin-root placeholders treats a matching quoted placeholder followed by an outside path separator equivalently to the fully quoted path, preserves balanced expandable quoting, and emits a default-visible diagnostic instead of silently deploying any supported placeholder that remains unresolved. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 113 -> 114 (109 MUST, 5 SHOULD). |
+| 0.1.31  | 2026-08-23 | Spec-citation fold for Azure DevOps organization-policy discovery. Added [req-pl-017] (Section 6.8, governance MUST): discovery uses `apm/apm-policy` first and can use legacy `_apm/_apm` only after an HTTP 404; all non-404 failures stop without fallback, and a successful legacy fallback emits one actionable migration warning. Section 6.9, Section 11.3.4, and Appendix C updated. Statement count: 114 -> 115 (110 MUST, 5 SHOULD). |
+| 0.1.32  | 2026-08-23 | Spec-citation fold for authoritative legacy plugin skill declarations (closes #2537). Added [req-pr-006] (Section 8.1, consumer MUST): omitted `skills` alone enables conventional discovery; a string or list replaces discovery; explicit empty, invalid, escaping, symlinked, and duplicate-derived entries contribute no skills; declared containers contribute only immediate child skills; and only resulting names are eligible for enumeration, selection, or deployment. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 115 -> 116 (111 MUST, 5 SHOULD). |
+| 0.1.33  | 2026-08-23 | Spec-citation fold for authorized pre-deployment scan scope (closes #2490 Mode-B silent-extension gate). Added [req-sc-015] (Section 10.16, consumer MUST): a consumer derives one post-authorization source-file set for every install and uninstall re-integration materialization lifecycle; excludes symlink files and does not traverse symlinked directories; scans and materializes only that set; rejects a selected blocking finding before a source-derived target write; and does not scan or materialize source-only package files. Added row 20 to the Section 10.11 summary table. Reconciled with concurrent [req-pl-017] and [req-pr-006] and retained all amendments. Section 1.3, Section 11.3.2, and Appendix C updated. Statement count: 116 -> 117 (112 MUST, 5 SHOULD). |
+| 0.1.34  | 2026-08-25 | Spec-citation fold for root-declared Plugin component staging containment (closes #2556). Added [req-pr-007] (Section 8.1, consumer MUST): a consumer canonicalizes the non-symlink component-source root and prunes the current operation's materialization subtree before traversal. Section 8.7, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 117 -> 118 (113 MUST, 5 SHOULD). |
+| 0.1.35  | 2026-08-27 | Stale-spec (Mode C) amendment recording a machine-verifiable native Agent Plugins lifecycle. Added [req-tg-013] (Section 8.5.7, consumer MUST): schema, effective-target, integrity, security, and executable admission drives one aggregate direct-plus-transitive registration per scope without locating, invoking, or version-checking a host binary during lifecycle operations; packages remain materialized in place and opaque to legacy projection; direct dependencies win plugin-name collisions over transitive dependencies, same-precedence collisions fail, and recorded ownership does not silently repoint to a transitive claimant; a consumer-owned marketplace identifier and activation suffix are reserved only with the exact generated directory-marketplace entry; the ownership record is primary evidence, while missing-record recovery may re-adopt only that exact entry and reconcile the reserved namespace; foreign collisions and invalid JSON fail closed; unrelated JSON values are preserved semantically though stable serialization may reformat them; and catalog, ownership-record, and settings writes form one rollback unit. Revised [req-tg-011] to clarify that acquisition, materialization, and lock recording may precede target exclusion, which creates no target registration or primitive projection and does not block ordinary dependencies in the same batch. Compatibility is qualified at release or build time by the pinned real-host lifecycle suite; runtime availability is the operator's responsibility. Added the native plugin namespace and ownership-recovery threat to Section 10. Section 8.7, Section 11.3.2 Consumer enumeration, Appendix C, and conformance coverage updated. Statement count: 118 -> 119 (114 MUST, 5 SHOULD). |
+| 0.1.36  | 2026-08-29 | Editorial and defensive alignment for [req-tg-011] and [req-tg-013]. Named the [req-tg-008] result as the effective target intersection; scoped aggregate registration and plugin-name claimant selection to dependencies that passed admission; required target contraction to retire consumer-owned native registration; required advisory uninstall, prune, and restore reconciliation to omit ambiguous or changed-owner plugin entries without blocking cleanup; restored exact removal boundaries; defined directory-marketplace entries; and added reserved namespace disclosure to Section 11.2. Added conformance coverage for direct-owner promotion, advisory collision cleanup, and transitive owner-repoint refusal. Statement count remains 119 (114 MUST, 5 SHOULD). |
+| 0.1.37  | 2026-09-01 | Spec-citation fold for safe full-SHA revision-pin updates (closes #2511 Mode-B silent-extension gate). Added [req-rs-017] (Section 7.7, consumer MUST): a consumer extension may replace a full commit pin only with the peeled commit of the highest eligible non-prerelease annotated tag, including 0.x; no eligible tag retains the current commit and allows unrelated updates to continue; malformed, ambiguous, or failed remote tag resolution stops before manifest or lockfile writes. Revised [req-rs-011], [req-rs-012], and [req-rs-015] for bounded manifest rewrite, scoped operation, advisory tag provenance, and network-free replay. Section 5.2, Section 5.6, Section 7.11, Section 11.3.2, Appendix C, and conformance coverage updated. Statement count: 119 -> 120 (115 MUST, 5 SHOULD). |
+| 0.1.38  | 2026-09-01 | Defensive amendment of [req-lk-005] (no new normative statement; count remains 120 (115 MUST, 5 SHOULD)): `generated_at` is optional advisory metadata, new lockfiles omit it by default, and later writes preserve an existing omission unless explicitly configured otherwise. |
+| 0.1.39  | 2026-09-01 | Spec-citation fold for user-scoped direct MCP target selection (closes #2548 Mode-B silent-extension gate). Added [req-tg-014] (Section 8.5.8, consumer MUST): explicit selection, the user-scope manifest, configured user default, and user-scope runtime discovery form one precedence chain; project-only signals cannot constrain final discovery; and a selected set with no user-capable runtime fails before user manifest, lockfile, or target-config mutation. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 120 -> 121 (116 MUST, 5 SHOULD). |
+| 0.1.40  | 2026-09-07 | Spec-citation fold for dependency-policy identity casing in PR #2706. Added [req-pl-018] (Section 6.3.1, governance MUST) and extended [req-rs-016] clause (3): dependency allow, deny, and exact require operands use the documented per-host repository case rule, while registry-sourced repository coordinates are case-insensitive regardless of host; case normalization is ASCII-only, is bounded identically on both operands, stops at recursive-glob ambiguity, and does not cross virtual-path, ref, registry-name, MCP-name, unmanaged-path, or case-sensitive host/source boundaries; deny precedence is unchanged. Defined the policy glob grammar, documented byte-exact Section 6.4 merge behavior, and added the threat mapping. Classified this as a non-breaking correction of previously unspecified evaluation behavior under Section 9.2: existing lowercase workarounds remain matching; on registry sources and hosts documented as case-insensitive, case-variant allow entries can newly match, deny entries can newly enforce, and exact require entries can newly be satisfied, so those policies should be re-audited. Sections 1.3, 6.3.1, 6.3.5, 6.4, 6.5, 6.9, 7.2, 9.2, 10.8, 10.11, 11.2, and 11.3.4, Appendix C, and conformance coverage updated. Statement count: 121 -> 122 (117 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

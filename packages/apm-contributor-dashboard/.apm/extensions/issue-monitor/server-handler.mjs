@@ -134,6 +134,7 @@ const WRITE_ENDPOINTS = new Set([
     "/start-session", "/open-session", "/run-panel", "/approve-pipeline",
     "/approve-pr", "/approve-workflow-runs", "/merge-when-ready",
     "/submit-comment", "/refine-comment", "/create-follow-up-issues",
+    "/refresh-data",
 ]);
 
 function serveStatic(res, filePath, mimePath = filePath) {
@@ -246,7 +247,11 @@ async function readBodyWithLimit(req, pathname) {
  * @param {string}  deps.distDir - absolute path to dist/ folder
  */
 export function createHandler(deps) {
-    const { ghExec, session, startedSessions, sessionIds = new Map(), saveSessions, getIssueData, getPrData, getLastUpdated, getLastError, repo, distDir } = deps;
+    const {
+        ghExec, session, startedSessions, sessionIds = new Map(), saveSessions,
+        getIssueData, getPrData, getLastUpdated, getLastError, refreshData,
+        refreshIntervalMs = 15 * 60 * 1000, repo, distDir,
+    } = deps;
 
     // CSRF token -- generated once per server lifetime, embedded in index.html
     const csrfToken = deps.csrfToken || randomBytes(32).toString("hex");
@@ -354,6 +359,43 @@ export function createHandler(deps) {
         if (req.url === "/api/prs") {
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ prs: getPrData(), lastUpdated: getLastUpdated(), error: getLastError() }));
+            return;
+        }
+
+        // POST /refresh-data
+        if (req.method === "POST" && req.url === "/refresh-data") {
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
+            res.setHeader("Content-Type", "application/json");
+            try {
+                const body = JSON.parse(raw);
+                if (!body || Array.isArray(body) || typeof body !== "object") {
+                    throw new TypeError("Request body must be a JSON object");
+                }
+            } catch (e) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+                return;
+            }
+            if (typeof refreshData !== "function") {
+                res.writeHead(503);
+                res.end(JSON.stringify({ ok: false, error: "Refresh is unavailable" }));
+                return;
+            }
+            try {
+                const result = await refreshData();
+                res.end(JSON.stringify(result));
+            } catch (e) {
+                res.writeHead(500);
+                res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+            }
             return;
         }
 
@@ -839,8 +881,8 @@ query($owner: String!, $repo: String!, $cursor: String) {
             // Inject CSRF token into HTML so the client can send it with write requests
             try {
                 let html = readFileSync(join(distDir, "index.html"), "utf-8");
-                const tokenScript = `<script>window.__CANVAS_TOKEN__="${csrfToken}";</script>`;
-                html = html.replace("</head>", `${tokenScript}</head>`);
+                const runtimeScript = `<script>window.__CANVAS_TOKEN__="${csrfToken}";window.__APM_DASHBOARD_REFRESH_INTERVAL_MS__=${refreshIntervalMs};</script>`;
+                html = html.replace("</head>", `${runtimeScript}</head>`);
                 res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "no-cache" });
                 res.end(html);
             } catch {

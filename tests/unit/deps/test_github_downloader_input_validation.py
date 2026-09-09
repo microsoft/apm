@@ -28,6 +28,8 @@ Covers branches not hit by the existing test_github_downloader_validation.py:
 
 from __future__ import annotations
 
+import base64
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -382,10 +384,11 @@ class TestBuildValidationAttempts:
         labels = [a.label for a in attempts]
         assert not any("header" in lab for lab in labels)
 
-    def test_ado_basic_uses_http_basic_header(self) -> None:
+    def test_ado_basic_delegates_header_format_to_auth_resolver(self) -> None:
         dl = _make_downloader()
         dl.auth_resolver.resolve_for_dep.return_value.token = "myPAT"
         dl.auth_resolver.resolve_for_dep.return_value.auth_scheme = "basic"
+        dl.auth_resolver.git_env_for_remote.return_value = {"CANONICAL": "ado"}
         dep = self._make_dep()
         dep.is_azure_devops.return_value = True
         dep.host = "dev.azure.com"
@@ -404,17 +407,47 @@ class TestBuildValidationAttempts:
         assert len(auth_attempts) >= 1
         # Verify it's Base64 Basic, not a raw Bearer
         token_attempt = auth_attempts[0]
-        env_values = list(token_attempt.env.values())
-        # The GIT_CONFIG_VALUE should contain "Basic " not "Bearer "
-        header_values = [
-            v for v in env_values if isinstance(v, str) and ("Basic" in v or "Bearer" in v)
-        ]
-        assert any("Basic" in v for v in header_values)
+        assert token_attempt.env == {"CANONICAL": "ado"}
+        dl.auth_resolver.git_env_for_remote.assert_any_call(
+            dl.auth_resolver.resolve_for_dep.return_value,
+            "https://dev.azure.com/myorg/myproject/_git/myrepo",
+        )
 
-    def test_non_ado_with_token_uses_bearer_header(self) -> None:
+    def test_ado_attempts_never_construct_native_credential_helper_env(self) -> None:
+        """ADO validation uses only AuthResolver PAT or bearer environments."""
+        dl = _make_downloader()
+        dl.auth_resolver.resolve_for_dep.return_value.token = "myPAT"
+        dl.auth_resolver.resolve_for_dep.return_value.auth_scheme = "basic"
+        dl.auth_resolver.git_env_for_remote.return_value = {"CANONICAL": "ado"}
+        dl.auth_resolver.build_native_git_credential_env.side_effect = AssertionError(
+            "native helper must not be considered for ADO"
+        )
+        dep = self._make_dep()
+        dep.is_azure_devops.return_value = True
+        dep.host = "dev.azure.com"
+        dep.repo_url = "myorg/myproject/_git/myrepo"
+        dep.ado_organization = "myorg"
+        dep.ado_project = "myproject"
+        dep.ado_repo = "myrepo"
+        dl.auth_resolver.classify_host.return_value = MagicMock(kind="ado")
+
+        attempts = _build_validation_attempts(dl, dep, lambda _message: None)
+
+        assert attempts == [
+            AttemptSpec(
+                "ADO authenticated HTTPS (basic header)",
+                "https://dev.azure.com/myorg/myproject/_git/myrepo",
+                {"CANONICAL": "ado"},
+            )
+        ]
+        dl.auth_resolver.build_native_git_credential_env.assert_not_called()
+
+    def test_github_token_delegates_header_format_to_auth_resolver(self) -> None:
         dl = _make_downloader(token="ghp_token")
         dl.auth_resolver.resolve_for_dep.return_value.token = "ghp_token"
         dl.auth_resolver.resolve_for_dep.return_value.auth_scheme = "basic"
+        dl.auth_resolver.resolve_for_dep.return_value.host_info.kind = "github"
+        dl.auth_resolver.git_env_for_remote.return_value = {"CANONICAL": "github"}
         dep = self._make_dep()
         dep.is_azure_devops.return_value = False
         dl.auth_resolver.classify_host.return_value = MagicMock(kind="github")
@@ -422,15 +455,18 @@ class TestBuildValidationAttempts:
         attempts = _build_validation_attempts(dl, dep, lambda m: None)
         auth_attempts = [a for a in attempts if "header" in a.label.lower()]
         assert len(auth_attempts) >= 1
-        env_values = list(auth_attempts[0].env.values())
-        header_values = [v for v in env_values if isinstance(v, str) and ("Bearer" in v)]
-        assert any("Bearer" in v for v in header_values)
+        assert auth_attempts[0].env == {"CANONICAL": "github"}
+        dl.auth_resolver.git_env_for_remote.assert_any_call(
+            dl.auth_resolver.resolve_for_dep.return_value,
+            "https://github.com/owner/repo.git",
+        )
 
     def test_token_attempt_preserves_retained_git_config(self) -> None:
         """#2368: the auth header must not clobber indexed entries in git_env."""
         dl = _make_downloader(token="ghp_token")
         dl.auth_resolver.resolve_for_dep.return_value.token = "ghp_token"
         dl.auth_resolver.resolve_for_dep.return_value.auth_scheme = "basic"
+        dl.auth_resolver.resolve_for_dep.return_value.host_info.kind = "github"
         dl.git_env = {
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": "safe.bareRepository",
@@ -439,14 +475,22 @@ class TestBuildValidationAttempts:
         dep = self._make_dep()
         dep.is_azure_devops.return_value = False
         dl.auth_resolver.classify_host.return_value = MagicMock(kind="github")
+        dl.auth_resolver.git_env_for_remote.side_effect = lambda ctx, _url: (
+            AuthResolver.git_env_for_context(ctx, base_env=dl.git_env)
+        )
 
         attempts = _build_validation_attempts(dl, dep, lambda m: None)
         token_env = attempts[0].env
-        assert token_env["GIT_CONFIG_COUNT"] == "2"
+        assert token_env["GIT_CONFIG_COUNT"] == "3"
         assert token_env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
         assert token_env["GIT_CONFIG_VALUE_0"] == "explicit"
-        assert token_env["GIT_CONFIG_KEY_1"] == "http.extraheader"
-        assert token_env["GIT_CONFIG_VALUE_1"] == "Authorization: Bearer ghp_token"
+        assert token_env["GIT_CONFIG_KEY_1"] == "credential.helper"
+        assert token_env["GIT_CONFIG_VALUE_1"] == ""
+        assert token_env["GIT_CONFIG_KEY_2"] == "http.extraheader"
+        header = token_env["GIT_CONFIG_VALUE_2"]
+        assert header.startswith("Authorization: Basic ")
+        encoded = header.removeprefix("Authorization: Basic ")
+        assert base64.b64decode(encoded).decode() == "x-access-token:ghp_token"
         # The downloader's shared base env must not be mutated.
         assert dl.git_env["GIT_CONFIG_COUNT"] == "1"
 
@@ -526,6 +570,61 @@ class TestRefExistsViaLsRemote:
         assert ok is False
         assert _winning is None
 
+    def test_ado_pat_401_uses_canonical_bearer_retry(self) -> None:
+        """Virtual-package ref validation retries ADO through AuthResolver only."""
+        dl = _make_downloader()
+        dep = _make_github_dep()
+        dep.is_azure_devops.return_value = True
+        dep.host = "dev.azure.com"
+        dep.repo_url = "myorg/myproject/_git/myrepo"
+        dl.auth_resolver.resolve_for_dep.return_value.source = "ADO_APM_PAT"
+        primary = AttemptSpec(
+            "ADO authenticated HTTPS (basic header)",
+            "https://dev.azure.com/myorg/myproject/_git/myrepo",
+            {"PRIMARY": "1"},
+        )
+        calls: list[dict[str, str]] = []
+
+        def fake_remote(_url, *_patterns, env, **_kwargs):
+            calls.append(env)
+            if len(calls) == 1:
+                return subprocess.CompletedProcess(
+                    ["git", "ls-remote"],
+                    128,
+                    stdout="",
+                    stderr="fatal: Authentication failed (401)",
+                )
+            return subprocess.CompletedProcess(
+                ["git", "ls-remote"],
+                0,
+                stdout="a" * 40 + "\trefs/heads/main\n",
+                stderr="",
+            )
+
+        def canonical_fallback(_dep, primary_op, bearer_op, is_auth_failure):
+            first = primary_op()
+            assert is_auth_failure(first)
+            second = bearer_op("selected-az-bearer")
+            return type("Outcome", (), {"outcome": second, "bearer_attempted": True})()
+
+        dl.auth_resolver.execute_with_bearer_fallback.side_effect = canonical_fallback
+        dl.auth_resolver.build_ado_bearer_git_env.return_value = {"BEARER": "1"}
+
+        with (
+            patch.object(gdv, "_build_validation_attempts", return_value=[primary]),
+            patch("apm_cli.utils.git_env.git_remote_refs", side_effect=fake_remote),
+        ):
+            ok, winning = _ref_exists_via_ls_remote(dl, dep, "main", self._log)
+
+        assert ok is True
+        assert winning == AttemptSpec(
+            "ADO authenticated HTTPS (bearer header)",
+            primary.url,
+            {"BEARER": "1"},
+        )
+        assert calls == [{"PRIMARY": "1"}, {"BEARER": "1"}]
+        dl.auth_resolver.execute_with_bearer_fallback.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # _path_exists_in_tree_at_ref
@@ -540,23 +639,23 @@ class TestPathExistsInTreeAtRef:
         return AttemptSpec("ssh", "git@github.com:owner/repo.git", {})
 
     def test_fetch_failure_returns_false(self, tmp_path: Path) -> None:
-        import git as git_mod
-
         dl = _make_downloader()
         dep = _make_github_dep()
         attempt = self._winning_attempt()
-
-        mock_git = MagicMock()
-        mock_git.fetch.side_effect = git_mod.exc.GitCommandError("fetch", 128, "err")
 
         with (
             patch(
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
-            patch("apm_cli.deps.github_downloader_validation.git") as mock_git_mod,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                side_effect=[
+                    MagicMock(),
+                    MagicMock(),
+                    subprocess.CalledProcessError(128, ["git", "fetch"]),
+                ],
+            ),
         ):
-            mock_git_mod.cmd.Git.return_value = mock_git
-            mock_git_mod.exc.GitCommandError = git_mod.exc.GitCommandError
             result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
 
         assert result is False
@@ -566,17 +665,15 @@ class TestPathExistsInTreeAtRef:
         dep = _make_github_dep()
         attempt = self._winning_attempt()
 
-        mock_git = MagicMock()
-        mock_git.fetch.return_value = ""
-        mock_git.ls_tree.return_value = ""  # empty = path not found
-
         with (
             patch(
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
-            patch("apm_cli.deps.github_downloader_validation.git") as mock_git_mod,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                return_value=MagicMock(stdout=""),
+            ),
         ):
-            mock_git_mod.cmd.Git.return_value = mock_git
             result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
 
         assert result is False
@@ -586,40 +683,38 @@ class TestPathExistsInTreeAtRef:
         dep = _make_github_dep()
         attempt = self._winning_attempt()
 
-        mock_git = MagicMock()
-        mock_git.fetch.return_value = ""
-        mock_git.ls_tree.return_value = "040000 tree abc123\tskills/foo\n"
-
         with (
             patch(
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
-            patch("apm_cli.deps.github_downloader_validation.git") as mock_git_mod,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                return_value=MagicMock(stdout="040000 tree abc123\tskills/foo\n"),
+            ),
         ):
-            mock_git_mod.cmd.Git.return_value = mock_git
             result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
 
         assert result is True
 
     def test_ls_tree_exception_returns_false(self, tmp_path: Path) -> None:
-        import git as git_mod
-
         dl = _make_downloader()
         dep = _make_github_dep()
         attempt = self._winning_attempt()
-
-        mock_git = MagicMock()
-        mock_git.fetch.return_value = ""
-        mock_git.ls_tree.side_effect = git_mod.exc.GitCommandError("ls-tree", 128, "err")
 
         with (
             patch(
                 "apm_cli.deps.github_downloader_validation.get_apm_temp_dir", return_value=tmp_path
             ),
-            patch("apm_cli.deps.github_downloader_validation.git") as mock_git_mod,
+            patch(
+                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                side_effect=[
+                    MagicMock(),
+                    MagicMock(),
+                    MagicMock(),
+                    subprocess.CalledProcessError(128, ["git", "ls-tree"]),
+                ],
+            ),
         ):
-            mock_git_mod.cmd.Git.return_value = mock_git
-            mock_git_mod.exc.GitCommandError = git_mod.exc.GitCommandError
             result = _path_exists_in_tree_at_ref(dl, dep, "skills/foo", "main", self._log, attempt)
 
         assert result is False

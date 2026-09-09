@@ -5,8 +5,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from apm_cli.security.gate import is_generated_python_artifact
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+
+
+def format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
+    """Format one target path, two paths, or a collapsed multi-target count."""
+    deduped = list(dict.fromkeys(paths))
+    if verbose and len(deduped) >= 2:
+        return "", [f"  |     -> {path}" for path in deduped]
+    if not deduped:
+        return "", []
+    if len(deduped) == 1:
+        return deduped[0], []
+    if len(deduped) == 2:
+        return f"{deduped[0]}, {deduped[1]}", []
+    return f"{len(deduped)} targets", []
 
 
 def deployed_path_entry(
@@ -81,6 +96,9 @@ def skill_bundle_file_entries(
     entries: list[str] = []
     for bundle_file in sorted(skill_dir.rglob("*")):
         try:
+            relative = bundle_file.relative_to(skill_dir)
+            if is_generated_python_artifact(relative):
+                continue
             if bundle_file.is_file() and not bundle_file.is_symlink():
                 entries.append(deployed_path_entry(bundle_file, project_root, targets))
         except OSError:

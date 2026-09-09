@@ -45,6 +45,7 @@ def _make_target(
     scoped.compile_family = compile_family
     scoped.resolved_deploy_root = deploy_root
     scoped.root_dir = f".{name}"
+    scoped.include_scoped_in_user_root_context = False
 
     if for_scope_returns is _UNSET:
         target.for_scope = MagicMock(return_value=scoped)
@@ -204,6 +205,73 @@ class TestSkippedNoInstructions:
             result = compile_user_root_contexts([target], source_root)
 
         assert len(result) == 1
+        assert result[0].status == "skipped-no-instructions"
+
+    def test_opencode_includes_scoped_instructions_in_user_agents_md(self, tmp_path):
+        from apm_cli.compilation.user_root_context import compile_user_root_contexts
+
+        source_root = tmp_path / "source"
+        (source_root / "apm_modules").mkdir(parents=True)
+        deploy_root = tmp_path / ".config" / "opencode"
+        target = _make_target("opencode", "agents", deploy_root=deploy_root)
+        target.for_scope.return_value.include_scoped_in_user_root_context = True
+        instr = _make_instruction("python", apply_to="**/*.py", content="Use hints")
+        primitives = MagicMock()
+        primitives.instructions = [instr]
+
+        with patch(
+            "apm_cli.primitives.discovery.discover_primitives",
+            return_value=primitives,
+        ):
+            result = compile_user_root_contexts([target], source_root)
+
+        assert result[0].status == "written"
+        content = (deploy_root / "AGENTS.md").read_text()
+        assert "## Files matching `**/*.py`" in content
+        assert "Use hints" in content
+
+    def test_opencode_scoped_content_is_independent_of_compile_cwd(self, tmp_path, monkeypatch):
+        """A stable source root keeps scoped-section order independent of CWD."""
+        from apm_cli.compilation.user_root_context import compile_user_root_contexts
+
+        source_root = tmp_path / "source"
+        (source_root / "apm_modules").mkdir(parents=True)
+        target = _make_target("opencode", "agents", deploy_root=tmp_path / ".config" / "opencode")
+        target.for_scope.return_value.include_scoped_in_user_root_context = True
+        first = _make_instruction("first", apply_to="src/**/*.py", content="First")
+        second = _make_instruction("second", apply_to="tests/**/*.py", content="Second")
+        first.file_path = source_root / "apm_modules" / "z" / "first.instructions.md"
+        second.file_path = source_root / "apm_modules" / "a" / "second.instructions.md"
+        primitives = MagicMock()
+        primitives.instructions = [first, second]
+
+        with patch("apm_cli.primitives.discovery.discover_primitives", return_value=primitives):
+            monkeypatch.chdir(tmp_path)
+            compile_user_root_contexts([target], source_root)
+            first_content = (tmp_path / ".config" / "opencode" / "AGENTS.md").read_bytes()
+
+            monkeypatch.chdir(source_root)
+            compile_user_root_contexts([target], source_root)
+            second_content = (tmp_path / ".config" / "opencode" / "AGENTS.md").read_bytes()
+
+        assert second_content == first_content
+
+    def test_control_target_excludes_scoped_instructions(self, tmp_path):
+        """Targets without the profile policy retain the global-only contract."""
+        from apm_cli.compilation.user_root_context import compile_user_root_contexts
+
+        source_root = tmp_path / "source"
+        (source_root / "apm_modules").mkdir(parents=True)
+        target = _make_target("claude", "claude", deploy_root=tmp_path / ".claude")
+        primitives = MagicMock()
+        primitives.instructions = [_make_instruction("python", apply_to="**/*.py")]
+
+        with patch(
+            "apm_cli.primitives.discovery.discover_primitives",
+            return_value=primitives,
+        ):
+            result = compile_user_root_contexts([target], source_root)
+
         assert result[0].status == "skipped-no-instructions"
 
 

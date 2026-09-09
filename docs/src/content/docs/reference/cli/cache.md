@@ -6,7 +6,7 @@ sidebar:
 ---
 
 Inspect and maintain the local cache APM uses to avoid redundant
-network I/O during `apm install`.
+network I/O during dependency installs and MCP registry lookups.
 
 ## Synopsis
 
@@ -23,20 +23,25 @@ root. The cache holds two independent stores:
 
 - **Git cache** -- bare repository databases plus per-SHA worktree
   checkouts, keyed by resolved commit.
-- **HTTP cache** -- conditional-GET responses for the GitHub release
-  and API endpoints APM polls during install.
+- **HTTP cache** -- conditional-GET responses for MCP registry
+  endpoints.
+
+A fresh, integrity-verified HTTP cache hit updates only the entry
+directory's `mtime`. This recency marker drives LRU eviction; it does
+not rewrite stored metadata or extend the response TTL. If the
+`mtime` update fails, APM logs the failure at debug level and returns
+the verified cached response. Stores and successful 304 refreshes
+also update the directory `mtime`.
 
 The cache is purely a performance optimization. Removing it never
-breaks correctness; the next `apm install` re-fetches whatever it
-needs.
+breaks correctness; the next dependency install or MCP registry
+lookup re-fetches whatever it needs.
 
-Plain and frozen installs can replay locked SHAs and reuse local bare
-repositories or per-SHA checkouts when upstream is unavailable. Commands that
-report or change current state -- `apm install --update`, `apm install
---refresh`, `apm update` (including `--force`), `apm lock --update`, and `apm outdated` -- do not
-accept a persistent bare-repository ref as evidence of current upstream state.
-After establishing a fresh SHA, update may still reuse content cached for that
-SHA. `--refresh` is stronger: it also bypasses cached content.
+Plain and frozen installs can reuse locked SHAs when upstream is unavailable.
+Commands that require current state -- `apm install --update`, `apm install
+--refresh`, `apm update` (including `--force`), `apm lock --update`, and `apm
+outdated` -- resolve upstream first. Update may reuse content for the resolved
+SHA; `--refresh` bypasses it.
 
 ## Subcommands
 
@@ -75,35 +80,70 @@ apm cache clean --yes        # alias for --force
 
 | Flag | Description |
 |---|---|
-| `--force`, `-f` | Skip the confirmation prompt. |
+| `--force`, `-f` | Skip the confirmation prompt. Does not suppress deletion failures or make the command succeed. |
 | `--yes`, `-y` | Alias for `--force`. Use in CI scripts so the command never blocks on stdin. |
+
+If an entry can't be deleted -- a locked file, a permissions error --
+`clean` still removes every other entry, then reports the incomplete
+cleanup with the affected paths and exits non-zero. Successful
+removals are not rolled back. Close the process holding the lock or
+fix permissions, then retry.
 
 :::caution
 `clean` removes every cached commit and every cached HTTP response.
-The next `apm install` will re-fetch everything from the network.
+The next dependency install or MCP registry lookup will re-fetch the
+required data from the network.
 Use `prune` when you only want to reclaim space from stale entries.
 :::
 
 ### `apm cache prune`
 
-Remove git-cache checkouts whose filesystem `mtime` is older than
-`--days N`. Defaults to 30 days. The HTTP cache is not touched.
+Remove Git-cache SHA groups whose shared `mtime` is older than `--days N`.
+Reusing a full or sparse variant refreshes the group timestamp; pruning removes
+all variants. The default is 30 days. The HTTP cache is not touched.
 
 ```bash
 apm cache prune              # default: older than 30 days
 apm cache prune --days 7     # tighter window
 ```
 
+Output counts SHA groups, not checkout variants:
+
+```text
+Pruning SHA groups older than 30 days...
+Pruned 2 SHA group(s).
+```
+
 | Flag | Description |
 |---|---|
-| `--days N` | Remove entries not accessed within this many days. Default: `30`. |
+| `--days N` | Remove SHA groups not accessed within this many days. Default: `30`. |
+
+A recency-only permission error after successful checkout validation is
+non-fatal:
+
+```text
+[!] Cannot update Git cache recency for <sha-root>: <cause>. Continuing with validated checkout; cache prune may evict it. Check cache permissions or set APM_CACHE_DIR to a writable directory.
+```
+
+Other filesystem errors and validation failures remain fatal.
+
+:::note
+`--days` accepts a nonnegative integer. Negative values are rejected
+before the cache is touched. `0` makes every past entry eligible for
+removal.
+:::
+
+`prune` counts only successfully deleted SHA groups and continues attempting
+other stale entries after removal errors. It reports completed and failed counts
+with each failed path and cause, then exits `1` if any failed; successful
+deletions are not rolled back, so fix permissions or release locks and rerun the
+command.
 
 :::caution[Lockfile-blind]
-`prune` does not consult any project's `apm.lock.yaml`. It can evict a
-per-SHA checkout that a plain or frozen install would otherwise reuse. If the
-remaining bare repository cannot rebuild that checkout, the next install
-requires remote access. Freshness-required commands require upstream ref
-resolution regardless of retained cache entries.
+`prune` does not consult project lockfiles. It can evict every variant for a
+locked SHA. If the bare repository cannot rebuild the checkout, the next
+install requires remote access. Freshness-required commands resolve upstream
+regardless of retained cache entries.
 :::
 
 ## Cache layout
@@ -129,7 +169,10 @@ Inside the cache root:
                      #                    for sparse-checkout consumers
     checkouts_v1/    # per-SHA worktree checkouts, variant-keyed
                      #   <shard>/<sha>/full/             -- full tree
-                     #   <shard>/<sha>/sparse-<hash>/    -- sparse cone
+                     #   <shard>/<sha>/sparse-<hash>/    -- sparse cone, or a
+                     #                                     full tree when a
+                     #                                     symlink target lies
+                     #                                     outside the cone
                      #                                     (<hash> = first
                      #                                      16 hex of
                      #                                      sha256(paths))
@@ -140,7 +183,9 @@ The `full/` and `sparse-<variant>/` subdirs let two consumers of the
 same commit share storage when they want the same subdirs, and keep
 distinct shards when they do not -- without the variant suffix the
 sparse checkout would clobber the full tree for any other consumer
-of that SHA.
+of that SHA. A sparse variant widens to the full tree when a package
+symlink targets a tracked file excluded from the sparse cone, so that
+variant can consume more disk than its name suggests.
 
 The cache root is created with mode `0700` and validated to be
 absolute with no NUL bytes before use.
@@ -156,10 +201,12 @@ absolute with no NUL bytes before use.
 ## Coming from npm?
 
 `apm cache clean` mirrors `npm cache clean`: it nukes the local cache
-and forces re-download on next install. There is no `--dry-run` and
-no per-package targeting; cleaning is all-or-nothing.
+and forces dependencies and registry responses to be downloaded again
+when next needed. There is no `--dry-run` and no per-package targeting;
+cleaning is all-or-nothing.
 
 ## Related
 
 - [`apm install`](../install/) -- populates the cache during dependency resolution.
+- [`apm mcp`](../mcp/) -- resolves MCP servers through registry lookups.
 - [Lockfile spec](../../lockfile-spec/) -- what gets pinned and re-fetched.

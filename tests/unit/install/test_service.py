@@ -81,6 +81,7 @@ class TestInstallServiceDelegation:
             allow_insecure_hosts=("mirror.example.com",),
             only_packages=["alpha", "beta"],
             marketplace_provenance={"source": "test-marketplace"},
+            trust_bin=True,
         )
         with patch("apm_cli.install.pipeline.run_install_pipeline") as mock_run:
             from apm_cli.models.results import InstallResult
@@ -102,6 +103,7 @@ class TestInstallServiceDelegation:
         assert kwargs["allow_insecure_hosts"] == ("mirror.example.com",)
         assert kwargs["only_packages"] == ["alpha", "beta"]
         assert kwargs["marketplace_provenance"] == {"source": "test-marketplace"}
+        assert kwargs["trust_bin"] is True
 
     def test_run_passes_optional_collaborators(self, fake_apm_package):
         logger = MagicMock()
@@ -141,6 +143,7 @@ class TestClickWrapperUsesService:
                 target="claude",
                 allow_insecure=True,
                 allow_insecure_hosts=("mirror.example.com",),
+                trust_bin=True,
             )
 
         assert result == "wrapped-result"
@@ -154,3 +157,4 @@ class TestClickWrapperUsesService:
         assert request.target == "claude"
         assert request.allow_insecure is True
         assert request.allow_insecure_hosts == ("mirror.example.com",)
+        assert request.trust_bin is True

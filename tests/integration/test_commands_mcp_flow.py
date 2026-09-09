@@ -662,6 +662,7 @@ class TestMcpRegistryEnvOverride:
         ):
             mock_instance = MagicMock()
             mock_instance.client.registry_url = "https://my-registry.example.com"
+            mock_instance.client.registry_url_source = "env"
             mock_cls.return_value = mock_instance
 
             with patch.object(logger, "progress") as mock_progress:
@@ -683,6 +684,7 @@ class TestMcpRegistryEnvOverride:
             patch("apm_cli.registry.integration.RegistryIntegration") as mock_cls,
         ):
             mock_instance = MagicMock()
+            mock_instance.client.registry_url_source = "default"
             mock_cls.return_value = mock_instance
 
             with patch.object(logger, "progress") as mock_progress:
@@ -700,6 +702,7 @@ class TestMcpRegistryEnvOverride:
         ):
             mock_instance = MagicMock()
             mock_instance.client.registry_url = "https://ent-registry.local"
+            mock_instance.client.registry_url_source = "env"
             mock_cls.return_value = mock_instance
 
             _build_registry_with_diag(mock_console, None)
@@ -724,6 +727,7 @@ class TestHandleRegistryNetworkError:
         logger = CommandLogger("test")
         mock_reg = MagicMock()
         mock_reg.client.registry_url = "https://r.example.com"
+        mock_reg.client.registry_url_source = "default"
 
         env = {k: v for k, v in os.environ.items() if k != "MCP_REGISTRY_URL"}
         with patch.dict(os.environ, env, clear=True):
@@ -739,6 +743,7 @@ class TestHandleRegistryNetworkError:
         logger = CommandLogger("test")
         mock_reg = MagicMock()
         mock_reg.client.registry_url = "https://custom.r.io"
+        mock_reg.client.registry_url_source = "env"
 
         with patch.dict(os.environ, {MCP_REGISTRY_ENV: "https://custom.r.io"}):
             with patch.object(logger, "error") as mock_err:
@@ -753,6 +758,7 @@ class TestHandleRegistryNetworkError:
         logger = CommandLogger("test")
         mock_reg = MagicMock()
         mock_reg.client.registry_url = "https://public.r.io"
+        mock_reg.client.registry_url_source = "default"
 
         env = {k: v for k, v in os.environ.items() if k != MCP_REGISTRY_ENV}
         with patch.dict(os.environ, env, clear=True):
@@ -767,6 +773,7 @@ class TestHandleRegistryNetworkError:
         mock_console = MagicMock()
         mock_reg = MagicMock()
         mock_reg.client.registry_url = "https://r.example.com"
+        mock_reg.client.registry_url_source = "default"
 
         env = {k: v for k, v in os.environ.items() if k != "MCP_REGISTRY_URL"}
         with patch.dict(os.environ, env, clear=True):

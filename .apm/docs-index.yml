@@ -148,6 +148,15 @@ pages:
       flags: []
       schemas: [marketplace.json]
 
+  - path: docs/src/content/docs/consumer/copilot-agent-plugins.md
+    title: "Install Agent Plugins for Copilot"
+    persona: consumer
+    promise: 1
+    documents_symbols:
+      cli: [apm install, apm uninstall, apm prune, apm update, apm deps list]
+      flags: [--target, -g]
+      schemas: [marketplace.json, settings.local.json, apm-registration.json]
+
   - path: docs/src/content/docs/producer/index.md
     title: "Producer overview"
     persona: producer
@@ -258,7 +267,7 @@ pages:
 # structural verdict.
 symbol_index:
   cli:
-    "apm install": [docs/src/content/docs/consumer/install-packages.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
+    "apm install": [docs/src/content/docs/consumer/install-packages.md, docs/src/content/docs/consumer/installing-from-marketplaces.md, docs/src/content/docs/consumer/copilot-agent-plugins.md]
     "apm compile": [docs/src/content/docs/producer/compile.md]
     "apm pack": [docs/src/content/docs/producer/pack-a-bundle.md, docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/releasing-from-any-ci.md, docs/src/content/docs/producer/versioning-strategies.md]
     "apm plugin init": [docs/src/content/docs/producer/repo-shapes.md, docs/src/content/docs/reference/cli/plugin.md]

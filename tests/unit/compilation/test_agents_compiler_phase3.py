@@ -542,24 +542,20 @@ class TestMaybeEmitCopilotRootInstructions(unittest.TestCase):
         primitives = _make_primitives(inst)
         base_result = _make_result(stats={})
 
-        out = self._output_path()
+        out = compiler.base_dir / ".github" / "copilot-instructions.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("fake", encoding="utf-8")
 
-        target_str = str(out)
-
-        original_read_text = Path.read_text
-
-        def _fake_read_text(self_path, *args, **kwargs):
-            if str(self_path) == target_str:
-                raise OSError("read denied")
-            return original_read_text(self_path, *args, **kwargs)
-
-        with patch("pathlib.Path.read_text", _fake_read_text):
+        with patch(
+            "apm_cli.compilation.agents_compiler.Path.read_text",
+            side_effect=OSError("read denied"),
+        ) as read_text:
             result = compiler._maybe_emit_copilot_root_instructions(config, primitives, base_result)
 
+        read_text.assert_called_once_with(encoding="utf-8")
         self.assertFalse(result.success)
-        self.assertTrue(any("read denied" in e or "Failed to read" in e for e in result.errors))
+        self.assertTrue(any("Failed to read" in error for error in result.errors))
+        self.assertTrue(any("read denied" in error for error in compiler.errors))
 
     def test_oserror_writing_file_adds_error(self) -> None:
         compiler = AgentsCompiler(self.tmp)

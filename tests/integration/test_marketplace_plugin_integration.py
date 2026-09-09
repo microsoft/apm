@@ -449,12 +449,12 @@ class TestPluginIntegration:
         plugin_json = plugin_dir / "plugin.json"
         plugin_json.write_text("{ this is not valid json }")
 
-        # Validate — the parser should fall back to dir-name defaults and succeed
+        # Malformed root plugin.json fails closed instead of entering legacy projection.
         result = validate_apm_package(plugin_dir)
-        assert result.package_type == PackageType.MARKETPLACE_PLUGIN
-        # name derived from directory name
-        assert result.package is not None
-        assert result.package.name == "invalid-plugin"
+        assert result.package_type == PackageType.INVALID
+        assert result.is_valid is False
+        assert result.package is None
+        assert any("Invalid root plugin.json" in error for error in result.errors)
 
     def test_plugin_without_artifacts(self, tmp_path):
         """Test plugin with only plugin.json and no artifacts."""

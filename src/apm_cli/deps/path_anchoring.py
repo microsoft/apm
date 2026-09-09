@@ -60,6 +60,9 @@ def resolve_local_dep_dir(
     lock_dep: LockedDependency,
     lockfile: LockFile | None,
     project_root: Path,
+    *,
+    parent_index: dict[str, tuple[LockedDependency, ...]] | None = None,
+    resolved_cache: dict[str, Path] | None = None,
 ) -> Path:
     """Resolve the on-disk source directory for a locked LOCAL dependency.
 
@@ -84,8 +87,47 @@ def resolve_local_dep_dir(
             f"not a resolvable local dependency: repo_url={lock_dep.repo_url!r} "
             f"source={lock_dep.source!r} local_path={lock_dep.local_path!r}"
         )
-    anchor = _anchor_dir(lock_dep, lockfile, project_root.resolve(), seen=set())
-    return _join(anchor, lock_dep.local_path)
+    if not lock_dep.resolved_by:
+        return _join(project_root.resolve(), lock_dep.local_path)
+    index = parent_index if parent_index is not None else build_local_parent_index(lockfile)
+    cache = resolved_cache if resolved_cache is not None else {}
+    return _resolve_dep_dir(
+        lock_dep,
+        lockfile,
+        project_root.resolve(),
+        parent_index=index,
+        resolved_cache=cache,
+        seen=set(),
+    )
+
+
+def build_local_parent_index(
+    lockfile: LockFile | None,
+) -> dict[str, tuple[LockedDependency, ...]]:
+    """Index local dependencies by repo URL for repeated parent resolution."""
+    grouped: dict[str, list[LockedDependency]] = {}
+    if lockfile is not None:
+        for dependency in lockfile.dependencies.values():
+            if dependency.source == "local" and dependency.local_path:
+                grouped.setdefault(dependency.repo_url, []).append(dependency)
+    return {repo_url: tuple(dependencies) for repo_url, dependencies in grouped.items()}
+
+
+def resolve_local_dep_dirs(lockfile: LockFile, project_root: Path) -> dict[str, Path]:
+    """Resolve every locked local dependency with one shared index and cache."""
+    parent_index = build_local_parent_index(lockfile)
+    resolved_cache: dict[str, Path] = {}
+    return {
+        dependency.get_unique_key(): resolve_local_dep_dir(
+            dependency,
+            lockfile,
+            project_root,
+            parent_index=parent_index,
+            resolved_cache=resolved_cache,
+        )
+        for dependency in lockfile.get_package_dependencies()
+        if dependency.source == "local"
+    }
 
 
 def _join(anchor: Path, local_path: str) -> Path:
@@ -94,17 +136,25 @@ def _join(anchor: Path, local_path: str) -> Path:
     return raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
 
 
-def _anchor_dir(
+def _resolve_dep_dir(
     dep: LockedDependency,
     lockfile: LockFile | None,
     project_root: Path,
+    *,
+    parent_index: dict[str, tuple[LockedDependency, ...]],
+    resolved_cache: dict[str, Path],
     seen: set[str],
 ) -> Path:
-    """Return the directory on which *dep*'s ``local_path`` is anchored."""
-    if not dep.resolved_by:
-        return project_root
-
+    """Resolve one dependency, memoizing every parent in its ancestry."""
     key = dep.get_unique_key()
+    cached = resolved_cache.get(key)
+    if cached is not None:
+        return cached
+    if not dep.resolved_by:
+        resolved = _join(project_root, dep.local_path)
+        resolved_cache[key] = resolved
+        return resolved
+
     if key in seen:
         raise LocalResolutionError(
             f"cycle in resolved_by chain at {dep.repo_url!r} "
@@ -112,12 +162,27 @@ def _anchor_dir(
         )
     seen.add(key)
 
-    parent = _find_parent(lockfile, dep)
-    parent_anchor = _anchor_dir(parent, lockfile, project_root, seen)
-    return _join(parent_anchor, parent.local_path)
+    parent = _find_parent(lockfile, dep, parent_index=parent_index)
+    parent_dir = _resolve_dep_dir(
+        parent,
+        lockfile,
+        project_root,
+        parent_index=parent_index,
+        resolved_cache=resolved_cache,
+        seen=seen,
+    )
+    resolved = _join(parent_dir, dep.local_path)
+    resolved_cache[key] = resolved
+    seen.remove(key)
+    return resolved
 
 
-def _find_parent(lockfile: LockFile | None, dep: LockedDependency) -> LockedDependency:
+def _find_parent(
+    lockfile: LockFile | None,
+    dep: LockedDependency,
+    *,
+    parent_index: dict[str, tuple[LockedDependency, ...]],
+) -> LockedDependency:
     """Find the unique local parent of *dep* by ``repo_url == resolved_by``.
 
     ``resolved_by`` carries the parent's ``repo_url`` (e.g. ``_local/foo``),
@@ -132,11 +197,7 @@ def _find_parent(lockfile: LockFile | None, dep: LockedDependency) -> LockedDepe
             f"{dep.repo_url!r} declares resolved_by={dep.resolved_by!r} but no "
             "lockfile was supplied to resolve the parent"
         )
-    matches = [
-        other
-        for other in lockfile.dependencies.values()
-        if other.repo_url == dep.resolved_by and other.source == "local" and other.local_path
-    ]
+    matches = parent_index.get(dep.resolved_by, ())
     if not matches:
         raise LocalResolutionError(
             f"resolved_by parent {dep.resolved_by!r} of {dep.repo_url!r} "
