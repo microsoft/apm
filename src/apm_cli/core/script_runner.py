@@ -187,7 +187,14 @@ class ScriptRunner:
             else:
                 # Use regular shell execution for other commands
                 # (shell=True works cross-platform: bash on Unix, cmd.exe on Windows)
-                result = subprocess.run(compiled_command, shell=True, check=True, env=env)
+                from .tls_trust import build_child_tls_env
+
+                result = subprocess.run(
+                    compiled_command,
+                    shell=True,
+                    check=True,
+                    env=build_child_tls_env(env, runtime_name=runtime),
+                )
 
             execution_time = time.time() - start_time
 
@@ -569,7 +576,13 @@ class ScriptRunner:
             resolved = find_runtime_binary(actual_command_args[0])
             if resolved:
                 actual_command_args[0] = resolved
-        return subprocess.run(actual_command_args, check=True, env=env_vars)
+        from .tls_trust import build_child_tls_env
+
+        return subprocess.run(
+            actual_command_args,
+            check=True,
+            env=build_child_tls_env(env_vars, runtime_name=runtime),
+        )
 
     def _discover_prompt_file(self, name: str) -> Path | None:
         """Discover prompt files by name across local and dependencies.

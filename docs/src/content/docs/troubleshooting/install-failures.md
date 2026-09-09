@@ -139,7 +139,7 @@ For end-to-end auth setup see [Authentication](../../getting-started/authenticat
 [!] TLS verification failed
 ```
 
-APM verifies HTTPS against the OS trust store by default. Behind a corporate proxy, install your org's CA into the OS trust store; for a per-shell override, set `REQUESTS_CA_BUNDLE` to a readable PEM bundle. Full walkthrough: [SSL / TLS issues](../ssl-issues/).
+APM verifies HTTPS against the OS trust store by default. Behind a corporate proxy, install your org's CA into the OS trust store; for a per-shell additive setting that retains public trust, set `APM_EXTRA_CA_BUNDLE` to a readable PEM bundle. Use `REQUESTS_CA_BUNDLE` only when you intend to replace the complete Python trust set. Full walkthrough: [SSL / TLS issues](../ssl-issues/).
 
 ### Timeouts and proxies
 

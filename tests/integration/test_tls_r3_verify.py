@@ -370,19 +370,19 @@ def test_child_bootstrap_leaves_pip_vendored_truststore_in_control(
     assert injections == []
 
 
-def test_v4_best_effort_control_flow_does_not_abort(tmp_path):
+def test_v4_best_effort_control_flow_does_not_abort():
     # Dynamically prove the bash guard: a failing `pip` under `set -euo
     # pipefail` guarded by `|| log_warning` still exits 0 and runs later steps.
-    script = tmp_path / "probe.sh"
-    script.write_text(
+    script = (
         "set -euo pipefail\n"
         'log_warning() { echo "[!] $*"; }\n'
         "pip() { echo 'simulated failure' >&2; return 1; }\n"
         "pip install 'truststore>=0.10.0' || log_warning 'truststore install failed'\n"
-        "echo CONTINUED\n",
-        encoding="ascii",
+        "echo CONTINUED\n"
     )
-    result = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [shutil.which("bash") or "bash"], input=script, capture_output=True, text=True, check=False
+    )
     assert result.returncode == 0, result.stderr
     assert "CONTINUED" in result.stdout
 
@@ -390,7 +390,7 @@ def test_v4_best_effort_control_flow_does_not_abort(tmp_path):
 # --------------------------------------------------------------------------- #
 # V5 (M5/L1/M4-docs): docs + changelog scope honesty
 # --------------------------------------------------------------------------- #
-def test_v5_ssl_docs_early_caveat_and_notes():
+def test_v5_ssl_docs_runtime_scope_and_notes():
     docs = (
         _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
     ).read_text(encoding="utf-8")
@@ -398,15 +398,14 @@ def test_v5_ssl_docs_early_caveat_and_notes():
     lines = docs.splitlines()
     heading = "## Default behaviour: the OS trust store"
     heading_idx = next(i for i, line in enumerate(lines) if line.strip() == heading)
-    caveat_idx = next(i for i, line in enumerate(lines) if "Scope caveat" in line)
-    assert caveat_idx > heading_idx
-    # The caveat must be near the top of the section, not buried far below.
-    gap = sum(1 for line in lines[heading_idx + 1 : caveat_idx] if line.strip())
-    assert gap <= 2, f"Node/Codex caveat must sit within ~2 content lines, got {gap}"
+    runtime_scope_idx = next(i for i, line in enumerate(lines) if "Runtime coverage" in line)
+    assert runtime_scope_idx > heading_idx
 
     known_limits = docs.index("### Known limitations")
     early_region = docs[docs.index(heading) : known_limits]
+    assert "APM_EXTRA_CA_BUNDLE" in early_region
     assert "NODE_EXTRA_CA_CERTS" in early_region
+    assert "Rust/Codex" in early_region
 
     # M4-docs: pip's own cert resolution caveat during setup.
     assert "PIP_CERT" in docs

@@ -264,12 +264,14 @@ See also: [Install failures](../install-failures/)
 TLS verification failed -- APM uses the system trust store by default.
 If you're behind a corporate proxy or firewall, make sure your
 organisation's CA is installed in the OS trust store, or set
-REQUESTS_CA_BUNDLE to a readable PEM bundle and retry.
+APM_EXTRA_CA_BUNDLE to a readable PEM bundle to add it while retaining
+public trust. Use REQUESTS_CA_BUNDLE only to replace the complete
+Python trust set.
 ```
 
 Cause: Python's TLS stack rejected the server certificate. Almost always a corporate proxy doing TLS interception with a CA that is not in the system trust store.
 
-Fix: install the corporate CA into the OS trust store and retry. For a per-shell override, export `REQUESTS_CA_BUNDLE=/path/to/corporate-ca.pem`; `SSL_CERT_FILE` alone is not a reliable requests override. Do not disable TLS verification.
+Fix: install the corporate CA into the OS trust store and retry. For a per-shell additive setting that retains public trust, export `APM_EXTRA_CA_BUNDLE=/path/to/corporate-ca.pem`. Use `REQUESTS_CA_BUNDLE` only when you intend to replace the complete Python trust set; `SSL_CERT_FILE` alone is not a reliable requests override. Do not disable TLS verification.
 
 See also: [SSL issues](../ssl-issues/)
 

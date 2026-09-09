@@ -43,12 +43,17 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 
 APM keeps certificate verification enabled for every HTTPS request. Python-based paths verify against the operating-system trust store by default through `truststore`, so corporate roots trusted by `git` and `curl` are also trusted by `apm install`.
 
-- `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` replace the OS store with an explicitly selected PEM bundle for APM's HTTP layer.
-- `APM_DISABLE_TRUSTSTORE=1` restores the previous bundled-`certifi` behavior.
-- If `truststore` is unavailable or injection fails, APM falls back to `certifi`; it does not disable verification.
-- The Python-based `llm` runtime receives a shipped, self-contained `.pth` bootstrap in its managed virtual environment. The bootstrap imports only `truststore`; it does not execute dependency-provided package content.
+- Trust selection is deterministic: `REQUESTS_CA_BUNDLE`, then `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, `APM_EXTRA_CA_BUNDLE`, the OS trust store, and finally bundled `certifi` as the Requests verification fallback.
+- `APM_DISABLE_TRUSTSTORE=1` disables APM's OS/additive propagation. It does not unset a separately configured Requests/curl replacement bundle.
+- `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` replace the OS store with an explicitly selected PEM bundle for APM's Python HTTP layer.
+- `APM_EXTRA_CA_BUNDLE` is additive. Truststore-backed parent contexts retain native OS roots and add certificates from the selected PEM bundle; the parent Requests fallback retains bundled `certifi` roots plus those certificates.
+- Before `apm run` launches a child, APM copies the validated CA bytes into an APM-owned, per-process directory beneath the user's `~/.apm/tls/` data directory. Python/Requests children receive a merged `certifi`-plus-extra snapshot, and the source file cannot change their trust after validation. The per-process directory is removed when the APM process exits normally.
+- The Python-based `llm` runtime receives a shipped, self-contained `.pth` bootstrap in its managed virtual environment. APM refreshes the bootstrap before a managed `llm` launch, so an existing runtime receives trust updates after APM is upgraded. The bootstrap imports only `truststore`; it does not execute dependency-provided package content.
+- For Node-based children, APM derives `NODE_EXTRA_CA_CERTS` from the validated extra-only snapshot. An explicitly set `NODE_EXTRA_CA_CERTS` remains authoritative and is never overwritten.
+- A missing, unreadable, empty, non-regular, oversized, non-ASCII, malformed, or private-key-bearing additive bundle is a configuration error. APM rejects private material before snapshotting and fails closed rather than ignoring the bundle or disabling verification.
+- If `truststore` is unavailable or injection fails, the APM parent's Requests-based HTTPS falls back to `certifi`; when an additive bundle is selected, it remains additive to that fallback. Parent stdlib `urllib` callers do not consult the Requests fallback bundle. A managed Python child without `truststore` likewise retains `certifi` plus the extra CA for Requests-based HTTPS. APM never disables verification.
 
-Node-based (Copilot) and Rust-based (Codex) child runtimes retain their own trust configuration for now. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
+Git remains separately configured through its own trust settings. Rust-based Codex retains its runtime-owned trust configuration. See [SSL / TLS issues](../../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
 
 ## Dependency provenance
 

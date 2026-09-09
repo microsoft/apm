@@ -29,7 +29,7 @@ class TestLLMRuntime:
             check=True,
             env={"PATH": "clean"},
         )
-        mock_child_env.assert_called_once_with(os.environ)
+        mock_child_env.assert_called_once_with(os.environ, runtime_name="llm")
 
     @patch("apm_cli.runtime.llm_runtime.subprocess.run")
     def test_init_fallback(self, mock_run):
@@ -104,4 +104,4 @@ class TestLLMRuntime:
             check=True,
             env={"PATH": "clean"},
         )
-        mock_child_env.assert_called_once_with(os.environ)
+        mock_child_env.assert_called_once_with(os.environ, runtime_name="llm")

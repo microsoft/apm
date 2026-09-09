@@ -1,10 +1,9 @@
-"""T3: the #2005 docs/CHANGELOG must scope OS-trust honestly.
+"""Documentation drift guards for the #2005 and #2034 TLS trust contracts.
 
-Round-1 shipped copy claiming ``apm run`` child runtimes (incl. ``codex``)
-re-run the OS-trust bootstrap. That was a field no-op for the ``llm`` venv and
-never true for the Node/Rust runtimes. These tests are the silent-drift guard
-that keeps the prose scoped to what actually ships: ``apm install`` plus the
-Python ``llm`` runtime, with Node (Copilot) / Rust (Codex) tracked in #2034.
+The additive bundle is now implemented for APM's parent Python path, its
+managed Python child, and Node child propagation. Git and Rust-based Codex
+still own their native trust configuration; the docs must keep that boundary
+visible while positively describing the shipped additive controls.
 """
 
 from __future__ import annotations
@@ -44,11 +43,10 @@ def test_ssl_docs_scope_and_known_limitations():
     ).read_text(encoding="utf-8")
 
     assert "### Known limitations" in docs, "ssl-issues.md must have a Known limitations section"
-    assert "#2034" in docs, "ssl-issues.md must reference the Node/Rust follow-up (#2034)"
-    # Node (Copilot) / Rust (Codex) must be described as NOT covered.
-    assert "not yet covered" in docs
-    # The stale round-1 claim that codex re-runs the bootstrap must be gone.
-    assert "the `llm` and `codex` CLIs) re-run the same OS-trust bootstrap" not in docs
+    assert "APM_EXTRA_CA_BUNDLE" in docs
+    assert "NODE_EXTRA_CA_CERTS" in docs
+    assert "Rust-based Codex" in docs
+    assert "runtime-owned trust configuration" in docs
 
 
 def test_changelog_names_tls_precedence_controls():
@@ -60,21 +58,23 @@ def test_changelog_names_tls_precedence_controls():
     assert "`CURL_CA_BUNDLE`" in entry
 
 
-def test_ssl_docs_node_caveat_appears_early():
+def test_ssl_docs_runtime_scope_appears_early():
     docs = (
         _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
     ).read_text(encoding="utf-8")
 
     heading = "## Default behaviour: the OS trust store"
     start = docs.index(heading)
-    known_limits = docs.index("### Known limitations")
-    # The Node/Codex caveat must surface EARLY -- inside the Default behaviour
-    # section, well before the Known limitations block far below.
-    caveat = docs.index("Scope caveat", start)
-    assert caveat < known_limits, "Node/Codex caveat must appear before Known limitations"
-    # And it must offer the workaround users can apply today.
-    caveat_region = docs[start:known_limits]
-    assert "NODE_EXTRA_CA_CERTS" in caveat_region
+    configure = docs.index("## Configure trust")
+    # Runtime coverage must be visible in the default-behaviour explanation,
+    # before users reach configuration recipes.
+    scope = docs.index("### Runtime coverage", start)
+    assert scope < configure
+    scope_region = docs[scope:configure]
+    assert "Node/Copilot child" in scope_region
+    assert "NODE_EXTRA_CA_CERTS" in scope_region
+    assert "Rust/Codex" in scope_region
+    assert "runtime's own trust settings" in scope_region
 
 
 def test_ssl_docs_pip_cert_and_replaces_notes():
@@ -90,13 +90,16 @@ def test_ssl_docs_pip_cert_and_replaces_notes():
     assert "stale `REQUESTS_CA_BUNDLE`" in docs
 
 
-def test_ssl_docs_keep_planned_configuration_generic():
+def test_ssl_docs_describe_additive_validation_and_precedence():
     docs = (
         _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
     ).read_text(encoding="utf-8")
 
-    assert "APM_EXTRA_CA_BUNDLE" not in docs
-    assert docs.count("#2034") == 1
+    assert "APM_EXTRA_CA_BUNDLE" in docs
+    assert "retains native OS roots" in docs
+    assert "no larger than 8 MiB" in docs
+    assert "invalid selected bundle fails closed" in docs
+    assert "`REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `APM_DISABLE_TRUSTSTORE`, " in docs
 
 
 def test_enterprise_security_docs_transport_trust_model():
@@ -108,17 +111,31 @@ def test_enterprise_security_docs_transport_trust_model():
     assert "APM_DISABLE_TRUSTSTORE" in security
     assert "REQUESTS_CA_BUNDLE" in security
     assert "CURL_CA_BUNDLE" in security
+    assert "APM_EXTRA_CA_BUNDLE" in security
+    assert "NODE_EXTRA_CA_CERTS" in security
     assert ".pth" in security
     assert "Node" in security
     assert "Rust" in security
 
 
-def test_ssl_docs_verify_apm_path_and_mark_planned_scope():
+def test_ssl_docs_verify_apm_path_and_shipped_scope():
     docs = (
         _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
     ).read_text(encoding="utf-8")
 
-    assert ":::note[Planned]" in docs
+    assert "export APM_EXTRA_CA_BUNDLE=/path/to/corporate-ca.pem" in docs
+    assert "export NODE_EXTRA_CA_CERTS=/path/to/node-ca-bundle.pem" in docs
     assert 'python -c "import requests' not in docs
     assert "APM_LOG_LEVEL=DEBUG apm install" in docs
     assert "schannel" not in docs.lower()
+
+
+def test_changelog_names_additive_bundle_and_node_non_override():
+    changelog = (_repo_root() / "CHANGELOG.md").read_text(encoding="utf-8")
+    entry = _changelog_entry(changelog, "#2034")
+    prose = " ".join(entry.split())
+
+    assert "`APM_EXTRA_CA_BUNDLE`" in entry
+    assert "without replacing existing trust" in prose
+    assert "`NODE_EXTRA_CA_CERTS`" in entry
+    assert "without overwriting" in prose
