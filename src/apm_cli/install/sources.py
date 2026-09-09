@@ -470,6 +470,9 @@ class CachedDependencySource(DependencySource):
                     package_path=install_path,
                     source=dep_ref.repo_url,
                 )
+        from apm_cli.models.apm_package import restore_installed_package_source
+
+        restore_installed_package_source(cached_package, dep_ref)
         if not cached_package.source:
             cached_package.source = dep_ref.repo_url
 
