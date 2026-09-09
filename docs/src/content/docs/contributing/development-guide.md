@@ -56,24 +56,13 @@ Enhancement suggestions are welcome! Please:
 
 ### Required CI and release gates
 
-`Merge Gate / gate` is the required PR and merge-queue check. It accepts only
-successful underlying GitHub Actions checks; skipped, neutral, missing,
-duplicate, failed, cancelled, or timed-out checks fail closed. It requires Lint
-and Test Architecture Ratchets in both contexts.
-
-Release candidates never reuse PR artifacts. Tags publish only fresh full
-qualification or a same-SHA, trusted-main candidate with matching evidence.
-Ordinary `main` green status is not enough. See
-[Integration Testing](../integration-testing/) for the native platform matrix,
-runtime selections, and archive-promotion model.
-
-Maintainers can apply the `ci-performance` PR label to run read-only native
-and Windows before/after comparisons. These probes require identical test
-outcomes and report execution time separately from runner setup and queue
-delays. They neither publish releases nor replace required qualification.
-Remove the label before unrelated follow-up pushes to avoid rerunning them.
-See [performance capture](../integration-testing/#timing-and-performance-capture)
-for artifact names and acceptance criteria.
+`Merge Gate / gate` is the required PR and merge-queue check.
+Ordinary `main` success is not release qualification. See the canonical
+[CI gates](../integration-testing/#pull-requests-and-merge-queue),
+[release qualification](../integration-testing/#release-qualification),
+[candidate reuse](../integration-testing/#candidate-reuse-on-tags),
+[publication recovery](../integration-testing/#publication-recovery), and
+[performance capture](../integration-testing/#timing-and-performance-capture) sections.
 
 ### Workflow dependency updates
 

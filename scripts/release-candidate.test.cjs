@@ -3,7 +3,6 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { after, describe, it } = require("node:test");
 
@@ -38,7 +37,7 @@ function digestBytes(bytes) {
 }
 
 function makeTemp() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "apm-release-candidate-"));
+  const root = fs.mkdtempSync(path.join(ROOT, ".release-candidate-test-"));
   after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
@@ -146,7 +145,7 @@ function context(overrides = {}) {
   };
 }
 
-function fakeGithub({ runs = [], artifactsByRun = {}, jobsByRun = {}, runById = {}, calls = [] } = {}) {
+function fakeGithub({ runs = [], artifactsByRun = {}, jobsByRunAttempt = {}, runById = {}, calls = [] } = {}) {
   return {
     rest: {
       actions: {
@@ -160,11 +159,12 @@ function fakeGithub({ runs = [], artifactsByRun = {}, jobsByRun = {}, runById = 
         },
         listJobsForWorkflowRun: async (params) => {
           calls.push(["listJobsForWorkflowRun", params]);
-          return { data: { jobs: jobsByRun[Number(params.run_id)] || [] } };
+          const attempt = runById[Number(params.run_id)]?.run_attempt || 1;
+          return { data: { jobs: jobsByRunAttempt[`${params.run_id}:${attempt}`] || [] } };
         },
         listJobsForWorkflowRunAttempt: async (params) => {
           calls.push(["listJobsForWorkflowRunAttempt", params]);
-          return { data: { jobs: jobsByRun[Number(params.run_id)] || [] } };
+          return { data: { jobs: jobsByRunAttempt[`${params.run_id}:${params.attempt_number}`] || [] } };
         },
         getWorkflowRun: async (params) => {
           calls.push(["getWorkflowRun", params]);
@@ -181,6 +181,58 @@ function withCwd(dir, fn) {
   return Promise.resolve()
     .then(fn)
     .finally(() => process.chdir(old));
+}
+
+async function withQualifiedReusableCandidate(fn) {
+  const root = makeTemp();
+  writeRequiredConfig(root);
+  const artifactRoot = path.join(root, "candidate-artifacts");
+  writeCandidateFiles(artifactRoot);
+  const evidencePath = path.join(root, "release-candidate-evidence.json");
+  const outputRoot = path.join(root, "release-assets");
+  const run = {
+    id: 123, event: "schedule", path: rc.WORKFLOW_PATH, head_sha: SHA,
+    head_branch: "main", status: "completed", conclusion: "success",
+    run_attempt: 1, run_started_at: NOW,
+  };
+  const artifacts = artifactMetadata();
+  const calls = [];
+  const github = fakeGithub({
+    artifactsByRun: { 123: artifacts },
+    jobsByRunAttempt: { "123:1": requiredJobs(), "123:2": requiredJobs() },
+    runById: { 123: run },
+    calls,
+  });
+  return withCwd(root, async () => {
+    const evidence = await rc.qualify({
+      github,
+      context: context({ runId: 123, eventName: "schedule", ref: "refs/heads/main" }),
+      artifactRoot,
+      evidencePath,
+    });
+    assert.deepEqual(
+      calls.filter(([name]) => name.startsWith("listJobs")),
+      [["listJobsForWorkflowRunAttempt", {
+        owner: "microsoft", repo: "apm", run_id: 123, attempt_number: 1, per_page: 100,
+      }]],
+    );
+    assert.equal(evidence.run_id, 123);
+    assert.equal(evidence.run_attempt, 1);
+    assert.equal(evidence.event, "schedule");
+    assert.equal(fs.existsSync(outputRoot), false);
+    calls.length = 0;
+    await fn({
+      root, run, artifacts, calls, evidence,
+      options: {
+        github,
+        context: context({ runId: 999, runAttempt: 7 }),
+        runId: 123,
+        artifactRoot,
+        evidencePath,
+        outputRoot,
+      },
+    });
+  });
 }
 
 describe("release candidate planning", () => {
@@ -214,6 +266,10 @@ describe("release candidate planning", () => {
       assert.equal(outputs.candidate_artifact_ids, "");
       assert.equal(outputs.candidate_evidence_artifact_id, "");
       assert.match(messages[0], /building a fresh full candidate/);
+      assert.match(messages[0], /Prior candidate run 123 attempt 1 unavailable:/);
+      assert.match(messages[0], /automatically\. No operator action required\./);
+      assert.equal(messages.some((message) => /Re-run all jobs/.test(message)), false);
+      assert.equal(messages[1], "Release plan: fresh full qualification; no reusable candidate is available for this SHA.");
     });
   }
 
@@ -245,6 +301,7 @@ describe("release candidate planning", () => {
 
   it("outputs prior candidate run and artifact IDs for exact-SHA tag promotion", async () => {
     const outputs = {};
+    const messages = [];
     const run = {
       id: 123,
       event: "schedule",
@@ -264,13 +321,36 @@ describe("release candidate planning", () => {
     await rc.plan({
       github,
       context: context(),
-      core: { setOutput(name, value) { outputs[name] = value; } },
+      core: {
+        setOutput(name, value) { outputs[name] = value; },
+        info(message) { messages.push(message); },
+      },
     });
 
     assert.equal(outputs.candidate_run_id, "123");
     assert.match(outputs.candidate_evidence_artifact_id, /^[0-9]+$/);
     assert.equal(outputs.candidate_artifact_ids.split(",").length, 5);
+    assert.deepEqual(messages, [
+      `Release plan: reuse; trusted exact-SHA candidate from source run 123 attempt 1 SHA ${SHA}.`,
+    ]);
   });
+
+  for (const [overrides, message] of [
+    [{}, "fresh full qualification; no reusable candidate is available for this SHA"],
+    [{ eventName: "schedule", ref: "refs/heads/main" }, "fresh full qualification; schedule uses the current run"],
+    [{ eventName: "repository_dispatch", ref: "refs/heads/main" }, "fresh full qualification; repository_dispatch uses the current run"],
+    [{ ref: "refs/heads/main" }, "fresh platform validation; push uses the current run"],
+  ]) {
+    it(`explains planning when ${message}`, async () => {
+      const messages = [];
+      await rc.plan({
+        github: fakeGithub(),
+        context: context(overrides),
+        core: { setOutput() {}, info(message) { messages.push(message); } },
+      });
+      assert.deepEqual(messages, [`Release plan: ${message}.`]);
+    });
+  }
 });
 
 describe("trusted candidate discovery", () => {
@@ -469,6 +549,21 @@ describe("trusted candidate discovery", () => {
     );
   });
 
+  it("keeps manual rerun guidance for an explicitly selected unavailable candidate", async () => {
+    const run = {
+      id: 123, event: "schedule", path: rc.WORKFLOW_PATH, head_sha: SHA,
+      head_branch: "main", status: "completed", conclusion: "success",
+      run_attempt: 1, run_started_at: NOW,
+    };
+    await assert.rejects(
+      () => rc.resolveExplicitCandidateRun({
+        github: fakeGithub({ runById: { 123: run } }),
+        context: context(), runId: 123, sha: SHA,
+      }),
+      /Candidate run 123 attempt 1: Expected exactly one workflow artifact named release-candidate-evidence-1, found 0\. Use Re-run all jobs/,
+    );
+  });
+
   it("hard-fails invalid explicit candidate_run_id instead of falling back", async () => {
     const github = fakeGithub({
       runById: {
@@ -570,6 +665,78 @@ describe("trusted candidate discovery", () => {
   });
 });
 
+describe("cross-run candidate promotion", () => {
+  it("promotes schedule run A attempt 1 from tag run B with exact archive and sidecar bytes", async () => {
+    await withQualifiedReusableCandidate(async ({ calls, evidence, options }) => {
+      const verified = await rc.verify(options);
+
+      assert.deepEqual(verified, evidence);
+      assert.deepEqual(calls, [
+        ["getWorkflowRun", { owner: "microsoft", repo: "apm", run_id: 123 }],
+        ["listJobsForWorkflowRunAttempt", {
+          owner: "microsoft", repo: "apm", run_id: 123, attempt_number: 1, per_page: 100,
+        }],
+        ["listWorkflowRunArtifacts", {
+          owner: "microsoft", repo: "apm", run_id: 123, per_page: 100,
+        }],
+      ]);
+      const expectedFiles = catalog().flatMap((row) => {
+        const archive = rc.archiveName(row.binary_name);
+        return [archive, `${archive}.sha256`];
+      });
+      assert.deepEqual(fs.readdirSync(options.outputRoot).sort(), expectedFiles.sort());
+      for (const row of catalog()) {
+        const archive = rc.archiveName(row.binary_name);
+        for (const file of [archive, `${archive}.sha256`]) {
+          assert.deepEqual(
+            fs.readFileSync(path.join(options.outputRoot, file)),
+            fs.readFileSync(path.join(options.artifactRoot, row.binary_name, "release-assets", file)),
+          );
+        }
+      }
+    });
+  });
+
+  it("rejects stale qualification after the source run advances to another attempt", async () => {
+    await withQualifiedReusableCandidate(async ({ root, run, calls, options }) => {
+      await rc.verify({ ...options, outputRoot: path.join(root, "verified-attempt-1") });
+      const qualifiedEvidence = fs.readFileSync(options.evidencePath);
+      run.run_attempt = 2;
+      calls.length = 0;
+
+      await assert.rejects(() => rc.verify(options), /attempt does not match evidence/);
+
+      assert.equal(fs.existsSync(options.outputRoot), false);
+      assert.deepEqual(fs.readFileSync(options.evidencePath), qualifiedEvidence);
+      assert.deepEqual(calls, [
+        ["getWorkflowRun", { owner: "microsoft", repo: "apm", run_id: 123 }],
+      ]);
+    });
+  });
+
+  for (const [drift, mutate, pattern] of [
+    ["artifact ID", ({ artifacts }) => { artifacts[1].id += 1000; }, /Workflow artifact \d+ not found/],
+    ["artifact digest", ({ artifacts }) => {
+      artifacts[1].digest = `sha256:${"f".repeat(64)}`;
+    }, /Workflow artifact digest mismatch/],
+    ["workflow fingerprint", ({ root }) => {
+      fs.appendFileSync(path.join(root, rc.WORKFLOW_PATH), "\n# Changed after qualification\n", "ascii");
+    }, /Candidate config hash mismatch for \.github\/workflows\/build-release\.yml/],
+    ["source status", ({ run }) => { run.status = "in_progress"; }, /Candidate run did not complete successfully/],
+    ["source conclusion", ({ run }) => { run.conclusion = "failure"; }, /Candidate run did not complete successfully/],
+  ]) {
+    it(`rejects cross-run ${drift} drift without creating publication assets`, async () => {
+      await withQualifiedReusableCandidate(async (fixture) => {
+        mutate(fixture);
+
+        await assert.rejects(() => rc.verify(fixture.options), pattern);
+
+        assert.equal(fs.existsSync(fixture.options.outputRoot), false);
+      });
+    });
+  }
+});
+
 describe("candidate manifest and publication verification", () => {
   it("qualifies a manifest only with full source and five-platform native gate evidence", async () => {
     const root = makeTemp();
@@ -578,7 +745,7 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot);
     const github = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
     });
 
     await withCwd(root, async () => {
@@ -641,7 +808,7 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot);
     const github = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog(), 1, { attemptNames: false }) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
     });
 
     await withCwd(root, async () => {
@@ -706,7 +873,7 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot, catalog(), SHA, "1.2.4");
     const github = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
     });
 
     await withCwd(root, async () => {
@@ -725,7 +892,7 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot);
     const github = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
       runById: {
         999: {
           id: 999,
@@ -796,7 +963,7 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot);
     const github = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
       runById: {
         999: {
           id: 999,
@@ -841,7 +1008,7 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot);
     const github = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
       runById: {
         999: {
           id: 999,
@@ -890,7 +1057,7 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot);
     const github = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
       runById: {
         999: {
           id: 999,
@@ -933,12 +1100,12 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot);
     const githubForQualify = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
     });
     const githubForVerify = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: {
-        999: requiredJobs(catalog(), (jobs) =>
+      jobsByRunAttempt: {
+        "999:1": requiredJobs(catalog(), (jobs) =>
           jobs.map((job) =>
             job.name.includes("Lint") ? { ...job, conclusion: "failure" } : job,
           ),
@@ -990,7 +1157,7 @@ describe("candidate manifest and publication verification", () => {
     writeCandidateFiles(artifactRoot);
     const github = fakeGithub({
       artifactsByRun: { 999: artifactMetadata(catalog()) },
-      jobsByRun: { 999: requiredJobs() },
+      jobsByRunAttempt: { "999:1": requiredJobs() },
       runById: {
         999: {
           id: 999,

@@ -366,6 +366,7 @@ def _run_subtest_probe(
         env={
             **os.environ,
             "PYTHONPATH": str(root),
+            "PYTEST_XDIST_AUTO_NUM_WORKERS": "2",
             "FAIL_SECOND_SUBTEST": "1" if fail_second_subtest else "",
             "SKIP_PLAIN_PARAM": "1" if skip_plain_param else "",
         },
@@ -375,6 +376,26 @@ def _run_subtest_probe(
         check=False,
     )
     return result, capture(junit, SHA, "subtest probe", variant, shard, shard_count)
+
+
+@pytest.mark.parametrize("detected_cpus", [16, 160])
+def test_nested_probe_auto_workers_are_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, detected_cpus: int
+) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: detected_cpus)
+    monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", str(detected_cpus))
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        assert env["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "2"
+        assert command[command.index("-n") + 1] == "auto"
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(sys.modules[__name__], "capture", lambda *_: _baseline())
+    result, _ = _run_subtest_probe(tmp_path, "budget", "baseline", 1, 1, "auto")
+    assert result.returncode == 0
 
 
 def test_real_pytest_subtests_compare_under_xdist_baseline_and_two_shards(

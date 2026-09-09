@@ -1,9 +1,9 @@
 """Capture and compare read-only release wall-clock evidence.
 
-This module is deliberately not release qualification code. It verifies the
-artifacts needed for an apples-to-apples timing comparison, emits a
-non-promotable proof, and compares two already-successful GitHub Actions
-attempts by their real terminal job timestamps.
+This module is deliberately not release qualification code. It verifies
+artifacts, emits a non-promotable proof, and compares two already-successful
+GitHub Actions attempts by their real terminal job timestamps. Native runner
+comparability is assessed separately from that clock arithmetic.
 """
 
 from __future__ import annotations
@@ -45,6 +45,17 @@ WORKFLOW_PATH = ".github/workflows/build-release.yml"
 SIDE_CHOICES = ("baseline", "proposed")
 BAD_JOB_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required"}
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+# Workflow digests are validated against each side, not compared across a DAG change.
+RUNNER_COMPARISON_FIELDS = (
+    "system",
+    "kernel",
+    "arch",
+    "cpu",
+    "cpu_count",
+    "image_version",
+    "python",
+    "source_uv_lock_sha256",
+)
 
 
 @dataclass(frozen=True)
@@ -738,12 +749,12 @@ def _job_records(
                     "path": str(path),
                     "github_job": record_workflow.get("github_job"),
                     "runner_name": record_workflow.get("runner_name"),
+                    "schema_version": data.get("schema_version"),
+                    "recorded_at": data.get("recorded_at"),
+                    "environment": data.get("environment"),
                 }
             )
-    names = [(item["github_job"], item["runner_name"]) for item in records]
-    if len(names) != len(set(names)):
-        raise ValueError("Duplicate wall-clock job record identity")
-    _validate_job_records({"job_records": records}, {"job_records": len(records)})
+    _validate_job_records({"side": side, "job_records": records}, {"job_records": len(records)})
     return records
 
 
@@ -801,6 +812,17 @@ def verify_artifacts(
             "python_distributions": 2,
         },
         "job_records": records,
+        "observation_assessment": _validate_job_records(
+            {
+                "side": side,
+                "job_records": records,
+                "filehashes": {
+                    "source_uv_lock_sha256": source_digests["uv.lock"],
+                    "source_build_release_yml_sha256": source_digests[WORKFLOW_PATH],
+                },
+            },
+            {"job_records": len(records)},
+        ),
         "captured_at": _utc_now(),
         "scope": "read-only wall-clock artifact proof; not release promotion evidence",
     }
@@ -886,12 +908,59 @@ def _validate_python_proof(python_proof: object) -> None:
         raise ValueError("Python distribution filenames are malformed")
 
 
-def _validate_job_records(proof: dict[str, object], counts: dict[str, object]) -> None:
+def _observation_roles(side: str) -> dict[tuple[str, str, str], tuple[str, ...]]:
+    """Index the distinct observer DAGs by job ID and normalized native platform.
+
+    Baseline macOS jobs combine unit/build/integration; other baseline platforms
+    combine unit/build only. Proposed jobs observe all three roles separately.
+    Docs, wheels, validation and terminal jobs have no paired observer contract.
+    """
+    roles = {}
+    for binary_name in BINARY_NAMES:
+        _, system, arch = binary_name.split("-", 2)
+        if side == "proposed":
+            for job, role in (
+                ("unit-tests", "unit"),
+                ("build", "build"),
+                ("integration-tests", "integration"),
+            ):
+                roles[(job, system, arch)] = (f"{role}/{binary_name}",)
+        elif system == "darwin":
+            job = (
+                "build-and-validate-macos-intel"
+                if arch == "x86_64"
+                else "build-and-validate-macos-arm"
+            )
+            roles[(job, system, arch)] = tuple(
+                f"{role}/{binary_name}" for role in ("unit", "build", "integration")
+            )
+        else:
+            roles[("build-and-test", system, arch)] = (
+                f"unit/{binary_name}",
+                f"build/{binary_name}",
+            )
+            roles[("integration-tests", system, arch)] = (f"integration/{binary_name}",)
+    return roles
+
+
+def _validate_job_records(proof: dict[str, object], counts: dict[str, object]) -> dict[str, object]:
+    """Assess observations in O(N) time using fixed-size role expansion.
+
+    Broken identities remain errors. Missing/invalid measurement metadata leaves
+    historical clocks readable, but cannot establish runner comparability.
+    """
     records = proof.get("job_records")
     if not isinstance(records, list) or not records:
         raise ValueError("Wall-clock proof must contain at least one job record")
     if counts.get("job_records") != len(records):
         raise ValueError("Wall-clock proof job record count does not match")
+    expected = _observation_roles(_side(str(proof.get("side"))))
+    expected_roles = {role for roles in expected.values() for role in roles}
+    observed: dict[str, dict[str, str]] = {}
+    issues: list[str] = []
+    unassessed = False
+    fields = (*RUNNER_COMPARISON_FIELDS, "source_build_release_yml_sha256")
+    filehashes = proof.get("filehashes", {})
     seen: set[tuple[str, str]] = set()
     for record in records:
         if not isinstance(record, dict):
@@ -906,6 +975,59 @@ def _validate_job_records(proof: dict[str, object], counts: dict[str, object]) -
         if key in seen:
             raise ValueError("Wall-clock proof contains duplicate job record identity")
         seen.add(key)
+        label = f"{github_job}/{runner_name}"
+        schema = record.get("schema_version")
+        environment = record.get("environment")
+        if isinstance(schema, bool) or not isinstance(schema, int) or schema != ABI_VERSION:
+            issues.append(f"{label}: missing or unsupported observation schema_version")
+            unassessed = True
+            continue
+        try:
+            _timestamp(record.get("recorded_at"), "observation recorded_at")
+        except ValueError:
+            issues.append(f"{label}: missing or invalid recorded_at")
+            unassessed = True
+            continue
+        if not isinstance(environment, dict) or any(
+            not isinstance(environment.get(field), str) or not environment[field].strip()
+            for field in fields
+        ):
+            issues.append(f"{label}: missing or invalid environment")
+            unassessed = True
+            continue
+        try:
+            _positive_int(environment["cpu_count"], "observation cpu_count")
+            for field in ("source_uv_lock_sha256", "source_build_release_yml_sha256"):
+                _require_sha256(environment[field], field)
+        except ValueError:
+            issues.append(f"{label}: invalid environment CPU count or source digest")
+            unassessed = True
+            continue
+        if isinstance(filehashes, dict):
+            for field in ("source_uv_lock_sha256", "source_build_release_yml_sha256"):
+                if field in filehashes and environment[field] != filehashes[field]:
+                    issues.append(f"{label}: environment {field} does not match proof")
+        system = environment["system"].lower()
+        arch = environment["arch"].lower()
+        arch = {"amd64": "x86_64", "aarch64": "arm64"}.get(arch, arch)
+        roles = expected.get((github_job, system, arch))
+        if roles is None:
+            issues.append(f"{label}: unexpected observer role/platform {system}/{arch}")
+            continue
+        for role in roles:
+            if role in observed:
+                issues.append(f"{role}: duplicate observer role/platform")
+            else:
+                observed[role] = {field: environment[field] for field in RUNNER_COMPARISON_FIELDS}
+                observed[role].update(system=system, arch=arch)
+    missing = sorted(expected_roles - observed.keys())
+    if missing:
+        issues.append(f"Missing observer roles: {', '.join(missing)}")
+    return {
+        "status": "unassessed" if unassessed else "inconclusive" if issues else "complete",
+        "issues": issues,
+        "roles": observed,
+    }
 
 
 def _read_proof(path: Path, side: str, expected_sha: str) -> dict[str, object]:
@@ -948,7 +1070,8 @@ def _read_proof(path: Path, side: str, expected_sha: str) -> dict[str, object]:
     _validate_native_proof(filehashes.get("native"), side, counts.get("candidate_metadata"))
     _validate_docs_proof(filehashes.get("docs"))
     _validate_python_proof(filehashes.get("python"))
-    _validate_job_records(proof, counts)
+    # Recompute rather than trusting an assessment saved by an older producer.
+    proof["observation_assessment"] = _validate_job_records(proof, counts)
     return proof
 
 
@@ -1009,6 +1132,16 @@ def _validate_run(
     terminal_end = _timestamp(terminal["completed_at"], f"{side} terminal.completed_at")
     if terminal_end < terminal_start:
         raise ValueError(f"{side} terminal job has an invalid timeline")
+    assessment = proof["observation_assessment"]
+    for record in proof["job_records"]:
+        try:
+            recorded = _timestamp(record.get("recorded_at"), "observation recorded_at")
+        except ValueError:
+            continue  # Already unassessed by the metadata validator.
+        if not created <= recorded <= terminal_end:
+            if assessment["status"] != "unassessed":
+                assessment["status"] = "inconclusive"
+            assessment["issues"].append("Observation recorded_at is outside the run timeline")
     executed_jobs = []
     runner_seconds = 0.0
     for job in jobs:
@@ -1045,6 +1178,7 @@ def _validate_run(
         "executed_job_count": len(executed_jobs),
         "skipped_job_count": len(jobs) - len(executed_jobs),
         "version": proof.get("version"),
+        "observation_assessment": assessment,
     }
 
 
@@ -1082,6 +1216,41 @@ def _select_terminal(
     if missing:
         raise ValueError(f"{side} required job missing or duplicated: {', '.join(missing)}")
     return terminal
+
+
+def _runner_comparability(
+    baseline: dict[str, object], proposed: dict[str, object]
+) -> dict[str, object]:
+    """Compare indexed native roles without claiming campaign-level controls."""
+    before = baseline["observation_assessment"]
+    after = proposed["observation_assessment"]
+    issues = [
+        f"{side}: {issue}"
+        for side, assessment in (("baseline", before), ("proposed", after))
+        for issue in assessment["issues"]
+    ]
+    for role, environment in before["roles"].items():
+        other = after["roles"].get(role)
+        if other is not None:
+            for field in RUNNER_COMPARISON_FIELDS:
+                if environment[field] != other[field]:
+                    issues.append(f"{role}: {field} differs between baseline and proposed")
+    status = "matched"
+    if before["status"] == "unassessed" or after["status"] == "unassessed":
+        status = "unassessed"
+    elif issues:
+        status = "inconclusive"
+    return {
+        "status": status,
+        "issues": issues,
+        "controlled_acceptance": False,
+        "scope": "native unit/build/integration runner observations only",
+        "limitations": [
+            "Docs, wheels, source checks and validation runners are not assessed",
+            "Overlap, cache state, retry budget and population variance are not assessed",
+            "Matching native observations alone do not establish controlled acceptance",
+        ],
+    }
 
 
 def compare_runs(
@@ -1156,6 +1325,8 @@ def compare_runs(
         "schema_version": ABI_VERSION,
         "readonly_adapter": True,
         "production_qualification": False,
+        "clock_arithmetic": "validated",
+        "comparability": _runner_comparability(baseline, proposed),
         "terminal_job": terminal_name,
         "baseline_required_job_names": sorted(baseline_required_names),
         "proposed_required_job_names": sorted(proposed_required_names),

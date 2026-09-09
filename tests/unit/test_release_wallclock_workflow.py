@@ -167,16 +167,18 @@ def test_pr_binary_smoke_remains_default_but_can_be_excluded_from_release_measur
 
 
 def test_windows_wallclock_keeps_public_dependency_validation_with_the_job_token() -> None:
-    """A token-free legacy variable must not silently skip the public dependency gate."""
+    """Select public checks explicitly, without aliasing the job token into a PAT."""
     native = load_workflow(ROOT / ".github/workflows/release-platform.yml")
     step = workflow_step(
         workflow_job(native, "release-validation"), "Run release validation tests (Windows)"
     )
     assert step["env"]["GITHUB_API_TOKEN"] == "${{ github.token }}"
     assert step["env"]["GITHUB_APM_PAT"] == (
-        "${{ inputs.wallclock-evidence && github.token || secrets.GH_CLI_PAT }}"
+        "${{ !inputs.wallclock-evidence && secrets.GH_CLI_PAT || '' }}"
     )
+    assert "-PublicApiOnly:('${{ inputs.wallclock-evidence }}' -eq 'true')" in step["run"]
     assert "GITHUB_TOKEN" not in step["env"]
+    assert "GITHUB_MODELS_KEY" not in step["env"]
     assert "GH_MODELS_PAT" not in str(step)
     assert "APM_RUN_INFERENCE_TESTS" not in step["env"]
 

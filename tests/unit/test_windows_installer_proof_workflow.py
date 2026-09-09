@@ -262,3 +262,125 @@ def test_installer_outcome_requires_executed_cases(
     assert (completed.returncode == 0) is accepted, completed.stdout + completed.stderr
     if accepted:
         assert json.loads(completed.stdout)["skipped"] == 0
+
+
+def test_installer_diagnostics_are_persisted_before_junit_validation() -> None:
+    """The uploadable raw result and visible summary precede any JUnit rejection."""
+    body = _script_text().split("function Invoke-InstallerPytest {", 1)[1]
+    body = body.split("function Invoke-ProcessCaptureSelfTest {", 1)[0]
+    validation = body.index("$result.junit = Read-InstallerOutcome")
+    for diagnostic in (
+        '"$Name-stdout.log"',
+        '"$Name-stderr.log"',
+        'Write-JsonFile -Value $result -Path (Join-Path $OutDir "$Name-result.json")',
+        'Write-Host "[$Name] exit $($result.exit_code) timed_out=$($result.timed_out)"',
+    ):
+        assert body.index(diagnostic) < validation
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("junit", "exit_code", "timed_out"),
+    [
+        (None, 124, True),
+        ("<testsuites><broken", 23, False),
+        ("<testsuites><testsuite/></testsuites>", 0, False),
+        (
+            '<testsuites><testsuite><testcase name="installer">'
+            "<skipped/></testcase></testsuite></testsuites>",
+            0,
+            False,
+        ),
+        (
+            '<testsuites><testsuite><testcase name="installer">'
+            "<failure/></testcase></testsuite></testsuites>",
+            0,
+            False,
+        ),
+    ],
+    ids=["missing-after-timeout", "malformed", "empty", "skipped", "false-success"],
+)
+def test_installer_rejected_junit_retains_process_diagnostics(
+    tmp_path: Path, junit: str | None, exit_code: int, timed_out: bool
+) -> None:
+    """Execute the real persistence/validation path with a captured-process stub."""
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("pwsh is not installed")
+    out_dir = tmp_path / "diagnostics"
+    out_dir.mkdir()
+    if junit is not None:
+        (out_dir / "junit-fixture.xml").write_text(junit, encoding="ascii")
+    driver = tmp_path / "invoke-installer.ps1"
+    driver.write_text(
+        r"""
+param([string]$SourceScript, [string]$OutDir, [int]$FixtureExitCode, [string]$TimedOut)
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $SourceScript, [ref]$tokens, [ref]$errors
+)
+if ($errors.Count) { throw ($errors | Out-String) }
+foreach ($name in @("Write-JsonFile", "Read-InstallerOutcome", "Invoke-InstallerPytest")) {
+    $definition = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq $name
+    }, $true)
+    if (-not $definition) { throw "Missing function: $name" }
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+function Invoke-CapturedProcess {
+    param($FilePath, $Arguments, $Name, $TimeoutSeconds, $Environment)
+    return [ordered]@{
+        name = $Name
+        exit_code = $FixtureExitCode
+        timed_out = $TimedOut -eq "true"
+        stdout = "fixture captured stdout"
+        stderr = "fixture captured stderr"
+        timeout_seconds = $TimeoutSeconds
+    }
+}
+Invoke-InstallerPytest -Name "fixture" -OutDir $OutDir `
+    -BaseTemp (Join-Path $OutDir "fresh-basetemp") -InstallerEnvironment @{} |
+    ConvertTo-Json -Depth 8
+""",
+        encoding="ascii",
+    )
+    completed = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(driver),
+            "-SourceScript",
+            str(PROOF_SCRIPT),
+            "-OutDir",
+            str(out_dir),
+            "-FixtureExitCode",
+            str(exit_code),
+            "-TimedOut",
+            str(timed_out).lower(),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode != 0, completed.stdout + completed.stderr
+    record = json.loads((out_dir / "fixture-result.json").read_text(encoding="utf-8-sig"))
+    assert record["exit_code"] == exit_code
+    assert record["timed_out"] is timed_out
+    assert record["timeout_seconds"] == 900
+    assert record["stdout"] == "fixture captured stdout"
+    assert record["stderr"] == "fixture captured stderr"
+    assert record["junit_validation_error"]
+    assert "junit" not in record
+    for stream in ("stdout", "stderr"):
+        log = (out_dir / f"fixture-{stream}.log").read_text(encoding="utf-8-sig")
+        assert log.strip() == f"fixture captured {stream}"
+        assert f"[fixture {stream}] fixture captured {stream}" in completed.stdout
+    assert f"[fixture] exit {exit_code} timed_out={timed_out}" in completed.stdout

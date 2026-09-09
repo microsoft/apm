@@ -27,6 +27,8 @@ WORKFLOW = ROOT / ".github" / "workflows" / "release-platform.yml"
 
 SIGNING_STEP = "Sign Windows binary (Authenticode)"
 BUILD_STEP = "Build binary (Windows)"
+SMOKE_STEP = "Test native binary startup and core contracts"
+PACKAGE_STEP = "Package exact candidate archive"
 UPLOAD_STEP = "Upload binary as workflow artifact"
 
 
@@ -60,12 +62,14 @@ def _assert_signing_step(workflow: WorkflowNode) -> None:
     assert "WINDOWS_CERT_PFX" in env, "signing step env must include WINDOWS_CERT_PFX"
     assert "WINDOWS_CERT_PASSWORD" in env, "signing step env must include WINDOWS_CERT_PASSWORD"
 
-    # Ordering: signing must occur after build and before upload.
     build_idx = workflow_step_index(job, BUILD_STEP)
     sign_idx = workflow_step_index(job, SIGNING_STEP)
+    smoke_idx = workflow_step_index(job, SMOKE_STEP)
+    package_idx = workflow_step_index(job, PACKAGE_STEP)
     upload_idx = workflow_step_index(job, UPLOAD_STEP)
-    assert build_idx < sign_idx < upload_idx, (
-        f"signing step order wrong: build={build_idx} sign={sign_idx} upload={upload_idx}"
+    assert build_idx < sign_idx < smoke_idx < package_idx < upload_idx, (
+        f"signing step order wrong: build={build_idx} sign={sign_idx} "
+        f"smoke={smoke_idx} package={package_idx} upload={upload_idx}"
     )
 
 
@@ -104,23 +108,25 @@ def test_signing_step_references_script() -> None:
         _assert_signing_step(workflow)
 
 
-def test_signing_step_order() -> None:
-    """Moving the signing step after upload must fail the contract."""
+@pytest.mark.parametrize(
+    "after_step", [SMOKE_STEP, PACKAGE_STEP, UPLOAD_STEP], ids=["smoke", "package", "upload"]
+)
+def test_signing_step_order(after_step: str) -> None:
+    """Only bytes signed before smoke and packaging can be qualified."""
     workflow = deepcopy(_workflow())
     job = workflow_job(workflow, "build")
     steps: list = job["steps"]
 
-    # Find and remove the signing step, then insert it after the upload step.
     sign_step = next(
         (s for s in steps if isinstance(s, dict) and s.get("name") == SIGNING_STEP),
         None,
     )
     assert sign_step is not None, "signing step not found for order mutation"
     steps.remove(sign_step)
-    upload_idx = next(
-        i for i, s in enumerate(steps) if isinstance(s, dict) and s.get("name") == UPLOAD_STEP
+    after_idx = next(
+        i for i, s in enumerate(steps) if isinstance(s, dict) and s.get("name") == after_step
     )
-    steps.insert(upload_idx + 1, sign_step)
+    steps.insert(after_idx + 1, sign_step)
 
     with pytest.raises(AssertionError, match="order"):
         _assert_signing_step(workflow)

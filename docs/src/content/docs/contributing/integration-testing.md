@@ -396,49 +396,65 @@ the build independently; all remain required at the final gate.
 
 ### Release qualification
 
-`build-release.yml` qualifies native candidates by platform through
-`release-platform.yml`:
+`build-release.yml` uses `release-platform.yml` to:
 
-1. Resolve whether to reuse a qualified candidate or build fresh.
-2. For fresh full validation, call source CI so lint, architecture ratchets,
-   coverage, red-team tests, and lifecycle smoke stay in the same authority as
-   normal CI.
+1. Reuse a qualified candidate or build fresh.
+2. For fresh full validation, call canonical source CI for lint, architecture
+   ratchets, coverage, red-team tests, and lifecycle smoke.
 3. Run independent native unit and build jobs for each platform.
-4. Let platform integration, isolated archive validation, and the Windows
-   installer job depend only on that platform's build artifact.
-5. Promote only the exact archives that were packaged once, verified, unpacked,
-   and tested.
+4. Run integration, isolated archive validation, and Windows installer tests
+   depending only on their platform's build artifact.
+5. Promote only those exact, verified, unpacked, tested archives.
 
-Unix integration uses the shared `release-integration.yml` runner. All native
-Unix lanes retain one shard with four workers and `duration_based_chunks`
-assignment. Multi-runner ARM sharding remains experimental until a matched
-performance comparison supports changing the release topology. Every
-configured shard must succeed.
+Unix integration uses `release-integration.yml`: one shard, four workers, and
+`duration_based_chunks` assignment per native lane. Multi-runner ARM sharding
+remains experimental pending a matched performance comparison. Every shard
+must succeed.
 
-For stable tags, read-only docs and wheel builds also start after release
-planning. Their publishers wait for successful GitHub Release creation and
-their own build artifacts. Prebuilding does not grant publishing permissions
-or make failed qualification deployable.
+Stable-tag read-only docs and wheel builds start after planning. Publishers
+require successful GitHub Release creation and their own builds; prebuilding
+neither grants publishing permissions nor bypasses qualification.
 
-The publication path never repacks candidate archives. `scripts/package_release.py`
-packages each native archive once, records archive and executable SHA-256
-digests, verifies archive member safety, checks the embedded version/build SHA,
-extracts into a fresh destination, and rechecks the extracted executable before
-release upload.
+`scripts/package_release.py` packages each native archive once, records archive
+and executable SHA-256 digests, verifies member safety and embedded version/build
+SHA, extracts into a fresh destination, and rechecks the executable before upload.
+Publication never repacks archives.
 Candidate artifacts are attempt-scoped (`candidate-<run_attempt>-<binary_name>`;
 evidence is `release-candidate-evidence-<run_attempt>`), so partial reruns must
-not reuse old-attempt artifacts; use **Re-run all jobs** to regenerate complete
-qualification.
+not reuse old-attempt artifacts. Before publication, use **Re-run all jobs** to
+regenerate complete qualification; afterward, follow [publication recovery](#publication-recovery).
 
 ### Candidate reuse on tags
 
-A pushed tag may reuse an existing candidate only when release evidence proves
-the same commit SHA already completed a successful, trusted-main full
-qualification with immutable run identity, artifact identity, and matching
-digests. Ordinary `main` green status is not enough, and PR artifacts are never
-publication inputs. An absent or expired candidate triggers a fresh full build.
-API errors or inconsistent candidate evidence fail the release rather than
-silently falling back.
+A tag can reuse only successful full qualification from
+`build-release.yml` on `main` at the exact tag commit SHA, triggered by
+`schedule` or `repository_dispatch` with type `manual-build-release`.
+Evidence must match immutable run and artifact identities and digests.
+PR, `workflow_dispatch`, ordinary `main` push, and earlier tag-push runs are
+not eligible cross-run sources. Fresh tag qualification is usable within its
+own run. Absent or expired candidates trigger a fresh full build; API errors
+or inconsistent evidence fail closed.
+
+### Publication recovery
+
+The human release operator authorizes recovery after publication starts.
+Qualification reruns are not publisher retries:
+`verified-release-assets-<run_attempt>`, `docs-pages-<run_attempt>`, and
+`pypi-distributions-<run_attempt>` are attempt-scoped. **Re-run failed jobs**
+increments the attempt without rerunning successful producers, so it cannot
+recover their artifacts. **Re-run all jobs** also revisits successful publishers;
+it is not a safe delivery-only retry.
+
+1. Stop retries. Retain exact successful producer and qualification evidence:
+   run IDs, attempts, SHA/version, artifact IDs/digests, and publisher logs.
+2. For failed downloads, verify the expected producer attempt and artifact
+   availability. For failed Pages deployment, record the existing deployment
+   and source version. For partial PyPI uploads, inventory accepted and missing
+   filenames/versions. In every case, verify existing public GitHub/PyPI asset
+   hashes and versions against retained producer evidence before any retry.
+3. Request release-operator authorization with that inventory.
+   The workflow provides no publisher-only recovery using immutable producer
+   identities; stop if safe continuation cannot be established.
 
 ### Platform matrix
 

@@ -12,7 +12,8 @@
 # This is the final gate before release - testing the actual product as shipped
 
 param(
-    [string]$BinaryPath
+    [string]$BinaryPath,
+    [switch]$PublicApiOnly
 )
 
 $ErrorActionPreference = "Continue"
@@ -109,13 +110,15 @@ function Test-Prerequisite {
     $hasReleaseApiToken = [bool]$env:GITHUB_API_TOKEN
     $inferenceTestsEnabled = $env:APM_RUN_INFERENCE_TESTS -eq "1"
 
-    Initialize-GitHubToken
+    if (-not $PublicApiOnly) {
+        Initialize-GitHubToken
+    }
 
     # Initialize-GitHubToken does not return failure; check tokens after setup.
     # GITHUB_API_TOKEN is the workflow's read-only GitHub API token for public
     # release validation. It is not a PAT/Models credential, so do not copy it
     # into GITHUB_TOKEN, GITHUB_APM_PAT, or GITHUB_MODELS_KEY.
-    $hasPatOrModelsToken = [bool]($env:GITHUB_TOKEN -or $env:GITHUB_APM_PAT)
+    $hasPatOrModelsToken = -not $PublicApiOnly -and [bool]($env:GITHUB_TOKEN -or $env:GITHUB_APM_PAT)
 
     if ($inferenceTestsEnabled -and -not $hasPatOrModelsToken) {
         Write-ErrorText "Inference tests require GITHUB_TOKEN or GITHUB_APM_PAT; GITHUB_API_TOKEN only covers public release API access"
@@ -425,8 +428,13 @@ function Main {
         Write-Info "Inference tests decoupled; skipping apm run tests"
     }
 
-    # Add dependency tests to total if available and GITHUB token is present
-    if ($script:DEPENDENCY_TESTS_AVAILABLE -and ($env:GITHUB_APM_PAT -or $env:GITHUB_TOKEN)) {
+    # Public API validation selects the same public checks without PAT/Models aliases.
+    $hasDependencyAccess = if ($PublicApiOnly) {
+        [bool]$env:GITHUB_API_TOKEN
+    } else {
+        [bool]($env:GITHUB_APM_PAT -or $env:GITHUB_TOKEN)
+    }
+    if ($script:DEPENDENCY_TESTS_AVAILABLE -and $hasDependencyAccess) {
         $testsTotal++
         $dependencyTestsRun = $true
         Write-Info "Dependency integration tests will be included"
@@ -479,10 +487,10 @@ function Main {
             Write-ErrorText "Hero scenario 2 (2-min guardrailing) failed"
         }
 
-        # Run dependency integration tests if available and GitHub token is set
+        # Keep the explicit public-only mode through the helper's credential gate.
         if ($dependencyTestsRun) {
             Write-Info "Running dependency integration tests with real GitHub repositories"
-            if (Test-DependencyIntegration -BinaryPath $script:BINARY_PATH) {
+            if (Test-DependencyIntegration -BinaryPath $script:BINARY_PATH -PublicApiOnly:$PublicApiOnly) {
                 $testsPassed++
                 Write-Success "Dependency integration tests passed"
             } else {

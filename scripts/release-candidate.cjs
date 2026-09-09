@@ -188,7 +188,7 @@ function findOneArtifactByName(artifacts, name) {
   if (matches.length !== 1) {
     const ErrorType = matches.length === 0 ? CandidateUnavailableError : Error;
     throw new ErrorType(
-      `Expected exactly one workflow artifact named ${name}, found ${matches.length}. ${RERUN_ALL_JOBS_HINT}.`,
+      `Expected exactly one workflow artifact named ${name}, found ${matches.length}`,
     );
   }
   return matches[0];
@@ -345,7 +345,9 @@ async function discoverCandidateRun({ github, context, sha, catalog = loadCatalo
     });
   } catch (error) {
     if (!(error instanceof CandidateUnavailableError)) throw error;
-    core?.info?.(`Prior candidate unavailable; building a fresh full candidate: ${error.message}`);
+    core?.info?.(
+      `Prior candidate run ${sameSha[0].id} attempt ${sameSha[0].run_attempt} unavailable: ${error.message}; building a fresh full candidate automatically. No operator action required.`,
+    );
     return null;
   }
 }
@@ -356,7 +358,13 @@ async function resolveExplicitCandidateRun({ github, context, runId, sha, catalo
     throw new Error("candidate_run_id must be a numeric workflow run id");
   }
   const run = await getWorkflowRun(github, { owner, repo, run_id: Number(runId) });
-  const candidate = await candidateFromRun({ github, owner, repo, run, expectedSha: sha, catalog });
+  let candidate;
+  try {
+    candidate = await candidateFromRun({ github, owner, repo, run, expectedSha: sha, catalog });
+  } catch (error) {
+    if (!(error instanceof CandidateUnavailableError)) throw error;
+    throw addAttemptHint(new Error(`Candidate run ${runId} attempt ${run.run_attempt}: ${error.message}`));
+  }
   if (!candidate) {
     throw new Error(`Candidate run ${runId} does not contain release-candidate evidence`);
   }
@@ -741,14 +749,18 @@ async function plan({ github, context, core }) {
   let candidateRunId = "";
   let candidateArtifactIds = "";
   let candidateEvidenceArtifactId = "";
+  let decision = `fresh ${fullValidation ? "full qualification" : "platform validation"}; ${eventName(context)} uses the current run`;
   if (isTagPush(context)) {
     const candidate = await discoverCandidateRun({ github, context, sha: context.sha, catalog, core });
+    decision = "fresh full qualification; no reusable candidate is available for this SHA";
     if (candidate) {
       candidateRunId = String(candidate.run.id);
       candidateArtifactIds = candidate.artifacts.map((artifact) => String(artifact.id)).join(",");
       candidateEvidenceArtifactId = String(candidate.evidence.id);
+      decision = `reuse; trusted exact-SHA candidate from source run ${candidate.run.id} attempt ${candidate.run.run_attempt} SHA ${candidate.run.head_sha}`;
     }
   }
+  core?.info?.(`Release plan: ${decision}.`);
   core.setOutput("matrix", JSON.stringify(matrix));
   core.setOutput("full_validation", String(fullValidation));
   core.setOutput("candidate_run_id", candidateRunId);

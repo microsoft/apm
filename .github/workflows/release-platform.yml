@@ -305,12 +305,11 @@ jobs:
         timeout-minutes: 20
         env:
           GITHUB_API_TOKEN: ${{ github.token }}
-          # Preserve the legacy public-dependency gate in read-only measurements.
-          GITHUB_APM_PAT: ${{ inputs.wallclock-evidence && github.token || secrets.GH_CLI_PAT }}
+          GITHUB_APM_PAT: ${{ !inputs.wallclock-evidence && secrets.GH_CLI_PAT || '' }}
           APM_E2E_TESTS: '1'
         run: |
           $env:PATH = "$PWD\dist\apm-windows-x86_64;$env:PATH"
-          .\scripts\windows\test-release-validation.ps1
+          .\scripts\windows\test-release-validation.ps1 -PublicApiOnly:('${{ inputs.wallclock-evidence }}' -eq 'true')
 
   windows-installer:
     name: Candidate Windows Installer

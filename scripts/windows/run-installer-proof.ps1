@@ -384,8 +384,7 @@ function Invoke-InstallerPytest {
     )
     $result = Invoke-CapturedProcess -FilePath "uv" -Arguments $arguments `
         -Name "$Name installer pytest" -TimeoutSeconds 900 -Environment $InstallerEnvironment
-    $result.junit = Read-InstallerOutcome -JUnitPath (Join-Path $OutDir "junit-$Name.xml") `
-        -ExitCode $result.exit_code
+    # Persist raw diagnostics even when pytest never produced usable JUnit.
     $result.stdout | Set-Content -LiteralPath (Join-Path $OutDir "$Name-stdout.log") -Encoding UTF8
     $result.stderr | Set-Content -LiteralPath (Join-Path $OutDir "$Name-stderr.log") -Encoding UTF8
     Write-JsonFile -Value $result -Path (Join-Path $OutDir "$Name-result.json")
@@ -396,6 +395,15 @@ function Invoke-InstallerPytest {
     if ($result.stderr) {
         ($result.stderr -split "`n") | Select-Object -Last 30 | ForEach-Object { Write-Host "[$Name stderr] $_" }
     }
+    try {
+        $result.junit = Read-InstallerOutcome -JUnitPath (Join-Path $OutDir "junit-$Name.xml") `
+            -ExitCode $result.exit_code
+    } catch {
+        $result.junit_validation_error = $_.Exception.Message
+        Write-JsonFile -Value $result -Path (Join-Path $OutDir "$Name-result.json")
+        throw
+    }
+    Write-JsonFile -Value $result -Path (Join-Path $OutDir "$Name-result.json")
     return $result
 }
 

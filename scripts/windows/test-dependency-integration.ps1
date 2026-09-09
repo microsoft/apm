@@ -304,7 +304,8 @@ function Test-DependencyCleanup {
 function Test-DependencyIntegration {
     param(
         [Parameter(Mandatory)]
-        [string]$BinaryPath
+        [string]$BinaryPath,
+        [switch]$PublicApiOnly
     )
 
     Write-DepInfo "=== APM Dependencies Integration Testing ==="
@@ -316,8 +317,12 @@ function Test-DependencyIntegration {
     $testDir = Join-Path $env:TEMP "apm-dep-test-$PID"
     New-Item -ItemType Directory -Path $testDir -Force | Out-Null
 
-    # Check for GitHub token
-    if (-not $env:GITHUB_CLI_PAT -and -not $env:GITHUB_TOKEN) {
+    # Public repositories can be tested without treating the API token as a PAT.
+    if ($PublicApiOnly -and -not $env:GITHUB_API_TOKEN) {
+        Write-DepError "Public API validation requires GITHUB_API_TOKEN"
+        return $false
+    }
+    if (-not $PublicApiOnly -and -not $env:GITHUB_CLI_PAT -and -not $env:GITHUB_TOKEN) {
         Write-DepError "GitHub token required for dependency testing"
         Write-DepInfo "Set GITHUB_CLI_PAT or GITHUB_TOKEN environment variable"
         return $false

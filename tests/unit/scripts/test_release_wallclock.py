@@ -7,6 +7,7 @@ import json
 import stat
 import tarfile
 import zipfile
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -286,6 +287,11 @@ def test_verify_artifacts_emits_nonpromotable_real_archive_proof(
     assert proof["counts"]["job_records"] == 1
     assert proof["filehashes"]["docs"]["format"] == "tar"
     assert proof["filehashes"]["python"]["wheel"]["version"] == VERSION
+    original = json.loads((native / "runner.json").read_text(encoding="ascii"))
+    for field in ("schema_version", "recorded_at", "environment"):
+        assert proof["job_records"][0][field] == original[field]
+    # One terminal observer does not cover either native DAG.
+    assert proof["observation_assessment"]["status"] == "inconclusive"
 
 
 @pytest.mark.parametrize(
@@ -633,6 +639,50 @@ def test_verify_rejects_fake_or_wrong_project_python_distributions(
         verify_artifacts("baseline", source, BASE_SHA, native, docs, python)
 
 
+def _observation_records(side: str) -> list[dict[str, object]]:
+    """Model the real eight-observer baseline and fifteen-observer proposed DAG."""
+    records = []
+    for system, arch in (
+        ("Linux", "x86_64"),
+        ("Linux", "aarch64"),
+        ("Windows", "AMD64"),
+        ("Darwin", "x86_64"),
+        ("Darwin", "arm64"),
+    ):
+        if side == "proposed":
+            jobs = ("unit-tests", "build", "integration-tests")
+        elif system == "Darwin":
+            jobs = (
+                "build-and-validate-macos-intel"
+                if arch == "x86_64"
+                else "build-and-validate-macos-arm",
+            )
+        else:
+            jobs = ("build-and-test", "integration-tests")
+        for job in jobs:
+            records.append(
+                {
+                    "path": f"wallclock/{side}-{system}-{arch}-{job}.json",
+                    "github_job": job,
+                    "runner_name": f"{side}-{system}-{arch}-{job}",
+                    "schema_version": 1,
+                    "recorded_at": _at(10),
+                    "environment": {
+                        "system": system,
+                        "kernel": "fixture-kernel",
+                        "arch": arch,
+                        "cpu": f"fixture-{arch}",
+                        "cpu_count": "4",
+                        "image_version": f"fixture-{system}-{arch}-20260901.1",
+                        "python": "3.12.10",
+                        "source_uv_lock_sha256": "1" * 64,
+                        "source_build_release_yml_sha256": "e" * 64,
+                    },
+                }
+            )
+    return records
+
+
 def _proof(
     path: Path,
     side: str,
@@ -641,6 +691,7 @@ def _proof(
     controller_sha: str,
     run_head_sha: str,
 ) -> Path:
+    observations = _observation_records(side)
     native = {}
     for index, binary_name in enumerate(BINARY_NAMES, start=1):
         archive = archive_name(binary_name)
@@ -675,7 +726,7 @@ def _proof(
                     "native_archives": 5,
                     "native_sidecars": 5,
                     "candidate_metadata": 5 if side == "proposed" else 0,
-                    "job_records": 1,
+                    "job_records": len(observations),
                     "docs_indexes": 1,
                     "python_distributions": 2,
                 },
@@ -705,13 +756,7 @@ def _proof(
                         },
                     },
                 },
-                "job_records": [
-                    {
-                        "path": "wallclock/job.json",
-                        "github_job": "build",
-                        "runner_name": f"{side}-runner",
-                    }
-                ],
+                "job_records": observations,
             }
         ),
         encoding="ascii",
@@ -814,6 +859,244 @@ def _compare_ok(
         baseline_required,
         proposed_required,
     )
+
+
+def test_compare_matches_distinct_native_dags_without_claiming_controlled_acceptance(
+    tmp_path: Path,
+) -> None:
+    result = _compare_ok(*_compare_fixture(tmp_path))
+
+    assert len(_observation_records("baseline")) == 8
+    assert len(_observation_records("proposed")) == 15
+    for side in ("baseline", "proposed"):
+        assessment = result[side]["observation_assessment"]
+        assert assessment["status"] == "complete"
+        assert set(assessment["roles"]) == {
+            f"{role}/{binary_name}"
+            for role in ("unit", "build", "integration")
+            for binary_name in BINARY_NAMES
+        }
+    assert result["clock_arithmetic"] == "validated"
+    assert result["comparability"]["status"] == "matched"
+    assert result["comparability"]["issues"] == []
+    assert result["comparability"]["controlled_acceptance"] is False
+    assert result["production_qualification"] is False
+
+
+@pytest.mark.parametrize("field", ["schema_version", "recorded_at", "environment"])
+def test_job_record_ingestion_preserves_missing_metadata_as_unassessed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    source, native, docs, python = _verified_fixture(
+        tmp_path, monkeypatch, "baseline", BASE_SHA, BASE_CONTROLLER
+    )
+    path = native / "runner.json"
+    payload = json.loads(path.read_text(encoding="ascii"))
+    payload.pop(field)
+    path.write_text(json.dumps(payload), encoding="ascii")
+
+    proof = verify_artifacts("baseline", source, BASE_SHA, native, docs, python)
+
+    assert proof["job_records"][0][field] is None
+    assert proof["observation_assessment"]["status"] == "unassessed"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", None),
+        ("schema_version", True),
+        ("schema_version", 1.0),
+        ("schema_version", 2),
+        ("recorded_at", None),
+        ("recorded_at", "not-a-time"),
+        ("recorded_at", "2026-09-08T00:00:10"),
+        ("environment", None),
+        ("environment", {}),
+        ("image_version", ""),
+        ("cpu_count", "0"),
+        ("cpu_count", True),
+        ("source_uv_lock_sha256", "not-a-digest"),
+    ],
+)
+def test_compare_incomplete_metadata_cannot_count_as_controlled_gain(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    paths = _compare_fixture(tmp_path)
+    payload = json.loads(paths[3].read_text(encoding="ascii"))
+    record = payload["job_records"][0]
+    target = (
+        record
+        if field in {"schema_version", "recorded_at", "environment"}
+        else record["environment"]
+    )
+    if value is None:
+        target.pop(field)
+    else:
+        target[field] = value
+    # A saved claim must not override recomputation.
+    payload["observation_assessment"] = {"status": "complete", "issues": []}
+    paths[3].write_text(json.dumps(payload), encoding="ascii")
+
+    result = _compare_ok(*paths)
+
+    assert result["comparability"]["status"] == "unassessed"
+    assert result["comparability"]["issues"]
+    assert result["comparability"]["controlled_acceptance"] is False
+    assert result["delta_seconds"]["primary_gain_seconds"] == 10
+    assert result["clock_arithmetic"] == "validated"
+
+
+def test_compare_legacy_projected_records_keep_raw_clocks_without_inventing_metadata(
+    tmp_path: Path,
+) -> None:
+    paths = _compare_fixture(tmp_path)
+    for path in paths[2:]:
+        payload = json.loads(path.read_text(encoding="ascii"))
+        payload["job_records"] = [
+            {"path": "historical/job.json", "github_job": "build", "runner_name": "legacy"}
+        ]
+        payload["counts"]["job_records"] = 1
+        path.write_text(json.dumps(payload), encoding="ascii")
+
+    result = _compare_ok(*paths)
+
+    assert result["gain_percent"]["primary"] == 10
+    assert result["baseline"]["wallclock_seconds_from_created_at"] == 100
+    assert result["proposed"]["wallclock_seconds_from_created_at"] == 90
+    assert result["comparability"]["status"] == "unassessed"
+    assert result["comparability"]["controlled_acceptance"] is False
+    assert result["baseline"]["observation_assessment"]["roles"] == {}
+
+
+@pytest.mark.parametrize(
+    ("side", "index"),
+    [("baseline", index) for index in range(8)] + [("proposed", index) for index in range(15)],
+)
+def test_compare_requires_every_observer_role_and_platform(
+    tmp_path: Path, side: str, index: int
+) -> None:
+    paths = _compare_fixture(tmp_path)
+    path = paths[2] if side == "baseline" else paths[3]
+    payload = json.loads(path.read_text(encoding="ascii"))
+    payload["job_records"].pop(index)
+    payload["counts"]["job_records"] -= 1
+    path.write_text(json.dumps(payload), encoding="ascii")
+
+    result = _compare_ok(*paths)
+
+    assert result[side]["observation_assessment"]["status"] == "inconclusive"
+    assert any("Missing observer roles:" in issue for issue in result["comparability"]["issues"])
+    assert result["comparability"]["controlled_acceptance"] is False
+    assert result["delta_seconds"]["primary_gain_seconds"] == 10
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [
+        ("image", "image_version differs"),
+        ("cpu", "cpu_count differs"),
+        ("duplicate-role", "duplicate observer role/platform"),
+        ("wrong-platform", "Missing observer roles"),
+        ("wrong-job", "unexpected observer role/platform"),
+        ("timestamp", "outside the run timeline"),
+        ("timestamp-before", "outside the run timeline"),
+        ("source-digest", "does not match proof"),
+    ],
+)
+def test_compare_environment_drift_and_ambiguous_coverage_are_inconclusive(
+    tmp_path: Path, fault: str, message: str
+) -> None:
+    paths = _compare_fixture(tmp_path)
+    payload = json.loads(paths[3].read_text(encoding="ascii"))
+    record = payload["job_records"][0]
+    if fault == "image":
+        record["environment"]["image_version"] = "different-image"
+    elif fault == "cpu":
+        record["environment"]["cpu_count"] = "8"
+    elif fault == "duplicate-role":
+        duplicate = dict(record, runner_name="another-runner")
+        payload["job_records"].append(duplicate)
+        payload["counts"]["job_records"] += 1
+    elif fault == "wrong-platform":
+        record["environment"]["arch"] = "aarch64"
+    elif fault == "wrong-job":
+        record["github_job"] = "unrecognized-job"
+    elif fault == "timestamp":
+        record["recorded_at"] = _at(91)
+    elif fault == "timestamp-before":
+        record["recorded_at"] = _at(-1)
+    else:
+        record["environment"]["source_build_release_yml_sha256"] = "f" * 64
+    paths[3].write_text(json.dumps(payload), encoding="ascii")
+
+    result = _compare_ok(*paths)
+
+    assert result["comparability"]["status"] == "inconclusive"
+    assert any(message in issue for issue in result["comparability"]["issues"])
+    assert result["comparability"]["controlled_acceptance"] is False
+    assert result["delta_seconds"]["primary_gain_seconds"] == 10
+
+
+def test_compare_allows_intentional_workflow_digest_change_between_sides(tmp_path: Path) -> None:
+    paths = _compare_fixture(tmp_path)
+    payload = json.loads(paths[3].read_text(encoding="ascii"))
+    payload["workflow_digest"] = "f" * 64
+    payload["filehashes"]["source_build_release_yml_sha256"] = "f" * 64
+    for record in payload["job_records"]:
+        record["environment"]["source_build_release_yml_sha256"] = "f" * 64
+    paths[3].write_text(json.dumps(payload), encoding="ascii")
+
+    result = _compare_ok(*paths)
+
+    assert result["comparability"]["status"] == "matched"
+    assert result["comparability"]["controlled_acceptance"] is False
+
+
+def test_observation_validation_record_visits_scale_linearly() -> None:
+    """Count scans and identity comparisons at N and 10N without wall clocks."""
+
+    class CountedName(str):
+        """Expose a quadratic list-based replacement for identity set membership."""
+
+        comparisons = 0
+
+        def __eq__(self, other: object) -> bool:
+            type(self).comparisons += 1
+            return super().__eq__(other)
+
+        def __hash__(self) -> int:
+            return super().__hash__()
+
+    class CountedRecords(list[dict[str, object]]):
+        """Expose repeated scans, including index-based scans, deterministically."""
+
+        visits = 0
+
+        def __iter__(self) -> Iterator[dict[str, object]]:
+            for record in super().__iter__():
+                self.visits += 1
+                yield record
+
+        def __getitem__(self, key: int) -> dict[str, object]:
+            self.visits += 1
+            return super().__getitem__(key)
+
+    visits = []
+    template = _observation_records("proposed")[0]
+    for size in (30, 300):
+        CountedName.comparisons = 0
+        records = CountedRecords(
+            dict(template, runner_name=CountedName(f"runner-{index}")) for index in range(size)
+        )
+        assessment = release_wallclock._validate_job_records(
+            {"side": "proposed", "job_records": records}, {"job_records": size}
+        )
+        assert assessment["status"] == "inconclusive"  # Duplicate roles, not identities.
+        operations = records.visits + CountedName.comparisons
+        assert size <= operations <= 3 * size
+        visits.append(operations)
+    assert visits[1] <= 12 * visits[0]
 
 
 @pytest.mark.parametrize(
