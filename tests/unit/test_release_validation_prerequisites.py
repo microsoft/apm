@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -26,12 +25,6 @@ _TOKEN_ENV_NAMES = {
     "GITHUB_MODELS_KEY",
     "GITHUB_TOKEN",
 }
-
-
-def _digest(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
@@ -75,29 +68,28 @@ if (-not $function) { throw "Test-Prerequisite function not found" }
 
 . ([scriptblock]::Create($function.Extent.Text))
 
-function Get-EnvDigest {
+$expectedEnvironment = @{}
+foreach ($name in @("GITHUB_API_TOKEN", "GITHUB_APM_PAT", "GITHUB_MODELS_KEY", "GITHUB_TOKEN")) {
+    $expectedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
+
+function Test-EnvPreserved {
     param([string]$Name)
 
     $value = [Environment]::GetEnvironmentVariable($Name, "Process")
     if ($null -eq $value) { return $null }
 
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
-        return [System.BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLowerInvariant()
-    } finally {
-        $sha.Dispose()
-    }
+    return [string]::Equals($value, $expectedEnvironment[$Name], [StringComparison]::Ordinal)
 }
 
 $result = Test-Prerequisite
 [pscustomobject]@{
     Result = [bool]$result
-    EnvDigests = [pscustomobject]@{
-        GITHUB_API_TOKEN = Get-EnvDigest "GITHUB_API_TOKEN"
-        GITHUB_APM_PAT = Get-EnvDigest "GITHUB_APM_PAT"
-        GITHUB_MODELS_KEY = Get-EnvDigest "GITHUB_MODELS_KEY"
-        GITHUB_TOKEN = Get-EnvDigest "GITHUB_TOKEN"
+    EnvPreserved = [pscustomobject]@{
+        GITHUB_API_TOKEN = Test-EnvPreserved "GITHUB_API_TOKEN"
+        GITHUB_APM_PAT = Test-EnvPreserved "GITHUB_APM_PAT"
+        GITHUB_MODELS_KEY = Test-EnvPreserved "GITHUB_MODELS_KEY"
+        GITHUB_TOKEN = Test-EnvPreserved "GITHUB_TOKEN"
     }
     Messages = @($script:Messages)
 } | ConvertTo-Json -Compress -Depth 5
@@ -139,8 +131,8 @@ def test_public_release_api_token_satisfies_prerequisite_when_inference_is_off()
     record, stdout, stderr = _run_test_prerequisite({"GITHUB_API_TOKEN": api_token})
 
     assert record["Result"] is True
-    assert record["EnvDigests"] == {
-        "GITHUB_API_TOKEN": _digest(api_token),
+    assert record["EnvPreserved"] == {
+        "GITHUB_API_TOKEN": True,
         "GITHUB_APM_PAT": None,
         "GITHUB_MODELS_KEY": None,
         "GITHUB_TOKEN": None,
@@ -155,7 +147,7 @@ def test_missing_release_and_pat_tokens_rejects_prerequisite() -> None:
 
     assert record["Result"] is False
     assert any("GitHub token setup failed" in message for message in _messages(record))
-    assert record["EnvDigests"] == {
+    assert record["EnvPreserved"] == {
         "GITHUB_API_TOKEN": None,
         "GITHUB_APM_PAT": None,
         "GITHUB_MODELS_KEY": None,
@@ -172,8 +164,8 @@ def test_api_token_does_not_satisfy_inference_prerequisite_or_seed_pat_aliases()
     )
 
     assert record["Result"] is False
-    assert record["EnvDigests"] == {
-        "GITHUB_API_TOKEN": _digest(api_token),
+    assert record["EnvPreserved"] == {
+        "GITHUB_API_TOKEN": True,
         "GITHUB_APM_PAT": None,
         "GITHUB_MODELS_KEY": None,
         "GITHUB_TOKEN": None,
@@ -200,11 +192,11 @@ def test_existing_pat_and_models_tokens_are_preserved_and_not_logged() -> None:
     )
 
     assert record["Result"] is True
-    assert record["EnvDigests"] == {
-        "GITHUB_API_TOKEN": _digest(api_token),
-        "GITHUB_APM_PAT": _digest(apm_pat),
-        "GITHUB_MODELS_KEY": _digest(models_key),
-        "GITHUB_TOKEN": _digest(github_token),
+    assert record["EnvPreserved"] == {
+        "GITHUB_API_TOKEN": True,
+        "GITHUB_APM_PAT": True,
+        "GITHUB_MODELS_KEY": True,
+        "GITHUB_TOKEN": True,
     }
     messages = _messages(record)
     assert any("GITHUB_APM_PAT is set" in message for message in messages)
