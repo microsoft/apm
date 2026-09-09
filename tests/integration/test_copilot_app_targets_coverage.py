@@ -1003,10 +1003,11 @@ class TestExperimentalFlags:
 
         assert "verbose_version" in FLAGS
 
-    def test_flags_contains_copilot_cowork(self) -> None:
+    def test_flags_omits_copilot_cowork(self) -> None:
+        """copilot-cowork graduated to GA -- its flag was removed from FLAGS."""
         from apm_cli.core.experimental import FLAGS
 
-        assert "copilot_cowork" in FLAGS
+        assert "copilot_cowork" not in FLAGS
 
     def test_flags_contains_copilot_app(self) -> None:
         from apm_cli.core.experimental import FLAGS
@@ -1175,11 +1176,11 @@ class TestGetOverriddenFlags:
 
         with patch(
             "apm_cli.core.experimental._get_experimental_section",
-            return_value={"verbose_version": True, "copilot_cowork": False},
+            return_value={"verbose_version": True, "copilot_app": False},
         ):
             result = get_overridden_flags()
         assert result["verbose_version"] is True
-        assert result["copilot_cowork"] is False
+        assert result["copilot_app"] is False
 
     def test_excludes_non_registered_keys(self) -> None:
         from apm_cli.core.experimental import get_overridden_flags

@@ -1,0 +1,6 @@
+name: cowork-smoke-test
+version: 1.0.0
+description: Sentinel skill that proves an APM-installed skill is loaded by the host agent
+author: Microsoft
+license: MIT
+type: skill

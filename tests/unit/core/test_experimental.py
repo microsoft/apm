@@ -507,66 +507,122 @@ class TestResetReturnType:
 
 
 # ---------------------------------------------------------------------------
-# Cowork flag registration
+# Cowork flag graduation (GA -- flag removed)
 # ---------------------------------------------------------------------------
 
 
-class TestCoworkFlagRegistration:
-    """Tests for the 'cowork' experimental flag registration."""
+class TestCoworkFlagRemoved:
+    """The copilot-cowork target is GA; its experimental flag is gone."""
 
-    def test_cowork_flag_is_registered(self) -> None:
+    def test_cowork_flag_is_not_registered(self) -> None:
         from apm_cli.core.experimental import FLAGS
 
-        assert "copilot_cowork" in FLAGS
+        assert "copilot_cowork" not in FLAGS
 
-    def test_cowork_flag_default_is_false(self) -> None:
-        from apm_cli.core.experimental import FLAGS
-
-        assert FLAGS["copilot_cowork"].default is False
-
-    def test_cowork_flag_is_disabled_by_default(self, inject_config: Any) -> None:
-        inject_config({})
+    def test_is_enabled_raises_for_removed_flag(self) -> None:
         from apm_cli.core.experimental import is_enabled
 
-        assert is_enabled("copilot_cowork") is False
+        with pytest.raises(ValueError, match="Unknown experimental flag"):
+            is_enabled("copilot_cowork")
 
-    def test_cowork_flag_can_be_enabled(self, isolated_config: Any) -> None:
-        from apm_cli.core.experimental import enable, is_enabled
+    def test_validate_flag_name_rejects_removed_flag(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
 
-        enable("copilot_cowork")
-        assert is_enabled("copilot_cowork") is True
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-cowork")
+        assert "Unknown experimental feature: copilot-cowork" in excinfo.value.args[0]
 
-    def test_cowork_flag_hint_contains_docs_url(self) -> None:
-        """Verify the hint URL is a valid https URL using urlparse."""
-        from urllib.parse import urlparse
+    def test_stale_cowork_config_key_is_reported(self, inject_config: Any) -> None:
+        inject_config({"experimental": {"copilot_cowork": True}})
+        from apm_cli.core.experimental import get_stale_config_keys
 
-        from apm_cli.core.experimental import FLAGS
+        assert "copilot_cowork" in get_stale_config_keys()
 
-        hint = FLAGS["copilot_cowork"].hint
-        assert hint is not None
-        # Extract URL portion from the hint string
-        import re as _re
 
-        urls = _re.findall(r"https?://\S+", hint)
-        assert urls, "hint must contain at least one URL"
-        parsed = urlparse(urls[0])
-        assert parsed.scheme == "https"
-        assert parsed.hostname is not None
-        assert parsed.path != ""
+class TestGraduatedFlags:
+    """Graduated flags teach migration instead of suggesting a wrong target."""
 
-    def test_cowork_flag_description_is_printable_ascii(self) -> None:
-        import string
+    def test_graduated_flags_never_overlap_live_flags(self) -> None:
+        """A live flag would shadow the entry, making the guidance dead code."""
+        from apm_cli.core.experimental import FLAGS, GRADUATED_FLAGS
 
-        from apm_cli.core.experimental import FLAGS
+        assert not (set(GRADUATED_FLAGS) & set(FLAGS))
 
-        desc = FLAGS["copilot_cowork"].description
-        assert len(desc) <= 80
-        assert all(c in string.printable for c in desc)
+    def test_cowork_is_registered_as_graduated(self) -> None:
+        from apm_cli.core.experimental import GRADUATED_FLAGS
 
-    def test_cowork_key_equals_name(self) -> None:
-        from apm_cli.core.experimental import FLAGS
+        assert "copilot_cowork" in GRADUATED_FLAGS
 
-        assert FLAGS["copilot_cowork"].name == "copilot_cowork"
+    def test_graduated_flag_carries_guidance_not_suggestions(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-cowork")
+
+        args = excinfo.value.args
+        assert args[1] == [], "typo suggestions must be suppressed"
+        assert "generally available" in args[2]
+        assert "--target copilot-cowork --global" in args[2]
+        assert args[3] == "copilot-cowork"
+
+    def test_graduated_guidance_never_suggests_copilot_app(self) -> None:
+        """Regression trap: 'copilot-app' is a different target entirely."""
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-cowork")
+
+        assert "copilot-app" not in str(excinfo.value.args[1:])
+
+    def test_near_miss_on_graduated_name_resolves_to_guidance(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-cowrk")
+
+        args = excinfo.value.args
+        assert args[3] == "copilot-cowork"
+        assert "copilot-app" not in str(args[1:])
+
+    def test_unrelated_typo_still_gets_flag_suggestions(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("verbose-vers")
+
+        args = excinfo.value.args
+        assert "verbose-version" in args[1]
+        assert len(args) == 2 or args[2] is None
+
+    def test_closer_live_flag_beats_graduated_near_miss(self) -> None:
+        """Regression trap: the graduated check must not shadow a better live match.
+
+        'copilot-ap' is a typo for the LIVE 'copilot-app' flag, but it also
+        scores above the difflib cutoff against the graduated
+        'copilot-cowork'. Taking the graduated branch unconditionally sent
+        the caller to a completely different target -- the same wrong-answer
+        failure GRADUATED_FLAGS exists to prevent, inverted.
+        """
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("copilot-ap")
+
+        args = excinfo.value.args
+        # Live-suggestion path: guidance/graduated slots must stay empty.
+        assert "copilot-app" in args[1]
+        assert len(args) == 2 or args[2] is None
+        assert "copilot-cowork" not in str(args[1:])
+
+    def test_unknown_name_yields_no_guidance(self) -> None:
+        from apm_cli.core.experimental import validate_flag_name
+
+        with pytest.raises(ValueError) as excinfo:
+            validate_flag_name("totally-bogus")
+
+        args = excinfo.value.args
+        assert args[1] == []
+        assert len(args) == 2 or args[2] is None
 
 
 # ---------------------------------------------------------------------------

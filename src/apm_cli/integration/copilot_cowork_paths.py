@@ -20,8 +20,8 @@ traversal checks.
 Design note
 -----------
 This module is pure-stdlib and does **not** import any third-party library.
-It is always importable but functionally inert until the ``cowork``
-experimental flag is enabled by the caller.
+It is inert until a caller selects the ``copilot-cowork`` target, which is
+explicit-only and user-scope only.
 """
 
 from __future__ import annotations

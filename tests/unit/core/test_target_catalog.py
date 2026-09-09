@@ -52,12 +52,10 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
         )
         == ALL_CANONICAL_TARGETS
     )
+    assert frozenset({"copilot-app", "grok-cloud", "openclaw"}) == EXPERIMENTAL_TARGETS
     assert (
-        frozenset({"copilot-app", "copilot-cowork", "grok-cloud", "openclaw"})
-        == EXPERIMENTAL_TARGETS
-    )
-    assert (
-        frozenset({"agent-skills", "antigravity", "grok-cloud", "hermes"}) == EXPLICIT_ONLY_TARGETS
+        frozenset({"agent-skills", "antigravity", "copilot-cowork", "grok-cloud", "hermes"})
+        == EXPLICIT_ONLY_TARGETS
     )
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
     assert TARGET_ALIASES == {
@@ -264,7 +262,7 @@ def test_current_native_profiles_are_characterized() -> None:
             "copilot-cowork",
             {"skills": ("skills", "/SKILL.md", "skill_standard", None, False)},
             None,
-            "copilot_cowork",
+            None,
         ),
         "copilot-app": (
             "copilot-app",
@@ -419,3 +417,27 @@ def _capability(
         runtimes=runtimes,
         commands=frozenset(COMMANDS),
     )
+
+
+def test_copilot_cowork_is_ga_explicit_only() -> None:
+    """copilot-cowork graduated: manifest-valid, explicit-only, never in all.
+
+    Regression trap for the GA flip. The target must be accepted in
+    ``apm.yml`` ``targets:`` (so it can be declared once and picked up by a
+    later ``apm install --global``) while staying out of every ``all``
+    expansion and out of auto-detection.
+    """
+    from apm_cli.core.target_catalog import TARGET_CAPABILITIES, manifest_target_names
+
+    capability = TARGET_CAPABILITIES["copilot-cowork"]
+    assert capability.experimental_flag is None
+    assert capability.explicit_only is True
+    assert capability.in_all is False
+
+    assert "copilot-cowork" in manifest_target_names()
+    assert "copilot-cowork" in CANONICAL_TARGETS
+    assert "copilot-cowork" not in EXPERIMENTAL_TARGETS
+    assert "copilot-cowork" in EXPLICIT_ONLY_TARGETS
+
+    for command in COMMANDS:
+        assert "copilot-cowork" not in expand_all(command)

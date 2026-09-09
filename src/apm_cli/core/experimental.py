@@ -61,15 +61,6 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint="Run 'apm --version' to see the new output.",
     ),
-    "copilot_cowork": ExperimentalFlag(
-        name="copilot_cowork",
-        description="Enable Microsoft 365 Copilot Cowork skills deployment via OneDrive.",
-        default=False,
-        hint=(
-            "Use '--target copilot-cowork --global' to deploy skills. "
-            "See https://microsoft.github.io/apm/integrations/copilot-cowork/"
-        ),
-    ),
     "copilot_app": ExperimentalFlag(
         name="copilot_app",
         description="Deploy prompts as workflows into the GitHub Copilot desktop App.",
@@ -136,6 +127,36 @@ FLAGS: dict[str, ExperimentalFlag] = {
         ),
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Graduated flags
+# ---------------------------------------------------------------------------
+
+GRADUATED_FLAGS: dict[str, str] = {
+    "copilot_cowork": (
+        "The 'copilot-cowork' target is now generally available -- no flag is "
+        "needed.\nRun: apm install --target copilot-cowork --global"
+    ),
+}
+"""Flags that graduated to GA, mapped to migration guidance.
+
+A graduated flag is NOT a typo, so ``difflib`` suggestions are actively
+harmful here: the nearest registered name is usually an unrelated feature
+(``copilot-cowork`` -> ``copilot-app``), and following that suggestion
+silently enables the wrong behaviour.  Entries stay here permanently so
+stale scripts get a correct answer rather than a plausible wrong one.
+
+The precedence is closest-match, not graduated-first: an exact graduated
+name always wins, but a graduated *near-miss* only wins when it scores
+above the best live-flag match.  Otherwise ``copilot-ap`` -- a typo for
+the live ``copilot-app`` -- would route to the graduated ``copilot-cowork``
+hint and reintroduce the wrong-answer failure from the other direction.
+
+Add an entry whenever a flag is removed from :data:`FLAGS` because its
+behaviour became the default.  Keys MUST NOT overlap :data:`FLAGS` -- a
+live flag would shadow the entry and render it dead code.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -215,28 +236,68 @@ def is_enabled(name: str, *, create_config: bool = True) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _match_ratio(probe: str, candidate: str) -> float:
+    """Similarity of ``probe`` to ``candidate`` on difflib's 0..1 scale.
+
+    Used to compare a graduated-flag near-miss against the best live-flag
+    near-miss so the closer of the two wins.
+    """
+    return difflib.SequenceMatcher(None, probe, candidate).ratio()
+
+
 def validate_flag_name(name: str) -> str:
     """Validate and normalise a flag name from CLI input.
 
     Returns the normalised snake_case name on success.
 
     Raises:
-        ValueError: If the flag is not registered.  The exception message
-            includes ``difflib``-based suggestions when available.
+        ValueError: If the flag is not registered.  ``args[1]`` carries
+            ``difflib``-based suggestions; ``args[2]`` carries migration
+            guidance when the name resolves to a graduated flag rather
+            than a typo, and ``args[3]`` the graduated flag's display name.
     """
     normalised = normalise_flag_name(name)
     if normalised in FLAGS:
         return normalised
 
     display = display_name(normalised)
+    msg = f"Unknown experimental feature: {display}"
+
+    guidance = GRADUATED_FLAGS.get(normalised)
+    graduated_name = normalised if guidance is not None else None
+
     suggestions = difflib.get_close_matches(
         normalised,
         FLAGS.keys(),
         n=3,
         cutoff=0.6,
     )
-    msg = f"Unknown experimental feature: {display}"
-    raise ValueError(msg, [display_name(s) for s in suggestions])
+
+    if guidance is None:
+        # A near-miss on a graduated name ('copilot-cowrk') must not fall
+        # through to FLAGS matching, which would suggest an unrelated target.
+        # It must not shadow a *better* live match either: 'copilot-ap' is a
+        # typo for the live 'copilot-app', not for the graduated
+        # 'copilot-cowork', and routing it to the graduated hint would send
+        # the caller to a different feature entirely -- the same wrong-answer
+        # failure this registry exists to prevent. Prefer whichever side
+        # actually matches more closely.
+        graduated_match = difflib.get_close_matches(
+            normalised, GRADUATED_FLAGS.keys(), n=1, cutoff=0.6
+        )
+        if graduated_match:
+            best_live = max(
+                (_match_ratio(normalised, candidate) for candidate in suggestions),
+                default=0.0,
+            )
+            if _match_ratio(normalised, graduated_match[0]) > best_live:
+                graduated_name = graduated_match[0]
+                guidance = GRADUATED_FLAGS[graduated_name]
+
+    if guidance is not None:
+        raise ValueError(msg, [], guidance, display_name(graduated_name))
+
+    raise ValueError(msg, [display_name(s) for s in suggestions], None)
 
 
 def _set_flag(name: str, value: bool) -> ExperimentalFlag:
