@@ -43,6 +43,13 @@ outside-constraint upgrades, see the
 `apm update` remains constraint-respecting and writable; it does not take an
 outside-constraint `Latest`.
 
+`apm uninstall -g PKG` rebuilds the generated Copilot user-instructions
+aggregate from validated surviving packages and root authoring. Cleanup
+refusal retains previous ownership receipts after partial removal; recovery
+uses `apm install --global`, not a force bypass. Follow the
+[Copilot aggregate recovery steps](https://microsoft.github.io/apm/reference/targets-matrix/#copilot)
+before retrying.
+
 For `apm install -g --mcp`, mixed target selections warn and skip
 workspace-only runtimes. If no selected target supports user scope, the command
 exits `2` before creating or changing the user manifest, lockfile, or runtime

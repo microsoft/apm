@@ -128,6 +128,25 @@ GitHub Copilot (CLI and IDE).
   at user scope). User-scope deploys land under `~/.copilot/`, not
   `~/.github/`; hook script commands are written as absolute paths so Copilot
   CLI can invoke them from any working directory.
+
+  This generated file is a whole-file aggregate: the deployment ledger records
+  every contributing package and root owner with the final combined-content
+  digest. It has no editable generated regions. Author root
+  `*.instructions.md` files in `~/.apm/instructions/`, not in the aggregate.
+
+  `apm uninstall -g PKG` reconstructs it from validated surviving package
+  sources eligible for Copilot and actual root authoring, never from generated
+  output. Successful cleanup and lockfile persistence remove the aggregate and
+  its ownership records when no eligible content remains. By default, APM
+  leaves unmanaged output unchanged without claiming ownership.
+
+  Edited or unsafe aggregate cleanup is refused, retaining previous ownership
+  receipts. Removal is partially completed, not rolled back. Back up and move
+  the refused `~/.copilot/copilot-instructions.md` out of its managed path,
+  repair unsafe paths, then run `apm install --global`. Port wanted edits to
+  genuine authoring in `~/.apm/instructions/`; do not restore the old aggregate.
+  For source-validation or rebuild failures, fix the reported source problem
+  before running `apm install --global`.
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 
