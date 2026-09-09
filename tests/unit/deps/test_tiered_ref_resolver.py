@@ -193,7 +193,9 @@ def test_l2_returns_none_when_no_git_cache():
 
 
 def test_l2_returns_none_when_bare_dir_missing(tmp_path):
-    fake_cache = types.SimpleNamespace(_db_root=tmp_path / "nonexistent")
+    fake_cache = types.SimpleNamespace(
+        _db_root=tmp_path / "nonexistent", read_resolved_ref=lambda *_: (False, None)
+    )
     tier = L2BareRevParse(git_cache=fake_cache)
     assert tier.try_resolve(_dep(), "main") is None
 
@@ -218,7 +220,9 @@ def test_l2_short_circuits_on_sha_input():
 def test_l2_rev_parse_uses_git_cache_repository_identity(tmp_path, dependency):
     bare = tmp_path / cache_shard_key(dependency.to_github_url())
     bare.mkdir(parents=True)
-    fake_cache = types.SimpleNamespace(_db_root=tmp_path)
+    fake_cache = types.SimpleNamespace(
+        _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
+    )
     tier = L2BareRevParse(git_cache=fake_cache)
 
     with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as rp:
@@ -304,6 +308,33 @@ def test_orchestrator_caches_after_first_resolve():
     counting_tier.try_resolve.assert_called_once()
     assert resolver.stats["counting"] == 1
     assert resolver.stats["per_run_cache"] == 2
+
+
+def test_only_actual_current_remote_resolution_can_publish_named_observation():
+    """Neither an older lock seed nor a SHA passthrough authorizes publication."""
+    cache = PerRunRefCache()
+    remote = MagicMock()
+    remote.name = "commits_api"
+    remote.try_resolve.return_value = SHA_B
+    legacy = _make_legacy_with(SHA_B)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), remote, legacy],
+        cache=cache,
+        legacy=legacy,
+        freshness_policy=RefFreshnessPolicy.CURRENT_REMOTE,
+    )
+    dependency = _dep(ref="main")
+    assert resolver.remotely_resolved(dependency, SHA_B) is False
+    resolver.resolve(dependency)
+    resolver.resolve(dependency)
+    assert resolver.remotely_resolved(dependency, SHA_B) is True
+    assert resolver.remotely_resolved(dependency, SHA_A) is False
+    assert resolver.remotely_resolved(_dep(ref="other"), SHA_B) is False
+    resolver.seed(_dep(ref="old"), "old", SHA_A)
+    resolver.resolve(_dep(ref="old"))
+    resolver.resolve(_dep(ref=SHA_A))
+    assert resolver.remotely_resolved(_dep(ref="old"), SHA_A) is False
+    assert resolver.remotely_resolved(_dep(ref=SHA_A), SHA_A) is False
 
 
 def test_seed_populates_l0_and_avoids_network_tier():
@@ -569,7 +600,7 @@ def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
 
     bare = tmp_path / cache_shard_key(_dep().to_github_url())
     bare.mkdir(parents=True)
-    git_cache = types.SimpleNamespace(_db_root=tmp_path)
+    git_cache = types.SimpleNamespace(_db_root=tmp_path, read_resolved_ref=lambda *_: (False, None))
     downloader = MagicMock()
     fake_refs = MagicMock()
     fake_refs.resolve_commit_sha_for_ref.return_value = None
@@ -604,7 +635,7 @@ def test_normal_policy_uses_l2_when_api_unavailable_without_clone(monkeypatch, t
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
     bare = tmp_path / cache_shard_key(_dep().to_github_url())
     bare.mkdir(parents=True)
-    git_cache = types.SimpleNamespace(_db_root=tmp_path)
+    git_cache = types.SimpleNamespace(_db_root=tmp_path, read_resolved_ref=lambda *_: (False, None))
     downloader = MagicMock()
     fake_refs = MagicMock()
     fake_refs.resolve_commit_sha_for_ref.return_value = None

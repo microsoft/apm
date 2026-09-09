@@ -171,6 +171,8 @@ object form instead:
 
 Omit `path:` for whole-repo dependencies. Keeping aliases explicit reserves
 `@` for git usernames and future package-manager-compatible version syntax.
+
+For reserved aliases `.` and `..`, see [Rejected dependency aliases](../../troubleshooting/migration/#rejected-dependency-aliases).
 :::
 
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see

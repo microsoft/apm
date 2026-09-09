@@ -105,7 +105,11 @@
             "ref": { "type": "string" },
             "prerelease": { "type": "boolean" },
             "path": { "type": "string" },
-            "alias": { "type": "string" },
+            "alias": {
+              "type": "string",
+              "pattern": "^\\s*(?!\\.{1,2}\\s*(?![\\s\\S]))[a-zA-Z0-9._-]+\\s*(?![\\s\\S])",
+              "description": "Alias input is trimmed and validated per req-mf-025; source paths are independent."
+            },
             "skills": { "type": "array", "items": { "type": "string" } }
           },
           "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },

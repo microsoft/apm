@@ -44,3 +44,83 @@ def test_embedded_git_url_subpath_guard_rejects_provider_bypass() -> None:
         violation.rule_id == RULE_ID and "Embedded git URL subpath validation" in violation.message
         for violation in report.violations
     )
+
+
+def test_alias_consumers_share_validation_and_materialization() -> None:
+    """All ingress and install boundaries route through the existing owners."""
+    report = run_selected_rules(ROOT, (RULE_ID,))
+    assert not report.violations
+
+
+@pytest.mark.parametrize(
+    ("path", "before", "after"),
+    [
+        ("src/apm_cli/deps/lockfile.py", "alias=self.alias", "alias=None"),
+        ("src/apm_cli/deps/lockfile.py", 'result["alias"] = self.alias', "pass"),
+        (
+            "src/apm_cli/deps/lockfile.py",
+            "self.alias = parse_alias_override(self.alias)",
+            "pass",
+        ),
+        (REFERENCE, "alias = parse_alias_override(alias)", "alias = alias"),
+        (
+            "src/apm_cli/models/dependency/registry_entry.py",
+            'alias = parse_alias_override(entry.get("alias"))',
+            'alias = entry.get("alias")',
+        ),
+        (
+            "src/apm_cli/models/dependency/object_fields.py",
+            'validate_path_segments(alias, context="dependency alias")',
+            "pass",
+        ),
+        (
+            "src/apm_cli/models/dependency/materialization.py",
+            "if resolved == ensure_path_within(apm_modules_dir, apm_modules_dir):",
+            "if False:",
+        ),
+        (
+            "src/apm_cli/install/phases/download.py",
+            "_pd_path = _pd_ref.get_install_path(apm_modules_dir)",
+            "_pd_path = apm_modules_dir / _pd_ref.alias",
+        ),
+        (
+            "src/apm_cli/install/phases/integrate.py",
+            "install_path = dep_ref.get_install_path(apm_modules_dir)",
+            "install_path = apm_modules_dir / dep_ref.alias",
+        ),
+        (
+            "src/apm_cli/install/phases/resolve.py",
+            "cache_validation_callback=partial(",
+            "bypassed_cache_validation_callback=partial(",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "if parent_dep.alias:",
+            "if False:",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "self._cache_validation_callback(install_path, dep_ref.get_unique_key())",
+            "pass",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "had_existing_install = install_path.exists()",
+            "had_existing_install = install_path.exists()\n"
+            "        self._cache_validation_callback(install_path, dep_ref.get_unique_key())",
+        ),
+    ],
+)
+def test_alias_owner_guard_rejects_bypass(path: str, before: str, after: str) -> None:
+    """Restoring a split alias decision must trip the registered static guard."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert before in source
+    report = run_selected_rules(
+        ROOT,
+        (RULE_ID,),
+        source_overrides={path: source.replace(before, after, 1)},
+    )
+    assert any(
+        violation.rule_id == RULE_ID and "Dependency aliases" in violation.message
+        for violation in report.violations
+    )

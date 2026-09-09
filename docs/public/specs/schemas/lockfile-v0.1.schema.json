@@ -36,6 +36,12 @@
       "type": "object",
       "properties": {
         "repo_url": { "type": "string", "minLength": 1 },
+        "alias": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]+(?![\\s\\S])",
+          "not": { "enum": [".", ".."] },
+          "description": "Validated install-directory override, not source identity; req-mf-025."
+        },
         "materialization_repo_url": {
           "type": "string",
           "minLength": 1,

@@ -226,15 +226,13 @@ class TestScanInstalledPackages:
         found = [p for p in result if "org/project/repo" in p]
         assert len(found) >= 1
 
-    def test_ignores_dot_named_directories(self, tmp_path):
-        """Directories whose own name starts with '.' are skipped."""
-        # A directory named '.hidden' at top-level is skipped by name check.
+    def test_includes_dot_named_top_level_packages(self, tmp_path):
+        """A valid dotted alias with package metadata is an installed package."""
         dot_dir = tmp_path / ".hidden"
         dot_dir.mkdir()
         (dot_dir / "apm.yml").write_text("name: hidden")
         result = _scan_installed_packages(tmp_path)
-        # rel_parts of ".hidden" has length 1, so it can't produce an owner/repo key
-        assert not any(p == ".hidden" for p in result)
+        assert result == [".hidden"]
 
     def test_ignores_dirs_without_apm_marker(self, tmp_path):
         """Directories without apm.yml or .apm are not returned."""

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Dependency aliases now reject `.` and `..`, require contained destinations, and persist placement for replay and cleanup; documented in `specs/openapm-v0.1.md` (`req-mf-025`). [Review alias migration and reinstall artifacts](https://microsoft.github.io/apm/troubleshooting/migration/#rejected-dependency-aliases). - by @Danvs60 (#2901)
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
 - Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
 

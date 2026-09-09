@@ -10,6 +10,51 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.cache.git_cache import CachePruneError, GitCache
+from apm_cli.cache.url_normalize import cache_shard_key
+
+
+@pytest.mark.parametrize("ref", ["main", "release/v1", "v1.0"])
+def test_remote_ref_receipt_is_shared_without_rewriting_git_refs(tmp_path: Path, ref: str) -> None:
+    """Fresh named observations survive cache instances without changing pins."""
+    cache = GitCache(tmp_path)
+    url = "https://github.com/owner/repo"
+    assert cache.read_resolved_ref(url, ref) == (False, None)
+    cache.remember_resolved_ref(url, ref, "a" * 40)
+    cache.remember_resolved_ref(url, ref, "b" * 40)
+    replay = GitCache(tmp_path)
+    assert replay.read_resolved_ref(url + ".git", ref) == (True, "b" * 40)
+    assert replay.read_resolved_ref(url, ref + "-other") == (False, None)
+    assert replay.read_resolved_ref(url + "-other", ref) == (False, None)
+    assert replay._resolve_sha(url, ref, locked_sha="a" * 40) == "a" * 40
+    assert replay.read_resolved_ref(url, ref) == (True, "b" * 40)
+
+
+@pytest.mark.parametrize("count", [2, 20])
+def test_ref_receipt_stats_count_bytes_not_repositories(tmp_path: Path, count: int) -> None:
+    """Receipt accounting is linear and does not count lock files as content."""
+    cache = GitCache(tmp_path)
+    for index in range(count):
+        cache.remember_resolved_ref("https://github.com/owner/repo", f"ref-{index}", "a" * 40)
+    with patch("apm_cli.cache.git_cache.os.scandir", wraps=os.scandir) as scandir:
+        stats = cache.get_cache_stats()
+    assert stats == {"db_count": 0, "checkout_count": 0, "total_size_bytes": 40 * count}
+    assert scandir.call_count == 2
+
+
+def test_corrupt_remote_ref_receipt_does_not_revive_stale_bare_ref(tmp_path: Path) -> None:
+    """An unusable newer observation is a cache miss, not an older answer."""
+    from apm_cli.deps.tiered_ref_resolver import L2BareRevParse
+    from apm_cli.models.apm_package import DependencyReference
+
+    cache = GitCache(tmp_path)
+    dependency = DependencyReference.parse("owner/repo#main")
+    url = dependency.to_github_url()
+    cache.remember_resolved_ref(url, "main", "b" * 40)
+    cache._resolved_ref_path(url, "main").write_text("broken", encoding="ascii")
+    (cache._db_root / cache_shard_key(url)).mkdir()
+    with patch.object(L2BareRevParse, "_rev_parse", return_value="a" * 40) as bare:
+        assert L2BareRevParse(cache).try_resolve(dependency, "main") is None
+    bare.assert_not_called()
 
 
 @pytest.mark.windows_compat

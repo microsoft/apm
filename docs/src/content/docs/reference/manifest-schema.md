@@ -434,7 +434,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `git` | `string` | REQUIRED (remote) | HTTPS URL, SSH URL, or FQDN shorthand | Clone URL of the repository. Required for remote dependencies. |
 | `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
-| `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
+| `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$`; excludes exactly `.` and `..` | Names the destination directory, not the source; local `../` paths remain supported. Valid: `.safe`, `safe.`, `foo..bar`, `my-skill.v2`. [Migration](../../troubleshooting/migration/#rejected-dependency-aliases). |
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
