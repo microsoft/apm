@@ -627,14 +627,17 @@ class TestPackCmdFlags:
 
 class TestUnpackCmd:
     def test_unpack_deprecation_warning(self, tmp_path: Path) -> None:
-        """unpack always emits a deprecation warning."""
+        """The warning keeps legacy consumers on the supported restore path."""
         bundle = tmp_path / "bundle.zip"
         bundle.write_bytes(b"fake")
         result = CliRunner().invoke(
             unpack_cmd,
             [str(bundle), "--dry-run"],
         )
-        assert "deprecated" in (result.output or "").lower() or result.exit_code in (0, 1)
+        output = " ".join(result.output.split())
+        assert "deprecated" in output
+        assert "Legacy '--format apm' bundles still require 'apm unpack'." in output
+        assert "Use 'apm install <bundle-path>' for Claude plugin bundles." in output
 
     def test_unpack_nonexistent_bundle(self, tmp_path: Path) -> None:
         """Passing a non-existent path exits non-zero."""
@@ -645,10 +648,12 @@ class TestUnpackCmd:
         assert result.exit_code != 0
 
     def test_unpack_help_shows_install_hint(self) -> None:
-        """Help text references 'apm install' as the replacement."""
+        """Help distinguishes legacy restoration from Claude plugin installation."""
         result = CliRunner().invoke(unpack_cmd, ["--help"])
         assert result.exit_code == 0
-        assert "install" in result.output.lower()
+        output = " ".join(result.output.split())
+        assert "Legacy '--format apm' bundles still require 'apm unpack'." in output
+        assert "Use 'apm install <bundle-path>' for Claude plugin bundles." in output
 
 
 # ---------------------------------------------------------------------------

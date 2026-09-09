@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::caution[Deprecated]
-`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the only deploy path for legacy `--format apm` tarballs (see [Behavior](#behavior)).
+`apm unpack` is deprecated and will be removed in a future release. For Claude plugin bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. Legacy `--format apm` bundles still require `apm unpack`, including ZIP archives, tarballs, and unpacked directories (see [Behavior](#behavior)).
 :::
 
 ## Synopsis
