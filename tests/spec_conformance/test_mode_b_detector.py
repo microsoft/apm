@@ -17,11 +17,18 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from tests.spec_conformance._manifest import (
+    MANIFEST_PATH,
+    REPO_ROOT,
+    SCHEMA_PATH,
+    SPEC_PATH,
+)
+
 DETECTOR = REPO_ROOT / "tests" / "spec_conformance" / "mode_b_detector.sh"
 PATHS_FILE = REPO_ROOT / "tests" / "spec_conformance" / "critical_paths.txt"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "spec-conformance.yml"
@@ -74,21 +81,33 @@ def test_critical_paths_file_lists_known_directories():
         )
 
 
-def test_detector_short_circuits_on_spec_concurrent_edit(tmp_path):
+@pytest.mark.parametrize("selected_path", [SPEC_PATH, MANIFEST_PATH])
+def test_detector_short_circuits_on_spec_concurrent_edit(tmp_path, selected_path):
     """A PR that edits the spec body MUST short-circuit (exit 0)."""
     repo = _make_repo(tmp_path)
     # Add a substantive critical-path change AND a spec edit.
     (repo / "src" / "apm_cli" / "deps" / "new.py").write_text(
         "\n".join(f"x = {i}" for i in range(40)) + "\n"
     )
-    spec = repo / "docs" / "src" / "content" / "docs" / "specs"
-    spec.mkdir(parents=True, exist_ok=True)
-    (spec / "openapm-v0.1.md").write_text("placeholder spec edit\n")
+    selected = repo / selected_path.relative_to(REPO_ROOT)
+    selected.write_text(selected.read_text() + "\n# Informative draft note\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-m", "feature + spec edit")
     out = _run_detector(repo)
     assert out.returncode == 0
     assert "spec-concurrent edit detected" in out.stdout, out.stdout
+
+
+def test_retained_previous_minor_does_not_satisfy_active_spec_citation(tmp_path):
+    """Changing only the previous minor cannot cite the active assessment."""
+    repo = _make_repo(tmp_path)
+    (repo / "src/apm_cli/deps/new.py").write_text("\n".join(f"x = {i}" for i in range(40)) + "\n")
+    (repo / "docs/src/content/docs/specs/openapm-v0.1.md").write_text("old history\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "critical change with old-only notice")
+    result = _run_detector(repo)
+    assert result.returncode == 1
+    assert "Mode B detector" in result.stdout
 
 
 def test_detector_short_circuits_on_new_top_level_req_marker(tmp_path):
@@ -165,6 +184,26 @@ def test_detector_fires_on_substantive_critical_path_add(tmp_path):
     )
     assert "Mode B detector" in out.stdout
     assert "apm-spec-waiver" in out.stdout
+
+
+def test_detector_controls_ignore_ambient_gate_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host's gate configuration must not change the synthetic control."""
+    repo = _make_repo(tmp_path)
+    (repo / "src/apm_cli/deps/new.py").write_text("\n".join(f"x = {i}" for i in range(40)) + "\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "uncited critical change")
+    for name, value in {
+        "BASE_REF": "missing-base",
+        "MODE_B_THRESHOLD": "99999",
+        "GH_PR_BODY": "apm-spec-waiver: ambient waiver must not apply",
+        "GITHUB_ACTIONS": "true",
+    }.items():
+        monkeypatch.setenv(name, value)
+    result = _run_detector(repo)
+    assert result.returncode == 1
+    assert "Mode B detector" in result.stdout
 
 
 def test_detector_respects_waiver_trailer(tmp_path):
@@ -255,6 +294,10 @@ def test_workflow_checkout_uses_full_history():
     )
 
 
+def test_workflow_triggers_on_public_spec_assets():
+    assert "'docs/public/specs/**'" in WORKFLOW.read_text()
+
+
 def test_workflow_invokes_detector_after_orphan_check():
     """The CI workflow MUST wire the detector as a step."""
     body = WORKFLOW.read_text()
@@ -317,6 +360,16 @@ def _make_repo(tmp_path: Path) -> Path:
     shutil.copy2(DETECTOR, repo / "tests" / "spec_conformance" / "mode_b_detector.sh")
     (repo / "tests" / "spec_conformance" / "mode_b_detector.sh").chmod(0o755)
     shutil.copy2(PATHS_FILE, repo / "tests" / "spec_conformance" / "critical_paths.txt")
+    for relative in ("tests/__init__.py", "tests/spec_conformance/__init__.py"):
+        (repo / relative).write_text("")
+    shutil.copy2(
+        REPO_ROOT / "tests/spec_conformance/_manifest.py",
+        repo / "tests/spec_conformance/_manifest.py",
+    )
+    for source in (SPEC_PATH, MANIFEST_PATH, SCHEMA_PATH):
+        destination = repo / source.relative_to(REPO_ROOT)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-m", "base", "--quiet")
     # Create a feature branch and an origin/main reference the detector
@@ -328,27 +381,14 @@ def _make_repo(tmp_path: Path) -> Path:
 
 
 def _run_detector(repo: Path) -> subprocess.CompletedProcess:
-    env = {**os.environ, "BASE_REF": "origin/main"}
-    # Disable the env-var waiver path; we test commit-trailer waivers
-    # by leaving GH_PR_BODY unset.
-    env.pop("GH_PR_BODY", None)
-    return subprocess.run(
-        ["bash", "tests/spec_conformance/mode_b_detector.sh"],
-        cwd=repo,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    return _run_detector_with_env(repo, BASE_REF="origin/main")
 
 
 def _run_detector_with_env(repo: Path, **overrides: str) -> subprocess.CompletedProcess:
-    """Run the detector with explicit env overrides. GH_PR_BODY is
-    cleared so only the supplied vars drive behaviour."""
-    env = {**os.environ}
-    env.pop("GH_PR_BODY", None)
-    # Strip any ambient GITHUB_ACTIONS so callers control it explicitly.
-    env.pop("GITHUB_ACTIONS", None)
+    """Only explicit overrides may configure the synthetic detector."""
+    env = {**os.environ, "PYTHON": sys.executable, "PYTHONPATH": str(repo)}
+    for name in ("GH_PR_BODY", "GITHUB_ACTIONS", "BASE_REF", "MODE_B_THRESHOLD"):
+        env.pop(name, None)
     env.update(overrides)
     return subprocess.run(
         ["bash", "tests/spec_conformance/mode_b_detector.sh"],

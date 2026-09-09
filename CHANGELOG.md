@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
 - Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
 
+### Fixed
+
+- Global installs anchor local children to established declaring sources without treating disguised remote names as local, and audit replays current target intent without modifying live configuration or native state. The corrective OpenAPM draft is assessed explicitly as `v0.2.0`; previous exact-version assessments remain available, and human ratification and activation are pending. (#2820)
+
 ## [0.30.0] - 2026-09-07
 
 ### Security

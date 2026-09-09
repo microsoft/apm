@@ -179,19 +179,6 @@ def test_producer_rejects_unknown_registries_keys():
         validate_against("manifest-v0.1.schema.json", doc)
 
 
-@pytest.mark.req("req-mf-016")
-def test_consumer_rejects_absolute_paths_in_apm_source():
-    """Spec restricts apm-source `path:` to relative form."""
-    assert_spec_contains("path")
-    waive(
-        "Path-shape negative test requires apm_cli's path-policy loader "
-        "to be invokable from the test harness; the JSON Schema currently "
-        "models `path` as a free-form string. Tracked as a follow-up: "
-        "tighten the schema to forbid leading `/` and document the "
-        "absolute-path rejection in the schema additionalProperties."
-    )
-
-
 @pytest.mark.req("req-mf-017")
 def test_producer_publishes_apm_yml_at_repo_root():
     assert_spec_contains("apm.yml")
@@ -202,6 +189,18 @@ def test_consumer_restricts_policy_hash_algorithm_to_strong_set():
     schema = load_schema("manifest-v0.1.schema.json")
     enum = schema["properties"]["policy"]["properties"]["hash_algorithm"]["enum"]
     assert set(enum) == {"sha256", "sha384", "sha512"}
+
+
+@pytest.mark.req("req-mf-018")
+@pytest.mark.parametrize("digest", ["not-a-digest", "sha256:" + "a" * 63])
+def test_retained_schema_accepts_invalid_policy_hash_without_semantic_evidence(
+    digest: str,
+) -> None:
+    """Structural acceptance is a schema limitation, not consumer hash enforcement."""
+    document = load_yaml_fixture("manifest", "valid-minimal.yml")
+    document["policy"] = {"hash_algorithm": "sha256", "hash": digest}
+    validate_against("manifest-v0.1.schema.json", document)
+    assert_spec_contains('id="req-mf-018"', 'id="req-lk-016"', "`policy.hash`")
 
 
 @pytest.mark.req("req-mf-019")
@@ -254,9 +253,13 @@ def test_consumer_resolves_runtime_argument_templates_without_secret_leakage():
 
 
 @pytest.mark.req("req-mf-021")
-def test_producer_workspaces_must_not_use_in_v0_1():
-    """req-mf-021 forbids workspaces in v0.1."""
-    assert_spec_contains("workspaces", "v0.1")
+def test_producer_workspaces_remain_reserved():
+    """The corrective revision does not activate the old future-version promise."""
+    assert_spec_contains(
+        "**producer** MUST NOT\ndeclare a top-level `workspaces:` key",
+        "reserved for a future revision and MUST NOT attach any semantics",
+        "The diagnostic MUST NOT fail install.",
+    )
 
 
 @pytest.mark.req("req-mf-022")

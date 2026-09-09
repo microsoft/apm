@@ -86,6 +86,48 @@ _GUARD_LOCKFILE_TIMESTAMP_CONSTRUCTOR = "contracts-tooling-lockfile-timestamp-co
 
 _GUARD_GENERATION_FOOTER = "contracts-tooling-generation-footer"
 
+_GUARD_SPEC_ASSESSMENT = "contracts-tooling-spec-assessment"
+
+
+def check_spec_assessment_authority(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep selected artifact, exact identity, and collection decisions in one owner."""
+    required_calls = {
+        "tests/spec_conformance/_helpers.py": ("selected_assessment(",),
+        "tests/spec_conformance/conftest.py": ("coverage_document(", "coverage_output_path("),
+        "tests/spec_conformance/orphan_check.py": ("collect_coverage(",),
+        "tests/spec_conformance/gen_statement.py": ("collect_coverage(", "selected_assessment("),
+        "tests/spec_conformance/mode_b_detector.sh": ("-m tests.spec_conformance._manifest",),
+    }
+    findings: list[Violation] = []
+    for path, calls in required_calls.items():
+        facts, failures = _facts_for(provider, path, _GUARD_SPEC_ASSESSMENT)
+        findings.extend(failures)
+        if failures:
+            continue
+        if any(not _present(facts, call) for call in calls):
+            findings.append(
+                _summary(
+                    _GUARD_SPEC_ASSESSMENT,
+                    path,
+                    "Spec assessment consumers must route through tests/spec_conformance/_manifest.py",
+                )
+            )
+        if _present_re(
+            facts,
+            re.compile(
+                r"""(?:openapm-v[0-9]+\.[0-9]+|["']v[0-9]+\.[0-9]+\.[0-9]+["']"""
+                r"|^\s*(?:SPEC_PATH|MANIFEST_PATH|SPEC_VERSION|_SELECTED_MINOR)\s*=)"
+            ),
+        ):
+            findings.append(
+                _summary(
+                    _GUARD_SPEC_ASSESSMENT,
+                    path,
+                    "Selected spec paths and exact revision must not be independently hard-coded",
+                )
+            )
+    return tuple(findings)
+
 
 _SRC_PREFIX = "src/apm_cli/"
 
@@ -1330,6 +1372,11 @@ def _structural_rule(rule_id: str, description: str, check) -> Rule:
 
 
 RULES: tuple[Rule, ...] = (
+    _owner_rule(
+        _GUARD_SPEC_ASSESSMENT,
+        "Selected specification and fresh binding inventory have one canonical owner.",
+        check_spec_assessment_authority,
+    ),
     _owner_rule(
         _GUARD_TAXONOMY,
         "Behavioral test taxonomy classification stays owned by module-level pytestmark.",

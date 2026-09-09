@@ -10,25 +10,30 @@ from click.testing import CliRunner
 
 from apm_cli.policy.discovery import PolicyFetchResult
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize(
-    "args",
+    ("args", "expects_update"),
     [
-        ["policy", "status", "--output=json"],
-        ["policy", "status", "-ojson"],
-        ["audit", "--ci", "--no-drift", "--no-policy", "--format=json"],
-        ["audit", "--ci", "--no-drift", "--no-policy", "-fjson"],
-        ["--verbose", "policy", "status", "--output", "json"],
+        (["policy", "status", "--output=json"], True),
+        (["policy", "status", "-ojson"], True),
+        (["audit", "--ci", "--no-drift", "--no-policy", "--format=json"], False),
+        (["audit", "--ci", "--no-drift", "--no-policy", "-fjson"], False),
+        (["--verbose", "policy", "status", "--output", "json"], True),
     ],
 )
-def test_machine_output_keeps_update_notice_off_stdout(args: list[str]) -> None:
+def test_machine_output_keeps_update_notice_off_stdout(
+    args: list[str], expects_update: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Every Click spelling must leave stdout as one parseable JSON document."""
     from apm_cli.cli import cli
 
+    monkeypatch.delenv("APM_E2E_TESTS", raising=False)
     with (
         patch("apm_cli.commands._helpers.is_self_update_enabled", return_value=True),
         patch("apm_cli.commands._helpers.get_version", return_value="1.0.0"),
-        patch("apm_cli.commands._helpers.check_for_updates", return_value="2.0.0"),
+        patch("apm_cli.commands._helpers.check_for_updates", return_value="2.0.0") as check_updates,
         patch(
             "apm_cli.commands.policy.discover_policy_with_chain",
             return_value=PolicyFetchResult(outcome="absent"),
@@ -39,7 +44,12 @@ def test_machine_output_keeps_update_notice_off_stdout(args: list[str]) -> None:
 
     assert result.exception is None, result.output
     json.loads(result.stdout)
-    assert "A new version of APM is available" in result.stderr
+    if expects_update:
+        check_updates.assert_called_once_with("1.0.0")
+        assert "A new version of APM is available" in result.stderr
+    else:
+        check_updates.assert_not_called()
+        assert "A new version of APM is available" not in result.stderr
     assert "A new version of APM is available" not in result.stdout
 
 

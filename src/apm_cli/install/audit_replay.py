@@ -15,15 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.install.audit_target_roots import AuditTargetError, resolve_audit_targets
 from apm_cli.install.drift import (
     CheckLogger,
     ReplayConfig,
     _make_scratch_root,
-    _read_apm_yml_target,
     run_replay,
 )
 from apm_cli.install.plan import lockfile_satisfies_manifest
-from apm_cli.integration.targets import TargetProfile, resolve_targets
+from apm_cli.integration.targets import TargetProfile
 from apm_cli.models.apm_package import APMPackage
 
 
@@ -76,7 +76,7 @@ def prepare_ci_audit_replay(
             f"lockfile not found at {lockfile_path}; run 'apm install' to generate it"
         )
 
-    manifest = APMPackage.from_apm_yml(project_root / "apm.yml")
+    manifest = APMPackage.from_apm_yml(project_root / "apm.yml", create_config=False)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
         raise CiAuditReplayError(f"lockfile at {lockfile_path} is empty or unreadable")
@@ -87,6 +87,10 @@ def prepare_ci_audit_replay(
     if not satisfied:
         raise CiAuditReplayError("apm.lock.yaml is out of sync with apm.yml. " + " ".join(reasons))
 
+    try:
+        targets = resolve_audit_targets(project_root, user_scope=user_scope)
+    except AuditTargetError as exc:
+        raise CiAuditReplayError(str(exc)) from exc
     scratch_root = _make_scratch_root(project_root)
     modules_root = scratch_root / "apm_modules"
     config = ReplayConfig(
@@ -96,6 +100,7 @@ def prepare_ci_audit_replay(
         scratch_root=scratch_root,
         modules_root=modules_root,
         user_scope=user_scope,
+        resolved_targets=targets,
     )
     stderr_context = (
         contextlib.nullcontext() if verbose else contextlib.redirect_stderr(io.StringIO())
@@ -106,17 +111,10 @@ def prepare_ci_audit_replay(
     except Exception as exc:
         raise CiAuditReplayError(str(exc)) from exc
 
-    explicit_target = _read_apm_yml_target(project_root)
     return PreparedCiAuditReplay(
         scratch_root=scratch_root,
         modules_root=modules_root,
         lockfile_path=lockfile_path,
         tracked_files=_git_tracked_files(project_root),
-        targets=tuple(
-            resolve_targets(
-                scratch_root,
-                user_scope=user_scope,
-                explicit_target=explicit_target,
-            )
-        ),
+        targets=targets,
     )

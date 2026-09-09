@@ -10,7 +10,7 @@ import logging
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 
@@ -344,6 +344,8 @@ class APMPackage:
     # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
     allow_executables: dict[str, dict[str, bool]] | None = None
     agent_plugin: "AgentPlugin | None" = None
+    # Acquisition-only provenance; never parsed from or serialized to a manifest.
+    proven_source_kind: Literal["local", "git", "registry"] | None = None
 
     def __post_init__(self) -> None:
         """Derive the canonical target projection for compatibility callers."""

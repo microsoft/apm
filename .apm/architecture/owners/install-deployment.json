@@ -96,6 +96,16 @@
       "guards": ["install-deployment-install-scope-selection"]
     },
     {
+      "id": "local-dependency-scope-admission",
+      "decision": "Declaring-source provenance and local dependency scope admission",
+      "owner": "deps/apm_resolver.py (_source_kind_for_dependency) projects acquisition provenance onto APMPackage; install/package_resolution.py (user_scope_rejection_reason) owns admission",
+      "selectors": [
+        "src/apm_cli/install/package_resolution.py",
+        "src/apm_cli/deps/apm_resolver.py"
+      ],
+      "guards": ["install-deployment-local-scope-admission"]
+    },
+    {
       "id": "mcp-registry-url-resolution",
       "decision": "MCP registry URL resolution precedence",
       "owner": "registry/client.py (resolve_mcp_registry_url)",

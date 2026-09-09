@@ -2,6 +2,13 @@
   "version": 1,
   "owners": [
     {
+      "id": "spec-assessment-selection",
+      "decision": "One active specification artifact, informative manifest, exact assessment identity, and fresh static binding inventory",
+      "owner": "tests/spec_conformance/_manifest.py",
+      "selectors": ["tests/spec_conformance/_manifest.py"],
+      "guards": ["contracts-tooling-spec-assessment"]
+    },
+    {
       "id": "dependency-identity-materialization",
       "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; embedded git URL subpath validation",
       "owner": "models/dependency/identity.py + materialization.py + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py)",
