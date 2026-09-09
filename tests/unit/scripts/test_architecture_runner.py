@@ -621,6 +621,7 @@ install-deployment-audit-replay
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cached-claude-skill-metadata
+install-deployment-copilot-aggregate
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
 install-deployment-executable-trust-context

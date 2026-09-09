@@ -16,6 +16,7 @@ def _pre_deploy_security_scan(
     package_name: str = "",
     force: bool = False,
     logger=None,
+    show_force_hint: bool = True,
 ) -> bool:
     """Scan authorized deployable source files for hidden characters before deployment.
 
@@ -50,10 +51,11 @@ def _pre_deploy_security_scan(
             logger.error_detail(
                 "  |-- Fix the reported file(s) in the package source, then reinstall"
             )
-            logger.error_detail(
-                "  |-- Use --force only after reviewing the reported findings "
-                f"from {printable_ascii_text(str(source_plan.source_root))}"
-            )
+            if show_force_hint:
+                logger.error_detail(
+                    "  |-- Use --force only after reviewing the reported findings "
+                    f"from {printable_ascii_text(str(source_plan.source_root))}"
+                )
         return False
 
     return True

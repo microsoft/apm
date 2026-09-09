@@ -11,6 +11,7 @@ def reconcile_uninstall_deployment_state(
     deploy_root: Path,
     all_deployed_files: set[str],
     surviving_deployed_files: dict[str, set[str]],
+    removed_paths: frozenset[str] = frozenset(),
     fully_refreshed_dependency_keys: set[str] | None = None,
 ) -> bool:
     """Reconcile survivor ownership and hashes without persisting."""
@@ -31,6 +32,20 @@ def reconcile_uninstall_deployment_state(
     for record in previous_ledger.records.values():
         records_by_value.setdefault(record.locator.value, []).append(record)
     materializations: list[MaterializationResult] = []
+    # Only the cleanup owner can attest removal. Empty/failed integration or
+    # filesystem absence alone is not proof. Current successful replacements
+    # supersede these removals in DeploymentReconciler.
+    for path in sorted(removed_paths):
+        for prior in records_by_value.get(path, ()):
+            materializations.append(
+                MaterializationResult(
+                    locator=prior.locator,
+                    owners=frozenset(prior.owners),
+                    status=MaterializationStatus.REMOVED,
+                    content_hash=None,
+                    validation=NativePayloadValidation(valid=True, contract="uninstall-cleanup"),
+                )
+            )
     for dep_key, deployed_files in surviving_deployed_files.items():
         transferred = sorted(all_deployed_files.intersection(deployed_files))
         hashes = compute_deployed_hashes(transferred, deploy_root)

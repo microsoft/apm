@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
+    _GUARD_COPILOT_AGGREGATE,
     _GUARD_PROVENANCE,
     _GUARD_TARGET_CONTRACTION,
     check_base_integrator,
+    check_copilot_aggregate,
     check_provenance_state,
     check_target_file_contraction,
 )
@@ -72,6 +74,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        _GUARD_COPILOT_AGGREGATE,
+        "Generated Copilot aggregates use canonical ownership, cleanup and source reconstruction.",
+        check_copilot_aggregate,
+    ),
     _rule(
         _GUARD_PACKAGE_TARGET,
         "Restriction-only package target authorization has one owner (install/target_filter.py).",

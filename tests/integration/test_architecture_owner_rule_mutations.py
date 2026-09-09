@@ -318,6 +318,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
+        guard_id="install-deployment-copilot-aggregate",
+        rule_id="install-deployment-copilot-aggregate",
+        path="src/apm_cli/install/phases/lockfile.py",
+        old="DeploymentReconciler.merge_aggregate_records(",
+        new="parallel_aggregate_merge(",
+        intent="Aggregate ledger accumulation bypasses the canonical ownership reconciler.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",

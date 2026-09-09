@@ -19,8 +19,8 @@
       "id": "deployment-provenance-state",
       "decision": "Deployment provenance / state",
       "owner": "deployment_ledger.py",
-      "selectors": ["src/apm_cli/core/deployment_ledger.py"],
-      "guards": ["install-deployment-provenance-state"]
+      "selectors": ["src/apm_cli/core/deployment_ledger.py", "src/apm_cli/core/deployment_state.py"],
+      "guards": ["install-deployment-provenance-state", "install-deployment-copilot-aggregate"]
     },
     {
       "id": "target-scoped-deployed-file-contraction",
@@ -106,7 +106,7 @@
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
       "owner": "BaseIntegrator (see integrators.instructions.md)",
-      "selectors": ["src/apm_cli/integration/base_integrator.py"],
+      "selectors": ["src/apm_cli/integration/base_integrator.py", "src/apm_cli/integration/instruction_integrator.py"],
       "guards": ["install-deployment-base-integrator"]
     },
     {

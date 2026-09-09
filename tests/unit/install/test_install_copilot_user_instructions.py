@@ -262,4 +262,4 @@ class TestCopilotUserInstructionsIntegration:
         assert result.files_integrated == 1
         deployed = result.target_paths[0]
         assert deployed.name == "coding.instructions.md"
-        assert ".copilot" not in str(deployed)
+        assert deployed.relative_to(project_root).parent == Path(".github/instructions")

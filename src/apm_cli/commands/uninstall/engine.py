@@ -1080,11 +1080,26 @@ class IntegrationCleanupOutcome:
     deployed_files: dict[str, list[str]]
     failed_paths: list[str]
     error_count: int
+    removed_paths: frozenset[str] = frozenset()
 
     @property
     def complete(self) -> bool:
         """Return whether every integration cleanup operation succeeded."""
         return self.error_count == 0
+
+
+class AggregateIntegrationError(RuntimeError):
+    """Safe public aggregate failure facts, without raw source exception text."""
+
+    def __init__(self, phase: str, paths: frozenset[str]) -> None:
+        self.phase = phase
+        self.paths = paths
+        cause = (
+            "managed content changed or could not be safely removed"
+            if phase == "cleanup"
+            else "source validation or integration failed"
+        )
+        super().__init__(f"Instruction aggregate {phase} failed: {cause}.")
 
 
 def _native_hook_state_exists(project_root: Path, targets: list[object]) -> bool:
@@ -1126,6 +1141,7 @@ def _sync_integrations_after_uninstall(
     """
     from ...install.services import (
         IntegratorBundle,
+        integrate_local_content,
         integrate_package_primitives,
     )
     from ...install.target_filter import resolve_effective_package_targets
@@ -1140,6 +1156,21 @@ def _sync_integrations_after_uninstall(
     _resolved_targets = resolve_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
     )
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...integration.instruction_integrator import InstructionIntegrator
+
+    aggregate_paths = InstructionIntegrator.aggregate_paths(_resolved_targets)
+    aggregate_rebuilds = aggregate_paths.intersection(all_deployed_files)
+    cleanup_hashes = dict(deployed_file_hashes or {})
+    if lockfile is not None and aggregate_paths:
+        # Include surviving claims: older installations recorded only the
+        # last contributor, so the selected dependency can have no path.
+        aggregate_snapshot = DeploymentLedgerCodec.cleanup_snapshot(
+            lockfile, {".", *lockfile.dependencies}
+        )
+        aggregate_rebuilds |= aggregate_paths.intersection(aggregate_snapshot.paths)
+        cleanup_hashes.update(aggregate_snapshot.hashes)
+    all_deployed_files.update(aggregate_rebuilds)
     require_valid_survivors = bool(all_deployed_files) or _native_hook_state_exists(
         project_root,
         _resolved_targets,
@@ -1212,6 +1243,7 @@ def _sync_integrations_after_uninstall(
 
     counts = {entry.counter_key: 0 for entry in _dispatch.values()}
     package_deployed_files: dict[str, list[str]] = {}
+    removed_aggregate_paths: set[str] = set()
 
     # Phase 1: Remove all APM-deployed files
     # Per-target sync for primitives with sync_for_target
@@ -1232,13 +1264,27 @@ def _sync_integrations_after_uninstall(
             if _buckets is not None:
                 _bucket_key = BaseIntegrator.partition_bucket_key(_prim_name, _target.name)
                 _managed_subset = _buckets.get(_bucket_key, set())
+            aggregate_sync = _prim_name == "instructions" and bool(
+                InstructionIntegrator.aggregate_paths([_target])
+            )
+            sync_options = (
+                {"managed_file_hashes": cleanup_hashes, "diagnostics": logger.diagnostics}
+                if aggregate_sync
+                else {}
+            )
             result = _integrators[_prim_name].sync_for_target(
                 _target,
                 apm_package,
                 project_root,
                 managed_files=_managed_subset,
+                **sync_options,
             )
             counts[_entry.counter_key] += result.get("files_removed", 0)
+            if aggregate_sync:
+                removed_aggregate_paths.update(result.get("removed_paths", ()))
+            if aggregate_sync and result.get("errors", 0):
+                logger.render_summary()
+                raise AggregateIntegrationError("cleanup", aggregate_rebuilds)
 
     # Skills (multi-target, handled by SkillIntegrator)
     # Check both target root_dir and deploy_root for skill directories
@@ -1377,6 +1423,7 @@ def _sync_integrations_after_uninstall(
     _rebuild_scope = InstallScope.USER if user_scope else InstallScope.PROJECT
     _allow_executables = getattr(apm_package, "allow_executables", None)
     reintegration_diagnostics = DiagnosticCollector()
+    reintegration_errors = 0
     for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
         dep_key = dep_ref.get_unique_key()
         deployed_files = package_deployed_files.setdefault(dep_key, [])
@@ -1396,9 +1443,11 @@ def _sync_integrations_after_uninstall(
                 allow_executables=_allow_executables,
                 trust_bin=False,
                 bin_skip_reason_override="not_retrusted_on_uninstall",
+                show_force_hint=False,
             )
             deployed_files.extend(integration_result["deployed_files"])
         except Exception as exc:
+            reintegration_errors += 1
             pkg_id = _dependency_public_label(dep_ref)
             logger.warning(
                 f"Best-effort re-integration skipped for {pkg_id}. "
@@ -1408,12 +1457,51 @@ def _sync_integrations_after_uninstall(
                 f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
             )
 
+    if aggregate_rebuilds:
+        from dataclasses import replace
+
+        # Rebuild only root instructions, not unrelated first-party primitives.
+        # Root sources come from the deployment root at user scope, exactly as
+        # install does; never adopt arbitrary text from the generated output.
+        root_targets = [
+            replace(target, primitives={"instructions": target.primitives["instructions"]})
+            for target in _resolved_targets
+            if InstructionIntegrator.aggregate_paths([target]).intersection(aggregate_rebuilds)
+        ]
+        root_result = integrate_local_content(
+            project_root,
+            targets=root_targets,
+            prompt_integrator=_integrator_bundle.prompt,
+            agent_integrator=_integrator_bundle.agent,
+            skill_integrator=_integrator_bundle.skill,
+            instruction_integrator=_integrator_bundle.instruction,
+            command_integrator=_integrator_bundle.command,
+            hook_integrator=_integrator_bundle.hook,
+            force=False,
+            managed_files=None,
+            diagnostics=reintegration_diagnostics,
+            logger=logger,
+            scope=_rebuild_scope,
+            show_force_hint=False,
+        )
+        package_deployed_files["."] = root_result["deployed_files"]
+
     reintegration_diagnostics.render_summary()
+    if aggregate_rebuilds:
+        from ...install.outcome import finalize_install_result
+        from ...models.results import InstallResult
+
+        rebuild_result = finalize_install_result(
+            InstallResult(diagnostics=reintegration_diagnostics), force=False
+        )
+        if reintegration_errors or rebuild_result.exit_code:
+            raise AggregateIntegrationError("rebuild", aggregate_rebuilds)
     return IntegrationCleanupOutcome(
         counts=counts,
         deployed_files=package_deployed_files,
         failed_paths=failed_hook_paths,
         error_count=result.get("errors", 0),
+        removed_paths=frozenset(removed_aggregate_paths),
     )
 
 

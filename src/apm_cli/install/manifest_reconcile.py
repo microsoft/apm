@@ -706,6 +706,7 @@ def reconcile_target_deployed_files(
         if dep_key not in (dependency_keys or set())
         for path in dependency.deployed_files
     }
+    survivor_files.update(lockfile.local_deployed_files)
     desired_owners = (
         DeploymentLedgerCodec.valid_owner_keys(
             lockfile,
