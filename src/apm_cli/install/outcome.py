@@ -41,6 +41,21 @@ def diagnostic_error_count(diagnostics: object | None) -> int:
         return 0
 
 
+def agent_plugin_target_excluded_count(diagnostics: object | None) -> int:
+    """Return the number of target-excluded Agent Plugin packages."""
+    if diagnostics is None:
+        return 0
+    value = getattr(diagnostics, "agent_plugin_target_excluded_count", 0)
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def install_command_outcome(result: InstallResult) -> InstallCommandOutcome:
     """Return the command outcome owned by ``InstallResult.disposition``."""
     if result.disposition in _SUCCESS_SUMMARY_DISPOSITIONS:
@@ -143,6 +158,7 @@ def finalize_install_result(
     if (
         result.disposition is InstallDisposition.FAILED
         or diagnostic_error_count(diagnostics) > 0
+        or (result.installed_count == 0 and agent_plugin_target_excluded_count(diagnostics) > 0)
         or (has_critical and not force)
     ):
         result.disposition = InstallDisposition.FAILED
