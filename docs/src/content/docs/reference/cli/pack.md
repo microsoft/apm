@@ -20,7 +20,7 @@ apm pack [OPTIONS]
 - `target:` (or `targets:`) field containing `claude` or `copilot` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
 
-The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time.
+The bundle embeds an enriched `apm.lock.yaml` (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) for integrity verification. Install Claude plugin bundles with `apm install <bundle>`; restore legacy `--format apm` archives with `apm unpack <archive>`.
 
 Plugin bundles are target-agnostic. The consumer's project decides where files land at install time -- the bundle carries no harness binding. Legacy `--format apm` packaging filters paths by target; see the [gh-aw workaround](../../../integrations/gh-aw/) for omitted Copilot skills. Flags whose scope does not match the detected outputs are silent no-ops, not errors, so the same `apm pack` invocation works in CI across projects that produce only a bundle, only a marketplace, or both.
 
@@ -281,7 +281,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 - **Lockfile-attested dependencies.** Dependency content is packed exclusively from lockfile `deployed_files` and verified against `deployed_file_hashes`; the `apm_modules` cache is never packed. If a dependency has cached primitives but no `deployed_files`, `apm pack` errors and tells you to run `apm install`.
 - **Hidden-character scan.** Source files are scanned before bundling. Findings are reported as warnings only -- packing is non-blocking. Consumers are protected at install time, where critical findings block.
 - **Empty bundle warning.** If no package files match after dependency resolution, `apm pack` emits a warning and exits `0` with an empty bundle. Missing dependency content is an error, not an empty bundle.
-- **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.
+- **Share line.** Plugin bundles print `Share with: apm install <bundle-path>`; legacy APM bundles print `Share with: apm unpack <bundle-path>`.
 - **Marketplace fallback.** With no `marketplace:` block in `apm.yml`, a legacy `marketplace.yml` file is read with a deprecation warning. Both files present is a hard error.
 - **Marketplace outputs.** Configure via `marketplace.outputs` map (keyed by format). Claude is included by default. The legacy list form (`outputs: [claude]`) still parses with a deprecation warning. Use `--marketplace=` to filter which formats are built in a given invocation.
 - **JSON mode.** `--json` makes `apm pack` machine-friendly: stdout is a single JSON object, all human-readable logs move to stderr. Combine with `--marketplace=` for selective CI matrix builds.
@@ -299,8 +299,8 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 
 ## Related
 
-- [`apm unpack`](../unpack/) -- inverse, deprecated; prefer `apm install <bundle>`.
-- [`apm install`](../install/) -- consumer side; installs a packed bundle directory, `.zip`, or `.tar.gz`.
+- [`apm unpack`](../unpack/) -- deprecated; restores legacy APM bundles.
+- [`apm install`](../install/) -- installs a Claude plugin bundle directory, `.zip`, or `.tar.gz`.
 - [Pack a bundle (producer guide)](../../../producer/pack-a-bundle/) -- task-oriented walkthrough.
 - [Publish to a marketplace](../../../producer/publish-to-a-marketplace/) -- end-to-end marketplace flow.
 - [Lockfile spec](../../lockfile-spec/) -- `pack:` metadata and `bundle_files` schema.

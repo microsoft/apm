@@ -81,6 +81,9 @@ def test_install_pack_zip_restore_preserves_shared_skill(tmp_path: Path) -> None
 
         packed = runner.invoke(cli, ["pack", "--format", "apm", "--archive", "--target", "copilot"])
         assert packed.exit_code == 0, packed.output
+        output = " ".join(packed.output.split())
+        assert "Legacy APM bundles still filter paths by target" in output
+        assert "Share with: apm unpack" in output
         archives = list((producer.root / "build").glob("*.zip"))
         assert len(archives) == 1
         with zipfile.ZipFile(archives[0]) as archive:

@@ -181,7 +181,7 @@ def _parse_marketplace_filter(
     "-t",
     type=TargetParamType(),
     default=None,
-    help="[Deprecated] Target platform filter. Bundles are now target-agnostic; the consumer's project decides where files land at install time. Value is recorded in pack.target as informational metadata only and is ignored by 'apm install'. The flag will be removed in a future release.",
+    help="[Deprecated] Filter paths in legacy --format apm bundles. Plugin formats are target-agnostic. Recorded in pack.target as informational metadata and ignored by 'apm install'. The flag will be removed in a future release.",
 )
 @click.option(
     "--archive",
@@ -384,8 +384,9 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     else:
         logger.warning(
             "--target is deprecated and will be removed in a future release. "
-            "Bundles are target-agnostic; the value is recorded as informational "
-            "pack.target metadata only and is ignored by 'apm install'."
+            "Legacy APM bundles still filter paths by target; plugin formats "
+            "are target-agnostic. The value is recorded as informational "
+            "pack.target metadata and is ignored by 'apm install'."
         )
         effective_target = target
     options = BuildOptions(
@@ -794,11 +795,9 @@ def _render_bundle_result(
                 "Claude plugin bundle ready -- contains plugin.json plus "
                 "plugin-native directories and an embedded apm.lock.yaml."
             )
-        # Issue #1207: target-agnostic bundles install into any consumer
-        # project.  Print a copy-pasteable share line so packing creates
-        # the social hand-off naturally.
         if pack_result.bundle_path:
-            logger.info(f"Share with: apm install {pack_result.bundle_path}")
+            verb = "unpack" if fmt == BundleFormat.APM else "install"
+            logger.info(f"Share with: apm {verb} {pack_result.bundle_path}")
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):

@@ -254,7 +254,7 @@ dependencies:
   - .agents/skills/apm-review-panel/evals/render_eval.py
   - .agents/skills/apm-review-panel/evals/trigger-evals.json
   deployed_file_hashes:
-    .agents/skills/apm-review-panel/SKILL.md: sha256:c9fee6c311b23b6ea72b06a424c8ba21c5d88bcc833e65259b7e0212aa73abbb
+    .agents/skills/apm-review-panel/SKILL.md: sha256:495c7d5b703b93e3046f341324e90806fe96ee44a93f92a2dea53bc684ed6b83
     .agents/skills/apm-review-panel/apm.yml: sha256:80c403c4d3c59a91bb27b85650e21a466e9cd0cbc28e92bf0f3e53c6ea71cb2c
     .agents/skills/apm-review-panel/assets/ceo-return-schema.json: sha256:d8707211968efb0471d083f880d5353d66a0eda84635e803a930f60c91837468
     .agents/skills/apm-review-panel/assets/panelist-return-schema.json: sha256:e3cf2ae17e93dd934f2659ed77d2640ea9601fbe8698f63ba800edf046691f99
@@ -1945,7 +1945,7 @@ deployments:
   owners:
   - local:packages/apm-review-panel
   active_owner: local:packages/apm-review-panel
-  content_hash: sha256:c9fee6c311b23b6ea72b06a424c8ba21c5d88bcc833e65259b7e0212aa73abbb
+  content_hash: sha256:495c7d5b703b93e3046f341324e90806fe96ee44a93f92a2dea53bc684ed6b83
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-review-panel/apm.yml

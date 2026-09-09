@@ -18,64 +18,39 @@ description: >-
 
 # APM Review Panel - Fan-Out Advisory Review
 
-The panel is FAN-OUT + SYNTHESIZER. Each persona runs in its own agent
-thread (via the `task` tool) and returns JSON matching
-`assets/panelist-return-schema.json`. The orchestrator schema-validates
-each return, hands all returns to the apm-ceo synthesizer (also a task
-thread, returns JSON matching `assets/ceo-return-schema.json`), then
-renders ONE recommendation comment from `assets/recommendation-template.md`.
-
-This skill is ADVISORY by design. It does not compute a binary verdict, it
-does not apply verdict labels, and it does not gate merge. The panel
-surfaces findings; the maintainer and the PR author decide ship.
+FAN-OUT + SYNTHESIZER: each persona returns schema-valid JSON in its
+own `task` thread; apm-ceo synthesizes in another. The orchestrator
+renders ONE advisory comment. The maintainer and PR author decide ship.
 
 ## Architecture invariants
 
-- **Advisory regime, not gate regime.** There is no `APPROVE` / `REJECT`,
-  no `panel-approved` / `panel-rejected` label, no deterministic verdict
-  computation. The CEO returns a `ship_recommendation.stance` (`ship_now`
+- **Advisory, never a gate.** No binary verdict computation, `APPROVE` /
+  `REJECT`, or verdict labels. The CEO's `ship_recommendation.stance` (`ship_now`
   / `ship_with_followups` / `needs_discussion` / `needs_rework`); this is
-  prose for the human reviewer, never auto-applied as a label or status
-  check. This is the architectural fix for the previous regime's
-  over-strictness: removing the binary gate removes the incentive for
-  panelists to inflate `required[]` defensively.
+  prose for humans, never a label or status check.
 - **Three severity buckets, none of them gate.** Findings carry
   `severity: blocking | recommended | nit`. `blocking` is the highest
   signal a panelist can send and renders prominently in the comment; it
   still does not block merge. `recommended` is the default for substantive
   feedback. `nit` is one-line polish. The orchestrator never reads
   severity to gate anything.
-- **Single-writer interlock.** Only the orchestrator writes to the PR:
-  exactly one `add-comment` and one `remove-labels` call. The
-  `remove-labels` call always sweeps `panel-review` (trigger
-  idempotency) AND defensively removes `panel-approved` /
-  `panel-rejected` if present (legacy verdict labels from the
-  pre-advisory regime; they have no meaning here and would mislead
-  readers if left on a PR after a fresh advisory pass). NO `add-labels`
-  call -- there are no verdict labels to apply. Panelist subagents and
-  the CEO subagent return JSON only and MUST NOT call any `gh` write
-  command, post comments, apply labels, or touch the PR state.
+- **Single-writer interlock.** Only the orchestrator emits one comment
+  and one label sweep using step 7's transport. Sweep `panel-review`
+  (trigger reset), `panel-approved`, and `panel-rejected` (obsolete,
+  misleading verdict labels). NO `add-labels`. Panelists and CEO return
+  JSON only: no `gh` writes, comments, labels, or PR-state mutations.
 - **Single-emission discipline.** Exactly one comment per panel run,
   rendered from `assets/recommendation-template.md` after all subagents
   return.
-- **Non-empty turn exit (the run's hard contract).** gh-aw decides
-  success by inspecting `agent_output` AFTER your turn ends: a turn that
-  ends with zero safe outputs (`agent_output = {"items":[]}`) is detected
-  as a failure, the safe-output detection job is skipped, the
-  `add-comment` job never runs, and the workflow opens a "No Safe Outputs
-  Generated" issue. Therefore your turn MUST end with at least one safe
-  output -- the rendered comment on success (step 7), or an explicit
-  `noop` if the run genuinely cannot produce one. NEVER end the turn
-  empty.
-- **Synchronous fan-out -- never spawn-and-forget.** Every `task` spawn
-  (each panelist AND the CEO synthesizer) is BLOCKING: spawn it, WAIT for
-  its JSON return, then continue. Use the `task` tool's synchronous mode;
-  do NOT use its background/detached mode -- the variant that returns an
-  `agent_id` immediately and runs the subagent in the background -- for
-  any panelist or the CEO. Their returns are LOAD-BEARING: the comment
-  cannot be rendered without them. Spawning the CEO (or a panelist)
-  detached and then ending the turn while it is still running is the
-  documented cause of the empty-output failure above.
+- **Non-empty turn exit.** In gh-aw, zero safe outputs
+  (`agent_output = {"items":[]}`) cause "No Safe Outputs Generated":
+  detection is skipped and `add-comment` never runs. Emit the comment
+  or, if genuinely impossible, explicit `noop`; never end empty.
+  Step 9 scopes verification to the selected transport.
+- **Synchronous fan-out -- never spawn-and-forget.** Every panelist and
+  CEO `task` MUST use synchronous mode and be awaited for its JSON.
+  Never use background/detached mode returning an `agent_id`, or end
+  the turn while a child runs: their returns are required for rendering.
 
 ## Agent roster
 
@@ -95,39 +70,9 @@ surfaces findings; the maintainer and the PR author decide ship.
 ## Topology
 
 ```
-   apm-review-panel SKILL (orchestrator thread)
-                      |
-   FAN-OUT via task tool (panelists in parallel)
-                      |
-   +-----+-------+-------+-----+-----+------+-----------+----------+
-   v     v       v       v     v     v      v           v          v (cond.)
-  py    cli     dx-ux   sec   grw   auth   doc-writer  test-cov
-   |     |       |       |     |     |      |           |
-   |   each returns JSON per panelist-return-schema.json
-   +-----+-------+-------+-----+-----+------+-----------+----------+
-                      |
-                      v   <-- S4 schema-validate
-                      v   <-- on malformed: re-spawn that persona
-                      v
-   task: apm-ceo synthesizer
-   - aggregates findings across panelists
-   - resolves dissent
-   - emits headline + arbitration prose + principle alignment
-   - emits curated recommended_followups (prioritized)
-   - emits ship_recommendation (stance + prose)
-   - returns ceo-return-schema.json
-                      |
-                      v   <-- S4 schema-validate
-                      v
-   orchestrator (sole writer)
-            |               |
-            v               v
-        add-comment    remove-labels
-        (max:2)        [panel-review,
-                        panel-approved,
-                        panel-rejected]
-                       (trigger reset +
-                        legacy verdict sweep)
+orchestrator -> nine parallel panelist tasks -> S4 panelist schema gate
+  -> apm-ceo task (aggregate, arbitrate dissent, curate follow-ups)
+  -> S4 CEO schema gate -> orchestrator: one comment + one label sweep
 ```
 
 ## Conditional panelists
@@ -178,14 +123,10 @@ change user-facing documentation, agent or skill prose, instruction
 files, CHANGELOG entries, README claims, or any natural-language
 artifact a reader will rely on? If unsure, answer YES."
 
-When the doc-writer is active and the PR includes documentation changes,
-the persona reviews them for: (a) consistency with the existing voice
-and structure, (b) accuracy against the code being changed, (c)
-completeness for the typical reader (no orphan claims, no missing
-prerequisites), (d) discoverability (cross-links, sidebar order if
-Starlight content). When the doc-writer is active because of code
-changes that SHOULD have updated docs but did not, the persona surfaces
-that gap as a finding.
+When active, doc-writer checks changed docs for voice/structure
+consistency, code accuracy, completeness (no orphan claims or missing
+prerequisites), and discoverability (cross-links, Starlight sidebar
+order). Surface missing doc updates required by code changes as findings.
 
 ### Performance Expert
 
@@ -241,32 +182,21 @@ documentation-only PR -- the diff contains zero `src/**/*.py` files.
 In that case set `inactive_reason: "documentation-only PR -- no
 runtime code paths to defend"`.
 
-The activation rule is intentionally narrow: under the advisory regime,
-test outcomes are LOAD-BEARING for CEO arbitration (passed / failed /
-missing test evidence outranks opinion-only findings -- see
-`apm-ceo.agent.md` and `panelist-return-schema.json` evidence block).
-A persona whose findings carry that weight cannot be silently skipped
-on a heuristic. Better to spawn it on a pure refactor and have it
-return a single `nit`-severity "no behavior surface touched -- no
-coverage finding" line than to skip it and leave the CEO without
-evidence to weigh. (Earlier revisions of this skill paired test-coverage
-with auth and doc-writer as conditional for symmetry; that symmetry
-broke when test evidence became load-bearing.)
+Test evidence (passed / failed / missing) outranks opinion in CEO
+arbitration; see `apm-ceo.agent.md` and the panelist schema evidence
+block. Never skip this persona heuristically. On a pure refactor,
+return a `nit` "no behavior surface touched -- no coverage finding"
+rather than leaving the CEO without evidence.
 
-The test-coverage-expert is paired with the devx-ux-expert lens and
-defends the user-promise contracts the DevX persona enumerates (CLI
-surface, error wording, install idempotency, lockfile determinism, auth
-resolution). It MUST verify "no test exists" claims with `view`/`grep`
-on the test tree before emitting a finding -- false-positive coverage
-findings destroy trust in the field. It does NOT compute coverage
-percentages, does NOT flag tests for pure refactors, and does NOT
-duplicate python-architect on test-code design.
+Paired with devx-ux-expert, it defends CLI surface, error wording,
+install idempotency, lockfile determinism, and auth resolution.
+Verify "no test exists" with `view`/`grep` on the test tree before
+reporting. No coverage percentages, pure-refactor test findings, or
+duplication of python-architect's test-code design review.
 
 ## Routing matrix (CEO synthesis emphasis only)
 
-These routes describe WHICH specialist's findings the CEO weights more
-heavily for a given PR type. They do NOT change which personas run --
-every mandatory persona always runs. Routing is a CEO synthesis hint.
+These synthesis weights NEVER change which personas run.
 
 - **Architecture-heavy PR** -> CEO weights Python Architect on
   abstraction calls; CLI Logging on consistency.
@@ -288,12 +218,9 @@ every mandatory persona always runs. Routing is a CEO synthesis hint.
 
 ## Execution checklist
 
-Work through these steps in order. Do not skip ahead. Do not emit any
-output to the PR before step 6. Every `task` spawn below is BLOCKING:
-wait for the subagent to return before continuing, and never end your
-turn while a panelist or the CEO synthesizer is still running. The turn
-ends only after the comment (step 7) and label sweep (step 8) -- or, if
-no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
+Follow in order; no PR output before step 6. Await every child.
+Finish only after comment + label sweep, or step 9's explicit failure/
+no-action path.
 
 1. **Read PR context** (the orchestrating workflow already fetched it
    via `gh pr view` / `gh pr diff`). Identify changed files for the
@@ -349,12 +276,8 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
 
 5. **Spawn the CEO synthesizer task.** Pass the full set of validated
    panelist JSON returns to a `task` invocation that loads
-   `../../agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
-   for its JSON return -- do NOT spawn it detached (background mode that
-   returns an `agent_id`) and do NOT end your turn while it runs. Its
-   return is required to render the comment; ending the turn here is the
-   exact cause of the "No Safe Outputs Generated" failure. The prompt
-   MUST:
+   `../../agents/apm-ceo.agent.md`. Run synchronously and WAIT for its
+   JSON before rendering; never detach or end the turn early. Its prompt MUST:
    - Provide all panelist returns as structured input.
    - Ask for: headline, arbitration prose, principle alignment (only
      applicable principles), curated recommended_followups (prioritized
@@ -393,13 +316,27 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
    handles over individual logins. Pass the resulting list to the
    template renderer as `notify_audience`.
 
-   This step replaces the maintainer-notification signal that the
-   pre-advisory verdict labels carried. It is the only mechanism by
-   which a fresh panel pass announces itself.
+   This is the fresh panel pass's only notification mechanism.
 
 7. **Render the comment.** Load `assets/recommendation-template.md`,
    fill the placeholders from the panelist + CEO JSON, and emit it as
    exactly ONE comment.
+
+   **Transport boundary:** Discover the runtime's advertised tools and
+   schemas. With gh-aw safeoutputs, invoke structured `add_comment`
+   ONCE with the complete markdown directly in its `body` argument.
+   No shell staging, wrapper, or intermediate comment file. Configured
+   safeoutputs that are missing, failed, or uncertain NEVER authorize
+   direct GitHub writes or a second comment. Unknown is not absent.
+
+   Only outside a safe-output workflow, when safeoutputs are absent
+   AND the caller authorizes interactive writes, create the body via
+   a native file-edit tool, then use
+   `gh pr comment <PR_NUMBER> --repo <OWNER/REPO> --body-file <PATH>`.
+   Shell text contains only identifiers/path, never final, panelist,
+   or CEO prose: no heredocs, `echo`, `printf`, inline scripts,
+   substitutions, or encoding workarounds. Without the required tools
+   or authority, stop and report explicitly; never bypass the boundary.
 
    Filling rules:
    - The per-persona summary table renders ONLY active panelists, one
@@ -413,33 +350,29 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
    - NEVER render the words "Verdict", "APPROVE", "REJECT", "blocked",
      "merge gate", or any equivalent. The panel is advisory.
 
-8. **Sweep labels** via `safe-outputs.remove-labels`. The list MUST be
-   `[panel-review, panel-approved, panel-rejected]` -- always all three,
-   regardless of which are currently on the PR. `panel-review` is the
-   re-run idempotency reset; the other two are LEGACY VERDICT LABELS
-   from the pre-advisory regime that have no meaning under the advisory
-   contract and would mislead readers if left on a freshly-reviewed PR.
-   `safe-outputs.remove-labels` is idempotent on missing labels, so
-   sweeping all three on every run is safe and self-healing. NO
-   verdict labels are applied.
+8. **Sweep labels** once: `[panel-review, panel-approved, panel-rejected]`,
+   always all three, even if absent. Use structured `remove_labels` in
+   gh-aw (idempotent on missing labels); on step 7's authorized CLI
+   path, perform the same cleanup via CLI. Reset the trigger and remove
+   obsolete verdict labels; NEVER apply verdict labels.
 
-9. **Guarantee a non-empty exit.** Your final action this turn MUST be a
-   safe output. In the normal path that is the single `add-comment` from
-   step 7 (the `remove-labels` sweep alone does NOT count -- it is not
-   the run's required output). Before ending the turn, confirm step 7
-   actually issued the `add-comment` call and it did not error. If, after
-   every subagent has returned, you genuinely cannot render a comment
-   (e.g. a fatal upstream error), call `noop` so the run records an
-   intentional no-action rather than an empty `agent_output`. Ending the
-   turn with zero safe outputs is a FAILURE, not a success -- see the
-   "Non-empty turn exit" architecture invariant.
+9. **Verify exit.** In gh-aw, confirm step 7 issued one accepted
+   `add_comment` without error; label cleanup alone is not the required
+   output. Buffered acceptance is NOT publication: workflow
+   post-processing verifies delivery. If all children returned but no
+   comment can be produced, call advertised `noop` for intentional
+   no-action. If that tool is missing/fails, report failure explicitly,
+   never success or a CLI bypass. Zero safe outputs is a FAILURE.
+   On the authorized no-safeoutputs CLI path, verify the posted comment
+   and label state via CLI read-back; report failures, not fabricated
+   delivery or calls to nonexistent safe-output tools.
 
 ## Output contract (non-negotiable)
 
 - Exactly ONE comment per panel run, rendered from
   `assets/recommendation-template.md`. The `safe-outputs.add-comment.max:
   2` is a fail-soft ceiling; the discipline lives here.
-- Exactly ONE `remove-labels` call sweeping
+- Exactly ONE label sweep using step 7's selected transport:
   `[panel-review, panel-approved, panel-rejected]`.
 - NO `add-labels` call. The advisory regime has no verdict to encode.
 - Subagents (panelists + CEO) NEVER write to PR state, NEVER call `gh
@@ -453,28 +386,19 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
   the conditional rules, the recommendation template, and the JSON
   schema MUST agree on the persona set. If you change one, change all
   in the same edit.
-- **Calibrated severity discipline.** The advisory regime relies on
-  panelists honestly distinguishing `blocking` from `recommended`. If a
-  panelist marks everything `blocking`, the comment becomes noisy and
-  the maintainer learns to ignore the field. The panelist prompts state
-  the contract explicitly; the CEO arbitration prose is the safety
-  valve when a panelist over-flags.
-- **Mermaid diagrams are template-required.** The python-architect
-  persona is asked to supply `extras.diagrams.class_diagram`,
-  `extras.diagrams.component`, and the OPTIONAL
-  `extras.diagrams.sequence`. The template renders nothing when they
-  are missing -- it does NOT invent diagrams. Real diagrams are
-  what makes the comment scannable for the human reviewer.
+- **Calibrated severity.** Distinguish `blocking` from `recommended`;
+  CEO arbitration corrects over-flagging, not a merge gate.
+- **Mermaid diagrams are template-required.** Request
+  `extras.diagrams.class_diagram`, `extras.diagrams.component`, and
+  OPTIONAL `extras.diagrams.sequence` from python-architect. Missing
+  diagrams remain absent; never invent them.
 - **Mermaid `classDiagram` `:::cssClass` shorthand gotcha.** GitHub's
   mermaid renderer rejects `:::cssClass` appended to relationship
   lines (e.g. `A *-- B:::touched`); use standalone
   `class Name:::cssClass` declarations instead. Authority:
   `python-architect.agent.md:146-154`.
-- **Doc-writer detects DRIFT, not just edits.** When the PR changes
-  user-facing code that SHOULD have updated docs but did not, doc-writer
-  surfaces that as a finding. The conditional rule above is necessary
-  but not sufficient -- doc-writer reasons about doc consistency given
-  the diff, not just whether doc files were touched.
+- **Doc-writer detects DRIFT, not just edits.** Review consistency
+  against the diff, including missing updates, not just touched docs.
 - **False-negative auth gotcha.** Auth regressions can be introduced
   from non-auth files that change the inputs to auth -- host
   classification, dependency parsing, clone URL construction, HTTP
@@ -482,12 +406,8 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
   a diff changes how a remote host, org, token source, or fallback path
   is selected and you are not certain it is auth-neutral, activate
   auth-expert as `active: true`.
-- **Test-coverage probe is mandatory.** The test-coverage-expert MUST
-  verify "no test exists for X" via `view`/`grep` on the `tests/` tree
-  before emitting a finding. A false-positive coverage finding (test
-  exists but persona claimed it does not) destroys maintainer trust in
-  the field. The persona scope file enforces this; the orchestrator
-  passes the diff and trusts the persona to probe.
+- **Test-coverage probe is mandatory.** The persona verifies missing
+  tests via `view`/`grep` on `tests/`; the orchestrator supplies the diff.
 - **Subagent write enforcement is contract-based, not sandbox-based.**
   Tool permissions are workflow-scoped, not subagent-scoped, so every
   spawned task technically inherits the same `gh` toolset. The
@@ -495,17 +415,13 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
   each `.agent.md` plus the `safe-outputs.add-comment.max: 2`
   fail-soft. If a subagent ever tries to post a comment, the cap
   catches it.
-- **Empty-safe-output failure (background spawn-and-forget).** The single
-  most common way this panel "succeeds" yet posts nothing is spawning the
-  CEO synthesizer (or a panelist) as a background/detached task and then
-  ending the turn while it is still running. The harness exits with
-  `agent_output = {"items":[]}`, gh-aw skips safe-output detection, the
-  `add-comment` job never runs, and the workflow opens a "No Safe Outputs
-  Generated" issue. Every `task` spawn MUST be awaited to completion, and
-  the turn MUST end with a safe output -- the comment, or an explicit
-  `noop`. See the "Synchronous fan-out" and "Non-empty turn exit"
-  architecture invariants and step 9.
-- **No verdict-label reset workflow.** The previous regime had a
-  companion workflow `pr-panel-label-reset.yml` that stripped verdict
-  labels on every push. The advisory regime has no verdict labels to
-  strip; that workflow is removed.
+- **Empty-safe-output failure.** Background spawn-and-forget can end
+  gh-aw with no comment. Await every child and follow step 9.
+- **Prose is data, not shell source.** PR #1844 documents run
+  `27815857237`: the command-safety parser scanned a heredoc and
+  rejected a wrapped prose line beginning with `kill`. Quoting does
+  not remove this hazard. Preserve words like `kill`, `rm`, `sudo`
+  as data; follow step 7, never shell-stage the prose.
+- **No verdict-label reset workflow.** The obsolete
+  `pr-panel-label-reset.yml` is removed; the advisory regime adds no
+  verdict labels.

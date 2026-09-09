@@ -221,12 +221,16 @@ class TestRenderBundleResult:
         _render_bundle_result(logger, result, "apm", None, False)
         assert not any("Plugin bundle ready" in p for p in logger.progresses)
 
-    def test_live_share_line_emitted(self) -> None:
-        """The 'Share with: apm install ...' info line is always emitted."""
+    @pytest.mark.parametrize(
+        ("fmt", "verb"),
+        [(BundleFormat.APM, "unpack"), (BundleFormat.CLAUDE_PLUGIN, "install")],
+    )
+    def test_live_share_line_emitted(self, fmt: BundleFormat, verb: str) -> None:
+        """The handoff command must accept the format that was just packed."""
         logger = _RecordingLogger()
         result = _pack_result(files=["file.md"], bundle_path="build/my-bundle")
-        _render_bundle_result(logger, result, "apm", None, False)
-        assert any("apm install" in i for i in logger.infos)
+        _render_bundle_result(logger, result, fmt, None, False)
+        assert f"Share with: apm {verb} build/my-bundle" in logger.infos
 
     def test_live_zip_archive_emits_migration_tip_when_requested(self) -> None:
         logger = _RecordingLogger()
