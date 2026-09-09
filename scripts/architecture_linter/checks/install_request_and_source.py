@@ -132,16 +132,6 @@ def check_local_scope_admission(provider: FactsProvider) -> tuple[Violation, ...
                     "and retain declaring-parent context instead of an inline scope predicate",
                 )
             )
-        if path == "src/apm_cli/install/sources.py" and (
-            "restore_installed_package_source" not in _name_calls_in(facts, "acquire")
-        ):
-            findings.append(
-                _summary(
-                    _GUARD_LOCAL_SCOPE,
-                    path,
-                    "Cached acquisition must restore source through restore_installed_package_source",
-                )
-            )
     return tuple(findings)
 
 

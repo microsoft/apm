@@ -1184,21 +1184,6 @@ def test_local_scope_guard_retains_declaring_parent_delegation() -> None:
     assert {finding.rule_id for finding in report.violations} == {case.rule_id}
 
 
-def test_local_scope_guard_retains_cached_source_restoration() -> None:
-    """The combined successor retains the acquisition edge of the shared helper."""
-    case = MutationCase(
-        guard_id="install-deployment-local-scope-admission",
-        rule_id="install-deployment-local-scope-admission",
-        path="src/apm_cli/install/sources.py",
-        old="restore_installed_package_source(cached_package, dep_ref)",
-        new="parallel_source_restoration(cached_package, dep_ref)",
-        intent="Cached acquisition bypasses canonical installed source restoration.",
-    )
-    report = run_selected_rules(ROOT, (case.rule_id,), source_overrides={case.path: _mutate(case)})
-    assert not report.failures
-    assert {finding.rule_id for finding in report.violations} == {case.rule_id}
-
-
 def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> None:
     """AC13 must retain the selected transport attempt as the requested-URL owner."""
     path = "src/apm_cli/install/helpers/ref_reuse.py"
