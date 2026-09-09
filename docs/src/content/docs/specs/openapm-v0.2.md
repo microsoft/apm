@@ -14,19 +14,21 @@ This document is an **editor's Working Draft** of OpenAPM, exact revision
 **v0.2.0**. It is the **inactive corrective-spec foundation** retained in
 [microsoft/apm#2820](https://github.com/microsoft/apm/pull/2820), not an
 implementation-conformance statement or an active replacement for v0.1.
-The combined local-source and audit successor owns the complete executable
-assessment and bindings against the exact reconciled draft. This foundation
-does not select that assessment, activate runtime changes, or record an
-announcement, publication, or ratification date. The existing v0.1 remains
-active. Qualifying human review and ratification remain pending; citing this
-draft as a ratified specification is inappropriate.
+It inherits alias safety prospectively from
+[microsoft/apm#2901](https://github.com/microsoft/apm/pull/2901) at exact commit
+[`d1dd63c6d1e4a4b0af95f490c111270d56a16bdd`](https://github.com/microsoft/apm/commit/d1dd63c6d1e4a4b0af95f490c111270d56a16bdd),
+not a published or ratified baseline.
+[microsoft/apm#2919](https://github.com/microsoft/apm/pull/2919) owns the coupled
+local-source and audit executable assessment and bindings against this exact
+draft; [microsoft/apm#2923](https://github.com/microsoft/apm/pull/2923) owns the
+aggregate. This foundation selects no assessment and activates no runtime
+changes. **v0.1 remains active.** Human review and ratification remain pending;
+no announcement, publication, or ratification date is recorded here.
 
-This bounded corrective minor changes only local-source provenance and
-anchoring ([req-mf-016](#req-mf-016)) and the current-intent, read-only
-audit contract ([req-lk-023](#req-lk-023)) in Section 5.5. This is a
-review candidate, not a publication or ratification record.
-Features previously reserved for v0.2 remain reserved for a future
-revision; they are not activated by v0.2.0.
+Beyond that prospective dependency, this corrective minor changes only
+local-source provenance and anchoring ([req-mf-016](#req-mf-016)) and the
+current-intent, read-only audit contract ([req-lk-023](#req-lk-023)) in
+Section 5.5. Previously reserved features remain inactive.
 
 OpenAPM is published under the **MIT License**.
 
@@ -151,7 +153,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- This revision carries **123 normative statements (118 MUST, 5 SHOULD)** indexed in
+- This revision carries **124 normative statements (119 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -561,8 +563,39 @@ and MUST NOT use both on the same entry.
 | `version`| yes (registry form)                     | Opaque version selector; semver range when registry publishes semver. |
 | `ref`    | no                                      | Branch, tag, semver range, or commit SHA (git form).                  |
 | `path`   | no / yes (local form)                   | Subpath within repo, or local filesystem path.                        |
-| `alias`  | no                                      | Local alias.                                                          |
+| `alias`  | no                                      | Local install-directory override; see [req-mf-025](#req-mf-025).        |
 | `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
+
+<a id="req-mf-025"></a>
+**[req-mf-025]** A conforming **consumer** implementation that supports
+dependency aliases MUST validate a supplied alias, after trimming surrounding
+whitespace, as a non-empty string containing only ASCII letters, digits,
+periods, underscores, and hyphens, excluding the reserved names `.` and `..`.
+It MUST reject an invalid alias with a diagnostic identifying the alias.
+Names such as `.safe`, `safe.`, `foo..bar`, and `my-skill.v2` remain valid.
+The alias selects a directory directly below `apm_modules`; before using
+that destination, the consumer MUST reject a path that resolves, including
+through symlinks, to `apm_modules` itself or outside it.
+
+An alias changes placement, not repository identity, source path, or revision.
+The validated, trimmed token, preserving ASCII case and periods, is the
+canonical alias used for placement and lock emission. Trimming is permitted
+canonicalization under [req-cf-001](#req-cf-001); subsequent round trips preserve
+the canonical token. The lock-entry schema describes canonical writer output;
+readers trim input before validation.
+Consumers MUST preserve the resolved dependency reference's canonical alias in its lock entry and
+restore it for subsequent materialization, replay, and removal. Lock readers
+MUST apply the same alias validation. An absent alias retains the existing
+unaliased layout; consumers MUST NOT infer an alias from package inventory
+such as `name`. Local source references, including `../sibling`, retain
+their declaring source anchor independently of alias placement. This
+requirement does not expand source-path permissions; repository-relative
+references in remote packages remain bounded by the authenticated clone root.
+
+Alias support follows the optional-feature disclosure in
+[Section 11.2](#112-how-to-claim-conformance). Older readers may preserve
+the unknown `alias` field without implementing its placement semantics;
+field preservation alone does not establish alias lifecycle support.
 
 <a id="req-mf-011"></a>
 **[req-mf-011]** A conforming **consumer** implementation MUST reject
@@ -887,6 +920,7 @@ This section's normative statements are:
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
+  [req-mf-025](#req-mf-025),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
@@ -945,6 +979,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 |---------------------------|---------------------------------------------------------------------------------|
 | `repo_url`                | Canonical repo identity. REQUIRED for git-sourced entries. Cache isolation additionally follows [req-rs-016](#req-rs-016). |
 | `materialization_repo_url` | Optional source-cased repository identifier following the same host/owner/repo-path grammar as `repo_url`, used to reconstruct materialization and generated-link paths. See [req-lk-022](#req-lk-022). |
+| `alias`                   | Optional validated install-directory override, independent of source identity and inventory `name`. See [req-mf-025](#req-mf-025). |
 | `host`                    | FQDN when not inferable from `repo_url`.                                        |
 | `port`                    | Non-standard port. Validated to `1..65535` on read.                             |
 | `registry_prefix`         | Path prefix when resolved via registry proxy.                                   |
@@ -3327,6 +3362,9 @@ to its registered deploy root(s). The self-entry isolation in
 [Section 5.3](#53-self-entry-semantics) prevents the cleanup logic
 of one dependency from claiming the project's own files. Orphan
 detection MUST scope per-dependency, not globally.
+For supported dependency aliases, [req-mf-025](#req-mf-025) constrains
+destinations and records canonical placement for later cleanup. Containment
+alone does not establish ownership or authorize deletion of existing content.
 
 ### 10.8 Policy bypass via crafted manifest
 
@@ -3391,7 +3429,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); TLS-only wire rule remains deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
-| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); self-entry isolation | Consumer-default  |
+| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010), [req-pl-018](#req-pl-018) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
@@ -3621,10 +3659,12 @@ conformance statement identifying:
 
 **Foundation assessment status (informative).** This draft and its
 informative requirement inventory do not assert that the reference CLI
-satisfies the requirements above. The combined local-source and audit
-successor is responsible for complete executable bindings, fresh assessment,
-and exact artifact/manifest fingerprints before any implementation claim.
-Static references and passing schema checks are not runtime conformance.
+satisfies the requirements above.
+[microsoft/apm#2919](https://github.com/microsoft/apm/pull/2919) owns complete
+executable bindings, fresh assessment, and exact artifact/manifest fingerprints.
+Imported alias-safety coverage is not a v0.2.0 assessment or evidence of
+publication or ratification. Static references and schema checks are not
+runtime conformance.
 
 The prior assessment disclosed an inherited gap: the reference CLI's bare
 content audit uses source-derived drift replay rather than the stored-hash
@@ -3666,6 +3706,7 @@ These disclosures are not waivers of any normative obligation.
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
 [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
+[req-mf-025](#req-mf-025),
 [req-ext-001](#req-ext-001),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -4103,6 +4144,7 @@ the existing conformance classes or disabling [req-rg-001](#req-rg-001).
 | [req-mf-022](#req-mf-022)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-023](#req-mf-023)                | MUST    | 4.5     | consumer    |
 | [req-mf-024](#req-mf-024)                | MUST    | 4.3.2   | consumer    |
+| [req-mf-025](#req-mf-025)                | MUST    | 4.3.2   | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-lk-001](#req-lk-001)                | MUST    | 5.1     | consumer    |
@@ -4203,7 +4245,7 @@ the existing conformance classes or disabling [req-rg-001](#req-rg-001).
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 123** (118 MUST, 5 SHOULD).
+**Total normative statements: 124** (119 MUST, 5 SHOULD).
 
 The [req-mf-016](#req-mf-016) consumer entry covers source anchoring,
 user-scope admission, remote-repository containment, and local
@@ -4221,32 +4263,39 @@ This distinct minor reconciles the local-source correction in
 [microsoft/apm#2818](https://github.com/microsoft/apm/issues/2818)
 and the audit current-intent/read-only correction in
 [microsoft/apm#2816](https://github.com/microsoft/apm/issues/2816).
-Only those two contracts change behavior. The approved local-source
-clauses replace [req-mf-016](#req-mf-016)'s previous blanket project-root
-escape rejection with source-provenance admission, original declaring-source
-anchors, remote-repository containment, and internal local-symlink rules.
-[req-lk-023](#req-lk-023) adds current-intent precedence, source-derived
-expected output, comparison of prior target claims, and read-only replay
-with unsupported native writers refused before invocation. Section 8.4
-cross-references that selection order; [req-pl-014](#req-pl-014)
-distinguishes default-mode advisory drift from CI/conformance failures.
-Statement count from the current-main baseline: **122 -> 123**
-(118 MUST, 5 SHOULD). The complete previous-minor 0.1.40 amendment,
-including [req-pl-018](#req-pl-018), its related identity, policy,
-disclosure, and security text, and Section 9.2's deterministic-evaluation
-allowance, is inherited rather than introduced by this correction.
-No other requirement identifier is added, removed, or renumbered.
+Beyond the dependency below, only [req-mf-016](#req-mf-016)'s local-source
+contract and Section 5.5's audit contract change behavior; Section 8.4 and
+[req-pl-014](#req-pl-014) retain their corresponding selection and exit-scope
+clarifications.
 
-**Classification and preservation.** These are substantive changes to
-the conformance contract under Sections 9.1, 9.2, and 9.4, not same-minor
-errata. The previous minor's operative specification, requirements
-manifest, schemas, and conformance interpretation are retained from exact
-current main `f8df1b751efc30b32dc01b125616b51f777b4c81`. Its artifact
-and manifest are retained byte-for-byte, without a new announcement.
-That previous
-minor remains available and supported indefinitely, with no removal date.
+**Prospective dependency.** This draft inherits
+[microsoft/apm#2901](https://github.com/microsoft/apm/pull/2901) at exact commit
+[`d1dd63c6d1e4a4b0af95f490c111270d56a16bdd`](https://github.com/microsoft/apm/commit/d1dd63c6d1e4a4b0af95f490c111270d56a16bdd),
+not a published or ratified baseline. Its 0.1.41 candidate adds
+[req-mf-025](#req-mf-025) and the optional lock-entry `alias` field.
+Under Section 9.2 this is additive optional support and a defensive definition
+of previously unspecified behavior, not behavior-neutral errata: unsafe or
+reserved aliases can newly fail; valid dotted aliases remain accepted;
+whitespace is canonicalized; recorded aliases determine replay placement;
+absent aliases retain the unaliased layout. Source identity and source-path
+permissions do not change. Unknown-field preservation is not placement support.
+The requirement and its disclosure, cleanup, and threat mappings are inherited,
+not introduced by the local-source/audit correction.
+
+Statement count from that prospective dependency: **123 -> 124**
+(119 MUST, 5 SHOULD); only [req-lk-023](#req-lk-023) is added to its inventory.
+The complete 0.1.40 amendment, including [req-pl-018](#req-pl-018), its identity,
+policy, disclosure, and security text, and Section 9.2's deterministic-evaluation
+allowance, remains inherited. No other identifier is added, removed, or renumbered.
+
+**Classification and preservation.** The local-source and audit corrections
+are substantive conformance changes under Sections 9.1, 9.2, and 9.4, not same-minor
+errata. The retained v0.1 artifact, requirements manifest, and all four public
+schemas match that exact prospective dependency byte-for-byte. The import
+establishes no publication or ratification. v0.1 remains active, available,
+and supported indefinitely, with no removal date.
 Section 9.5 constrains announcement-to-removal, not parallel availability
-of a new minor. No migration exception is needed or claimed.
+of a new minor; no migration exception is claimed.
 
 An admitted local sibling outside the project root can satisfy this
 revision while violating the old blanket rule. Neither this correction
@@ -4260,18 +4309,14 @@ drafting of this bounded normative reconciliation and waived only the
 This is not a conformance waiver. At least two qualified non-author human
 reviewers remain required under Section 9.3 step 3: one with implementation
 experience and one with consumer/integrator experience. Implementation
-evidence and ratification remain required; the AI advisory panel does not
-supply those human approvals. This foundation record asserts none of them
-complete and records no announcement, publication, or ratification date.
-The publication owner supplies the actual record later. Section 9 is
-retained unchanged from current main, not from the stale original branch.
+evidence and ratification remain pending; AI review supplies no human approval.
+The publication owner supplies any actual record later. Section 9 remains
+unchanged from the prospective dependency.
 
-The original #2820 is retained as the inactive corrective-spec foundation,
-not the implementation-conformance change. Its combined local-source and
-audit successor owns the complete executable assessment and bindings,
-reanchored to the exact draft and current-main preservation baseline.
-Existing v0.1 remains active; this foundation does not activate a new
-assessment selector, runtime behavior, normative publication, or latest alias.
+The [Status](#status-of-this-document) assigns foundation-only ownership to
+#2820, coupled executable assessment to #2919, and aggregation to #2923.
+This record activates no assessment selector, runtime behavior, publication,
+or latest alias and records no announcement, publication, or ratification date.
 
 No previously reserved workspace, nesting, attestation, HTTP wire,
 internationalization, range-widening, withdrawal, or default-frozen feature
