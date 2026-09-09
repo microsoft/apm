@@ -17,6 +17,7 @@ from scripts.package_release import (
     BINARY_NAMES,
     archive_name,
     file_digest,
+    main,
     package,
     require_binary_identity,
     verify_extract,
@@ -40,6 +41,50 @@ def candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Pa
         ),
     )
     return dist, archives, pyproject
+
+
+@pytest.mark.parametrize("operation", ["pack", "verify-extract"])
+def test_cli_reports_the_completed_candidate_path(
+    candidate: tuple[Path, Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operation: str,
+) -> None:
+    dist, archives, pyproject = candidate
+    binary_name = "apm-linux-x86_64"
+    bundle = dist / binary_name
+    bundle.mkdir(parents=True)
+    (bundle / "apm").write_bytes(b"candidate")
+    expected = archives / archive_name(binary_name)
+    action = "Packaged"
+    if operation == "verify-extract":
+        package(binary_name, dist, archives, SHA, pyproject)
+        dist = tmp_path / "isolated"
+        expected = dist / binary_name / "apm"
+        action = "Verified"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "package_release.py",
+            operation,
+            "--binary-name",
+            binary_name,
+            "--sha",
+            SHA,
+            "--dist",
+            str(dist),
+            "--archives",
+            str(archives),
+            "--pyproject",
+            str(pyproject),
+        ],
+    )
+
+    main()
+
+    assert capsys.readouterr().out == f"[+] {action} {binary_name}: {expected.resolve()}\n"
+    assert expected.is_file()
 
 
 @pytest.mark.parametrize("binary_name", BINARY_NAMES)

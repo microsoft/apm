@@ -177,8 +177,12 @@ def main() -> None:
     args = parser.parse_args()
     if args.operation == "pack":
         package(args.binary_name, args.dist, args.archives, args.sha, args.pyproject)
+        artifact = args.archives / archive_name(args.binary_name)
+        action = "Packaged"
     else:
-        verify_extract(args.binary_name, args.archives, args.dist, args.sha)
+        artifact = verify_extract(args.binary_name, args.archives, args.dist, args.sha)
+        action = "Verified"
+    print(f"[+] {action} {args.binary_name}: {artifact.resolve()}")
 
 
 if __name__ == "__main__":

@@ -423,6 +423,8 @@ neither grants publishing permissions nor bypasses qualification.
 and executable SHA-256 digests, verifies member safety and embedded version/build
 SHA, extracts into a fresh destination, and rechecks the executable before upload.
 Publication never repacks archives.
+For local runs, successful `pack` and `verify-extract` commands print the resolved
+archive and extracted executable paths, respectively.
 Candidate artifacts are attempt-scoped (`candidate-<run_attempt>-<binary_name>`;
 evidence is `release-candidate-evidence-<run_attempt>`), so partial reruns must
 not reuse old-attempt artifacts. Before publication, use **Re-run all jobs** to
