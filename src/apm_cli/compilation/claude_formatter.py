@@ -107,6 +107,10 @@ class ClaudeFormatter:
             source_attribution = config.get("source_attribution", True)
             skip_instructions = config.get("skip_instructions", False)
 
+            # Reset any previous state so contexts from earlier compile passes
+            # can't leak into later calls and rewrite links incorrectly.
+            self.link_resolver.context_registry.clear()
+
             # Register context/memory fragments so embedded links to them
             # (e.g. ".context.md") resolve to their actual on-disk location,
             # mirroring the AGENTS.md distributed compiler.
