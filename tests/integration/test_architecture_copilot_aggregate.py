@@ -43,6 +43,11 @@ def test_copilot_aggregate_routes_are_registered_and_satisfied() -> None:
             "package.source = None",
         ),
         (
+            "src/apm_cli/install/sources.py",
+            "restore_installed_package_source(cached_package, dep_ref)",
+            "parallel_source(cached_package, dep_ref)",
+        ),
+        (
             "src/apm_cli/commands/uninstall/engine.py",
             "rebuild_result = finalize_install_result(",
             "rebuild_result = parallel_outcome(",

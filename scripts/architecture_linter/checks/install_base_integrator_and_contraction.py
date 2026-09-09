@@ -81,6 +81,7 @@ def check_copilot_aggregate(provider: FactsProvider) -> tuple[Violation, ...]:
             "restore_installed_package_source",
             {"to_github_url"},
         ),
+        ("src/apm_cli/install/sources.py", "acquire", {"restore_installed_package_source"}),
         (
             "src/apm_cli/commands/uninstall/cli.py",
             "uninstall",
