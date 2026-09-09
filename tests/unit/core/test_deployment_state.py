@@ -591,9 +591,7 @@ def test_legacy_accumulation_preserves_revisited_owner_and_hash_precedence(
     lock.local_deployed_file_hashes = {value: root_hash} if root_hash is not None else {}
     # Revisit an owner in the codec's input stream, including duplicate paths.
     with monkeypatch.context() as patch:
-        patch.setattr(
-            lock, "dependencies", SimpleNamespace(items=lambda: [*entries, entries[0]])
-        )
+        patch.setattr(lock, "dependencies", SimpleNamespace(items=lambda: [*entries, entries[0]]))
         ledger = DeploymentLedgerCodec.from_lockfile(lock)
     assert len(ledger.records) == 1
     record = next(iter(ledger.records.values()))
@@ -612,9 +610,7 @@ def test_legacy_accumulation_preserves_revisited_owner_and_hash_precedence(
     assert DeploymentLedgerCodec.legacy_deployed_file_claims(lock) == {value: "fixture/first"}
     assert all(dep.deployed_files == [value] for dep in lock.dependencies.values())
     expected_hashes = {value: expected_hash} if expected_hash is not None else {}
-    assert all(
-        dep.deployed_file_hashes == expected_hashes for dep in lock.dependencies.values()
-    )
+    assert all(dep.deployed_file_hashes == expected_hashes for dep in lock.dependencies.values())
     assert lock.local_deployed_file_hashes == expected_hashes
     assert LockFile.from_yaml(lock.to_yaml()).deployment_ledger == ledger
 
