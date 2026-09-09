@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-> **Normative reference:** this page documents the v0.3 working-draft manifest schema as implemented by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 4 (Manifest)](/apm/specs/openapm-v01/) and published as JSON Schema at [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json).
+> **Normative reference:** This page describes the CLI's v0.3 working draft. [OpenAPM v0.1, Section 4](../../specs/openapm-v01/#4-manifest-format-apmyml) defines the normative contract; its unratified 0.1.41 amendment selects [`manifest-v0.1.41.schema.json`](/apm/specs/schemas/manifest-v0.1.41.schema.json). See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
 
 <dl>
 <dt>Version</dt><dd>0.3 (Working Draft)</dd>
@@ -69,13 +69,13 @@ marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
 
 Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. Unknown top-level keys MUST be preserved by writers but MAY be ignored by resolvers.
 
-The standard `$schema` key negotiates the manifest contract. Omit it for the
-current APM working draft. Set it to
-`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json` for
-the normative OpenAPM v0.1 shape. Unknown schema identities fail closed; APM
-does not interpret a working-draft manifest as v0.1. Under explicit v0.1,
-`registries` follows the normative string-or-object registry map rather than
-the working draft's named map plus `default` selector.
+The standard `$schema` key selects the manifest contract; omission selects
+APM's current working draft. Amendment 0.1.41 selects
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.41.schema.json`
+for the alias-aware OpenAPM v0.1 shape. Unknown identities fail closed, not
+back to the working draft. Explicit OpenAPM v0.1 uses the normative
+string-or-object `registries` map, not the working draft's named map plus
+`default` selector.
 
 The `marketplace:` block is the source for `apm pack`'s marketplace output. Repositories that do not publish a marketplace omit it entirely. See [Section 7](#7-marketplace-authoring-block).
 

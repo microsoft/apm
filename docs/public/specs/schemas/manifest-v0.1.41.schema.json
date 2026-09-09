@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json",
-  "title": "OpenAPM Manifest (apm.yml) v0.1",
+  "$id": "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.41.schema.json",
+  "title": "OpenAPM Manifest (apm.yml) v0.1, schema revision 0.1.41",
   "description": "Normative JSON Schema (Draft 2020-12) for the OpenAPM v0.1 manifest. Where this schema and the prose of OpenAPM v0.1 disagree, the prose is authoritative.",
   "type": "object",
   "required": ["name", "version"],
@@ -105,7 +105,11 @@
             "ref": { "type": "string" },
             "prerelease": { "type": "boolean" },
             "path": { "type": "string" },
-            "alias": { "type": "string" },
+            "alias": {
+              "type": "string",
+              "pattern": "^\\s*(?!\\.{1,2}\\s*(?![\\s\\S]))[a-zA-Z0-9._-]+\\s*(?![\\s\\S])",
+              "description": "Alias input is trimmed and validated per req-mf-025; source paths are independent."
+            },
             "skills": { "type": "array", "items": { "type": "string" } }
           },
           "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },

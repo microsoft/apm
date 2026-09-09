@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://microsoft.github.io/apm/specs/schemas/lockfile-v0.1.schema.json",
-  "title": "OpenAPM Lockfile (apm.lock.yaml) v0.1",
+  "$id": "https://microsoft.github.io/apm/specs/schemas/lockfile-v0.1.41.schema.json",
+  "title": "OpenAPM Lockfile (apm.lock.yaml) v0.1, schema revision 0.1.41",
   "description": "Normative JSON Schema (Draft 2020-12) for the OpenAPM v0.1 lockfile. Where this schema and the prose of OpenAPM v0.1 disagree, the prose is authoritative.",
   "type": "object",
   "required": ["lockfile_version", "dependencies"],
@@ -36,6 +36,12 @@
       "type": "object",
       "properties": {
         "repo_url": { "type": "string", "minLength": 1 },
+        "alias": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]+(?![\\s\\S])",
+          "not": { "enum": [".", ".."] },
+          "description": "Validated install-directory override, not source identity; req-mf-025."
+        },
         "materialization_repo_url": {
           "type": "string",
           "minLength": 1,

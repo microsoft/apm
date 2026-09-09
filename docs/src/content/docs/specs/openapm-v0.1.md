@@ -3810,31 +3810,40 @@ provided under the published docs site:
 | `https://microsoft.github.io/apm/spec/latest`       | Newest ratified version      | Human citation in prose. Toolchains MUST NOT pin to `latest`; pin to a versioned URL. |
 | `https://microsoft.github.io/apm/spec`              | Alias of `latest`            | Short prose citation. Same restriction as `latest` -- do not pin tooling. |
 
-The JSON Schemas published alongside this specification (Appendix
-A) are themselves identified by the `$id` URL embedded in each
-schema. Toolchains MUST pin to the `$id` URL verbatim; the schema
-files are byte-immortal at those URLs for the lifetime of this
-version.
+Each schema's embedded `$id` identifies it. Toolchains MUST pin to that
+URL verbatim; schema files are byte-immortal there for this version's
+lifetime. The published [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json) and
+[`lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json) URLs and bytes remain unchanged and available;
+[Appendix A](#appendix-a-normative-json-schemas-inline) selects this
+amendment's distinct resources.
 
 ## Appendix A. Normative JSON Schemas (inline)
 
-The machine-readable schemas backing this specification are
-published alongside this document and are normative.
+The schemas below define this specification's normative structural contract.
+
+:::note[Planned]
+Amendment 0.1.41 selects new, independent manifest and lockfile resources
+with distinct `$id` URLs. Human approval and the public comment period under
+[Section 9.3](#93-amendment-process) remain pending; listing these URLs does
+not establish approval or publication.
+:::
 
 | Schema                | Authoritative source (in-tree)                                                                       |
 |-----------------------|------------------------------------------------------------------------------------------------------|
-| Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json) (JSON Schema 2020-12).    |
-| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json) (JSON Schema 2020-12). |
+| Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.41.schema.json`](/apm/specs/schemas/manifest-v0.1.41.schema.json) (JSON Schema 2020-12).    |
+| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.41.schema.json`](/apm/specs/schemas/lockfile-v0.1.41.schema.json) (JSON Schema 2020-12). |
 | Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
 | Claude-Code marketplace (informational, emitted output) | `tests/fixtures/schemas/claude-code-marketplace.schema.json`         |
 | Claude-Code plugin (informational, emitted output)      | `tests/fixtures/schemas/claude-code-plugin.schema.json`              |
 
-The reference Python validator `src/apm_cli/policy/schema.py`
-remains in-tree as a **non-normative cross-reference** for
-implementers; the JSON Schema is authoritative. Schemas for
-manifest and lockfile validation are JSON-Schema-only in v0.1; a
-reference Python validator MAY be added in a future minor revision
-without normative effect.
+Consumers checking the structural constraints for [req-mf-025](#req-mf-025)
+choose the distinct 0.1.41 `$id` URLs above. Validation against the older
+structural schemas does not waive newer prose or runtime requirements.
+
+`src/apm_cli/policy/schema.py` is a **non-normative cross-reference**;
+the policy JSON Schema is authoritative. Manifest and lockfile validation
+are JSON-Schema-only in v0.1; a reference Python validator MAY be added
+in a future minor revision without normative effect.
 
 Where a JSON Schema and the prose of this specification disagree,
 the **prose** is authoritative and the schema is treated as an
@@ -4049,7 +4058,7 @@ renumbering of conformance classes.
 | 0.1.38  | 2026-09-01 | Defensive amendment of [req-lk-005] (no new normative statement; count remains 120 (115 MUST, 5 SHOULD)): `generated_at` is optional advisory metadata, new lockfiles omit it by default, and later writes preserve an existing omission unless explicitly configured otherwise. |
 | 0.1.39  | 2026-09-01 | Spec-citation fold for user-scoped direct MCP target selection (closes #2548 Mode-B silent-extension gate). Added [req-tg-014] (Section 8.5.8, consumer MUST): explicit selection, the user-scope manifest, configured user default, and user-scope runtime discovery form one precedence chain; project-only signals cannot constrain final discovery; and a selected set with no user-capable runtime fails before user manifest, lockfile, or target-config mutation. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 120 -> 121 (116 MUST, 5 SHOULD). |
 | 0.1.40  | 2026-09-07 | Spec-citation fold for dependency-policy identity casing in PR #2706. Added [req-pl-018] (Section 6.3.1, governance MUST) and extended [req-rs-016] clause (3): dependency allow, deny, and exact require operands use the documented per-host repository case rule, while registry-sourced repository coordinates are case-insensitive regardless of host; case normalization is ASCII-only, is bounded identically on both operands, stops at recursive-glob ambiguity, and does not cross virtual-path, ref, registry-name, MCP-name, unmanaged-path, or case-sensitive host/source boundaries; deny precedence is unchanged. Defined the policy glob grammar, documented byte-exact Section 6.4 merge behavior, and added the threat mapping. Classified this as a non-breaking correction of previously unspecified evaluation behavior under Section 9.2: existing lowercase workarounds remain matching; on registry sources and hosts documented as case-insensitive, case-variant allow entries can newly match, deny entries can newly enforce, and exact require entries can newly be satisfied, so those policies should be re-audited. Sections 1.3, 6.3.1, 6.3.5, 6.4, 6.5, 6.9, 7.2, 9.2, 10.8, 10.11, 11.2, and 11.3.4, Appendix C, and conformance coverage updated. Statement count: 121 -> 122 (117 MUST, 5 SHOULD). |
-| 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Sections 1.3, 4.9, 5.2, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
+| 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Selects distinct 0.1.41 schema publication identities without changing published v0.1 URLs or bytes; Section 9.3 remains pending (see Appendix A). Sections 1.3, 4.9, 5.2, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **Normative reference:** this page documents the v0.2 working-draft lockfile format as emitted by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 5 (Lockfile)](/apm/specs/openapm-v01/) and published as JSON Schema at [`lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json).
+> **Normative reference:** This page describes the CLI's v0.2 working draft. [OpenAPM v0.1, Section 5](../../specs/openapm-v01/#5-lockfile-format-apmlockyaml) defines the normative contract; its unratified 0.1.41 amendment selects [`lockfile-v0.1.41.schema.json`](/apm/specs/schemas/lockfile-v0.1.41.schema.json). See [schema identity and status](../../specs/openapm-v01/#appendix-a-normative-json-schemas-inline).
 
 `apm.lock.yaml` is the pinned record of every resolved dependency and every
 file APM deployed into the workspace. It is the source of truth for

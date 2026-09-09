@@ -1,6 +1,7 @@
 """Dependency alias validation, containment, and durable replay conformance."""
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 import jsonschema
 import pytest
@@ -9,9 +10,44 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.registry.resolver import RegistryResolution
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.path_security import PathTraversalError
-from tests.spec_conformance._helpers import load_yaml_fixture, validate_against
+from tests.spec_conformance._helpers import (
+    load_schema,
+    load_yaml_fixture,
+    sha256_hex,
+    validate_against,
+)
 
 pytestmark = pytest.mark.component
+
+
+@pytest.mark.parametrize(
+    ("name", "digest"),
+    [
+        ("manifest", "7bdefbe443d3315d71add021c777d776c9cfd4942acb19750a799f46fa0d1344"),
+        ("lockfile", "6c0dca9e7994035b55da17340b1f9f6c6673501c63ebd947400cf472d5723560"),
+    ],
+)
+def test_published_schema_content_remains_immutable(
+    repo_root: Path, name: str, digest: str
+) -> None:
+    """Preserve published LF content regardless of local Git checkout newlines."""
+    path = repo_root / "docs" / "public" / "specs" / "schemas" / f"{name}-v0.1.schema.json"
+    assert sha256_hex(path.read_text(encoding="utf-8").encode("utf-8")) == digest
+
+
+@pytest.mark.parametrize("name", ["manifest", "lockfile"])
+def test_alias_schema_revision_has_distinct_published_identity(name: str) -> None:
+    """The alias-aware schema cannot overwrite a cached validator at the old ID."""
+    old = load_schema(f"{name}-v0.1.schema.json")
+    revised = load_schema(f"{name}-v0.1.41.schema.json")
+    jsonschema.Draft202012Validator.check_schema(revised)
+    old_id = urlparse(old["$id"])
+    new_id = urlparse(revised["$id"])
+    assert old_id.path == f"/apm/specs/schemas/{name}-v0.1.schema.json"
+    assert new_id.path == f"/apm/specs/schemas/{name}-v0.1.41.schema.json"
+    assert new_id.scheme == old_id.scheme == "https"
+    assert new_id.hostname == old_id.hostname == "microsoft.github.io"
+    assert new_id.query == new_id.fragment == ""
 
 
 @pytest.mark.req("req-mf-025")
@@ -126,8 +162,8 @@ def test_alias_schemas_distinguish_input_from_canonical_output(
     lock = load_yaml_fixture("lockfile", "v2-with-registry.yml")
     lock["dependencies"][0]["alias"] = alias
     for schema, document, valid in (
-        ("manifest-v0.1.schema.json", manifest, manifest_valid),
-        ("lockfile-v0.1.schema.json", lock, lock_valid),
+        ("manifest-v0.1.41.schema.json", manifest, manifest_valid),
+        ("lockfile-v0.1.41.schema.json", lock, lock_valid),
     ):
         if valid:
             validate_against(schema, document)
