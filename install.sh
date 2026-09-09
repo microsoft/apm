@@ -1367,7 +1367,7 @@ if [ "$PLATFORM" = "linux" ]; then
         if [ "$(printf '%s\n' "$REQUIRED_GLIBC" "$GLIBC_VERSION" | sort -V | head -n1)" != "$REQUIRED_GLIBC" ]; then
             apm_echo "${YELLOW}[!] Compatibility Issue Detected${NC}"
             apm_echo "${YELLOW}Your glibc version: $GLIBC_VERSION${NC}"
-            apm_echo "${YELLOW}Required version: $REQUIRED_GLIBC or newer${NC}"
+            apm_echo "${YELLOW}Required version: glibc $REQUIRED_GLIBC+${NC}"
             echo ""
             echo "The prebuilt binary will not work on your system."
             echo ""

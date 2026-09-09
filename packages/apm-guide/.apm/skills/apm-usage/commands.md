@@ -436,7 +436,7 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 
 Self-update preferences: `self-update.channel` accepts `stable` or `prerelease`; `self-update.install-dir` is optional. On Unix, a set directory must match the existing installation, while leaving it unset preserves the detected installation. Windows keeps its installer destination/default behavior. `VERSION` pins a release; `APM_SELF_UPDATE_CHANNEL` and `APM_INSTALL_DIR` override config. Both channels pass a normalized `v<version>` to the installer and GitHub/GHES script URL. `APM_INSTALLER_BASE_URL` stays authoritative, receiving only the script name. Config excludes credentials, mirror URLs, commands, and installer arguments.
 
-Linux bootstrap/self-update: prebuilt binaries (x86_64 and ARM64) require glibc 2.38+. On older systems, use pip with a working Python 3.10+; the prebuilt glibc floor does not apply to system Python.
+Linux bootstrap/self-update: prebuilt binaries (x86_64 and ARM64) require glibc 2.38+. On older systems, use pip with a working Python 3.10+; the floor applies only to prebuilt binaries, not to a system Python running pip.
 
 Unix self-update passes the running binary's identity to preserve its launcher/bundle destinations, never invokes `sudo`, and rejects conflicting overrides or switching an existing install to pip. Set or unset install-directory preferences do not migrate it. Follow [Unix ownership and migration](./installation.md#unix-ownership-and-migration) for administrator/package-manager installs.
 

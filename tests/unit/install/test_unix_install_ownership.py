@@ -102,7 +102,7 @@ def _run(
     script_args: tuple[str, ...] = (),
     **overrides: str,
 ) -> subprocess.CompletedProcess[str]:
-    """Run unchanged configuration and installation code from this checkout."""
+    """Run production installer code; binary_glibc_failure injects a later loader failure."""
     root, env = installation
     source = INSTALLER.read_text(encoding="ascii")
     config = source.split("# Banner\n", 1)[0]
@@ -2170,7 +2170,7 @@ def test_glibc_floor_routes_to_pip_before_binary_download(
     if glibc_version in {"2.31", "2.35", "2.36", "2.37"}:
         assert log.read_text(encoding="ascii").splitlines() == ["install", "--user", "apm-cli"]
         assert f"Your glibc version: {glibc_version}" in result.stdout
-        assert "Required version: 2.38 or newer" in result.stdout
+        assert "Required version: glibc 2.38+" in result.stdout
         assert "Reached binary download phase" not in result.stdout
     else:
         assert not log.exists()
