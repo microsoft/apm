@@ -145,6 +145,7 @@ def _publish(
     name: str,
     *,
     skill: str | None = None,
+    skill_resource: str | None = None,
     instruction: str | None = None,
     agent: str | None = None,
     hook_command: str | None = None,
@@ -166,7 +167,13 @@ def _publish(
         mcp_dependencies=mcp_dependencies,
     )
     if skill is not None:
-        scenario.sources.add_skill(package, skill, _skill(skill))
+        skill_path = scenario.sources.add_skill(package, skill, _skill(skill))
+        if skill_resource is not None:
+            resource = skill_path.parent / "assets" / "reference.md"
+            resource.parent.mkdir()
+            resource.write_text(skill_resource, encoding="utf-8")
+    elif skill_resource is not None:
+        raise ValueError("A skill resource requires a skill")
     if instruction is not None:
         scenario.sources.add_instruction(package, instruction, _instruction(instruction))
     if agent is not None:
@@ -844,6 +851,7 @@ def test_required_pack_install_compile_audit_closes_regular_package_state(
         scenario,
         "regular-kit-source",
         skill="triage",
+        skill_resource="Nested resource retained by legacy Copilot packing.\n",
         instruction="guard",
         agent="reviewer",
     )
@@ -861,6 +869,35 @@ def test_required_pack_install_compile_audit_closes_regular_package_state(
         environment=source.environment,
         scenario_id="pack-closure-install-producer",
     )
+    expected_skill_files = {
+        f".agents/skills/triage/{name}": (producer.root / ".agents/skills/triage" / name).read_bytes()
+        for name in ("SKILL.md", "assets/reference.md")
+    }
+    _run_success(
+        scenario,
+        producer,
+        ("pack", "--format", "apm", "--archive", "--target", "copilot", "--output", "legacy-build"),
+        environment=source.environment,
+        scenario_id="pack-closure-legacy-pack",
+    )
+    legacy_archive = producer.root / "legacy-build" / "regular-kit-0.1.0.zip"
+    with zipfile.ZipFile(legacy_archive) as bundle:
+        lock_paths = [name for name in bundle.namelist() if name.endswith("/apm.lock.yaml")]
+        assert len(lock_paths) == 1
+        prefix = lock_paths[0].removesuffix("apm.lock.yaml")
+        for path, content in expected_skill_files.items():
+            assert bundle.read(prefix + path) == content
+    legacy_consumer = scenario.consumers.create("legacy-consumer", targets=("copilot",))
+    assert not (legacy_consumer.root / ".agents").exists()
+    _run_success(
+        scenario,
+        legacy_consumer,
+        ("unpack", str(legacy_archive)),
+        environment=scenario.environment,
+        scenario_id="pack-closure-legacy-unpack",
+    )
+    for path, content in expected_skill_files.items():
+        assert (legacy_consumer.root / path).read_bytes() == content
     _run_success(
         scenario,
         producer,
