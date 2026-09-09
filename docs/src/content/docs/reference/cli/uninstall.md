@@ -119,7 +119,8 @@ What gets removed, in order:
    shared entry. Cleanup attempts every owning runtime before exiting nonzero on
    failure. Fix the reported configs, then run `apm install` to reconcile stale
    entries.
-7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
+7. `apm.lock.yaml` is deleted only when no dependencies or root-owned deployment
+   receipts remain.
 
 Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No
@@ -145,6 +146,12 @@ deleted, uninstall lists the retained paths and exits before changing `apm.yml`
 or the on-disk `apm.lock.yaml`. Direct and orphan directories run first and may
 already be gone; declarations and deployed ownership remain. Resolve the listed
 files and retry the same uninstall command.
+
+If APM refuses to clean up a Copilot aggregate or cannot rebuild it, packages and
+declarations have already been removed. Uninstall exits nonzero and retains
+ownership receipts; it does not undo the removal. Follow
+[Copilot recovery](../../targets-matrix/#copilot) to resolve the output or source
+errors, then run `apm install --global`.
 
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the

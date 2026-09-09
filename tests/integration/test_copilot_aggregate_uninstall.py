@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import DeploymentLedger
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.models.dependency.selection import parse_dependency_entry
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
@@ -67,6 +70,7 @@ def _assert_recovered_sections(
         "survivor-missing",
         "survivor-ineligible",
         "root-missing",
+        "legacy-last-writer",
     ],
 )
 def test_generated_copilot_aggregate_lifecycle(
@@ -179,6 +183,29 @@ def test_generated_copilot_aggregate_lifecycle(
     if has_root:
         assert initial.count(_ROOT_BODY.strip()) == 1
     aggregate_rel = ".copilot/copilot-instructions.md"
+    if obligation == "legacy-last-writer":
+        # Reproduce an old receipt without changing the two rendered sections.
+        survivor_key = refs["survivor"].get_unique_key()
+        legacy_record = replace(records[0], owners=(survivor_key,), active_owner=survivor_key)
+        DeploymentLedgerCodec.apply_to_lockfile(
+            DeploymentLedger(records={legacy_record.locator.key: legacy_record}), lock
+        )
+        lock_path = isolated.config_root / "apm.lock.yaml"
+        lock.save(lock_path)
+        legacy = LockFile.read(lock_path)
+        assert legacy is not None
+        assert list(legacy.deployment_ledger.records.values()) == [legacy_record]
+        assert legacy.dependencies[refs["primary"].get_unique_key()].deployed_files == []
+        assert legacy.dependencies[refs["primary"].get_unique_key()].deployed_file_hashes == {}
+        assert legacy.dependencies[survivor_key].deployed_files == [aggregate_rel]
+        assert legacy.dependencies[survivor_key].deployed_file_hashes == {
+            aggregate_rel: legacy_record.content_hash
+        }
+        assert aggregate.read_text(encoding="utf-8") == initial
+        assert (
+            legacy_record.content_hash
+            == "sha256:" + hashlib.sha256(aggregate.read_bytes()).hexdigest()
+        )
     survivor_path = refs["survivor"].get_install_path(isolated.config_root / "apm_modules")
     installed_instruction = survivor_path / ".apm/instructions/survivor.instructions.md"
 
@@ -310,6 +337,12 @@ def test_generated_copilot_aggregate_lifecycle(
         return
     remaining = aggregate.read_text(encoding="utf-8")
     print("POST-UNINSTALL AGGREGATE", remaining)
+    if obligation == "legacy-last-writer":
+        assert bodies["primary"].strip() not in remaining, "Unrecorded removed-owner body survived"
+        identities = re.findall(r"<!-- apm:source:(.*?) -->", remaining)
+        assert [urlparse(identity) for identity in identities] == [
+            urlparse(refs["survivor"].to_github_url())
+        ], "Unrecorded removed-owner provenance survived"
     if obligation == "removed-section":
         assert bodies["primary"].strip() not in remaining, "Removed-owner body survived"
         assert "primary" not in remaining, "Removed-owner provenance survived"
