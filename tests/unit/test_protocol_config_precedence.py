@@ -6,10 +6,127 @@ they focus exclusively on the precedence resolution so each layer of the chain
 can be validated in isolation.
 """
 
+import json
 import os
-from unittest.mock import patch
+import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+
+pytestmark = pytest.mark.component
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize(
+    ("create_config", "stored", "use_env", "expected_pref", "expected_fallback"),
+    [
+        (False, False, False, None, False),
+        (True, False, False, None, False),
+        (False, True, False, "ssh", True),
+        (False, True, True, "https", False),
+    ],
+    ids=["read-only-defaults", "install-bootstrap", "read-only-stored", "read-only-env"],
+)
+def test_downloader_config_bootstrap_preserves_transport_precedence(
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    create_config: bool,
+    stored: bool,
+    use_env: bool,
+    expected_pref: str | None,
+    expected_fallback: bool,
+    platform: str,
+) -> None:
+    """Skipping initialization changes no configured or environment transport choice."""
+    from apm_cli import config
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+    from apm_cli.deps.transport_selection import ProtocolPreference
+
+    config_path = tmp_path / ".apm/config.json"
+    monkeypatch.setattr(config, "CONFIG_DIR", str(config_path.parent))
+    monkeypatch.setattr(config, "CONFIG_FILE", str(config_path))
+    monkeypatch.setattr(config, "_config_cache", None)
+    for key in ("APM_GIT_PROTOCOL", "APM_ALLOW_PROTOCOL_FALLBACK", "APM_TEMP_DIR"):
+        monkeypatch.delenv(key, raising=False)
+    # Exercise the real Windows sentinel branch, not a stubbed config reader.
+    # Scratch Git config is allowed; missing user configuration is not.
+    scratch = tmp_path_factory.mktemp("git-sentinel")
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    if stored:
+        config_path.parent.mkdir()
+        config_path.write_text(
+            json.dumps({"prefer_ssh": True, "allow_protocol_fallback": True}), encoding="utf-8"
+        )
+    if use_env:
+        monkeypatch.setenv("APM_GIT_PROTOCOL", "https")
+        monkeypatch.setenv("APM_ALLOW_PROTOCOL_FALLBACK", "0")
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    with monkeypatch.context() as platform_patch:
+        platform_patch.setattr(sys, "platform", platform)
+        if create_config:
+            downloader = GitHubPackageDownloader(auth_resolver=MagicMock())
+        else:
+            downloader = GitHubPackageDownloader(auth_resolver=MagicMock(), create_config=False)
+
+    assert downloader._protocol_pref is ProtocolPreference.from_str(expected_pref)
+    assert downloader._allow_fallback is expected_fallback
+    assert downloader.git_env["GIT_ASKPASS"] == "echo"
+    assert downloader.git_env["GIT_CONFIG_NOSYSTEM"] == "1"
+    if platform == "win32":
+        sentinel = scratch / ".apm_empty_gitconfig"
+        assert downloader.git_env["GIT_CONFIG_GLOBAL"] == str(sentinel)
+        assert sentinel.read_bytes() == b""
+    else:
+        assert downloader.git_env["GIT_CONFIG_GLOBAL"] == os.devnull
+    if create_config:
+        assert json.loads(config_path.read_text(encoding="utf-8")) == {"default_client": "vscode"}
+    else:
+        assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("use_env", [False, True], ids=["stored-temp", "env-temp"])
+def test_read_only_windows_sentinel_preserves_temp_precedence(
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    use_env: bool,
+) -> None:
+    """The sentinel uses env > saved temp without modifying saved configuration."""
+    from apm_cli import config
+    from apm_cli.deps.github_downloader import GitHubPackageDownloader
+
+    saved_temp = tmp_path_factory.mktemp("saved-temp")
+    env_temp = tmp_path_factory.mktemp("env-temp")
+    config_path = tmp_path / ".apm/config.json"
+    config_path.parent.mkdir()
+    config_path.write_text(json.dumps({"temp_dir": str(saved_temp)}), encoding="utf-8")
+    monkeypatch.setattr(config, "CONFIG_DIR", str(config_path.parent))
+    monkeypatch.setattr(config, "CONFIG_FILE", str(config_path))
+    monkeypatch.setattr(config, "_config_cache", None)
+    monkeypatch.delenv("APM_TEMP_DIR", raising=False)
+    if use_env:
+        monkeypatch.setenv("APM_TEMP_DIR", str(env_temp))
+    before = ArtifactSnapshot.capture(tmp_path)
+
+    with monkeypatch.context() as platform_patch:
+        platform_patch.setattr(sys, "platform", "win32")
+        downloader = GitHubPackageDownloader(auth_resolver=MagicMock(), create_config=False)
+
+    expected_temp, unused_temp = (env_temp, saved_temp) if use_env else (saved_temp, env_temp)
+    sentinel = expected_temp / ".apm_empty_gitconfig"
+    assert downloader.git_env["GIT_CONFIG_GLOBAL"] == str(sentinel)
+    assert sentinel.read_bytes() == b""
+    assert not (unused_temp / ".apm_empty_gitconfig").exists()
+    assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))
+
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -144,6 +144,32 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
 
+    # Git credential isolation may write its scratch sentinel, never bootstrap
+    # user configuration. Keep temp precedence with the configuration owner.
+    for path, required in (
+        (
+            "src/apm_cli/deps/git_auth_env.py",
+            ("get_apm_temp_dir(create_config=False)",),
+        ),
+        (
+            "src/apm_cli/config.py",
+            (
+                'return get_config(create=create_config).get("temp_dir")',
+                "get_temp_dir(create_config=create_config)",
+            ),
+        ),
+    ):
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_HOST_CRED,
+                path,
+                required,
+                "Git sentinel temp lookup must use noncreating configuration-owner reads",
+            )
+        )
+
     # AC5 -- AuthResolver must scrub inherited Git authorization state.
     findings.extend(
         _require_subs(

@@ -180,18 +180,18 @@ def test_resolver_records_resolved_ref_in_lockfile():
 
 @pytest.mark.req("req-rs-013")
 def test_resolver_fails_closed_on_ambiguous_resolution():
-    """`conflict_resolution: nest` MUST be rejected in v0.1."""
+    """`conflict_resolution: nest` remains refused in the corrective revision."""
     assert_spec_contains(
         "conflict_resolution: nest",
-        "reserved for v0.2",
+        "reserved for a future revision",
     )
     # Schema enum pin (round-3 fold): the manifest schema MUST admit
-    # only `intersection-pick` in v0.1; `nest` is reserved for v0.2.
+    # only `intersection-pick`; `nest` remains reserved.
     schema = load_schema("manifest-v0.1.schema.json")
     enum = schema["$defs"]["depsBlock"]["properties"]["conflict_resolution"]["enum"]
     assert enum == ["intersection-pick"], (
         f"manifest schema conflict_resolution enum MUST be exactly "
-        f"['intersection-pick'] in v0.1; got {enum!r}"
+        f"['intersection-pick']; got {enum!r}"
     )
 
 

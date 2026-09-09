@@ -1,0 +1,9 @@
+# req-mf-016: this selected local parent and its child are siblings outside
+# the consumer's project/user root; source anchoring is not deployment scope.
+name: parent
+version: 1.0.0
+targets:
+  - cursor
+dependencies:
+  apm:
+    - path: ../child

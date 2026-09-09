@@ -724,31 +724,42 @@ def _check_drift(
     from ..core.scope import get_workspace_deploy_root
     from ..deps.lockfile import get_lockfile_path
     from ..deps.path_anchoring import LocalResolutionError
-    from ..install.audit_target_roots import external_replay_root
+    from ..install.audit_target_roots import (
+        AuditTargetError,
+        audit_comparison_targets,
+        external_replay_root,
+        resolve_audit_targets,
+    )
     from ..install.drift import (
         CacheMissError,
         CheckLogger,
         ReplayConfig,
-        _read_apm_yml_target,
         diff_scratch_against_project,
         run_replay,
     )
-    from ..integration.targets import resolve_targets
 
     logger = CheckLogger(verbose=verbose)
     deployment_root = get_workspace_deploy_root(project_root)
     user_scope = deployment_root != project_root.resolve()
     if prepared_replay is None:
-        config = ReplayConfig(
-            project_root=project_root,
-            lockfile_path=get_lockfile_path(project_root),
-            targets=frozenset(targets) if targets else None,
-            cache_only=cache_only,
-            user_scope=user_scope,
-        )
-
         try:
+            resolved_targets = list(resolve_audit_targets(project_root, user_scope=user_scope))
+            config = ReplayConfig(
+                project_root=project_root,
+                lockfile_path=get_lockfile_path(project_root),
+                targets=frozenset(targets) if targets else None,
+                cache_only=cache_only,
+                user_scope=user_scope,
+                resolved_targets=tuple(resolved_targets),
+            )
             scratch = run_replay(config, logger)
+        except AuditTargetError as exc:
+            return (
+                CheckResult(
+                    name="drift", passed=False, message=f"drift target resolution failed: {exc}"
+                ),
+                [],
+            )
         except AgentPluginDeploymentBoundaryError as exc:
             return (
                 CheckResult(
@@ -792,11 +803,6 @@ def _check_drift(
                 ),
                 [],
             )
-        resolved_targets = resolve_targets(
-            project_root,
-            user_scope=user_scope,
-            explicit_target=_read_apm_yml_target(project_root),
-        )
         tracked_files = None
     else:
         scratch = prepared_replay.scratch_root
@@ -814,7 +820,16 @@ def _check_drift(
         project_targets,
         tracked_files=tracked_files,
     )
-    for target in resolved_targets:
+    try:
+        comparison_targets = audit_comparison_targets(
+            lockfile, tuple(resolved_targets), user_scope=user_scope
+        )
+    except AuditTargetError as exc:
+        return (
+            CheckResult(name="drift", passed=False, message=f"drift comparison failed: {exc}"),
+            findings,
+        )
+    for target in comparison_targets:
         live_root = target.managed_deploy_root
         if live_root is None:
             continue
@@ -887,14 +902,6 @@ def run_baseline_checks(
     result = CIAuditResult()
     deployment_root = get_workspace_deploy_root(project_root)
     user_scope = deployment_root != project_root.resolve()
-    from ..install.drift import _read_apm_yml_target
-    from ..integration.targets import resolve_targets
-
-    resolved_targets = resolve_targets(
-        deployment_root,
-        user_scope=user_scope,
-        explicit_target=_read_apm_yml_target(project_root),
-    )
     apm_yml_path = project_root / "apm.yml"
 
     # Parse manifest ONCE -- this function owns parse-error handling.
@@ -964,8 +971,24 @@ def run_baseline_checks(
     if _run(_check_deployment_ledger_owners(lock)):
         return result
 
+    from ..install.audit_target_roots import AuditTargetError, resolve_audit_targets
+
+    target_error = None
+    try:
+        resolved_targets = (
+            prepared_replay.targets
+            if prepared_replay is not None
+            else resolve_audit_targets(project_root, user_scope=user_scope)
+        )
+    except AuditTargetError as exc:
+        target_error = CheckResult(name="target-resolution", passed=False, message=str(exc))
+        result.checks.append(target_error)
+        resolved_targets = ()
+
     # Check 4: Deployed files present
-    if _run(_check_deployed_files_present(deployment_root, lock, resolved_targets)):
+    if target_error is not None or _run(
+        _check_deployed_files_present(deployment_root, lock, resolved_targets)
+    ):
         return result
 
     # Check 5: No orphaned packages

@@ -16,16 +16,15 @@ Exit codes:
 
 from __future__ import annotations
 
-import json
 import re
-import subprocess
 import sys
 
 from tests.spec_conformance._manifest import (
-    COVERAGE_PATH,
     MANIFEST_PATH,
     REPO_ROOT,
     SPEC_PATH,
+    Coverage,
+    collect_coverage,
     load_requirements,
 )
 
@@ -69,38 +68,8 @@ def set_appc() -> set[str]:
 
 
 def set_markers() -> set[str]:
-    """Run pytest in collect-only mode and harvest the coverage map.
-
-    We invoke pytest in a sub-process to honour the spec_conformance
-    conftest's marker-validation step. The coverage map is written by
-    pytest_collection_modifyitems.
-    """
-    if COVERAGE_PATH.exists():
-        COVERAGE_PATH.unlink()
-    cmd = [
-        sys.executable,
-        "-m",
-        "pytest",
-        "tests/spec_conformance",
-        "--collect-only",
-        "-q",
-        "-p",
-        "no:randomly",
-        "--no-header",
-    ]
-    res = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
-    if res.returncode != 0 and not COVERAGE_PATH.exists():
-        sys.stderr.write(
-            "orphan_check: pytest --collect-only failed before producing "
-            "coverage map. pytest stderr below:\n"
-        )
-        sys.stderr.write(res.stderr)
-        sys.exit(2)
-    if not COVERAGE_PATH.exists():
-        return set()
-    with COVERAGE_PATH.open(encoding="utf-8") as f:
-        data = json.load(f)
-    return set(data.keys())
+    """Collect the complete active assessment through the shared owner."""
+    return set(collect_coverage())
 
 
 def diff_report(label_a: str, set_a: set[str], label_b: str, set_b: set[str]) -> list[str]:
@@ -135,11 +104,12 @@ def check_appendix_c_consistency() -> list[str]:
     return problems
 
 
-def main() -> int:
+def check_bindings(coverage: Coverage) -> int:
+    """Compare all four projections using an already freshly collected inventory."""
     anchors = set_anchors()
     manifest = set_manifest()
     appc = set_appc()
-    markers = set_markers()
+    markers = set(coverage)
     failures: list[str] = []
     if anchors != manifest:
         failures.append("[x] anchors != manifest")
@@ -168,6 +138,14 @@ def main() -> int:
         "anchors / manifest / Appendix C / pytest markers"
     )
     return 0
+
+
+def main() -> int:
+    try:
+        return check_bindings(collect_coverage())
+    except (ValueError, RuntimeError, OSError) as error:
+        sys.stderr.write(f"[x] orphan_check: {error}\n")
+        return 2
 
 
 if __name__ == "__main__":

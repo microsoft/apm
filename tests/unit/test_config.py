@@ -11,6 +11,8 @@ import pytest
 
 from apm_cli import config as config_mod
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):
@@ -91,6 +93,19 @@ class TestInstallTargetConfig:
 
     def test_default_is_none(self, isolated_config):
         assert config_mod.get_install_target() is None
+
+    @pytest.mark.parametrize("value", ["claudee", [], 42, None])
+    def test_strict_read_rejects_present_invalid_target(self, isolated_config, value):
+        config_mod.update_config({"install_target": value})
+        before = isolated_config.read_bytes()
+        assert config_mod.get_install_target(create_config=False) is None
+        with pytest.raises(ValueError, match="Invalid saved target configuration"):
+            config_mod.get_install_target(create_config=False, strict=True)
+        assert isolated_config.read_bytes() == before
+
+    def test_strict_absent_read_does_not_create_config(self, isolated_config):
+        assert config_mod.get_install_target(create_config=False, strict=True) is None
+        assert not isolated_config.exists()
 
     def test_set_and_get_roundtrip(self, isolated_config):
         config_mod.set_install_target("claude")

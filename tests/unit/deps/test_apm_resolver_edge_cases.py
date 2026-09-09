@@ -562,14 +562,15 @@ class TestIsRemoteParent:
     def test_none_parent_returns_false(self) -> None:
         assert APMDependencyResolver._is_remote_parent(None) is False
 
-    def test_parent_with_no_source_returns_false(self) -> None:
+    def test_parent_with_unknown_provenance_requires_backstop(self) -> None:
         pkg = MagicMock()
         pkg.source = None
-        assert APMDependencyResolver._is_remote_parent(pkg) is False
+        assert APMDependencyResolver._is_remote_parent(pkg) is True
 
     def test_local_prefix_returns_false(self) -> None:
         pkg = MagicMock()
         pkg.source = "_local/mypkg"
+        pkg.proven_source_kind = "local"
         assert APMDependencyResolver._is_remote_parent(pkg) is False
 
     def test_https_source_returns_true(self) -> None:
@@ -590,11 +591,13 @@ class TestIsRemoteParent:
     def test_relative_local_path_returns_false(self) -> None:
         pkg = MagicMock()
         pkg.source = "../relative/path"
+        pkg.proven_source_kind = "local"
         assert APMDependencyResolver._is_remote_parent(pkg) is False
 
     def test_absolute_local_path_returns_false(self) -> None:
         pkg = MagicMock()
         pkg.source = "/abs/local/path"
+        pkg.proven_source_kind = "local"
         assert APMDependencyResolver._is_remote_parent(pkg) is False
 
 

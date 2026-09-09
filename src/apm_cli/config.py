@@ -148,13 +148,16 @@ def set_auto_integrate(enabled: bool) -> None:
     update_config({"auto_integrate": enabled})
 
 
-def get_temp_dir() -> str | None:
+def get_temp_dir(*, create_config: bool = True) -> str | None:
     """Get the configured temporary directory.
+
+    Args:
+        create_config: When false, leave missing user configuration absent.
 
     Returns:
         The stored temp_dir config value, or None if not set.
     """
-    return get_config().get("temp_dir")
+    return get_config(create=create_config).get("temp_dir")
 
 
 def set_temp_dir(path: str) -> None:
@@ -206,21 +209,34 @@ def unset_temp_dir() -> None:
     _unset_config_key("temp_dir")
 
 
-def get_install_target(*, create_config: bool = True) -> str | list[str] | None:
+def get_install_target(
+    *, create_config: bool = True, strict: bool = False
+) -> str | list[str] | None:
     """Get the configured default target used by ``apm install``.
 
     Args:
         create_config: When false, do not create a missing user config file.
+        strict: Reject invalid present values rather than treating them as unset.
 
     Returns:
         Parsed target value from config, or ``None`` when unset/invalid.
     """
     from apm_cli.core.target_detection import parse_target_field
 
-    value = get_config(create=create_config).get(_INSTALL_TARGET_KEY)
+    settings = get_config(create=create_config)
+    if _INSTALL_TARGET_KEY not in settings:
+        return None
     try:
-        return parse_target_field(value)
-    except ValueError:
+        parsed = parse_target_field(settings[_INSTALL_TARGET_KEY])
+        if strict and parsed is None:
+            raise ValueError("target value must not be null")
+        return parsed
+    except ValueError as exc:
+        if strict:
+            raise ValueError(
+                "Invalid saved target configuration. Correct 'apm config set target' "
+                f"or use 'apm config unset target': {exc}"
+            ) from exc
         return None
 
 
@@ -489,13 +505,16 @@ def get_apm_protocol_pref(
 # ---------------------------------------------------------------------------
 
 
-def get_copilot_cowork_skills_dir() -> str | None:
+def get_copilot_cowork_skills_dir(*, create_config: bool = True) -> str | None:
     """Get the configured cowork skills directory.
+
+    Args:
+        create_config: When false, leave missing configuration absent during discovery.
 
     Returns:
         The stored ``copilot_cowork_skills_dir`` config value, or ``None`` if not set.
     """
-    return get_config().get("copilot_cowork_skills_dir")
+    return get_config(create=create_config).get("copilot_cowork_skills_dir")
 
 
 def set_copilot_cowork_skills_dir(path: str) -> None:
@@ -644,7 +663,7 @@ def is_registry_default(name: str) -> bool:
     return bool(cfg and cfg.get("default") is True)
 
 
-def get_apm_temp_dir() -> str | None:
+def get_apm_temp_dir(*, create_config: bool = True) -> str | None:
     """Return the effective temporary directory for APM operations.
 
     Resolution order:
@@ -654,13 +673,16 @@ def get_apm_temp_dir() -> str | None:
 
     Empty or whitespace-only values are treated as unset and skipped.
 
+    Args:
+        create_config: When false, leave missing user configuration absent.
+
     Returns:
         Directory path string, or None when the system default should be used.
     """
     env_val = os.environ.get("APM_TEMP_DIR", "").strip()
     if env_val:
         return env_val
-    config_val = (get_temp_dir() or "").strip()
+    config_val = (get_temp_dir(create_config=create_config) or "").strip()
     if config_val:
         return config_val
     return None
