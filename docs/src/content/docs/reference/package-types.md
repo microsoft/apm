@@ -296,9 +296,14 @@ Any target set that excludes Copilot refuses this native install rather than
 falling back to the Claude plugin artifact mapping above -- APM never partially
 dissects a recognized Agent Plugin through its normal primitive integrators.
 Older Copilot clients may copy plugins into private state outside APM ownership,
-so APM cannot guarantee cleanup of those client-created copies. Ask the
-publisher for a Claude-compatible package (`apm pack --claude-plugin`) for a
-non-Copilot target.
+so APM cannot guarantee cleanup of those client-created copies.
+
+On non-dry-run installs, target exclusion exits `1` only when no package
+deploys; mixed installs that deploy another package still exit `0`.
+`--dry-run` remains a successful preview, not proof of real install success.
+See [`apm install` notes](../cli/install/#notes) for recovery commands and
+dry-run diagnostic behavior. Publishers can also provide a Claude-compatible
+package (`apm pack --claude-plugin`) for non-Copilot targets.
 :::
 
 **When to choose:** you are producing a portable package with
