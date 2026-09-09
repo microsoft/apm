@@ -1,5 +1,9 @@
 # Authentication
 
+## CLI bootstrap and release lookup
+
+CLI bootstrap/update metadata recovery is separate from package authentication. See [Public release metadata](https://microsoft.github.io/apm/getting-started/installation/#public-release-metadata) for token precedence and bounded anonymous retry, and [mirror migration](https://microsoft.github.io/apm/getting-started/installation/#enterprise-bootstrap-mirror-mode) for final-endpoint configuration.
+
 ## Token precedence chain
 
 For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.
@@ -56,6 +60,9 @@ APM runs git clones non-interactively. Before using an SSH dependency, make
 sure its key is already available to SSH. Unlock a passphrase-protected key
 first (for example, with `ssh-add <key-file>`). In CI, load a dedicated deploy
 key non-interactively or use token-backed HTTPS.
+
+APM uses the selected transport for clone/fetch and semver tag discovery. When
+`prefer-ssh` selects SSH, strict mode does not silently probe HTTPS.
 
 ## Marketplace transport
 
@@ -260,6 +267,12 @@ a **separate** credential chain from the GitHub / ADO token chains above.
 Tokens are scoped per registry name as declared in `apm.yml`'s `registries:`
 block (or in `~/.apm/config.json`).
 
+Credentials are released only when `registry.<name>.url` in
+`~/.apm/config.json` matches the request destination. Configure this
+user-owned URL even when a project declares the same registry. Project-only
+registry declarations are anonymous, and credentials are never sent over
+HTTP.
+
 **Env-var naming:** `APM_REGISTRY_TOKEN_{NAME}` where `{NAME}` is the
 registry name uppercased, with `-` and `.` mapped to `_`.
 
@@ -287,6 +300,7 @@ Bearer wins when both forms are set.
 
 ```bash
 # Bearer token for registry "jf-skills"
+apm config set registry.jf-skills.url https://registry.example.com
 export APM_REGISTRY_TOKEN_JF_SKILLS=eyJ...
 
 # Or HTTP Basic

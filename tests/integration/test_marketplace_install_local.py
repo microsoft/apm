@@ -21,7 +21,7 @@ from click.testing import CliRunner
 
 from apm_cli.agent_plugins import (
     PLUGIN_SCHEMA_ID,
-    UnsupportedAgentPluginVersionError,
+    AgentPluginManifestError,
 )
 from apm_cli.bundle.local_bundle import route_agent_plugin_package
 from apm_cli.commands.install import install
@@ -310,13 +310,14 @@ def test_install_rejects_local_marketplace_symlink_escape(tmp_path: Path) -> Non
     ("schema_id", "expected"),
     [
         (PLUGIN_SCHEMA_ID, "native"),
-        ("https://agent-plugins.org/schemas/2.0.0/plugin.schema.json", "unsupported"),
+        ("https://agent-plugins.org/schemas/2.0.0/plugin.schema.json", "legacy"),
+        (42, "invalid"),
         (None, "legacy"),
     ],
 )
 def test_local_marketplace_source_reaches_canonical_schema_router(
     tmp_path: Path,
-    schema_id: str | None,
+    schema_id: str | int | None,
     expected: str,
 ) -> None:
     repo = tmp_path / "mkt"
@@ -346,8 +347,8 @@ def test_local_marketplace_source_reaches_canonical_schema_router(
     resolved = resolve_marketplace_plugin("schema-plugin", "local-mkt")
     package_root = Path(resolved.canonical)
 
-    if expected == "unsupported":
-        with pytest.raises(UnsupportedAgentPluginVersionError, match="supports only"):
+    if expected == "invalid":
+        with pytest.raises(AgentPluginManifestError, match=r"\$schema must be a string"):
             route_agent_plugin_package(package_root)
         return
     detection = route_agent_plugin_package(package_root)

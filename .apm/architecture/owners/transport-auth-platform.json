@@ -2,6 +2,20 @@
   "version": 1,
   "owners": [
     {
+      "id": "unix-install-ownership",
+      "decision": "Unix installer destinations, prior-install ownership, native shell setup receipt and unprivileged replacement",
+      "owner": "install.sh (apm_is_recognized_bundle, apm_resolve_install_paths, apm_require_owned_bundle, apm_configure_native_shell_path, apm_read_shell_receipt)",
+      "selectors": ["install.sh"],
+      "guards": ["transport-platform-unix-install-ownership"]
+    },
+    {
+      "id": "cache-cleanup-outcome",
+      "decision": "Explicit cache-clean removal and residual outcome",
+      "owner": "cache/cleanup.py (clean_cache_buckets)",
+      "selectors": ["src/apm_cli/cache/cleanup.py"],
+      "guards": ["transport-platform-cache-cleanup-outcome"]
+    },
+    {
       "id": "host-credential-resolution",
       "decision": "Host + credential resolution",
       "owner": "core/auth.py (AuthResolver), core/host_providers.py",
@@ -16,6 +30,13 @@
         "transport-platform-ado-validation-helper-suppression",
         "transport-platform-host-credential-resolution"
       ]
+    },
+    {
+      "id": "host-reference-coordinates",
+      "decision": "Host-qualified reference host/repo/subpath coordinates",
+      "owner": "models/dependency/host_virtual.py (parse_host_qualified_reference)",
+      "selectors": ["src/apm_cli/models/dependency/host_virtual.py"],
+      "guards": ["transport-platform-host-reference-coordinates"]
     },
     {
       "id": "url-path-containment-decoding",
@@ -80,6 +101,20 @@
       "owner": "commands/self_update.py (_ResolvedSelfUpdateRelease)",
       "selectors": ["src/apm_cli/commands/self_update.py"],
       "guards": ["transport-platform-self-update-resolution"]
+    },
+    {
+      "id": "release-metadata-discovery",
+      "decision": "Public release metadata discovery and bounded rejected-credential recovery",
+      "owner": "utils/version_checker.py (get_latest_version_from_github)",
+      "selectors": ["src/apm_cli/utils/version_checker.py"],
+      "guards": ["transport-platform-release-metadata-discovery"]
+    },
+    {
+      "id": "git-clone-connect-retry",
+      "decision": "Bounded same-action HTTPS connection retry below auth and protocol selection",
+      "owner": "deps/clone_engine.py (CloneEngine)",
+      "selectors": ["src/apm_cli/deps/clone_engine.py"],
+      "guards": ["transport-platform-clone-connect-retry"]
     },
     {
       "id": "github-api-throttle-classification",

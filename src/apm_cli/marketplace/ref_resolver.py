@@ -275,20 +275,41 @@ class RefResolver:
                 summary=f"Bearer authentication is not supported for host '{self._host}'.",
                 hint="Use bearer authentication only with an Azure DevOps host.",
             )
-        if use_ssh and ado_host:
-            org, project, repo = _ado_coordinates_from_owner_repo(
-                host=self._host,
-                owner_repo=owner_repo,
-            )
-            ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host
-            url = build_ado_ssh_url(org, project, repo, host=ssh_host)
-        elif use_ssh:
-            url = build_ssh_url(
-                self._host,
-                owner_repo,
-                port=self._port,
-                user=self._ssh_user,
-            )
+        if use_ssh:
+            if ado_host:
+                org, project, repo = _ado_coordinates_from_owner_repo(
+                    host=self._host,
+                    owner_repo=owner_repo,
+                )
+                ssh_host = "ssh.dev.azure.com" if self._host == "dev.azure.com" else self._host
+                canonical_ssh_url = build_ado_ssh_url(org, project, repo, host=ssh_host)
+            else:
+                canonical_ssh_url = build_ssh_url(
+                    self._host,
+                    owner_repo,
+                    port=self._port,
+                    user=self._ssh_user,
+                )
+            if remote_url is not None:
+                accepted_requested_urls = {
+                    canonical_ssh_url,
+                    canonical_ssh_url.removesuffix(".git"),
+                }
+                if remote_url not in accepted_requested_urls:
+                    raise GitLsRemoteError(
+                        package=owner_repo,
+                        summary=(
+                            "The canonical SSH remote URL does not match the configured "
+                            "host or dependency coordinates."
+                        ),
+                        hint=(
+                            "Re-add the dependency with its original URL to regenerate "
+                            "the lock entry."
+                        ),
+                    )
+                url = remote_url
+            else:
+                url = canonical_ssh_url
         elif remote_url is not None:
             parsed_remote = urllib.parse.urlparse(remote_url)
             expected_ado_path = (
@@ -391,8 +412,9 @@ class RefResolver:
         owner_repo:
             ``"owner/repo"`` string (no host, no ``.git`` suffix).
         remote_url:
-            Canonical ADO URL from ``DependencyReference.to_github_url``.
-            Pass consistently for the same logical remote within one
+            Canonical requested URL that Git must receive for an exact
+            ``insteadOf`` rewrite, or the canonical ADO HTTPS URL. Pass
+            consistently for the same logical remote within one
             ``RefResolver`` lifetime so cache identity stays aligned.
 
         Returns

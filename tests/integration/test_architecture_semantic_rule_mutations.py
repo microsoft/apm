@@ -511,6 +511,17 @@ def test_matrix_case_order_is_deterministic() -> None:
     assert list(CASE_IDS) == sorted(CASE_IDS)
 
 
+def test_engine_command_cannot_gain_a_second_test_owner() -> None:
+    """A local engine selector must fail the same boundary as binary selectors."""
+    rule_id = "contracts-tests-executable-contract-authorities"
+    path = "tests/integration/test_cache_prune_outcome_lifecycle.py"
+    mutation = _source(path) + "\n\ndef apm_engine_command():\n    return ('alternate-engine',)\n"
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutation})
+    assert not report.failures
+    assert {item.rule_id for item in report.violations} == {rule_id}
+    assert {item.path for item in report.violations} == {path}
+
+
 @pytest.mark.parametrize("case", MUTATIONS, ids=CASE_IDS)
 def test_case_targets_a_registered_rule_that_owns_no_guard(case: MutationCase) -> None:
     """Each case must name a registered rule that declares no owner guard.

@@ -976,6 +976,7 @@ class LockFile:
         to avoid parsing the same bytes again.
         """
         from ..utils.atomic_io import atomic_write_text
+        from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
 
         existing: LockFile | None
@@ -1010,7 +1011,9 @@ class LockFile:
             self.generated_at = datetime.now(timezone.utc).isoformat()
         else:
             self.generated_at = None
-        atomic_write_text(path, self.to_yaml())
+        serialized = self.to_yaml()
+        assert_no_staging_paths(serialized, path.name)
+        atomic_write_text(path, serialized)
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:

@@ -41,6 +41,7 @@ from ..models.apm_package import (
     ResolvedReference,
     validate_apm_package,
 )
+from ..models.dependency.host_virtual import repository_owner_and_repo, repository_path_segments
 from ..utils.github_host import default_host, is_full_commit_sha, is_github_hostname
 
 if TYPE_CHECKING:
@@ -174,16 +175,17 @@ class ArtifactoryOrchestrator:
 
     @staticmethod
     def _split_owner_repo(dep_ref: DependencyReference) -> tuple[str, str]:
-        repo_parts = dep_ref.repo_url.split("/")
-        if len(repo_parts) < 2 or not all(repo_parts):
+        owner_repo = repository_owner_and_repo(dep_ref.repo_url)
+        if owner_repo is None:
             raise ValueError(
                 f"Invalid Artifactory repo reference '{dep_ref.repo_url}': "
                 "expected 'owner/repo' format"
             )
+        owner, repo = owner_repo
         # Owner is the top-level namespace; the remainder of the path is the
         # project slug.  For GitLab projects behind an Artifactory VCS proxy
         # the slug can include subgroups (e.g. ``group/subgroup/project``).
-        return repo_parts[0], "/".join(repo_parts[1:])
+        return owner, repo
 
     @staticmethod
     def _progress(progress_obj, progress_task_id, *, completed: int, total: int = 100) -> None:
@@ -266,7 +268,7 @@ class ArtifactoryOrchestrator:
 
         ref = dep_ref.reference or "main"
         subdir_path = dep_ref.virtual_path
-        repo_parts = dep_ref.repo_url.split("/")
+        repo_parts = repository_path_segments(dep_ref.repo_url)
         owner = repo_parts[0]
         # Preserve subgroup nesting (GitLab via proxy) by folding everything
         # past the owner into the repo slug.

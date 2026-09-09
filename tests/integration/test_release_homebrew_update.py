@@ -9,6 +9,69 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+import pytest
+
+from tests.integration.release_homebrew_update_harness import (
+    _assert_release_workflow_has_no_package_manager_push,
+)
+
+
+def test_incoming_dispatch_conditions_do_not_imply_package_manager_push(
+    tmp_path: Path,
+) -> None:
+    workflow = tmp_path / "workflow.json"
+    workflow.write_text(
+        json.dumps(
+            {
+                "jobs": {
+                    "build": {
+                        "if": "github.event_name == 'repository_dispatch'",
+                        "steps": [
+                            {
+                                "if": "github.event_name == 'repository_dispatch'",
+                                "run": "echo validation",
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _assert_release_workflow_has_no_package_manager_push(workflow)
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        {"run": "gh api repos/owner/tap/dispatches -f event_type=repository_dispatch"},
+        {"uses": "peter-evans/repository-dispatch@v3"},
+        {"run": "gh pr create --repo owner/homebrew-apm"},
+        {"env": {"GH_TOKEN": "${{ secrets.GH_PKG_PAT }}"}, "run": "echo update"},
+        {"env": {"GH_TOKEN": "${{ github.token }}"}, "run": "echo homebrew"},
+        {"env": {"GH_TOKEN": "${{ secrets.TAP_TOKEN }}"}, "run": "echo scoop"},
+    ],
+)
+def test_outgoing_package_manager_push_remains_rejected(
+    tmp_path: Path, step: dict[str, object]
+) -> None:
+    workflow = tmp_path / "workflow.json"
+    workflow.write_text(
+        json.dumps(
+            {
+                "jobs": {
+                    "publish": {
+                        "if": "github.event_name == 'repository_dispatch'",
+                        "steps": [step],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="push/auth path"):
+        _assert_release_workflow_has_no_package_manager_push(workflow)
+
 
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(

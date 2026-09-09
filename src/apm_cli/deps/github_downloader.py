@@ -29,12 +29,14 @@ from ..models.apm_package import (
     ResolvedReference,
     validate_apm_package,
 )
+from ..models.dependency.host_virtual import dependency_repository_owner, repository_path_segments
 from ..utils.atomic_io import atomic_write_text
 from ..utils.console import (
     _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
 )
 from ..utils.git_env import (
     checkout_git_worktree,
+    get_git_executable,
     git_no_hooks_args,
     git_subprocess_error_text,
     git_worktree_head,
@@ -332,7 +334,7 @@ class GitHubPackageDownloader:
             auth_ctx = self.auth_resolver.resolve_for_remote(
                 dep_ref.host or default_host(),
                 remote_url,
-                dep_ref.repo_url.split("/", 1)[0],
+                dependency_repository_owner(dep_ref),
                 port=dep_ref.port,
                 host_type=dep_ref.host_type,
             )
@@ -362,7 +364,7 @@ class GitHubPackageDownloader:
             is True
             and not dep_ref.is_insecure
         ):
-            org = dep_ref.repo_url.split("/", 1)[0] if "/" in dep_ref.repo_url else None
+            org = dependency_repository_owner(dep_ref)
 
             def _checkout(token: str | None, env: dict[str, str]) -> Path:
                 attempt_env = GitAuthEnvBuilder.subprocess_env_dict(env)
@@ -835,7 +837,7 @@ class GitHubPackageDownloader:
 
         # Check if this is Artifactory (Mode 1: explicit FQDN)
         if dep_ref.is_artifactory():
-            repo_parts = dep_ref.repo_url.split("/")
+            repo_parts = repository_path_segments(dep_ref.repo_url)
             return self._download_file_from_artifactory(
                 dep_ref.host,
                 dep_ref.artifactory_prefix,
@@ -848,7 +850,7 @@ class GitHubPackageDownloader:
         # Check if this should go through Artifactory proxy (Mode 2)
         art_proxy = self._parse_artifactory_base_url()
         if art_proxy and self._should_use_artifactory_proxy(dep_ref):
-            repo_parts = dep_ref.repo_url.split("/")
+            repo_parts = repository_path_segments(dep_ref.repo_url)
             return self._download_file_from_artifactory(
                 art_proxy[0],
                 art_proxy[1],
@@ -1097,7 +1099,7 @@ class GitHubPackageDownloader:
             "name": package_name,
             "version": "1.0.0",
             "description": description,
-            "author": dep_ref.repo_url.split("/")[0],
+            "author": dependency_repository_owner(dep_ref),
         }
         apm_yml_content = yaml_to_str(apm_yml_data)
 
@@ -1109,7 +1111,7 @@ class GitHubPackageDownloader:
             name=package_name,
             version="1.0.0",
             description=description,
-            author=dep_ref.repo_url.split("/")[0],
+            author=dependency_repository_owner(dep_ref),
             source=dep_ref.to_github_url(),
             package_path=target_path,
         )
@@ -1222,7 +1224,13 @@ class GitHubPackageDownloader:
                     )
                     if token is not None:
                         remote_result = subprocess.run(
-                            ["git", "remote", "set-url", "origin", authenticated_url],
+                            [
+                                get_git_executable(),
+                                "remote",
+                                "set-url",
+                                "origin",
+                                authenticated_url,
+                            ],
                             cwd=str(temp_clone_path),
                             env=git_env,
                             capture_output=True,
@@ -1238,7 +1246,7 @@ class GitHubPackageDownloader:
                                 stderr=remote_result.stderr,
                             )
                     fetch_result = subprocess.run(
-                        ["git", "fetch", "origin", ref or "HEAD", "--depth=1"],
+                        [get_git_executable(), "fetch", "origin", ref or "HEAD", "--depth=1"],
                         cwd=str(temp_clone_path),
                         env=git_env,
                         capture_output=True,
@@ -1254,7 +1262,7 @@ class GitHubPackageDownloader:
                             stderr=fetch_result.stderr,
                         )
 
-                org = dep_ref.repo_url.split("/", 1)[0]
+                org = dependency_repository_owner(dep_ref)
                 self.auth_resolver.try_with_fallback(
                     dep_ref.host or default_host(),
                     _fetch,
@@ -1266,7 +1274,7 @@ class GitHubPackageDownloader:
                     base_env=self.git_env,
                 )
                 checkout_result = subprocess.run(
-                    ["git", *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
+                    [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
                     cwd=str(temp_clone_path),
                     env=setup_env,
                     capture_output=True,
@@ -1294,7 +1302,7 @@ class GitHubPackageDownloader:
                     auth_url,
                 )
             else:
-                org = dep_ref.repo_url.split("/", 1)[0]
+                org = dependency_repository_owner(dep_ref)
                 generic_ctx = self.auth_resolver.resolve_for_remote(
                     dep_ref.host or default_host(),
                     auth_url,
@@ -1319,15 +1327,18 @@ class GitHubPackageDownloader:
                 env=env,
                 timeout=120,
             )
-            fetch_cmd = ["git", "fetch", "origin"]
+            fetch_cmd = [get_git_executable(), "fetch", "origin"]
             fetch_cmd.append(ref or "HEAD")
             fetch_cmd.append("--depth=1")
-            checkout_cmds = [
-                fetch_cmd,
-                ["git", *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
+            checkout_steps = [
+                ("fetch", fetch_cmd),
+                (
+                    "checkout",
+                    [get_git_executable(), *git_no_hooks_args(), "checkout", "FETCH_HEAD"],
+                ),
             ]
 
-            for cmd in checkout_cmds:
+            for step_name, cmd in checkout_steps:
                 result = subprocess.run(
                     cmd,
                     cwd=str(temp_clone_path),
@@ -1339,7 +1350,7 @@ class GitHubPackageDownloader:
                 )
                 if result.returncode != 0:
                     _debug(
-                        f"Sparse-checkout step failed ({' '.join(cmd)}): "
+                        f"Sparse-checkout {step_name} failed: "
                         f"{redact_git_diagnostic(result.stderr.strip())}"
                     )
                     return False
@@ -1799,7 +1810,7 @@ class GitHubPackageDownloader:
         package structure instead of cloning the full repository.
 
         Args:
-            repo_ref: Repository reference — either a DependencyReference object
+            repo_ref: Repository reference -- either a DependencyReference object
                 or a string (e.g., "user/repo#branch"). Passing the object
                 directly avoids a lossy parse round-trip for generic git hosts.
             target_path: Local path where package should be downloaded
@@ -1949,9 +1960,8 @@ class GitHubPackageDownloader:
 
         # Store progress reporter so we can disable it after clone
         progress_reporter = None
-        package_display_name = (
-            dep_ref.repo_url.split("/")[-1] if "/" in dep_ref.repo_url else dep_ref.repo_url
-        )
+        repo_segments = repository_path_segments(dep_ref.repo_url)
+        package_display_name = repo_segments[-1] if repo_segments else dep_ref.repo_url
 
         try:
             # Clone the repository using fallback authentication methods
@@ -2002,7 +2012,7 @@ class GitHubPackageDownloader:
             if "Authentication failed" in str(e) or "remote: Repository not found" in str(e):
                 error_msg = f"Failed to clone repository {dep_ref.repo_url}. "
                 host = dep_ref.host or default_host()
-                org = dep_ref.repo_url.split("/")[0] if dep_ref.repo_url else None
+                org = dependency_repository_owner(dep_ref)
                 error_msg += self.auth_resolver.build_error_context(
                     host,
                     "clone",

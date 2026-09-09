@@ -23,7 +23,7 @@ Requires the experimental `registries` feature:
 apm experimental enable registries
 ```
 
-The project's `apm.yml` must declare a `registries:` block with at least one registry URL. Publish credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` or `apm config set registry.<name>.token`.
+The project's `apm.yml` must declare a `registries:` block with at least one registry URL. Publish credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` or `apm config set registry.<name>.token`. Credentials are sent only when `registry.<name>.url` in `~/.apm/config.json` matches the publish destination.
 
 ## Options
 

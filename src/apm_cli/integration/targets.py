@@ -28,6 +28,11 @@ from apm_cli.core.target_catalog import (
     expand_all,
     normalize_target_name,
 )
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+)
 
 RULE_FORMATS: frozenset[str] = frozenset(
     {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering", "antigravity_rules"}
@@ -1333,6 +1338,18 @@ def active_targets(
     return [KNOWN_TARGETS["copilot"]]
 
 
+def _validate_project_target_root(project_root: Path, profile: TargetProfile) -> Path:
+    """Return a contained project target root without following symlinks."""
+    deploy_path = profile.deploy_path(project_root)
+    if profile.resolved_deploy_root is not None:
+        return deploy_path
+    if has_symlink_component(project_root, deploy_path):
+        raise PathTraversalError(
+            f"Refusing deployment through symlinked target root: {profile.root_dir}"
+        )
+    return ensure_path_within(deploy_path, project_root)
+
+
 def resolve_targets(
     project_root,
     user_scope: bool = False,
@@ -1364,6 +1381,8 @@ def resolve_targets(
     for t in raw:
         scoped = t.for_scope(user_scope=user_scope)
         if scoped is not None:
+            if not user_scope:
+                _validate_project_target_root(Path(project_root), scoped)
             resolved.append(scoped)
     return resolved
 
@@ -1378,7 +1397,7 @@ def materialize_project_target_profiles(
         profile = KNOWN_TARGETS.get(target_name)
         if profile is None:
             continue
-        deploy_path = profile.deploy_path(project_root)
+        deploy_path = _validate_project_target_root(project_root, profile)
         if not deploy_path.is_dir():
             deploy_path.mkdir(parents=True, exist_ok=True)
         profiles.append(profile)

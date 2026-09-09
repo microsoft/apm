@@ -417,6 +417,9 @@ class TestPluginHeroScenarios:
 
         parsed = yaml_lib.safe_load((plugin_dir / "apm.yml").read_text())
         assert parsed["type"] == "hybrid", f"Expected type 'hybrid', got '{parsed.get('type')}'"
+        revalidated = validate_apm_package(plugin_dir)
+        assert revalidated.is_valid, revalidated.errors
+        assert revalidated.package_type is PackageType.SKILL_BUNDLE
 
     @pytest.mark.requires_apm_binary
     def test_local_plugin_uninstall_after_sequential_skill_install_cleans_deployed_files(
@@ -479,6 +482,7 @@ class TestPluginHeroScenarios:
         self,
         apm_binary_path: Path,
         tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """A plugin's Copilot-dialect LSP config reaches canonical lock and runtime state."""
         plugin_dir = tmp_path / "copilot-lsp-plugin"
@@ -507,6 +511,11 @@ class TestPluginHeroScenarios:
         )
         normalized = validate_apm_package(plugin_dir)
         assert normalized.is_valid, normalized.errors
+        normalization_output = capsys.readouterr()
+        warning_output = normalization_output.out + normalization_output.err
+        assert warning_output.count("uses unsupported 'cwd'") == 1
+        assert "consumer runtime chooses the working directory" in warning_output
+        assert "[!] LSP server 'csharp'" in warning_output
 
         project = tmp_path / "project"
         project.mkdir()
@@ -527,9 +536,9 @@ class TestPluginHeroScenarios:
         )
         assert initial_install.returncode == 0, initial_install.stdout + initial_install.stderr
         install_output = initial_install.stdout + initial_install.stderr
-        assert install_output.count("uses unsupported 'cwd'") == 1
-        assert "consumer runtime chooses the working directory" in install_output
-        assert "[!] LSP server 'csharp'" in install_output
+        # Normalization already removed cwd; installing its APM projection
+        # must not emit the same warning a second time.
+        assert "uses unsupported 'cwd'" not in install_output
 
         lock = LockFile.read(project / "apm.lock.yaml")
         assert lock is not None
@@ -1168,8 +1177,10 @@ class TestPluginNetworkE2E:
         assert plugin_entry is not None, (
             f"Plugin not found in lockfile. Deps: {lockfile['dependencies']}"
         )
-        assert plugin_entry.get("package_type") == "marketplace_plugin", (
-            f"Expected package_type 'marketplace_plugin', got: {plugin_entry.get('package_type')}"
+        # The normalized apm.yml/.apm package outranks its plugin publishing
+        # surface and retains the root skills/ bundle classification.
+        assert plugin_entry.get("package_type") == "skill_bundle", (
+            f"Expected package_type 'skill_bundle', got: {plugin_entry.get('package_type')}"
         )
 
     # ---- Test 11: idempotent reinstall ----------------------------------

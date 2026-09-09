@@ -232,6 +232,12 @@ preference with `apm config set prefer-ssh true`, or save the retry escape hatch
 with `apm config set allow-protocol-fallback true`. See the
 [`apm config` reference](../../reference/cli/config/).
 
+If Git reports an HTTPS `Failed to connect...` / `Couldn't connect to server`
+error for the requested remote, APM retries that Git action once after 1 second
+with the same URL, credentials, and transport. A persistent connection failure
+still fails the command. This adds no retries for auth, TLS, policy, timeout,
+or content errors; existing auth and protocol fallback rules are unchanged.
+
 ## Pin a version
 
 Append `#<ref>` to a shorthand entry. `<ref>` can be a tag, branch, or
@@ -386,8 +392,9 @@ For the full lockfile schema, see
 The split mirrors `package.json` + `package-lock.json`. The verbs match
 too: `apm update` refreshes dependencies to the latest matching versions or refs
 (like `npm update`); `apm install --frozen` is the lockfile-only,
-fail-on-drift install for CI (like `npm ci`). To upgrade the `apm` CLI
-binary itself, use `apm self-update`.
+fail-on-drift install for CI (like `npm ci`). CLI upgrades use your
+package manager (`brew upgrade apm` for Homebrew), or `apm self-update` for
+standalone installs. See [Update and refresh](../update-and-refresh/#update-the-apm-cli-binary).
 :::
 
 ## Explain a transitive dependency: `apm deps why`

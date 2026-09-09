@@ -303,7 +303,7 @@ See [Registries](../../../guides/registries/) for the full setup guide.
 ## Related
 
 - [`apm update`](../update/) -- refresh dependencies in `apm.yml` to their latest matching versions or refs, with a consent gate.
-- [`apm self-update`](../self-update/) -- upgrade the `apm` CLI binary itself.
+- [CLI upgrades](../../../consumer/update-and-refresh/#update-the-apm-cli-binary) -- use your package manager, or `apm self-update` for standalone installs.
 - [`apm prune`](../prune/) -- remove orphaned packages and stale files.
 - [Registries](../../../guides/registries/) -- end-to-end guide for registry-sourced dependencies.
 - [`apm audit`](../audit/) -- explicit security reporting and remediation after install.

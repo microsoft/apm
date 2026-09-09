@@ -371,6 +371,8 @@ Chain limit: 5 levels max. Cycles are detected and rejected.
 
 Deny is evaluated first. Empty allow list permits all (except denied).
 
+Identity casing compares GitHub and registry owner/repository prefixes case-insensitively and keeps other identity boundaries case-sensitive. See [Identity casing](https://microsoft.github.io/apm/reference/policy-schema/#identity-casing) for recursive-glob behavior, upgrade risk, and workaround removal.
+
 ## Baseline checks (always run with --ci)
 
 These checks run without a policy file:
@@ -567,7 +569,8 @@ equivalent to `APM_POLICY_DISABLE`.
 
 ### 9. Cache and offline behaviour
 
-Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default
+Resolved effective policy is cached under the platform user cache at
+`apm/policy_v1/<project-key>/`. Default
 TTL comes from the policy's `cache.ttl` (`3600` seconds). Beyond TTL, APM serves
 the stale cache on refresh failure with a loud warning, up to a hard ceiling
 of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch. Writes are

@@ -682,7 +682,7 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
     assert "managed-server" not in json.loads(vscode_path.read_text(encoding="utf-8"))["servers"]
     output = uninstall.stderr + uninstall.stdout
     assert "Uninstall incomplete" in output
-    assert "run 'apm install'" in output
+    assert "run 'apm install'" in " ".join(output.split())
 
 
 def test_uninstall_preserves_legacy_ownership_for_surviving_server(

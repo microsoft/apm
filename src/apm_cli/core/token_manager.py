@@ -26,6 +26,7 @@ import subprocess
 import sys
 from urllib.parse import urlparse
 
+from apm_cli.utils.git_env import get_gh_executable, get_git_executable
 from apm_cli.utils.github_host import (
     default_host,
     is_azure_devops_hostname,
@@ -225,7 +226,7 @@ class GitHubTokenManager:
         stdin = "\n".join(stdin_lines) + "\n\n"
         try:
             result = subprocess.run(
-                ["git", "credential", "fill"],
+                [get_git_executable(), "credential", "fill"],
                 input=stdin,
                 capture_output=True,
                 text=True,
@@ -268,7 +269,7 @@ class GitHubTokenManager:
             return None
         try:
             result = subprocess.run(
-                ["gh", "auth", "token", "--hostname", host],
+                [get_gh_executable(), "auth", "token", "--hostname", host],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

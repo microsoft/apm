@@ -18,7 +18,13 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_package_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
-from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
+from tests.utils.artifact_snapshot import (
+    ArtifactSnapshot,
+    ArtifactSnapshotSet,
+    assert_only_snapshot_paths_changed,
+    assert_snapshot_changes_within,
+    assert_unchanged,
+)
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_git_repository import (
@@ -764,6 +770,84 @@ def test_required_lsp_only_dry_run_reports_plan_without_writing_state(
     _assert_same_state(before, after)
 
 
+def test_required_unknown_host_qualified_virtual_install_fails_before_state_write(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    scenario = _new_scenario(tmp_path / "unknown-host-virtual", apm_binary_path)
+    folded_source = scenario.sources.create("folded-host-source")
+    scenario.sources.add_skill(folded_source, "jdk-installer", _skill("jdk-installer"))
+    split_virtual_root = folded_source.root / "packages" / "skill"
+    split_virtual_skill = split_virtual_root / "skills" / "jdk-installer"
+    split_virtual_skill.mkdir(parents=True)
+    dump_yaml(
+        {
+            "name": "split-virtual-source",
+            "version": "0.1.0",
+            "description": "Split virtual source for the unknown-host guard",
+        },
+        split_virtual_root / "apm.yml",
+    )
+    (split_virtual_skill / "SKILL.md").write_text(_skill("jdk-installer"), encoding="utf-8")
+    folded_repository = scenario.repositories.create(
+        "folded-host-source",
+        source_tree=folded_source.root,
+    )
+    scenario.repositories.commit(folded_repository, message="seed folded host source")
+    split_remote_url = "https://github.corp.example.com/acme/internal-skills"
+    folded_remote_url = "https://github.corp.example.com/acme/internal-skills/packages/skill"
+    consumer = scenario.consumers.create(
+        "unknown-host-consumer",
+        targets=("copilot",),
+    )
+    bad_reference = "github.corp.example.com/acme/internal-skills/packages/skill"
+    dump_yaml(
+        {
+            "name": "unknown-host-consumer",
+            "version": "0.1.0",
+            "dependencies": {"apm": [bad_reference]},
+            "targets": ["copilot"],
+        },
+        consumer.manifest_path,
+    )
+    capture_args = {
+        "targets": ("copilot",),
+        "config_paths": (
+            PurePosixPath("apm.lock.yaml"),
+            PurePosixPath("apm_modules"),
+            PurePosixPath(".agents/skills/jdk-installer/SKILL.md"),
+        ),
+    }
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        (
+            (folded_repository, split_remote_url),
+            (folded_repository, folded_remote_url),
+        ),
+    )
+    for name in ("GITHUB_HOST", "GITLAB_HOST", "APM_GITLAB_HOSTS", "ADO_HOST", "APM_ADO_HOSTS"):
+        environment.pop(name, None)
+    before = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+
+    failed = scenario.runner.run(
+        _INSTALL_ARGS,
+        scenario_id="unknown-host-virtual-install",
+        cwd=consumer.root,
+        env=environment,
+    )
+    after = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+
+    assert after.lockfile_bytes is None
+    assert after.file("apm_modules").kind == "missing"
+    assert after.file(".agents/skills/jdk-installer/SKILL.md").kind == "missing"
+    assert not after.deployment_records
+    _assert_same_state(before, after)
+    assert failed.returncode != 0, _result_evidence(failed)
+    combined_output = f"{failed.stdout}\n{failed.stderr}"
+    normalized_output = " ".join(combined_output.split())
+    assert "Unsupported package host: 'github.corp.example.com'." in normalized_output
+    assert "Invalid repository format" not in combined_output
+
+
 def _hook_commands(settings_path: Path) -> list[str]:
     if not settings_path.exists():
         return []
@@ -1297,6 +1381,7 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
         scenario_id="reinstall-idempotency-compile-first",
     )
     before = LifecycleStateSnapshot.capture(consumer.root, targets=("copilot",))
+    before_artifacts = ArtifactSnapshot.capture(consumer.root)
 
     _run_success(
         scenario,
@@ -1313,6 +1398,7 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
         scenario_id="reinstall-idempotency-compile-second",
     )
     after = LifecycleStateSnapshot.capture(consumer.root, targets=("copilot",))
+    after_artifacts = ArtifactSnapshot.capture(consumer.root)
     _, audit = _audit(
         scenario,
         consumer,
@@ -1321,7 +1407,8 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
     )
 
     _assert_same_state(before, after)
-    assert all("hook-sidecar" not in file.roles for file in after.files)
+    assert_unchanged(before_artifacts, after_artifacts)
+    assert after.file(".github/instructions/stable.instructions.md").kind == "file"
     assert audit["passed"] is True
 
 
@@ -1738,6 +1825,133 @@ def test_required_dependency_prune_then_uninstall_cascades_owned_state(
     assert uninstall_audit["passed"] is True
 
 
+@pytest.mark.parametrize("first_parent", ["root-a", "root-b"])
+def test_required_diamond_uninstall_preserves_shared_instructions_until_last_parent(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    first_parent: str,
+) -> None:
+    """Guard #2852's already-correct survivor rebuild across sequential uninstalls."""
+    scenario = _new_scenario(tmp_path / "diamond-uninstall", apm_binary_path)
+    shared = scenario.consumers.create("shared")
+    source_instruction = scenario.consumers.add_instruction(
+        shared, "shared", _instruction("shared")
+    )
+    parents = [
+        scenario.consumers.create(name, dependencies=({"path": "../shared"},))
+        for name in ("root-a", "root-b")
+    ]
+    consumer = scenario.consumers.create(
+        "diamond-consumer",
+        dependencies=tuple({"path": f"../{parent.name}"} for parent in parents),
+        targets=("copilot",),
+    )
+    deployed_instruction = ".github/instructions/shared.instructions.md"
+    user_note = consumer.root / ".github" / "instructions" / "user-notes.txt"
+    user_note.parent.mkdir(parents=True)
+    user_note.write_bytes(b"Keep this user-authored note.\n")
+    capture_args = {
+        "targets": ("copilot",),
+        "config_paths": (PurePosixPath(deployed_instruction),),
+    }
+    roots = {
+        "project": consumer.root,
+        "user": scenario.isolated.home,
+        "shared-source": shared.root,
+        **{parent.name: parent.root for parent in parents},
+    }
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "copilot"),
+        environment=scenario.environment,
+        scenario_id="diamond-install",
+    )
+    assert user_note.read_bytes() == b"Keep this user-authored note.\n"
+    installed = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    assert installed.file(deployed_instruction).content == source_instruction.read_bytes()
+    assert installed.lockfile_bytes is not None
+    lock = LockFile.from_yaml(installed.lockfile_bytes.decode("utf-8"))
+    dependencies = {dep.repo_url: dep for dep in lock.get_package_dependencies()}
+    assert set(dependencies) == {"_local/root-a", "_local/root-b", "_local/shared"}
+    # Empty parent deployment claims are the legacy-cleanup trigger in #2852.
+    assert dependencies["_local/root-a"].deployed_files == []
+    assert dependencies["_local/root-b"].deployed_files == []
+    shared_record = next(
+        record
+        for record in installed.deployment_records
+        if record.locator.value == deployed_instruction
+    )
+    assert shared_record.owners == (f"local:{shared.root.as_posix()}",)
+    assert shared_record.active_owner == f"local:{shared.root.as_posix()}"
+    assert deployed_instruction in dependencies["_local/shared"].deployed_files
+    modules = consumer.root / "apm_modules"
+    installed_sources = {
+        name: dep.to_dependency_ref().get_install_path(modules)
+        for name, dep in dependencies.items()
+    }
+    source_snapshots = {
+        name: ArtifactSnapshot.capture(path) for name, path in installed_sources.items()
+    }
+    for path in installed_sources.values():
+        assert (path / "apm.yml").is_file()
+
+    last_parent = "root-b" if first_parent == "root-a" else "root-a"
+    for index, parent_name in enumerate((first_parent, last_parent)):
+        before = ArtifactSnapshotSet.capture(roots)
+        _run_success(
+            scenario,
+            consumer,
+            ("uninstall", f"../{parent_name}"),
+            environment=scenario.environment,
+            scenario_id=f"diamond-uninstall-{parent_name}",
+        )
+        after = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+        assert_snapshot_changes_within(
+            before,
+            ArtifactSnapshotSet.capture(roots),
+            exact_paths={
+                "project": {
+                    "apm.yml",
+                    "apm.lock.yaml",
+                    ".github",
+                    ".github/instructions",
+                    deployed_instruction,
+                }
+            },
+            tree_prefixes={"project": {"apm_modules"}},
+        )
+        assert not installed_sources[f"_local/{parent_name}"].exists()
+        manifest_dependencies = (
+            load_yaml(consumer.manifest_path).get("dependencies", {}).get("apm", [])
+        )
+        if index == 0:
+            assert manifest_dependencies == [{"path": f"../{last_parent}"}]
+            assert after.file(deployed_instruction) == installed.file(deployed_instruction)
+            assert after.deployment_records == installed.deployment_records
+            assert after.lockfile_bytes is not None
+            survivor_lock = LockFile.from_yaml(after.lockfile_bytes.decode("utf-8"))
+            survivors = {dep.repo_url: dep for dep in survivor_lock.get_package_dependencies()}
+            assert set(survivors) == {f"_local/{last_parent}", "_local/shared"}
+            shared_survivor = survivors["_local/shared"]
+            assert shared_survivor.resolved_by == f"_local/{last_parent}"
+            assert shared_survivor.deployed_files == dependencies["_local/shared"].deployed_files
+            assert (
+                shared_survivor.deployed_file_hashes
+                == dependencies["_local/shared"].deployed_file_hashes
+            )
+            for name in survivors:
+                assert_unchanged(
+                    source_snapshots[name], ArtifactSnapshot.capture(installed_sources[name])
+                )
+        else:
+            assert manifest_dependencies == []
+            assert after.file(deployed_instruction).kind == "missing"
+            assert after.lockfile_bytes is None
+            assert after.deployment_records == ()
+            assert not list(modules.glob("**/apm.yml"))
+
+
 def test_required_tamper_is_detected_and_repair_restores_last_good_state(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -2136,7 +2350,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     assert final_audit["summary"]["failed"] == 0
 
 
-def test_required_failed_lock_write_releases_workspace_lock_and_preserves_state(
+def test_required_failed_lock_write_bounds_partial_state_and_recovers(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
@@ -2164,6 +2378,12 @@ def test_required_failed_lock_write_releases_workspace_lock_and_preserves_state(
         ),
     }
     before_failure = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    before_artifacts = ArtifactSnapshotSet.capture(
+        {
+            "project": consumer.root,
+            "user": scenario.isolated.home,
+        }
+    )
     failing_environment = dict(source.environment)
     failing_environment["APM_TEST_FAIL_LOCK_REPLACE"] = "1"
     failed = scenario.runner.run(
@@ -2174,7 +2394,38 @@ def test_required_failed_lock_write_releases_workspace_lock_and_preserves_state(
     )
     assert failed.returncode != 0, _result_evidence(failed)
     after_failure = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
+    after_artifacts = ArtifactSnapshotSet.capture(
+        {
+            "project": consumer.root,
+            "user": scenario.isolated.home,
+        }
+    )
+    assert after_failure.manifest_bytes == before_failure.manifest_bytes
+    assert after_failure.deployment_records == before_failure.deployment_records
     assert after_failure.lockfile_bytes == before_failure.lockfile_bytes
+    assert after_failure.mcp_state_bytes == before_failure.mcp_state_bytes
+    assert after_failure.lsp_state_bytes == before_failure.lsp_state_bytes
+    assert after_failure.file(".agents/skills/lock-release/SKILL.md").kind == "missing"
+    assert (
+        after_failure.file(".claude/skills/lock-release/SKILL.md").content
+        == _skill("lock-release").encode()
+    )
+    assert_only_snapshot_paths_changed(
+        before_artifacts,
+        after_artifacts,
+        {
+            "project": {
+                ".agents",
+                ".agents/skills",
+                ".agents/skills/lock-release",
+                ".agents/skills/lock-release/SKILL.md",
+                ".claude",
+                ".claude/skills",
+                ".claude/skills/lock-release",
+                ".claude/skills/lock-release/SKILL.md",
+            }
+        },
+    )
     assert list(consumer.root.glob("apm-atomic-*")) == []
 
     _run_success(

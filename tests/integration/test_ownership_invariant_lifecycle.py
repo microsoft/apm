@@ -25,6 +25,7 @@ from tests.integration.test_required_lifecycle_state_machine import (
     _run_success,
     _skill,
 )
+from tests.utils.artifact_snapshot import ArtifactSnapshotSet, assert_snapshot_set_unchanged
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_package import LocalPackage
 
@@ -769,8 +770,14 @@ def test_apm_install_dry_run_preserves_complete_unowned_state(
         project_sentinels=project_sentinels,
         external_roots=external_roots,
     )
+    before_artifacts = ArtifactSnapshotSet.capture(
+        {
+            "project": project.root,
+            "user": scenario.isolated.home,
+        }
+    )
 
-    _run_success(
+    result = _run_success(
         scenario,
         project,
         (*_INSTALL_ARGS, "--dry-run"),
@@ -783,9 +790,17 @@ def test_apm_install_dry_run_preserves_complete_unowned_state(
         project_sentinels=project_sentinels,
         external_roots=external_roots,
     )
+    after_artifacts = ArtifactSnapshotSet.capture(
+        {
+            "project": project.root,
+            "user": scenario.isolated.home,
+        }
+    )
 
     _assert_sentinels_unchanged((*project_sentinels, *user_sentinels), "dry-run")
+    assert "ownership-dry-run" in result.stdout + result.stderr
     assert (scenario.isolated.config_root / "apm.yml").exists() is False
     assert (scenario.isolated.config_root / "config.json").exists() is False
     assert (scenario.isolated.config_root / "apm_modules").exists() is False
     _assert_same_state(before, after)
+    assert_snapshot_set_unchanged(before_artifacts, after_artifacts)

@@ -39,87 +39,25 @@ from apm_cli.install.registry_wiring import (
     registry_resolution_for_cached_registry_dep,
     resolver_last_registry_resolution,
 )
+from apm_cli.install.source_helpers import (
+    format_package_type_label as _format_package_type_label,
+)
+from apm_cli.install.source_helpers import (
+    rebuild_cached_semver_resolution as _rebuild_cached_semver_resolution,
+)
+from apm_cli.install.source_helpers import (
+    record_declared_license as _record_declared_license,
+)
+from apm_cli.models.dependency.host_virtual import (
+    dependency_repository_owner,
+    repository_path_segments,
+)
 from apm_cli.utils.console import _rich_success
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.models.apm_package import PackageInfo
-
-
-def _format_package_type_label(pkg_type) -> str | None:
-    """Human-readable label for a detected ``PackageType``.
-
-    Centralised so every install path emits the same wording and so
-    new ``PackageType`` values can be added without grepping for ad-hoc
-    dicts.  Missing ``HOOK_PACKAGE`` from this table is what made
-    microsoft/apm#780 silent -- keep all classifiable enum members
-    covered.
-    """
-    from apm_cli.models.apm_package import PackageType
-
-    return {
-        PackageType.CLAUDE_SKILL: "Skill (SKILL.md detected)",
-        PackageType.AGENT_PLUGIN: "Agent Plugin (plugin.json)",
-        PackageType.MARKETPLACE_PLUGIN: "Marketplace Plugin (plugin.json or agents/skills/commands)",
-        PackageType.HYBRID: "Hybrid (apm.yml + SKILL.md)",
-        PackageType.APM_PACKAGE: "APM Package (apm.yml)",
-        PackageType.HOOK_PACKAGE: "Hook Package (hooks/*.json only)",
-        PackageType.SKILL_BUNDLE: "Skill Bundle (skills/<name>/SKILL.md)",
-    }.get(pkg_type)
-
-
-def _record_declared_license(ctx, dep_key: str, install_path) -> None:
-    """Backfill ctx.package_declared_licenses from the resolved dep's manifest.
-
-    Reads the DECLARED license (apm.yml ``license:`` or plugin.json
-    ``license``) at the install path. APM never reads the LICENSE file text or
-    concludes a license -- this is a passthrough of an author claim. When no
-    manifest declares one, the key is left ABSENT (not declared == unknown);
-    no sentinel is stored. Best-effort: any read error leaves the key absent.
-    """
-    try:
-        from apm_cli.export.declared_license import read_declared_license
-
-        declared = read_declared_license(install_path)
-    except Exception:
-        declared = None
-    if declared:
-        ctx.package_declared_licenses[dep_key] = declared
-
-
-def _rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
-    """Rebuild a ``GitSemverResolution`` from a cached lockfile entry.
-
-    Returns ``None`` unless ALL required fields are present on
-    *dep_locked_chk*:  ``constraint``, ``version``, ``resolved_tag``,
-    and ``resolved_commit``.  Per PR #1496 review thread: gating on
-    just ``constraint`` and back-filling missing fields with empty
-    strings risks propagating an incomplete semver resolution into
-    ``InstalledPackage`` and rewriting the lockfile with empty/missing
-    fields (and an empty ``resolved_ref``).  When the lockfile cache is
-    incomplete we prefer to leave the resolution as ``None`` so the
-    caller falls back to the literal-ref path.
-    """
-    if dep_locked_chk is None:
-        return None
-    if not (
-        dep_locked_chk.constraint
-        and dep_locked_chk.version
-        and dep_locked_chk.resolved_tag
-        and dep_locked_chk.resolved_commit
-    ):
-        return None
-    from apm_cli.deps.git_semver_resolver import GitSemverResolution
-
-    return GitSemverResolution(
-        constraint=dep_locked_chk.constraint,
-        resolved_version=dep_locked_chk.version,
-        resolved_tag=dep_locked_chk.resolved_tag,
-        resolved_sha=dep_locked_chk.resolved_commit,
-        matched_pattern="",
-        resolved_at=dep_locked_chk.resolved_at or "",
-    )
 
 
 @dataclass
@@ -525,8 +463,9 @@ class CachedDependencySource(DependencySource):
                     raise DirectDependencyError(f"Cached Claude Skill is invalid: {details}")
                 cached_package = validation_result.package
             else:
+                repo_segments = repository_path_segments(dep_ref.repo_url)
                 cached_package = APMPackage(
-                    name=dep_ref.repo_url.split("/")[-1],
+                    name=repo_segments[-1] if repo_segments else dep_ref.repo_url,
                     version="unknown",
                     package_path=install_path,
                     source=dep_ref.repo_url,
@@ -797,7 +736,7 @@ class FreshDependencySource(DependencySource):
                     try:
                         _host = dep_ref.host or "github.com"
                         _org = (
-                            dep_ref.repo_url.split("/")[0]
+                            dependency_repository_owner(dep_ref)
                             if dep_ref.repo_url and "/" in dep_ref.repo_url
                             else None
                         )

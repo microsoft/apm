@@ -300,8 +300,8 @@ class TestDownloadRefLockfileOverride:
         assert ref.repo_url == "owner/repo"
         assert ref.reference == "abc123def456"
 
-    def test_http_lockfile_restores_insecure_scheme(self):
-        """HTTP deps should restore the locked insecure scheme on replay."""
+    def test_http_lockfile_cannot_restore_insecure_scheme(self):
+        """Lock state cannot downgrade a manifest dependency to HTTP."""
         dep = DependencyReference(
             repo_url="acme/rules",
             host="git.company.internal",
@@ -321,8 +321,8 @@ class TestDownloadRefLockfileOverride:
         ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=False)
         assert ref.host == "git.company.internal"
         assert ref.reference == "abc123def456"
-        assert ref.is_insecure is True
-        assert ref.allow_insecure is True
+        assert ref.is_insecure is False
+        assert ref.allow_insecure is False
 
 
 class TestLockedDependencyToDependencyRef:

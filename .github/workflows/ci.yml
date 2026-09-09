@@ -197,6 +197,7 @@ jobs:
           tests/unit/scripts/test_check_exact_test_duplicates.py \
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
+          tests/quality/test_lifecycle_bug_ledger.py \
           tests/quality/test_ci_topology.py
 
     - name: Run bounded architecture scaling gate
@@ -498,12 +499,12 @@ jobs:
   # GITHUB_APM_PAT/ADO_APM_PAT env, so it is structurally unable to depend on
   # credentials.
   #
-  # Why timeout-minutes: 5
+  # Why timeout-minutes: 6
   # ------------------------
-  # Recent hosted runs of the current required selection complete in about
-  # three minutes. The 5-minute job cap includes checkout/setup/sync and
-  # still fails fast on accidental network retries or unreviewed marker growth.
-  # Hosted job duration is the release authority.
+  # Two xdist workers share the required selection without widening the cap.
+  # loadgroup preserves xdist_group serialization for HOME-mutating tests,
+  # matching the merge-group integration scheduler. The 6-minute cap includes
+  # checkout/setup/sync/cleanup; hosted job duration is the release authority.
   #
   # tests/quality/test_ci_topology.py independently collects the full,
   # merge-group-only, and required selections and guards their set partition,
@@ -513,7 +514,7 @@ jobs:
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 6
     permissions:
       contents: read
 
@@ -535,6 +536,11 @@ jobs:
       with:
         enable-cache: true
 
+    - name: Install Unix shell startup test runtimes
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y fish zsh
+
     - name: Install dependencies
       run: uv sync --frozen --extra dev
 
@@ -543,4 +549,5 @@ jobs:
         APM_E2E_TESTS: "1"
       run: |
         uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+          -n 2 --dist loadgroup \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration

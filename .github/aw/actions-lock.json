@@ -1,9 +1,9 @@
 {
   "entries": {
-    "actions/create-github-app-token@v3.1.1": {
+    "actions/create-github-app-token@v3.2.0": {
       "repo": "actions/create-github-app-token",
-      "version": "v3.1.1",
-      "sha": "1b10c78c7865c340bc4f6099eb2f838309f1e8c3"
+      "version": "v3.2.0",
+      "sha": "bcd2ba49218906704ab6c1aa796996da409d3eb1"
     },
     "actions/download-artifact@v8.0.1": {
       "repo": "actions/download-artifact",
@@ -18,7 +18,7 @@
     "actions/github-script@v9": {
       "repo": "actions/github-script",
       "version": "v9",
-      "sha": "373c709c69115d41ff229c7e5df9f8788daa9553"
+      "sha": "3a2844b7e9c422d3c10d287c895573f7108da1b3"
     },
     "actions/github-script@v9.0.0": {
       "repo": "actions/github-script",
@@ -30,10 +30,15 @@
       "version": "v7",
       "sha": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     },
-    "github/gh-aw-actions/setup@v0.87.1": {
+    "github/gh-aw-actions/setup-cli@v0.87.8": {
+      "repo": "github/gh-aw-actions/setup-cli",
+      "version": "v0.87.8",
+      "sha": "1aa033c7bf25ac9428fe521065b90c30a7070c4e"
+    },
+    "github/gh-aw-actions/setup@v0.87.8": {
       "repo": "github/gh-aw-actions/setup",
-      "version": "v0.87.1",
-      "sha": "423b3dc04bbf1b1797194a4a75aa5cf5d0d4f5b3"
+      "version": "v0.87.8",
+      "sha": "1aa033c7bf25ac9428fe521065b90c30a7070c4e"
     },
     "microsoft/apm-action@v1.10.0": {
       "repo": "microsoft/apm-action",

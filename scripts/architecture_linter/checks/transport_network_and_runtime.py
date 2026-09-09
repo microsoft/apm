@@ -43,6 +43,41 @@ from scripts.architecture_linter.models import Rule, Violation
 
 _RID_THROTTLE = "transport-platform-github-throttle"
 
+_RID_CONNECT_RETRY = "transport-platform-clone-connect-retry"
+_CONNECT_RETRY_OWNER = "src/apm_cli/deps/clone_engine.py"
+
+
+def _check_clone_connect_retry(provider: FactsProvider) -> tuple[Violation, ...]:
+    inv = frozenset(provider.inventory)
+    findings = list(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CONNECT_RETRY,
+            _CONNECT_RETRY_OWNER,
+            (
+                "def _is_connect_failure(",
+                "if not _is_connect_failure(exc, url):",
+                "_clone(winning_url, git_env, target_path)",
+                "_clone(attempt_url, attempt_env, target_path)",
+                "_clone(url, _env_for(attempt, url), target_path)",
+            ),
+            "CloneEngine must own connection retries below every auth attempt",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_CONNECT_RETRY,
+            _src_python(provider, exclude={_CONNECT_RETRY_OWNER}),
+            re.compile(r"def _is_connect_failure\(|Couldn't connect to server"),
+            "Git connection retry classification belongs only to CloneEngine",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
 
 _THROTTLE_OWNER = "src/apm_cli/deps/github_rate_limit.py"
 
@@ -198,7 +233,8 @@ def _check_git_semver_preflight(provider: FactsProvider) -> tuple[Violation, ...
                 "transport_plan = transport_selector.select(",
                 "candidate_url=rewrite_candidate",
                 "selected_attempt = transport_plan.attempts[0]",
-                "selected_attempt.requested_url is not None",
+                "requested_url = selected_attempt.requested_url",
+                "if requested_url is not None:",
                 "uses_public_github_anonymous_first",
                 "remote_url=policy_url",
                 "build_git_env=False",
@@ -478,6 +514,13 @@ def _check_runtime_deadline_safety(provider: FactsProvider) -> tuple[Violation, 
 
 
 RULES: tuple[Rule, ...] = (
+    Rule(
+        id=_RID_CONNECT_RETRY,
+        group=GROUP,
+        guard_ids=(_RID_CONNECT_RETRY,),
+        description="CloneEngine owns bounded same-action HTTPS connection retries.",
+        check=_check_clone_connect_retry,
+    ),
     Rule(
         id=_RID_THROTTLE,
         group=GROUP,

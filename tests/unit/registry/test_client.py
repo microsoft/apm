@@ -53,6 +53,37 @@ def _make_session(response):
 
 
 class TestUrlConstruction:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https:///apm",
+            "https://registry.example.com/apm?token=value",
+            "https://registry.example.com/apm#fragment",
+        ],
+    )
+    def test_invalid_base_url_is_rejected(self, url):
+        with pytest.raises(ValueError):
+            RegistryClient(url, RegistryAuthContext(registry_name="x", token=None))
+
+    def test_remote_http_registry_is_rejected(self):
+        with pytest.raises(ValueError, match="must use HTTPS"):
+            RegistryClient(
+                "http://registry.example.com/apm",
+                RegistryAuthContext(registry_name="x", token=None),
+            )
+
+    def test_loopback_http_registry_must_be_anonymous(self):
+        RegistryClient(
+            "http://127.0.0.1:8080/apm",
+            RegistryAuthContext(registry_name="x", token=None),
+        )
+        for host in ("localhost", "127.0.0.1"):
+            with pytest.raises(ValueError, match="must not be sent over HTTP"):
+                RegistryClient(
+                    f"http://{host}:8080/apm",
+                    RegistryAuthContext(registry_name="x", token="token-value"),
+                )
+
     def test_versions_url(self):
         session = _make_session(_make_response(json_body={"package": "a/b", "versions": []}))
         client = RegistryClient(
@@ -112,6 +143,17 @@ class TestAuth:
 
 
 class TestListVersions:
+    def test_redirect_is_rejected(self):
+        session = _make_session(_make_response(status=302))
+        client = RegistryClient(
+            "https://r.example.com",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+        with pytest.raises(RegistryError, match="registry HTTP 302"):
+            client.list_versions("a", "b")
+        assert session.request.call_args.kwargs["allow_redirects"] is False
+
     def test_parses_versions(self):
         session = _make_session(
             _make_response(
@@ -294,8 +336,7 @@ class TestFetchFromUrl:
         assert call.kwargs["url"] == url
         assert call.kwargs["headers"]["Authorization"] == "Bearer mytoken"
 
-    def test_uses_absolute_url_not_base_url(self):
-        """fetch_from_url must use the passed URL exactly, not prepend base_url."""
+    def test_rejects_absolute_url_on_different_origin(self):
         session = _make_session(_make_response(body=b"x", content_type="application/gzip"))
         client = RegistryClient(
             "https://r.example.com/apm",
@@ -303,8 +344,31 @@ class TestFetchFromUrl:
             session=session,
         )
         full_url = "https://other-host.example.com/packages/a/b/1.0/download"
-        client.fetch_from_url(full_url)
-        assert session.request.call_args.kwargs["url"] == full_url
+        with pytest.raises(RegistryError, match="does not match configured registry"):
+            client.fetch_from_url(full_url)
+        session.request.assert_not_called()
+
+    def test_rejects_absolute_url_outside_registry_path(self):
+        session = _make_session(_make_response(body=b"x", content_type="application/gzip"))
+        client = RegistryClient(
+            "https://r.example.com/apm",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+        with pytest.raises(RegistryError, match="outside configured registry path"):
+            client.fetch_from_url("https://r.example.com/other/archive")
+        session.request.assert_not_called()
+
+    def test_rejects_absolute_url_with_query(self):
+        session = _make_session(_make_response(body=b"x", content_type="application/gzip"))
+        client = RegistryClient(
+            "https://r.example.com/apm",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+        with pytest.raises(ValueError, match="query strings"):
+            client.fetch_from_url("https://r.example.com/apm/archive?token=value")
+        session.request.assert_not_called()
 
     def test_404_raises_registry_error_with_status(self):
         session = _make_session(

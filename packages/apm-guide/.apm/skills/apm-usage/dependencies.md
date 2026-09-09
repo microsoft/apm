@@ -176,8 +176,11 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
 | `allow_insecure` | OPTIONAL | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
-| `skills` | OPTIONAL | Install only named skills from a skill bundle. |
+| `skills` | OPTIONAL | Select deployed skills, not a repo slice; use `path` for a subdirectory. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
+
+Git [skill collections](../../../../../docs/src/content/docs/reference/package-types.md)
+with `skills/<name>/SKILL.md` support `skills: [name]` without root `apm.yml` or `SKILL.md`.
 
 Unknown fields are rejected. A Git `version` field reports an actionable error
 to use `ref` for a branch, tag, or commit; `version` belongs to registry and
@@ -293,7 +296,8 @@ Behind `apm experimental enable registries`. Registry deps resolve over the
 REST [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
 alongside the Git resolver -- declare registries in `apm.yml` (or in
 `~/.apm/config.json`) and reference them from `dependencies.apm`. See
-`authentication.md` (Registry tokens) for `APM_REGISTRY_TOKEN_{NAME}`.
+`authentication.md` (Registry tokens) for the required user-owned URL
+binding and `APM_REGISTRY_TOKEN_{NAME}`.
 
 ```yaml
 registries:

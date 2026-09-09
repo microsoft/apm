@@ -1,0 +1,312 @@
+{
+  "schema_version": 1,
+  "scope": "Representative post-0.26 escaped defects with reviewable regression evidence; this is not an issue-count census.",
+  "property_catalog": [
+    {
+      "id": "filesystem.open_world_observation",
+      "phase": 1,
+      "oracle_tier": "open-world",
+      "law": "No command may create, change, or remove files outside its declared write set."
+    },
+    {
+      "id": "transaction.failed_command_preserves_state",
+      "phase": 1,
+      "oracle_tier": "open-world",
+      "law": "A command that fails before commit preserves all durable project and user state."
+    },
+    {
+      "id": "ownership.preserve_unowned",
+      "phase": 1,
+      "oracle_tier": "open-world",
+      "law": "Cleanup changes only APM-owned state and preserves user and surviving-package ownership."
+    },
+    {
+      "id": "idempotency.byte_stable",
+      "phase": 1,
+      "oracle_tier": "open-world",
+      "law": "Repeating a converged operation leaves durable bytes unchanged."
+    },
+    {
+      "id": "routing.authorized_targets_only",
+      "phase": 1,
+      "oracle_tier": "open-world",
+      "law": "Only explicitly effective targets receive package primitives and service configuration."
+    },
+    {
+      "id": "source.ref_cache_coherent",
+      "phase": 1,
+      "oracle_tier": "semantic",
+      "law": "Materialized content, resolved references, and cache identity describe the same source revision."
+    },
+    {
+      "id": "portability.byte_deterministic",
+      "phase": 0,
+      "oracle_tier": "semantic",
+      "law": "Equivalent inputs produce portable paths and deterministic bytes across supported platforms."
+    },
+    {
+      "id": "outcome.status_matches_state",
+      "phase": 1,
+      "oracle_tier": "outcome",
+      "law": "Exit status and diagnostics truthfully describe the durable outcome."
+    },
+    {
+      "id": "cache.successful_reads_refresh_recency",
+      "phase": 0,
+      "oracle_tier": "outcome",
+      "law": "Successful fresh HTTP cache reads protect entries from eviction without extending response TTL or causing a refetch."
+    },
+    {
+      "id": "auth.credentials_isolated",
+      "phase": 0,
+      "oracle_tier": "outcome",
+      "law": "Credentials remain scoped to their intended host and never enter persisted URLs or output."
+    }
+  ],
+  "bugs": [
+    {
+      "issue": 2306,
+      "fixed_in": "0.27.0",
+      "summary": "Repeated install rewrote unchanged ownership and lockfile timestamps.",
+      "failure_modes": ["idempotency", "ownership"],
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_reinstall_is_byte_idempotent_across_durable_state"
+      ]
+    },
+    {
+      "issue": 2310,
+      "fixed_in": "0.26.0",
+      "summary": "Target contraction reintroduced a removed deployment path.",
+      "failure_modes": ["routing", "cleanup"],
+      "properties": ["routing.authorized_targets_only", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_inactive_target_ghost_e2e.py::test_install_repairs_ghost_before_fresh_checkout_audit"
+      ]
+    },
+    {
+      "issue": 2329,
+      "fixed_in": "0.27.0",
+      "summary": "Cold-cache CI audit produced false failures and false-green results.",
+      "failure_modes": ["cache", "outcome"],
+      "properties": ["source.ref_cache_coherent", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_audit_cold_cache_ci_e2e.py::test_cold_cache_audit_fails_for_tracked_stale_deployments_and_reconciles_idempotently"
+      ]
+    },
+    {
+      "issue": 2362,
+      "fixed_in": "0.27.0",
+      "summary": "Package target restrictions leaked hooks into sibling harnesses.",
+      "failure_modes": ["routing", "ownership"],
+      "properties": ["routing.authorized_targets_only", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_package_target_hook_routing_e2e.py::test_claude_package_restricts_hooks_across_install_update_and_audit"
+      ]
+    },
+    {
+      "issue": 2380,
+      "fixed_in": "0.27.0",
+      "summary": "Audit omitted deployed files that no lockfile entry claimed.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["filesystem.open_world_observation", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_unrecorded_drift_lifecycle_e2e.py::test_unrecorded_claim_fails_without_writes_and_install_repairs_idempotently"
+      ]
+    },
+    {
+      "issue": 2390,
+      "fixed_in": "0.27.0",
+      "summary": "MCP-only install omitted the lockfile and could not audit cleanly.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_only_lockfile_lifecycle.py::test_mcp_only_install_audit_and_repeat_are_byte_identical"
+      ]
+    },
+    {
+      "issue": 2484,
+      "fixed_in": "0.28.0",
+      "summary": "A changed aliased ref reused stale cached content.",
+      "failure_modes": ["reference", "cache"],
+      "properties": ["source.ref_cache_coherent", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_consume_source_ref_cache_matrix.py::test_source_ref_transition_applies_once_and_invalid_twin_preserves_state"
+      ]
+    },
+    {
+      "issue": 2558,
+      "fixed_in": "Unreleased",
+      "summary": "Global uninstall left managed Copilot hook files behind.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_ownership_invariant_lifecycle.py::test_apm_only_touches_owned_state_across_lifecycle"
+      ]
+    },
+    {
+      "issue": 2624,
+      "fixed_in": "Unreleased",
+      "summary": "Manifest rewrites caused repeated Windows line-ending churn.",
+      "failure_modes": ["portability", "idempotency"],
+      "properties": ["portability.byte_deterministic", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/unit/test_yaml_io.py::TestLoadYamlRoundtrip::test_dump_roundtrip_writes_deterministic_lf"
+      ]
+    },
+    {
+      "issue": 2744,
+      "fixed_in": "Unreleased",
+      "summary": "Legacy cached plugin upgrade deleted valid prior deployments.",
+      "failure_modes": ["cache", "cleanup", "ownership"],
+      "properties": ["source.ref_cache_coherent", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_legacy_content_hash_upgrade_preserves_skills_and_converges"
+      ]
+    },
+    {
+      "issue": 2759,
+      "fixed_in": "Unreleased",
+      "summary": "Git-hook installs could mutate the invoking repository and expose transport state.",
+      "failure_modes": ["transaction", "auth"],
+      "properties": ["transaction.failed_command_preserves_state", "auth.credentials_isolated"],
+      "regression_tests": [
+        "tests/integration/test_consume_source_ref_cache_matrix.py::test_cli_custom_port_negative_twins_preserve_last_good_state"
+      ]
+    },
+    {
+      "issue": 2800,
+      "fixed_in": "Unreleased",
+      "summary": "Unknown host-qualified package paths reached mutable install work.",
+      "failure_modes": ["routing", "transaction"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_unknown_host_qualified_virtual_install_fails_before_state_write"
+      ]
+    },
+    {
+      "issue": 2849,
+      "fixed_in": "Unreleased",
+      "summary": "Uninstall reported success and discarded ownership after package deletion failed.",
+      "failure_modes": ["cleanup", "outcome", "ownership", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_failed_package_deletion_retains_ownership_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_global_failed_package_deletion_preserves_user_scope_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_shared_local_slot_rename_failure_restores_original_until_retry",
+        "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_user_edited_target_refusal_retains_ownership_after_package_deletion"
+      ]
+    },
+    {
+      "issue": 2850,
+      "fixed_in": "Unreleased",
+      "summary": "Cache pruning evicted checkouts just reused by a frozen install.",
+      "failure_modes": ["cache", "cleanup"],
+      "properties": ["source.ref_cache_coherent", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_git_cache_recency_lifecycle.py::test_frozen_rehydrate_then_prune_preserves_recent_checkout_and_ownership",
+        "tests/unit/cache/test_git_cache_recency.py::test_successful_checkout_reuse_survives_prune"
+      ]
+    },
+    {
+      "issue": 2851,
+      "fixed_in": "Unreleased",
+      "summary": "Successful MCP HTTP cache hits did not refresh LRU recency and were evicted before cold entries.",
+      "failure_modes": ["cache"],
+      "properties": ["cache.successful_reads_refresh_recency"],
+      "regression_tests": [
+        "tests/integration/test_http_cache_recency_lifecycle.py::test_mcp_show_hit_survives_cache_pressure_without_refetch",
+        "tests/unit/cache/test_http_cache.py::TestHttpCacheSizeCap::test_successful_hit_protects_entry_from_eviction",
+        "tests/unit/cache/test_http_cache.py::TestHttpCacheHitMiss::test_hit_updates_recency_without_rewriting_response"
+      ]
+    },
+    {
+      "issue": 2852,
+      "fixed_in": "already fixed at 045f78cd71e56b9029e1b4193f7e4d4a46b00086",
+      "summary": "Regression-only coverage: shared transitive instructions survive either diamond parent's uninstall and are removed after the last parent.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_diamond_uninstall_preserves_shared_instructions_until_last_parent"
+      ]
+    },
+    {
+      "issue": 2853,
+      "fixed_in": "Unreleased",
+      "summary": "Cache clean reported success despite failed Git db, checkout, or HTTP removal.",
+      "failure_modes": ["cache", "cleanup", "outcome"],
+      "properties": ["outcome.status_matches_state", "filesystem.open_world_observation", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_cache_clean_lifecycle.py::test_cache_clean_status_matches_residual_state"
+      ]
+    },
+    {
+      "issue": 2854,
+      "fixed_in": "Unreleased",
+      "summary": "Cache prune counted failed removals as successful and exited zero.",
+      "failure_modes": ["cache", "cleanup", "outcome", "idempotency"],
+      "properties": [
+        "outcome.status_matches_state",
+        "filesystem.open_world_observation",
+        "idempotency.byte_stable"
+      ],
+      "regression_tests": [
+        "tests/integration/test_cache_prune_outcome_lifecycle.py::test_prune_failure_retry_and_convergence",
+        "tests/unit/cache/test_git_cache.py::test_prune_reports_only_completed_deletions"
+      ]
+    },
+    {
+      "issue": 2855,
+      "fixed_in": "Unreleased",
+      "summary": "Prune reported success after orphan deletion failed, including partially completed batches.",
+      "failure_modes": ["cleanup", "outcome", "idempotency"],
+      "properties": ["outcome.status_matches_state", "filesystem.open_world_observation", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_prune_failure_lifecycle.py::test_prune_failure_reports_partial_state_and_retry_converges",
+        "tests/integration/test_prune_failure_lifecycle.py::test_prune_mixed_failure_reconciles_only_successful_owners"
+      ]
+    },
+    {
+      "issue": 2856,
+      "fixed_in": "Unreleased",
+      "summary": "Negative cache-prune ages deleted fresh installed Git checkouts.",
+      "failure_modes": ["cache", "cleanup", "transaction", "outcome"],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "filesystem.open_world_observation",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_cache_prune_age_lifecycle.py::test_negative_prune_preserves_installed_cache_and_valid_ages"
+      ]
+    },
+    {
+      "issue": 2888,
+      "fixed_in": "Unreleased",
+      "summary": "Fresh resolution rejected manifestless nested skill collections accepted by package validation.",
+      "failure_modes": ["outcome", "transaction", "idempotency", "cache"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state", "idempotency.byte_stable", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_package_shape_lifecycle_contract.py::test_manifestless_skill_bundle_subset_lifecycle",
+        "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_valid_bundle_activates_and_reloads",
+        "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_invalid_bundle_preserves_state"
+      ]
+    }
+  ],
+  "known_gaps": [
+    {
+      "id": "partial-uninstall-deletion",
+      "summary": "A recursive deletion failure can leave earlier packages or some files removed; declarations and lock ownership remain available for retry.",
+      "properties": ["transaction.failed_command_preserves_state"],
+      "bounded_by": "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_failed_package_deletion_retains_ownership_until_retry",
+      "next_decision": "Filesystem rollback is not guaranteed; retry uninstall after resolving the error or reinstall declared packages."
+    },
+    {
+      "id": "late-lock-write-atomicity",
+      "summary": "An injected lockfile replacement failure can occur after target files move to the newly declared target while the prior lockfile remains intact.",
+      "properties": ["transaction.failed_command_preserves_state"],
+      "bounded_by": "tests/integration/test_required_lifecycle_state_machine.py::test_required_failed_lock_write_bounds_partial_state_and_recovers",
+      "next_decision": "Full install transaction expansion remains deferred with phases 2-4."
+    }
+  ]
+}

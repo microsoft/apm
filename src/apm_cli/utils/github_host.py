@@ -242,24 +242,11 @@ def maybe_raise_bare_fqdn_github_gitlab_conflict(raw: str) -> None:
     are excluded. Only applies when there are at least three path segments after the host
     (same threshold as GitLab direct shorthand probing).
     """
-    s = raw.strip()
-    if "#" in s:
-        s = s.rsplit("#", 1)[0].strip()
-    if s.startswith(("git@", "https://", "http://", "ssh://", "//")):
-        return
-    if "/" not in s:
-        return
-    parts = [p for p in s.split("/") if p]
-    # host + at least three segments → ambiguous nested repo vs repo + virtual path
-    if len(parts) < 4:
-        return
-    host_cand = parts[0]
-    if "." not in host_cand:
-        return
-    if not is_supported_git_host(host_cand):
-        return
-    if has_github_gitlab_host_env_conflict(host_cand):
-        raise ValueError(format_github_gitlab_host_conflict_error(host_cand))
+    from apm_cli.models.dependency.host_virtual import (
+        reject_bare_fqdn_github_gitlab_conflict,
+    )
+
+    reject_bare_fqdn_github_gitlab_conflict(raw)
 
 
 def is_github_hostname(hostname: str | None) -> bool:
@@ -389,7 +376,7 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     This CDN endpoint is not subject to the GitHub REST API rate limit and
     does not require authentication for public repositories.
 
-    Only valid for github.com — GitHub Enterprise Server and GHE Cloud Data
+    Only valid for github.com -- GitHub Enterprise Server and GHE Cloud Data
     Residency hosts do not have a ``raw.githubusercontent.com`` equivalent.
 
     Args:
@@ -453,7 +440,7 @@ def build_ssh_url(
     """Build an SSH clone URL for the given host and repo_ref (owner/repo).
 
     When ``port`` is set, emit the explicit ``ssh://`` form because SCP
-    shorthand (``git@host:path``) cannot carry a port — the ``:`` is the path
+    shorthand (``git@host:path``) cannot carry a port -- the ``:`` is the path
     separator. Without a port, keep the compact SCP shorthand (no behavioural
     change for the common case).
 

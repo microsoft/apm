@@ -41,7 +41,7 @@ MACOS_STARTUP_CONTRACTS = (
         "macos-latest",
         "${{ github.workspace }}/dist/apm-darwin-arm64/apm",
         "github.ref_type == 'tag' || github.event_name == 'schedule' || "
-        "github.event_name == 'workflow_dispatch'",
+        "github.event_name == 'repository_dispatch'",
     ),
 )
 NON_LIVE_UNIX_INTEGRATION_STEPS = (
@@ -150,7 +150,7 @@ def _assert_intel_focused_integration(workflow: dict) -> None:
     step = workflow_step(job, INTEL_FOCUSED_INTEGRATION_STEP)
     assert step.get("if") == (
         "github.ref_type == 'tag' || github.event_name == 'schedule' || "
-        "github.event_name == 'workflow_dispatch'"
+        "github.event_name == 'repository_dispatch'"
     )
     assert step["env"].get("PYTEST_MARK_EXPR") == INTEL_FOCUSED_MARK_EXPRESSION
     assert step["env"].get("PYTEST_EXTRA_ARGS") == NON_LIVE_UNIX_PYTEST_ARGS

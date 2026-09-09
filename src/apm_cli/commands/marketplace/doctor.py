@@ -15,6 +15,7 @@ from ...marketplace.yml_schema import (
     load_marketplace_yml,
 )
 from ...utils.diagnostics import printable_ascii_text
+from ...utils.git_env import get_git_executable
 from . import (
     _DoctorCheck,
     _find_duplicate_names,
@@ -136,7 +137,7 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
     git_detail = ""
     try:
         result = subprocess.run(
-            ["git", "--version"],
+            [get_git_executable(), "--version"],
             capture_output=True,
             text=True,
             timeout=5,

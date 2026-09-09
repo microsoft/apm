@@ -36,6 +36,21 @@ if TYPE_CHECKING:
 _STRICT_CONFIG_FAILURE_RUNTIMES = frozenset({"intellij"})
 
 
+class _PrevalidatedRegistryServers(dict[str, dict]):
+    """Registry metadata plus trusted provenance from direct prevalidation."""
+
+    def __init__(
+        self, servers: dict[str, dict], *, source: str | None, registry_url: str | None
+    ) -> None:
+        from apm_cli.registry.client import normalize_mcp_registry_url
+
+        super().__init__(servers)
+        self.source = source
+        self.registry_url = (
+            normalize_mcp_registry_url(registry_url) if registry_url is not None else None
+        )
+
+
 def _validate_registry_servers(
     operations: Any,
     server_names: list[str],
@@ -103,7 +118,11 @@ def prevalidate_registry_dependencies(
         fail_closed=True,
         server_info_cache=server_info_cache,
     )
-    return {name: server_info_cache[name] for name in valid_servers}
+    return _PrevalidatedRegistryServers(
+        {name: server_info_cache[name] for name in valid_servers},
+        source=registry_source,
+        registry_url=registry_url,
+    )
 
 
 class _TargetSelectionSource(StrEnum):
@@ -1241,7 +1260,23 @@ def run_mcp_install(  # noqa: PLR0913
                     dep.name if hasattr(dep, "name") else dep for dep in group_deps_list
                 ]
                 group_dep_map = {dep.name: dep for dep in group_deps_list if hasattr(dep, "name")}
-                operations = MCPServerOperations(registry_url=group_registry_url)
+                group_prevalidated = prevalidated_registry_servers
+                group_registry_source = None
+                if isinstance(group_prevalidated, _PrevalidatedRegistryServers):
+                    if (
+                        group_registry_url == group_prevalidated.registry_url
+                        and set(group_dep_names) <= group_prevalidated.keys()
+                    ):
+                        group_registry_source = group_prevalidated.source
+                    else:
+                        group_prevalidated = None
+                if group_registry_source is not None:
+                    operations = MCPServerOperations(
+                        registry_url=group_registry_url,
+                        registry_source=group_registry_source,
+                    )
+                else:
+                    operations = MCPServerOperations(registry_url=group_registry_url)
                 configured_count += _install_registry_group(
                     operations=operations,
                     group_dep_names=group_dep_names,
@@ -1257,7 +1292,7 @@ def run_mcp_install(  # noqa: PLR0913
                     console=console,
                     logger=logger,
                     managed_target_servers=managed_target_servers,
-                    prevalidated_servers=prevalidated_registry_servers,
+                    prevalidated_servers=group_prevalidated,
                     fail_on_write_error=fail_on_write_error,
                 )
 

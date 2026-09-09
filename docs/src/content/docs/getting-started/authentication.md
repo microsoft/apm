@@ -6,6 +6,10 @@ sidebar:
 
 APM works without tokens for public packages on github.com. Authentication is needed for private repositories, enterprise hosts (`*.ghe.com`, GHES), GitLab (private or API access), and Azure DevOps.
 
+## CLI bootstrap and release lookup
+
+Installing or updating the CLI queries public release metadata authenticated-first when an environment token is available, with narrowly scoped anonymous recovery for a rejected token. This is separate from private-package authentication and anonymous-first public-package Git operations. See [Public release metadata](../installation/#public-release-metadata) for token precedence and retry restrictions.
+
 ## How APM resolves authentication
 
 Public `github.com` packages need no token configuration. APM tries HTTPS repository operations anonymously before resolving credentials.
@@ -471,7 +475,10 @@ A misspelled env var is indistinguishable from a missing token — APM attempts 
 
 Token precedence (highest wins): `APM_REGISTRY_TOKEN_{NAME}` env var → `registry.<name>.token` in `~/.apm/config.json`.
 
+APM sends either credential only when `registry.<name>.url` in `~/.apm/config.json` matches the request destination. Configure that user-owned URL even when the project also declares the registry. Project-only registry declarations remain anonymous, and credentials are never sent over HTTP.
+
 ```bash
+apm config set registry.jf-skills.url https://registry.example.com
 export APM_REGISTRY_TOKEN_JF_SKILLS=eyJ...
 # or persist locally:
 apm config set registry.jf-skills.token eyJ...
@@ -648,11 +655,13 @@ Authentication and transport are independent decisions:
   select keys or override agent behavior -- whatever `git clone` would do
   on the same machine, APM does.
 
-APM picks one initial transport per dependency. An explicit URL scheme prevents
-APM from selecting another protocol, while Git still applies matching safe
-`url.<base>.insteadOf` rules afterward. Shorthand defaults to HTTPS unless a
-flag or configuration selects SSH. For the full matrix and fallback escape
-hatch, see [Manage dependencies: Transport selection](../../consumer/manage-dependencies/#transport-selection).
+APM picks one initial transport per dependency and uses it for clone/fetch and
+semver tag discovery. When `prefer-ssh` selects SSH, strict mode does not
+silently probe HTTPS. An explicit URL scheme prevents APM from selecting another
+protocol, while Git still applies matching safe `url.<base>.insteadOf` rules
+afterward. Shorthand defaults to HTTPS unless a flag or configuration selects
+SSH. For the full matrix and fallback escape hatch, see [Manage dependencies:
+Transport selection](../../consumer/manage-dependencies/#transport-selection).
 
 :::caution[Custom ports and cross-protocol fallback]
 When `--allow-protocol-fallback` is in effect, APM reuses the

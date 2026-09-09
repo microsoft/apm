@@ -15,7 +15,9 @@ from apm_cli.utils.git_env import (
     GitUrlRewriteError,
     GitUrlRewriteProbeError,
     _GitConfigSnapshot,
+    _resolve_trusted_executable,
     clone_git_worktree,
+    get_gh_executable,
     get_git_executable,
     git_network_env,
     git_remote_refs,
@@ -50,33 +52,105 @@ class TestGetGitExecutable:
     def teardown_method(self) -> None:
         reset_git_cache()
 
-    @patch("shutil.which", return_value="/usr/bin/git")
-    def test_returns_git_path(self, mock_which) -> None:
+    @patch(
+        "apm_cli.utils.git_env._resolve_trusted_executable",
+        return_value="/usr/bin/git",
+    )
+    def test_returns_git_path(self, mock_resolve) -> None:
         result = get_git_executable()
         assert result == "/usr/bin/git"
-        mock_which.assert_called_once_with("git")
+        mock_resolve.assert_called_once_with("git")
 
-    @patch("shutil.which", return_value="/usr/bin/git")
-    def test_cached_after_first_call(self, mock_which) -> None:
-        """shutil.which called only once across multiple invocations."""
+    @patch(
+        "apm_cli.utils.git_env._resolve_trusted_executable",
+        return_value="/usr/bin/git",
+    )
+    def test_cached_after_first_call(self, mock_resolve) -> None:
+        """Resolution runs only once across multiple invocations."""
         get_git_executable()
         get_git_executable()
         get_git_executable()
-        mock_which.assert_called_once()
+        mock_resolve.assert_called_once()
 
-    @patch("shutil.which", return_value=None)
-    def test_raises_if_git_not_found(self, mock_which) -> None:
+    @patch(
+        "apm_cli.utils.git_env._resolve_trusted_executable",
+        side_effect=FileNotFoundError,
+    )
+    def test_raises_if_git_not_found(self, mock_resolve) -> None:
         with pytest.raises(FileNotFoundError, match=r"git executable not found"):
             get_git_executable()
 
-    @patch("shutil.which", side_effect=[None, "/usr/bin/git"])
-    def test_transient_failure_does_not_poison_later_resolution(self, mock_which) -> None:
+    @patch(
+        "apm_cli.utils.git_env._resolve_trusted_executable",
+        side_effect=[FileNotFoundError, "/usr/bin/git"],
+    )
+    def test_transient_failure_does_not_poison_later_resolution(self, mock_resolve) -> None:
         """A transient PATH miss raises but remains retryable."""
         with pytest.raises(FileNotFoundError):
             get_git_executable()
 
         assert get_git_executable() == "/usr/bin/git"
-        assert mock_which.call_count == 2
+        assert mock_resolve.call_count == 2
+
+
+class TestGetGhExecutable:
+    """Test cached GitHub CLI binary lookup."""
+
+    def setup_method(self) -> None:
+        reset_git_cache()
+
+    def teardown_method(self) -> None:
+        reset_git_cache()
+
+    @patch(
+        "apm_cli.utils.git_env._resolve_trusted_executable",
+        side_effect=FileNotFoundError,
+    )
+    def test_missing_gh_has_actionable_error(self, mock_resolve) -> None:
+        with pytest.raises(FileNotFoundError, match=r"Please install it"):
+            get_gh_executable()
+
+
+class TestResolveTrustedExecutable:
+    """Test exclusion of executable candidates controlled by the project."""
+
+    def test_skips_path_directories_inside_worktree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project = tmp_path / "project"
+        project_bin = project / "bin"
+        nested_cwd = project / "packages" / "example"
+        trusted_bin = tmp_path / "tools"
+        (project / ".git").mkdir(parents=True)
+        project_bin.mkdir(parents=True)
+        nested_cwd.mkdir(parents=True)
+        trusted_bin.mkdir()
+        monkeypatch.chdir(nested_cwd)
+
+        with (
+            patch("os.get_exec_path", return_value=[str(project_bin), str(trusted_bin)]),
+            patch("shutil.which", return_value=str(trusted_bin / "git")) as mock_which,
+        ):
+            result = _resolve_trusted_executable("git")
+
+        assert result == str((trusted_bin / "git").resolve())
+        mock_which.assert_called_once_with(str(trusted_bin / "git"))
+
+    def test_rejects_candidate_resolving_inside_worktree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "tools"
+        (project / ".git").mkdir(parents=True)
+        trusted_bin.mkdir()
+        monkeypatch.chdir(project)
+
+        with (
+            patch("os.get_exec_path", return_value=[str(trusted_bin)]),
+            patch("shutil.which", return_value=str(project / "git")),
+            pytest.raises(FileNotFoundError),
+        ):
+            _resolve_trusted_executable("git")
 
 
 class TestGitSubprocessEnv:
@@ -268,6 +342,39 @@ class TestGitSubprocessEnv:
         assert "check Git configuration and retry" in message
         assert "--show-origin" in message
         assert "private config detail" not in message
+
+    def test_rewrite_probe_retries_once_after_timeout(self) -> None:
+        calls: list[int] = []
+
+        def fake_probe(args, **kwargs):
+            calls.append(kwargs["timeout"])
+            if len(calls) == 1:
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return subprocess.CompletedProcess(args, 0, stdout=b"", stderr=b"")
+
+        with patch("apm_cli.utils.git_env._git_config_run", side_effect=fake_probe):
+            env = git_network_env("https://git.example.com/acme/repo")
+
+        assert env["GIT_TRACE_REDACT"] == "1"
+        assert calls == [10, 30]
+
+    def test_rewrite_probe_still_fails_closed_after_retry_timeouts(self) -> None:
+        calls: list[int] = []
+
+        def fake_probe(args, **kwargs):
+            calls.append(kwargs["timeout"])
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+        with (
+            patch("apm_cli.utils.git_env._git_config_run", side_effect=fake_probe),
+            pytest.raises(GitUrlRewriteProbeError) as raised,
+        ):
+            git_network_env("https://git.example.com/acme/repo")
+
+        message = str(raised.value)
+        assert "Git config probe timed out" in message
+        assert "check Git configuration and retry" in message
+        assert calls == [10, 30]
 
     def test_clone_retains_url_rewrite_without_restoring_parent_auth(self, tmp_path) -> None:
         config = tmp_path / "gitconfig"

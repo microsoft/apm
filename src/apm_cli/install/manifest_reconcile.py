@@ -450,7 +450,7 @@ def declared_target_profiles(
     except TargetResolutionError:
         return None
     active_by_name = _profiles_by_name(active_targets)
-    if not names and not active_by_name:
+    if not names:
         return None
 
     profiles: list[TargetProfile] = []

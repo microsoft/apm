@@ -6,6 +6,7 @@ import contextlib
 import os
 import tempfile
 import threading
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -93,7 +94,12 @@ class InstallTransaction:
         self._validation = validation
         self._logger = logger
         self._workspace_lock = acquire_lifecycle_lock() if acquire_lock else None
-        self._workspace_lock_held = self._workspace_lock is not None
+        # Finalize this acquisition, not the shared FileLock object's lifetime.
+        self._workspace_lock_finalizer = (
+            weakref.finalize(self, self._workspace_lock.release)
+            if self._workspace_lock is not None
+            else None
+        )
         try:
             self._manifest_existed = manifest_path.exists()
             self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
@@ -239,10 +245,8 @@ class InstallTransaction:
 
     def _release_workspace_lock(self) -> None:
         """Release this transaction's nested lifecycle acquisition once."""
-        lock = self._workspace_lock
-        if self._workspace_lock_held and lock is not None:
-            self._workspace_lock_held = False
-            lock.release()
+        if self._workspace_lock_finalizer is not None:
+            self._workspace_lock_finalizer()
 
 
 def resolution_for_context(ctx: Any) -> ResolutionStagingSession:

@@ -1,12 +1,14 @@
 """Auth, credential, URL-path, and Windows-stable-path transport analyzers.
 
-Ports three of the ten canonical owner decisions in
+Ports four of the canonical owner decisions in
 ``.apm/architecture/owners/transport-auth-platform.json``:
 
 * ``transport-platform-host-credential-resolution`` -- ``core/auth.py`` is the
   single owner of Git-subprocess credential and public-GitHub anonymous-first
   environments (legacy AC5 auth scrub, AC19 header-injection ban, AC20
   anonymous-first ownership, AC24 ADO context).
+* ``transport-platform-host-reference-coordinates`` -- ``host_virtual.py`` owns
+  host-qualified reference host/repo/subpath coordinates.
 * ``transport-platform-url-path-security`` -- ``utils/path_security.py`` owns
   symlink-component containment and strict percent-encoded URL-path decoding
   (legacy symlink-component guard + AC10a).
@@ -48,6 +50,7 @@ from scripts.architecture_linter.groups.common import EXEMPT_MARKER, checked_fac
 from scripts.architecture_linter.models import Rule, Violation
 
 _RID_HOST_CRED = "transport-platform-host-credential-resolution"
+_RID_HOST_REFERENCE_COORDINATES = "transport-platform-host-reference-coordinates"
 _RID_ADO_VALIDATION = "transport-platform-ado-validation-bearer-fallback"
 _RID_ADO_CALLER_CONFIG = "transport-platform-ado-validation-caller-config"
 _RID_ADO_CLONE_FALLBACK = "transport-platform-ado-validation-clone-bearer-fallback"
@@ -79,6 +82,7 @@ _RID_ARTIFACTORY_NETRC = "transport-platform-artifactory-netrc-isolation"
 
 
 _AUTH_OWNER = "src/apm_cli/core/auth.py"
+_HOST_REFERENCE_OWNER = "src/apm_cli/models/dependency/host_virtual.py"
 _ARTIFACTORY_NETRC_OWNER = "src/apm_cli/deps/artifactory_entry.py"
 _ARTIFACTORY_NETRC_CONSUMER = "src/apm_cli/deps/download_strategies.py"
 
@@ -124,6 +128,16 @@ _NONINTERACTIVE_BYPASS = re.compile(r"GitAuthEnvBuilder\.noninteractive_env\(")
 
 
 _PERSISTENT_CACHE_BYPASS = re.compile(r"(_persistent_cache|persistent_git_cache)\.get_checkout\(")
+
+_ADHOC_REFERENCE_HOST_PARSE = re.compile(
+    r"is_supported_git_host\(\s*parts\[0\]\s*\)"
+    r"|(?:dep_ref|dependency)\.repo_url\.split\(\s*[\"']/[\"'](?:\s*,\s*1)?\s*\)\s*\[0\]"
+    r"|repo_url_base\.split\(\s*[\"']/[\"'](?:\s*,\s*1)?\s*\)\s*\[0\]"
+    r"|owner\s*,\s*repo\s*=\s*(?:dep_ref|dependency)\.repo_url\.split\("
+    r"|repo_parts\s*=\s*(?:dep_ref|dependency)\.repo_url\.split\(\s*[\"']/[\"']"
+    r"|source_url\.replace\(\"https://\", \"\"\)\.split\(\"/\"\)"
+    r"|maybe_raise_bare_fqdn_github_gitlab_conflict\("
+)
 
 
 def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -364,6 +378,58 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
     return tuple(findings)
 
 
+def _check_host_reference_coordinates(provider: FactsProvider) -> tuple[Violation, ...]:
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_REFERENCE_COORDINATES,
+            _HOST_REFERENCE_OWNER,
+            (
+                "def parse_host_qualified_reference(",
+                "def dependency_repository_owner(",
+                "class UnsupportedHostQualifiedVirtualPackageError(",
+            ),
+            "host_virtual.py must own host/reference coordinate parsing",
+        )
+    )
+    for path in _src_python(
+        provider,
+        exclude={
+            _HOST_REFERENCE_OWNER,
+            "src/apm_cli/models/dependency/materialization.py",
+            "src/apm_cli/utils/github_host.py",
+        },
+    ):
+        facts, failures = checked_facts(
+            provider,
+            path,
+            _RID_HOST_REFERENCE_COORDINATES,
+            require_python=True,
+        )
+        if failures:
+            findings.extend(failures)
+            continue
+        for number, line in enumerate(facts.lines, start=1):
+            if EXEMPT_MARKER in line or line.lstrip().startswith("#"):
+                continue
+            match = _ADHOC_REFERENCE_HOST_PARSE.search(line)
+            if match is not None:
+                findings.append(
+                    violation(
+                        _RID_HOST_REFERENCE_COORDINATES,
+                        path,
+                        "host/reference coordinate parsing must route through host_virtual.py",
+                        line=number,
+                        column=match.start() + 1,
+                    )
+                )
+    return tuple(findings)
+
+
 def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
@@ -421,6 +487,20 @@ def _check_artifactory_netrc_isolation(provider: FactsProvider) -> tuple[Violati
 def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ...]:
     inv = frozenset(provider.inventory)
     findings: list[Violation] = []
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_GIT_CHILD_ENV,
+            _src_python(provider, exclude={"src/apm_cli/utils/git_env.py"}),
+            re.compile(
+                r"(?:subprocess\.(?:run|Popen|check_call|check_output)|"
+                r"(?:self\.)?_run)\s*\(\s*\[\s*['\"](?:git|gh)['\"]\s*,"
+            ),
+            "Git and GitHub CLI subprocesses must use the trusted executable resolver",
+            exempt=False,
+        )
+    )
     findings.extend(
         _require_subs(
             provider,
@@ -1369,6 +1449,13 @@ RULES: tuple[Rule, ...] = (
         ),
         description="Host + credential resolution stays owned by core/auth.py (AuthResolver).",
         check=_check_host_credential_resolution,
+    ),
+    Rule(
+        id=_RID_HOST_REFERENCE_COORDINATES,
+        group=GROUP,
+        guard_ids=(_RID_HOST_REFERENCE_COORDINATES,),
+        description="Host-qualified reference coordinates stay owned by host_virtual.py.",
+        check=_check_host_reference_coordinates,
     ),
     Rule(
         id=_RID_GIT_CHILD_ENV,

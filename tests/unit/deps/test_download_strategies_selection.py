@@ -174,12 +174,12 @@ class TestDebugHelper:
         assert "[DEBUG]" in captured.err
 
     def test_debug_redacts_git_credentials(self, capsys: pytest.CaptureFixture[str]) -> None:
-        secret = "glrt-" + "R" * 24
+        sentinel = "glrt-" + "R" * 24
         with patch.dict("os.environ", {"APM_DEBUG": "1"}):
-            _debug(f"git cleanup failed with {secret}")
+            _debug(f"git cleanup failed with {sentinel}")
 
         captured = capsys.readouterr()
-        assert secret not in captured.err
+        assert sentinel not in captured.err
         assert "[DEBUG] git cleanup failed with ***" in captured.err
 
 

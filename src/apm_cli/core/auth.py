@@ -3,7 +3,7 @@
 Every APM operation that touches a remote host MUST use AuthResolver.
 Resolution is per-(host, org) pair, thread-safe, and cached per-process.
 
-All token-bearing requests use HTTPS — that is the transport security
+All token-bearing requests use HTTPS -- that is the transport security
 boundary. Token environment variables are chosen by host class (GitHub-class,
 GitLab, generic, or ADO); when a resolved token fails against the target host,
 ``try_with_fallback`` retries with git credential helpers where applicable.
@@ -48,6 +48,10 @@ from apm_cli.core.host_providers import (
     git_transport_policy,
 )
 from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.models.dependency.host_virtual import (
+    dependency_repository_owner,
+    repository_owner_from_reference_text,
+)
 from apm_cli.utils.github_host import (
     default_host,
     is_azure_devops_hostname,
@@ -173,7 +177,7 @@ class HostInfo:
 class AuthContext:
     """Resolved authentication for a single (host, org) pair.
 
-    Treat as immutable after construction — fields are never mutated.
+    Treat as immutable after construction -- fields are never mutated.
     Not frozen because ``git_env`` is a dict (unhashable).
     """
 
@@ -320,16 +324,16 @@ class AuthResolver:
 
         Note: EMU (Enterprise Managed Users) tokens use standard PAT
         prefixes (``ghp_`` or ``github_pat_``).  There is no prefix that
-        identifies a token as EMU-scoped — that's a property of the
+        identifies a token as EMU-scoped -- that's a property of the
         account, not the token format.
 
         Prefix reference (docs.github.com):
-        - ``github_pat_`` → fine-grained PAT
-        - ``ghp_``        → classic PAT
-        - ``ghu_``        → OAuth user-to-server (e.g. ``gh auth login``)
-        - ``gho_``        → OAuth app token
-        - ``ghs_``        → GitHub App installation (server-to-server)
-        - ``ghr_``        → GitHub App refresh token
+        - ``github_pat_`` -> fine-grained PAT
+        - ``ghp_``        -> classic PAT
+        - ``ghu_``        -> OAuth user-to-server (e.g. ``gh auth login``)
+        - ``gho_``        -> OAuth app token
+        - ``ghs_``        -> GitHub App installation (server-to-server)
+        - ``ghr_``        -> GitHub App refresh token
         """
         if token.startswith("github_pat_"):
             return "fine-grained"
@@ -472,11 +476,7 @@ class AuthResolver:
         git credential helper) can discriminate same-host multi-port setups.
         """
         host = dep_ref.host or default_host()
-        org: str | None = None
-        if dep_ref.repo_url:
-            parts = dep_ref.repo_url.split("/")
-            if parts:
-                org = parts[0]
+        org = dependency_repository_owner(dep_ref)
         return self.resolve(
             host,
             org,
@@ -926,15 +926,7 @@ class AuthResolver:
             az_available = bool(provider and provider.is_available())
             pat_set = bool(os.environ.get("ADO_APM_PAT"))
 
-            org_part = org or ""
-            if not org_part:
-                source_url = dep_url or ""
-                if source_url:
-                    parts = source_url.replace("https://", "").split("/")
-                    if len(parts) >= 2 and (
-                        parts[0] in ("dev.azure.com",) or parts[0].endswith(".visualstudio.com")
-                    ):
-                        org_part = parts[1] if len(parts) > 1 else ""
+            org_part = org or repository_owner_from_reference_text(dep_url) or ""
 
             token_url = (
                 (
@@ -1130,7 +1122,7 @@ class AuthResolver:
         3. ``gh auth token --hostname <host>`` (gh CLI active account)
         4. Host-specific git credential helper
 
-        Resolution order (``gitlab``): ``GITLAB_APM_PAT`` → ``GITLAB_TOKEN`` →
+        Resolution order (``gitlab``): ``GITLAB_APM_PAT`` -> ``GITLAB_TOKEN`` ->
         credential helper. GitHub env vars are not consulted.
 
         Resolution order (``generic``): credential helper only (no GitHub or
@@ -1170,7 +1162,7 @@ class AuthResolver:
         # ADO uses ADO_APM_PAT (single var) + AAD bearer fallback;
         # per-org vars and credential fill are out of scope.
 
-        # 1. Per-org GitHub PAT (GitHub-class hosts only — not GitLab / generic / ADO)
+        # 1. Per-org GitHub PAT (GitHub-class hosts only -- not GitLab / generic / ADO)
         if org and host_info.kind in ("github", "ghe_cloud", "ghes"):
             env_name = f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"
             token = os.environ.get(env_name)
@@ -1702,5 +1694,5 @@ class AuthResolver:
 
 
 def _org_to_env_suffix(org: str) -> str:
-    """Convert an org name to an env-var suffix (upper-case, hyphens → underscores)."""
+    """Convert an org name to an env-var suffix (upper-case, hyphens -> underscores)."""
     return org.upper().replace("-", "_")
