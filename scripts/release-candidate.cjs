@@ -746,6 +746,7 @@ async function verify({
 async function plan({ github, context, core }) {
   const catalog = loadCatalog();
   const { matrix, fullValidation } = matrixForContext(context, catalog);
+  const prerelease = isPrereleaseTag(context);
   let candidateRunId = "";
   let candidateArtifactIds = "";
   let candidateEvidenceArtifactId = "";
@@ -760,13 +761,16 @@ async function plan({ github, context, core }) {
       decision = `reuse; trusted exact-SHA candidate from source run ${candidate.run.id} attempt ${candidate.run.run_attempt} SHA ${candidate.run.head_sha}`;
     }
   }
-  core?.info?.(`Release plan: ${decision}.`);
+  const publication = !isTagPush(context) ? "" : prerelease
+    ? " Prerelease tag; stable docs and PyPI publication will be skipped. Use an exact vN.N.N tag for stable publication."
+    : " Stable tag.";
+  core?.info?.(`Release plan: ${decision}.${publication}`);
   core.setOutput("matrix", JSON.stringify(matrix));
   core.setOutput("full_validation", String(fullValidation));
   core.setOutput("candidate_run_id", candidateRunId);
   core.setOutput("candidate_artifact_ids", candidateArtifactIds);
   core.setOutput("candidate_evidence_artifact_id", candidateEvidenceArtifactId);
-  core.setOutput("is_prerelease", String(isPrereleaseTag(context)));
+  core.setOutput("is_prerelease", String(prerelease));
 }
 
 module.exports = {

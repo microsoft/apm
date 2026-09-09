@@ -252,13 +252,23 @@ describe("release candidate planning", () => {
   ]) {
     it(`classifies release publication for ${tag} through the planner`, async () => {
       const outputs = {};
+      const messages = [];
       await rc.plan({
         github: fakeGithub(),
         context: context({ ref: `refs/tags/${tag}` }),
-        core: { setOutput(name, value) { outputs[name] = value; } },
+        core: {
+          setOutput(name, value) { outputs[name] = value; },
+          info(message) { messages.push(message); },
+        },
       });
       assert.equal(outputs.is_prerelease, String(prerelease));
       assert.equal(outputs.full_validation, "true");
+      const publication = prerelease
+        ? " Prerelease tag; stable docs and PyPI publication will be skipped. Use an exact vN.N.N tag for stable publication."
+        : " Stable tag.";
+      assert.deepEqual(messages, [
+        `Release plan: fresh full qualification; no reusable candidate is available for this SHA.${publication}`,
+      ]);
     });
   }
 
@@ -295,7 +305,7 @@ describe("release candidate planning", () => {
       assert.match(messages[0], /Prior candidate run 123 attempt 1 unavailable:/);
       assert.match(messages[0], /automatically\. No operator action required\./);
       assert.equal(messages.some((message) => /Re-run all jobs/.test(message)), false);
-      assert.equal(messages[1], "Release plan: fresh full qualification; no reusable candidate is available for this SHA.");
+      assert.equal(messages[1], "Release plan: fresh full qualification; no reusable candidate is available for this SHA. Stable tag.");
     });
   }
 
@@ -357,7 +367,7 @@ describe("release candidate planning", () => {
     assert.match(outputs.candidate_evidence_artifact_id, /^[0-9]+$/);
     assert.equal(outputs.candidate_artifact_ids.split(",").length, 5);
     assert.deepEqual(messages, [
-      `Release plan: reuse; trusted exact-SHA candidate from source run 123 attempt 1 SHA ${SHA}.`,
+      `Release plan: reuse; trusted exact-SHA candidate from source run 123 attempt 1 SHA ${SHA}. Stable tag.`,
     ]);
   });
 
@@ -374,7 +384,8 @@ describe("release candidate planning", () => {
         context: context(overrides),
         core: { setOutput() {}, info(message) { messages.push(message); } },
       });
-      assert.deepEqual(messages, [`Release plan: ${message}.`]);
+      const publication = Object.keys(overrides).length === 0 ? " Stable tag." : "";
+      assert.deepEqual(messages, [`Release plan: ${message}.${publication}`]);
     });
   }
 });
