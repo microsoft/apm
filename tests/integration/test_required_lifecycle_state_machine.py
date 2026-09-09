@@ -870,7 +870,9 @@ def test_required_pack_install_compile_audit_closes_regular_package_state(
         scenario_id="pack-closure-install-producer",
     )
     expected_skill_files = {
-        f".agents/skills/triage/{name}": (producer.root / ".agents/skills/triage" / name).read_bytes()
+        f".agents/skills/triage/{name}": (
+            producer.root / ".agents/skills/triage" / name
+        ).read_bytes()
         for name in ("SKILL.md", "assets/reference.md")
     }
     _run_success(
