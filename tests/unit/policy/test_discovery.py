@@ -276,10 +276,10 @@ class TestFirstConcealedCloserPolicy(unittest.TestCase):
         self.assertEqual(result, "acme/dept-a/team-x")
 
     @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_absent_verdict_is_cached_so_the_probe_runs_once(self, mock_state):
-        # With project_root set, a genuine-absent git verdict is cached, so a
-        # second walk over the same level does not re-probe the network.
-        mock_state.return_value = None
+    def test_present_verdict_is_cached_so_the_probe_runs_once(self, mock_state):
+        # Only the DEFINITIVE "present" verdict is cached: a second walk over a
+        # confirmed-present level does not re-probe the network.
+        mock_state.return_value = True
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             first = first_concealed_closer_policy(
@@ -288,25 +288,38 @@ class TestFirstConcealedCloserPolicy(unittest.TestCase):
             second = first_concealed_closer_policy(
                 ["acme/dept-a"], "apm-policy", host="gitlab.com", port=None, project_root=root
             )
-        self.assertIsNone(first)
-        self.assertIsNone(second)
-        self.assertEqual(mock_state.call_count, 1)  # cached: probed once, not twice
+        self.assertEqual(first, "acme/dept-a")
+        self.assertEqual(second, "acme/dept-a")
+        self.assertEqual(mock_state.call_count, 1)  # present cached: probed once
 
     @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_no_cache_bypasses_the_concealment_cache(self, mock_state):
+    def test_indeterminate_verdict_is_not_cached_so_it_re_probes(self, mock_state):
+        # None (missing OR transient failure) is NOT cached -- a transient error
+        # must never be remembered as "absent" and suppress re-probing.
         mock_state.return_value = None
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             for _ in range(2):
                 first_concealed_closer_policy(
-                    ["acme/dept-a"],
-                    "apm-policy",
-                    host="gitlab.com",
-                    port=None,
-                    project_root=root,
-                    no_cache=True,
+                    ["acme/dept-a"], "apm-policy", host="gitlab.com", port=None, project_root=root
                 )
-        self.assertEqual(mock_state.call_count, 2)  # no_cache: re-probes each time
+        self.assertEqual(mock_state.call_count, 2)  # not cached: re-probes each time
+
+    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
+    def test_cache_only_never_probes_and_fails_closed_when_unverifiable(self, mock_state):
+        # Offline (cache_only) must not touch the network; without a cached
+        # "present" verdict it fails closed rather than applying a weaker ancestor.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = first_concealed_closer_policy(
+                ["acme/dept-a"],
+                "apm-policy",
+                host="gitlab.com",
+                port=None,
+                project_root=Path(tmpdir),
+                cache_only=True,
+            )
+        self.assertEqual(result, "acme/dept-a")  # unverifiable offline -> fail closed
+        mock_state.assert_not_called()  # no network probe in cache_only
 
 
 class TestExtractOrgFromGitRemote(unittest.TestCase):

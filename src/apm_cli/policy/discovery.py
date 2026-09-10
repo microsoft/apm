@@ -1014,7 +1014,10 @@ def _gitlab_walk_candidate(
             cache_only=cache_only,
         )
         if result.outcome != "absent":
-            if skipped and result.outcome in {"found", "empty"}:
+            # Gate on a usable policy (found/empty/cached_stale all carry one),
+            # not just found/empty -- a stale-but-usable ancestor must also be
+            # checked for a concealed closer before it is applied.
+            if skipped and result.policy is not None:
                 concealed = _gitlab.first_concealed_closer_policy(
                     skipped,
                     candidate_repo,
@@ -1022,6 +1025,7 @@ def _gitlab_walk_candidate(
                     port=port,
                     project_root=project_root,
                     no_cache=no_cache,
+                    cache_only=cache_only,
                 )
                 if concealed is not None:
                     return _gitlab_concealed_closer_result(concealed, candidate_repo, host, port)
@@ -1050,10 +1054,11 @@ def _gitlab_concealed_closer_result(
     return PolicyFetchResult(
         source=f"org:{host_label}/{namespace}/{repo}",
         error=(
-            f"A closer GitLab policy project {namespace}/{repo} exists but its "
-            "apm-policy.yml could not be read (GitLab returns 404 for a private "
-            "project the token cannot access); refusing to silently apply a weaker "
-            "ancestor policy. Grant the token read access to that project, or remove it."
+            f"A closer GitLab policy project {namespace}/{repo} could not be confirmed "
+            "absent (GitLab returns 404 for a private project the token cannot read, or "
+            "the project state was unverifiable offline in cache-only mode); refusing to "
+            "silently apply a weaker ancestor policy. Grant the token read access to that "
+            "project, or remove it."
         ),
         outcome="incomplete_chain",
     )

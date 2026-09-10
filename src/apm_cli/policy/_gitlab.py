@@ -118,42 +118,46 @@ def first_concealed_closer_policy(
     port: int | None,
     project_root: Path | None = None,
     no_cache: bool = False,
+    cache_only: bool = False,
 ) -> str | None:
-    """Return the closest skipped namespace whose ``apm-policy`` project exists.
+    """Return the closest skipped namespace that must fail the walk closed.
 
     During the subgroup walk (see :func:`discovery._gitlab_walk_candidate`) an
     ``absent`` level is ambiguous -- GitLab returns 404 both for a missing
     project and for a private one the token cannot read. Before an ancestor
     policy is applied over the skipped closer levels, this confirms via
     authenticated Git whether any skipped closer ``apm-policy`` project actually
-    exists. It returns the closest such namespace (its ``absent`` was a
-    concealed 404, so the caller must fail closed), or ``None`` when no skipped
-    level's project can be confirmed. ``skipped_namespaces`` is ordered
-    closest-first.
+    exists. It returns the closest namespace the caller must fail closed on (a
+    confirmed-present concealed project, or -- in ``cache_only`` mode -- one that
+    cannot be verified offline), or ``None`` when every skipped level is known to
+    be genuinely absent. ``skipped_namespaces`` is ordered closest-first.
 
-    Each ``git ls-remote`` probe is cached per ``(host, namespace, repo)`` under
-    the project's policy cache (same TTL as policies) so the common "team
-    inherits the org policy" path -- every install re-walking the same absent
-    closer levels -- does not pay a fresh network round-trip per level on every
-    run. Pass ``project_root`` to enable the cache; ``no_cache`` bypasses it.
+    Only the DEFINITIVE ``present`` verdict is cached (per ``(host, namespace,
+    repo)`` at the policy-cache TTL): ``_gitlab_project_state_via_git`` returns
+    ``None`` for a missing project AND for an auth/network/timeout failure alike,
+    so caching an ``absent`` verdict would let a transient failure suppress
+    re-probing for the whole TTL and wrongly apply a weaker ancestor. Because
+    absence is never definitive, the common "team inherits the org policy" path
+    re-probes each install; that cost is accepted (see the PR trade-offs).
+
+    ``cache_only`` (the offline local-bundle contract) never issues a network
+    probe: a cached ``present`` fails closed, and an unverifiable level fails
+    closed deterministically rather than reaching out to the network.
     """
+    use_cache = project_root is not None and not no_cache
     for namespace in skipped_namespaces:
-        cached = (
-            None
-            if (no_cache or project_root is None)
-            else _read_concealment_verdict(project_root, host, port, namespace, repo)
-        )
-        if cached == "present":
+        if use_cache and _read_concealment_verdict(project_root, host, port, namespace, repo):
+            return namespace  # cached definitive "present" -> concealed, fail closed
+        if cache_only:
+            # Offline: no network probe. Without a cached "present" we cannot
+            # confirm this closer level is genuinely absent, so fail closed
+            # rather than silently apply a weaker ancestor.
             return namespace
-        if cached == "absent":
-            continue
-        exists = _gitlab_project_state_via_git(org=namespace, repo=repo, host=host, port=port)
-        if not no_cache and project_root is not None:
-            _write_concealment_verdict(
-                project_root, host, port, namespace, repo, "present" if exists else "absent"
-            )
-        if exists is True:
+        if _gitlab_project_state_via_git(org=namespace, repo=repo, host=host, port=port) is True:
+            if use_cache:
+                _write_concealment_verdict(project_root, host, port, namespace, repo)
             return namespace
+        # Indeterminate (None): missing OR transient failure -- NOT cached.
     return None
 
 
@@ -168,8 +172,12 @@ def _concealment_cache_file(project_root: Path, host: str, port: int | None, ns:
 
 def _read_concealment_verdict(
     project_root: Path, host: str, port: int | None, ns: str, repo: str
-) -> str | None:
-    """Return a fresh cached ``"present"``/``"absent"`` verdict, or ``None``."""
+) -> bool:
+    """Return ``True`` iff a fresh definitive ``"present"`` verdict is cached.
+
+    Only ``present`` is ever cached (see :func:`first_concealed_closer_policy`),
+    so a hit means the closer project is confirmed to exist.
+    """
     import json
     import time
 
@@ -181,19 +189,18 @@ def _read_concealment_verdict(
         )
         data = json.loads(raw)
     except (OSError, ValueError):
-        return None
+        return False
     if data.get("schema") != CACHE_SCHEMA_VERSION:
-        return None
+        return False
     if time.time() - float(data.get("ts", 0)) > DEFAULT_CACHE_TTL:
-        return None
-    verdict = data.get("verdict")
-    return verdict if verdict in ("present", "absent") else None
+        return False
+    return data.get("verdict") == "present"
 
 
 def _write_concealment_verdict(
-    project_root: Path, host: str, port: int | None, ns: str, repo: str, verdict: str
+    project_root: Path, host: str, port: int | None, ns: str, repo: str
 ) -> None:
-    """Persist a concealment verdict (best-effort; cache write never blocks)."""
+    """Persist the definitive ``present`` verdict (best-effort; never blocks)."""
     import json
     import time
 
@@ -203,7 +210,7 @@ def _write_concealment_verdict(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"schema": CACHE_SCHEMA_VERSION, "verdict": verdict, "ts": time.time()}),
+            json.dumps({"schema": CACHE_SCHEMA_VERSION, "verdict": "present", "ts": time.time()}),
             encoding="utf-8",
         )
     except OSError:

@@ -108,7 +108,7 @@ EXTRA_RULES: tuple[Rule, ...] = (
         group=GROUP,
         guard_ids=(RULE_REMOTE_ORIGIN_OWNER,),
         description=(
-            "Policy discovery reads and parses the git remote through one owner (discovery.py)."
+            "Policy discovery reads and parses the git remote through one owner (policy/_remote.py)."
         ),
         check=check_policy_remote_origin_owner,
     ),
