@@ -42,11 +42,18 @@ function Write-ErrorText { param([string]$Message) throw $Message }
 function Write-ManualInstallHelp { throw "Unexpected install failure" }
 
 $source = Get-Content -Raw -LiteralPath "$env:TEST_ROOT/install.ps1"
-$start = $source.IndexOf('    $currentDir = Join-Path $installRoot')
+# Execute stable promotion and its PATH consumers, not acquisition or rollback setup.
+$start = $source.IndexOf('    $currentDir = Join-Path $installRoot', $source.IndexOf('# Expose the complete onedir bundle'))
+$shimPath = Join-Path $binDir "apm.cmd"
+$end = $source.IndexOf('    if ($hasCompanion)', $start)
+$pathStart = $source.IndexOf('    Add-ToUserPath -PathEntry $binDir', $end)
 $endMarker = '    Add-ToUserPath -PathEntry $currentDir'
-$end = $source.IndexOf($endMarker, $start) + $endMarker.Length
-if ($start -lt 0 -or $end -lt $start) { throw "Stable-path production block not found" }
+$pathEnd = $source.IndexOf($endMarker, $pathStart) + $endMarker.Length
+if ($start -lt 0 -or $end -lt $start -or $pathStart -lt $end -or $pathEnd -lt $pathStart) {
+    throw "Stable-path production blocks not found"
+}
 . ([scriptblock]::Create($source.Substring($start, $end - $start)))
+. ([scriptblock]::Create($source.Substring($pathStart, $pathEnd - $pathStart)))
 @{
     current_dir = $currentDir
     current_exe = $currentExe

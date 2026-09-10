@@ -9,6 +9,7 @@ from pathlib import Path
 
 import click
 
+from apm_cli.apmx import main as apmx
 from apm_cli.cli import cli
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +33,10 @@ def recovery_guidance(dist_dir: Path, *, mismatch: bool) -> str:
 
 def public_top_level_commands(group: click.Group) -> set[str]:
     """Return visible top-level names from Click's live command registry."""
-    return {name for name, command in group.commands.items() if not command.hidden}
+    names = {name for name, command in group.commands.items() if not command.hidden}
+    if group is cli and not apmx.hidden:
+        names.add(apmx.name)
+    return names
 
 
 def rendered_cli_reference_pages(dist_dir: Path) -> set[str]:

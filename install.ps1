@@ -329,16 +329,18 @@ if options.target_dir or options.prefix_path or options.root_path:
     raise SystemExit("Automatic pip fallback cannot verify redirected pip destinations. Remove target/prefix/root pip settings or install manually.")
 scheme = get_scheme("apm-cli", user=True, isolated=options.isolated_mode)
 scripts = Path(scheme.scripts)
-names = ("apmx.exe", "apmx-script.py", "apmx.exe.manifest") if os.name == "nt" else ("apmx",)
+entrypoints = {"apm": "apm_cli.cli:cli", "apmx": "apm_cli.apmx:main"}
+names = tuple(name + suffix for name in entrypoints for suffix in ((".exe", "-script.py", ".exe.manifest") if os.name == "nt" else ("",)))
 existing = [scripts / name for name in names if os.path.lexists(scripts / name)]
 distributions = list(metadata.distributions(path=list({scheme.purelib, scheme.platlib}))) if existing else []
 for target in existing:
+    entrypoint = target.name.split(".", 1)[0].removesuffix("-script")
     owned = False
     if target.is_file() and not target.is_symlink():
         for dist in distributions:
             if dist.metadata.get("Name", "").lower().replace("_", "-") != "apm-cli":
                 continue
-            if not any(ep.group == "console_scripts" and ep.name == "apmx" and ep.value == "apm_cli.apmx:main" for ep in dist.entry_points):
+            if not any(ep.group == "console_scripts" and ep.name == entrypoint and ep.value == entrypoints[entrypoint] for ep in dist.entry_points):
                 continue
             for record in dist.files or ():
                 if Path(dist.locate_file(record)).resolve() != target.resolve():
@@ -353,7 +355,7 @@ for target in existing:
             if owned:
                 break
     if not owned:
-        raise SystemExit(f"Refusing to replace unrelated apmx launcher at {target}. Remove it with its original installer or choose another Python installation.")
+        raise SystemExit(f"Refusing to replace unrelated {entrypoint} launcher at {target}. Remove it with its original installer or choose another Python installation.")
 print(scripts)
 # APM_PIP_COMPANION_GUARD_END
 '@
@@ -366,7 +368,7 @@ print(scripts)
         $ErrorActionPreference = $previousErrorActionPreference
     }
     if ($probeExitCode -ne 0 -or -not $pipScriptsDir) {
-        Write-ErrorText "Cannot verify the pip user-script directory and apmx ownership. No package was installed."
+        Write-ErrorText "Cannot verify the pip user-script directory and apm/apmx ownership. No package was installed."
         return $false
     }
     try {

@@ -27,7 +27,7 @@ def _probe(path: Path) -> str:
     )
 
 
-def _fixture(tmp_path: Path, state: str) -> tuple[dict[str, str], Path]:
+def _fixture(tmp_path: Path, state: str, name: str = "apmx") -> tuple[dict[str, str], Path]:
     """Provide a private user scheme and optional, RECORD-owned companion."""
     env = {
         **os.environ,
@@ -49,7 +49,7 @@ def _fixture(tmp_path: Path, state: str) -> tuple[dict[str, str], Path]:
         check=True,
     )
     scripts, site = map(Path, json.loads(result.stdout))
-    launcher = scripts / ("apmx.exe" if os.name == "nt" else "apmx")
+    launcher = scripts / (name + ".exe" if os.name == "nt" else name)
     if state != "absent":
         scripts.mkdir(parents=True)
         launcher.write_bytes(b"original companion bytes")
@@ -59,7 +59,8 @@ def _fixture(tmp_path: Path, state: str) -> tuple[dict[str, str], Path]:
         name = "foreign-project" if state == "wrong-project" else "apm-cli"
         (dist / "METADATA").write_text(f"Name: {name}\nVersion: 0.0.1\n", encoding="ascii")
         (dist / "entry_points.txt").write_text(
-            "[console_scripts]\napmx = apm_cli.apmx:main\n", encoding="ascii"
+            "[console_scripts]\napm = apm_cli.cli:cli\napmx = apm_cli.apmx:main\n",
+            encoding="ascii",
         )
         content = launcher.read_bytes()
         digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode()
@@ -78,9 +79,12 @@ def test_standalone_pip_probes_cannot_drift() -> None:
 
 
 @pytest.mark.parametrize("state", ["foreign", "owned", "absent", "modified", "wrong-project"])
-def test_pip_guard_checks_actual_user_scheme_and_record(tmp_path: Path, state: str) -> None:
+@pytest.mark.parametrize("launcher_name", ["apm", "apmx"])
+def test_pip_guard_checks_actual_user_scheme_and_record(
+    tmp_path: Path, state: str, launcher_name: str
+) -> None:
     """An unrelated native bin directory cannot authorize pip's user-script writes."""
-    env, launcher = _fixture(tmp_path, state)
+    env, launcher = _fixture(tmp_path, state, launcher_name)
     before = launcher.read_bytes() if launcher.exists() else None
     result = subprocess.run(
         [sys.executable, "-c", _probe(ROOT / "install.sh")],
@@ -93,7 +97,7 @@ def test_pip_guard_checks_actual_user_scheme_and_record(tmp_path: Path, state: s
     if result.returncode == 0:
         assert Path(result.stdout.strip()) == launcher.parent
     else:
-        assert "Refusing to replace unrelated apmx launcher" in result.stderr
+        assert f"Refusing to replace unrelated {launcher_name} launcher" in result.stderr
     assert (launcher.read_bytes() if launcher.exists() else None) == before
 
 

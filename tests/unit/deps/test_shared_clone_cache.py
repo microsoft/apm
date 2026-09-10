@@ -277,6 +277,7 @@ class TestDownloaderSharedCloneIntegration:
         target_b = tmp_path / "modules" / "repo-b-tool"
 
         downloader = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
+        downloader._contract_path = None
         downloader.auth_resolver = MagicMock()
         downloader.token_manager = MagicMock()
         downloader._transport_selector = MagicMock()
@@ -345,6 +346,7 @@ class TestDownloaderSharedCloneIntegration:
 
         # Create downloader with shared cache
         downloader = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
+        downloader._contract_path = None
         downloader.auth_resolver = MagicMock()
         downloader.token_manager = MagicMock()
         downloader._transport_selector = MagicMock()

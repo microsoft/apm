@@ -1045,8 +1045,10 @@
       "keyword": "MUST",
       "section": "7.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_packaged_contract_replays_caller_lock_without_resolution[False]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_packaged_contract_replays_caller_lock_without_resolution[True]",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_replays_locked_commit_without_network"
       ]
     },

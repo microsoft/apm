@@ -260,8 +260,11 @@ def run_contract(
         requested_model=plan.model,
         observed_models=observed_models,
     )
-    logger.close()
-    store.update("record", transcript_retention=logger.transcript_metadata)
+    try:
+        logger.close()
+        store.update("record", transcript_retention=logger.transcript_metadata)
+    except OSError as exc:
+        store.fail_finalization(result, exc)
     store.finish(result)
     events.emit("finished", result=result)
     return result

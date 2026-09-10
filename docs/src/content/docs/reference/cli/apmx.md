@@ -127,6 +127,9 @@ Outcomes apply in this order:
 
 CLI usage errors exit `2`. A refusal before admission need not create a run;
 a nonterminal record means incomplete or unknown, not permission to replay.
+Credential-bearing URL text is redacted from retained package references.
+Transcript or record-write failures report finalization failure and retain an
+incomplete `HALTED` record when the filesystem still permits writing.
 
 `VERIFIED` / `0` means native-advisory check success, not factual correctness,
 sandboxing, signing, budget enforcement, or merge permission. There is no

@@ -41,6 +41,14 @@ def test_public_commands_are_linked_from_reference_index(tmp_path: Path) -> None
     assert linked == public
 
 
+def test_bundled_companion_requires_its_rendered_reference(tmp_path: Path) -> None:
+    """A separately installed entrypoint is not an orphan subcommand page."""
+    _render_public_pages(tmp_path, omit={"apmx"})
+    assert registry_docs_mismatches(cli, tmp_path) == (["apmx"], [])
+    _render_page(tmp_path, "apmx")
+    assert registry_docs_mismatches(cli, tmp_path) == ([], [])
+
+
 def test_hidden_alias_does_not_require_rendered_page(tmp_path: Path) -> None:
     """The hidden info alias must not create a second documentation contract."""
     public = _render_public_pages(tmp_path)

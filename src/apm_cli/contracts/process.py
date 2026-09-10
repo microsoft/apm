@@ -9,6 +9,9 @@ import subprocess
 import time
 from pathlib import Path
 
+from apm_cli.utils.git_env import get_git_executable
+from apm_cli.utils.subprocess_env import external_process_env
+
 from .events import EventEmitter
 from .models import (
     ByteSink,
@@ -220,12 +223,15 @@ def local_git(
     accepted_codes: tuple[int, ...] = (0,),
 ) -> bytes:
     """Run a bounded local Git operation without inherited hooks or Git overrides."""
-    executable = shutil.which("git")
-    if executable is None:
+    try:
+        executable = get_git_executable()
+    except FileNotFoundError as exc:
         raise ContractError(
             "Git is required for captured assessment workspaces.", code="git_missing"
-        )
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        ) from exc
+    env = {
+        key: value for key, value in external_process_env().items() if not key.startswith("GIT_")
+    }
     env.update(
         GIT_CONFIG_NOSYSTEM="1",
         GIT_CONFIG_GLOBAL=os.devnull,

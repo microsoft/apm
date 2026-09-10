@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from ..utils.atomic_io import atomic_write_text
+from ..utils.git_env import redact_git_diagnostic
 from ..utils.path_security import has_symlink_component
 from .models import (
     Artifact,
@@ -105,7 +106,11 @@ class AttemptStore:
                         {
                             "root": plan.source.root,
                             "contract_relative_path": plan.source.contract_relative_path,
-                            "package_ref": plan.source.package_ref,
+                            "package_ref": (
+                                redact_git_diagnostic(plan.source.package_ref)
+                                if plan.source.package_ref
+                                else None
+                            ),
                             "resolved_commit": plan.source.resolved_commit,
                             "package_hash": plan.source.package_hash,
                             "prepared_hash": plan.source.prepared_hash,
@@ -184,22 +189,26 @@ class AttemptStore:
         try:
             self._write()
         except OSError as exc:
-            self._data.update(
-                complete=False,
-                phase="finalization_failed",
-                result=replace(result, outcome=Outcome.HALTED, stop_reason="finalization_failure"),
-            )
-            try:
-                self._write()
-            except OSError as repair_error:
-                raise ContractError(
-                    f"Run record finalization failed at {self.record_path}; failure-state "
-                    "persistence also failed. Treat this invocation as HALTED and do not "
-                    "rely on a visible success record.",
-                    code="finalization_failure",
-                ) from repair_error
+            self.fail_finalization(result, exc)
+
+    def fail_finalization(self, result: RunResult, error: Exception) -> None:
+        """Retain the same incomplete state for transcript and record failures."""
+        self._data.update(
+            complete=False,
+            phase="finalization_failed",
+            result=replace(result, outcome=Outcome.HALTED, stop_reason="finalization_failure"),
+        )
+        try:
+            self._write()
+        except OSError as repair_error:
             raise ContractError(
-                f"Run record finalization failed at {self.record_path}. The attempt is "
-                "incomplete; inspect filesystem durability before retrying.",
+                f"Run record finalization failed at {self.record_path}; failure-state "
+                "persistence also failed. Treat this invocation as HALTED and do not "
+                "rely on a visible success record.",
                 code="finalization_failure",
-            ) from exc
+            ) from repair_error
+        raise ContractError(
+            f"Run record finalization failed at {self.record_path}. The attempt is "
+            "incomplete; inspect filesystem durability before retrying.",
+            code="finalization_failure",
+        ) from error

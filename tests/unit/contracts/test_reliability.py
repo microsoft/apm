@@ -17,6 +17,7 @@ from apm_cli.contracts.models import (
     CheckObservation,
     ContractError,
     ContractLimits,
+    ContractSource,
     LeafContract,
     LeafPlan,
     Outcome,
@@ -278,6 +279,45 @@ def test_record_is_private_atomic_and_observed_not_claimed(tmp_path: Path) -> No
     assert store.record_path.stat().st_mode & 0o777 == 0o600
     assert store.directory.stat().st_mode & 0o777 == 0o700
     assert "not protected" in data["provenance"]
+
+
+def test_record_redacts_credentials_in_package_reference(tmp_path: Path) -> None:
+    plan = _plan(tmp_path)
+    plan = replace(
+        plan,
+        source=ContractSource(
+            tmp_path,
+            "test.contract.md",
+            "https://user:private-token@github.com/org/repo?token=query-secret",
+        ),
+    )
+    store = records.AttemptStore.create(plan)
+    retained = store.record_path.read_text(encoding="utf-8")
+    assert "private-token" not in retained
+    assert "query-secret" not in retained
+    assert json.loads(retained)["source"]["package"]["package_ref"]
+
+
+def test_local_git_uses_trusted_lookup_and_unfrozen_child_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Frozen execution must not hand bundled library paths to system Git."""
+    requests = []
+    monkeypatch.setattr(process, "get_git_executable", lambda: "/trusted/git")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/bundle/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/system/lib")
+    monkeypatch.setenv("GIT_DIR", "/foreign/repository")
+
+    def observe(request, **kwargs):
+        requests.append(request)
+        return ProcessObservation(0)
+
+    monkeypatch.setattr(process, "supervise_process", observe)
+    assert process.local_git(tmp_path, "status") == b""
+    assert requests[0].argv[0] == "/trusted/git"
+    assert requests[0].env["LD_LIBRARY_PATH"] == "/system/lib"
+    assert "GIT_DIR" not in requests[0].env
 
 
 def test_durable_atomic_writer_syncs_file_and_directory(

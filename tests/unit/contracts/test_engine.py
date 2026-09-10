@@ -34,6 +34,41 @@ pytestmark = [
 ]
 
 
+@pytest.mark.parametrize("failure_stage", ["close", "record_update"])
+def test_finalization_failure_repairs_record_before_reporting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_stage: str
+) -> None:
+    """Post-execution persistence failures cannot leave an apparently active attempt."""
+    plan = _plan(tmp_path, ())
+    _fake_adapter(monkeypatch, plan)
+    logger = ContractLogger()
+    if failure_stage == "close":
+        close = logger.close
+
+        def fail_close() -> None:
+            close()
+            raise OSError("transcript sync failed")
+
+        monkeypatch.setattr(logger, "close", fail_close)
+    else:
+        update = engine.records.AttemptStore.update
+
+        def fail_record(self, phase: str, **observations: object) -> None:
+            if phase == "record":
+                raise OSError("record update failed")
+            update(self, phase, **observations)
+
+        monkeypatch.setattr(engine.records.AttemptStore, "update", fail_record)
+    with pytest.raises(ContractError) as failure:
+        engine.run_contract(plan, logger=logger, allow_advisory=True)
+    assert failure.value.code == "finalization_failure"
+    record = next((tmp_path / ".apm" / "runs").glob("*/record.json"))
+    data = json.loads(record.read_text(encoding="utf-8"))
+    assert data["phase"] == "finalization_failed"
+    assert data["complete"] is False
+    assert data["result"]["outcome"]["name"] == "HALTED"
+
+
 def _python_check(name: str, code: str) -> CheckSpec:
     return CheckSpec(name, f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}")
 

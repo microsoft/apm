@@ -598,6 +598,7 @@ def test_literal_group_import_converts_system_exit_to_import_error(
 
 
 _EXPECTED_RULE_ID_TEXT = """
+contracts-leaf-runtime-owners
 contracts-tests-executable-contract-authorities
 contracts-tests-lifecycle-smoke-partition
 contracts-tests-taxonomy-classification

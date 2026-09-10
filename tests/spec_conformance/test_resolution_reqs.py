@@ -213,6 +213,52 @@ def test_resolver_replays_locked_commit_without_network():
     )
 
 
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize("planning", [True, False])
+def test_packaged_contract_replays_caller_lock_without_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, planning: bool
+) -> None:
+    """The packaged-job consumer reuses the same locked Git identity offline."""
+    from apm_cli.contracts.models import ContractLimits
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.contract_source import prepare_contract_source
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    ref = DependencyReference.parse("example/job#stable")
+    installed = ref.get_install_path(tmp_path / "apm_modules")
+    installed.mkdir(parents=True)
+    (installed / "apm.yml").write_text("name: job\nversion: 1.0.0\n", encoding="ascii")
+    (installed / "job.contract.md").write_text(
+        "---\nproduces: result.txt\nverify:\n  result: echo checked\n---\nWrite the result.\n",
+        encoding="ascii",
+    )
+    (tmp_path / "apm.yml").write_text(
+        "name: caller\nversion: 1.0.0\ndependencies:\n  apm: [example/job#stable]\n",
+        encoding="ascii",
+    )
+    locked = LockedDependency.from_dependency_ref(ref, "d" * 40, depth=1, resolved_by=None)
+    locked.content_hash = compute_package_hash(installed)
+    lock = LockFile()
+    lock.add_dependency(locked)
+    lock.write(tmp_path / "apm.lock.yaml")
+    before = (tmp_path / "apm.lock.yaml").read_bytes()
+
+    def refuse_network(*args: object, **kwargs: object) -> None:
+        raise AssertionError("A matching materialized lock must not resolve or fetch")
+
+    monkeypatch.setattr("apm_cli.deps.github_downloader.GitHubPackageDownloader", refuse_network)
+    with prepare_contract_source(
+        str(ref),
+        "job.contract.md",
+        caller_root=tmp_path,
+        planning=planning,
+        limits=ContractLimits(),
+    ) as source:
+        assert source.resolved_commit == locked.resolved_commit
+        assert source.package_hash == locked.content_hash
+    assert (tmp_path / "apm.lock.yaml").read_bytes() == before
+
+
 @pytest.mark.req("req-rs-016")
 def test_resolver_cache_preserves_complete_repository_identity(tmp_path: Path):
     """Distinct nested repositories stay separate; identical identities reuse."""
