@@ -719,6 +719,7 @@ transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
 transport-platform-github-throttle
+transport-platform-gitlab-sparse-plan
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-network-host-parsing
