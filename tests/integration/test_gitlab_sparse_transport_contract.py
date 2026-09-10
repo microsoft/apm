@@ -232,7 +232,6 @@ def test_local_read_failure_is_terminal(
     state["api"].assert_not_called()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Creating symlinks requires Windows privileges")
 def test_cached_symlink_escape_is_terminal(materialization: dict) -> None:
     """P6: real containment is rechecked before reading even an existing checkout."""
     state = materialization
@@ -240,7 +239,10 @@ def test_cached_symlink_escape_is_terminal(materialization: dict) -> None:
     transport = next(iter(state["owner"]._strategies._git_file_transports.values()))
     target = transport._work_dir / _PATHS[0]
     target.unlink()
-    target.symlink_to(transport._work_dir.parent / "outside.md")
+    try:
+        target.symlink_to(transport._work_dir.parent / "outside.md")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Symlink creation unavailable: {exc}")
     state["owner"]._allow_fallback = True
     with pytest.raises(PathTraversalError):
         _fetch(state, _PATHS[0], "main")
