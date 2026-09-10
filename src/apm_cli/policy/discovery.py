@@ -1064,8 +1064,16 @@ def _gitlab_walk_candidate(
     outcome wins; an ``absent`` level continues to the next-shallower group.
     When every level is absent the last ``absent`` result is returned so the
     caller's candidate cascade can proceed unchanged.
+
+    GitLab returns 404 both for a missing project and for a private project the
+    token cannot read, so an ``absent`` is ambiguous. Before applying an
+    ancestor policy over one or more skipped closer levels, verify (via
+    authenticated Git) that no skipped closer ``apm-policy`` project actually
+    exists; if one does, its policy was concealed and we fail closed rather than
+    silently apply the weaker ancestor.
     """
     result = PolicyFetchResult(error=None, outcome="absent")
+    skipped: list[str] = []
     for namespace in namespaces:
         result = _gitlab._fetch_from_gitlab_repo(
             org=namespace,
@@ -1078,13 +1086,37 @@ def _gitlab_walk_candidate(
             cache_only=cache_only,
         )
         if result.outcome != "absent":
+            if skipped and result.outcome in {"found", "empty"}:
+                concealed = _gitlab.first_concealed_closer_policy(
+                    skipped, candidate_repo, host=host, port=port
+                )
+                if concealed is not None:
+                    return _gitlab_concealed_closer_result(concealed, candidate_repo, host, port)
             return result
+        skipped.append(namespace)
         logger.debug(
             "GitLab policy absent at %s/%s; trying parent group",
             namespace,
             candidate_repo,
         )
     return result
+
+
+def _gitlab_concealed_closer_result(
+    namespace: str, repo: str, host: str, port: int | None
+) -> PolicyFetchResult:
+    """Fail-closed result when a skipped closer GitLab policy project exists."""
+    host_label = f"{host}:{port}" if port is not None else host
+    return PolicyFetchResult(
+        source=f"org:{host_label}/{namespace}/{repo}",
+        error=(
+            f"A closer GitLab policy project {namespace}/{repo} exists but its "
+            "apm-policy.yml could not be read (GitLab returns 404 for a private "
+            "project the token cannot access); refusing to silently apply a weaker "
+            "ancestor policy. Grant the token read access to that project, or remove it."
+        ),
+        outcome="cache_miss_fetch_fail",
+    )
 
 
 def _remote_url_parts(url: str) -> tuple[str, list[str]] | None:

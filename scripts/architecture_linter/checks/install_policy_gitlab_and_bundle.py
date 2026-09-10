@@ -126,6 +126,9 @@ _REMOTE_PARSER_DEFS = re.compile(
 _REMOTE_PARSER_DEF_COUNT = 3
 
 
+_REMOTE_ORIGIN_READ_COUNT = 1
+
+
 def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation, ...]:
     """Reading and parsing the project git remote for policy discovery has one owner.
 
@@ -150,6 +153,17 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
                 "Policy discovery must define exactly "
                 f"{_REMOTE_PARSER_DEF_COUNT} canonical git-remote read/parse helpers "
                 f"(found {definitions})",
+            )
+        )
+    origin_reads = _count_re(owner, _REMOTE_ORIGIN_ARGV)
+    if origin_reads != _REMOTE_ORIGIN_READ_COUNT:
+        findings.append(
+            _report(
+                rule_id,
+                _POLICY_DISCOVERY,
+                "Policy discovery must read the git remote origin exactly "
+                f"{_REMOTE_ORIGIN_READ_COUNT} time via _git_remote_origin_url "
+                f"(found {origin_reads} origin-read argv occurrences)",
             )
         )
     findings.extend(

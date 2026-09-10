@@ -110,6 +110,31 @@ def _gitlab_project_state_via_git(
         return None
 
 
+def first_concealed_closer_policy(
+    skipped_namespaces: list[str],
+    repo: str,
+    *,
+    host: str,
+    port: int | None,
+) -> str | None:
+    """Return the closest skipped namespace whose ``apm-policy`` project exists.
+
+    During the subgroup walk (see :func:`discovery._gitlab_walk_candidate`) an
+    ``absent`` level is ambiguous -- GitLab returns 404 both for a missing
+    project and for a private one the token cannot read. Before an ancestor
+    policy is applied over the skipped closer levels, this confirms via
+    authenticated Git whether any skipped closer ``apm-policy`` project actually
+    exists. It returns the closest such namespace (its ``absent`` was a
+    concealed 404, so the caller must fail closed), or ``None`` when no skipped
+    level's project can be confirmed. ``skipped_namespaces`` is ordered
+    closest-first.
+    """
+    for namespace in skipped_namespaces:
+        if _gitlab_project_state_via_git(org=namespace, repo=repo, host=host, port=port) is True:
+            return namespace
+    return None
+
+
 def _fetch_gitlab_chain_parent(
     parent_ref: str,
     *,

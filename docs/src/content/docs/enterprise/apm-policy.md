@@ -95,6 +95,10 @@ A bare nested `extends:` ref whose first segment contains a dot (e.g. a group na
 
 Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project with no `apm-policy` at any level (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
 
+:::caution[Concealed private policy projects]
+GitLab returns HTTP 404 both for a missing project and for a private one the token cannot read, so a closer `apm-policy` a team publishes could otherwise be silently skipped in favour of a weaker ancestor. Before applying an ancestor policy over a skipped closer level, APM confirms via authenticated Git that the skipped closer `apm-policy` project does not exist; if Git confirms it *does* exist, discovery fails closed rather than downgrade. The residual case where the token can read neither the policy file nor the project over Git is indistinguishable from a genuinely absent project and still ascends -- grant the CI token read access to every `apm-policy` project it should honour.
+:::
+
 :::caution[Self-managed GitLab requires GITLAB_HOST or APM_GITLAB_HOSTS]
 An arbitrary FQDN is never auto-classified as GitLab -- the same domain shape could be Bitbucket, Gitea, or a plain git server. `gitlab.com` is recognised automatically, but a self-managed instance (e.g. `gitlab.example.com`) is only recognised once you set `GITLAB_HOST=gitlab.example.com` (or `APM_GITLAB_HOSTS` for more than one instance). Without it, APM falls through to the GitHub-style cascade above, which is invalid on GitLab and behaves exactly like the unfixed discovery this section describes. This mirrors `GITHUB_HOST` for GitHub Enterprise Server and `ADO_HOST` for on-prem Azure DevOps Server -- see [Environment Variables](../../reference/environment-variables/).
 :::
