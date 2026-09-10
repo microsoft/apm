@@ -1016,7 +1016,12 @@ def _gitlab_walk_candidate(
         if result.outcome != "absent":
             if skipped and result.outcome in {"found", "empty"}:
                 concealed = _gitlab.first_concealed_closer_policy(
-                    skipped, candidate_repo, host=host, port=port
+                    skipped,
+                    candidate_repo,
+                    host=host,
+                    port=port,
+                    project_root=project_root,
+                    no_cache=no_cache,
                 )
                 if concealed is not None:
                     return _gitlab_concealed_closer_result(concealed, candidate_repo, host, port)
@@ -1033,7 +1038,14 @@ def _gitlab_walk_candidate(
 def _gitlab_concealed_closer_result(
     namespace: str, repo: str, host: str, port: int | None
 ) -> PolicyFetchResult:
-    """Fail-closed result when a skipped closer GitLab policy project exists."""
+    """Fail-closed result when a skipped closer GitLab policy project exists.
+
+    Uses ``incomplete_chain`` -- an outcome that ALWAYS fails closed in
+    :func:`outcome_routing.route_discovery_outcome`, regardless of the project's
+    ``policy.fetch_failure_default`` -- because a concealed closer policy is a
+    governance ambiguity that must never silently downgrade to a weaker ancestor
+    (a ``cache_miss_fetch_fail`` here would default to ``warn`` and proceed).
+    """
     host_label = f"{host}:{port}" if port is not None else host
     return PolicyFetchResult(
         source=f"org:{host_label}/{namespace}/{repo}",
@@ -1043,7 +1055,7 @@ def _gitlab_concealed_closer_result(
             "project the token cannot access); refusing to silently apply a weaker "
             "ancestor policy. Grant the token read access to that project, or remove it."
         ),
-        outcome="cache_miss_fetch_fail",
+        outcome="incomplete_chain",
     )
 
 

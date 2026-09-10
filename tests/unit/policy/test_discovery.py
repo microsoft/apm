@@ -250,6 +250,64 @@ class TestFirstConcealedCloserPolicy(unittest.TestCase):
         )
         self.assertIsNone(result)
 
+    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
+    def test_returns_closest_confirmed_when_match_is_a_middle_level(self, mock_state):
+        # Only the MIDDLE skipped namespace is git-confirmed to exist; the
+        # closest-first scan must return it, not None and not a farther level.
+        mock_state.side_effect = lambda **kw: True if kw["org"] == "acme/dept-a" else None
+        result = first_concealed_closer_policy(
+            ["acme/dept-a/team-x", "acme/dept-a", "acme"],
+            "apm-policy",
+            host="gitlab.com",
+            port=None,
+        )
+        self.assertEqual(result, "acme/dept-a")
+
+    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
+    def test_returns_the_closest_of_multiple_confirmed(self, mock_state):
+        # When several skipped levels exist, the CLOSEST (first) wins.
+        mock_state.return_value = True
+        result = first_concealed_closer_policy(
+            ["acme/dept-a/team-x", "acme/dept-a", "acme"],
+            "apm-policy",
+            host="gitlab.com",
+            port=None,
+        )
+        self.assertEqual(result, "acme/dept-a/team-x")
+
+    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
+    def test_absent_verdict_is_cached_so_the_probe_runs_once(self, mock_state):
+        # With project_root set, a genuine-absent git verdict is cached, so a
+        # second walk over the same level does not re-probe the network.
+        mock_state.return_value = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            first = first_concealed_closer_policy(
+                ["acme/dept-a"], "apm-policy", host="gitlab.com", port=None, project_root=root
+            )
+            second = first_concealed_closer_policy(
+                ["acme/dept-a"], "apm-policy", host="gitlab.com", port=None, project_root=root
+            )
+        self.assertIsNone(first)
+        self.assertIsNone(second)
+        self.assertEqual(mock_state.call_count, 1)  # cached: probed once, not twice
+
+    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
+    def test_no_cache_bypasses_the_concealment_cache(self, mock_state):
+        mock_state.return_value = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            for _ in range(2):
+                first_concealed_closer_policy(
+                    ["acme/dept-a"],
+                    "apm-policy",
+                    host="gitlab.com",
+                    port=None,
+                    project_root=root,
+                    no_cache=True,
+                )
+        self.assertEqual(mock_state.call_count, 2)  # no_cache: re-probes each time
+
 
 class TestExtractOrgFromGitRemote(unittest.TestCase):
     """Test _extract_org_from_git_remote with mocked subprocess."""
@@ -1284,8 +1342,26 @@ class TestAutoDiscover(unittest.TestCase):
             result = _auto_discover(Path(tmpdir), no_cache=True)
 
         self.assertFalse(result.found)
-        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        # ``incomplete_chain`` ALWAYS fails closed (unlike cache_miss_fetch_fail,
+        # which defaults to warn) -- the concealed policy must never downgrade.
+        self.assertEqual(result.outcome, "incomplete_chain")
         self.assertIn("acme/dept-a/team-x/apm-policy", result.error)
+
+    def test_gitlab_concealed_result_blocks_even_with_fetch_failure_default_warn(self):
+        """The concealed-closer outcome blocks install under the DEFAULT warn
+        knob -- proving the fix is fail-closed, not fail-open (#2753 review)."""
+        from apm_cli.install.errors import PolicyViolationError
+        from apm_cli.policy.discovery import _gitlab_concealed_closer_result
+        from apm_cli.policy.outcome_routing import route_discovery_outcome
+
+        concealed = _gitlab_concealed_closer_result("acme/dept-a", "apm-policy", "gitlab.com", None)
+        with self.assertRaises(PolicyViolationError):
+            route_discovery_outcome(
+                concealed,
+                logger=None,
+                fetch_failure_default="warn",
+                raise_blocking_errors=True,
+            )
 
     @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
     @patch("apm_cli.policy.discovery._gitlab_namespace_descending")

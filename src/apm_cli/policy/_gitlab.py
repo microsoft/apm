@@ -116,6 +116,8 @@ def first_concealed_closer_policy(
     *,
     host: str,
     port: int | None,
+    project_root: Path | None = None,
+    no_cache: bool = False,
 ) -> str | None:
     """Return the closest skipped namespace whose ``apm-policy`` project exists.
 
@@ -128,11 +130,84 @@ def first_concealed_closer_policy(
     concealed 404, so the caller must fail closed), or ``None`` when no skipped
     level's project can be confirmed. ``skipped_namespaces`` is ordered
     closest-first.
+
+    Each ``git ls-remote`` probe is cached per ``(host, namespace, repo)`` under
+    the project's policy cache (same TTL as policies) so the common "team
+    inherits the org policy" path -- every install re-walking the same absent
+    closer levels -- does not pay a fresh network round-trip per level on every
+    run. Pass ``project_root`` to enable the cache; ``no_cache`` bypasses it.
     """
     for namespace in skipped_namespaces:
-        if _gitlab_project_state_via_git(org=namespace, repo=repo, host=host, port=port) is True:
+        cached = (
+            None
+            if (no_cache or project_root is None)
+            else _read_concealment_verdict(project_root, host, port, namespace, repo)
+        )
+        if cached == "present":
+            return namespace
+        if cached == "absent":
+            continue
+        exists = _gitlab_project_state_via_git(org=namespace, repo=repo, host=host, port=port)
+        if not no_cache and project_root is not None:
+            _write_concealment_verdict(
+                project_root, host, port, namespace, repo, "present" if exists else "absent"
+            )
+        if exists is True:
             return namespace
     return None
+
+
+def _concealment_cache_file(project_root: Path, host: str, port: int | None, ns: str, repo: str):
+    """Return the cache file path for one namespace's concealment verdict."""
+    from .discovery import _cache_key, _get_cache_dir
+
+    host_label = f"{host}:{port}" if port is not None else host
+    key = _cache_key(f"concealment:{host_label}/{ns}/{repo}")
+    return _get_cache_dir(project_root) / f"concealment_{key}.json"
+
+
+def _read_concealment_verdict(
+    project_root: Path, host: str, port: int | None, ns: str, repo: str
+) -> str | None:
+    """Return a fresh cached ``"present"``/``"absent"`` verdict, or ``None``."""
+    import json
+    import time
+
+    from .discovery import CACHE_SCHEMA_VERSION, DEFAULT_CACHE_TTL
+
+    try:
+        raw = _concealment_cache_file(project_root, host, port, ns, repo).read_text(
+            encoding="utf-8"
+        )
+        data = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    if data.get("schema") != CACHE_SCHEMA_VERSION:
+        return None
+    if time.time() - float(data.get("ts", 0)) > DEFAULT_CACHE_TTL:
+        return None
+    verdict = data.get("verdict")
+    return verdict if verdict in ("present", "absent") else None
+
+
+def _write_concealment_verdict(
+    project_root: Path, host: str, port: int | None, ns: str, repo: str, verdict: str
+) -> None:
+    """Persist a concealment verdict (best-effort; cache write never blocks)."""
+    import json
+    import time
+
+    from .discovery import CACHE_SCHEMA_VERSION
+
+    path = _concealment_cache_file(project_root, host, port, ns, repo)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"schema": CACHE_SCHEMA_VERSION, "verdict": verdict, "ts": time.time()}),
+            encoding="utf-8",
+        )
+    except OSError:
+        return
 
 
 def _fetch_gitlab_chain_parent(

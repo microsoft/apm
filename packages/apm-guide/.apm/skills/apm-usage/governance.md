@@ -429,6 +429,11 @@ closest `apm-policy` (e.g. `acme/dept-a/team-x/apm-policy` before
 `acme/dept-a/apm-policy` before `acme/apm-policy`), so a team can scope its own
 policy under a subgroup; a team policy can `extends:` an ancestor group's policy
 to inherit it. A flat `<group>/<project>` remote probes only `<group>/apm-policy`.
+Because GitLab 404s a private project the token cannot read, before applying an
+ancestor policy over a skipped closer level APM confirms via authenticated Git
+that the closer `apm-policy` project does not exist; if it does, discovery fails
+closed unconditionally (blocking install) rather than downgrade to the weaker
+ancestor -- grant the token read access to every `apm-policy` it should honour.
 Configure a self-managed host with
 `GITLAB_HOST` or `APM_GITLAB_HOSTS`, and use `APM_GITLAB_POLICY_REPO` to select
 another project name. Repositories with no detectable git remote (unpacked
