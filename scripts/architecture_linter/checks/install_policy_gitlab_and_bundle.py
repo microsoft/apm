@@ -119,11 +119,12 @@ _REMOTE_ORIGIN_ARGV = re.compile(r'"remote",\s*"get-url",\s*"origin"')
 
 
 _REMOTE_PARSER_DEFS = re.compile(
-    r"^def (_remote_url_parts|_parse_remote_url|_git_remote_origin_url)\("
+    r"^def (_remote_url_parts|_parse_remote_url|_git_remote_origin_url"
+    r"|_extract_org_host_port_from_git_remote)\("
 )
 
 
-_REMOTE_PARSER_DEF_COUNT = 3
+_REMOTE_PARSER_DEF_COUNT = 4
 
 
 _REMOTE_ORIGIN_READ_COUNT = 1
@@ -136,11 +137,12 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
     """Reading and parsing the project git remote for policy discovery has one owner.
 
     ``policy/_remote.py`` is the sole reader of ``git remote get-url origin`` and
-    the sole home of the remote-URL splitter/parsers (``_remote_url_parts``,
-    ``_parse_remote_url``, ``_git_remote_origin_url``). The owner MUST define all
-    three helpers, and no other module in the policy tree may re-read or re-parse
-    the remote -- either would reintroduce the double-read / divergent-parse the
-    single-owner refactor removed (#2753).
+    the sole home of the remote-URL splitter/parsers/identity extractor
+    (``_remote_url_parts``, ``_parse_remote_url``, ``_git_remote_origin_url``,
+    ``_extract_org_host_port_from_git_remote``). The owner MUST define all four,
+    and no other module in the policy tree may re-read or re-parse the remote --
+    either would reintroduce the double-read / divergent-parse the single-owner
+    refactor removed (#2753).
     """
     rule_id = RULE_REMOTE_ORIGIN_OWNER
     owner, owner_fail = _configured(provider, _REMOTE_MODULE, rule_id)
