@@ -161,6 +161,67 @@ def test_predeclared_source_collision_refuses_with_exit_one(workspace: Path) -> 
     assert snapshot(workspace.parent) == before
 
 
+@pytest.mark.parametrize("inventoried", [False, True])
+@pytest.mark.parametrize("second_group", ["dependencies", "devDependencies"])
+def test_existing_slot_collision_blocks_unrelated_addition(
+    workspace: Path, inventoried: bool, second_group: str
+) -> None:
+    """Validate every existing reference, even when discovery would skip it."""
+    prefix = ".claude/skills/" if inventoried else ""
+    first, second = (f"{prefix}{name}/review" for name in ("a", "b"))
+    skill(workspace, first)
+    skill(workspace, second)
+    skill(workspace, ".claude/skills/unrelated")
+    manifest = (
+        "# Keep all existing declarations\nname: consumer\nversion: 1.0.0\n"
+        f"dependencies:\n  apm:\n    - ./{first}\n"
+    )
+    if second_group == "devDependencies":
+        manifest += "devDependencies:\n  apm:\n"
+    manifest += f"    - path: ./{second}\n      targets: [copilot]\n"
+    (workspace / "apm.yml").write_text(manifest)
+    before = snapshot(workspace.parent)
+
+    preview = invoke("--format", "json")
+    assert preview.exit_code == 0, preview.output
+    report = json.loads(preview.output)
+    assert report["additions"] == [{"path": "./.claude/skills/unrelated"}]
+    result = invoke("--apply", "--yes", "--format", "json")
+    assert result.exit_code == 1, result.output
+    assert "collision" in result.output
+    assert any(
+        item["status"] == "unsafe" and "collision" in item["reason"] for item in report["findings"]
+    )
+    assert snapshot(workspace.parent) == before
+
+
+def test_repeated_equivalent_references_preserve_options_while_adding(workspace: Path) -> None:
+    """Equivalent string/object references are not conflicting install slots."""
+    source = skill(workspace)
+    skill(workspace, ".claude/skills/unrelated")
+    manifest = workspace / "apm.yml"
+    manifest.write_text(
+        "# Preserve repeated declarations and their options\n"
+        "name: consumer\nversion: 1.0.0\ndependencies:\n  apm:\n"
+        "    - ./.claude/skills/review\n"
+        f"    - path: {source}\n      alias: custom\n      targets: [copilot]\n"
+    )
+    original_entries = load_yaml(manifest)["dependencies"]["apm"]
+    result = invoke("--apply", "--yes", "--format", "json")
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert not any(item["status"] == "unsafe" for item in report["findings"])
+    assert report["additions"] == [{"path": "./.claude/skills/unrelated"}]
+    assert load_yaml(manifest)["dependencies"]["apm"] == [
+        *original_entries,
+        {"path": "./.claude/skills/unrelated"},
+    ]
+    assert manifest.read_bytes().startswith(b"# Preserve repeated declarations and their options\n")
+    applied = snapshot(workspace.parent)
+    assert invoke("--apply", "--yes").exit_code == 0
+    assert snapshot(workspace.parent) == applied
+
+
 @pytest.mark.parametrize("symlink_kind", ["source", "nested", "manifest"])
 def test_unsafe_symlinks_refuse_before_write(workspace: Path, symlink_kind: str) -> None:
     source = skill(workspace)

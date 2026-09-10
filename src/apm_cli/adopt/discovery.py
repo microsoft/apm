@@ -127,15 +127,29 @@ def discover(root: Path, manifest: Path, *, user_scope: bool = False) -> dict[st
     _, references, _ = read_manifest(manifest, root)
     consumer = manifest.parent
     declared = {local_directory(ref, consumer) for ref in references if ref.is_local}
-    slots = {
-        ref.get_install_path(consumer / "apm_modules"): (
-            local_directory(ref, consumer) if ref.is_local else ref.get_unique_key()
-        )
-        for ref in references
-        if not ref.is_marketplace
-    }
+    slots: dict[Path, set[Path | str]] = {}
+    for ref in references:
+        if not ref.is_marketplace:
+            identity = local_directory(ref, consumer) if ref.is_local else ref.get_unique_key()
+            slot = ref.get_install_path(consumer / "apm_modules")
+            slots.setdefault(slot, set()).add(identity)
     managed = _managed_paths(consumer, root)
     findings: list[dict[str, Any]] = []
+    for slot, identities in slots.items():
+        if len(identities) > 1:
+            findings.append(
+                {
+                    "path": manifest.relative_to(root).as_posix(),
+                    "kind": "manifest",
+                    "status": "unsafe",
+                    "reason": (
+                        "Existing dependency install identity collision at "
+                        f"{slot.relative_to(consumer).as_posix()}. "
+                        "Remove conflicting references and retry."
+                    ),
+                    "dependency": None,
+                }
+            )
     supported: list[tuple[dict[str, Any], Path, Path]] = []
     for path, kind in _inventory(root, user_scope=user_scope):
         finding = {
@@ -202,7 +216,7 @@ def discover(root: Path, manifest: Path, *, user_scope: bool = False) -> dict[st
     by_slot: dict[Path, list[dict[str, Any]]] = {}
     for finding, path, slot in supported:
         by_slot.setdefault(slot, []).append(finding)
-        if slot in slots and slots[slot] != path.resolve():
+        if slot in slots and slots[slot] != {path.resolve()}:
             finding.update(
                 status="unsafe", reason="Install identity collision with an existing dependency."
             )

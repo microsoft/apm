@@ -89,3 +89,43 @@ def test_native_skill_ownership_does_not_cross_target_paths(tmp_path: Path) -> N
     assert snapshot(second) == original
     assert second not in result.target_paths
     assert len(result.target_paths) == 1
+
+
+@pytest.mark.parametrize("existing_secondary", [False, True])
+def test_native_skill_metadata_uses_first_successful_destination(
+    tmp_path: Path, existing_secondary: bool
+) -> None:
+    """A protected first target must not hide a successful later deployment."""
+    info = package(tmp_path)
+    targets = apply_legacy_skill_paths([KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]])
+    first, second = (
+        SkillIntegrator._target_skill_dir(target, tmp_path, "review") for target in targets
+    )
+    first.mkdir(parents=True)
+    (first / "SKILL.md").write_bytes(b"First target belongs to its author\r\n")
+    (first / "custom.bin").write_bytes(b"\xff\x00author")
+    managed = set()
+    if existing_secondary:
+        second.mkdir(parents=True)
+        (second / "SKILL.md").write_bytes(b"Previously managed deployment")
+        managed.add(second.relative_to(tmp_path).as_posix())
+    original = snapshot(first)
+    source = snapshot(info.install_path)
+    diagnostics = DiagnosticCollector()
+
+    result = SkillIntegrator().integrate_package_skill(
+        info, tmp_path, targets=targets, managed_files=managed, diagnostics=diagnostics
+    )
+
+    assert snapshot(first) == original
+    assert snapshot(second) == source
+    assert snapshot(info.install_path) == source
+    assert result.target_paths == [second]
+    assert result.skill_path == second / "SKILL.md"
+    assert result.skill_created is (not existing_secondary)
+    assert result.skill_updated is existing_secondary
+    assert result.skill_skipped is False
+    assert result.references_copied == len(source) == 2
+    assert [item.message for item in diagnostics.by_category()["collision"]] == [
+        first.relative_to(tmp_path).as_posix()
+    ]

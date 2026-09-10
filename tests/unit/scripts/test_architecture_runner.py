@@ -691,6 +691,7 @@ mutation_writes.mcp_passthrough_denylist
 mutation_writes.mcp_target_selection
 mutation_writes.neutral_hook_contract
 mutation_writes.user_root_scope
+onboarding-metadata-only
 contracts-tooling-root-context-write-eligibility
 registry_delegation.agents_source_attribution
 registry_delegation.bootstrap_project_name

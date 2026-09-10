@@ -1118,11 +1118,11 @@ class SkillIntegrator(BaseIntegrator):
 
         seen_skill_dirs: set[Path] = set()
 
-        for idx, target in enumerate(targets):
+        for target in targets:
             if not target.supports("skills"):
                 continue
 
-            is_primary = idx == 0  # first active target owns diagnostics
+            is_primary = primary_skill_md is None  # first successful target owns result/diagnostics
             skills_mapping = target.primitives["skills"]
             # Static targets still need the effective root for the containment guard below.
             effective_root = skills_mapping.deploy_root or target.root_dir
