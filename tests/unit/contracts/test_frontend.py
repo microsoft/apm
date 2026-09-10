@@ -1,7 +1,9 @@
 """Strict source diagnostics and read-only planning regression traps."""
 
 import hashlib
+import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -16,6 +18,13 @@ def source(tmp_path: Path, header: str = "produces: out.json\nverify:\n  valid: 
     path = tmp_path / "work.contract.md"
     path.write_text("---\n" + header + "\n---\nWrite a result.\n", encoding="utf-8")
     return path
+
+
+def changed_stat(result: os.stat_result, **changes: int) -> SimpleNamespace:
+    """Return a complete stat-like object with selected fields changed."""
+    values = {name: getattr(result, name) for name in dir(result) if name.startswith("st_")}
+    values.update(changes)
+    return SimpleNamespace(**values)
 
 
 @pytest.fixture
@@ -43,6 +52,55 @@ def test_exact_bom_crlf_body_digest_and_declaration_locations(tmp_path: Path) ->
     assert parsed.locations["produces"].line == 3
     assert parsed.checks[0].location.line == 5
     assert parsed.checks[0].location.column == 3
+
+
+@pytest.mark.windows_compat
+def test_path_timestamp_drift_does_not_change_source_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = source(tmp_path)
+    real_stat = Path.stat
+
+    def stat_with_timestamp_drift(
+        candidate: Path, *args, **kwargs
+    ) -> os.stat_result | SimpleNamespace:
+        result = real_stat(candidate, *args, **kwargs)
+        if candidate != path:
+            return result
+        return changed_stat(
+            result,
+            st_mtime_ns=result.st_mtime_ns + 1,
+            st_ctime_ns=result.st_ctime_ns + 1,
+        )
+
+    monkeypatch.setattr(Path, "stat", stat_with_timestamp_drift)
+
+    assert parse_contract(path).produces == "out.json"
+
+
+@pytest.mark.windows_compat
+def test_path_replacement_still_changes_source_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = source(tmp_path)
+    real_stat = Path.stat
+
+    def stat_with_replaced_identity(
+        candidate: Path, *args, **kwargs
+    ) -> os.stat_result | SimpleNamespace:
+        result = real_stat(candidate, *args, **kwargs)
+        if candidate != path:
+            return result
+        return changed_stat(
+            result,
+            st_ino=result.st_ino + 1,
+        )
+
+    monkeypatch.setattr(Path, "stat", stat_with_replaced_identity)
+
+    with pytest.raises(ContractError) as error:
+        parse_contract(path)
+    assert error.value.code == "source_changed"
 
 
 @pytest.mark.parametrize(

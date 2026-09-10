@@ -622,10 +622,15 @@ def load_frontmatter_document(path: Path, *, max_bytes: int = 256 * 1024) -> Fro
         after = os.fstat(source.fileno())
     current = path.stat()
 
-    def identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    def read_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
         return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
-    if identity(before) != identity(after) or identity(before) != identity(current):
+    def path_identity(info: os.stat_result) -> tuple[int, int, int]:
+        return info.st_dev, info.st_ino, info.st_size
+
+    if read_identity(before) != read_identity(after) or path_identity(before) != path_identity(
+        current
+    ):
         raise FrontmatterSourceError("Source changed while reading.", code="source_changed")
     return loads_frontmatter_document(raw, max_bytes=max_bytes)
 
