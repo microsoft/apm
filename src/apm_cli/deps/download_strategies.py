@@ -1023,6 +1023,7 @@ class DownloadDelegate:
         rest_eligible = False
         failures: list[str] = []
         last_error: GitFileTransportError | None = None
+        previous_attempt = None
         for attempt in plan.attempts:
             requested_url = attempt.requested_url or self.build_repo_url(
                 project_path,
@@ -1045,6 +1046,18 @@ class DownloadDelegate:
             )
             # Revalidate before reuse: a cached checkout must not bypass changed policy.
             effective_url = validate_git_url_rewrite_safety(requested_url, git_env) or effective_url
+            if (
+                not plan.strict
+                and previous_attempt is not None
+                and previous_attempt.scheme != attempt.scheme
+            ):
+                _rich_warning(
+                    redact_git_diagnostic(
+                        f"Protocol fallback: {previous_attempt.label} GitLab sparse fetch of "
+                        f"{project_path} failed; retrying with {attempt.label}."
+                    ),
+                    symbol="warning",
+                )
             try:
                 content = self._download_gitlab_file_via_git(
                     dep_ref,
@@ -1057,6 +1070,7 @@ class DownloadDelegate:
                 )
             except GitFileTransportError as exc:
                 last_error = exc
+                previous_attempt = attempt
                 failures.append(redact_git_diagnostic(f"{attempt.label}: {exc}"))
                 rest_eligible = rest_eligible or self._gitlab_rest_eligible(
                     effective_url, host_info.api_base

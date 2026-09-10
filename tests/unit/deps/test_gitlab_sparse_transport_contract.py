@@ -240,8 +240,46 @@ def test_opt_in_fallback_order_port_and_warning(
     assert {_components(remote)[2:4] for remote, _, _ in attempts} == {
         ("gitlab-ssh.example.com", 2222)
     }
-    warning.assert_called_once()
+    notices = [call.args[0] for call in warning.call_args_list]
+    assert len([notice for notice in notices if notice.startswith("Custom port ")]) == 1
+    assert len(notices) == (1 if successful_attempt == 0 else 2)
     assert api.call_count == (1 if successful_attempt is None else 0)
+
+
+@pytest.mark.parametrize("scheme", ["ssh", "https"])
+@pytest.mark.parametrize("allow_fallback", [False, True])
+@pytest.mark.parametrize("first_fails", [False, True])
+def test_protocol_switch_warning_matches_executed_attempts(
+    downloader: GitHubPackageDownloader, scheme: str, allow_fallback: bool, first_fails: bool
+) -> None:
+    """Warn only after failure actually advances an opt-in cross-protocol attempt."""
+    downloader._allow_fallback = allow_fallback
+    first = GitFileTransportError("unavailable") if first_fails else b"Git"
+    attempts, api = _capture(downloader, [first, b"Git"])
+    dep = _dep(f"{scheme}://gitlab.com/group/repo.git")
+    with patch("apm_cli.deps.download_strategies._rich_warning") as warning:
+        if first_fails and not allow_fallback:
+            if scheme == "ssh":
+                with pytest.raises(RuntimeError, match="REST is not authorized"):
+                    downloader._download_github_file(dep, "agents/spec.agent.md", "main")
+            else:
+                assert downloader._download_github_file(dep, "agents/spec.agent.md") == b"REST"
+        else:
+            assert downloader._download_github_file(dep, "agents/spec.agent.md") == b"Git"
+    switched = first_fails and allow_fallback
+    assert len(attempts) == (2 if switched else 1)
+    messages = [call.args[0] for call in warning.call_args_list]
+    labels = ("SSH", "plain HTTPS") if scheme == "ssh" else ("plain HTTPS", "SSH")
+    expected = (
+        [
+            f"Protocol fallback: {labels[0]} GitLab sparse fetch of group/repo "
+            f"failed; retrying with {labels[1]}."
+        ]
+        if switched
+        else []
+    )
+    assert messages == expected, "P11 warn exactly when the executed protocol changes"
+    assert api.call_count == int(first_fails and not allow_fallback and scheme == "https")
 
 
 def test_https_rest_preserves_headers_endpoint_and_ref(

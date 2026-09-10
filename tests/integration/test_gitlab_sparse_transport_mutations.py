@@ -155,6 +155,14 @@ MUTATIONS: tuple[Mutation, ...] = (
         f"{GIT_CONTRACT}::test_real_git_manifest_remote_bytes_and_single_fetch[v1]",
         "P9 requested ref must materialize exact local Git bytes",
     ),
+    Mutation(
+        "M10-silent-protocol-switch",
+        "download_gitlab_file",
+        "                and previous_attempt is not None\n",
+        "                and False\n",
+        f"{UNIT_CONTRACT}::test_protocol_switch_warning_matches_executed_attempts[True-True-ssh]",
+        "P11 warn exactly when the executed protocol changes",
+    ),
 )
 
 
@@ -270,7 +278,7 @@ def passing_candidate(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path
     candidate = root / "candidate"
     _copy_candidate(candidate)
     nodes = tuple(dict.fromkeys(mutation.node for mutation in MUTATIONS))
-    assert len(MUTATIONS) == 13, "Expected 13 behavioral mutants plus the separate static M9"
+    assert len(MUTATIONS) == 14, "Expected 14 behavioral mutants plus the separate static M9"
     result, cases = _run_contracts(candidate, root / "baseline-run", nodes)
     assert result.returncode == 0, f"Unmutated candidate failed:\n{result.stdout}\n{result.stderr}"
     assert len(cases) == len(nodes), "Baseline did not execute every named assertion"

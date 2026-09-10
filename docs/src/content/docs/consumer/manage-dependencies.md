@@ -232,7 +232,8 @@ preference with `apm config set prefer-ssh true`, or save the retry escape hatch
 with `apm config set allow-protocol-fallback true`. See the
 [`apm config` reference](../../reference/cli/config/).
 
-Opt-in SSH/HTTPS fallback reuses the declared custom port and warns; it does
+Opt-in SSH/HTTPS fallback warns when a failed attempt switches protocol.
+It reuses the declared custom port and warns about that port once; it does
 not map an SSH alias to a web hostname. If protocols use different endpoints,
 declare the intended URL instead. GitLab REST additionally requires an
 executed same-origin HTTPS attempt; see

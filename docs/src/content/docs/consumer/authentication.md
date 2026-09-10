@@ -63,10 +63,12 @@ same [transport policy](../manage-dependencies/#transport-selection) as clones.
 SSH keys and Git credential helpers work without an extra token, even when
 the REST API is disabled.
 
-In strict mode, explicit SSH/SCP URLs and SSH preference keep these fetches
-on SSH, preserving the user, host, port, and ref. Git failure never triggers
-REST, even with a PAT available. Fix SSH access or explicitly declare the
-HTTPS web endpoint; APM does not map SSH aliases to web hostnames.
+In strict mode, APM passes the selected SSH/SCP URL to Git, preserving its
+user, host, port, and requested ref without choosing another protocol.
+Safe Git `insteadOf` rewrites still apply. If the effective transport remains
+SSH, failure never triggers REST, even with a PAT available. Fix SSH access
+or explicitly declare the HTTPS web endpoint; APM does not map SSH aliases
+to web hostnames.
 
 REST fallback runs only after the selected Git plan is exhausted and an
 executed attempt used effective HTTPS with the same normalized scheme,

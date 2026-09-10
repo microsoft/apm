@@ -42,7 +42,7 @@ REWRITE_FALLBACK_HINT = (
     "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'."
 )
 _PROTOCOL_FALLBACK_DOCS_URL = (
-    "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
+    "https://microsoft.github.io/apm/consumer/manage-dependencies/#transport-selection"
 )
 
 
@@ -151,8 +151,8 @@ def fallback_port_warning(
         f"Custom port {dep_port} on {host_display}/{dep_ref.repo_url}: "
         f"if {initial_scheme} fails, APM will retry over "
         f"{fallback_scheme} on the same port.\n"
-        f"    Pin the URL scheme, or drop "
-        f"--allow-protocol-fallback to fail fast.\n"
+        f"    Disable protocol fallback in CLI flags, environment, "
+        f"and saved config to fail fast.\n"
         f"    See: {_PROTOCOL_FALLBACK_DOCS_URL}"
     )
 

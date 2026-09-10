@@ -89,16 +89,16 @@ def test_custom_port_warning_preserves_text_and_docs_link(schemes: tuple[str, st
         f"Custom port 2222 on {dep_ref.host}/{dep_ref.repo_url}: "
         f"if {schemes[0].upper()} fails, APM will retry over "
         f"{schemes[1].upper()} on the same port.\n"
-        "    Pin the URL scheme, or drop "
-        "--allow-protocol-fallback to fail fast.\n"
+        "    Disable protocol fallback in CLI flags, environment, "
+        "and saved config to fail fast.\n"
         "    "
     )
     parsed = urlsplit(docs_url)
     assert (parsed.scheme, parsed.hostname, parsed.path, parsed.fragment) == (
         "https",
         "microsoft.github.io",
-        "/apm/guides/dependencies/",
-        "restoring-the-legacy-permissive-chain",
+        "/apm/consumer/manage-dependencies/",
+        "transport-selection",
     )
 
 

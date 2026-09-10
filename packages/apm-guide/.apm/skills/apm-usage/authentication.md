@@ -216,10 +216,11 @@ apm pack                                 # marketplace.json also resolves agains
 
 GitLab `path:` single-file sparse fetches follow the clone transport policy:
 `--ssh`, `APM_GIT_PROTOCOL`, saved `prefer-ssh`, and opt-in
-`--allow-protocol-fallback` / `APM_ALLOW_PROTOCOL_FALLBACK`. Strict SSH/SCP
-and SSH preference preserve user, host, port, and ref; Git failure never
-unlocks REST merely because a PAT exists. Fix SSH or declare the HTTPS web
-endpoint.
+`--allow-protocol-fallback` / `APM_ALLOW_PROTOCOL_FALLBACK`. In strict mode,
+APM passes the selected SSH/SCP URL to Git with its user, host, port, and
+requested ref intact; safe Git `insteadOf` rewrites still apply. If the
+effective transport remains SSH, failure never unlocks REST, even with a
+PAT available. Fix SSH or declare the HTTPS web endpoint.
 
 Default HTTPS compatibility remains. REST requires an exhausted Git plan
 and an executed effective HTTPS attempt matching the API's normalized
