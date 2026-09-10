@@ -46,18 +46,22 @@ def test_native_skill_preserves_unowned_directory(tmp_path: Path, managed: set[s
     original = snapshot(target)
     integrator = SkillIntegrator()
     for _ in range(2):
+        diagnostics = DiagnosticCollector()
         result = integrator.integrate_package_skill(
             info,
             tmp_path,
             targets=[KNOWN_TARGETS["copilot"]],
             managed_files=managed,
-            diagnostics=DiagnosticCollector(),
+            diagnostics=diagnostics,
         )
         assert snapshot(target) == original
         assert result.target_paths == []
         assert result.skill_skipped
         assert not result.skill_created
         assert not result.skill_updated
+        assert [item.message for item in diagnostics.by_category()["collision"]] == [
+            ".agents/skills/review"
+        ]
 
 
 def test_native_skill_force_still_replaces_unowned_directory(tmp_path: Path) -> None:

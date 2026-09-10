@@ -106,7 +106,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-pl-017](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-017) | MUST | 6.8 | governance | active | 1 | - |
 | [req-pl-018](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-018) | MUST | 6.3.1 | governance | active | 1 | - |
 | [req-pr-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-001) | MUST | 8.2 | consumer | active | 1 | - |
-| [req-pr-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-002) | MUST | 8.3 | consumer | active | 1 | - |
+| [req-pr-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-002) | MUST | 8.3 | consumer | active | 2 | - |
 | [req-pr-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-003) | MUST | 8.3 | consumer | active | 1 | - |
 | [req-pr-004](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-004) | MUST | 7.8 | producer | active | 10 | - |
 | [req-pr-005](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-005) | SHOULD | 7.8 | producer | active | 1 | - |

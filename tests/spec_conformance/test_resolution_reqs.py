@@ -48,6 +48,9 @@ from tests.spec_conformance._helpers import (
     load_json_fixture,
     load_schema,
 )
+from tests.unit.adopt.test_native_skill_collision import (
+    test_native_skill_preserves_unowned_directory as _native_skill_collision_contract,
+)
 from tests.unit.registry.test_resolver import TestHappyPath as _RegistryResolverContract
 
 # --- req-rs-001..014 ---------------------------------------------------
@@ -520,6 +523,12 @@ def test_consumer_rejects_primitive_collisions():
         "first declared",
         "MUST NOT replace",
     )
+
+
+@pytest.mark.req("req-pr-002")
+def test_local_native_skill_overrides_dependency_and_reports_conflict(tmp_path: Path) -> None:
+    """Bind existing local-priority semantics to native skill collision admission."""
+    _native_skill_collision_contract(tmp_path, managed=None)
 
 
 @pytest.mark.req("req-pr-007")

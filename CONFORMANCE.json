@@ -796,9 +796,10 @@
       "keyword": "MUST",
       "section": "8.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_namespaces_primitives_by_source"
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_namespaces_primitives_by_source",
+        "tests/spec_conformance/test_resolution_reqs.py::test_local_native_skill_overrides_dependency_and_reports_conflict"
       ]
     },
     {
