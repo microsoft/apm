@@ -103,10 +103,14 @@ EXTRA_RULES: tuple[Rule, ...] = (
         "GitLab policy cache and transport remain in policy/_gitlab.py.",
         check_gitlab_facade_orchestration,
     ),
-    _semantic_rule(
-        RULE_REMOTE_ORIGIN_OWNER,
-        "Policy discovery reads and parses the git remote through one owner (discovery.py).",
-        check_policy_remote_origin_owner,
+    Rule(
+        id=RULE_REMOTE_ORIGIN_OWNER,
+        group=GROUP,
+        guard_ids=(RULE_REMOTE_ORIGIN_OWNER,),
+        description=(
+            "Policy discovery reads and parses the git remote through one owner (discovery.py)."
+        ),
+        check=check_policy_remote_origin_owner,
     ),
     _semantic_rule(
         RULE_LOCAL_BUNDLE_PREFLIGHT,

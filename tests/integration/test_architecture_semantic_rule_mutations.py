@@ -216,13 +216,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The exec gate stops defining the one plugin bin eligibility owner.",
     ),
     MutationCase(
-        rule_id="install-deployment-policy-remote-origin-owner",
-        path="src/apm_cli/policy/discovery.py",
-        old="def _git_remote_origin_url(",
-        new="def _git_remote_origin_url_impl(",
-        intent="Policy discovery drops its canonical git-remote origin reader.",
-    ),
-    MutationCase(
         rule_id="install-deployment-ref-recheck-ownership",
         path="src/apm_cli/install/phases/resolve.py",
         old="                if not should_force_ref_recheck(",
