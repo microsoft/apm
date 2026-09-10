@@ -135,6 +135,12 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "skills at ~/.openclaw/skills/."
         ),
     ),
+    "contracts": ExperimentalFlag(
+        name="contracts",
+        description="Run explicit local or packaged contracts with apm plan, run, or apmx.",
+        default=False,
+        hint="Use 'apm plan CONTRACT --on copilot' or 'apmx --help' to get started.",
+    ),
 }
 
 

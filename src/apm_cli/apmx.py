@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from apm_cli.commands.contracts import invoke_contract
+from apm_cli.contracts.feature_gate import require_contracts_enabled
 from apm_cli.contracts.frontend import admit_caller_policy
 from apm_cli.contracts.models import ContractError, ContractLimits, Outcome
 from apm_cli.core.contract_logger import ContractLogger
@@ -71,6 +72,7 @@ def main(
                 allow_advisory=allow_advisory,
             )
             return
+        require_contracts_enabled()
         admit_caller_policy(caller_root, limits=limits)
         if not planning and not allow_advisory:
             raise ContractError(

@@ -20,11 +20,13 @@ def invoke_contract(
 ) -> None:
     """Plan or execute one leaf using the contract-specific error boundary."""
     from ..contracts import frontend, workspace
+    from ..contracts.feature_gate import require_contracts_enabled
     from ..contracts.models import ContractError, Outcome
     from ..core.contract_logger import ContractLogger
 
     logger = ContractLogger(verbose=verbose)
     try:
+        require_contracts_enabled()
         plan = frontend.plan_contract(
             Path(contract),
             Path.cwd(),

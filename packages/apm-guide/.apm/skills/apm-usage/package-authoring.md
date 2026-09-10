@@ -583,7 +583,8 @@ target is present. Authoring rules:
 
 Ship an explicit file such as `contracts/handoff.contract.md` and its checker
 resources under package-root `checks/`. Use normal `apm.yml` fields; there is no
-job-entrypoint schema. The consumer selects the file with `apmx --from`.
+job-entrypoint schema. After `apm experimental enable contracts`, the consumer
+selects the file with `apmx --from`.
 
 Contract frontmatter declares fixed-file `needs`, one regular-file `produces`,
 1 to 8 named shell commands in `verify`, and optionally one skill in `imports`.

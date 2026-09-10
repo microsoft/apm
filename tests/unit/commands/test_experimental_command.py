@@ -165,6 +165,15 @@ class TestEnableCommand:
         assert result.exit_code == 0
         assert "Enabled experimental feature: verbose-version" in result.output
 
+    def test_enable_contracts_points_to_contract_commands(self, runner: CliRunner) -> None:
+        """The contracts opt-in is discoverable through the standard command."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["enable", "contracts"])
+        assert result.exit_code == 0
+        assert "Enabled experimental feature: contracts" in result.output
+        assert "apm plan CONTRACT" in result.output
+
     def test_enable_typo_exits_1_with_suggestion_and_recovery_hint(self, runner: CliRunner) -> None:
         """One-character typo produces exit 1, error message, suggestion, recovery hint."""
         from apm_cli.commands.experimental import experimental

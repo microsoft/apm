@@ -5,6 +5,9 @@ sidebar:
   order: 12
 ---
 
+`apm plan` for contracts is experimental and disabled by default. Enable it with
+`apm experimental enable contracts`.
+
 ## Synopsis
 
 ```bash

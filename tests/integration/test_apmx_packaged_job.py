@@ -121,6 +121,10 @@ class PackagedJob:
 def job(tmp_path: Path) -> PackagedJob:
     """Reuse the hermetic HOME/network guard; never use ambient native credentials."""
     isolation = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=os.environ)
+    (isolation.config_root / "config.json").write_text(
+        '{"experimental": {"contracts": true}}\n',
+        encoding="utf-8",
+    )
     package = isolation.package_root / "job"
     shutil.copytree(_EXAMPLE, package)
     caller = isolation.work_root / "caller"

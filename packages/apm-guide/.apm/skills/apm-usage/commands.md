@@ -244,6 +244,9 @@ descendants, are skipped.
 
 ## Local contracts (v0.1)
 
+Contract planning and execution are disabled by default. Enable them once with
+`apm experimental enable contracts`.
+
 ```bash
 apmx CONTRACT --on copilot [--model MODEL] --allow-advisory
 apmx --from PACKAGE_REF contracts/file.contract.md --on copilot [--model MODEL] --allow-advisory

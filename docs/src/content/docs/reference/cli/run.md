@@ -9,7 +9,9 @@ Execute a shell command from `apm.yml` `scripts:`, npm-style, or explicitly
 select a local contract with `--on copilot`.
 
 :::caution[Experimental]
-The `run` command surface is marked experimental. Flags and behavior may change before 1.0.
+Contract mode is disabled by default. Enable it with
+`apm experimental enable contracts`. Existing script execution does not require
+the flag.
 :::
 
 ## Synopsis

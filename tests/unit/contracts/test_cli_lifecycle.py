@@ -20,6 +20,8 @@ FIXTURE = Path(__file__).resolve().parents[3] / "examples/contracts/first-contra
 
 
 def _prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path]:
+    from apm_cli import config
+
     project = tmp_path / "project"
     shutil.copytree(FIXTURE, project)
     home = tmp_path / "home"
@@ -37,8 +39,24 @@ def _prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Pat
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
     monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+    monkeypatch.setattr(config, "_config_cache", {"experimental": {"contracts": True}})
     monkeypatch.chdir(project)
     return project, home, marker
+
+
+@pytest.mark.parametrize("command", ["plan", "run"])
+def test_contract_commands_require_experimental_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    from apm_cli import config
+
+    project, _, marker = _prepare(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "_config_cache", {"experimental": {}})
+    result = CliRunner().invoke(cli, [command, "handoff.contract.md", "--on", "copilot"])
+    assert result.exit_code == 21, result.output
+    assert "apm experimental enable contracts" in result.output
+    assert not marker.exists()
+    assert not (project / ".apm" / "runs").exists()
 
 
 def _files(root: Path) -> dict[str, bytes]:

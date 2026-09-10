@@ -27,6 +27,8 @@ pytestmark = pytest.mark.component
 
 @pytest.fixture
 def caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from apm_cli import config
+
     root = tmp_path / "caller"
     root.mkdir()
     workspace.local_git(root, "init", "--quiet")
@@ -36,6 +38,7 @@ def caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
     monkeypatch.setattr("apm_cli.contracts.frontend.sys.platform", "linux")
     monkeypatch.setattr("apm_cli.runtime.utils.find_runtime_binary", lambda _: sys.executable)
+    monkeypatch.setattr(config, "_config_cache", {"experimental": {"contracts": True}})
     return root
 
 
@@ -209,6 +212,28 @@ def test_no_policy_gate_precedes_remote_acquisition(
     )
     assert result.exit_code == 21, result.output
     acquire.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["job.contract.md", "--on", "copilot", "--plan"],
+        ["--from", "org/job", "job.contract.md", "--on", "copilot", "--plan"],
+    ],
+)
+def test_experimental_gate_precedes_contract_admission(
+    caller: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    from apm_cli import config
+
+    acquire = Mock(side_effect=AssertionError("package acquisition"))
+    monkeypatch.setattr("apm_cli.apmx.prepare_contract_source", acquire)
+    monkeypatch.setattr(config, "_config_cache", {"experimental": {}})
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == int(Outcome.UNPROVEN), result.output
+    assert "apm experimental enable contracts" in result.output
+    acquire.assert_not_called()
+    assert not (caller / ".apm").exists()
 
 
 def test_remote_plan_never_initializes_downloader(

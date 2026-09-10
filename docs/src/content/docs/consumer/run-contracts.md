@@ -14,6 +14,12 @@ named checks. Existing [scripts](../run-scripts/) still use `apm run`.
 - An independent, secret-free caller directory with no Git remote or configured
   policy requirement.
 
+Enable the experimental contract surface once:
+
+```bash
+apm experimental enable contracts
+```
+
 **Native execution is not a sandbox.** Review
 [host access and policy limits](../../reference/cli/apmx/#native-execution-boundary).
 Never remove remotes or policy to bypass a refusal.

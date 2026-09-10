@@ -9,6 +9,7 @@ project or changing this package.
 From the repository root, with `apmx` installed and Copilot authenticated:
 
 ```sh
+apm experimental enable contracts
 package="$(pwd)/examples/contracts/packaged-job"
 caller="$HOME/apmx-contract-example"
 mkdir "$caller" &&

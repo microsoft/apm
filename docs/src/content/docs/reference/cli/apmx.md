@@ -8,6 +8,14 @@ sidebar:
 Bundled with APM, `apmx` runs one explicit contract on one harness, captures one
 output, runs independent checks, and retains a record.
 
+:::caution[Experimental]
+Enable contract planning and execution first:
+
+```bash
+apm experimental enable contracts
+```
+:::
+
 ## Synopsis
 
 ```bash

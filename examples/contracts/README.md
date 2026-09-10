@@ -11,6 +11,7 @@ Do not remove a project's remotes or policy to make it eligible.
 From the copied `first-contract/` directory:
 
 ```sh
+apm experimental enable contracts
 apm plan ./handoff.contract.md --on copilot --model gpt-6-astra
 apm run ./handoff.contract.md --on copilot --model gpt-6-astra --allow-advisory
 ```
@@ -37,6 +38,7 @@ cp first-contract/notes.md reuse-contract/notes.md
 cp first-contract/checks/check_handoff.py reuse-contract/checks/check_handoff.py
 cd reuse-contract
 apm install --only apm --target copilot
+apm experimental enable contracts
 apm plan ./handoff.contract.md --on copilot --model gpt-6-astra
 apm run ./handoff.contract.md --on copilot --model gpt-6-astra --allow-advisory
 ```

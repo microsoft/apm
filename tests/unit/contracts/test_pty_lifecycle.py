@@ -46,11 +46,19 @@ def test_pty_interrupt_leaves_halted_record_and_no_success(
         encoding="utf-8",
     )
     actor.chmod(0o755)
+    home = tmp_path / "home"
+    config_dir = home / ".apm"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text(
+        '{"experimental": {"contracts": true}}\n',
+        encoding="ascii",
+    )
     monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
     monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
     env = {
         **os.environ,
         "PATH": str(tools) + os.pathsep + os.environ.get("PATH", ""),
+        "HOME": str(home),
         "PYTHONPATH": str(source_root / "src"),
         "NO_COLOR": "1",
         "COLUMNS": "48",
