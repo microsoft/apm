@@ -244,3 +244,42 @@ def test_onboarding_does_not_grant_install_collision_ownership(
         or record.locator.value.startswith(".agents/skills/review/")
         for record in onboarding.state().deployment_records
     )
+
+
+def test_discover_rejects_target_selection_without_writes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Target selection belongs to install, not the read-only inventory."""
+    onboarding = _onboarding(tmp_path, apm_binary_path)
+    before = onboarding.artifacts()
+    result = onboarding.runner.run(
+        (*_DISCOVER, "--target", "copilot"),
+        scenario_id="onboarding-target-rejected",
+        cwd=onboarding.root,
+        env=onboarding.isolated.subprocess_env(),
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "--discover cannot" in result.stderr
+    assert "select targets" in result.stderr
+    assert_snapshot_set_unchanged(before, onboarding.artifacts())
+
+
+def test_global_declaration_reports_matching_install_scope(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The separate install hint must consume the manifest just declared."""
+    onboarding = _onboarding(tmp_path, apm_binary_path)
+    source = onboarding.isolated.home / ".claude" / "skills" / "review"
+    source.parent.mkdir(parents=True)
+    onboarding.source.rename(source)
+    before = onboarding.artifacts()
+    result = onboarding.run(
+        ("init", "--discover", "--global", "--apply", "--yes"), "global-declare"
+    )
+    assert "Run 'apm install --global' separately." in result.stdout
+    assert_only_snapshot_paths_changed(
+        before,
+        onboarding.artifacts(),
+        {"home": {".apm/apm.yml", ".apm/.apm-lifecycle.lock"}},
+    )
+    assert _declared_local_paths(onboarding.isolated.home / ".apm") == [str(source)]

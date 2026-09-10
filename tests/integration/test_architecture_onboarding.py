@@ -49,3 +49,29 @@ def test_onboarding_guard_requires_read_only_admission() -> None:
         ROOT, ("onboarding-metadata-only",), source_overrides={path: mutated}
     )
     assert any("read-only package admission" in item.message for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "source.write_text('rewritten')",
+        "run_install_pipeline()",
+        "import shutil",
+        "import subprocess",
+    ],
+)
+def test_onboarding_guard_covers_init_discovery_branch(mutation: str) -> None:
+    """The public init facade cannot bypass the metadata-only discovery owner."""
+    path = "src/apm_cli/commands/init.py"
+    original = (ROOT / path).read_text()
+    mutated = original.replace(
+        "    if discover_flag:\n", f"    if discover_flag:\n        {mutation}\n"
+    )
+    assert mutated != original
+    report = run_selected_rules(
+        ROOT, ("onboarding-metadata-only",), source_overrides={path: mutated}
+    )
+    assert any(
+        item.rule_id == "onboarding-metadata-only" and item.path == path
+        for item in report.violations
+    )

@@ -5,7 +5,7 @@
       "id": "onboarding-metadata-only",
       "decision": "Discovery inventory and consented consumer dependency delta; never source or deployment mutation",
       "owner": "adopt/discovery.py + adopt/materialize.py + adopt/manifest_edit.py",
-      "selectors": ["src/apm_cli/adopt/*.py", "src/apm_cli/commands/discover.py"],
+      "selectors": ["src/apm_cli/adopt/*.py", "src/apm_cli/commands/discover.py", "src/apm_cli/commands/init.py"],
       "guards": ["onboarding-metadata-only"]
     },
     {

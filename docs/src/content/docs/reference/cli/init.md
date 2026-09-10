@@ -159,8 +159,10 @@ the author and target harness remain responsible for compliance.
   - `agentrc` not in PATH: prints a tip line with a link to
     `https://github.com/microsoft/agentrc`.
   - Instructions already exist: no mention (suppressed entirely).
-- **Exit codes:** `0` on success or user-aborted prompt; `1` on invalid
-  project or plugin name, or unhandled error.
+- **Exit codes:** `0` on success or a declined plain-init prompt; `1` on invalid
+  project or plugin name, refused discovery apply, declined discovery consent,
+  or unhandled error. Discovery consent refusal leaves files unchanged.
+  Invalid option combinations, including `--discover --target`, exit `2`.
 
 ## Deprecations
 

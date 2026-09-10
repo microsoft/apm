@@ -11,6 +11,7 @@ from scripts.architecture_linter.models import Rule, Violation
 
 RULE_ID = "onboarding-metadata-only"
 WRITER = "src/apm_cli/adopt/manifest_edit.py"
+INIT = "src/apm_cli/commands/init.py"
 _FORBIDDEN_MODULES = (
     "shutil",
     "subprocess",
@@ -49,14 +50,37 @@ _MUTATIONS = frozenset(
 def check_onboarding(provider: FactsProvider) -> Iterable[Violation]:
     """Inspect only onboarding's bounded source set and its CLI facade."""
     paths = inventory_paths(
-        provider, prefixes=("src/apm_cli/adopt/",), exact=("src/apm_cli/commands/discover.py",)
+        provider, prefixes=("src/apm_cli/adopt/",), exact=("src/apm_cli/commands/discover.py", INIT)
     )
     for path in paths:
         if not path.endswith(".py"):
             continue
         facts, failures = checked_facts(provider, path, RULE_ID, require_python=True)
         yield from failures
-        for imported in facts.imports:
+        imports, calls = facts.imports, facts.calls
+        if path == INIT:
+            function = facts.tree_index.function("init")
+            branches = (
+                [
+                    node
+                    for node in function.body
+                    if isinstance(node, ast.If)
+                    and isinstance(node.test, ast.Name)
+                    and node.test.id == "discover_flag"
+                ]
+                if isinstance(function, ast.FunctionDef)
+                else []
+            )
+            if len(branches) != 1:
+                yield violation(RULE_ID, path, "Init must retain its separate discovery branch.")
+                continue
+            branch = branches[0]
+            lines = range(branch.lineno, (branch.end_lineno or branch.lineno) + 1)
+            imports = tuple(item for item in imports if item.line in lines)
+            calls = tuple(item for item in calls if item.line in lines)
+            if not any(call.qualname == "run_discover" for call in calls):
+                yield violation(RULE_ID, path, "Init discovery must delegate to run_discover.")
+        for imported in imports:
             modules = (imported.module or "", *imported.names)
             if any(
                 part in _FORBIDDEN_MODULES for module in modules for part in module.split(".")
@@ -70,7 +94,7 @@ def check_onboarding(provider: FactsProvider) -> Iterable[Violation]:
                     "Onboarding must not import conversion, transport or execution.",
                     line=imported.line,
                 )
-        for call in facts.calls:
+        for call in calls:
             name = call.qualname.rsplit(".", 1)[-1]
             if name in _MUTATIONS:
                 if path == WRITER and name in {"mkdir", "write_yaml_text_atomic"}:

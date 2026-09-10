@@ -264,6 +264,7 @@ def test_global_uses_existing_user_manifest_and_absolute_refs(workspace: Path) -
     assert not (Path.home() / ".apm").exists()
     result = invoke("--global", "--apply", "--yes")
     assert result.exit_code == 0, result.output
+    assert "Run 'apm install --global' separately." in result.output
     manifest = Path.home() / ".apm/apm.yml"
     assert load_yaml(manifest)["dependencies"]["apm"] == [{"path": str(source)}]
     assert not (workspace / "apm.yml").exists()

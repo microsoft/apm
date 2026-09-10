@@ -25,7 +25,8 @@ class DiscoveryLogger(CommandLogger):
         for entry in report["additions"]:
             self.info(f"apm.yml dependencies.apm: path: {entry['path']}")
         if report["applied"]:
-            self.success("Updated consumer apm.yml. Run 'apm install' separately.")
+            install = "apm install --global" if report["scope"] == "global" else "apm install"
+            self.success(f"Updated consumer apm.yml. Run '{install}' separately.")
         elif report["additions"]:
             self.info(
                 "Read-only preview. Use --apply to add these dependencies after confirmation."
