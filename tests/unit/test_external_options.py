@@ -230,49 +230,104 @@ def test_empty_allowlist_rejects_any_flag(tmp_path: Path):
 
 def test_arity_separate_value_passes():
     args = ("--baseline", "base.yaml")
-    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED) == args
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED, base_dir=Path.cwd()) == args
 
 
 def test_arity_inline_value_passes():
     args = ("--baseline=base.yaml",)
-    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED) == args
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED, base_dir=Path.cwd()) == args
 
 
 def test_arity_value_followed_by_another_flag_passes():
     args = ("--baseline", "base.yaml", "--severity", "high")
-    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED) == args
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED, base_dir=Path.cwd()) == args
 
 
 def test_arity_missing_value_at_end_rejected():
     with pytest.raises(ExternalScanError, match=r"requires exactly one value"):
-        validate_value_arity("skillspector", ("--baseline",), _VALUE_REQUIRED)
+        validate_value_arity("skillspector", ("--baseline",), _VALUE_REQUIRED, base_dir=Path.cwd())
 
 
 def test_arity_missing_value_before_next_flag_rejected():
     with pytest.raises(ExternalScanError, match=r"requires exactly one value"):
-        validate_value_arity("skillspector", ("--baseline", "--model", "gpt-4o"), _VALUE_REQUIRED)
+        validate_value_arity(
+            "skillspector",
+            ("--baseline", "--model", "gpt-4o"),
+            _VALUE_REQUIRED,
+            base_dir=Path.cwd(),
+        )
 
 
 def test_arity_empty_inline_value_rejected():
     with pytest.raises(ExternalScanError, match=r"requires exactly one value"):
-        validate_value_arity("skillspector", ("--baseline=",), _VALUE_REQUIRED)
+        validate_value_arity("skillspector", ("--baseline=",), _VALUE_REQUIRED, base_dir=Path.cwd())
 
 
 def test_arity_second_value_rejected():
     with pytest.raises(ExternalScanError, match=r"second value"):
-        validate_value_arity("skillspector", ("--baseline", "a.yaml", "b.yaml"), _VALUE_REQUIRED)
+        validate_value_arity(
+            "skillspector", ("--baseline", "a.yaml", "b.yaml"), _VALUE_REQUIRED, base_dir=Path.cwd()
+        )
 
 
 def test_arity_ignores_flags_outside_the_set():
     # Only the named flags are counted; ``--model`` keeps whatever arity the
     # allowlist pass already permitted.
     args = ("--model", "gpt-4o", "extra")
-    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED) == args
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED, base_dir=Path.cwd()) == args
 
 
 def test_arity_no_op_for_empty_prefix_set():
     args = ("--baseline",)
-    assert validate_value_arity("skillspector", args, frozenset()) == args
+    assert validate_value_arity("skillspector", args, frozenset(), base_dir=Path.cwd()) == args
+
+
+def test_arity_inline_value_followed_by_stray_value_rejected():
+    """``--baseline=a.yaml b.yaml`` must fail like the separate-value spelling.
+
+    extra_args precede the positional scan targets, so a trailing token would
+    become an extra target rather than a second baseline.  The inline branch
+    used to ``continue`` without looking at it.
+    """
+    with pytest.raises(ExternalScanError, match=r"second value"):
+        validate_value_arity(
+            "skillspector",
+            ("--baseline=base.yaml", "extra.yaml"),
+            _VALUE_REQUIRED,
+            base_dir=Path.cwd(),
+        )
+
+
+def test_arity_inline_value_followed_by_flag_passes():
+    args = ("--baseline=base.yaml", "--severity", "high")
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED, base_dir=Path.cwd()) == args
+
+
+def test_arity_separator_free_value_is_still_contained(tmp_path):
+    """A declared path value is resolved even with no path separator.
+
+    ``_value_escapes_root`` treats a separator-free token as a non-path, which
+    is correct for ``--model gpt-4o`` but not for a path-valued flag.
+    """
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    scan_root = tmp_path / "scan"
+    scan_root.mkdir()
+    args = ("--baseline", "../outside/base.yaml")
+    with pytest.raises(ExternalScanError, match=r"resolves outside the scan directory"):
+        validate_value_arity("skillspector", args, _VALUE_REQUIRED, base_dir=scan_root)
+
+
+def test_arity_inline_escaping_value_rejected(tmp_path):
+    scan_root = tmp_path / "scan"
+    scan_root.mkdir()
+    with pytest.raises(ExternalScanError, match=r"resolves outside the scan directory"):
+        validate_value_arity(
+            "skillspector",
+            ("--baseline=../outside/base.yaml",),
+            _VALUE_REQUIRED,
+            base_dir=scan_root,
+        )
 
 
 # ---------------------------------------------------------------------------

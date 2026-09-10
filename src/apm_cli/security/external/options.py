@@ -182,15 +182,40 @@ def validate_extra_args(
     return args
 
 
+def _reject_escaping_value(name: str, flag: str, value: str, base_dir: Path) -> None:
+    """Reject a declared path value that resolves outside *base_dir*.
+
+    :func:`_value_escapes_root` deliberately treats a separator-free token as a
+    non-path, which is right for tuning knobs like ``--model gpt-4o``.  A flag
+    declared path-valued is different: ``--baseline .skillspector-baseline.yaml``
+    is a path even though it carries no separator, and if that name is a symlink
+    to a file outside the scan directory the scanner would read outside it.  So
+    resolve every declared path value, separators or not.
+    """
+    from ...utils.path_security import ensure_path_within
+
+    try:
+        ensure_path_within(base_dir / value, base_dir)
+    except (ValueError, OSError) as exc:
+        raise ExternalScanError(
+            f"External scanner '{name}': argument '{flag}' value '{value}' resolves "
+            f"outside the scan directory."
+        ) from exc
+
+
 def validate_value_arity(
     name: str,
     args: tuple[str, ...],
     value_required_prefixes: frozenset[str],
+    *,
+    base_dir: Path,
 ) -> tuple[str, ...]:
     """Require each flag in *value_required_prefixes* to carry exactly one value.
 
-    Run this *after* :func:`validate_extra_args`, which owns the allowlist and
-    the path-containment check; this pass only counts values.  It matters
+    Run this *after* :func:`validate_extra_args`, which owns the allowlist.
+    That pass skips containment for separator-free tokens, so this one resolves
+    every declared path value itself (see :func:`_reject_escaping_value`).  Arity
+    matters
     because adapters append ``extra_args`` **before** their positional targets:
     a flag left without a value would make the scanner consume the first target
     as that value, silently scanning one path fewer.  A stray second value is
@@ -224,9 +249,16 @@ def validate_value_arity(
         if separator:
             if not inline_value:
                 raise ExternalScanError(missing)
+            _reject_escaping_value(name, flag_name, inline_value, base_dir)
+            if index < len(args) and not args[index].startswith("-"):
+                raise ExternalScanError(
+                    f"External scanner '{name}': argument '{flag_name}' takes exactly one "
+                    f"value, but a second value '{args[index]}' followed it."
+                )
             continue
         if index >= len(args) or args[index].startswith("-"):
             raise ExternalScanError(missing)
+        _reject_escaping_value(name, flag_name, args[index], base_dir)
         index += 1
         if index < len(args) and not args[index].startswith("-"):
             raise ExternalScanError(

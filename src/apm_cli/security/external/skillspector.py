@@ -137,6 +137,7 @@ class SkillSpectorAdapter:
             self.name,
             extra_args,
             self.VALUE_REQUIRED_ARG_PREFIXES,
+            base_dir=Path.cwd(),
         )
 
         targets = [str(p) for p in paths] or ["."]
