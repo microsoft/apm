@@ -1,5 +1,6 @@
 """Direct regression tests for resolution-staging path relocations."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -196,3 +197,51 @@ def test_case_only_relocation_updates_spelling_and_rolls_back(tmp_path: Path) ->
 
     staging.rollback()
     assert [path.name for path in modules.iterdir()] == ["mixedorg"]
+
+
+def test_prepare_replacement_slot_names_fit_windows_max_path(tmp_path: Path) -> None:
+    """A realistic staged path must not overflow Windows MAX_PATH (issue #2896).
+
+    Before the fix, every staged path carried a 32-hex-char staging root
+    (``uuid4().hex``) plus a 64-hex-char per-destination slot
+    (``sha256(...).hexdigest()``) -- 96 hex characters of pure entropy on
+    top of the project root and a package's own nested directories. Added to
+    a realistic Windows project location that reliably pushed staged paths
+    past the 260-character MAX_PATH, raising
+    ``[WinError 206] The filename or extension is too long.``. This guards
+    the fix: the staging root is now 12 hex chars and the per-destination
+    slot is 16 (28 total), freeing 68 characters on every staged path.
+    """
+    modules = tmp_path / "apm_modules"
+    destination = (
+        modules
+        / "acme-platform-org"
+        / "enterprise-notification-templates-package"
+        / "src"
+        / "templates"
+        / "email"
+        / "transactional"
+    )
+    staging = ResolutionStagingSession(modules)
+
+    replacement = staging.prepare_replacement(destination)
+
+    staging_root_name = replacement.parents[1].name
+    slot_name = replacement.name
+    assert re.fullmatch(r"[0-9a-f]{12}", staging_root_name), staging_root_name
+    assert re.fullmatch(r"[0-9a-f]{16}", slot_name), slot_name
+
+    # Re-root the real, generated relative path (unmocked, straight out of
+    # prepare_replacement) under a realistic Windows project location -- a
+    # OneDrive-synced repo checkout, a common enterprise layout -- to check
+    # the MAX_PATH arithmetic the issue describes independent of this test
+    # run's own (highly variable) tmp_path length.
+    realistic_root = (
+        r"C:\Users\jennifer.smith\OneDrive - Contoso Corporation\Documents"
+        r"\GitHub\internal-tools-platform\services\billing-reconciliation-worker"
+    )
+    relative_len = len(str(replacement.relative_to(modules))) + len("apm_modules") + 1
+    old_scheme_relative_len = relative_len + (32 - 12) + (64 - 16)
+
+    assert len(realistic_root) + 1 + relative_len <= 260
+    assert len(realistic_root) + 1 + old_scheme_relative_len > 260
