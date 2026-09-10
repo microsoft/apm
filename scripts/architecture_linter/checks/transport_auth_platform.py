@@ -32,6 +32,9 @@ from scripts.architecture_linter.checks.python_semantics import (
     direct_definitions,
     effective_definition,
 )
+from scripts.architecture_linter.checks.transport_gitlab_sparse import (
+    check_gitlab_prepared_remote,
+)
 from scripts.architecture_linter.checks.transport_platform_shared import (
     _SRC_PREFIX,
     GROUP,
@@ -1031,20 +1034,7 @@ def _check_git_child_environment(provider: FactsProvider) -> tuple[Violation, ..
             exempt=False,
         )
     )
-    findings.extend(
-        _require_subs(
-            provider,
-            inv,
-            _RID_GIT_CHILD_ENV,
-            "src/apm_cli/deps/download_strategies.py",
-            (
-                "tokenless_url_builder = partial(",
-                'token="",',
-                "build_repo_url_fn=tokenless_url_builder",
-            ),
-            "Git file transport must keep managed credentials out of remote URLs",
-        )
-    )
+    findings.extend(check_gitlab_prepared_remote(provider, _RID_GIT_CHILD_ENV))
     findings.extend(
         _require_subs(
             provider,

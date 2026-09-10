@@ -954,6 +954,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A parallel throttle classifier appears outside deps/github_rate_limit.py.",
     ),
     MutationCase(
+        guard_id="transport-platform-gitlab-sparse-plan",
+        rule_id="transport-platform-gitlab-sparse-plan",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="        if rest_eligible:",
+        new="        if True:  # bypass rest_eligible",
+        intent="GitLab file downloads bypass the executed HTTPS plan gate before REST.",
+    ),
+    MutationCase(
         guard_id="transport-platform-host-credential-resolution",
         rule_id="transport-platform-host-credential-resolution",
         path="src/apm_cli/deps/download_strategies.py",

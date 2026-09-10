@@ -39,14 +39,15 @@ from ..utils.github_host import (
     is_github_hostname,
 )
 from .bare_cache import build_clone_failure_message
-from .transport_selection import ProtocolPreference, TransportAttempt, TransportPlan
+from .transport_selection import (
+    TransportAttempt,
+    TransportPlan,
+    fallback_port_warning,
+    initial_transport_scheme,
+)
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
-
-_PROTOCOL_FALLBACK_DOCS_URL = (
-    "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
-)
 
 
 def _is_connect_failure(error: GitCommandError | subprocess.CalledProcessError, url: str) -> bool:
@@ -197,12 +198,7 @@ class CloneEngine:
         dep_host = dep_ref.host if dep_ref else None
         is_github = is_github_hostname(dep_host) if dep_host else True
         is_generic = not is_ado and not is_github
-        explicit_scheme = (
-            (getattr(dep_ref, "explicit_scheme", None) or "").lower() if dep_ref else ""
-        )
-        candidate_uses_ssh = explicit_scheme == "ssh" or (
-            not explicit_scheme and self._protocol_pref == ProtocolPreference.SSH
-        )
+        candidate_uses_ssh = initial_transport_scheme(dep_ref, self._protocol_pref) == "ssh"
         rewrite_candidate = (
             host._build_repo_url(
                 repo_url_base,
@@ -321,17 +317,12 @@ class CloneEngine:
         )
 
         # Cross-protocol fallback custom-port warning (#786).
-        dep_port = getattr(dep_ref, "port", None) if dep_ref else None
-        if (
-            not plan.strict
-            and dep_port is not None
-            and any(a.scheme == "ssh" for a in plan.attempts)
-            and any(a.scheme == "https" for a in plan.attempts)
-        ):
+        port_warning = fallback_port_warning(dep_ref, plan)
+        if port_warning is not None:
             warn_key = (
                 dep_host.lower() if dep_host else dep_host,
                 repo_url_base,
-                dep_port,
+                dep_ref.port,
             )
             # Guard the check-then-add under the lock so two threads
             # racing on the same warn_key cannot both pass the
@@ -342,20 +333,7 @@ class CloneEngine:
                     self._fallback_port_warned.add(warn_key)
                     _should_warn = True
             if _should_warn:
-                initial_scheme = plan.attempts[0].scheme.upper()
-                fallback_scheme = next(
-                    a.scheme.upper() for a in plan.attempts if a.scheme != plan.attempts[0].scheme
-                )
-                host_display = dep_host or "host"
-                _rich_warning(
-                    f"Custom port {dep_port} on {host_display}/{repo_url_base}: "
-                    f"if {initial_scheme} fails, APM will retry over "
-                    f"{fallback_scheme} on the same port.\n"
-                    f"    Pin the URL scheme, or drop "
-                    f"--allow-protocol-fallback to fail fast.\n"
-                    f"    See: {_PROTOCOL_FALLBACK_DOCS_URL}",
-                    symbol="warning",
-                )
+                _rich_warning(port_warning, symbol="warning")
 
         def _run_public_github_attempt() -> tuple[str, bool]:
             if dep_ref is None:

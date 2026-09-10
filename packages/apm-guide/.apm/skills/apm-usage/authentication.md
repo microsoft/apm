@@ -214,23 +214,20 @@ apm pack                                 # marketplace.json also resolves agains
 
 ## GitLab (SaaS or self-managed)
 
-APM fetches `path:`-specified files from GitLab dependencies via git sparse/partial
-checkout (the same transport as the clone). Git transport is tried first, so SSH
-keys and git credential helpers work without any extra token, and self-hosted
-GitLab instances where the API returns 410 (disabled) no longer fail. Explicit
-`git:` / SSH URLs carry the host in the dependency; set `GITLAB_HOST` (or
-`APM_GITLAB_HOSTS`) only when bare-host or shorthand forms should classify as
-GitLab.
+GitLab `path:` single-file sparse fetches follow the clone transport policy:
+`--ssh`, `APM_GIT_PROTOCOL`, saved `prefer-ssh`, and opt-in
+`--allow-protocol-fallback` / `APM_ALLOW_PROTOCOL_FALLBACK`. Strict SSH/SCP
+and SSH preference preserve user, host, port, and ref; Git failure never
+unlocks REST merely because a PAT exists. Fix SSH or declare the HTTPS web
+endpoint.
 
-If git transport is unavailable, `GITLAB_APM_PAT` is the fallback:
-
-```bash
-export GITLAB_APM_PAT=glpat_your_token
-apm install
-```
-
-`GITLAB_TOKEN` is accepted as a lower-precedence fallback. `git credential fill` is
-also tried (same as for GitHub) so credential-manager users need no env var at all.
+Default HTTPS compatibility remains. REST requires an exhausted Git plan
+and an executed effective HTTPS attempt matching the API's normalized
+scheme/host/port. HTTP is not upgraded; HTTPS rewritten to SSH/local does
+not qualify. Opt-in alternate protocol reuses the declared custom port and
+warns, without mapping SSH aliases to web hostnames. See the
+[GitLab fetch policy](https://microsoft.github.io/apm/consumer/authentication/#gitlab-saas-or-self-managed)
+and [GitLab hosts](#gitlab-hosts) for token trust.
 
 ## GHE Cloud data residency (*.ghe.com)
 
@@ -406,7 +403,7 @@ credential under a fully qualified `https://<host>:<port>/` URL.
 
 ### SSH connection hangs on corporate/VPN networks
 
-APM tries SSH as a fallback when HTTPS auth is not available. It forces
+APM tries SSH when selected or cross-protocol fallback is enabled. It forces
 `BatchMode=yes`, disables askpass and HTTP credential channels, and uses a
 30-second connection timeout so SSH attempts fail without prompting.
 
