@@ -100,8 +100,9 @@ Inherit from a parent policy. See [Inheritance](#inheritance).
 
 | Value | Source |
 |-------|--------|
-| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`) |
+| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`); on GitLab, the top-level group's `apm-policy` |
 | `owner/repo` | Cross-org policy from a specific repository |
+| `namespace/.../repo` | On GitLab, an ancestor subgroup's policy, e.g. `acme/dept-a/apm-policy` (host-qualify a namespace whose first segment contains a dot) |
 | `https://...` | Direct URL to a policy file |
 
 ### `fetch_failure`
@@ -475,7 +476,7 @@ There are 21 policy checks.
 ## Inheritance
 
 :::note[Discovery vs. `extends:` -- two different concepts]
-APM auto-discovers exactly **one** policy file: `<org>/.github/apm-policy.yml`, derived from the project's git remote. There is no automatic per-repo or per-enterprise discovery. `extends:` is what composes policies **inside** that one discovered file -- it lets the discovered policy pull in a parent (and that parent's parent, up to `MAX_CHAIN_DEPTH=5`) so you can model an enterprise -> org -> team chain through composition. Most teams who say "3 levels (repo, org, enterprise)" actually want `extends:`, not more discovery sites.
+APM auto-discovers exactly **one** policy file per project, derived from the git remote: on GitHub `<org>/.github/apm-policy.yml`, and on GitLab the **closest** `apm-policy` walking up the subgroup tree to the top-level group (see [Policy Files](./apm-policy/#where-it-lives)). There is no automatic per-repo or per-enterprise discovery. `extends:` is what composes policies **inside** that one discovered file -- it lets the discovered policy pull in a parent (and that parent's parent, up to `MAX_CHAIN_DEPTH=5`) so you can model an enterprise -> org -> team chain through composition. Most teams who say "3 levels (repo, org, enterprise)" actually want `extends:`, not more discovery sites.
 :::
 
 Policies can inherit from a parent using `extends`. This enables a three-level chain:

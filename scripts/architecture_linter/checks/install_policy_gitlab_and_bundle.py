@@ -13,7 +13,6 @@ from collections.abc import Sequence
 
 from scripts.architecture_linter.checks.install_policy_shared import (
     _APM_RESOLVER,
-    _ELSE_TERMINATOR,
     _POLICY_DISCOVERY,
     _banned,
     _configured,
@@ -116,9 +115,6 @@ def check_gitlab_policy_adapter(provider: FactsProvider) -> tuple[Violation, ...
     return tuple(findings)
 
 
-_POLICY_DISCOVERY_OWNER = "src/apm_cli/policy/discovery.py"
-
-
 _REMOTE_ORIGIN_ARGV = re.compile(r'"remote",\s*"get-url",\s*"origin"')
 
 
@@ -127,23 +123,40 @@ _REMOTE_PARSER_DEFS = re.compile(
 )
 
 
+_REMOTE_PARSER_DEF_COUNT = 3
+
+
 def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation, ...]:
     """Reading and parsing the project git remote for policy discovery has one owner.
 
     ``discovery.py`` is the sole reader of ``git remote get-url origin`` and the
     sole home of the remote-URL splitter/parsers (``_remote_url_parts``,
-    ``_parse_remote_url``, ``_git_remote_origin_url``). This forbids any other
-    module in the policy tree from re-reading or re-parsing the remote, which
-    would reintroduce the double-read / divergent-parse the single-owner
-    refactor removed (#2753).
+    ``_parse_remote_url``, ``_git_remote_origin_url``). The owner MUST define all
+    three helpers, and no other module in the policy tree may re-read or re-parse
+    the remote -- either would reintroduce the double-read / divergent-parse the
+    single-owner refactor removed (#2753).
     """
     rule_id = RULE_REMOTE_ORIGIN_OWNER
+    owner, owner_fail = _configured(provider, _POLICY_DISCOVERY, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
     findings: list[Violation] = []
+    definitions = _count_re(owner, _REMOTE_PARSER_DEFS)
+    if definitions != _REMOTE_PARSER_DEF_COUNT:
+        findings.append(
+            _report(
+                rule_id,
+                _POLICY_DISCOVERY,
+                "Policy discovery must define exactly "
+                f"{_REMOTE_PARSER_DEF_COUNT} canonical git-remote read/parse helpers "
+                f"(found {definitions})",
+            )
+        )
     findings.extend(
         _banned(
             provider,
             rule_id=rule_id,
-            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_POLICY_DISCOVERY_OWNER,)),
+            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_POLICY_DISCOVERY,)),
             pattern=_REMOTE_ORIGIN_ARGV,
             message="Read the git remote origin only via discovery.py::_git_remote_origin_url",
             configured=False,
@@ -154,7 +167,7 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
         _banned(
             provider,
             rule_id=rule_id,
-            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_POLICY_DISCOVERY_OWNER,)),
+            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_POLICY_DISCOVERY,)),
             pattern=_REMOTE_PARSER_DEFS,
             message="Remote-URL split/parse owner is discovery.py; do not redefine these helpers",
             configured=False,
@@ -164,7 +177,13 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
     return tuple(findings)
 
 
-_GITLAB_BRANCH_START = re.compile(r"^[ \t]*elif is_gitlab_hostname\(host\):")
+# The facade delegation now lives in ``_gitlab_walk_candidate`` (the GitLab
+# branch of ``_auto_discover`` calls it; see #2753). Scope the orchestration
+# scan to that helper's body -- from its ``def`` to the next top-level ``def``.
+_GITLAB_WALK_START = re.compile(r"^def _gitlab_walk_candidate\(")
+
+
+_TOP_LEVEL_DEF = re.compile(r"^def ")
 
 
 _NON_WHITESPACE = re.compile(r"[^\s]")
@@ -185,8 +204,8 @@ def check_gitlab_facade_orchestration(provider: FactsProvider) -> tuple[Violatio
 
     branch = _indent_scoped_branch(
         lines,
-        start=_GITLAB_BRANCH_START,
-        terminator=_ELSE_TERMINATOR,
+        start=_GITLAB_WALK_START,
+        terminator=_TOP_LEVEL_DEF,
         probe=_NON_WHITESPACE,
         include_start=False,
         restart_skips=True,
