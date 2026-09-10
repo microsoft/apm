@@ -1327,7 +1327,7 @@ if options.target_dir or options.prefix_path or options.root_path:
     raise SystemExit("Automatic pip fallback cannot verify redirected pip destinations. Remove target/prefix/root pip settings or install manually.")
 scheme = get_scheme("apm-cli", user=True, isolated=options.isolated_mode)
 scripts = Path(scheme.scripts)
-entrypoints = {"apm": "apm_cli.cli:cli", "apmx": "apm_cli.apmx:main"}
+entrypoints = {"apm": "apm_cli.cli:main", "apmx": "apm_cli.apmx:main"}
 names = tuple(name + suffix for name in entrypoints for suffix in ((".exe", "-script.py", ".exe.manifest") if os.name == "nt" else ("",)))
 existing = [scripts / name for name in names if os.path.lexists(scripts / name)]
 distributions = list(metadata.distributions(path=list({scheme.purelib, scheme.platlib}))) if existing else []

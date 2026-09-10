@@ -14,6 +14,11 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 ROOT = Path(__file__).resolve().parents[2]
 pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
@@ -58,8 +63,12 @@ def _fixture(tmp_path: Path, state: str, name: str = "apmx") -> tuple[dict[str, 
         dist.mkdir(parents=True)
         name = "foreign-project" if state == "wrong-project" else "apm-cli"
         (dist / "METADATA").write_text(f"Name: {name}\nVersion: 0.0.1\n", encoding="ascii")
+        scripts_metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+            "project"
+        ]["scripts"]
         (dist / "entry_points.txt").write_text(
-            "[console_scripts]\napm = apm_cli.cli:cli\napmx = apm_cli.apmx:main\n",
+            "[console_scripts]\n"
+            + "".join(f"{key} = {value}\n" for key, value in scripts_metadata.items()),
             encoding="ascii",
         )
         content = launcher.read_bytes()
