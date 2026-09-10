@@ -254,7 +254,7 @@ class TestFirstConcealedCloserPolicy(unittest.TestCase):
 class TestExtractOrgFromGitRemote(unittest.TestCase):
     """Test _extract_org_from_git_remote with mocked subprocess."""
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_successful_remote(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -271,26 +271,26 @@ class TestExtractOrgFromGitRemote(unittest.TestCase):
             timeout=5,
         )
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_git_command_fails(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         result = _extract_org_from_git_remote(Path("/fake"))
         self.assertIsNone(result)
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_git_not_found(self, mock_run):
         mock_run.side_effect = FileNotFoundError("git not found")
         result = _extract_org_from_git_remote(Path("/fake"))
         self.assertIsNone(result)
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5)
         result = _extract_org_from_git_remote(Path("/fake"))
         self.assertIsNone(result)
 
-    @patch("apm_cli.policy.discovery._parse_remote_url")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote._parse_remote_url")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_remote_parser_value_error_returns_none(self, mock_run, mock_parse):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -302,9 +302,9 @@ class TestExtractOrgFromGitRemote(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch("apm_cli.policy.discovery.urlparse")
-    @patch("apm_cli.policy.discovery._parse_remote_url")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.urlparse")
+    @patch("apm_cli.policy._remote._parse_remote_url")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_remote_port_value_error_returns_none(self, mock_run, mock_parse, mock_urlparse):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -823,7 +823,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertIn("org:", result.source)
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_override_org_auto_discovers(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -837,7 +837,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             mock_fetch.assert_called_once()
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_none_auto_discovers(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -850,7 +850,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertTrue(result.found)
             self.assertEqual(result.source, "org:contoso/.github-private")
 
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_no_git_remote(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
 
@@ -860,7 +860,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertIn("Could not determine org", result.error)
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_cache_hit_returns_cached(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -881,7 +881,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertEqual(mock_fetch.call_count, 1)
 
     @patch("apm_cli.policy.discovery._fetch_github_contents")
-    @patch("apm_cli.policy.discovery.subprocess.run")
+    @patch("apm_cli.policy._remote.subprocess.run")
     def test_ghe_repo_ref_includes_host(self, mock_run, mock_fetch):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -1140,7 +1140,7 @@ class TestAutoDiscover(unittest.TestCase):
         mock_candidates.return_value = ("_apm",)
 
         with (
-            patch("apm_cli.policy.discovery.subprocess.run", side_effect=fake_run) as mock_run,
+            patch("apm_cli.policy._remote.subprocess.run", side_effect=fake_run) as mock_run,
             patch.dict(os.environ, {"ADO_HOST": "ado.example.test"}, clear=False),
             tempfile.TemporaryDirectory() as tmpdir,
         ):

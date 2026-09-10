@@ -21,13 +21,10 @@
     },
     {
       "id": "cached-policy-shape",
-      "decision": "Cached policy shape; git-remote reading and URL parsing for org-policy discovery",
-      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; _git_remote_origin_url; _remote_url_parts; _parse_remote_url)",
+      "decision": "Cached policy shape",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY)",
       "selectors": ["src/apm_cli/policy/discovery.py"],
-      "guards": [
-        "contracts-tooling-cached-policy-shape",
-        "install-deployment-policy-remote-origin-owner"
-      ]
+      "guards": ["contracts-tooling-cached-policy-shape"]
     },
     {
       "id": "policy-content-hash",

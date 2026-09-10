@@ -129,18 +129,21 @@ _REMOTE_PARSER_DEF_COUNT = 3
 _REMOTE_ORIGIN_READ_COUNT = 1
 
 
+_REMOTE_MODULE = "src/apm_cli/policy/_remote.py"
+
+
 def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation, ...]:
     """Reading and parsing the project git remote for policy discovery has one owner.
 
-    ``discovery.py`` is the sole reader of ``git remote get-url origin`` and the
-    sole home of the remote-URL splitter/parsers (``_remote_url_parts``,
+    ``policy/_remote.py`` is the sole reader of ``git remote get-url origin`` and
+    the sole home of the remote-URL splitter/parsers (``_remote_url_parts``,
     ``_parse_remote_url``, ``_git_remote_origin_url``). The owner MUST define all
     three helpers, and no other module in the policy tree may re-read or re-parse
     the remote -- either would reintroduce the double-read / divergent-parse the
     single-owner refactor removed (#2753).
     """
     rule_id = RULE_REMOTE_ORIGIN_OWNER
-    owner, owner_fail = _configured(provider, _POLICY_DISCOVERY, rule_id)
+    owner, owner_fail = _configured(provider, _REMOTE_MODULE, rule_id)
     if owner_fail:
         return tuple(owner_fail)
     findings: list[Violation] = []
@@ -149,8 +152,8 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
         findings.append(
             _report(
                 rule_id,
-                _POLICY_DISCOVERY,
-                "Policy discovery must define exactly "
+                _REMOTE_MODULE,
+                "policy/_remote.py must define exactly "
                 f"{_REMOTE_PARSER_DEF_COUNT} canonical git-remote read/parse helpers "
                 f"(found {definitions})",
             )
@@ -160,8 +163,8 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
         findings.append(
             _report(
                 rule_id,
-                _POLICY_DISCOVERY,
-                "Policy discovery must read the git remote origin exactly "
+                _REMOTE_MODULE,
+                "policy/_remote.py must read the git remote origin exactly "
                 f"{_REMOTE_ORIGIN_READ_COUNT} time via _git_remote_origin_url "
                 f"(found {origin_reads} origin-read argv occurrences)",
             )
@@ -170,9 +173,9 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
         _banned(
             provider,
             rule_id=rule_id,
-            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_POLICY_DISCOVERY,)),
+            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_REMOTE_MODULE,)),
             pattern=_REMOTE_ORIGIN_ARGV,
-            message="Read the git remote origin only via discovery.py::_git_remote_origin_url",
+            message="Read the git remote origin only via _remote.py::_git_remote_origin_url",
             configured=False,
             respect_exempt=True,
         )
@@ -181,9 +184,9 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
         _banned(
             provider,
             rule_id=rule_id,
-            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_POLICY_DISCOVERY,)),
+            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_REMOTE_MODULE,)),
             pattern=_REMOTE_PARSER_DEFS,
-            message="Remote-URL split/parse owner is discovery.py; do not redefine these helpers",
+            message="Remote-URL split/parse owner is _remote.py; do not redefine these helpers",
             configured=False,
             respect_exempt=True,
         )

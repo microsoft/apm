@@ -435,7 +435,7 @@ class TestParseRemoteUrlEdgeCases:
 
     def test_https_url_parse_exception_returns_none(self) -> None:
         """HTTPS URL where urlparse raises -> returns None."""
-        with patch("apm_cli.policy.discovery.urlparse", side_effect=Exception("boom")):
+        with patch("apm_cli.policy._remote.urlparse", side_effect=Exception("boom")):
             result = _parse_remote_url("https://github.com/owner/repo")
         assert result is None
 

@@ -400,7 +400,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="install-deployment-policy-remote-origin-owner",
         rule_id="install-deployment-policy-remote-origin-owner",
-        path="src/apm_cli/policy/discovery.py",
+        path="src/apm_cli/policy/_remote.py",
         old='[get_git_executable(), "remote", "get-url", "origin"],',
         new=(
             '[get_git_executable(), "remote", "get-url", "origin"],\n'
