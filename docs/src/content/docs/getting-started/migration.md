@@ -5,7 +5,9 @@ sidebar:
   order: 5
 ---
 
-APM is additive. It never deletes, overwrites, or modifies your existing configuration files. Your current `.github/copilot-instructions.md`, `AGENTS.md`, `.claude/` config, `.cursor-rules` -- all stay exactly where they are, untouched.
+APM is additive. It does not move or rewrite your existing configuration
+sources. Your current `.github/copilot-instructions.md`, `AGENTS.md`,
+`.claude/` config, and `.cursor-rules` stay in place.
 
 ## Add APM in three steps
 
@@ -39,9 +41,57 @@ git commit -m "Add APM manifest"
 
 Your teammates run `apm install` and get the same setup. No more copy-pasting configuration between repositories.
 
+## Adopt an existing skill as a local package
+
+Use discovery when a repository already contains an admissible skill or package
+directory. For example:
+
+```text
+.claude/skills/review/
+|-- SKILL.md
+`-- references.md
+```
+
+Preview the inventory, then consent to update the manifest:
+
+```bash
+apm init --discover
+apm init --discover --apply
+```
+
+The second command creates or merges `apm.yml` and adds the missing local
+package reference:
+
+```yaml
+dependencies:
+  apm:
+    - path: ./.claude/skills/review
+```
+
+The source stays in place. Discovery does not copy, translate, or execute it,
+and reruns do not duplicate the reference or overwrite the source. Loose native
+rules, hooks, MCP configuration, and other unsupported files are reported
+without translation. See the [`apm init` reference](../../reference/cli/init/)
+for discovery and merge behavior.
+
+Install through the normal target pipeline:
+
+```bash
+apm install --target copilot
+```
+
+For this shared skill, the install writes `.agents/skills/review/`. Normal
+collision handling still applies. APM does not convert content to a target
+standard; the package author and harness own compliance.
+
+Commit project-relative sources with the repository so teammates can resolve
+the same path. User-scope discovery uses installer-compatible absolute or
+home-rooted references instead.
+
 ## What happens to your existing files?
 
-They continue to work. APM-managed files coexist with manually-created ones. There is no conflict and no takeover.
+They continue to work. APM-managed files coexist with manually-created ones.
+Discovery does not imply takeover.
 
 Over time, you may choose to move manual configuration into APM packages for portability across repositories, but there is no deadline or requirement to do so. APM and manual configuration coexist indefinitely.
 

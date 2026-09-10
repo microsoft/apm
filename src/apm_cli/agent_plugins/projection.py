@@ -10,13 +10,16 @@ from .errors import AgentPluginManifestAuthorityError
 from .ir import AgentPlugin, thaw_frozen_json
 
 
-def project_agent_plugin_package(plugin: AgentPlugin) -> APMPackage:
+def project_agent_plugin_package(plugin: AgentPlugin, *, create_config: bool = True) -> APMPackage:
     """Project canonical Agent Plugin facts into the compatibility package model.
 
     Portable identity comes only from ``plugin.identity``. APM-owned manifest
     fields come only from ``plugin.apm_configuration``. Component facts remain
     attached through the canonical frozen IR rather than being reparsed from
     ``plugin.json``, ``mcp.json``, or the package filesystem.
+
+    Read-only admission passes ``create_config=False`` to avoid initializing
+    user configuration while projecting existing source metadata.
     """
     data = _project_apm_configuration(plugin)
     identity = plugin.identity
@@ -41,6 +44,7 @@ def project_agent_plugin_package(plugin: AgentPlugin) -> APMPackage:
             package_path=plugin.root,
             source_path=plugin.root,
             manifest_path=manifest_path,
+            create_config=create_config,
         )
     except (TargetResolutionError, ValueError) as exc:
         raise AgentPluginManifestAuthorityError(

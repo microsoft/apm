@@ -30,6 +30,7 @@ from apm_cli.commands.cache import cache
 from apm_cli.commands.compile import compile as compile_cmd
 from apm_cli.commands.config import config
 from apm_cli.commands.deps import deps
+from apm_cli.commands.discover import discover
 from apm_cli.commands.doctor import doctor
 from apm_cli.commands.experimental import experimental
 from apm_cli.commands.find import find as find_cmd
@@ -170,8 +171,14 @@ def cli(ctx, verbose: bool) -> None:
     warnings.filterwarnings("ignore", category=AgentsTargetDeprecationWarning)
 
     # Check for updates only for known commands; skip on invalid input to fail fast.
+    # Discovery must not initialize caches or contact the update service.
+    raw_args = ctx.meta.get("apm_raw_args", sys.argv[1:])
+    discovering = ctx.invoked_subcommand == "discover" or (
+        ctx.invoked_subcommand == "init" and "--discover" in raw_args
+    )
     if (
         not ctx.resilient_parsing
+        and not discovering
         and ctx.invoked_subcommand is not None
         and ctx.command.get_command(ctx, ctx.invoked_subcommand) is not None
     ):
@@ -199,6 +206,7 @@ cli.add_command(pack_cmd, name="pack")
 cli.add_command(unpack_cmd, name="unpack")
 cli.add_command(publish_cmd, name="publish")
 cli.add_command(init)
+cli.add_command(discover)
 cli.add_command(install)
 cli.add_command(lock)
 cli.add_command(uninstall)
