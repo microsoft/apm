@@ -1,0 +1,5 @@
+name: packaged-handoff
+version: 0.1.0
+dependencies:
+  apm:
+    - path: ./skills/handoff-style

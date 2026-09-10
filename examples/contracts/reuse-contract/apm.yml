@@ -1,0 +1,5 @@
+name: contracts-skill-reuse
+version: 0.1.0
+dependencies:
+  apm:
+    - path: ../handoff-style

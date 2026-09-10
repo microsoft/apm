@@ -1,0 +1,4 @@
+name: contracts-first-run
+version: 0.1.0
+dependencies:
+  apm: []

@@ -579,6 +579,25 @@ target is present. Authoring rules:
   package (the legacy `bin_deploy` rule remains a deprecated alias).
   See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#executables).
 
+## Local contract source (v0.1)
+
+Ship an explicit file such as `contracts/handoff.contract.md` and its checker
+resources under package-root `checks/`. Use normal `apm.yml` fields; there is no
+job-entrypoint schema. The consumer selects the file with `apmx --from`.
+
+Contract frontmatter declares fixed-file `needs`, one regular-file `produces`,
+1 to 8 named shell commands in `verify`, and optionally one skill in `imports`.
+The nonempty Markdown body describes the work. Inputs come from the caller,
+not package sample files; checks come from the package.
+
+Declare the imported skill in `apm.yml`: only one self-contained root `SKILL.md`
+is supported. `apmx` can fetch it privately if missing, without user installation
+or harness activation. No companions, transitive dependencies, MCP/hooks/plugins,
+`run`, `budget`, `sandbox`, or composition are supported.
+
+See the canonical [source and import reference](https://microsoft.github.io/apm/reference/cli/plan/#contract-source)
+and [commands](./commands.md#local-contracts-v01).
+
 ## Canvas extensions (experimental, Copilot-only)
 
 Behind the `canvas` experimental flag (`apm experimental enable canvas`), a

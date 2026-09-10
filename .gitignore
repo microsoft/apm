@@ -77,6 +77,7 @@ WIP/
 skill-plan.md
 skill-strategy.md
 apm_modules/
+.apm/runs/
 build/tmp/
 scout-pipeline-result.png
 .copilot/

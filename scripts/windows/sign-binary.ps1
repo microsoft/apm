@@ -9,7 +9,7 @@
 # this lets contributor / fork builds complete normally.
 #
 # Signing covers:
-#   1. apm.exe (the main entry point)
+#   1. apm.exe and apmx.exe (the entry points)
 #   2. Every bundled *.dll (unsigned DLLs can re-trigger Defender heuristics
 #      even when the EXE itself is signed)
 #
@@ -40,8 +40,9 @@ if (-not (Test-Path $BinaryDir)) {
 }
 
 $ExePath = Join-Path $BinaryDir "apm.exe"
-if (-not (Test-Path $ExePath)) {
-    Write-Host "[x] apm.exe not found in $BinaryDir"
+$CompanionExePath = Join-Path $BinaryDir "apmx.exe"
+if (-not (Test-Path $ExePath) -or -not (Test-Path $CompanionExePath)) {
+    Write-Host "[x] apm.exe or apmx.exe not found in $BinaryDir"
     exit 1
 }
 
@@ -105,7 +106,7 @@ try {
 
     # -- Collect targets: apm.exe + all bundled DLLs -------------------------
 
-    $Targets = @($ExePath)
+    $Targets = @($ExePath, $CompanionExePath)
     $DllTargets = Get-ChildItem -Path $BinaryDir -Filter "*.dll" -Recurse |
         Select-Object -ExpandProperty FullName
     $Targets += $DllTargets
@@ -131,27 +132,31 @@ try {
         "/q"
     ) + $Targets
 
-    $proc = Start-Process -FilePath $SignToolPath -ArgumentList $SignArgs `
-        -Wait -PassThru -NoNewWindow
-    if ($proc.ExitCode -ne 0) {
-        Write-Host "[x] signtool sign failed with exit code $($proc.ExitCode)"
-        exit $proc.ExitCode
+    & $SignToolPath @SignArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[x] signtool sign failed with exit code $LASTEXITCODE"
+        exit $LASTEXITCODE
     }
 
     Write-Host "[+] Signing complete"
 
     # -- Verify the EXE signature --------------------------------------------
 
-    Write-Host "[*] Verifying signature on apm.exe..."
-    $VerifyArgs = @("verify", "/pa", "/v", $ExePath)
-    $verifyProc = Start-Process -FilePath $SignToolPath -ArgumentList $VerifyArgs `
-        -Wait -PassThru -NoNewWindow
-    if ($verifyProc.ExitCode -ne 0) {
+    Write-Host "[*] Verifying signatures on apm.exe and apmx.exe..."
+    $VerifyArgs = @("verify", "/pa", "/v", $ExePath, $CompanionExePath)
+    & $SignToolPath @VerifyArgs
+    if ($LASTEXITCODE -ne 0) {
         Write-Host "[x] signtool verify failed -- signature may be invalid"
-        exit $verifyProc.ExitCode
+        exit $LASTEXITCODE
     }
 
     Write-Host "[+] Signature verified"
+
+    # Signing mutates executable bytes, including when CI signs after the build.
+    @($ExePath, $CompanionExePath) | ForEach-Object {
+        $hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower()
+        "$hash  $_"
+    } | Set-Content "$BinaryDir.sha256"
 
 } finally {
     if ($TempCert -and (Test-Path $TempCert)) {

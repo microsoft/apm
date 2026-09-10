@@ -328,6 +328,15 @@ def discover_policy_with_chain(
     return fetch_result
 
 
+def discover_contract_policy(
+    project_root: Path, *, manifest_data: dict | None = None
+) -> PolicyFetchResult:
+    """Acquire positive no-policy evidence without ambiguous cache-only absence."""
+    from .contract_prerequisite import discover_contract_prerequisite
+
+    return discover_contract_prerequisite(project_root, manifest_data=manifest_data)
+
+
 def _strip_source_prefix(src: str) -> str:
     """Strip 'org:' / 'url:' / 'file:' prefix from a PolicyFetchResult.source."""
     return src.removeprefix("org:").removeprefix("url:").removeprefix("file:")

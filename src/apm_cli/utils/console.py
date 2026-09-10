@@ -1,5 +1,8 @@
 """Console utility functions for formatting and output."""
 
+import atexit
+import os
+import sys
 import threading
 from contextlib import contextmanager
 from typing import Any
@@ -25,7 +28,10 @@ except ImportError:
 try:
     from colorama import Fore, Style, init
 
-    init(autoreset=False)
+    # init() registers an unconditional exit-time ANSI reset, even when no
+    # styled output was written. A NO_COLOR terminal must stay escape-free.
+    if "NO_COLOR" not in os.environ:
+        init(autoreset=False)
     COLORAMA_AVAILABLE = True
 except ImportError:
     COLORAMA_AVAILABLE = False
@@ -111,6 +117,9 @@ def _rich_echo(
     style: str = None,  # noqa: RUF013
     bold: bool = False,
     symbol: str = None,  # noqa: RUF013
+    propagate_broken_pipe: bool = False,
+    plain: bool = False,
+    natural_wrap: bool = False,
 ):
     """Echo message with Rich formatting or colorama fallback."""
     # Handle backward compatibility - if style is provided, use it as color
@@ -121,19 +130,32 @@ def _rich_echo(
         symbol_char = STATUS_SYMBOLS[symbol]
         message = f"{symbol_char} {message}"
 
+    if plain:
+        _plain_echo(message)
+        return
+
     console = _get_console()
     if console:
         try:
             style_str = color
             if bold:
                 style_str = f"bold {color}"
-            console.print(message, style=style_str, highlight=False, markup=False)
+            with _broken_pipe_policy(console, propagate_broken_pipe):
+                # Opt-in only: legacy callers retain Rich's usual wrapping.
+                wrap_options = {"soft_wrap": True} if natural_wrap else {}
+                console.print(
+                    message, style=style_str, highlight=False, markup=False, **wrap_options
+                )
             return
+        except BrokenPipeError:
+            # Lifecycle loggers must be able to disable a closed human stream;
+            # a fallback write would only repeat the same broken-pipe failure.
+            raise
         except Exception:
             pass
 
     # Colorama fallback
-    if COLORAMA_AVAILABLE and Fore:
+    if COLORAMA_AVAILABLE and Fore and "NO_COLOR" not in os.environ:
         color_map = {
             "red": Fore.RED,
             "green": Fore.GREEN,
@@ -150,6 +172,46 @@ def _rich_echo(
         click.echo(f"{color_code}{style_code}{message}{Style.RESET_ALL}", err=_console_stderr)
     else:
         click.echo(message, err=_console_stderr)
+
+
+def _plain_echo(message: str) -> None:
+    """Opt-in literal output, including when legacy imports wrapped stdio.
+
+    Do not replace sys.stdout/stderr or change existing converters' autoreset
+    settings: subsequent legacy writes keep their normal behavior. Only this
+    write bypasses Colorama. A plain command must also suppress Colorama's
+    unconditional exit-time reset; a later init() can register it again.
+    """
+    stream = sys.stderr if _console_stderr else sys.stdout
+    if COLORAMA_AVAILABLE:
+        from colorama import initialise
+        from colorama.ansitowin32 import StreamWrapper
+
+        while isinstance(stream, StreamWrapper):
+            # Colorama offers no public unwrap API. This narrow adapter only
+            # unwraps its known proxy, never arbitrary user/capture streams.
+            stream = stream._StreamWrapper__wrapped
+        if initialise.atexit_done:
+            atexit.unregister(initialise.reset_all)
+            initialise.atexit_done = False
+    click.echo(message, file=stream, color=False)
+
+
+@contextmanager
+def _broken_pipe_policy(console: Any, propagate: bool):
+    """Let lifecycle owners finish records instead of Rich exiting the process."""
+    original = getattr(console, "on_broken_pipe", None)
+
+    def raise_broken_pipe() -> None:
+        raise BrokenPipeError("Human output pipe closed.")
+
+    if propagate and original is not None:
+        console.on_broken_pipe = raise_broken_pipe
+    try:
+        yield
+    finally:
+        if propagate and original is not None:
+            console.on_broken_pipe = original
 
 
 def _rich_success(message: str, symbol: str = None):  # noqa: RUF013

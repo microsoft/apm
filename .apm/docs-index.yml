@@ -157,6 +157,42 @@ pages:
       flags: [--target, -g]
       schemas: [marketplace.json, settings.local.json, apm-registration.json]
 
+  - path: docs/src/content/docs/consumer/run-contracts.md
+    title: "Run a contract"
+    persona: consumer
+    promise: 1
+    documents_symbols:
+      cli: [apmx]
+      flags: [--from, --plan, --on, --model, --allow-advisory]
+      schemas: [.contract.md]
+
+  - path: docs/src/content/docs/reference/cli/apmx.md
+    title: "apmx"
+    persona: consumer
+    promise: 1
+    documents_symbols:
+      cli: [apmx]
+      flags: [--from, --plan, --on, --model, --allow-advisory, --verbose, --version]
+      schemas: [.contract.md, apm.yml.dependencies, apm.lock.yaml]
+
+  - path: docs/src/content/docs/reference/cli/plan.md
+    title: "apm plan"
+    persona: consumer
+    promise: 1
+    documents_symbols:
+      cli: [apm plan, apmx]
+      flags: [--on, --model, --verbose]
+      schemas: [.contract.md, apm.yml.dependencies, apm.lock.yaml]
+
+  - path: docs/src/content/docs/reference/cli/run.md
+    title: "apm run"
+    persona: consumer
+    promise: 1
+    documents_symbols:
+      cli: [apm run]
+      flags: [--param, --verbose, --on, --model, --allow-advisory]
+      schemas: [apm.yml.scripts, .contract.md]
+
   - path: docs/src/content/docs/producer/index.md
     title: "Producer overview"
     persona: producer

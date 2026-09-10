@@ -42,6 +42,7 @@ from ..models.apm_package import (
     validate_apm_package,
 )
 from ..models.dependency.host_virtual import repository_owner_and_repo, repository_path_segments
+from ..models.validation import ValidationResult
 from ..utils.github_host import default_host, is_full_commit_sha, is_github_hostname
 
 if TYPE_CHECKING:
@@ -146,8 +147,17 @@ class ArtifactoryOrchestrator:
     and auth headers stay shared.
     """
 
-    def __init__(self, archive_downloader: _HasArchiveDownloader) -> None:
+    def __init__(
+        self, archive_downloader: _HasArchiveDownloader, *, contract_path: str | None = None
+    ) -> None:
         self._archive_downloader = archive_downloader
+        self._contract_path = contract_path
+
+    def _validate_downloaded_package(self, target_path: Path) -> ValidationResult:
+        """Carry explicit source selection through proxy acquisition without changing installs."""
+        if self._contract_path is not None:
+            return validate_apm_package(target_path, contract_path=self._contract_path)
+        return validate_apm_package(target_path)
 
     # -- helpers --------------------------------------------------------
 
@@ -234,7 +244,7 @@ class ArtifactoryOrchestrator:
 
         from ._shared import _validate_and_load_package
 
-        validation_result = validate_apm_package(target_path)
+        validation_result = self._validate_downloaded_package(target_path)
         package = _validate_and_load_package(validation_result, target_path, dep_ref)
         ref_type, resolved_commit = self._resolved_commit_metadata(ref)
         package.resolved_commit = resolved_commit
@@ -304,7 +314,7 @@ class ArtifactoryOrchestrator:
         self._progress(progress_obj, progress_task_id, completed=80)
         from ._shared import _validate_and_load_package
 
-        validation_result = validate_apm_package(target_path)
+        validation_result = self._validate_downloaded_package(target_path)
         package = _validate_and_load_package(validation_result, target_path, dep_ref)
         ref_type, resolved_commit = self._resolved_commit_metadata(ref)
         package.resolved_commit = resolved_commit

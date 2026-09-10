@@ -61,6 +61,7 @@ build = [
 
 [project.scripts]
 apm = "apm_cli.cli:main"
+apmx = "apm_cli.apmx:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

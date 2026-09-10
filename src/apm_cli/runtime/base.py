@@ -8,9 +8,13 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from contextlib import suppress
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from ..core.tls_trust import build_child_tls_env
+
+if TYPE_CHECKING:
+    from ..contracts.models import BaselineSnapshot, LeafPlan, ProcessRequest
 
 
 def _terminate_and_reap(process: subprocess.Popen) -> None:
@@ -129,6 +133,23 @@ def _stream_subprocess_output(
 
 class RuntimeAdapter(ABC):
     """Base adapter interface for LLM runtimes."""
+
+    def build_contract_request(
+        self,
+        plan: "LeafPlan",
+        snapshot: "BaselineSnapshot",
+        run_directory: Path,
+        *,
+        timeout_seconds: float,
+    ) -> "ProcessRequest":
+        """Build a managed leaf invocation; legacy adapters are unsupported."""
+        from ..contracts.models import ContractError, Outcome
+
+        raise ContractError(
+            "This runtime does not support structured contract execution.",
+            code="unsupported_harness",
+            outcome=Outcome.UNPROVEN,
+        )
 
     @abstractmethod
     def execute_prompt(self, prompt_content: str, **kwargs) -> str:

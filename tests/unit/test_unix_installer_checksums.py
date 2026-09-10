@@ -44,6 +44,10 @@ def _run_installer(
     metadata_auth_status: int | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[dict], Path]:
     """Run the worktree installer; only fixture-local marker execution is allowed."""
+    companion = checksum in ("companion-matching", "companion-tampered")
+    tamper_companion = checksum == "companion-tampered"
+    if companion:
+        checksum = "matching"
     for directory in ("bin", "home", "scratch"):
         (tmp_path / directory).mkdir()
     asset = f"apm-{platform}-x86_64.tar.gz"
@@ -53,7 +57,20 @@ def _run_installer(
         member.size = len(payload)
         member.mode = 0o755
         archive.addfile(member, io.BytesIO(payload))
+        if companion:
+            member = tarfile.TarInfo(f"apm-{platform}-x86_64/apmx")
+            member.size = len(payload)
+            member.mode = 0o755
+            archive.addfile(member, io.BytesIO(payload))
     digest = hashlib.sha256((tmp_path / asset).read_bytes()).hexdigest()
+    if tamper_companion:
+        # Leave apm byte-for-byte intact; change only the companion payload.
+        with tarfile.open(tmp_path / asset, "w:gz") as archive:
+            for name, content in (("apm", payload), ("apmx", payload + b"exit 99\n")):
+                member = tarfile.TarInfo(f"apm-{platform}-x86_64/{name}")
+                member.size = len(content)
+                member.mode = 0o755
+                archive.addfile(member, io.BytesIO(content))
     records = {
         "matching": f"{digest}  {asset}\n",
         "binary-mode": f"{digest} *{asset}\n",
@@ -267,6 +284,18 @@ def _assert_verified(
     assert "[+] Archive checksum verified" in result.stdout
     assert marker.read_text(encoding="ascii") == "executed:--version\n"
     assert [event["tool"] for event in trace if event["tool"] in DENIED_TOOLS] == ["mkdir"]
+
+
+@pytest.mark.parametrize("tamper", [False, True])
+def test_archive_integrity_covers_companion_bytes(tmp_path: Path, tamper: bool) -> None:
+    """Changing apmx alone must fail before extraction or either entry executes."""
+    result, trace, marker = _run_installer(
+        tmp_path, checksum="companion-tampered" if tamper else "companion-matching"
+    )
+    if tamper:
+        _assert_refused(result, trace, marker)
+    else:
+        _assert_verified(result, trace, marker)
 
 
 def _single_https_url(args: list[str]) -> ParseResult:

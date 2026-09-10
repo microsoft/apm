@@ -20,7 +20,8 @@
 
 param(
     [string]$PinnedVersion = "v0.29.0",
-    [string]$OlderVersion  = "v0.28.0"
+    [string]$OlderVersion  = "v0.28.0",
+    [string]$LocalBundle = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -282,11 +283,12 @@ function Assert-MissingStableExecutableFailsForNativeProcess {
     param(
         [Parameter(Mandatory = $true)][string]$CurrentDir,
         [Parameter(Mandatory = $true)][string]$BinDir,
-        [Parameter(Mandatory = $true)][string]$WorkingDir
+        [Parameter(Mandatory = $true)][string]$WorkingDir,
+        [ValidateSet("apm", "apmx")][string]$CommandName = "apm"
     )
 
-    $stableExe = Join-Path $CurrentDir "apm.exe"
-    $cmdShim = Join-Path $BinDir "apm.cmd"
+    $stableExe = Join-Path $CurrentDir "$CommandName.exe"
+    $cmdShim = Join-Path $BinDir "$CommandName.cmd"
     $disabledCurrent = "$CurrentDir.pr6-disabled"
     $savedPath = $env:Path
     $savedLaunchCwd = $env:APM_LAUNCH_TEST_CWD
@@ -319,6 +321,7 @@ except FileNotFoundError:
 print("bare apm unexpectedly resolved", file=sys.stderr)
 sys.exit(1)
 '@
+        $pythonScript = $pythonScript.Replace('["apm",', '["' + $CommandName + '",')
         $pythonOutput = & $pythonExe -c $pythonScript 2>&1
         $pythonExit = $LASTEXITCODE
         if ($pythonExit -ne 0) {
@@ -679,6 +682,166 @@ function Test-SelfUpdateCommand {
 }
 
 # ---------------------------------------------------------------------------
+function Invoke-LocalBundleInstall {
+    param([string]$Archive, [hashtable]$Prefix, [string]$Version, [switch]$FailCompanionWrite)
+    $settings = @{
+        VERSION = $Version
+        APM_INSTALL_DIR = $Prefix.BinDir
+        APM_TEMP_DIR = $Prefix.TmpDir
+        APM_RELEASE_BASE_URL = "https://fixture.invalid/releases"
+        APM_NO_DIRECT_FALLBACK = "1"
+        APM_PYPI_INDEX_URL = ""
+        APM_SKIP_CHECKSUM = ""
+        APM_LOCAL_ARCHIVE = $Archive
+        APM_LOCAL_INSTALLER = [string]$InstallScript
+        APM_FAIL_COMPANION_WRITE = $(if ($FailCompanionWrite) { "1" } else { "" })
+    }
+    $saved = @{}
+    foreach ($key in $settings.Keys) {
+        $saved[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+        [Environment]::SetEnvironmentVariable($key, $settings[$key], "Process")
+    }
+    $child = @'
+$ErrorActionPreference = "Stop"
+function Invoke-WebRequest {
+    param($Uri, $OutFile, $Headers, [switch]$UseBasicParsing)
+    $parsed = [Uri]$Uri
+    if ($parsed.Host -ne "fixture.invalid") { throw "Unexpected network request: $Uri" }
+    if ($parsed.AbsolutePath.EndsWith(".zip.sha256")) {
+        Copy-Item -LiteralPath ($env:APM_LOCAL_ARCHIVE + ".sha256") -Destination $OutFile
+    } elseif ($parsed.AbsolutePath.EndsWith(".zip")) {
+        Copy-Item -LiteralPath $env:APM_LOCAL_ARCHIVE -Destination $OutFile
+    } else { throw "Unexpected fixture route: $Uri" }
+}
+if ($env:APM_FAIL_COMPANION_WRITE -eq "1") {
+    function Set-Content {
+        param($Path, $LiteralPath, $Value, $Encoding, [switch]$NoNewline)
+        if ($LiteralPath -and $LiteralPath.EndsWith("\apmx.cmd") -and -not $script:CompanionWriteFailed) {
+            $script:CompanionWriteFailed = $true
+            throw "Injected companion shim write failure"
+        }
+        if ($LiteralPath) {
+            Microsoft.PowerShell.Management\Set-Content -LiteralPath $LiteralPath -Value $Value -Encoding $Encoding -NoNewline:$NoNewline
+        } else {
+            Microsoft.PowerShell.Management\Set-Content -Path $Path -Value $Value -Encoding $Encoding -NoNewline:$NoNewline
+        }
+    }
+}
+& $env:APM_LOCAL_INSTALLER
+'@
+    try {
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $child | Out-Host
+        return $LASTEXITCODE
+    } finally {
+        foreach ($key in $settings.Keys) {
+            [Environment]::SetEnvironmentVariable($key, $saved[$key], "Process")
+        }
+    }
+}
+
+function Test-LocalCompanionBundle {
+    # This path validates the just-built release, not an older public release
+    # that never shipped apmx. All downloads are fixture copies with real hashes.
+    $root = Join-Path $RepoRoot ("APM Install Test & Edge " + [guid]::NewGuid().ToString("N"))
+    $prefix = @{ Root = $root; BinDir = (Join-Path $root "bin"); TmpDir = (Join-Path $root "scratch") }
+    $savedUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $savedPath = $env:Path
+    try {
+        if (-not (Test-Path (Join-Path $LocalBundle "apmx.exe"))) {
+            throw "Current-build companion gate requires an actual apmx.exe."
+        }
+        New-Item -ItemType Directory -Force -Path $prefix.BinDir, $prefix.TmpDir | Out-Null
+        $archive = Join-Path $root "current.zip"
+        Compress-Archive -Path $LocalBundle -DestinationPath $archive
+        $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+        "$hash  apm-windows-x86_64.zip" | Set-Content "$archive.sha256" -Encoding ASCII
+        $exitCode = Invoke-LocalBundleInstall -Archive $archive -Prefix $prefix -Version "v0.0.1"
+        Assert-True ($exitCode -eq 0) "Current bundle installs with apmx"
+        $current = Join-Path $root "current"
+        $companionShim = Join-Path $prefix.BinDir "apmx.cmd"
+        Assert-True (Test-Path (Join-Path $current "apmx.exe")) "Current bundle exposes native apmx.exe"
+        $shimVersion = Get-ShimVersion -ShimPath $companionShim
+        Assert-True ($shimVersion.ExitCode -eq 0) "Companion cmd shim preserves spaces and ampersands"
+        $python = (Get-Command python -ErrorAction Stop).Source
+        $env:Path = "$current;$($prefix.BinDir);$savedPath"
+        $env:APM_LAUNCH_TEST_CWD = $root
+        $native = @'
+import os
+import subprocess
+for flag in ("--version", "--help"):
+    subprocess.run(["apmx", flag], cwd=os.environ["APM_LAUNCH_TEST_CWD"], check=True)
+'@
+        & $python -c $native
+        Assert-True ($LASTEXITCODE -eq 0) "Native Python subprocess resolves apmx version and help"
+        & cmd.exe /d /c "apmx --help"
+        Assert-True ($LASTEXITCODE -eq 0) "cmd.exe resolves bare apmx help"
+        Assert-MissingStableExecutableFailsForNativeProcess -CurrentDir $current -BinDir $prefix.BinDir -WorkingDir $root -CommandName apmx
+        $env:Path = $savedPath
+
+        foreach ($version in @("v0.0.1", "v0.0.2")) {
+            $exitCode = Invoke-LocalBundleInstall -Archive $archive -Prefix $prefix -Version $version -FailCompanionWrite
+            Assert-True ($exitCode -ne 0) "Companion activation failure rejects the upgrade"
+            $target = (Get-Item $current).Target
+            Assert-True ($target -match 'v0\.0\.1$') "Companion failure restores previous shared runtime"
+            Assert-True ((Get-ShimVersion -ShimPath (Join-Path $prefix.BinDir "apm.cmd")).ExitCode -eq 0) "Rollback preserves apm shim"
+            Assert-True ((Get-ShimVersion -ShimPath $companionShim).ExitCode -eq 0) "Rollback preserves apmx shim"
+        }
+
+        $originalLength = (Get-Item $archive).Length
+        $stream = [IO.File]::OpenWrite($archive)
+        try {
+            $stream.Position = $originalLength
+            $stream.WriteByte(42)
+        } finally { $stream.Dispose() }
+        $exitCode = Invoke-LocalBundleInstall -Archive $archive -Prefix $prefix -Version "v0.0.2"
+        Assert-True ($exitCode -ne 0) "Tampered companion archive fails checksum verification"
+        Assert-True ((Get-Item $current).Target -match 'v0\.0\.1$') "Integrity failure preserves current bundle"
+        $stream = [IO.File]::OpenWrite($archive)
+        try { $stream.SetLength($originalLength) } finally { $stream.Dispose() }
+
+        $ownedContent = [IO.File]::ReadAllText($companionShim)
+        Set-Content -LiteralPath $companionShim -Value "unrelated apmx" -Encoding ASCII -NoNewline
+        $exitCode = Invoke-LocalBundleInstall -Archive $archive -Prefix $prefix -Version "v0.0.2"
+        Assert-True ($exitCode -ne 0) "Installer refuses unrelated apmx.cmd"
+        Assert-True ([IO.File]::ReadAllText($companionShim) -ceq "unrelated apmx") "Collision preserves unrelated companion launcher"
+        Set-Content -LiteralPath $companionShim -Value $ownedContent -Encoding ASCII -NoNewline
+        $foreignExe = Join-Path $prefix.BinDir "apmx.exe"
+        Set-Content -LiteralPath $foreignExe -Value "unrelated executable" -Encoding ASCII -NoNewline
+        $exitCode = Invoke-LocalBundleInstall -Archive $archive -Prefix $prefix -Version "v0.0.2"
+        Assert-True ($exitCode -ne 0) "Installer refuses unrelated apmx.exe"
+        Assert-True ([IO.File]::ReadAllText($foreignExe) -ceq "unrelated executable") "Collision preserves unrelated native executable"
+        Remove-Item -LiteralPath $foreignExe
+
+        $exitCode = Invoke-LocalBundleInstall -Archive $archive -Prefix $prefix -Version "v0.0.2"
+        Assert-True ($exitCode -eq 0) "Owned companion upgrades with apm"
+        $exitCode = Invoke-LocalBundleInstall -Archive $archive -Prefix $prefix -Version "v0.0.2"
+        Assert-True ($exitCode -eq 0) "Owned companion supports same-version reinstall"
+        Assert-True ((Get-Item $current).Target -match 'v0\.0\.2$') "Both executables resolve upgraded shared runtime"
+
+        $legacyRoot = Join-Path $root "legacy"
+        New-Item -ItemType Directory -Path $legacyRoot | Out-Null
+        Copy-Item -Path $LocalBundle -Destination $legacyRoot -Recurse
+        $legacyBundle = Join-Path $legacyRoot "apm-windows-x86_64"
+        Remove-Item -LiteralPath (Join-Path $legacyBundle "apmx.exe")
+        $legacyArchive = Join-Path $root "legacy.zip"
+        Compress-Archive -Path $legacyBundle -DestinationPath $legacyArchive
+        $hash = (Get-FileHash $legacyArchive -Algorithm SHA256).Hash.ToLower()
+        "$hash  apm-windows-x86_64.zip" | Set-Content "$legacyArchive.sha256" -Encoding ASCII
+        $exitCode = Invoke-LocalBundleInstall -Archive $legacyArchive -Prefix $prefix -Version "v0.0.0"
+        Assert-True ($exitCode -eq 0) "Legacy bundle remains installable"
+        Assert-True (-not (Test-Path $companionShim)) "Legacy downgrade removes only the owned apmx shim"
+        Assert-True (-not (Test-Path (Join-Path $current "apmx.exe"))) "Legacy bundle does not falsely expose apmx"
+    } finally {
+        $env:Path = $savedPath
+        [Environment]::SetEnvironmentVariable("Path", $savedUserPath, "User")
+        Remove-Item Env:APM_LAUNCH_TEST_CWD -ErrorAction SilentlyContinue
+        if (Test-Path (Join-Path $root "current")) {
+            [IO.Directory]::Delete((Join-Path $root "current"))
+        }
+        Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+    }
+}
+
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -688,14 +851,18 @@ Write-Host "        APM install.ps1 Windows integration test                  " 
 Write-Host "=================================================================" -ForegroundColor Blue
 Write-Host ""
 
-Test-Sha256Fallback
-Test-MoveThenTestOrdering
-Test-AntivirusDetector
-Test-EndToEndInstall
-Test-NonJunctionCollision
-Test-CrossVersionUpgrade
-Test-SameVersionReinstall
-Test-SelfUpdateCommand
+if ($LocalBundle) {
+    Test-LocalCompanionBundle
+} else {
+    Test-Sha256Fallback
+    Test-MoveThenTestOrdering
+    Test-AntivirusDetector
+    Test-EndToEndInstall
+    Test-NonJunctionCollision
+    Test-CrossVersionUpgrade
+    Test-SameVersionReinstall
+    Test-SelfUpdateCommand
+}
 
 Write-Host ""
 Write-Host "=================================================================" -ForegroundColor Blue

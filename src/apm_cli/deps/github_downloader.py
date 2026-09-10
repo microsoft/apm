@@ -30,6 +30,7 @@ from ..models.apm_package import (
     validate_apm_package,
 )
 from ..models.dependency.host_virtual import dependency_repository_owner, repository_path_segments
+from ..models.validation import ValidationResult
 from ..utils.atomic_io import atomic_write_text
 from ..utils.console import (
     _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
@@ -205,6 +206,7 @@ class GitHubPackageDownloader:
         transport_selector: TransportSelector | None = None,
         protocol_pref: ProtocolPreference | None = None,
         allow_fallback: bool | None = None,
+        contract_path: str | None = None,
     ):
         """Initialize the GitHub package downloader.
 
@@ -221,7 +223,10 @@ class GitHubPackageDownloader:
                 ``APM_ALLOW_PROTOCOL_FALLBACK`` env var, then
                 ``allow-protocol-fallback`` in ``~/.apm/config.json``,
                 then ``False``.
+            contract_path: Explicit contract-only source validation context.
+                None preserves ordinary install package validation.
         """
+        self._contract_path = contract_path
         self.auth_resolver = auth_resolver or AuthResolver()
         self.token_manager = self.auth_resolver._token_manager  # Backward compat
         self.git_env = self._setup_git_environment()
@@ -261,7 +266,9 @@ class GitHubPackageDownloader:
         from .clone_engine import CloneEngine
         from .git_reference_resolver import GitReferenceResolver
 
-        self._artifactory = ArtifactoryOrchestrator(archive_downloader=self._strategies)
+        self._artifactory = ArtifactoryOrchestrator(
+            archive_downloader=self._strategies, contract_path=contract_path
+        )
         self._refs = GitReferenceResolver(host=self)
         self._clone_engine = CloneEngine(host=self)
 
@@ -1728,7 +1735,7 @@ class GitHubPackageDownloader:
         # Validate the extracted package (after temp dir is cleaned up)
         from ._shared import _validate_and_load_package
 
-        validation_result = validate_apm_package(target_path)
+        validation_result = self._validate_downloaded_package(target_path)
         package = _validate_and_load_package(validation_result, target_path, dep_ref)
 
         # Get the resolved reference for metadata
@@ -1922,7 +1929,7 @@ class GitHubPackageDownloader:
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)
-                validation_result = validate_apm_package(target_path)
+                validation_result = self._validate_downloaded_package(target_path)
                 if validation_result.is_valid and validation_result.package:
                     package = validation_result.package
                     package.source = dep_ref.to_github_url()
@@ -2033,7 +2040,7 @@ class GitHubPackageDownloader:
         # Validate the downloaded package
         from ._shared import _validate_and_load_package
 
-        validation_result = validate_apm_package(target_path)
+        validation_result = self._validate_downloaded_package(target_path)
         package = _validate_and_load_package(validation_result, target_path, dep_ref)
         package.resolved_commit = resolved_ref.resolved_commit
 
@@ -2057,6 +2064,12 @@ class GitHubPackageDownloader:
             dependency_ref=dep_ref,  # Store for canonical dependency string
             package_type=validation_result.package_type,  # Track if APM, Claude Skill, or Hybrid
         )
+
+    def _validate_downloaded_package(self, target_path: Path) -> ValidationResult:
+        """Keep normal installs strict while admitting explicitly selected source packages."""
+        if self._contract_path is not None:
+            return validate_apm_package(target_path, contract_path=self._contract_path)
+        return validate_apm_package(target_path)
 
     def _get_clone_progress_callback(self):
         """Get a progress callback for Git clone operations.

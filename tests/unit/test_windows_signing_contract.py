@@ -177,3 +177,14 @@ def test_sign_script_uses_exclusive_file_lock() -> None:
         "lock) to prevent a concurrent process from reading the private key "
         "bytes during the write window"
     )
+
+
+def test_companion_is_signed_verified_and_rehashed() -> None:
+    """Both executable signatures must precede checksums of their final bytes."""
+    text = _sign_script_text()
+    assert '$CompanionExePath = Join-Path $BinaryDir "apmx.exe"' in text
+    assert "$Targets = @($ExePath, $CompanionExePath)" in text
+    assert '$VerifyArgs = @("verify", "/pa", "/v", $ExePath, $CompanionExePath)' in text
+    assert "& $SignToolPath @SignArgs" in text
+    assert "& $SignToolPath @VerifyArgs" in text
+    assert text.index("& $SignToolPath @VerifyArgs") < text.index('Set-Content "$BinaryDir.sha256"')

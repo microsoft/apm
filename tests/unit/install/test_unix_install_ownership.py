@@ -1472,7 +1472,11 @@ def _stage_fake_python_pip(
     fake_modules = root / "python-modules"
     pip = fake_modules / "pip"
     pip.mkdir(parents=True)
-    (pip / "__init__.py").touch()
+    (pip / "__init__.py").write_text(
+        "from pkgutil import extend_path\nfrom importlib.metadata import version\n"
+        '__path__ = extend_path(__path__, __name__)\n__version__ = version("pip")\n',
+        encoding="ascii",
+    )
     install_body = ""
     if install_launcher:
         install_body = (
@@ -1494,7 +1498,7 @@ def _stage_fake_python_pip(
     python = root / "tools" / python_name
     python.write_text(
         "#!/bin/sh\n"
-        f'case "$*" in *get_preferred_scheme*) [ {query_exit} -eq 0 ] || exit {query_exit};; esac\n'
+        f'case "$*" in *get_scheme*) [ {query_exit} -eq 0 ] || exit {query_exit};; esac\n'
         f'exec {shlex.quote(sys.executable)} "$@"\n',
         encoding="ascii",
     )
@@ -1741,6 +1745,121 @@ def test_fresh_install_uses_defaults(installation: tuple[Path, dict[str, str]]) 
     assert (root / "home/.local/bin/apm").resolve() == root / "home/.local/lib/apm/apm"
     assert not (root / "sudo.log").exists()
     assert not list((root / "home").glob(".*rc"))
+
+
+def _stage_companion(installation: tuple[Path, dict[str, str]], *, fail: str = "") -> None:
+    """Add a harmless companion to the existing installer fixture."""
+    _, env = installation
+    companion = Path(env["TMP_DIR"]) / env["EXTRACTED_DIR"] / "apmx"
+    companion.write_text(
+        "#!/bin/sh\n"
+        + ('case "$0" in *.apm-stage.*) ;; *) exit 71 ;; esac\n' if fail == "activation" else "")
+        + ("exit 72\n" if fail == "staging" else "printf 'apmx fixture\\n'\n"),
+        encoding="ascii",
+    )
+    companion.chmod(0o755)
+
+
+def test_companion_install_upgrade_and_legacy_downgrade(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """Install both launchers, replace together, then remove only the owned companion."""
+    root, env = installation
+    _stage_companion(installation)
+    bindir = root / "home/.local/bin"
+    lib = root / "home/.local/lib/apm"
+    for _ in range(2):
+        result = _run(installation)
+        assert result.returncode == 0, result.stderr
+        assert (bindir / "apmx").is_symlink()
+        assert (bindir / "apmx").resolve() == lib / "apmx"
+        (bindir / "apmx").unlink()
+        (bindir / "apmx").symlink_to("../lib/apm/apmx")
+    (Path(env["TMP_DIR"]) / env["EXTRACTED_DIR"] / "apmx").unlink()
+    result = _run(installation)
+    assert result.returncode == 0, result.stderr
+    assert (bindir / "apm").is_file()
+    assert not (bindir / "apmx").is_symlink()
+    assert not (lib / "apmx").exists()
+
+
+def test_legacy_install_preserves_unrelated_companion(
+    installation: tuple[Path, dict[str, str]],
+) -> None:
+    """Releases that never shipped apmx have no authority over another launcher."""
+    root, _ = installation
+    bindir = root / "home/.local/bin"
+    bindir.mkdir(parents=True)
+    foreign = bindir / "apmx"
+    foreign.write_text("unrelated\n", encoding="ascii")
+    result = _run(installation)
+    assert result.returncode == 0, result.stderr
+    assert foreign.read_text(encoding="ascii") == "unrelated\n"
+    assert (bindir / "apm").is_file()
+
+
+@pytest.mark.parametrize("kind", ["file", "directory", "symlink", "dangling"])
+def test_companion_collision_preserves_unrelated_path(
+    installation: tuple[Path, dict[str, str]], kind: str
+) -> None:
+    """Only a link resolving to the recognized APM bundle authorizes replacement."""
+    root, _ = installation
+    _stage_companion(installation)
+    bindir = root / "home/.local/bin"
+    bindir.mkdir(parents=True)
+    collision = bindir / "apmx"
+    target = root / "unrelated"
+    if kind == "directory":
+        collision.mkdir()
+        target = collision / "canary"
+    if kind != "dangling":
+        target.write_text("keep\n", encoding="ascii")
+    if kind in ("symlink", "dangling"):
+        collision.symlink_to(target)
+    elif kind == "file":
+        collision.write_text("keep\n", encoding="ascii")
+    result = _run(installation)
+    assert result.returncode == 1
+    assert "Refusing to replace unrelated apmx" in result.stderr
+    assert not (bindir / "apm").exists()
+    if kind in ("symlink", "dangling"):
+        assert collision.is_symlink()
+    if kind != "dangling":
+        assert target.read_text(encoding="ascii") == "keep\n"
+
+
+@pytest.mark.parametrize("prior", ["none", "legacy", "companion"])
+@pytest.mark.parametrize("failure", ["staging", "activation", "link"])
+def test_companion_failure_rolls_back_both_launchers(
+    installation: tuple[Path, dict[str, str]], prior: str, failure: str
+) -> None:
+    """No failure may leave a mixed-version bundle or dangling companion."""
+    root, _ = installation
+    bindir = root / "home/.local/bin"
+    lib = root / "home/.local/lib/apm"
+    if prior != "none":
+        if prior == "companion":
+            _stage_companion(installation)
+        assert _run(installation).returncode == 0
+        (lib / "VERSION").write_text("old\n", encoding="ascii")
+    _stage_companion(installation, fail=failure)
+    if failure == "link":
+        _replace_tool(
+            root,
+            "mv",
+            '#!/bin/sh\ncase "$2" in */apmx.link.*) exit 73 ;; esac\n'
+            'case "$3" in */bin/apmx) exit 73 ;; esac\nexec __REAL__ "$@"\n',
+        )
+    result = _run(installation)
+    assert result.returncode == 1, result.stdout + result.stderr
+    if prior == "none":
+        assert not lib.exists()
+        assert not (bindir / "apmx").is_symlink()
+        assert not (bindir / "apm").is_symlink()
+    else:
+        assert (lib / "VERSION").read_text(encoding="ascii") == "old\n"
+        assert (bindir / "apm").is_file()
+        assert (bindir / "apmx").is_file() == (prior == "companion")
 
 
 @pytest.mark.parametrize("on_path", [False, True])

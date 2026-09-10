@@ -62,6 +62,7 @@ def atomic_write_text(
     normalize_line_endings: bool = True,
     temp_prefix: str = "apm-atomic-",
     temp_suffix: str = "",
+    durable: bool = False,
 ) -> None:
     """Atomically write ``data`` (UTF-8) to ``path``.
 
@@ -85,6 +86,10 @@ def atomic_write_text(
     an established sibling-file naming contract without reimplementing the
     atomic write.
 
+    ``durable=True`` flushes file contents before replacement and syncs the
+    containing directory on POSIX. A directory-sync failure is reported even
+    though replacement has already occurred.
+
     On any failure, the temp file is removed and the original target
     file (if any) remains untouched.
     """
@@ -107,7 +112,16 @@ def atomic_write_text(
         fd_wrapped = True
         with fh:
             fh.write(normalize_crlf_to_lf(data) if normalize_line_endings else data)
+            if durable:
+                fh.flush()
+                os.fsync(fh.fileno())
         _replace_atomic_file(tmp_name, path)
+        if durable and os.name == "posix":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except Exception:
         if not fd_wrapped:
             # fdopen never took ownership of the descriptor; close it so

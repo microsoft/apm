@@ -17,13 +17,49 @@ from ._helpers import (
 )
 
 
-@click.command(help="Run a script with parameters (experimental)")
+@click.command(help="Run a script, or an explicit contract with --on copilot")
 @click.argument("script_name", required=False)
 @click.option("--param", "-p", multiple=True, help="Parameter in format name=value")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@click.option(
+    "--on", "harness", default=None, help="Select contract mode and its execution harness"
+)
+@click.option("--model", default=None, help="Native model for contract mode only")
+@click.option(
+    "--allow-advisory",
+    is_flag=True,
+    help="Consent to this native contract run without isolation; does not override policy",
+)
 @click.pass_context
-def run(ctx, script_name, param, verbose):
-    """Run a script from apm.yml (uses 'start' script if no name specified)."""
+def run(
+    ctx: click.Context,
+    script_name: str | None,
+    param: tuple[str, ...],
+    verbose: bool,
+    harness: str | None = None,
+    model: str | None = None,
+    allow_advisory: bool = False,
+) -> None:
+    """Run scripts unchanged, or select one .contract.md explicitly with --on."""
+    if harness is not None:
+        if not script_name:
+            raise click.UsageError("Contract mode requires a .contract.md path.", ctx)
+        if param:
+            raise click.UsageError("--param applies to scripts, not fixed-path contracts.", ctx)
+        from .contracts import invoke_contract
+
+        invoke_contract(
+            ctx,
+            script_name,
+            harness=harness,
+            model=model,
+            verbose=verbose or bool(ctx.find_root().obj and ctx.find_root().obj.get("verbose")),
+            planning=False,
+            allow_advisory=allow_advisory,
+        )
+        return
+    if model is not None or allow_advisory:
+        raise click.UsageError("--model and --allow-advisory require contract mode (--on).", ctx)
     logger = CommandLogger("run", verbose=verbose)
     try:
         # If no script name specified, use 'start' script

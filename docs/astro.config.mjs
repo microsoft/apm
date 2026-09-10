@@ -149,7 +149,7 @@ export default defineConfig({
 						},
 						{
 							label: 'CLI reference',
-							description: 'Per-command reference for the apm CLI.',
+							description: 'Per-command reference for apm and apmx.',
 							paths: ['reference/cli/**'],
 						},
 					],
@@ -171,6 +171,7 @@ export default defineConfig({
 						{ label: 'Install packages', slug: 'consumer/install-packages' },
 						{ label: 'Manage dependencies', slug: 'consumer/manage-dependencies' },
 						{ label: 'Run scripts', slug: 'consumer/run-scripts' },
+						{ label: 'Run a contract', slug: 'consumer/run-contracts' },
 						{ label: 'Update and refresh', slug: 'consumer/update-and-refresh' },
 						{ label: 'Install MCP servers', slug: 'consumer/install-mcp-servers' },
 						{ label: 'Install LSP servers', slug: 'consumer/install-lsp-servers' },

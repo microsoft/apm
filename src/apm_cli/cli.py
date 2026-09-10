@@ -43,6 +43,7 @@ from apm_cli.commands.marketplace import search as marketplace_search
 from apm_cli.commands.mcp import mcp
 from apm_cli.commands.outdated import outdated as outdated_cmd
 from apm_cli.commands.pack import pack_cmd, unpack_cmd
+from apm_cli.commands.plan import plan
 from apm_cli.commands.plugin import plugin as plugin_cmd
 from apm_cli.commands.policy import policy
 from apm_cli.commands.prune import prune
@@ -173,6 +174,13 @@ def cli(ctx, verbose: bool) -> None:
     if (
         not ctx.resilient_parsing
         and ctx.invoked_subcommand is not None
+        and ctx.invoked_subcommand != "plan"
+        and not (
+            ctx.invoked_subcommand == "run"
+            and any(
+                arg == "--on" or arg.startswith("--on=") for arg in ctx.meta.get("apm_raw_args", ())
+            )
+        )
         and ctx.command.get_command(ctx, ctx.invoked_subcommand) is not None
     ):
         _check_and_notify_updates()
@@ -208,6 +216,7 @@ cli.add_command(self_update)
 cli.add_command(plugin_cmd, name="plugin")
 cli.add_command(compile_cmd, name="compile")
 cli.add_command(run)
+cli.add_command(plan)
 cli.add_command(preview)
 cli.add_command(list_cmd, name="list")
 cli.add_command(config)

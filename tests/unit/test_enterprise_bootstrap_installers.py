@@ -227,18 +227,15 @@ def test_windows_pip_fallback_scopes_native_stderr_error_action_guard() -> None:
     continue_guard = '$ErrorActionPreference = "Continue"'
     restore_guard = "$ErrorActionPreference = $previousErrorActionPreference"
     python_pip_call = "$output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1"
-    pip_call = "$output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1"
+    probe_call = "$pipScriptsDir = $ownershipProbe | & $pythonCmd -"
 
-    assert previous_guard in body
-    assert continue_guard in body
-    assert restore_guard in body
-    assert body.count(continue_guard) == 1
-    assert body.index(previous_guard) < body.index(continue_guard)
-    assert body.index(continue_guard) < body.index(python_pip_call)
-    assert body.index(continue_guard) < body.index(pip_call)
-    assert body.index(python_pip_call) < body.index("finally {")
-    assert body.index(pip_call) < body.index("finally {")
-    assert body.index("finally {") < body.index(restore_guard)
+    scopes = body.split(previous_guard)[1:]
+    assert len(scopes) == 2
+    for scope, call in zip(scopes, (probe_call, python_pip_call), strict=True):
+        assert scope.count(continue_guard) == 1
+        assert scope.index(continue_guard) < scope.index(call)
+        assert scope.index(call) < scope.index("finally {") < scope.index(restore_guard)
+    assert "$pipCmd" not in body
 
 
 def test_windows_installer_uses_auth_on_first_ghes_metadata_fetch() -> None:

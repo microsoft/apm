@@ -908,6 +908,13 @@ apm_is_recognized_bundle() {
     }
 }
 
+apm_is_owned_companion_launcher() {
+    [ -L "$APM_INSTALL_DIR/apmx" ] &&
+        apm_is_recognized_bundle "$APM_LIB_DIR" &&
+        [ -f "$APM_LIB_DIR/apmx" ] && [ ! -L "$APM_LIB_DIR/apmx" ] &&
+        [ "$(apm_real_path "$APM_INSTALL_DIR/apmx")" = "$(apm_real_path "$APM_LIB_DIR/apmx")" ]
+}
+
 apm_probe_installation() {
     case "$1" in
         */*) _probe_parent="${1%/*}"
@@ -1303,8 +1310,52 @@ try_pip_installation() {
         PIP_FALLBACK_FAILURE="pip-unavailable"
         return 1
     fi
-    PIP_SCRIPTS_DIR="$("$PYTHON_CMD" -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme=sysconfig.get_preferred_scheme("user")))')" ||
-        apm_install_error "Cannot determine the pip user-script directory. Repair this Python installation before retrying; no package was installed."
+    # Standalone installers carry the same Python ownership probe. Inspect pip's
+    # selected user scheme, not the unrelated native APM_INSTALL_DIR.
+    PIP_SCRIPTS_DIR="$("$PYTHON_CMD" -c '
+# APM_PIP_COMPANION_GUARD_BEGIN
+import base64
+import hashlib
+import os
+from importlib import metadata
+from pathlib import Path
+from pip._internal.commands import create_command
+from pip._internal.locations import get_scheme
+
+options, _ = create_command("install").parse_args(["--user", "apm-cli"])
+if options.target_dir or options.prefix_path or options.root_path:
+    raise SystemExit("Automatic pip fallback cannot verify redirected pip destinations. Remove target/prefix/root pip settings or install manually.")
+scheme = get_scheme("apm-cli", user=True, isolated=options.isolated_mode)
+scripts = Path(scheme.scripts)
+names = ("apmx.exe", "apmx-script.py", "apmx.exe.manifest") if os.name == "nt" else ("apmx",)
+existing = [scripts / name for name in names if os.path.lexists(scripts / name)]
+distributions = list(metadata.distributions(path=list({scheme.purelib, scheme.platlib}))) if existing else []
+for target in existing:
+    owned = False
+    if target.is_file() and not target.is_symlink():
+        for dist in distributions:
+            if dist.metadata.get("Name", "").lower().replace("_", "-") != "apm-cli":
+                continue
+            if not any(ep.group == "console_scripts" and ep.name == "apmx" and ep.value == "apm_cli.apmx:main" for ep in dist.entry_points):
+                continue
+            for record in dist.files or ():
+                if Path(dist.locate_file(record)).resolve() != target.resolve():
+                    continue
+                if not record.hash or record.hash.mode not in ("sha256", "sha384", "sha512"):
+                    continue
+                content = target.read_bytes()
+                digest = base64.urlsafe_b64encode(hashlib.new(record.hash.mode, content).digest()).rstrip(b"=").decode("ascii")
+                if record.size == len(content) and record.hash.value == digest:
+                    owned = True
+                    break
+            if owned:
+                break
+    if not owned:
+        raise SystemExit(f"Refusing to replace unrelated apmx launcher at {target}. Remove it with its original installer or choose another Python installation.")
+print(scripts)
+# APM_PIP_COMPANION_GUARD_END
+')" ||
+        apm_install_error "Cannot verify the pip user-script directory and apmx ownership. No package was installed."
     [ -n "$PIP_SCRIPTS_DIR" ] ||
         apm_install_error "Cannot determine the pip user-script directory. Repair this Python installation before retrying; no package was installed."
     
@@ -1956,6 +2007,21 @@ apm_require_writable_directory "$(dirname "$APM_LIB_DIR")"
 apm_require_writable_directory "$APM_INSTALL_DIR"
 apm_read_shell_receipt "$APM_LIB_DIR/.apm-shell-setup"
 
+_apmx_old_link=""
+_apmx_link_changed=""
+_apmx_shipped=""
+if [ -e "$TMP_DIR/$EXTRACTED_DIR/apmx" ] || [ -L "$TMP_DIR/$EXTRACTED_DIR/apmx" ]; then
+    [ -f "$TMP_DIR/$EXTRACTED_DIR/apmx" ] && [ ! -L "$TMP_DIR/$EXTRACTED_DIR/apmx" ] ||
+        apm_install_error "Downloaded apmx is not a regular executable. Retry with an intact release archive."
+    _apmx_shipped=1
+fi
+if apm_is_owned_companion_launcher; then
+    _apmx_old_link="$(readlink "$APM_INSTALL_DIR/apmx")"
+elif [ -n "$_apmx_shipped" ] &&
+    { [ -e "$APM_INSTALL_DIR/apmx" ] || [ -L "$APM_INSTALL_DIR/apmx" ]; }; then
+    apm_install_error "Refusing to replace unrelated apmx at $APM_INSTALL_DIR/apmx. Move it with its original installer or choose another prefix."
+fi
+
 _apm_lib_parent="$(dirname "$APM_LIB_DIR")"
 _apm_stage_dir="$(mktemp -d "$_apm_lib_parent/.apm-stage.XXXXXX")" ||
     apm_install_error "Cannot create a staging directory in $_apm_lib_parent."
@@ -1981,6 +2047,14 @@ if ! INSTALLED_VERSION=$("$_apm_stage_dir/$BINARY_NAME" --version); then
     rm -rf "$_apm_stage_dir"
     apm_install_error "Downloaded APM failed its --version check. Existing installation was left unchanged."
 fi
+if [ -n "$_apmx_shipped" ]; then
+    if ! chmod +x "$_apm_stage_dir/apmx" ||
+        ! "$_apm_stage_dir/apmx" --version ||
+        ! "$_apm_stage_dir/apmx" --help > /dev/null; then
+        rm -rf "$_apm_stage_dir"
+        apm_install_error "Downloaded apmx failed its startup check. Existing installation was left unchanged."
+    fi
+fi
 
 apm_restore_old_bundle_after_failed_swap() {
     if [ -n "$_apm_had_old_bundle" ] && [ -n "$_apm_backup_dir" ] && [ -d "$_apm_backup_dir" ]; then
@@ -1989,6 +2063,12 @@ apm_restore_old_bundle_after_failed_swap() {
     elif [ -z "$_apm_had_old_bundle" ]; then
         rm -rf "$APM_LIB_DIR" || return 1
         rm -f "$APM_INSTALL_DIR/$BINARY_NAME" || return 1
+    fi
+    if [ -n "$_apmx_link_changed" ]; then
+        rm -f "$APM_INSTALL_DIR/apmx" || return 1
+        if [ -n "$_apmx_old_link" ]; then
+            ln -s "$_apmx_old_link" "$APM_INSTALL_DIR/apmx" || return 1
+        fi
     fi
     return 0
 }
@@ -2027,6 +2107,25 @@ if ! ln -s "$APM_LIB_DIR/$BINARY_NAME" "$_apm_link_tmp" ||
 fi
 if ! INSTALLED_VERSION=$("$APM_INSTALL_DIR/$BINARY_NAME" --version); then
     apm_abort_after_failed_swap "Installed APM at $APM_INSTALL_DIR/$BINARY_NAME failed its --version check."
+fi
+if [ -n "$_apmx_shipped" ]; then
+    _apmx_link_tmp="$(apm_mktemp_in_dir "$APM_INSTALL_DIR" "apmx.link")" ||
+        apm_abort_after_failed_swap "Cannot create a temporary apmx launcher link."
+    rm -f "$_apmx_link_tmp"
+    if ! ln -s "$APM_LIB_DIR/apmx" "$_apmx_link_tmp" ||
+        ! mv -f "$_apmx_link_tmp" "$APM_INSTALL_DIR/apmx"; then
+        rm -f "$_apmx_link_tmp"
+        apm_abort_after_failed_swap "Could not update the apmx launcher."
+    fi
+    _apmx_link_changed=1
+    if ! "$APM_INSTALL_DIR/apmx" --version ||
+        ! "$APM_INSTALL_DIR/apmx" --help > /dev/null; then
+        apm_abort_after_failed_swap "Installed apmx failed its startup check."
+    fi
+elif [ -n "$_apmx_old_link" ]; then
+    rm -f "$APM_INSTALL_DIR/apmx" ||
+        apm_abort_after_failed_swap "Could not remove the owned apmx launcher for this older release."
+    _apmx_link_changed=1
 fi
 if [ -n "$_apm_backup_dir" ] && [ -d "$_apm_backup_dir" ]; then
     rm -rf "$_apm_backup_dir"

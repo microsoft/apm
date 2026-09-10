@@ -48,13 +48,15 @@ def _read_version_from_pyproject(repo_root):
         return (0, 0, 0, 0)
     return (int(parts.group(1)), int(parts.group(2)), int(parts.group(3)), 0)
 
-_win_version_info = None
-if sys.platform == 'win32':
+def windows_version_info(executable_name):
+    """Describe each Windows entry point without anonymous PE metadata."""
+    if sys.platform != 'win32':
+        return None
     try:
         from PyInstaller.utils.win32 import versioninfo as vi
         _ver = _read_version_from_pyproject(repo_root)
         _ver_str = f'{_ver[0]}.{_ver[1]}.{_ver[2]}'
-        _win_version_info = vi.VSVersionInfo(
+        return vi.VSVersionInfo(
             ffi=vi.FixedFileInfo(
                 filevers=_ver,
                 prodvers=_ver,
@@ -70,10 +72,10 @@ if sys.platform == 'win32':
                     vi.StringStruct('FileDescription',
                                     'APM - Agent Package Manager'),
                     vi.StringStruct('FileVersion', _ver_str),
-                    vi.StringStruct('InternalName', 'apm'),
+                    vi.StringStruct('InternalName', executable_name),
                     vi.StringStruct('LegalCopyright',
                                     'Copyright (c) Microsoft Corporation'),
-                    vi.StringStruct('OriginalFilename', 'apm.exe'),
+                    vi.StringStruct('OriginalFilename', executable_name + '.exe'),
                     vi.StringStruct('ProductName', 'APM'),
                     vi.StringStruct('ProductVersion', _ver_str),
                 ])]),
@@ -81,7 +83,7 @@ if sys.platform == 'win32':
             ],
         )
     except ImportError:
-        _win_version_info = None
+        return None
 
 # APM CLI entry point
 entry_point = repo_root / 'src' / 'apm_cli' / 'cli.py'
@@ -270,7 +272,7 @@ excludes = [
 ]
 
 a = Analysis(
-    [str(entry_point)],
+    [str(entry_point), str(repo_root / 'src' / 'apm_cli' / 'apmx.py')],
     pathex=[str(repo_root / 'src')],
     binaries=[],
     datas=datas,
@@ -331,13 +333,18 @@ if sys.platform == 'linux':
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
+# Both entry scripts share the analysis, PYZ and onedir support files. Keep
+# runtime hooks in each EXE, but never execute the other CLI's entry script.
+apm_scripts = [script for script in a.scripts if script[0] != 'apmx']
+apmx_scripts = [script for script in a.scripts if script[0] != 'cli']
+
 # GNU strip corrupts Windows PE/COFF binaries; only enable on Unix
 _strip = sys.platform != 'win32'
 
 # Switch to --onedir for directory-based deployment (faster startup with --onedir)
 exe = EXE(
     pyz,
-    a.scripts,
+    apm_scripts,
     [],            # Empty for --onedir mode
     exclude_binaries=True,  # Exclude binaries for --onedir mode
     name='apm',
@@ -353,11 +360,26 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    version=_win_version_info,
+    version=windows_version_info('apm'),
+)
+
+apmx_exe = EXE(
+    pyz,
+    apmx_scripts,
+    [],
+    exclude_binaries=True,
+    name='apmx',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=_strip,
+    upx=should_use_upx(),
+    console=True,
+    version=windows_version_info('apmx'),
 )
 
 coll = COLLECT(
     exe,
+    apmx_exe,
     a.binaries,
     a.zipfiles,
     a.datas,

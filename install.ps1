@@ -307,35 +307,75 @@ function Install-ViaPip {
         return $false
     }
     Write-Info "Attempting installation via pip ($pythonCmd)..."
-    $pipCmd = $null
-    foreach ($candidate in @("pip3", "pip")) {
-        if (Get-Command $candidate -ErrorAction SilentlyContinue) {
-            $pipCmd = $candidate
-            break
-        }
-    }
-    if (-not $pipCmd) {
-        $pipCmd = "$pythonCmd -m pip"
-    }
     if ($noDirectFallback -and -not $pypiIndexUrl) {
         Write-ErrorText "APM_NO_DIRECT_FALLBACK is set, but APM_PYPI_INDEX_URL is not configured."
         Write-Host "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
         return $false
     }
     $pipIndexArgs = Get-PipIndexArgs
+    # Use this exact interpreter for both pip's destination probe and install.
+    $ownershipProbe = @'
+# APM_PIP_COMPANION_GUARD_BEGIN
+import base64
+import hashlib
+import os
+from importlib import metadata
+from pathlib import Path
+from pip._internal.commands import create_command
+from pip._internal.locations import get_scheme
+
+options, _ = create_command("install").parse_args(["--user", "apm-cli"])
+if options.target_dir or options.prefix_path or options.root_path:
+    raise SystemExit("Automatic pip fallback cannot verify redirected pip destinations. Remove target/prefix/root pip settings or install manually.")
+scheme = get_scheme("apm-cli", user=True, isolated=options.isolated_mode)
+scripts = Path(scheme.scripts)
+names = ("apmx.exe", "apmx-script.py", "apmx.exe.manifest") if os.name == "nt" else ("apmx",)
+existing = [scripts / name for name in names if os.path.lexists(scripts / name)]
+distributions = list(metadata.distributions(path=list({scheme.purelib, scheme.platlib}))) if existing else []
+for target in existing:
+    owned = False
+    if target.is_file() and not target.is_symlink():
+        for dist in distributions:
+            if dist.metadata.get("Name", "").lower().replace("_", "-") != "apm-cli":
+                continue
+            if not any(ep.group == "console_scripts" and ep.name == "apmx" and ep.value == "apm_cli.apmx:main" for ep in dist.entry_points):
+                continue
+            for record in dist.files or ():
+                if Path(dist.locate_file(record)).resolve() != target.resolve():
+                    continue
+                if not record.hash or record.hash.mode not in ("sha256", "sha384", "sha512"):
+                    continue
+                content = target.read_bytes()
+                digest = base64.urlsafe_b64encode(hashlib.new(record.hash.mode, content).digest()).rstrip(b"=").decode("ascii")
+                if record.size == len(content) and record.hash.value == digest:
+                    owned = True
+                    break
+            if owned:
+                break
+    if not owned:
+        raise SystemExit(f"Refusing to replace unrelated apmx launcher at {target}. Remove it with its original installer or choose another Python installation.")
+print(scripts)
+# APM_PIP_COMPANION_GUARD_END
+'@
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $pipScriptsDir = $ownershipProbe | & $pythonCmd -
+        $probeExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($probeExitCode -ne 0 -or -not $pipScriptsDir) {
+        Write-ErrorText "Cannot verify the pip user-script directory and apmx ownership. No package was installed."
+        return $false
+    }
     try {
         $previousErrorActionPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
-            if ($pipCmd -like "* -m pip") {
-                $output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1
-                $pipExitCode = $LASTEXITCODE
-                $output | Write-Host
-            } else {
-                $output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1
-                $pipExitCode = $LASTEXITCODE
-                $output | Write-Host
-            }
+            $output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1
+            $pipExitCode = $LASTEXITCODE
+            $output | Write-Host
         } finally {
             $ErrorActionPreference = $previousErrorActionPreference
         }
@@ -378,6 +418,27 @@ function Write-ManualInstallHelp {
     Write-Host "     cd apm && uv sync && uv run pip install -e ."
     Write-Host ""
     Write-Host "Need help? Create an issue at: $GithubUrl/$ApmRepo/issues"
+}
+
+function Get-CompanionShimContent {
+    param([string]$CurrentDir)
+    $target = Join-Path $CurrentDir "apmx.exe"
+    $localRoot = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA.TrimEnd('\', '/') } else { $null }
+    if ($localRoot -and $target.StartsWith($localRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relative = $target.Substring($localRoot.Length + 1) -replace '%', '%%'
+        $target = "%LOCALAPPDATA%\$relative"
+    } else {
+        $target = $target -replace '%', '%%'
+    }
+    return "@echo off`r`nREM Generated by APM installer -- apmx companion.`r`n`"$target`" %*`r`n"
+}
+
+function Test-OwnedCompanionShim {
+    param([string]$Path, [string]$ExpectedContent)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    return ($item -and -not $item.PSIsContainer -and
+        ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0 -and
+        [System.IO.File]::ReadAllText($Path) -ceq $ExpectedContent)
 }
 
 function Get-Sha256Hex {
@@ -892,6 +953,27 @@ try {
     }
 
     $stagedExe = Join-Path $stagingDir "apm.exe"
+    $stagedCompanion = Join-Path $stagingDir "apmx.exe"
+    $companionItem = Get-Item -LiteralPath $stagedCompanion -Force -ErrorAction SilentlyContinue
+    $hasCompanion = $null -ne $companionItem
+    if ($hasCompanion -and ($companionItem.PSIsContainer -or
+        ($companionItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        Remove-Item -Recurse -Force $stagingDir
+        throw "Downloaded apmx.exe is not a regular executable. Retry with an intact release archive."
+    }
+    $currentDir = Join-Path $installRoot "current"
+    $companionShim = Join-Path $binDir "apmx.cmd"
+    $companionContent = Get-CompanionShimContent -CurrentDir $currentDir
+    $ownedCompanion = Test-OwnedCompanionShim -Path $companionShim -ExpectedContent $companionContent
+    if ($hasCompanion -and
+        ((Get-Item -LiteralPath $companionShim -Force -ErrorAction SilentlyContinue) -and -not $ownedCompanion)) {
+        Remove-Item -Recurse -Force $stagingDir
+        throw "Refusing to replace unrelated apmx.cmd at $companionShim. Move it with its original installer or choose another prefix."
+    }
+    if ($hasCompanion -and (Get-Item -LiteralPath (Join-Path $binDir "apmx.exe") -Force -ErrorAction SilentlyContinue)) {
+        Remove-Item -Recurse -Force $stagingDir
+        throw "Unrelated apmx.exe exists in $binDir. Move it with its original installer or choose another prefix."
+    }
     if (-not (Test-Path $stagedExe)) {
         Write-ErrorText "Staged package is missing apm.exe."
         Remove-Item -Recurse -Force $stagingDir -ErrorAction SilentlyContinue
@@ -903,15 +985,27 @@ try {
 
     Write-Info "Testing binary..."
     $testFailure = $null
+    $testingCompanion = $false
     try {
         $testOutput = & $stagedExe --version 2>&1
         if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE - $testOutput" }
+        if ($hasCompanion) {
+            $testingCompanion = $true
+            foreach ($option in @("--version", "--help")) {
+                $companionOutput = & $stagedCompanion $option 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "apmx $option failed: $companionOutput" }
+            }
+        }
         Write-Success "Binary test successful: $testOutput"
     } catch {
         $testFailure = "$_"
     }
 
     if ($testFailure) {
+        if ($testingCompanion) {
+            Remove-Item -Recurse -Force $stagingDir
+            throw "Downloaded apmx failed its startup check. Existing installation was left unchanged: $testFailure"
+        }
         $denied = Test-AccessDeniedError -Text $testFailure
         $avBlocked = Test-AntivirusBlockError -Text $testFailure
         Write-ErrorText "Downloaded binary failed to run: $testFailure"
@@ -934,6 +1028,15 @@ try {
     # fails. Concurrent apm invocations during that window will fail and
     # need a retry -- acceptable for an install/self-update operation.
     $backupDir = $null
+    $oldCurrentDir = $null
+    $newCurrentDir = $null
+    $promoted = $false
+    $currentChanged = $false
+    $shimPath = Join-Path $binDir "apm.cmd"
+    $oldShimExists = Test-Path -LiteralPath $shimPath -PathType Leaf
+    $oldShimBytes = if ($oldShimExists) { ,([System.IO.File]::ReadAllBytes($shimPath)) } else { $null }
+    $companionChanged = $false
+    try {
     if (Test-Path $releaseDir) {
         $backupDir = "$releaseDir.old-" + [System.Guid]::NewGuid().ToString("N")
         try {
@@ -942,7 +1045,7 @@ try {
             Write-ErrorText "Failed to move existing release aside: $_"
             Remove-Item -Recurse -Force $stagingDir -ErrorAction SilentlyContinue
             Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
-            exit 1
+            throw
         }
     }
 
@@ -950,17 +1053,11 @@ try {
         Move-Item -Path $stagingDir -Destination $releaseDir -Force
     } catch {
         Write-ErrorText "Failed to promote staged release: $_"
-        if ($backupDir -and (Test-Path $backupDir)) {
-            Move-Item -Path $backupDir -Destination $releaseDir -Force -ErrorAction SilentlyContinue
-        }
         Remove-Item -Recurse -Force $stagingDir -ErrorAction SilentlyContinue
         Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
-        exit 1
+        throw
     }
-
-    if ($backupDir -and (Test-Path $backupDir)) {
-        Remove-Item -Recurse -Force $backupDir -ErrorAction SilentlyContinue
-    }
+    $promoted = $true
 
     # Expose the complete onedir bundle through a version-stable junction.
     # Putting this directory on PATH lets CreateProcess callers resolve the
@@ -982,26 +1079,19 @@ try {
         }
 
         Move-Item -Path $newCurrentDir -Destination $currentDir -Force
+        $currentChanged = $true
     } catch {
         Write-ErrorText "Failed to update stable executable path ${currentDir}: $_"
         if (Test-Path $newCurrentDir) {
             try { [System.IO.Directory]::Delete($newCurrentDir) } catch { Write-ErrorText "Could not remove temp junction ${newCurrentDir}: $_" }
         }
-        if ($oldCurrentDir -and (Test-Path $oldCurrentDir) -and -not (Test-Path $currentDir)) {
-            Move-Item -Path $oldCurrentDir -Destination $currentDir -Force -ErrorAction SilentlyContinue
-        }
         Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
-        exit 1
-    }
-    if ($oldCurrentDir -and (Test-Path $oldCurrentDir)) {
-        # Directory.Delete removes only the junction. Windows PowerShell 5.1
-        # Remove-Item prompts for its non-empty target in NonInteractive mode.
-        [System.IO.Directory]::Delete($oldCurrentDir)
+        throw
     }
     if (-not (Test-Path $currentExe)) {
         Write-ErrorText "Stable executable path is missing apm.exe: $currentExe"
         Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
-        exit 1
+        throw "Stable executable activation failed."
     }
 
     $shimPath = Join-Path $binDir "apm.cmd"
@@ -1053,6 +1143,54 @@ try {
     # token (issue #1509) keeps the embedded shim target ASCII-only even
     # when the user's profile directory contains non-ASCII characters.
     Set-Content -Path $shimPath -Value $shimContent -Encoding ASCII -NoNewline
+
+    if ($hasCompanion) {
+        $companionChanged = $true
+        Set-Content -LiteralPath $companionShim -Value $companionContent -Encoding ASCII -NoNewline
+        $currentCompanion = Join-Path $currentDir "apmx.exe"
+        foreach ($option in @("--version", "--help")) {
+            & $currentCompanion $option | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Installed apmx $option failed." }
+        }
+    } elseif ($ownedCompanion) {
+        $companionChanged = $true
+        Remove-Item -LiteralPath $companionShim -Force
+    }
+    } catch {
+        # Keep both launchers and their shared runtime on the previous release.
+        if ($currentChanged -and (Test-Path $currentDir)) {
+            [System.IO.Directory]::Delete($currentDir)
+        }
+        if ($promoted -and (Test-Path $releaseDir)) {
+            Remove-Item -Recurse -Force $releaseDir
+        }
+        if ($backupDir -and (Test-Path $backupDir)) {
+            Move-Item -Path $backupDir -Destination $releaseDir -Force
+        }
+        if ($oldCurrentDir -and (Test-Path $oldCurrentDir)) {
+            Move-Item -Path $oldCurrentDir -Destination $currentDir -Force
+        }
+        if ($oldShimExists) {
+            [System.IO.File]::WriteAllBytes($shimPath, [byte[]]$oldShimBytes)
+        } elseif (Test-Path -LiteralPath $shimPath) {
+            Remove-Item -LiteralPath $shimPath -Force
+        }
+        if ($companionChanged) {
+            if ($ownedCompanion) {
+                Set-Content -LiteralPath $companionShim -Value $companionContent -Encoding ASCII -NoNewline
+            } elseif (Test-Path -LiteralPath $companionShim) {
+                Remove-Item -LiteralPath $companionShim -Force
+            }
+        }
+        throw
+    }
+    if ($oldCurrentDir -and (Test-Path $oldCurrentDir)) {
+        # Delete the junction only, never its target.
+        [System.IO.Directory]::Delete($oldCurrentDir)
+    }
+    if ($backupDir -and (Test-Path $backupDir)) {
+        Remove-Item -Recurse -Force $backupDir -ErrorAction SilentlyContinue
+    }
 
     Add-ToUserPath -PathEntry $binDir
     # The onedir bundle must stay intact beside apm.exe. Add its stable

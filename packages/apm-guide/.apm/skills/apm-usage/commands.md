@@ -242,6 +242,33 @@ descendants, are skipped.
 | `apm preview SCRIPT` | Preview script without running | `-p name=value` |
 | `apm list` | List available scripts | -- |
 
+## Local contracts (v0.1)
+
+```bash
+apmx CONTRACT --on copilot [--model MODEL] --allow-advisory
+apmx --from PACKAGE_REF contracts/file.contract.md --on copilot [--model MODEL] --allow-advisory
+apmx [--from PACKAGE_REF] CONTRACT --on copilot --plan
+```
+
+`apmx` ships with APM. Supply required inputs in the caller directory; package
+checks come from `checks/`. Ordinary Git references retain `#ref` syntax.
+Execution prepares sources privately without changing manifests, locks, or
+global configuration. Planning is offline/read-only; unresolved remote sources
+exit 21. A matching direct caller declaration/lock binds Git source planning and
+execution to the same verified pin, without rewriting the caller lock.
+See [source selection](https://microsoft.github.io/apm/reference/cli/apmx/#sources-inputs-and-retained-output).
+Artifacts stay in caller `.apm/runs/<id>/artifacts/`, without copy-back.
+
+Execution requires macOS/Linux, ready Copilot, an eligible no-policy caller,
+and invocation-only consent. Windows supports help/version, not contract
+execution. `VERIFIED` / 0 means check success, not isolation or merge permission.
+See the [apmx reference](https://microsoft.github.io/apm/reference/cli/apmx/)
+for limits and outcomes.
+
+Legacy `apm plan CONTRACT --on copilot` and `apm run CONTRACT --on copilot
+--allow-advisory` remain local-only. Without `--on`, `apm run` keeps `start`,
+named-script and prompt fallback semantics.
+
 ## Security and audit
 
 | Command | Purpose | Key flags |

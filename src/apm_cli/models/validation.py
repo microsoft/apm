@@ -340,6 +340,26 @@ def validate_apm_package(
     *,
     source_path: Path | None = None,
     agent_plugin_detection: AgentPluginDetection | None = None,
+    contract_path: str | None = None,
+) -> ValidationResult:
+    """Validate installable packages, or one explicitly selected contract source.
+
+    ``contract_path`` is acquisition-only context, never an install permission:
+    it requires a real manifest and a parsed, confined contract instead of
+    installable native primitives. Ordinary callers retain their strict profile.
+    """
+    if contract_path is not None:
+        return _validate_explicit_contract_package(package_path, contract_path, ValidationResult())
+    return _validate_install_package(
+        package_path, source_path=source_path, agent_plugin_detection=agent_plugin_detection
+    )
+
+
+def _validate_install_package(
+    package_path: Path,
+    *,
+    source_path: Path | None = None,
+    agent_plugin_detection: AgentPluginDetection | None = None,
 ) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
 
@@ -838,6 +858,28 @@ def validate_legacy_marketplace_plugin(
         ValidationResult(),
         source_path=source_path,
     )
+
+
+def _validate_explicit_contract_package(
+    package_path: Path, contract_path: str, result: ValidationResult
+) -> ValidationResult:
+    """Validate selected contract sources without requiring installable primitives."""
+    from ..contracts.frontend import package_contract_path, parse_contract
+    from ..contracts.imports import read_project_manifest
+    from ..contracts.models import ContractLimits
+
+    try:
+        root = package_path.resolve()
+        limits = ContractLimits()
+        selected = package_contract_path(root, contract_path)
+        parse_contract(selected, limits=limits)
+        package, _, _ = read_project_manifest(root, limits)
+    except (OSError, ValueError) as exc:
+        result.add_error(f"Invalid explicit contract package: {exc}")
+        return result
+    result.package = package
+    result.package_type = PackageType.APM_PACKAGE
+    return result
 
 
 def _validate_apm_package_with_yml(

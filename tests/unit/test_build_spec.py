@@ -22,6 +22,7 @@ This approach keeps the tests hermetic, fast, and dependency-free.
 import ast
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,74 @@ def _find_repo_root() -> Path:
 
 _REPO_ROOT = _find_repo_root()
 _SPEC_FILE = _REPO_ROOT / "build" / "apm.spec"
+
+
+def test_companion_shares_frozen_runtime_without_running_apm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two native entry points must share support files, not execute both scripts."""
+    analyses = []
+    executables = []
+    collections = []
+    hook = ("pyi_rth_fixture", "hook.py", "PYSOURCE")
+    cli = ("cli", "cli.py", "PYSOURCE")
+    companion = ("apmx", "apmx.py", "PYSOURCE")
+
+    def analysis(scripts: list[str], **kwargs: object) -> SimpleNamespace:
+        analyses.append((scripts, kwargs))
+        return SimpleNamespace(
+            scripts=[hook, cli, companion],
+            pure=[],
+            zipped_data=[],
+            binaries=[],
+            zipfiles=[],
+            datas=[],
+        )
+
+    def executable(*args: object, **kwargs: object) -> tuple:
+        executables.append((args, kwargs))
+        return args, kwargs
+
+    def collect(*args: object, **kwargs: object) -> None:
+        collections.append((args, kwargs))
+
+    monkeypatch.setitem(
+        sys.modules,
+        "PyInstaller.utils.hooks",
+        SimpleNamespace(collect_submodules=lambda _: []),
+    )
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: SimpleNamespace(returncode=0))
+    pyz = object()
+    namespace = {
+        "SPECPATH": str(_SPEC_FILE.parent),
+        "Analysis": analysis,
+        "PYZ": lambda *args, **kwargs: pyz,
+        "EXE": executable,
+        "COLLECT": collect,
+    }
+    exec(compile(_SPEC_FILE.read_text(encoding="utf-8"), str(_SPEC_FILE), "exec"), namespace)  # noqa: S102
+    assert len(analyses) == 1
+    assert [Path(path).name for path in analyses[0][0]] == ["cli.py", "apmx.py"]
+    assert len(executables) == 2
+    assert [entry[1]["name"] for entry in executables] == ["apm", "apmx"]
+    assert [entry[0][1] for entry in executables] == [[hook, cli], [hook, companion]]
+    assert all(entry[0][0] is pyz and entry[1]["exclude_binaries"] for entry in executables)
+    assert len(collections) == 1
+    assert collections[0][0][:2] == tuple(executables)
+
+
+def test_companion_console_entrypoint() -> None:
+    """Editable and wheel installs invoke the same main as the frozen launcher."""
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    metadata = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert metadata["project"]["scripts"] == {
+        "apm": "apm_cli.cli:main",
+        "apmx": "apm_cli.apmx:main",
+    }
 
 
 def _extract_spec_helpers() -> str:

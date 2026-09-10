@@ -141,6 +141,23 @@ jobs:
         run: |
           uv run pwsh scripts/windows/sign-binary.ps1
 
+      - name: Smoke companion executable
+        shell: bash
+        env:
+          BINARY_DIR: dist/${{ matrix.binary_name }}
+        run: |
+          companion="$BINARY_DIR/apmx"
+          if [ -f "$companion.exe" ]; then companion="$companion.exe"; fi
+          "$companion" --version
+          "$companion" --help
+
+      - name: Test current Windows companion installation
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          uv run pwsh -NoProfile scripts/windows/test-install-script.ps1 -LocalBundle dist/apm-windows-x86_64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

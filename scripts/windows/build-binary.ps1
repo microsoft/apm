@@ -56,7 +56,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
     # Check if build was successful (onedir mode creates dist/apm/apm.exe)
-    if (-not (Test-Path "dist/apm/apm.exe")) {
+    if (-not (Test-Path "dist/apm/apm.exe") -or -not (Test-Path "dist/apm/apmx.exe")) {
         Write-Host "Build failed - binary not found" -ForegroundColor Red
         exit 1
     }
@@ -93,6 +93,11 @@ try {
         exit 1
     }
 
+    foreach ($option in @("--version", "--help")) {
+        & "dist/$BinaryName/apmx.exe" $option
+        if ($LASTEXITCODE -ne 0) { throw "apmx $option failed with exit code $LASTEXITCODE" }
+    }
+
     # Show binary info
     Write-Host "Build complete!" -ForegroundColor Green
     $size = (Get-ChildItem "dist/$BinaryName" -Recurse | Measure-Object -Property Length -Sum).Sum
@@ -101,8 +106,10 @@ try {
     Write-Host "Size: ${sizeMB}MB" -ForegroundColor Blue
 
     # Create checksum
-    $hash = (Get-FileHash "dist/$BinaryName/apm.exe" -Algorithm SHA256).Hash.ToLower()
-    "$hash  dist/$BinaryName/apm.exe" | Set-Content "dist/$BinaryName.sha256"
+    @("apm.exe", "apmx.exe") | ForEach-Object {
+        $hash = (Get-FileHash "dist/$BinaryName/$_" -Algorithm SHA256).Hash.ToLower()
+        "$hash  dist/$BinaryName/$_"
+    } | Set-Content "dist/$BinaryName.sha256"
     Write-Host "Checksum: dist/$BinaryName.sha256" -ForegroundColor Blue
 
     Write-Host "Ready for release!" -ForegroundColor Green

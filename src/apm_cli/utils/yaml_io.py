@@ -14,6 +14,9 @@ Public API::
     yaml_to_str(data)               -- serialize dict -> YAML string
 """
 
+import os
+import stat
+from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn
@@ -464,6 +467,167 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 
 
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
+
+
+@dataclass(frozen=True)
+class YAMLSourceLocation:
+    """One-based position in a frontmatter source, including its opening fence."""
+
+    line: int
+    column: int
+
+
+@dataclass(frozen=True)
+class FrontmatterDocument:
+    """Exact source bytes, preserved body, and declaration locations."""
+
+    raw: bytes
+    metadata: dict[str, Any]
+    body: str
+    locations: dict[tuple[str | int, ...], YAMLSourceLocation]
+
+
+class FrontmatterSourceError(ValueError):
+    """A strict YAML/frontmatter failure with an original-source position."""
+
+    def __init__(
+        self, message: str, *, line: int = 1, column: int = 1, code: str = "invalid_yaml"
+    ) -> None:
+        super().__init__(message)
+        self.line = line
+        self.column = column
+        self.code = code
+
+
+class _StrictFrontmatterLoader(_BoundedSafeLoader):
+    """Reject amplification and ambiguous declarations before construction."""
+
+    def __init__(self, stream: str) -> None:
+        super().__init__(stream)
+        self._source_depth = 0
+        self._source_nodes = 0
+        self.locations: dict[tuple[str | int, ...], YAMLSourceLocation] = {}
+
+    @staticmethod
+    def _refuse(message: str, mark: Any, code: str = "invalid_yaml") -> NoReturn:
+        raise FrontmatterSourceError(message, line=mark.line + 2, column=mark.column + 1, code=code)
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        event = self.peek_event()
+        if isinstance(event, yaml.events.AliasEvent) or getattr(event, "anchor", None):
+            self._refuse("YAML aliases and anchors are not supported.", event.start_mark)
+        if getattr(event, "tag", None) is not None:
+            self._refuse("Explicit YAML tags are not supported.", event.start_mark)
+        self._source_nodes += 1
+        self._source_depth += 1
+        try:
+            if self._source_depth > 24 or self._source_nodes > 4096:
+                self._refuse("YAML nesting or node limit exceeded.", event.start_mark)
+            return super().compose_node(parent, index)
+        finally:
+            self._source_depth -= 1
+
+    def construct_document(self, node: Any) -> Any:
+        def visit(item: Any, path: tuple[str | int, ...]) -> None:
+            self.locations.setdefault(
+                path, YAMLSourceLocation(item.start_mark.line + 2, item.start_mark.column + 1)
+            )
+            if isinstance(item, yaml.nodes.MappingNode):
+                seen: set[str] = set()
+                for key, value in item.value:
+                    if (
+                        not isinstance(key, yaml.nodes.ScalarNode)
+                        or key.tag != "tag:yaml.org,2002:str"
+                    ):
+                        self._refuse(
+                            "Mapping keys must be strings; merges are unsupported.", key.start_mark
+                        )
+                    if key.value == "<<":
+                        self._refuse("YAML merges are not supported.", key.start_mark)
+                    if key.value in seen:
+                        self._refuse(
+                            f"Duplicate YAML key: {key.value}.", key.start_mark, "duplicate_key"
+                        )
+                    seen.add(key.value)
+                    child = (*path, key.value)
+                    self.locations[child] = YAMLSourceLocation(
+                        key.start_mark.line + 2, key.start_mark.column + 1
+                    )
+                    visit(value, child)
+            elif isinstance(item, yaml.nodes.SequenceNode):
+                for index, value in enumerate(item.value):
+                    visit(value, (*path, index))
+
+        visit(node, ())
+        return super().construct_document(node)
+
+
+def loads_frontmatter_document(raw: bytes, *, max_bytes: int = 256 * 1024) -> FrontmatterDocument:
+    """Parse strict fenced YAML once, preserving bytes and source positions.
+
+    This is additive: permissive primitive/frontmatter consumers retain their
+    existing API. Limits are checked before YAML construction or alias expansion.
+    """
+    if len(raw) > max_bytes:
+        raise FrontmatterSourceError(
+            "Frontmatter source exceeds the byte limit.", code="source_limit"
+        )
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeError as exc:
+        raise FrontmatterSourceError("Source must be UTF-8.") from exc
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].rstrip("\r\n") != "---":
+        raise FrontmatterSourceError("Source must start with a --- frontmatter delimiter.")
+    closing = next(
+        (index for index in range(1, len(lines)) if lines[index].rstrip("\r\n") == "---"),
+        None,
+    )
+    if closing is None:
+        raise FrontmatterSourceError("Frontmatter is missing its closing --- delimiter.")
+    loader = _StrictFrontmatterLoader("".join(lines[1:closing]))
+    try:
+        metadata = loader.get_single_data()
+        if not isinstance(metadata, dict):
+            raise FrontmatterSourceError("Frontmatter must be a nonempty mapping.", line=2)
+        locations = dict(loader.locations)
+    except FrontmatterSourceError:
+        raise
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
+        mark = getattr(exc, "problem_mark", None)
+        raise FrontmatterSourceError(
+            "Malformed or over-budget YAML frontmatter.",
+            line=mark.line + 2 if mark else 2,
+            column=mark.column + 1 if mark else 1,
+        ) from exc
+    finally:
+        loader.dispose()
+    locations[("$body",)] = YAMLSourceLocation(closing + 2, 1)
+    return FrontmatterDocument(raw, metadata, "".join(lines[closing + 1 :]), locations)
+
+
+def load_frontmatter_document(path: Path, *, max_bytes: int = 256 * 1024) -> FrontmatterDocument:
+    """Read at most the bounded source size and parse strict frontmatter."""
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+    with os.fdopen(os.open(path, flags), "rb") as source:
+        before = os.fstat(source.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise FrontmatterSourceError("Source must be a regular file.", code="invalid_file")
+        raw = source.read(max_bytes + 1)
+        after = os.fstat(source.fileno())
+    current = path.stat()
+
+    def identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+    if identity(before) != identity(after) or identity(before) != identity(current):
+        raise FrontmatterSourceError("Source changed while reading.", code="source_changed")
+    return loads_frontmatter_document(raw, max_bytes=max_bytes)
 
 
 def loads_frontmatter(text: str, *, preserve_body: bool = False) -> Any:

@@ -28,6 +28,7 @@ class RuntimeDescriptor:
     script_builder: str | None = None
     content_argument: str = "positional"
     default_command: str | None = None
+    supports_contracts: bool = False
 
 
 def _build_registry(
@@ -65,6 +66,7 @@ RUNTIME_DESCRIPTORS = _build_registry(
             npm_package="@github/copilot",
             script_builder="_build_copilot_command",
             content_argument="prompt_flag",
+            supports_contracts=True,
             default_command=(
                 "copilot --log-level all --log-dir copilot-logs --allow-all-tools -p {prompt_file}"
             ),

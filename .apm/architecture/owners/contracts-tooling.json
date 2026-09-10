@@ -2,6 +2,41 @@
   "version": 1,
   "owners": [
     {
+      "id": "contract-package-source",
+      "decision": "Explicit package contract acquisition without project installation or a second execution engine",
+      "owner": "install/contract_source.py via canonical dependency owners; contracts/frontend.py admits the job",
+      "selectors": ["src/apm_cli/apmx.py", "src/apm_cli/install/contract_source.py"],
+      "guards": ["contracts-package-source"]
+    },
+    {
+      "id": "contract-leaf-source",
+      "decision": "Strict leaf contract source selection and planning without legacy fallback",
+      "owner": "contracts/frontend.py with canonical yaml_io and dependency owners",
+      "selectors": ["src/apm_cli/contracts/frontend.py", "src/apm_cli/contracts/imports.py"],
+      "guards": ["contracts-leaf-source"]
+    },
+    {
+      "id": "contract-exact-subject",
+      "decision": "Raw-byte input, baseline and artifact identity for local contracts",
+      "owner": "contracts/workspace.py",
+      "selectors": ["src/apm_cli/contracts/workspace.py"],
+      "guards": ["contracts-leaf-subject"]
+    },
+    {
+      "id": "contract-process-observation",
+      "decision": "Managed contract process creation, cancellation and termination observations",
+      "owner": "contracts/process.py",
+      "selectors": ["src/apm_cli/contracts/process.py"],
+      "guards": ["contracts-leaf-process"]
+    },
+    {
+      "id": "contract-leaf-outcome",
+      "decision": "Contract check normalization, terminal reduction and atomic run records",
+      "owner": "contracts/records.py with outcome vocabulary in contracts/models.py",
+      "selectors": ["src/apm_cli/contracts/records.py", "src/apm_cli/contracts/models.py"],
+      "guards": ["contracts-leaf-outcome"]
+    },
+    {
       "id": "dependency-identity-materialization",
       "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; embedded git URL subpath validation",
       "owner": "models/dependency/identity.py + materialization.py + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py)",
