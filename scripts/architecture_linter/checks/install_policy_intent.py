@@ -28,12 +28,14 @@ from scripts.architecture_linter.checks.install_policy_gitlab_and_bundle import 
     RULE_GITLAB_ADAPTER,
     RULE_GITLAB_FACADE,
     RULE_LOCAL_BUNDLE_PREFLIGHT,
+    RULE_REMOTE_ORIGIN_OWNER,
     RULE_REQUIRE_HASHES,
     RULE_WINNER_SELECTION,
     check_dependency_winner_selection,
     check_gitlab_facade_orchestration,
     check_gitlab_policy_adapter,
     check_local_bundle_preflight,
+    check_policy_remote_origin_owner,
     check_require_hashes_enforcement,
 )
 from scripts.architecture_linter.checks.install_policy_plugin_and_approval import (
@@ -100,6 +102,11 @@ EXTRA_RULES: tuple[Rule, ...] = (
         RULE_GITLAB_FACADE,
         "GitLab policy cache and transport remain in policy/_gitlab.py.",
         check_gitlab_facade_orchestration,
+    ),
+    _semantic_rule(
+        RULE_REMOTE_ORIGIN_OWNER,
+        "Policy discovery reads and parses the git remote through one owner (discovery.py).",
+        check_policy_remote_origin_owner,
     ),
     _semantic_rule(
         RULE_LOCAL_BUNDLE_PREFLIGHT,

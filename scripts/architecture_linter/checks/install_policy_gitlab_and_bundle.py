@@ -43,6 +43,9 @@ RULE_REQUIRE_HASHES = "install-deployment-require-hashes-enforcement"
 RULE_WINNER_SELECTION = "install-deployment-dependency-winner-selection"
 
 
+RULE_REMOTE_ORIGIN_OWNER = "install-deployment-policy-remote-origin-owner"
+
+
 def _count_text(lines: Sequence[tuple[int, str]], needle: str) -> int:
     """Return how many lines contain `needle` (``grep -Fc``)."""
     return sum(1 for _, text in lines if needle in text)
@@ -106,6 +109,54 @@ def check_gitlab_policy_adapter(provider: FactsProvider) -> tuple[Violation, ...
             paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_GITLAB_ADAPTER,)),
             pattern=_GITLAB_ADAPTER_DEFS,
             message="Duplicate GitLab policy fetch helper; route through policy/_gitlab.py",
+            configured=False,
+            respect_exempt=True,
+        )
+    )
+    return tuple(findings)
+
+
+_POLICY_DISCOVERY_OWNER = "src/apm_cli/policy/discovery.py"
+
+
+_REMOTE_ORIGIN_ARGV = re.compile(r'"remote",\s*"get-url",\s*"origin"')
+
+
+_REMOTE_PARSER_DEFS = re.compile(
+    r"^def (_remote_url_parts|_parse_remote_url|_git_remote_origin_url)\("
+)
+
+
+def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Reading and parsing the project git remote for policy discovery has one owner.
+
+    ``discovery.py`` is the sole reader of ``git remote get-url origin`` and the
+    sole home of the remote-URL splitter/parsers (``_remote_url_parts``,
+    ``_parse_remote_url``, ``_git_remote_origin_url``). This forbids any other
+    module in the policy tree from re-reading or re-parsing the remote, which
+    would reintroduce the double-read / divergent-parse the single-owner
+    refactor removed (#2753).
+    """
+    rule_id = RULE_REMOTE_ORIGIN_OWNER
+    findings: list[Violation] = []
+    findings.extend(
+        _banned(
+            provider,
+            rule_id=rule_id,
+            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_POLICY_DISCOVERY_OWNER,)),
+            pattern=_REMOTE_ORIGIN_ARGV,
+            message="Read the git remote origin only via discovery.py::_git_remote_origin_url",
+            configured=False,
+            respect_exempt=True,
+        )
+    )
+    findings.extend(
+        _banned(
+            provider,
+            rule_id=rule_id,
+            paths=_tree_python_paths(provider, _POLICY_TREE, excluded=(_POLICY_DISCOVERY_OWNER,)),
+            pattern=_REMOTE_PARSER_DEFS,
+            message="Remote-URL split/parse owner is discovery.py; do not redefine these helpers",
             configured=False,
             respect_exempt=True,
         )

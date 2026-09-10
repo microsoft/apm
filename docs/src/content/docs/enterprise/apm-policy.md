@@ -89,6 +89,10 @@ This lets an individual team publish its own `apm-policy` under its subgroup wit
 
 Composing policies across levels is opt-in via `extends:`. A team policy can extend an ancestor group's policy to inherit and tighten it, using either an explicit path (`extends: "acme/dept-a/apm-policy"` for the immediate parent group, or a deeper ancestor) or the `extends: "org"` shorthand, which on GitLab always resolves to the **top-level** group's policy (`<top-level-group>/apm-policy`) -- not the nearest ancestor. Children can only tighten, never relax.
 
+:::note[Group names containing a dot]
+A bare nested `extends:` ref whose first segment contains a dot (e.g. a group named `acme.tools`) is read as a host, so `extends: "acme.tools/team/apm-policy"` is rejected as cross-host. Spell it host-qualified instead -- `extends: "gitlab.com/acme.tools/team/apm-policy"` (or `<GITLAB_HOST>/...` on self-managed) -- so the leaf host is matched and stripped.
+:::
+
 Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project with no `apm-policy` at any level (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
 
 :::caution[Self-managed GitLab requires GITLAB_HOST or APM_GITLAB_HOSTS]
