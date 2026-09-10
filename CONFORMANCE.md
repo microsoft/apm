@@ -128,7 +128,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-rs-013](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-013) | MUST | 7.2 | consumer | active | 1 | - |
 | [req-rs-014](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-014) | MUST | 7.3.1 | consumer | active | 1 | - |
 | [req-rs-015](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-015) | MUST | 7.5 | consumer | active | 1 | - |
-| [req-rs-016](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-016) | MUST | 7.2 | consumer | active | 7 | - |
+| [req-rs-016](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-016) | MUST | 7.2 | consumer | active | 10 | - |
 | [req-rs-017](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-017) | MUST | 7.7 | consumer | active | 15 | - |
 | [req-sc-001](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-001) | MUST | 10.4 | consumer | active | 2 | - |
 | [req-sc-002](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-002) | MUST | 10.9 | consumer | active | 1 | - |
@@ -142,7 +142,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-sc-010](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-010) | MUST | 10.13 | consumer | active | 1 | - |
 | [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 1 | - |
 | [req-sc-012](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-012) | MUST | 10.14 | consumer | active | 1 | - |
-| [req-sc-013](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-013) | MUST | 10.3 | consumer | active | 1 | - |
+| [req-sc-013](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-013) | MUST | 10.3 | consumer | active | 4 | - |
 | [req-sc-014](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-014) | MUST | 10.15 | consumer | active | 1 | - |
 | [req-sc-015](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-015) | MUST | 10.16 | consumer | active | 3 | tests/fixtures/spec-conformance/source-plan/req-sc-015.json |
 | [req-tg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-001) | MUST | 8.4 | consumer | active | 1 | - |
