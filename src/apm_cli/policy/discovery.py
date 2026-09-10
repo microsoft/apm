@@ -993,15 +993,13 @@ def _gitlab_walk_candidate(
     When every level is absent the last ``absent`` result is returned so the
     caller's candidate cascade can proceed unchanged.
 
-    GitLab returns 404 both for a missing project and for a private project the
-    token cannot read, so an ``absent`` is ambiguous. Before applying an
-    ancestor policy over one or more skipped closer levels, verify (via
-    authenticated Git) that no skipped closer ``apm-policy`` project actually
-    exists; if one does, its policy was concealed and we fail closed rather than
-    silently apply the weaker ancestor.
+    A GitLab ``absent`` is a 404, which GitLab returns both for a missing
+    project and for a private one the token cannot read -- the same
+    "404 == no policy at this level" ambiguity GitHub/ADO discovery already
+    accept. A closer policy the token cannot read is therefore skipped in
+    favour of the next ancestor (documented as a GitLab-platform limitation).
     """
     result = PolicyFetchResult(error=None, outcome="absent")
-    skipped: list[str] = []
     for namespace in namespaces:
         result = _gitlab._fetch_from_gitlab_repo(
             org=namespace,
@@ -1014,54 +1012,13 @@ def _gitlab_walk_candidate(
             cache_only=cache_only,
         )
         if result.outcome != "absent":
-            # Gate on a usable policy (found/empty/cached_stale all carry one),
-            # not just found/empty -- a stale-but-usable ancestor must also be
-            # checked for a concealed closer before it is applied.
-            if skipped and result.policy is not None:
-                concealed = _gitlab.first_concealed_closer_policy(
-                    skipped,
-                    candidate_repo,
-                    host=host,
-                    port=port,
-                    project_root=project_root,
-                    no_cache=no_cache,
-                    cache_only=cache_only,
-                )
-                if concealed is not None:
-                    return _gitlab_concealed_closer_result(concealed, candidate_repo, host, port)
             return result
-        skipped.append(namespace)
         logger.debug(
             "GitLab policy absent at %s/%s; trying parent group",
             namespace,
             candidate_repo,
         )
     return result
-
-
-def _gitlab_concealed_closer_result(
-    namespace: str, repo: str, host: str, port: int | None
-) -> PolicyFetchResult:
-    """Fail-closed result when a skipped closer GitLab policy project exists.
-
-    Uses ``incomplete_chain`` -- an outcome that ALWAYS fails closed in
-    :func:`outcome_routing.route_discovery_outcome`, regardless of the project's
-    ``policy.fetch_failure_default`` -- because a concealed closer policy is a
-    governance ambiguity that must never silently downgrade to a weaker ancestor
-    (a ``cache_miss_fetch_fail`` here would default to ``warn`` and proceed).
-    """
-    host_label = f"{host}:{port}" if port is not None else host
-    return PolicyFetchResult(
-        source=f"org:{host_label}/{namespace}/{repo}",
-        error=(
-            f"A closer GitLab policy project {namespace}/{repo} could not be confirmed "
-            "absent (GitLab returns 404 for a private project the token cannot read, or "
-            "the project state was unverifiable offline in cache-only mode); refusing to "
-            "silently apply a weaker ancestor policy. Grant the token read access to that "
-            "project, or remove it."
-        ),
-        outcome="incomplete_chain",
-    )
 
 
 def _fetch_from_url(

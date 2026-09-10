@@ -95,8 +95,8 @@ A bare nested `extends:` ref whose first segment contains a dot (e.g. a group na
 
 Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project with no `apm-policy` at any level (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
 
-:::caution[Concealed private policy projects]
-GitLab returns HTTP 404 both for a missing project and for a private one the token cannot read, so a closer `apm-policy` a team publishes could otherwise be silently skipped in favour of a weaker ancestor. Before applying an ancestor policy over a skipped closer level, APM checks via authenticated Git whether that skipped closer `apm-policy` project actually exists; if it does, discovery **fails closed unconditionally** (the install is blocked regardless of `policy.fetch_failure_default`) rather than downgrade to the weaker ancestor -- the error names the concealed project so you can grant the token read access or remove it. The residual case where the token can read neither the policy file nor the project over Git is indistinguishable from a genuinely absent project and still ascends -- grant the CI token read access to every `apm-policy` project it should honour.
+:::caution[GitLab conceals private projects with 404]
+GitLab returns HTTP 404 both for a missing `apm-policy` project and for a private one the token cannot read. A closer policy the CI token is denied is therefore indistinguishable from "no policy at this level," so the walk skips it and applies the next ancestor -- the same `404 == no policy` behaviour GitHub and ADO discovery already have. Grant the CI token read access to every `apm-policy` project it should honour, so a closer policy is never silently skipped.
 :::
 
 :::caution[Self-managed GitLab requires GITLAB_HOST or APM_GITLAB_HOSTS]

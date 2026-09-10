@@ -21,7 +21,6 @@ from apm_cli.policy._gitlab import (
     _fetch_from_gitlab_repo,
     _fetch_gitlab_contents,
     _gitlab_project_state_via_git,
-    first_concealed_closer_policy,
 )
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,
@@ -228,98 +227,6 @@ class TestGitlabNamespaceDescending(unittest.TestCase):
     def test_no_namespace_segment_returns_none(self):
         # A remote with only one path segment has no owning namespace.
         self.assertIsNone(_gitlab_namespace_descending("https://gitlab.com/solo"))
-
-
-class TestFirstConcealedCloserPolicy(unittest.TestCase):
-    """first_concealed_closer_policy verifies skipped closer projects (#2753)."""
-
-    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_returns_closest_namespace_git_confirms_exists(self, mock_state):
-        # team-x exists (concealed 404); dept-a not confirmed.
-        mock_state.side_effect = lambda **kw: True if kw["org"] == "acme/dept-a/team-x" else None
-        result = first_concealed_closer_policy(
-            ["acme/dept-a/team-x", "acme/dept-a"], "apm-policy", host="gitlab.com", port=None
-        )
-        self.assertEqual(result, "acme/dept-a/team-x")
-
-    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_returns_none_when_no_skipped_project_confirmed(self, mock_state):
-        mock_state.return_value = None  # git cannot establish any project's state
-        result = first_concealed_closer_policy(
-            ["acme/dept-a/team-x", "acme/dept-a"], "apm-policy", host="gitlab.com", port=None
-        )
-        self.assertIsNone(result)
-
-    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_returns_closest_confirmed_when_match_is_a_middle_level(self, mock_state):
-        # Only the MIDDLE skipped namespace is git-confirmed to exist; the
-        # closest-first scan must return it, not None and not a farther level.
-        mock_state.side_effect = lambda **kw: True if kw["org"] == "acme/dept-a" else None
-        result = first_concealed_closer_policy(
-            ["acme/dept-a/team-x", "acme/dept-a", "acme"],
-            "apm-policy",
-            host="gitlab.com",
-            port=None,
-        )
-        self.assertEqual(result, "acme/dept-a")
-
-    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_returns_the_closest_of_multiple_confirmed(self, mock_state):
-        # When several skipped levels exist, the CLOSEST (first) wins.
-        mock_state.return_value = True
-        result = first_concealed_closer_policy(
-            ["acme/dept-a/team-x", "acme/dept-a", "acme"],
-            "apm-policy",
-            host="gitlab.com",
-            port=None,
-        )
-        self.assertEqual(result, "acme/dept-a/team-x")
-
-    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_present_verdict_is_cached_so_the_probe_runs_once(self, mock_state):
-        # Only the DEFINITIVE "present" verdict is cached: a second walk over a
-        # confirmed-present level does not re-probe the network.
-        mock_state.return_value = True
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            first = first_concealed_closer_policy(
-                ["acme/dept-a"], "apm-policy", host="gitlab.com", port=None, project_root=root
-            )
-            second = first_concealed_closer_policy(
-                ["acme/dept-a"], "apm-policy", host="gitlab.com", port=None, project_root=root
-            )
-        self.assertEqual(first, "acme/dept-a")
-        self.assertEqual(second, "acme/dept-a")
-        self.assertEqual(mock_state.call_count, 1)  # present cached: probed once
-
-    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_indeterminate_verdict_is_not_cached_so_it_re_probes(self, mock_state):
-        # None (missing OR transient failure) is NOT cached -- a transient error
-        # must never be remembered as "absent" and suppress re-probing.
-        mock_state.return_value = None
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            for _ in range(2):
-                first_concealed_closer_policy(
-                    ["acme/dept-a"], "apm-policy", host="gitlab.com", port=None, project_root=root
-                )
-        self.assertEqual(mock_state.call_count, 2)  # not cached: re-probes each time
-
-    @patch("apm_cli.policy._gitlab._gitlab_project_state_via_git")
-    def test_cache_only_never_probes_and_fails_closed_when_unverifiable(self, mock_state):
-        # Offline (cache_only) must not touch the network; without a cached
-        # "present" verdict it fails closed rather than applying a weaker ancestor.
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = first_concealed_closer_policy(
-                ["acme/dept-a"],
-                "apm-policy",
-                host="gitlab.com",
-                port=None,
-                project_root=Path(tmpdir),
-                cache_only=True,
-            )
-        self.assertEqual(result, "acme/dept-a")  # unverifiable offline -> fail closed
-        mock_state.assert_not_called()  # no network probe in cache_only
 
 
 class TestExtractOrgFromGitRemote(unittest.TestCase):
@@ -1298,12 +1205,11 @@ class TestAutoDiscover(unittest.TestCase):
         mock_gitlab_fetch.assert_called_once()
         self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "acme/dept-a/team-x")
 
-    @patch("apm_cli.policy._gitlab.first_concealed_closer_policy", return_value=None)
     @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
     @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
     @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_gitlab_subgroup_absent_ascends_to_parent(
-        self, mock_extract, mock_ns, mock_gitlab_fetch, mock_concealed
+        self, mock_extract, mock_ns, mock_gitlab_fetch
     ):
         """Absent at the deepest levels -> ascend until a policy is found."""
         mock_extract.return_value = ("acme", "gitlab.com", None)
@@ -1325,56 +1231,6 @@ class TestAutoDiscover(unittest.TestCase):
         self.assertEqual(mock_gitlab_fetch.call_count, 3)
         probed = [c.kwargs["org"] for c in mock_gitlab_fetch.call_args_list]
         self.assertEqual(probed, ["acme/dept-a/team-x", "acme/dept-a", "acme"])
-        # Skipped closer levels were verified genuinely empty before ascending.
-        mock_concealed.assert_called_once()
-        self.assertEqual(mock_concealed.call_args.args[0], ["acme/dept-a/team-x", "acme/dept-a"])
-
-    @patch("apm_cli.policy._gitlab.first_concealed_closer_policy")
-    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
-    @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
-    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
-    def test_gitlab_subgroup_concealed_closer_policy_fails_closed(
-        self, mock_extract, mock_ns, mock_gitlab_fetch, mock_concealed
-    ):
-        """A closer apm-policy project confirmed to exist (concealed 404) fails
-        closed instead of silently applying the weaker ancestor (#2753 review)."""
-        mock_extract.return_value = ("acme", "gitlab.com", None)
-        mock_ns.return_value = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
-        mock_gitlab_fetch.side_effect = [
-            PolicyFetchResult(outcome="absent"),  # team-x: concealed 404
-            PolicyFetchResult(
-                policy=ApmPolicy(),
-                source="org:gitlab.com/acme/dept-a/apm-policy",
-                outcome="found",
-            ),  # dept-a: an ancestor policy
-        ]
-        # Git confirms the skipped closer project (team-x) actually exists.
-        mock_concealed.return_value = "acme/dept-a/team-x"
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = _auto_discover(Path(tmpdir), no_cache=True)
-
-        self.assertFalse(result.found)
-        # ``incomplete_chain`` ALWAYS fails closed (unlike cache_miss_fetch_fail,
-        # which defaults to warn) -- the concealed policy must never downgrade.
-        self.assertEqual(result.outcome, "incomplete_chain")
-        self.assertIn("acme/dept-a/team-x/apm-policy", result.error)
-
-    def test_gitlab_concealed_result_blocks_even_with_fetch_failure_default_warn(self):
-        """The concealed-closer outcome blocks install under the DEFAULT warn
-        knob -- proving the fix is fail-closed, not fail-open (#2753 review)."""
-        from apm_cli.install.errors import PolicyViolationError
-        from apm_cli.policy.discovery import _gitlab_concealed_closer_result
-        from apm_cli.policy.outcome_routing import route_discovery_outcome
-
-        concealed = _gitlab_concealed_closer_result("acme/dept-a", "apm-policy", "gitlab.com", None)
-        with self.assertRaises(PolicyViolationError):
-            route_discovery_outcome(
-                concealed,
-                logger=None,
-                fetch_failure_default="warn",
-                raise_blocking_errors=True,
-            )
 
     @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
     @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
