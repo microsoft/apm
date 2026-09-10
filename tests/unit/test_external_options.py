@@ -6,6 +6,8 @@ Covers :mod:`apm_cli.security.external.options`:
   policy never injects argv and never forces LLM on -- restrict-only).
 * :func:`validate_extra_args` fail-closed allowlist (dangerous scanner-native
   flags, credential-bearing tokens, and out-of-root path values are rejected).
+* :func:`validate_value_arity` arity gate for value-bearing flags (exactly one
+  value; zero or two are rejected).
 """
 
 from __future__ import annotations
@@ -19,9 +21,11 @@ from apm_cli.security.external.options import (
     ScannerOptions,
     resolve_scanner_options,
     validate_extra_args,
+    validate_value_arity,
 )
 
 _ALLOWED = frozenset({"--model", "--severity"})
+_VALUE_REQUIRED = frozenset({"--baseline"})
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +221,58 @@ def test_no_dollar_expansion_value_is_literal(tmp_path: Path):
 def test_empty_allowlist_rejects_any_flag(tmp_path: Path):
     with pytest.raises(ExternalScanError):
         validate_extra_args("sarif", ("--model",), frozenset(), base_dir=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# validate_value_arity -- exactly one value for value-bearing flags
+# ---------------------------------------------------------------------------
+
+
+def test_arity_separate_value_passes():
+    args = ("--baseline", "base.yaml")
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED) == args
+
+
+def test_arity_inline_value_passes():
+    args = ("--baseline=base.yaml",)
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED) == args
+
+
+def test_arity_value_followed_by_another_flag_passes():
+    args = ("--baseline", "base.yaml", "--severity", "high")
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED) == args
+
+
+def test_arity_missing_value_at_end_rejected():
+    with pytest.raises(ExternalScanError, match=r"requires exactly one value"):
+        validate_value_arity("skillspector", ("--baseline",), _VALUE_REQUIRED)
+
+
+def test_arity_missing_value_before_next_flag_rejected():
+    with pytest.raises(ExternalScanError, match=r"requires exactly one value"):
+        validate_value_arity("skillspector", ("--baseline", "--model", "gpt-4o"), _VALUE_REQUIRED)
+
+
+def test_arity_empty_inline_value_rejected():
+    with pytest.raises(ExternalScanError, match=r"requires exactly one value"):
+        validate_value_arity("skillspector", ("--baseline=",), _VALUE_REQUIRED)
+
+
+def test_arity_second_value_rejected():
+    with pytest.raises(ExternalScanError, match=r"second value"):
+        validate_value_arity("skillspector", ("--baseline", "a.yaml", "b.yaml"), _VALUE_REQUIRED)
+
+
+def test_arity_ignores_flags_outside_the_set():
+    # Only the named flags are counted; ``--model`` keeps whatever arity the
+    # allowlist pass already permitted.
+    args = ("--model", "gpt-4o", "extra")
+    assert validate_value_arity("skillspector", args, _VALUE_REQUIRED) == args
+
+
+def test_arity_no_op_for_empty_prefix_set():
+    args = ("--baseline",)
+    assert validate_value_arity("skillspector", args, frozenset()) == args
 
 
 # ---------------------------------------------------------------------------

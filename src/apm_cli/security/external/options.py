@@ -20,6 +20,9 @@ injecting argv or forcing outbound network egress.
 each adapter declares a small allowlist of safe flag prefixes, and any token
 that is not allowed, names a secret, or is a path escaping the scan root is
 rejected fail-closed (raising :class:`ExternalScanError`).
+
+:func:`validate_value_arity` is a second, optional pass an adapter runs after
+that gate when one of its allowlisted flags must carry exactly one value.
 """
 
 from __future__ import annotations
@@ -175,5 +178,59 @@ def validate_extra_args(
             raise ExternalScanError(
                 f"External scanner '{name}': path argument '{token}' must stay "
                 f"within the scan directory."
+            )
+    return args
+
+
+def validate_value_arity(
+    name: str,
+    args: tuple[str, ...],
+    value_required_prefixes: frozenset[str],
+) -> tuple[str, ...]:
+    """Require each flag in *value_required_prefixes* to carry exactly one value.
+
+    Run this *after* :func:`validate_extra_args`, which owns the allowlist and
+    the path-containment check; this pass only counts values.  It matters
+    because adapters append ``extra_args`` **before** their positional targets:
+    a flag left without a value would make the scanner consume the first target
+    as that value, silently scanning one path fewer.  A stray second value is
+    rejected for the mirror reason -- the scanner would read it as an extra
+    target.
+
+    Both spellings are accepted: ``--flag=value`` and ``--flag`` ``value``.
+
+    Args:
+        name: Scanner name, for error messages.
+        args: Argv tokens already checked by :func:`validate_extra_args`.
+        value_required_prefixes: Flag names that must carry exactly one value.
+
+    Returns:
+        The validated *args* unchanged.
+
+    Raises:
+        ExternalScanError: When such a flag carries no value or a second one.
+    """
+    index = 0
+    while index < len(args):
+        token = args[index]
+        index += 1
+        flag_name, separator, inline_value = token.partition("=")
+        if flag_name not in value_required_prefixes:
+            continue
+        missing = (
+            f"External scanner '{name}': argument '{flag_name}' requires exactly "
+            f"one value (e.g. '{flag_name} path/to/baseline')."
+        )
+        if separator:
+            if not inline_value:
+                raise ExternalScanError(missing)
+            continue
+        if index >= len(args) or args[index].startswith("-"):
+            raise ExternalScanError(missing)
+        index += 1
+        if index < len(args) and not args[index].startswith("-"):
+            raise ExternalScanError(
+                f"External scanner '{name}': argument '{flag_name}' takes exactly one "
+                f"value, but a second value '{args[index]}' followed it."
             )
     return args
