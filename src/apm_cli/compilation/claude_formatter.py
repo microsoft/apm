@@ -9,6 +9,7 @@ import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..primitives.discovery import get_dependency_declaration_order
 from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
 from ..utils.paths import resolve_base_and_source_dirs
 from ..version import get_version
@@ -232,32 +233,58 @@ class ClaudeFormatter:
     def _collect_dependencies(self) -> builtins.list[str]:
         """Collect @import paths for apm_modules dependencies.
 
+        Prefers installed package roots from ``apm.yml`` / lockfile declaration
+        order (GitHub ``owner/repo``, Azure DevOps ``org/project/repo``, and
+        virtual paths). Falls back to a shallow filesystem scan that understands
+        both two-level and three-level layouts when no declarations are present
+        (e.g. unit fixtures).
+
         Returns:
             List[str]: List of @import paths for dependencies.
         """
-        dependencies = []
-        apm_modules_dir = self.base_dir / "apm_modules"
+        dependencies: builtins.list[str] = []
 
-        if not apm_modules_dir.is_dir():
+        # Modules live with sources; honor --root by preferring source_dir.
+        modules_root = self.source_dir / "apm_modules"
+        if not modules_root.is_dir() and self.base_dir.resolve() != self.source_dir.resolve():
+            modules_root = self.base_dir / "apm_modules"
+        if not modules_root.is_dir():
             return dependencies
 
-        # Scan for CLAUDE.md files in apm_modules
-        # Structure: apm_modules/{owner}/{package}/CLAUDE.md
-        for owner_dir in apm_modules_dir.iterdir():
+        declared = get_dependency_declaration_order(str(self.source_dir))
+        if not declared and self.base_dir.resolve() != self.source_dir.resolve():
+            declared = get_dependency_declaration_order(str(self.base_dir))
+
+        if declared:
+            for rel in declared:
+                if (modules_root / rel / "CLAUDE.md").is_file():
+                    dependencies.append(f"@apm_modules/{rel}/CLAUDE.md")
+            return sorted(dependencies)
+
+        # Fallback FS scan: GitHub owner/repo and ADO org/project/repo.
+        # Only treat a third level as a package when the mid directory has no
+        # package-root CLAUDE.md (avoids picking nested docs under GitHub pkgs).
+        for owner_dir in modules_root.iterdir():
             if not owner_dir.is_dir() or owner_dir.name.startswith("."):
                 continue
 
-            for package_dir in owner_dir.iterdir():
-                if not package_dir.is_dir() or package_dir.name.startswith("."):
+            for mid_dir in owner_dir.iterdir():
+                if not mid_dir.is_dir() or mid_dir.name.startswith("."):
                     continue
 
-                claude_md_path = package_dir / "CLAUDE.md"
-                if not claude_md_path.is_file():
+                package_claude = mid_dir / "CLAUDE.md"
+                if package_claude.is_file():
+                    dependencies.append(f"@apm_modules/{owner_dir.name}/{mid_dir.name}/CLAUDE.md")
                     continue
 
-                # Build the @import path
-                import_path = f"@apm_modules/{owner_dir.name}/{package_dir.name}/CLAUDE.md"
-                dependencies.append(import_path)
+                for repo_dir in mid_dir.iterdir():
+                    if not repo_dir.is_dir() or repo_dir.name.startswith("."):
+                        continue
+                    ado_claude = repo_dir / "CLAUDE.md"
+                    if ado_claude.is_file():
+                        dependencies.append(
+                            f"@apm_modules/{owner_dir.name}/{mid_dir.name}/{repo_dir.name}/CLAUDE.md"
+                        )
 
         return sorted(dependencies)
 

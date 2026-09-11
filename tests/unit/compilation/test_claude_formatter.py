@@ -336,6 +336,77 @@ class TestDependenciesImportSyntax:
         assert "@apm_modules/owner1/no-claude/CLAUDE.md" not in deps
         assert "@apm_modules/owner3/skills-only/CLAUDE.md" not in deps
 
+    def test_ado_three_level_dependencies_included(self, tmp_path):
+        """Azure DevOps packages live at apm_modules/org/project/repo (issue #2951)."""
+        ado_pkg = tmp_path / "apm_modules" / "contoso" / "platform" / "standards"
+        ado_pkg.mkdir(parents=True)
+        (ado_pkg / "CLAUDE.md").write_text("# ADO package", encoding="utf-8")
+        # Depth-3 tree without CLAUDE.md must stay omitted.
+        empty = tmp_path / "apm_modules" / "contoso" / "platform" / "empty-repo"
+        empty.mkdir(parents=True)
+        (empty / "README.md").write_text("no claude", encoding="utf-8")
+
+        formatter = ClaudeFormatter(str(tmp_path))
+        deps = formatter._collect_dependencies()
+
+        assert "@apm_modules/contoso/platform/standards/CLAUDE.md" in deps
+        assert "@apm_modules/contoso/platform/empty-repo/CLAUDE.md" not in deps
+
+    def test_nested_claude_md_under_github_package_not_imported(self, tmp_path):
+        """Do not treat nested docs/CLAUDE.md as a package root when mid has CLAUDE.md."""
+        pkg = tmp_path / "apm_modules" / "owner" / "repo"
+        pkg.mkdir(parents=True)
+        (pkg / "CLAUDE.md").write_text("# Package root", encoding="utf-8")
+        nested = pkg / "docs"
+        nested.mkdir()
+        (nested / "CLAUDE.md").write_text("# Nested docs", encoding="utf-8")
+
+        formatter = ClaudeFormatter(str(tmp_path))
+        deps = formatter._collect_dependencies()
+
+        assert deps == ["@apm_modules/owner/repo/CLAUDE.md"]
+
+    def test_mixed_github_and_ado_dependencies_sorted(self, tmp_path):
+        """Two-level and three-level roots can coexist and stay sorted."""
+        gh = tmp_path / "apm_modules" / "zeta" / "pkg"
+        gh.mkdir(parents=True)
+        (gh / "CLAUDE.md").write_text("# gh", encoding="utf-8")
+        ado = tmp_path / "apm_modules" / "alpha" / "proj" / "repo"
+        ado.mkdir(parents=True)
+        (ado / "CLAUDE.md").write_text("# ado", encoding="utf-8")
+
+        formatter = ClaudeFormatter(str(tmp_path))
+        deps = formatter._collect_dependencies()
+
+        assert deps == [
+            "@apm_modules/alpha/proj/repo/CLAUDE.md",
+            "@apm_modules/zeta/pkg/CLAUDE.md",
+        ]
+
+    def test_ado_dependency_appears_in_distributed_output(self, tmp_path):
+        """format_distributed Dependencies section includes ADO three-level imports."""
+        ado_pkg = tmp_path / "apm_modules" / "org" / "project" / "repo"
+        ado_pkg.mkdir(parents=True)
+        (ado_pkg / "CLAUDE.md").write_text("# ADO", encoding="utf-8")
+
+        formatter = ClaudeFormatter(str(tmp_path))
+        primitives = PrimitiveCollection()
+        instruction = Instruction(
+            name="test",
+            file_path=tmp_path / "test.instructions.md",
+            description="Test",
+            apply_to="**/*.py",
+            content="Test content",
+            author="test",
+        )
+        primitives.add_primitive(instruction)
+        placement_map = {formatter.base_dir: [instruction]}
+        result = formatter.format_distributed(primitives, placement_map)
+        content = result.content_map[formatter.base_dir / "CLAUDE.md"]
+
+        assert "## Dependencies" in content
+        assert "@apm_modules/org/project/repo/CLAUDE.md" in content
+
 
 class TestAgentsExcludedFromClaudeMd:
     """Tests verifying agents/workflows are NOT included in CLAUDE.md.

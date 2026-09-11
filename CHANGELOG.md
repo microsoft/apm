@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm compile --target claude` now includes `CLAUDE.md` imports for Azure DevOps three-level dependency paths (`apm_modules/org/project/repo`), matching GitHub two-level packages. (#2951)
+
 ### Added
 
 - gh-aw's shared APM import now supports `token-source: github-token`; after consumers re-vendor the workflow, its read-only current-repository identity can fetch same-repository private packages, while `cascade` remains the default and cross-repository packages still require a dedicated token or GitHub App. (#2706)
