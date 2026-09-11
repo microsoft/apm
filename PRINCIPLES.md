@@ -1,9 +1,9 @@
 # APM Principles
 
-The hard contract APM is held to. Every PR, every release, every
-roadmap call cites these principles. The triage panel, the review
-panel, and the batch-bug-shepherd Phase 1.5 strategic-alignment
-gate cite them by number when accepting or rejecting work.
+The product principles APM is held to. Maintainers use them to explain
+scope and roadmap decisions. Automated triage and review may cite them
+in recommendations; human authority is defined in
+[GOVERNANCE.md](GOVERNANCE.md).
 
 MANIFESTO = values. PRD = product pitch (currently framed at native
 platform owners). **This file = the rejection contract.** When a
@@ -84,13 +84,16 @@ changelog.
 
 ## P7 -- Community over feature count
 
-External-contributor PRs and issues triage before internal
-nice-to-haves. A contributor lost is worse than a feature delayed.
-Surface every external interaction at the top of the queue.
+Prioritize timely, respectful decisions on external contributions over
+internal nice-to-haves. Give contributors clear scope and a review contact
+before inviting implementation. Community priority does not require
+accepting every proposal or promising review capacity the project lacks.
+An honest deferral or decline is better than an indefinite promise.
 
 ## How this file is used
 
-- `apm-ceo` cites by number in arbitration prose.
+- Maintainers cite relevant principles when explaining scope decisions.
+- `apm-ceo` cites by number in advisory prose.
 - `batch-bug-shepherd` Phase 1.5 spawns one ceo subagent per
   triaged-LEGIT row, which returns a verdict + cited principle.
 - `apm-triage-panel` CEO arbiter cites a principle on every
@@ -98,8 +101,8 @@ Surface every external interaction at the top of the queue.
 - `apm-review-panel` CEO synthesizer cites a principle when
   surfacing strategic implications in arbitration.
 
-Any addition to this file requires the apm-ceo persona to ratify
-and ships in a PR that updates MANIFESTO.md cross-refs in the same
-commit. Removal of a principle is a breaking strategic change --
-requires CHANGELOG entry, migration line, and explicit `BREAKING:`
-prefix.
+Changes to these principles require a public issue and a human decision
+under [GOVERNANCE.md](GOVERNANCE.md#decisions-and-accountability).
+Update affected documentation in the same PR. If a change alters a public
+product contract, document the compatibility impact and migration in the
+changelog. Agent recommendations do not ratify policy.
