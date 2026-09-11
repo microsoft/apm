@@ -44,10 +44,11 @@ def _text(events) -> str:
     return "\n".join(safe_text(str(event.data.get("text", ""))) for event in events)
 
 
-def test_bytewise_utf8_and_delta_final_correlation() -> None:
+@pytest.mark.parametrize("phase", ["commentary", "final_answer"])
+def test_bytewise_utf8_and_delta_final_correlation(phase: str) -> None:
     decoder, events = _decoder()
     wire = (
-        _frame("assistant.message_start", messageId="a", phase="final_answer")
+        _frame("assistant.message_start", messageId="a", phase=phase)
         + _frame("assistant.message_delta", messageId="a", deltaContent="Caf\u00e9 ")
         + _frame("assistant.message_delta", messageId="a", deltaContent="ready\n")
         + _frame("assistant.message", messageId="a", content="Caf\u00e9 ready\nDone")
@@ -85,10 +86,11 @@ def test_separate_streams_and_interleaved_message_ids() -> None:
     assert all(event.source == "harness" for event in events)
 
 
-def test_redaction_withheld_across_native_delta_and_byte_boundaries() -> None:
+@pytest.mark.parametrize("phase", ["commentary", "final_answer"])
+def test_redaction_withheld_across_native_delta_and_byte_boundaries(phase: str) -> None:
     decoder, events = _decoder()
     secret = "ghp_" + "SPLITPRIVATE" * 3
-    decoder.feed("stdout", _frame("assistant.message_start", messageId="a", phase="final_answer"))
+    decoder.feed("stdout", _frame("assistant.message_start", messageId="a", phase=phase))
     decoder.feed("stdout", _frame("assistant.message_delta", messageId="a", deltaContent="token: "))
     decoder.feed(
         "stdout", _frame("assistant.message_delta", messageId="a", deltaContent=secret[:3])
@@ -448,7 +450,7 @@ def test_conflicting_results_and_earlier_protocol_error_remain_errors() -> None:
     assert decoder.protocol_error is not None
 
 
-@pytest.mark.parametrize("phase", ["analysis", "reasoning", "encrypted", "commentary", None])
+@pytest.mark.parametrize("phase", ["analysis", "reasoning", "encrypted", "future-phase", None])
 def test_start_phase_suppresses_nonpublic_deltas_and_completion(phase: str | None) -> None:
     decoder, events = _decoder()
     decoder.feed(
@@ -476,11 +478,10 @@ def test_start_phase_suppresses_nonpublic_deltas_and_completion(phase: str | Non
     assert decoder.protocol_error is None
 
 
-def test_public_phase_streams_before_completion_and_deduplicates_final() -> None:
+@pytest.mark.parametrize("phase", ["commentary", "final_answer"])
+def test_public_phase_streams_before_completion_and_deduplicates_final(phase: str) -> None:
     decoder, events = _decoder()
-    decoder.feed(
-        "stdout", _frame("assistant.message_start", messageId="public", phase="final_answer")
-    )
+    decoder.feed("stdout", _frame("assistant.message_start", messageId="public", phase=phase))
     decoder.feed(
         "stdout",
         _frame("assistant.message_delta", messageId="public", deltaContent="Writing handoff\n"),
@@ -492,7 +493,7 @@ def test_public_phase_streams_before_completion_and_deduplicates_final() -> None
         _frame(
             "assistant.message",
             messageId="public",
-            phase="final_answer",
+            phase=phase,
             content="Writing handoff\n",
             reasoning="PRIVATE_REASONING",
             encryptedContent="PRIVATE_ENCRYPTED",
@@ -501,6 +502,32 @@ def test_public_phase_streams_before_completion_and_deduplicates_final() -> None
     decoder.finish()
     assert _text(events) == "Writing handoff"
     assert "PRIVATE_" not in str(events)
+
+
+@pytest.mark.parametrize("phase", ["commentary", "final_answer"])
+def test_public_completed_message_without_deltas_is_shown_once(phase: str) -> None:
+    decoder, events = _decoder()
+    wire = _frame("assistant.message", messageId="public", phase=phase, content="Reading notes.")
+    decoder.feed("stdout", wire)
+    decoder.feed("stdout", wire)
+    decoder.finish()
+    assert _text(events) == "Reading notes."
+    assert decoder.protocol_error is None
+
+
+@pytest.mark.parametrize("phase", ["commentary", "final_answer"])
+def test_public_trailing_line_is_flushed_when_process_ends(phase: str) -> None:
+    decoder, events = _decoder()
+    decoder.feed("stdout", _frame("assistant.message_start", messageId="public", phase=phase))
+    decoder.feed(
+        "stdout",
+        _frame("assistant.message_delta", messageId="public", deltaContent="Reading notes."),
+    )
+    assert events == []
+    decoder.finish()
+    decoder.finish()
+    assert _text(events) == "Reading notes."
+    assert decoder.protocol_error is None
 
 
 def test_unknown_phase_deltas_are_not_released_before_later_analysis_phase() -> None:
@@ -533,14 +560,13 @@ def test_unclassified_deltas_are_not_flushed_at_process_end() -> None:
     assert events == []
 
 
-def test_late_public_start_waits_for_full_message_without_losing_prefix() -> None:
+@pytest.mark.parametrize("phase", ["commentary", "final_answer"])
+def test_late_public_start_waits_for_full_message_without_losing_prefix(phase: str) -> None:
     decoder, events = _decoder()
     decoder.feed(
         "stdout", _frame("assistant.message_delta", messageId="late", deltaContent="Before ")
     )
-    decoder.feed(
-        "stdout", _frame("assistant.message_start", messageId="late", phase="final_answer")
-    )
+    decoder.feed("stdout", _frame("assistant.message_start", messageId="late", phase=phase))
     decoder.feed(
         "stdout", _frame("assistant.message_delta", messageId="late", deltaContent="after\n")
     )
@@ -550,10 +576,13 @@ def test_late_public_start_waits_for_full_message_without_losing_prefix() -> Non
     assert _text(events) == "Before after"
 
 
-def test_message_phase_is_correlated_per_id_and_not_promoted_after_conflict() -> None:
+@pytest.mark.parametrize("phase", ["commentary", "final_answer"])
+def test_message_phase_is_correlated_per_id_and_not_promoted_after_conflict(phase: str) -> None:
     decoder, events = _decoder()
-    for identifier, phase in (("private", "analysis"), ("public", "final_answer")):
-        decoder.feed("stdout", _frame("assistant.message_start", messageId=identifier, phase=phase))
+    for identifier, selected in (("private", "analysis"), ("public", phase)):
+        decoder.feed(
+            "stdout", _frame("assistant.message_start", messageId=identifier, phase=selected)
+        )
     decoder.feed(
         "stdout", _frame("assistant.message_delta", messageId="private", deltaContent="PRIVATE\n")
     )
@@ -565,7 +594,7 @@ def test_message_phase_is_correlated_per_id_and_not_promoted_after_conflict() ->
         _frame(
             "assistant.message",
             messageId="private",
-            phase="final_answer",
+            phase=phase,
             content="PRIVATE_FINAL",
         ),
     )

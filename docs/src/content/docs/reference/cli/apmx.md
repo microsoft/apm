@@ -78,9 +78,11 @@ Private logs are not guaranteed secret-free or safe to publish.
 
 During preparation, generation and checks, interactive terminals show a rotating
 ASCII spinner, as in `apm install`. Its label names the current action rather
-than leaving an execution trace on screen. Copilot's public messages, tool activity and
-errors appear as they arrive, above the spinner, clearly attributed to Copilot.
-APM reports the check results separately. Private reasoning and raw
+than leaving an execution trace on screen. Copilot is asked for brief progress
+updates before reading inputs and writing the output. Its public progress messages,
+final response, tool activity and errors appear above the spinner as they arrive,
+clearly attributed to Copilot. The amount of narration depends on the model.
+APM reports the check results separately. Private reasoning and raw tool or
 protocol payloads are not displayed. Text is emitted at complete message or line
 boundaries so secret filtering can handle values split across stream chunks.
 

@@ -264,7 +264,8 @@ See [source selection](https://microsoft.github.io/apm/reference/cli/apmx/#sourc
 Artifacts stay in caller `.apm/runs/<id>/artifacts/`, without copy-back.
 `--allow-host-access` permits host-file, network and available login access for
 this run; it does not override policy. Interactive terminals show an ASCII
-spinner with live public Copilot messages, tool activity and errors. Pipes use
+spinner with Copilot's public progress updates, final response, tool activity
+and errors as they arrive. Private reasoning and raw tool payloads stay hidden. Pipes use
 plain progress and five-second updates while a subprocess is quiet. Copilot's
 messages are attributed separately from APM's check results; `--verbose` adds
 source identities, raw exits and log details.

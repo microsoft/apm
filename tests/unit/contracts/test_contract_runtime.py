@@ -123,6 +123,7 @@ def test_native_request_exact_permissions_and_model(
     ):
         assert selected in prompt
     assert "Use view to read and apply_patch to write." in prompt
+    assert "Send brief progress updates before reading inputs and writing the output." in prompt
     tail = request.argv[3:]
     assert tail[:4] == ("--output-format", "json", "--stream", "on")
     assert tail[tail.index("--available-tools") + 1 : tail.index("--available-tools") + 3] == (

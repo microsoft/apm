@@ -59,7 +59,7 @@ def test_pty_streams_live_output_and_restores_terminal(
         "    raise SystemExit(0)\n"
         "def emit(kind, data):\n"
         "    print(json.dumps({'type':kind,'data':data}),flush=True)\n"
-        "emit('assistant.message_start', {'messageId':'pty-ready','phase':'final_answer'})\n"
+        "emit('assistant.message_start', {'messageId':'pty-ready','phase':'commentary'})\n"
         "emit('assistant.message_delta', {'messageId':'pty-ready',"
         "'deltaContent':'PTY actor ready\\n'})\n"
         "emit('tool.execution_start', {'toolName':'view','arguments':'PRIVATE_ARGUMENTS'})\n"

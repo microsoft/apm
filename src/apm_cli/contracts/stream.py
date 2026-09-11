@@ -21,6 +21,7 @@ from .models import ContractLimits
 _TEXT_BYTES = 16 * 1024
 _DISPLAY_CHARS = 4096
 _CORRELATED_MESSAGES = 64
+_PUBLIC_PHASES = frozenset({"commentary", "final_answer"})
 
 
 def safe_text(text: str, *, limit: int = _DISPLAY_CHARS) -> str:
@@ -172,7 +173,7 @@ class ContractStreamDecoder:
         self._stdout.finish()
         self._stderr.finish()
         for message in self._messages.values():
-            if message.phase == "final_answer" and not message.suppressed:
+            if message.phase in _PUBLIC_PHASES and not message.suppressed:
                 message.lines.finish()
         self._closed = True
 
@@ -332,9 +333,9 @@ class ContractStreamDecoder:
             message.suppressed = True
         message.phase_known = True
         message.phase = phase if isinstance(phase, str) else None
-        if message.phase != "final_answer" or message.suppressed:
+        if message.phase not in _PUBLIC_PHASES or message.suppressed:
             # Explicit null/tool, analysis and unknown phases are not public
-            # assistant answers. Never release their content on finish().
+            # assistant messages. Never release their content on finish().
             message.lines.pending.clear()
 
     def _message_start(self, data: dict) -> None:
@@ -353,7 +354,7 @@ class ContractStreamDecoder:
             self._message_phase(message, data)
             message.delta(
                 content.encode("utf-8", errors="surrogatepass"),
-                allow_stream=message.phase == "final_answer" and not message.suppressed,
+                allow_stream=message.phase in _PUBLIC_PHASES and not message.suppressed,
             )
 
     def _message(self, data: dict) -> None:
@@ -366,7 +367,7 @@ class ContractStreamDecoder:
         if message is None or message.complete:
             return
         self._message_phase(message, data)
-        if message.suppressed or (message.phase_known and message.phase != "final_answer"):
+        if message.suppressed or (message.phase_known and message.phase not in _PUBLIC_PHASES):
             message.complete = True
             return
         # Legacy complete-message events without any phase remain supported.

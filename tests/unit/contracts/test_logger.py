@@ -522,15 +522,16 @@ def test_noninteractive_progress_never_starts_a_spinner(
     assert "\x1b" not in transcript
 
 
+@pytest.mark.parametrize("phase", ["commentary", "final_answer"])
 def test_public_subprocess_output_flows_while_spinner_remains_active(
-    tmp_path: Path, animated_console: Mock
+    tmp_path: Path, animated_console: Mock, phase: str
 ) -> None:
     logger = ContractLogger()
     logger.attach_run("run", tmp_path)
     logger.start_activity("Running Copilot")
     decoder = ContractStreamDecoder(EventEmitter("run", logger.on_event))
     for kind, data in [
-        ("assistant.message_start", {"messageId": "public", "phase": "final_answer"}),
+        ("assistant.message_start", {"messageId": "public", "phase": phase}),
         ("assistant.message_delta", {"messageId": "public", "deltaContent": "Public line\n"}),
         ("assistant.intent", {"intent": "Reading input"}),
         ("tool.execution_start", {"toolName": "view", "arguments": "PRIVATE_ARGUMENTS"}),
