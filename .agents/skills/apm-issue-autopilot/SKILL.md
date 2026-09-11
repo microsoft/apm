@@ -52,8 +52,10 @@ never an assertion from recall (A9 SUPERVISED EXECUTION).
 ## Hard boundaries
 
 - MANUAL invocation only. No event triggers, no label triggers, no
-  gh-aw. Labels (`status/accepted`, `status/shepherding`) are WRITTEN
-  for bookkeeping but are NEVER the trigger.
+  gh-aw. Only existing `status/shepherding` processing metadata may be
+  written for bookkeeping, NEVER human decision labels or new labels.
+  Load the triage sibling's `assets/label-contract.json` for ownership
+  and legacy read compatibility. Labels are NEVER implementation authority.
 - Triage is paramount. The autopilot ESCALATES to the maintainer by
   default; auto-implementation is the narrow exception, reached only
   for a clear, bounded, high-confidence accept the maintainer
@@ -205,6 +207,14 @@ for the whole batch, not per issue.
    an escalated row (override to proceed) or reject an auto-proceed
    row. Write the result into the `proceed_manifest`.
 
+Use GOVERNANCE.md and CONTRIBUTING.md to identify a responsible human
+maintainer and record the approved scope, done-when criteria, exclusions,
+and review contact on the issue. Existing `status/accepted` / `accepted`
+labels and old `triage-decision` comments are not approval. Neither a
+persona nor the absence of objections can fill `maintainer_decision`.
+Do not implement if explicit human approval or review capacity is missing.
+This is a human checkpoint, not an automated approval-record verifier.
+
 All later phases select rows ONLY where `gate` resolves to proceed AND
 `maintainer_decision in (approved, overridden-to-proceed)`. Rows the
 maintainer left escalated/terminal are handled in Phase 7.
@@ -213,8 +223,11 @@ maintainer left escalated/terminal are handled in Phase 7.
 
 For each proceed row: cross-reference open PRs that already address
 the issue (`gh pr list --search`). Record `pr` and `pr_in_flight`.
-Apply `status/accepted` to the issue and, on the issue (and the PR if
-one exists), assign `@me` and add `status/shepherding`. Record every
+Do not apply `status/accepted` or any other human decision label.
+On the issue (and the PR if one exists), assign `@me` and add
+`status/shepherding` only if that processing label already exists; if
+absent, record processing state locally and report it, never create a label.
+Record every
 label THIS run adds in the row's `labels_added` column so Phase 7 (and
 Phase 5 teardown) strip ONLY those and never touch pre-existing
 labels.

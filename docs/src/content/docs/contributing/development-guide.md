@@ -37,6 +37,16 @@ local package dependencies declared in
 Automated recommendations are advisory, not scope approval or a substitute
 for human review.
 
+Issue triage produces a recommendation and a **proposed** scope, done-when,
+exclusions, and review-needs brief. Maintainers still decide acceptance,
+priority, contributor invitations, and milestones. The
+[triage label contract](https://github.com/microsoft/apm/blob/main/packages/apm-triage-panel/assets/label-contract.json)
+separates those decisions from advisory processing. During compatibility
+rollout, `status/triaged` records completed automated advice; the future
+`triage/recommended` marker means the same thing, not human review.
+`status/needs-triage` can remain after advice while awaiting a human decision.
+No label or milestone migration is performed by the advisory workflow.
+
 To use these tools, [install APM](../../getting-started/installation/) if needed,
 then run from the repository root:
 

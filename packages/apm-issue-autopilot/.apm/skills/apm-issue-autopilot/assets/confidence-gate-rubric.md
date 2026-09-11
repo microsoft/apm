@@ -6,6 +6,10 @@ narrow exception, reached only for a clear, bounded, high-confidence
 accept whose implementation brief is complete. When in doubt, escalate
 to the maintainer. Triage is paramount; the gate is conservative.
 
+Here `decision` is the v2 panel's recommendation, not human acceptance.
+Bare `status/accepted` or legacy `accepted` labels, old agent decisions,
+and silence must never fill the maintainer approval field.
+
 The orchestrator applies this rubric per triaged row to compute the
 `gate` column of the `proceed_manifest`. The maintainer then ratifies
 or overrides each row in the single Phase 2 checkpoint.
@@ -51,7 +55,7 @@ or overrides each row in the single Phase 2 checkpoint.
 
 ## Why a separate implementation-ready gate
 
-Triage `accept` answers "should this land?"; it does NOT answer "is
+Triage `accept` recommends "consider this scope"; it does NOT answer "is
 the work bounded and specified enough to implement unattended?". An
 accept with a vague or partial brief is exactly where unattended
 implementation drifts. Missing brief fields therefore route to the
@@ -78,4 +82,7 @@ After the digest, the maintainer marks each row:
   declines, or an escalated row left for human action).
 
 Phases 3-6 select ONLY rows where the effective decision is
-`approved` or `overridden-to-proceed`.
+`approved` or `overridden-to-proceed`, with explicit responsible-human
+scope approval and a review contact recorded under CONTRIBUTING.md.
+The proposed brief's review_needs must be resolved by that human; a
+complete generated brief is not evidence of reviewer capacity.

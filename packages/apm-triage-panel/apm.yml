@@ -1,6 +1,6 @@
 name: apm-triage-panel
 version: 0.1.0
-description: Multi-persona triage panel for a single issue -- fans out to specialist persona lenses + a CEO arbiter, emits one synthesized triage decision (label set, milestone, next action).
+description: Single-issue advisory triage with existing in-context persona lenses -- recommends classification and a proposed scope brief, never human approval or release targeting.
 author: Microsoft
 license: MIT
 type: skill
