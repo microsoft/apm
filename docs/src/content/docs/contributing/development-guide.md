@@ -10,6 +10,9 @@ for issue-first scope approval, PR eligibility, small corrections, private
 security reporting, and the transition for existing contributions.
 [GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
 the responsible human maintainers and explains decisions and responsibilities.
+Its [roadmap and release planning model](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md#roadmap-and-release-planning)
+separates priorities from scope approval and release targets; Project rollout
+is pending.
 Those root documents own contribution policy; this guide covers technical work
 within the approved scope. Reporting and investigation need no prior permission.
 

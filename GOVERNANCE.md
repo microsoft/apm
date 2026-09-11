@@ -54,6 +54,108 @@ do not authorize implementation or commit a release. An accepted issue
 does not need a release milestone. The same contribution rules apply to
 maintainers and automated submissions.
 
+## Roadmap and release planning
+
+Use one public native GitHub Project, with actual issues as its records.
+Keep scope, evidence, and human approval on the issue; Horizon and priority
+order on the Project; release targeting in the issue's milestone. Link PRs
+to their issues rather than adding duplicate PR rows or draft cards. Larger
+outcomes use parent issues with bounded implementation sub-issues; a parent's
+priority does not approve every child.
+
+Anyone may propose an outcome in an issue with the problem, evidence, and
+alternatives. Area maintainers assess scope, risk, and maintenance cost;
+core maintainers shape the shortlist, and the lead coordinates final
+priority order. Use the [existing responsibilities](#maintainers-and-scope),
+not a separate planning committee.
+
+| Horizon | Meaning |
+| --- | --- |
+| Now | Active, reviewer-backed priorities. Start with at most three strategic outcomes alongside necessary maintenance; this is a focus guideline, not an automated cap. |
+| Next | A ranked shortlist, not permission to implement. |
+| Later | Deferred consideration, not a delivery promise. |
+
+Leave Horizon empty for unselected intake. Roadmap placement, ordering, and
+reactions neither authorize implementation nor guarantee delivery. Moving
+or removing an issue from a Horizon does not revoke its human approval.
+Record any change to approved scope or review support explicitly on the
+issue. Accepted, unclaimed work still needs no second permission request:
+follow [the contribution process](CONTRIBUTING.md#before-you-start-implementation),
+regardless of Horizon.
+
+Aim for a weekly asynchronous triage pass to review incoming evidence,
+decisions, and contributor availability, and a monthly roadmap refresh to
+reconsider the shortlist and order against capacity. These are operating
+cadences, not response SLAs or mandatory meetings. Handle urgent changes
+between reviews with an explicit issue decision and update the Project;
+do not wait for the calendar.
+
+### Release cohorts
+
+Milestones hold plausible release cohorts, not every accepted proposal.
+Acceptance alone implies neither a milestone nor a release date. At each
+release, explicitly reconsider unfinished issues: retain the target, move
+to another plausible cohort, or remove the target with a reason on the issue.
+Never silently roll all unfinished work forward. Retain completed issues
+and their milestone history, including completed work in the active release.
+
+### Native Project settings
+
+**Rollout pending:** these are intended settings, not a live board announcement.
+The retired board is not the active roadmap. Creating or reopening a Project,
+enabling automation, populating it, and changing live metadata require the
+separate final rollout approval.
+
+In Project settings, use public visibility and one single-select field,
+`Horizon`, with `Now`, `Next`, and `Later` in that order. Leave it unset by
+default. Display the native Assignees, Labels, and Milestone fields; do not
+add a duplicate target-release or scope-approval field.
+
+Save these views with `repo:microsoft/apm is:issue` plus the filters below:
+
+| View | Layout and additional filter |
+| --- | --- |
+| Intake | Table: `is:open`. All open issues are visible, not implicitly approved. |
+| Roadmap | Board: `is:open horizon:Now,Next,Later`. Group by Horizon in Now / Next / Later order and manually rank issues within each group, highest first. Unselected intake stays out. |
+| Ready to contribute | Table: `is:open label:"status/accepted" label:"help wanted" no:assignee`. A discovery shortlist, not an approval check. |
+| Release | Table: `has:milestone`, grouped by Milestone. Narrow to an existing milestone when needed; do not filter out closed issues. |
+
+For Ready to contribute, maintainers keep labels and assignments current;
+contributors check the human approval, review contact, comments, and linked
+PRs for an existing claim. An unassigned issue can still be claimed. Neither
+a label nor this view substitutes for the issue record.
+
+Under **Workflows > Auto-add to project**, select `microsoft/apm` and use
+`is:issue is:open`. This adds visibility through Intake, without setting
+Horizon, approval, invitations, or milestones. Native auto-add handles
+matching issues as they are created or updated; enabling it does not backfill
+existing issues. Keep automatic archival off so closing an issue does not
+silently remove release history. See GitHub's
+[auto-add](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/adding-items-automatically)
+and [view-filter](https://docs.github.com/en/issues/planning-and-tracking-with-projects/customizing-views-in-your-project/filtering-projects)
+instructions.
+
+### Final rollout checklist
+
+After explicit rollout approval, maintainers:
+
+- [ ] Choose whether to reopen the retired Project or create its replacement;
+  establish one public planning surface and verify access under existing controls.
+- [ ] Configure the field and saved views above. Review built-in workflows:
+  leave auto-archive off and ensure none assigns Horizon or implies approval.
+- [ ] Enable the repository-scoped auto-add workflow and bulk-add existing
+  open issues through the native add-items dialog. Leave Horizon empty unless
+  a human has selected it; reconcile legacy metadata against issue decisions,
+  preserving completed issue and release history. If replacing the board,
+  keep its history accessible and include completed issues from the active
+  release cohort in the new Project.
+- [ ] Record human priority choices and release targets, then populate the
+  selected Horizons and rank them. Confirm unselected intake stays off Roadmap,
+  Ready to contribute reflects supported unclaimed work, and Release includes
+  completed work as well as unfinished issues.
+- [ ] Publish the verified Project link here and in the repository's Projects
+  entry point, identify it as the active surface, and announce the cadence.
+
 ## Contributor progression
 
 | Role | How to contribute | Additional responsibility |
