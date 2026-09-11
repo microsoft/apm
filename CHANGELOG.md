@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Inactive `specs/openapm-v0.2.md` corrective draft for local-source admission and read-only current-intent audit; v0.1 remains active, runtime work is tracked in #2919 and #2923, and human ratification remains pending. (#2820)
 - gh-aw's shared APM import now supports `token-source: github-token`; after consumers re-vendor the workflow, its read-only current-repository identity can fetch same-repository private packages, while `cascade` remains the default and cross-repository packages still require a dedicated token or GitHub App. (#2706)
 - OpenAPM v0.1 adds `req-pl-018` for dependency-policy identity casing and amends `req-rs-016` clause (3), the Section 6.4 merge rules, and the Section 6.5 pattern grammar so repository identity and policy matching cannot diverge; Section 11.2 item 6 now requires the per-host case rule in `CONFORMANCE.md`. (#2706)
 
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Dependency aliases now reject `.` and `..`, require contained destinations, and persist placement for replay and cleanup; documented in `specs/openapm-v0.1.md` (`req-mf-025`). [Review alias migration and reinstall artifacts](https://microsoft.github.io/apm/troubleshooting/migration/#rejected-dependency-aliases). - by @Danvs60 (#2901)
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
 - Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
 

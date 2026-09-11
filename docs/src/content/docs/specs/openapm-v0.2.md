@@ -1,22 +1,38 @@
 ---
-title: OpenAPM v0.1
-description: Normative specification for the Agent Package Manager (APM) format and conformance.
+title: OpenAPM v0.2.0 (inactive editor's draft)
+description: Inactive editor's draft of OpenAPM v0.2.0; v0.1 remains active.
+slug: specs/openapm-v020
 sidebar:
   order: 1
 ---
 
-OpenAPM v0.1 is the normative specification of the APM package format, manifest, lockfile, and policy semantics. It is the contract implementers, conformance testers, and enterprise reviewers build against. If you are learning how to USE APM, start with the consumer, producer, or enterprise guides -- this page defines what APM IS, not how to operate it.
+OpenAPM v0.2.0 is the corrective specification of the APM package format, manifest, lockfile, and policy semantics. It is the contract implementers, conformance testers, and enterprise reviewers build against. If you are learning how to USE APM, start with the consumer, producer, or enterprise guides -- this page defines what APM IS, not how to operate it.
 
 ## Status of This Document
 
-This document is an **editor's Working Draft** of OpenAPM, version **0.1**.
-It is published to invite review, implementation feedback, and adversarial
-critique. It MAY be updated, replaced, or made obsolete at any time. Citing
-this document as anything other than work in progress is inappropriate.
+This document is an **editor's Working Draft** of OpenAPM, exact revision
+**v0.2.0**. It is the **inactive corrective-spec foundation** retained in
+[microsoft/apm#2820](https://github.com/microsoft/apm/pull/2820), not an
+implementation-conformance statement or an active replacement for v0.1.
+It inherits alias safety and independently versioned schemas prospectively from
+[microsoft/apm#2901](https://github.com/microsoft/apm/pull/2901) at exact commit
+[`5a0d872b9dd63b78b08923eddfad0ed1f9b369b4`](https://github.com/microsoft/apm/commit/5a0d872b9dd63b78b08923eddfad0ed1f9b369b4),
+not a published or ratified baseline.
+[microsoft/apm#2919](https://github.com/microsoft/apm/pull/2919) owns the coupled
+local-source and audit executable assessment and bindings against this exact
+draft; [microsoft/apm#2923](https://github.com/microsoft/apm/pull/2923) owns the
+aggregate. This foundation selects no assessment and activates no runtime
+changes. **v0.1 remains active.** Human review and ratification remain pending;
+no announcement, publication, or ratification date is recorded here.
+
+Beyond that prospective dependency, this corrective minor changes only
+local-source provenance and anchoring ([req-mf-016](#req-mf-016)) and the
+current-intent, read-only audit contract ([req-lk-023](#req-lk-023)) in
+Section 5.5. Previously reserved features remain inactive.
 
 OpenAPM is published under the **MIT License**.
 
-Version **0.1** is a `0.x` editor's draft under semantic-version-zero
+Version **v0.2.0** is a `0.x` editor's draft under semantic-version-zero
 discipline: no backward-compatibility guarantee applies until version
 **1.0**. Each `0.x` minor MAY introduce breaking changes with the
 migration window described in [Section 9](#9-versioning-and-amendment-process).
@@ -34,8 +50,8 @@ dependencies, writes an `apm.lock.yaml` lockfile, and deploys primitives
 to the directories the targets matrix specifies; a conforming governance
 implementation evaluates an `apm-policy.yml` policy against the install
 plan before any byte is written to disk. The wire contract between
-consumers and registry servers is **not normative in v0.1** and is
-reserved for v0.2 (see [Appendix B](#appendix-b-registry-http-api-reserved-for-v02)).
+consumers and registry servers is **not normative in this revision** and is
+reserved for a future revision (see [Appendix B](#appendix-b-registry-http-api-reserved)).
 
 ## Table of Contents
 
@@ -52,7 +68,7 @@ reserved for v0.2 (see [Appendix B](#appendix-b-registry-http-api-reserved-for-v
 11. [Conformance](#11-conformance)
 12. [Conformance test methodology](#12-conformance-test-methodology)
 13. [Appendix A: Normative JSON Schemas (inline)](#appendix-a-normative-json-schemas-inline)
-14. [Appendix B: Registry HTTP API (reserved for v0.2)](#appendix-b-registry-http-api-reserved-for-v02)
+14. [Appendix B: Registry HTTP API (reserved)](#appendix-b-registry-http-api-reserved)
 15. [Appendix C: Index of normative statements](#appendix-c-index-of-normative-statements)
 16. [Appendix D: Revision history](#appendix-d-revision-history)
 17. [Appendix E: Editorial reconciliation notes](#appendix-e-editorial-reconciliation-notes)
@@ -76,12 +92,12 @@ reserved for v0.2 (see [Appendix B](#appendix-b-registry-http-api-reserved-for-v
 - Specify a governance policy format that lets organisations gate
   installs without forking the consumer toolchain.
 
-**Non-goals (v0.1).**
+**Non-goals (this revision).**
 
 - The registry HTTP wire contract. The companion document
   [registry-http-api.md](../../reference/registry-http-api/) is
-  **informational** in v0.1 and is reserved for normative inclusion
-  in v0.2 once independent server implementations exist.
+  **informational** in this revision and is reserved for normative inclusion
+  in a future revision once independent server implementations exist.
 - The on-disk format of any third-party plugin distribution channel
   (such as the Claude-Code plugin marketplace). The OPTIONAL
   `marketplace:` block in the manifest is normative as **input**;
@@ -93,26 +109,27 @@ reserved for v0.2 (see [Appendix B](#appendix-b-registry-http-api-reserved-for-v
 - Account, billing, identity, or audit-log semantics for hosted
   registries.
 - Publisher identity, signature verification, and attestation
-  envelopes are out of scope for OpenAPM v0.1 and reserved for v0.2.
-  See [Section 10.12](#1012-publisher-provenance-and-attestations-reserved-for-v02).
+  envelopes remain out of scope and reserved for a future revision.
+  See [Section 10.12](#1012-publisher-provenance-and-attestations-reserved).
 - Reproducible-build determinism of registry archives
   (mtime/uid/gid normalisation, tar member ordering beyond
-  filesystem-natural order) is out of scope for OpenAPM v0.1 and
-  reserved for v0.2.
+  filesystem-natural order) remains out of scope and
+  reserved for a future revision.
 - Version withdrawal (yank, deprecate, supersede) for published
-  versions is out of scope for OpenAPM v0.1 and reserved for v0.2.
-  See [Section 7.9](#79-version-withdrawal-reserved-for-v02).
+  versions remains out of scope and reserved for a future revision.
+  See [Section 7.9](#79-version-withdrawal-reserved).
 - Workspace / monorepo composition (shared lockfile across sibling
   packages, intra-workspace resolve-to-local, workspace publish) is
-  out of scope for OpenAPM v0.1 and reserved for v0.2; current
+  out of scope and reserved for a future revision; current
   monorepo usage is supported via local-path dependencies per
   [Section 4.3.5](#435-local-path-dependencies). See
-  [Section 4.8](#48-workspaces-reserved-for-v02).
-- The v0.1 consumer-side integrity model is self-sufficient against
+  [Section 4.8](#48-workspaces-reserved).
+- The consumer-side integrity model supplies checks against
   a non-conforming registry (hash-verify-before-extract,
   re-verify-on-frozen); residual gaps (availability,
-  version-immutability, publisher identity) are closed normatively
-  in v0.2.
+  enforcement of version-immutability, publisher identity) remain outside
+  the consumer guarantee in this revision. The existing Registry
+  trust-anchor obligation [req-rg-001](#req-rg-001) remains operative.
 
 ### 1.2 Relationship to existing APM reference documentation
 
@@ -127,7 +144,7 @@ The reference pages under `docs/src/content/docs/reference/` are
 | [`primitive-types.md`](../../reference/primitive-types/)                              | Conceptual model for [Section 8](#8-primitive-type-system-and-target-matrix). |
 | [`package-types.md`](../../reference/package-types/)                                  | Producer-side layout decision tree for [Section 8](#8-primitive-type-system-and-target-matrix). |
 | [`targets-matrix.md`](../../reference/targets-matrix/)                                | Per-target support matrix; informational supplement to [Section 8](#8-primitive-type-system-and-target-matrix). |
-| [`registry-http-api.md`](../../reference/registry-http-api/)                          | Reserved; v0.2 normative surface, v0.1 informational only. |
+| [`registry-http-api.md`](../../reference/registry-http-api/)                          | Informational only; normative wire surface remains reserved. |
 
 Where a companion describes behaviour, this specification binds it.
 Where a companion and this specification disagree, **this specification
@@ -136,13 +153,13 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **123 normative statements (118 MUST, 5 SHOULD)** indexed in
+- This revision carries **124 normative statements (119 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
   [req-mf-020](#req-mf-020). A complete YAML safe-subset profile
   (anchor/alias handling, tag whitelist, octal-coercion treatment)
-  is reserved for v0.2.
+  is reserved for a future revision, not activated by v0.2.0.
 - Field names are `snake_case` unless they mirror an external
   contract (such as `tagPattern` in the OPTIONAL marketplace block).
 - All examples in this document are ASCII-only. Implementations
@@ -150,7 +167,7 @@ between the companion corpus and the implementation.
   UTF-8 and either preserve them on round-trip or reject them at
   parse time with a diagnostic. Unicode normalisation (NFC), IDNA
   for hosts, bidi-safe rendering, and locale-of-diagnostics are
-  out of scope for v0.1 and reserved for v0.2 (see
+  out of scope and reserved for a future revision (see
   [Section 1.4](#14-terminology-preliminaries)).
 - "Implementation" means any program that produces, consumes, or
   evaluates an OpenAPM file. A given implementation MAY claim more
@@ -158,7 +175,7 @@ between the companion corpus and the implementation.
 
 ### 1.4 Terminology preliminaries
 
-OpenAPM v0.1 distinguishes two host-related concepts that earlier
+This revision distinguishes two host-related concepts that earlier
 drafts conflated:
 
 - **Implementation-default host** -- the host an implementation uses
@@ -171,11 +188,11 @@ drafts conflated:
   (see [req-mf-009](#req-mf-009)) strips the project's
   `default_host:` only.
 
-**Internationalization considerations (reserved for v0.2).** v0.1
+**Internationalization considerations (reserved).** This revision
 does not normatively specify IDNA normalisation for hosts, Unicode
 normalisation form (NFC) for package or owner names, bidi-safe
-rendering of identifiers, or diagnostic locale. v0.2 will close
-this gap. v0.1 implementations SHOULD compare names byte-for-byte
+rendering of identifiers, or diagnostic locale. These remain reserved
+for a future revision. Implementations SHOULD compare names byte-for-byte
 after the canonical normalisation defined in
 [req-mf-009](#req-mf-009).
 
@@ -203,7 +220,7 @@ errata; a renumbering requires a minor version bump as defined in
 Conformance classes are defined normatively in
 [Section 11.1](#111-conformance-classes-normative); the four roles are
 **Producer**, **Consumer**, **Registry** (one MUST applies in
-v0.1; the wire contract remains reserved), and **Governance**.
+this revision; the wire contract remains reserved), and **Governance**.
 An implementation MUST declare which conformance class(es) it
 claims when asserting OpenAPM conformance (see
 [Section 11.2](#112-how-to-claim-conformance)).
@@ -221,6 +238,8 @@ type"), the definition section is cross-linked.
 | **Manifest** | The `apm.yml` file for one package or installation scope. Defined in [Section 4](#4-manifest-format-apmyml). |
 | **Lockfile** | The `apm.lock.yaml` file recording one installation scope's resolved state. Defined in [Section 5](#5-lockfile-format-apmlockyaml). |
 | **Installation scope** | The isolated manifest, lockfile, and target-configuration boundary for an install. A project scope is rooted at the consumer project. A user scope is independent of any project root and uses an implementation-defined user location disclosed by the consumer's conformance statement. |
+| **Source anchor** | The original declaring package's source directory used to resolve a relative dependency path. It is not the dependency's staging or deployment directory. See [Section 4.3.5](#435-local-path-dependencies). |
+| **Source containment root** | The boundary within which source content is permitted to resolve: the authenticated repository root for a remote-declared relative dependency, or the selected local package's resolved source directory for symlinks inside that package. It is distinct from installation scope and from the source anchor. |
 | **Policy** | An `apm-policy.yml` file evaluated by a Governance implementation. Defined in [Section 6](#6-policy-format-apm-policyyml). |
 | **Package** | A unit identified by a manifest (`apm.yml`) or by a recognised package layout (see [Section 8.1](#81-primitive-types)). |
 | **Primitive** | A typed unit of agent configuration (instruction, prompt, agent, skill, command, hook, or mcp server). Defined in [Section 8.1](#81-primitive-types). |
@@ -230,7 +249,7 @@ type"), the definition section is cross-linked.
 | **Direct dependency** | A dependency declared in the consumer's own `apm.yml`. |
 | **Transitive dependency** | A dependency declared in the `apm.yml` of a resolved package, not in the consumer's own `apm.yml`. |
 | **Virtual package** | A dependency targeting a subdirectory or file within a repository rather than the whole repository. Defined in [Section 4.3.3](#433-virtual-packages). |
-| **Registry** | A remote service that serves package archives over HTTP. The wire contract is reserved for v0.2. |
+| **Registry** | A remote service that serves package archives over HTTP. The wire contract remains reserved for a future revision. |
 | **git-semver** | A dependency form whose `ref:` is a semver range matched against remote git tags. Defined in [Section 7.3](#73-git-semver-resolution). |
 | **Constraint** | The version selector recorded for a dependency (a semver range, a literal tag, a branch name, a commit SHA, or `None`). |
 | **Drift** | A divergence between the lockfile and either the manifest (declaration drift) or the deployed files on disk (integrity drift). |
@@ -296,7 +315,7 @@ canonical YAML 1.2 tags `!!int`, `!!float`, or `!!bool`; (b)
 `&anchor` / `*alias` constructs MUST be rejected with a diagnostic;
 (c) custom (non-`!!`) tags MUST be rejected; (d) YAML 1.1 octal
 coercion (`0NN` interpreted as base-8) MUST NOT be applied. The
-complete safe-subset profile is reserved for v0.2; v0.1 implementations
+complete safe-subset profile is reserved for a future revision; implementations
 MUST at minimum enforce clauses (a)-(d).
 
 <a id="req-ext-001"></a>
@@ -350,7 +369,7 @@ The manifest top-level fields are:
 #### 4.2.1 `target`
 
 The canonical set of `target` identifiers registered by this
-specification at v0.1 is:
+specification in this revision is:
 
 ```
 copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all
@@ -368,7 +387,7 @@ registered **auto-detectable** target (see
 **auto-detectable** when the OpenAPM Target Registry publishes at
 least one detection predicate for it; a target registered without a
 detection predicate is **explicit-only** and MUST be selected
-explicitly. At v0.1 the explicit-only targets are `agent-skills` and
+explicitly. In this revision the explicit-only targets are `agent-skills` and
 `antigravity`, so `all` excludes them.
 
 Concrete per-target detection signals and deploy roots are documented
@@ -403,7 +422,7 @@ amendment via this namespace.
 #### 4.2.2 `type` (advisory)
 
 The `type` field MAY take one of the values `instructions`, `skill`,
-`hybrid`, or `prompts`. Its semantic content is **advisory** in v0.1:
+`hybrid`, or `prompts`. Its semantic content is **advisory** in this revision:
 package behaviour is driven by the on-disk layout recognised in
 [Section 8.1](#81-primitive-types), not by this field. Future
 revisions MAY assign behavioural meaning; conformant consumers MUST
@@ -652,10 +671,91 @@ selection is configured per project.
 <a id="req-mf-016"></a>
 **[req-mf-016]** A conforming **consumer** implementation MUST
 recognise dependency strings beginning with `./`, `../`, `/`, `~/`,
-`.\`, `..\`, or `~\` as local-path entries. The resolver MUST refuse
-any local-path entry whose normalised form contains `..` segments
-that would escape the project root, with a diagnostic naming the
-offending path.
+`.\`, `..\`, or `~\` as local-path entries. Admission and resolution
+depend on the declaring source, not merely on the presence of `..`.
+This prefix recognition is syntactic, not authorization to read an
+operator-local filesystem path. For remote-declared entries, apply
+clause (c) before operator-local admission under clause (b); a
+successfully derived Git reference is not an operator-local source:
+
+(a) **Selected local sources.** A consumer MAY admit operator-selected
+local sources at project and user scope, including absolute paths,
+home-expanded paths, and sibling packages outside the consumer
+project root. A consumer MAY restrict allowed local source roots
+through operator configuration or a documented implementation policy;
+this requirement does not mandate access to every local root. Such
+restrictions MUST be reported when they cause rejection, not presented
+as a successfully materialized dependency.
+
+An admitted direct project-scope relative dependency MUST resolve
+from the consumer project's source directory. An admitted absolute
+path MUST be resolved as an absolute source, after any home-directory
+expansion. An admitted relative dependency declared by an explicitly
+selected local package, or by another local package reached through
+that declared local dependency chain, MUST resolve from the declaring
+package's original source directory, including at user scope. The
+consumer MUST NOT substitute a staging directory, deployment directory,
+or unrelated current working directory for the declaring source anchor.
+
+(b) **Operator-local user-scope admission.** A direct relative local
+filesystem dependency at user scope MUST be rejected. A relative
+transitive local filesystem dependency
+at user scope MUST be rejected unless the consumer has established
+its declaring local parent and that parent's original absolute
+source directory. Provenance comes from the declaring dependency's
+established source kind, not its repository name or path spelling.
+A repository-name prefix such as `_local/`, a local-looking path,
+or a recorded path string alone is not proof that its parent is local.
+Unknown provenance does not authorize an operator-local read.
+The consumer MUST NOT
+search another installation scope's installed packages to supply a
+missing source anchor.
+
+(c) **Remote-declared paths.** A relative local-path entry declared
+by a remote Git package MUST resolve inside the authenticated parent
+repository root, after path normalisation and symlink resolution.
+An admitted entry MUST retain the parent's remote repository identity
+and ref, and MUST NOT become a read from the consumer's local package
+namespace. Absolute paths, including home-expanded and Windows
+absolute paths, and paths escaping that repository MUST be rejected.
+If the entry cannot be tied to that remote repository and ref, it
+MUST be rejected rather than treated as a trusted local dependency.
+
+(d) **Local package contents.** Once a local source directory is
+selected and resolved, that directory is the containment root for
+symlinks inside the package. An internal symlink whose resolved
+target stays inside that root MUST be materialized as the target's
+content, subject to the other applicable admission and content
+selection rules. A broken or cyclic internal symlink, or one whose
+target escapes that root, MUST cause local materialization to fail.
+Choosing a path that resolves to a source directory is distinct from
+dereferencing symlinks within the selected package's content.
+
+Rejections under this requirement MUST identify the offending path
+and the reason for refusal. These source rules do not change the
+manifest, lockfile, or target-configuration boundary of the selected
+installation scope.
+
+**Security note (informative).** Selecting a local source is an
+explicit trust decision about that source and its declared local
+dependency chain, not a claim that local content is harmless.
+Source anchoring, remote-repository containment, internal-symlink
+containment, and deployment eligibility are separate checks. This
+requirement does not promise atomicity of the entire install or
+race-free filesystem isolation against concurrent source mutation.
+An `alias` is destination naming, not source authorization or a substitute
+source anchor. It does not relax destination containment, including the
+registered target roots under [req-tg-002](#req-tg-002).
+
+**Local replay interoperability (informative).** A relative spelling
+alone does not identify a local source. Replaying a local dependency
+chain requires reestablishing the original declaring-source context;
+a recorded path string is not authorization to read it. An absolute
+local path does not imply that the same source exists or is approved
+on another machine. The reference CLI's `declaring_parent` and
+`anchored_local_path` metadata are implementation-specific; this
+requirement does not standardize those fields or a portable local
+lockfile representation.
 
 #### 4.3.6 MCP dependencies
 
@@ -785,23 +885,22 @@ userinfo (`user@host`), ports, or query strings are refused;
 (c) URL schemes other than `https://` are refused for remote
 sources; (d) local sources MUST begin with `./`.
 
-### 4.8 Workspaces (reserved for v0.2)
+### 4.8 Workspaces (reserved)
 
 Workspace / monorepo composition (shared lockfile across sibling
 packages, intra-workspace resolve-to-local, workspace publish) is
-**out of scope for v0.1 and reserved for v0.2**. Current monorepo
-usage is fully supported in v0.1 via local-path dependencies per
-[Section 4.3.5](#435-local-path-dependencies). A future v0.2
-surface will reserve a top-level `workspaces:` glob list, declare
-the root `apm.yml` lockfile as single source of truth, and
-normatively pin intra-workspace deps to local paths.
+**out of scope and reserved for a future revision; not activated by
+v0.2.0**. Local-path dependencies per
+[Section 4.3.5](#435-local-path-dependencies) do not imply workspace
+support. A future design may define a top-level `workspaces:` glob list,
+a shared root lockfile, and intra-workspace local resolution.
 
 <a id="req-mf-021"></a>
-**[req-mf-021]** In v0.1, a conforming **producer** MUST NOT
+**[req-mf-021]** In this revision, a conforming **producer** MUST NOT
 declare a top-level `workspaces:` key in `apm.yml`. A conforming
-**consumer** encountering a top-level `workspaces:` key in a v0.1
+**consumer** encountering a top-level `workspaces:` key in a
 manifest MUST emit a non-blocking diagnostic naming the key as
-reserved for v0.2 and MUST NOT attach any semantics to its value.
+reserved for a future revision and MUST NOT attach any semantics to its value.
 The diagnostic MUST NOT fail install.
 
 ### 4.9 Conformance requirements (manifest)
@@ -811,9 +910,11 @@ This section's normative statements are:
 - Producer: [req-mf-001](#req-mf-001), [req-mf-002](#req-mf-002),
   [req-mf-003](#req-mf-003), [req-mf-005](#req-mf-005),
   [req-mf-014](#req-mf-014), [req-mf-015](#req-mf-015),
-  [req-mf-017](#req-mf-017), [req-mf-021](#req-mf-021).
+  [req-mf-017](#req-mf-017), [req-mf-021](#req-mf-021),
+  [req-ext-002](#req-ext-002).
 - Producer (SHOULD): [req-mf-004](#req-mf-004).
-- Consumer: [req-mf-006](#req-mf-006), [req-mf-007](#req-mf-007),
+- Consumer: [req-mf-001](#req-mf-001),
+  [req-mf-006](#req-mf-006), [req-mf-007](#req-mf-007),
   [req-mf-008](#req-mf-008), [req-mf-009](#req-mf-009),
   [req-mf-010](#req-mf-010), [req-mf-011](#req-mf-011),
   [req-mf-012](#req-mf-012), [req-mf-013](#req-mf-013),
@@ -823,8 +924,9 @@ This section's normative statements are:
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
   [req-mf-025](#req-mf-025),
   [req-ext-001](#req-ext-001),
-  [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
+- Consumer (SHOULD): [req-mf-004](#req-mf-004), limited to its existing
+  Consumer version-validation diagnostic clause.
 
 ---
 
@@ -846,8 +948,8 @@ minimum the keys `lockfile_version` (string) and `dependencies`
 (list). Additional top-level keys defined by this specification are
 `generated_at`, `apm_version`, `mcp_servers`, `mcp_configs`,
 `local_deployed_files`, `local_deployed_file_hashes`, and
-`attestations` (the last reserved for v0.2 per
-[Section 10.12](#1012-publisher-provenance-and-attestations-reserved-for-v02)).
+`attestations` (the last remains reserved per
+[Section 10.12](#1012-publisher-provenance-and-attestations-reserved)).
 Vendor-extension top-level keys (`x-*`) are permitted per
 [req-ext-001](#req-ext-001).
 
@@ -906,7 +1008,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_tag`            | git-semver selected tag, or advisory tag provenance for a full-SHA git-literal update under [req-rs-017](#req-rs-017). |
 | `resolved_at`             | git-semver: ISO 8601 UTC timestamp; advisory (see [Section 7.3](#73-git-semver-resolution)). |
 | `name`                    | Self-asserted display/inventory name; non-identity (see [req-lk-019](#req-lk-019)). |
-| `attestations`            | Reserved for v0.2 (publisher provenance).                                       |
+| `attestations`            | Reserved for a future revision (publisher provenance).                          |
 | `x-<name>`                | Vendor extension (per [req-ext-001](#req-ext-001)).                             |
 
 <a id="req-lk-003"></a>
@@ -1101,14 +1203,11 @@ a digest: `resolved_hash`, `deployed_file_hashes` (each value),
 `tree_sha256`, and any future hash field. The `<algo>` token MUST
 be one of `sha256`, `sha384`, or `sha512` per
 [req-mf-018](#req-mf-018). Readers MUST accept bare 64-character
-lowercase hexadecimal values as `sha256:<hex>` for v0.1
+lowercase hexadecimal values as `sha256:<hex>` for
 backward-compatibility; writers MUST emit the explicit envelope
-form. Bare-hex reader-tolerance is retained for v0.1
-backward-compat only. v0.2 will remove reader-tolerance and
-require the `sha256:` envelope unconditionally. v0.1 Writers
-SHOULD already emit the envelope on every hash field for forward
-compatibility (this deprecation horizon supersedes earlier drafts
-that left the bare-hex form open-ended).
+form. This revision retains bare-hex reader tolerance and does not
+narrow the allowed envelope algorithms. Any removal of reader
+tolerance remains reserved for a future revision.
 
 <a id="req-lk-017"></a>
 **[req-lk-017]** A conforming **consumer** implementation
@@ -1171,8 +1270,71 @@ regenerating the lockfile from the manifest.
 
 ### 5.5 Drift and integrity model
 
-The lockfile is the contract `apm audit` validates the workspace
-against.
+The lockfile supplies dependency identities and recorded deployment ownership
+for audit. Replay compares those records and the installed files against
+source-derived output under current target intent, not a historical target
+selection inferred from ownership.
+
+<a id="req-lk-023"></a>
+**[req-lk-023]** A conforming **consumer** that replays primitive integration
+to audit drift MUST select the current targets in this order: the applicable
+scope's validated manifest `target` / `targets` declaration, then the saved
+user target configuration, then the existing target-detection rules. A present
+invalid manifest declaration, or an invalid saved target when that fallback
+is selected, MUST produce a failing target-resolution result rather than fall
+through to a lower-precedence source.
+Explicit selection and detection are distinct: reading a saved target does
+not turn a filesystem signal into a registered detection predicate.
+
+The consumer MUST resolve the selected profiles in the live operation's
+scope and preserve their deployment layout and experimental or runtime
+prerequisites. Filesystem replay MUST rebase their destinations into isolated
+scratch roots; it MUST NOT carry live native or user roots into write
+operations. An unavailable selected target MUST produce a target-resolution
+failure, not a successful empty replay.
+
+Replay MUST derive expected paths and bytes from the resolved sources and
+current target intent, independently of deployment ownership records. It MUST
+NOT use those records to recover an earlier unsaved `install --target`
+override or to suppress an expected file whose ownership is missing. Changing
+current intent MUST NOT remove existing claimed files under a formerly
+selected target from drift comparison. For installed-file comparison, a
+directory claim covers its contained descendant files. A file-shaped claim,
+including one identified by a recorded hash, does not become a directory-prefix
+claim merely because its live path becomes a directory. Membership remains
+within the applicable deployment-root containment boundary. Claims widen
+installed-file comparison only, not expected output. An unavailable recorded
+native root MUST produce a failing comparison result rather than silently
+exclude its claims.
+
+Replay and comparison MUST NOT modify the live manifest, lockfile, saved
+configuration, or deployed bytes, including native databases and sidecars.
+If a selected native runtime has no isolated replay backend, the consumer MUST
+report an unsupported-replay failure before invoking its live writer.
+Successful target selection alone does not imply replay support. This does
+not authorize repair operations or weaken [req-sc-001](#req-sc-001)
+content-integrity checks or [req-pl-016](#req-pl-016) invalid-owner failures.
+
+**Local-content composition (informative).** Replay under
+[req-lk-023](#req-lk-023) derives expected output from content admitted under
+[req-mf-016](#req-mf-016) clause (d), then applies the
+[req-sc-015](#req-sc-015) source plan to that admitted content. An internal
+resource link correctly dereferenced into a regular file during acquisition
+is not obsolete merely because its original representation was a symlink.
+This does not authorize following symlinks in the target source plan or
+relaxing archive-link rejection.
+
+**Result and exit scope (informative).** A failing target-resolution,
+replay, or comparison result is not a successful empty replay, even when
+the command reports it advisory in default mode. This requirement does not
+add an unconditional nonzero exit for bare audit. Ordinary source-derived
+drift and incomplete or unsupported replay remain subject to
+[req-pl-014](#req-pl-014); CI/conformance audit gates failed aggregate
+checks, while a passed advisory cache-miss skip is not a failure.
+Independent hard integrity obligations remain in force, including
+[req-lk-003](#req-lk-003), [req-lk-017](#req-lk-017), and
+[req-pl-016](#req-pl-016). A separately requested repair is not replay
+and receives no mutation authorization from this requirement.
 
 <a id="req-lk-005"></a>
 **[req-lk-005]** A conforming **consumer** implementation MUST treat
@@ -1216,9 +1378,9 @@ Variable placeholders are compared as literal strings, not expanded.
 An operation whose effect would insert, remove, or modify a manifest
 dependency entry MUST be rejected in frozen mode before that
 modification takes effect. The frozen-install operation is opt-in in
-v0.1 via `--frozen` (or equivalent); a future minor revision will flip
-the default to "frozen when a lockfile is present" (deferred to v0.x
-minor, see
+this revision via `--frozen` (or equivalent). A default of "frozen
+when a lockfile is present" remains reserved for a future revision
+(see
 [Section 9.2](#92-breaking-vs-non-breaking-change-definition)).
 
 <a id="req-lk-018"></a>
@@ -1227,8 +1389,8 @@ default to frozen-install behaviour when the `CI` environment
 variable is truthy (defined as: present and not the literal strings
 `""`, `"0"`, `"false"`, case-insensitive). The user MAY override
 the SHOULD-default via explicit non-frozen invocation. This
-SHOULD-on-CI rule is a transition step toward the v0.x default
-flip in [req-lk-006](#req-lk-006).
+SHOULD-on-CI rule does not activate the reserved general default
+change in [req-lk-006](#req-lk-006).
 
 <a id="req-lk-007"></a>
 **[req-lk-007]** A conforming **consumer** implementation SHOULD
@@ -1275,7 +1437,7 @@ install path masks a re-resolution event.
 #### 5.6.4 Git-source tree integrity hash
 
 `resolved_commit` is a SHA-1 identifier and serves as a stable
-content pointer in v0.1, but SHA-1 alone is below the 2026
+content pointer in this revision, but SHA-1 alone is below the 2026
 collision-resistance floor and MUST NOT be relied on as the sole
 integrity anchor. To close the SHA-1 gap, every git-sourced lockfile
 entry carries a `tree_sha256` envelope.
@@ -1307,16 +1469,35 @@ recomputed value differs from the recorded value. The diagnostic
 MUST name the entry, the expected envelope, and the observed
 envelope.
 
+> **Retained interoperability limits (informative).** The canonical Git-tree
+> definition does not explicitly settle symlink blob bytes versus dereferenced
+> contents, gitlinks/submodules with mode `160000`, or raw Git blobs versus
+> CRLF/LFS-filtered checkout bytes. This corrective revision supplies no new
+> cross-platform canonical-tree evidence resolving those boundaries.
+> [req-lk-015](#req-lk-015) and the digest construction above remain unchanged;
+> these limitations are not exemptions. Trusted-local dereferencing semantics
+> are not imported into Git hashing. A canonical-byte clarification and
+> cross-platform fixtures require separately scoped work.
+
+> **Unresolved encoding defect (informative).** The retained LF-delimited
+> encoding permits distinct trees to have identical canonical bytes when a
+> filename contains LF, without a SHA-256 collision. This newly demonstrated
+> inherited specification debt is not a local-source/audit regression or a
+> demonstrated reference-CLI exploit. A separately authorized normative
+> canonical-byte brief is required. Disclosure does not repair the defect or
+> waive [req-lk-015](#req-lk-015); the finding remains unresolved.
+
 > **Editorial note.** `resolved_commit` is a SHA-1 identifier. The
 > git project's SHA-1-to-SHA-256 object-format transition is
 > ongoing; until SHA-1 collisions are observed in the wild against
 > the git object format, `resolved_commit` is retained as the
-> canonical pointer, with `tree_sha256` providing collision-resistant
-> integrity. A future revision will track `resolved_commit_sha256`
+> canonical pointer. The unresolved LF-filename encoding defect above limits
+> `tree_sha256` integrity despite SHA-256's collision resistance.
+> A future revision will track `resolved_commit_sha256`
 > once git's SHA-256 object-format is widely deployed.
 
 > **Editorial note.** Canonical-tree definition for local-path
-> `content_hash` is reserved for v0.2; v0.1 consumers MAY use
+> `content_hash` remains reserved for a future revision; consumers MAY use
 > platform-native walk order but MUST document their choice in their
 > conformance statement.
 
@@ -1333,7 +1514,8 @@ This section's normative statements are:
   [req-lk-014](#req-lk-014), [req-lk-015](#req-lk-015),
   [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017),
   [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
-  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022).
+  [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+  [req-lk-023](#req-lk-023).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 
@@ -1358,7 +1540,7 @@ policy is applied.
 
 #### 6.1.1 Discovery providers
 
-OpenAPM v0.1 defines discovery as a **pluggable extension point**.
+This revision defines discovery as a **pluggable extension point**.
 A discovery provider is a named function that, given a project's
 remote git context, MAY return a policy reference (URL or local
 path). The reference initial provider registered by this
@@ -1442,7 +1624,7 @@ The `dependencies` policy block governs APM dependency declarations.
 |------------------------|-------------------------------------------------------------------------------------------|
 | `allow`                | List of patterns matched against the canonical host-blind dependency package path: repository coordinate plus any virtual path, with the `#` suffix excluded. Tri-state (see [Section 6.5](#65-allow-list--deny-list-tri-state-semantics)); case treatment per [req-pl-018](#req-pl-018). |
 | `deny`                 | Always wins over `allow`; case treatment per [req-pl-018](#req-pl-018).                   |
-| `require`              | Exact packages every consumer manifest must include; case treatment per [req-pl-018](#req-pl-018). |
+| `require`              | Exact packages required in the consumer manifest; case treatment per [req-pl-018](#req-pl-018). |
 | `require_resolution`   | `project-wins` / `policy-wins` / `block` for required-package version conflicts. Default `project-wins` when unset. |
 | `max_depth`            | Maximum transitive dependency depth. Default 50.                                          |
 | `require_pinned_constraint` | When true, flags unbounded direct deps as violations.                                 |
@@ -1504,7 +1686,7 @@ pattern are eligible for case-insensitive comparison. Normalization
 maps only U+0041 through U+005A to U+0061 through U+007A. Every other
 code point is compared literally; Unicode
 case folding, locale-sensitive mapping, and normalization forms are
-outside v0.1 per [Section 1.4](#14-terminology-preliminaries).
+outside this revision per [Section 1.4](#14-terminology-preliminaries).
 For the avoidance of doubt, this statement never applies outside the
 fields named in clause (a): normalization MUST NOT extend into a
 virtual in-repository path, a reference suffix after `#`, a registry
@@ -1522,7 +1704,7 @@ sharing a segment with one or more other characters, for example
 `dependencies.allow` after normalization. Where clause (b) or clause
 (d) requires byte-exact matching, a deny pattern that differs only in
 case does not match. Policy authors who intend to deny multiple
-distinct spellings on such a source or after such a truncation must
+distinct spellings on such a source or after such a truncation need to
 enumerate those spellings. The residual security boundary is described
 in [Section 10.8](#108-policy-bypass-via-crafted-manifest).
 
@@ -1541,7 +1723,7 @@ transitive ones.
 
 The `compilation` block governs `apm compile` outputs. Sub-field
 semantics are documented in the companion `policy-schema.md` and
-are non-normative in v0.1; the merge rules in
+are non-normative in this revision; the merge rules in
 [Section 6.4](#64-inheritance-and-merge-rules) reference only the
 field family `compilation.*`.
 
@@ -1751,8 +1933,13 @@ drift is detected, or when the drift check fails to complete (for
 example, an unreadable or corrupt local dependency graph). A drift
 check that is merely skipped for an advisory reason, such as a cache
 miss, does not by itself alter the exit status. When
-`security.audit.fail_on_drift` is absent or `false`, detected drift
-MUST be reported without, by itself, altering the audit exit status.
+`security.audit.fail_on_drift` is absent or `false`, ordinary detected
+drift MUST be reported without, by itself, altering the default-mode
+audit exit status. This default-mode rule does not suppress failed
+CI/conformance checks or the independent hard integrity failure in
+[req-pl-016](#req-pl-016). A failed current-intent resolution, replay,
+or comparison under [req-lk-023](#req-lk-023) is an incomplete drift
+check, not the advisory passed skip described above.
 
 <a id="req-pl-016"></a>
 **[req-pl-016]** A conforming **governance** implementation MUST treat
@@ -1824,7 +2011,7 @@ listed:
    `>=1.0,<2.0`).
 4. **git-literal** -- git URL or shorthand with a literal `ref:`
    (commit SHA, tag, branch).
-5. **marketplace** -- non-normative in v0.1; producer-side
+5. **marketplace** -- non-normative in this revision; producer-side
    authoring artifact only.
 
 <a id="req-rs-008"></a>
@@ -1854,25 +2041,20 @@ the consumer MUST apply the following tri-modal policy:
    reachable constraints is empty, the install MUST fail with a
    diagnostic naming both root-to-conflict chains. Silent
    first-wins resolution MUST NOT be substituted.
-3. **Nest mode (opt-in).** The manifest MAY declare
-   `dependencies.conflict_resolution: nest`, which instructs the
-   consumer to allow multiple versions of the same identity
-   co-existing under distinct deploy paths (npm-style nesting).
-   Nest mode is OPTIONAL in v0.1; its on-disk layout normative pin
-   is reserved for v0.2. In v0.1, the on-disk deploy layout for
-   `conflict_resolution: nest` is reserved (see
-   [Section 4.8](#48-workspaces-reserved-for-v02) and the future
-   workspaces semantics). A conforming **consumer** encountering
-   `dependencies.conflict_resolution: nest` in a v0.1 manifest
+3. **Nest mode (reserved).** Multiple versions of the same identity
+   under distinct deploy paths and the corresponding on-disk layout
+   remain reserved for a future revision (see
+   [Section 4.8](#48-workspaces-reserved)). A conforming **consumer**
+   encountering `dependencies.conflict_resolution: nest` in a manifest
    MUST refuse the install with a normative diagnostic naming the
-   key as reserved-for-v0.2 and citing this section.
+   key as reserved for a future revision and citing this section.
 
 <a id="req-rs-013"></a>
 **[req-rs-013]** A conforming **consumer** implementation MUST
-refuse to install a v0.1 manifest declaring
+refuse to install a manifest declaring
 `dependencies.conflict_resolution: nest`, emitting a normative
 diagnostic that names the `conflict_resolution: nest` key as
-reserved for v0.2 and cites
+reserved for a future revision and cites
 [Section 7.2](#72-resolution-algorithm) clause (3).
 
 <a id="req-rs-010"></a>
@@ -1978,7 +2160,7 @@ implementation-defined hedging is permitted.
 
 #### 7.3.1 Semver dialect (normative)
 
-OpenAPM v0.1 pins the semver-range dialect to **node-semver**
+This revision pins the semver-range dialect to **node-semver**
 ([https://github.com/npm/node-semver](https://github.com/npm/node-semver))
 as its normative reference, with version precedence and pre-release
 ordering inherited from **Semantic Versioning 2.0.0** Section 11
@@ -2060,9 +2242,8 @@ package identity at different constraints) are governed by
 > fail-closed is the correctness default: a consumer that
 > downgrades a dep silently to satisfy a transitive constraint
 > produces audit drift the workspace owner did not author. The
-> intersection-pick default is conservative; nest-mode is the
-> escape hatch for ecosystems that cannot live without parallel
-> versions. A future v0.2 may introduce
+> intersection-pick default is conservative; nest-mode remains reserved,
+> not an available escape hatch in this revision. A future revision may introduce
 > `policy.dependencies.resolver:` to let Governance pick the mode
 > centrally.
 
@@ -2148,7 +2329,7 @@ and `resolved_hash` ([req-lk-013](#req-lk-013)).
 
 #### 7.5.1 Mirror resolution
 
-OpenAPM v0.1 anchors trust on the recorded `resolved_hash`, not on
+This revision anchors trust on the recorded `resolved_hash`, not on
 the recorded `resolved_url`. This permits enterprise mirrors,
 content-addressable proxies, and offline caches to substitute for
 the origin URL without lockfile churn.
@@ -2164,7 +2345,7 @@ by **any** registry declared in the project's `apm.yml`
 `registries:` block, or by any policy-declared mirror, **provided
 that** the bytes returned by the mirror hash to the lockfile's
 recorded `resolved_hash`. The `resolved_url` field is advisory in
-v0.1: a mismatch between the mirror URL and `resolved_url` MUST
+this revision: a mismatch between the mirror URL and `resolved_url` MUST
 NOT fail the install when the hash matches. A hash mismatch MUST
 fail closed per [req-lk-013](#req-lk-013), regardless of which
 registry served the bytes.
@@ -2175,8 +2356,8 @@ registry served the bytes.
 > upstream source. Mirror operators MUST replicate the original
 > archive bytes verbatim; rebuilding the archive on the mirror
 > (even from the same source revision) will produce a different
-> `resolved_hash` and break the mirror-tolerance guarantee until
-> v0.2 introduces reproducible-build determinism (see
+> `resolved_hash` and break the mirror-tolerance guarantee.
+> Reproducible-build determinism remains reserved for a future revision (see
 > [Section 1.1](#11-goals-and-non-goals) non-goals).
 
 ### 7.6 Diagnostic surface (`deps why`)
@@ -2194,7 +2375,7 @@ given lockfile.
 
 ### 7.7 Update operation
 
-OpenAPM v0.1 defines the semantics of an explicit "update"
+This revision defines the semantics of an explicit "update"
 operation so that two conforming consumers produce the same lockfile
 delta from the same inputs.
 
@@ -2278,11 +2459,11 @@ unchanged.
 
 Range-widening update modes (for example `apm update --aggressive`,
 which would mutate the manifest's range upper bounds) are
-**reserved for v0.2**.
+**reserved for a future revision; not activated by v0.2.0**.
 
 ### 7.8 Producer release contract
 
-OpenAPM v0.1 defines a minimal producer release contract so that
+This revision defines a minimal producer release contract so that
 git-semver resolvers ([req-rs-002](#req-rs-002)) bind to the same
 artifact every consumer sees.
 
@@ -2303,26 +2484,26 @@ a non-blocking diagnostic on mismatch.
 **[req-pr-005]** A conforming **producer** publishing release tags
 SHOULD sign tags via a publicly verifiable mechanism (for example
 sigstore, GPG, or SSH-signed git tags). Signature verification is
-not enforced by v0.1 consumers; the SHOULD is advisory and feeds
-the v0.2 provenance work (see
-[Section 10.12](#1012-publisher-provenance-and-attestations-reserved-for-v02)).
+not enforced by this revision; the SHOULD is advisory and feeds
+future provenance work (see
+[Section 10.12](#1012-publisher-provenance-and-attestations-reserved)).
 
-Release publication itself is **out of scope** for the v0.1 CLI
+Release publication itself is **out of scope** for this revision's CLI
 surface. The canonical publication flow is whichever tag-and-release
 mechanism the producer's git host provides; on GitHub, that is
 `gh release create` or the `microsoft/apm-action mode: release`
 workflow. No `apm pack --create-tag` or `apm pack --push` surface
-is defined by v0.1; producers MUST NOT depend on such a surface.
+is defined by this revision; producers MUST NOT depend on such a surface.
 
-### 7.9 Version withdrawal (reserved for v0.2)
+### 7.9 Version withdrawal (reserved)
 
 Version withdrawal (yank, deprecate, supersede) for published
-versions is **out of scope for OpenAPM v0.1 and reserved for v0.2**.
-A future surface will define: `yanked: true` (consumers MUST NOT
-select for fresh resolution, MAY honour for existing locks with
-SHOULD-warn), `superseded_by: <version>`, and Governance
-`refuse_yanked: block | warn | off`. Producers needing withdrawal
-semantics in v0.1 MUST rely on out-of-band advisories.
+versions is **out of scope and reserved for a future revision**.
+An informative future sketch includes `yanked: true` (not selected for
+fresh resolution, possibly retained for existing locks with a warning),
+`superseded_by: <version>`, and Governance `refuse_yanked: block | warn | off`.
+None is activated here. Producers needing withdrawal semantics in
+this revision MUST rely on out-of-band advisories.
 
 ### 7.10 Worked example (informative)
 
@@ -2468,6 +2649,10 @@ dependencies' versions MUST NOT replace the resolved primitive.
 
 ### 8.4 Target detection signals (normative)
 
+Audit replay selects current intent under [req-lk-023](#req-lk-023)
+before using this section's detection fallback. The saved-configuration
+branch is selection, not auto-detection.
+
 When the user has not specified a target via `--target` or in the
 manifest's `target:` field, the consumer auto-detects from
 filesystem signals. The concrete table of per-target detection
@@ -2489,14 +2674,17 @@ signal MAY substitute for, or augment, the registered predicate.
 A target registered without a detection predicate
 MUST NOT be auto-detected and MUST be excluded from the expansion of
 `all`; such an **explicit-only** target MUST be selected explicitly
-via `--target <name>` or via the manifest's `target:` field. At v0.1
+via `--target <name>`, via the manifest's `target:` field, or, for audit replay,
+via a valid saved user target configuration selected under
+[req-lk-023](#req-lk-023). That saved audit selection constitutes explicit
+selection, not auto-detection. In this revision
 the explicit-only targets are `agent-skills` and `antigravity`. When
 no detection signal fires, the consumer MAY fall back to a `minimal`
 profile that emits `AGENTS.md` only.
 
 ### 8.5 Deploy directory contract (normative)
 
-OpenAPM v0.1 establishes `.agents/` as an **ecosystem convention**:
+This revision establishes `.agents/` as an **ecosystem convention**:
 the cross-tool deploy root for primitives shared between targets
 that opt into convergence. Per-target deploy roots are published in
 the non-normative OpenAPM Target Registry v0.1 companion.
@@ -2585,7 +2773,7 @@ capability restrictions could not be verified before the overall operation
 returns.
 
 > **Editorial note.** Concrete target-native encodings for capability
-> restrictions are intentionally unspecified in v0.1. A future revision
+> restrictions are intentionally unspecified in this revision. A future revision
 > may register them through the Target Registry companion or the amendment
 > process in [Section 9.3](#93-amendment-process) without weakening the
 > preservation-or-diagnostic contract above.
@@ -2971,9 +3159,8 @@ the emitted artifact.
 
 This section enumerates the attack surfaces this specification
 addresses, and maps each to the normative requirement(s) that
-mitigate it. Attack surfaces marked **deferred to v0.2** identify a
-mitigation that exists in v0.1 but whose normative wire-level
-treatment lands with the registry HTTP API.
+mitigate it. Normative registry HTTP wire-level treatment remains
+reserved for a future revision, not activated by v0.2.0.
 
 ### 10.1 Dependency confusion
 
@@ -2981,7 +3168,7 @@ treatment lands with the registry HTTP API.
 an internal package on a public registry; the consumer's resolver
 fetches the public copy instead of the internal one.
 
-**v0.1 posture.** Absent an active Governance policy, OpenAPM v0.1
+**Current posture.** Absent an active Governance policy, this revision
 has **NO consumer-class mitigation** for dependency confusion: the
 unprotected consumer install MUST be assumed vulnerable, and this
 specification does not claim otherwise. Mitigations below are
@@ -2992,9 +3179,9 @@ allow/deny tri-state ([req-pl-005](#req-pl-005),
 [req-pl-006](#req-pl-006)) lets an organisation pin acceptable
 sources. The `require_pinned_constraint` rule
 ([req-pl-007](#req-pl-007)) forces the consumer to declare intent
-explicitly, surfacing the dependency for review. A v0.2
-`registry_source.allow_non_registry: false` toggle closes the
-bypass in-band; v0.1 relies on policy review.
+explicitly, surfacing the dependency for review. A possible
+`registry_source.allow_non_registry: false` toggle remains reserved
+for a future revision; this revision relies on policy review.
 
 **Consumer-default cache isolation.** Cross-repository cache
 substitution is distinct from registry name confusion: a consumer
@@ -3009,11 +3196,11 @@ identity at every cache layer and forbids that reuse.
 of `acme/security-baseline`) lures the consumer into installing a
 hostile package.
 
-**v0.1 posture.** Absent an active Governance policy, OpenAPM v0.1
+**Current posture.** Absent an active Governance policy, this revision
 has **NO consumer-class mitigation** for typosquatting. Lookalike
 detection, vendor-distance scoring, and registry-side
-disambiguation are reserved for v0.2 and are explicitly out of
-scope for the v0.1 consumer.
+disambiguation remain reserved for a future revision and are explicitly out of
+scope for the consumer in this revision.
 
 **Mitigations (Governance-class only).** Canonical normalisation
 ([req-mf-009](#req-mf-009)) collapses cosmetic differences and
@@ -3034,7 +3221,7 @@ acceptable name space.
 **[req-sc-003]** A conforming **consumer** implementation MUST
 resolve credentials per host class (as defined in
 [Section 3](#3-terminology) and as alias-extended via
-[req-sc-006](#req-sc-006)), and MUST NOT forward a credential
+[req-sc-005](#req-sc-005)), and MUST NOT forward a credential
 resolved for one host class to a request targeting another host
 class. Credential scope MUST be observable in the consumer's
 diagnostic surface. When a fetch follows an HTTP redirect (3xx)
@@ -3145,10 +3332,9 @@ closed before extraction. The mirror-tolerance rule
 serve the bytes, but the bytes MUST still hash to the lockfile's
 recorded `resolved_hash`. Registry-class implementations
 participating in this trust chain MUST satisfy
-[req-rg-001](#req-rg-001). A v0.2 normative TLS-only requirement
-on the registry HTTP wire (reserved in
-[Appendix B](#appendix-b-registry-http-api-reserved-for-v02))
-augments this in-band.
+[req-rg-001](#req-rg-001). A normative TLS-only requirement
+on the registry HTTP wire remains reserved for a future revision in
+[Appendix B](#appendix-b-registry-http-api-reserved); it is not activated here.
 
 In addition:
 
@@ -3157,7 +3343,7 @@ In addition:
 constrain registry archive extraction so that (a) the archive
 content-type is `application/gzip` over a tar payload (`tar.gz`);
 implementations MUST reject `application/zip` and any other
-archive container in v0.1; (b) the uncompressed archive size MUST
+archive container in this revision; (b) the uncompressed archive size MUST
 NOT exceed a configurable cap whose default value is **100 MB**;
 and (c) the number of entries in the archive MUST NOT exceed a
 configurable cap whose default value is **10,000**. Violations MUST
@@ -3207,7 +3393,7 @@ thwart amplification attacks. [req-pl-018](#req-pl-018) prevents a
 case-variant repository spelling from bypassing an allow-list or
 deny-list when resolution treats both spellings as one package
 identity. On a case-sensitive source, differently cased repository
-paths remain distinct and policy authors must enumerate the spellings
+paths remain distinct and policy authors need to enumerate the spellings
 they intend to deny. The same normalization widens `dependencies.allow`
 matching on a case-insensitive source, so an upgrade can admit a
 case-variant spelling that previously missed. Clause (d) of
@@ -3253,7 +3439,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 2 | Typosquatting                               | [req-mf-009](#req-mf-009), [req-pl-005](#req-pl-005), [req-pl-007](#req-pl-007) | Governance-only   |
 | 3 | Token leakage across hosts                  | [req-sc-003](#req-sc-003), [req-sc-005](#req-sc-005), [req-sc-007](#req-sc-007), [req-sc-008](#req-sc-008), [req-sc-013](#req-sc-013) | Consumer-default  |
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
-| 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
+| 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); TLS-only wire rule remains deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
 | 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010), [req-pl-018](#req-pl-018) | Governance-only   |
@@ -3270,12 +3456,17 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 19| Executable deployment in non-interactive contexts    | [req-sc-014](#req-sc-014)                                          | Consumer-default  |
 | 20| Source-only or symlinked package content materialization | [req-sc-015](#req-sc-015)                                      | Consumer-default  |
 | 21| Native plugin namespace collision or ownership-ledger loss | [req-tg-013](#req-tg-013)                                      | Consumer-default  |
+| 22| Remote-to-local source substitution or internal local-symlink escape | [req-mf-016](#req-mf-016); source admission and acquisition, distinct from target source-plan controls | Consumer-default |
 
-### 10.12 Publisher provenance and attestations (reserved for v0.2)
+Source admission in [req-mf-016](#req-mf-016) determines whether and
+where dependency content may be acquired. It is distinct from the
+post-authorization target source-file plan in [req-sc-015](#req-sc-015).
+
+### 10.12 Publisher provenance and attestations (reserved)
 
 Publisher provenance (cryptographic attestations binding a
 specific package version to a specific publisher identity) is
-**out of scope for OpenAPM v0.1 and reserved for v0.2**. The
+**out of scope and reserved for a future revision**. The
 lockfile's `attestations:` field (per
 [req-lk-001](#req-lk-001)) and the producer-side tag-signing
 SHOULD ([req-pr-005](#req-pr-005)) are reserved hooks for this
@@ -3283,7 +3474,22 @@ future surface. A future surface will define: in-toto / SLSA
 provenance binding format; sigstore verification semantics;
 Governance `policy.dependencies.require_attestation` enforcement
 modes; and the registry HTTP wire envelope (alongside
-[Appendix B](#appendix-b-registry-http-api-reserved-for-v02)).
+[Appendix B](#appendix-b-registry-http-api-reserved)).
+
+The declaring-source context in [req-mf-016](#req-mf-016) is not
+cryptographic publisher provenance and does not activate this reservation.
+
+:::note[Planned]
+**Trust boundary (informative).** Digest comparisons assume a trusted expected
+digest or lockfile; they do not authenticate simultaneous replacement of
+record and payload. The reserved attestation subject comprises canonical
+package/source identity and version, the applicable archive or Git-tree
+content digest, and publisher identity. Trust-root selection, verification
+policy, and an interoperable envelope require separately scoped design.
+Attestation verification and enforcement remain reserved. Trusted records
+do not repair the distinct Git-tree encoding defect in
+[Section 5.6.4](#564-git-source-tree-integrity-hash).
+:::
 
 ### 10.13 Executable primitive approval gate
 
@@ -3432,7 +3638,7 @@ is the **sole normative home** for them. The forward pointer in
 |--------------|---------------------------------------------------------------------------------------|
 | Producer     | Emits a conforming `apm.yml`; optionally emits a conforming `apm.lock.yaml`. Conformance hooks: tag-release contract ([req-pr-004](#req-pr-004), [req-pr-005](#req-pr-005)). |
 | Consumer     | Parses `apm.yml`, resolves dependencies per [Section 7](#7-dependency-resolution), writes `apm.lock.yaml`, deploys primitives per [Section 8](#8-primitive-type-system-and-target-matrix). |
-| Registry     | **Reserved for v0.2.** One normative anchor in v0.1: see [req-rg-001](#req-rg-001) (trust-anchor expectation). |
+| Registry     | One operative trust-anchor obligation: [req-rg-001](#req-rg-001). Broader HTTP wire conformance remains reserved for a future revision. |
 | Governance   | Parses `apm-policy.yml`, evaluates per [Section 6](#6-policy-format-apm-policyyml), gates a Consumer install. |
 
 An implementation MAY claim more than one class. A toolchain
@@ -3447,18 +3653,20 @@ Section-level conformance summaries
 [Section 6.9](#69-conformance-requirements-governance),
 [Section 7.11](#711-conformance-requirements-resolution),
 [Section 8.7](#87-conformance-requirements-primitives-and-targets))
-are reader-aids that restate the Appendix C rows for the section's
-class. Appendix C is the canonical source of truth; on any
-conflict between a section summary and Appendix C, Appendix C
-wins.
+are reader-aids for existing role applicability. Appendix C and the
+informative inventory record primary index classification, not exclusive
+role applicability. Appendix C takes precedence over section summaries on
+primary classification; it does not exempt a secondary role expressly bound
+by the requirement body. Cross-role references enumerate existing clauses,
+not additional requirements.
 
 ### 11.2 How to claim conformance
 
-An implementation claiming OpenAPM v0.1 conformance MUST publish a
+An implementation claiming OpenAPM v0.2.0 conformance MUST publish a
 conformance statement identifying:
 
 1. Which conformance class(es) it claims.
-2. The version of the specification it conforms to (`v0.1`).
+2. The exact revision of the specification it conforms to (`v0.2.0`).
 3. The list of OPTIONAL features it implements.
 4. Any limitations or non-conformance points, with rationale.
 5. Any additional conformance-statement content required by a specific
@@ -3471,9 +3679,37 @@ conformance statement identifying:
    case-insensitive under [req-rs-016](#req-rs-016) and
    [req-pl-018](#req-pl-018); the conformance statement records that
    fixed rule rather than choosing it. The declared host rule MUST
-   agree across repository identity and policy matching. In v0.1 this
+   agree across repository identity and policy matching. In this revision this
    information is a named prose section; a machine-readable carrier is
-   reserved in [Section 12.6](#126-machine-readable-conformance-manifest-reserved-for-v02).
+   reserved in [Section 12.6](#126-machine-readable-conformance-manifest-reserved).
+
+**Foundation assessment status (informative).** This draft and its
+informative requirement inventory do not assert that the reference CLI
+satisfies the requirements above.
+[microsoft/apm#2919](https://github.com/microsoft/apm/pull/2919) owns complete
+executable bindings, fresh assessment, and exact artifact/manifest fingerprints.
+Imported alias-safety coverage is not a v0.2.0 assessment or evidence of
+publication or ratification. Static references and schema checks are not
+runtime conformance.
+
+The prior assessment disclosed an inherited gap: the reference CLI's bare
+content audit uses source-derived drift replay rather than the stored-hash
+baseline required by [req-lk-017](#req-lk-017)'s unqualified audit obligation;
+stored-hash and full-SHA consistency baselines are exercised in CI/conformance
+audit. Full Consumer conformance in bare audit mode is not claimed here.
+Prior source-only evidence also reports that local acquisition correctly
+dereferences an admitted internal resource symlink, but inherited replay
+from its original source representation can falsely report the deployed
+regular file as orphaned during unchanged CI audit. That is a replay
+limitation, not evidence of an escape, external-file read, or security
+bypass. This foundation does not rerun or repair those behaviors.
+
+The retained schema and Git-tree evidence limits are described in
+[Appendix A](#appendix-a-normative-json-schemas-inline) and
+[Section 5.6.4](#564-git-source-tree-integrity-hash). Controlled native
+snapshots do not establish a successful native install/audit round trip;
+no new native scratch backend or hosted-runtime evidence is supplied here.
+These disclosures are not waivers of any normative obligation.
 
 ### 11.3 Enumerated requirements by class
 
@@ -3486,8 +3722,15 @@ conformance statement identifying:
 [req-mf-021](#req-mf-021), [req-ext-002](#req-ext-002),
 [req-pr-004](#req-pr-004), [req-pr-005](#req-pr-005) (SHOULD).
 
+Also applicable: [req-sc-007](#req-sc-007), limited to the existing Producer
+secret-pattern packing refusal clause; [req-cf-002](#req-cf-002), for the
+existing Producer conformance-claim duties.
+
 #### 11.3.2 Consumer
 
+[req-mf-001](#req-mf-001) (existing Consumer mapping-validation clause),
+[req-mf-004](#req-mf-004) (SHOULD; existing Consumer version-validation
+diagnostic clause only),
 [req-mf-006](#req-mf-006), [req-mf-007](#req-mf-007),
 [req-mf-008](#req-mf-008), [req-mf-009](#req-mf-009),
 [req-mf-010](#req-mf-010), [req-mf-011](#req-mf-011),
@@ -3509,6 +3752,7 @@ conformance statement identifying:
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
 [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
+[req-lk-023](#req-lk-023),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -3543,7 +3787,7 @@ conformance statement identifying:
 
 <a id="req-rg-001"></a>
 **[req-rg-001]** A conforming **Registry** implementation
-(reserved for v0.2 wire normativity) MUST serve archive bytes
+(whose broader wire contract remains reserved) MUST serve archive bytes
 such that the SHA-256 of those bytes equals the digest the
 Registry advertises for the version, and MUST NOT mutate previously
 published `(name, version)` bytes. When a Registry receives a
@@ -3555,7 +3799,7 @@ previously-served bytes (idempotent republish). A Registry MUST
 NOT replace the bytes of a previously-served `(name, version)`
 under any circumstance. This is the trust anchor on which
 [req-lk-013](#req-lk-013) and [req-rs-009](#req-rs-009) depend;
-v0.2 will formalise the surrounding HTTP wire envelope.
+the surrounding HTTP wire envelope remains reserved for a future revision.
 
 #### 11.3.4 Governance
 
@@ -3646,8 +3890,8 @@ This evaluation exercises [req-pl-002](#req-pl-002),
 
 #### 11.4.4 Registry example
 
-Reserved for v0.2 wire-format normativity. A Registry claiming
-conformance against the v0.1 trust-anchor requirement
+Wire-format normativity remains reserved for a future revision. A Registry claiming
+conformance against this revision's trust-anchor requirement
 ([req-rg-001](#req-rg-001)) MUST publish an addendum statement
 enumerating the immutability guarantees and the digest algorithm
 served.
@@ -3685,12 +3929,11 @@ A single CI job named `Spec conformance` is RECOMMENDED. The job:
 1. Treats the HTML requirement anchors (`<a id="req-XXX"></a>`) in the
    spec body as the canonical statement list, and treats both the
    informative machine-readable manifest at
-   [`docs/public/specs/manifests/openapm-v0.1.requirements.yml`](/apm/specs/manifests/openapm-v0.1.requirements.yml)
-   (see [Section 12.6](#126-machine-readable-conformance-manifest-reserved-for-v02))
+   [`docs/public/specs/manifests/openapm-v0.2.requirements.yml`](/apm/specs/manifests/openapm-v0.2.requirements.yml)
+   (see [Section 12.6](#126-machine-readable-conformance-manifest-reserved))
    and the [Appendix C](#appendix-c-index-of-normative-statements)
    table as derived projections that MUST agree with the canonical
-   anchors. The v0.2 promotion will move the manifest from informative
-   to normative.
+   anchors. The manifest remains informative in this revision.
 2. Walks the conformance suite for ID references (docstrings,
    markers, or fixture directory names) and builds the set of
    referenced IDs.
@@ -3704,7 +3947,7 @@ A single CI job named `Spec conformance` is RECOMMENDED. The job:
 
 <a id="req-cf-002"></a>
 **[req-cf-002]** A **Consumer** or **Producer** claiming OpenAPM
-v0.1 conformance MUST publish a conformance statement (see
+v0.2.0 conformance MUST publish a conformance statement (see
 [Section 11.2](#112-how-to-claim-conformance)) that cites the test
 invocation exercising every `req-XXX` statement in its declared
 class against the seed fixture tree under
@@ -3742,7 +3985,7 @@ tests/fixtures/spec-conformance/
 
 Conformance-suite expansion (additional fixtures for archive
 path-traversal, merge-table cases, etc.) tracks here in subsequent
-revisions; the seed set above is the v0.1 minimum that
+revisions; the seed set above is the minimum that
 implementations can run against immediately.
 
 The lockfile fixture `materialization-sort-exclusion.yml` exercises
@@ -3772,41 +4015,50 @@ extension entries (per [req-ext-001](#req-ext-001),
 [req-lk-014](#req-lk-014)), and fields the implementation does
 not understand MUST be preserved verbatim across round-trip.
 
-### 12.6 Machine-readable conformance manifest (reserved for v0.2)
+### 12.6 Machine-readable conformance manifest (reserved)
 
 A machine-readable manifest enumerating every normative
 requirement, its keyword (MUST/SHOULD/MAY), its class, and its
-associated fixture path is **reserved for v0.2**. The shape will
+associated fixture path as a normative wire contract is **reserved for a
+future revision**. Such a contract would
 permit a conformance-suite runner to enumerate requirements
 without parsing the prose, and will permit cross-implementation
-result aggregation. v0.1 implementations satisfy the
+result aggregation. Implementations satisfy the
 "enumerable requirements" property via the prose anchors and the
 [Appendix C](#appendix-c-index-of-normative-statements) index
 table.
 
-As of v0.1.1 an **informative** companion manifest ships at
-[`docs/public/specs/manifests/openapm-v0.1.requirements.yml`](/apm/specs/manifests/openapm-v0.1.requirements.yml)
+This revision's **informative** companion manifest is
+[`docs/public/specs/manifests/openapm-v0.2.requirements.yml`](/apm/specs/manifests/openapm-v0.2.requirements.yml)
 with the shape sketched above (id, keyword, section,
 conformance_class, plus optional fixture/oracle paths and
 round-trip carve-outs). The companion is informative and exists
-to seed the v0.2 normative promotion; it is also the trip wire the
-spec-conformance CI job uses to detect silent drift between the
+as a derived inventory; it is also the trip wire the
+spec-conformance CI job can use, when this draft is explicitly selected
+for assessment, to detect silent drift between the
 canonical spec anchors, the Appendix C reader-aid table, and the
-test marker coverage. Implementations MAY consume it in v0.1 but
+test marker coverage. The inactive foundation does not switch that
+selection from v0.1; the combined successor owns complete executable
+bindings and assessment. Implementations MAY consume it in this revision but
 MUST NOT depend on its presence for normative conformance until
-v0.2 lifts the reservation.
+a future revision lifts the reservation. Its `spec_version` is exactly
+`v0.2.0`; `requirements_format_version: "1"` and the unchanged
+`requirements-v0.1.schema.json` identify the informative format, not
+the assessed specification revision.
 
 ---
 
 ## Citing this specification
 
 External documents, tooling, and conformance statements MUST cite
-this specification using a stable URL. Three shortlinks are
-provided under the published docs site:
+this specification using a stable URL. The following shortlinks are
+prepared under the docs site; draft availability does not imply ratification:
 
 | URL                                                  | Resolves to                  | Use when |
 |------------------------------------------------------|------------------------------|----------|
-| `https://microsoft.github.io/apm/spec/v0.1`         | This document (v0.1)         | Toolchain or test fixture pin. Versioned URLs are immortal: a versioned URL never moves, never 404s, never redirects to a different version. |
+| `https://microsoft.github.io/apm/spec/v0.2.0`       | This exact corrective revision | Toolchain or test fixture pin after publication. Its route identifies only v0.2.0, never a later patch. |
+| `https://microsoft.github.io/apm/spec/v0.2`         | This minor's initial corrective revision | Minor-line entry point; use the exact revision for evidence. |
+| `https://microsoft.github.io/apm/spec/v0.1`         | Preserved previous minor | Existing citations retain their previous interpretation and availability. |
 | `https://microsoft.github.io/apm/spec/latest`       | Newest ratified version      | Human citation in prose. Toolchains MUST NOT pin to `latest`; pin to a versioned URL. |
 | `https://microsoft.github.io/apm/spec`              | Alias of `latest`            | Short prose citation. Same restriction as `latest` -- do not pin tooling. |
 
@@ -3814,19 +4066,35 @@ Each schema's embedded `$id` identifies it. Toolchains MUST pin to that
 URL verbatim; schema files are byte-immortal there for this version's
 lifetime. The published [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json) and
 [`lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json) URLs and bytes remain unchanged and available;
-[Appendix A](#appendix-a-normative-json-schemas-inline) selects this
-amendment's distinct resources.
+[Appendix A](#appendix-a-normative-json-schemas-inline) selects the distinct
+alias-aware resources inherited by this draft.
+
+The exact v0.2.0 content route is `/specs/openapm-v020/`.
+Any future patch needs a distinct artifact and exact route; it MUST NOT
+replace this artifact at that route. The existing `latest` and `/spec`
+aliases are unchanged during preparation and may advance only at actual
+ratification.
 
 ## Appendix A. Normative JSON Schemas (inline)
 
-The schemas below define this specification's normative structural contract.
+The schemas below define this draft's normative structural contract.
+They inherit the prospective dependency identified in [Status](#status-of-this-document):
+independent alias-aware manifest and lockfile resources, with distinct `$id`
+URLs. The local-source/audit correction adds no wire-schema changes;
+schema revisions are independent of specification versions.
 
-:::note[Planned]
-Amendment 0.1.41 selects new, independent manifest and lockfile resources
-with distinct `$id` URLs. Human approval and the public comment period under
-[Section 9.3](#93-amendment-process) remain pending; listing these URLs does
-not establish approval or publication.
-:::
+The prerequisite's human approval and public-comment period under
+[Section 9.3](#93-amendment-process) remain pending. Listing these URLs
+establishes neither approval nor publication.
+
+The selected wire-schema `$id` values are:
+
+- `https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.41.schema.json`
+- `https://microsoft.github.io/apm/specs/schemas/lockfile-v0.1.41.schema.json`
+- `https://microsoft.github.io/apm/specs/schemas/policy-v0.1.schema.json`
+
+The informative requirements format separately reuses
+`https://microsoft.github.io/apm/specs/schemas/requirements-v0.1.schema.json`.
 
 | Schema                | Authoritative source (in-tree)                                                                       |
 |-----------------------|------------------------------------------------------------------------------------------------------|
@@ -3842,41 +4110,52 @@ structural schemas does not waive newer prose or runtime requirements.
 
 `src/apm_cli/policy/schema.py` is a **non-normative cross-reference**;
 the policy JSON Schema is authoritative. Manifest and lockfile validation
-are JSON-Schema-only in v0.1; a reference Python validator MAY be added
-in a future minor revision without normative effect.
+are JSON-Schema-only in this revision; a reference Python validator MAY be
+added in a future minor revision without normative effect.
 
 Where a JSON Schema and the prose of this specification disagree,
 the **prose** is authoritative and the schema is treated as an
 errata candidate.
 
+**Retained schema limitations (informative).** The manifest schema has a
+known source-key discriminator limitation: it rejects `git` entries with a
+`path` modifier and `id` entries with an explicit `registry` modifier.
+Those forms remain governed by [Section 4.3.2](#432-object-form). Separately,
+the schema types `policy.hash` as a string without validating its digest
+envelope; the applicable requirements in [req-mf-018](#req-mf-018) and
+[req-lk-016](#req-lk-016) remain in force. Schema validation
+alone is not a complete acceptance or conformance oracle for these cases.
+This note does not waive semantic validation or change any preserved schema
+file or identity; schema repairs require separately versioned artifacts.
+
 ---
 
-## Appendix B. Registry HTTP API (reserved for v0.2)
+## Appendix B. Registry HTTP API (reserved)
 
-The registry HTTP API is **non-normative** in v0.1.
+The registry HTTP API is **non-normative** in this revision.
 
 The companion page
 [`registry-http-api.md`](../../reference/registry-http-api/) is
-informational. v0.2 of this specification will define the wire
+informational. A future revision may define the wire
 contract normatively once independent server implementations exist.
 Until then, conforming Consumers MAY implement the wire contract
 described in the companion page but MUST NOT claim normative
-Registry conformance against v0.1, with the single exception of
+Registry wire conformance against this revision, with the single exception of
 the trust-anchor expectation in [req-rg-001](#req-rg-001).
 
-Reserved for inclusion in v0.2 (sketch only, non-normative in
-v0.1):
+Reserved for a future revision (sketch only, non-normative here;
+uppercase keywords within sketches do not activate obligations):
 
 - Archive container binding (`application/gzip` over `tar`; reject
   `application/zip`; see also [req-sc-004](#req-sc-004)).
 - Publisher attestation envelope (in-toto / SLSA; binds version to
   publisher identity; see
-  [Section 10.12](#1012-publisher-provenance-and-attestations-reserved-for-v02)).
+  [Section 10.12](#1012-publisher-provenance-and-attestations-reserved)).
 - Yank / withdrawal semantics (see
-  [Section 7.9](#79-version-withdrawal-reserved-for-v02)).
+  [Section 7.9](#79-version-withdrawal-reserved)).
 
-The class slot is reserved so that v0.2 does not require
-renumbering of conformance classes.
+The broader wire-contract slot remains reserved without renumbering
+the existing conformance classes or disabling [req-rg-001](#req-rg-001).
 
 ---
 
@@ -3933,6 +4212,7 @@ renumbering of conformance classes.
 | [req-lk-020](#req-lk-020)                | MUST    | 5.2     | consumer    |
 | [req-lk-021](#req-lk-021)                | MUST    | 5.2     | consumer    |
 | [req-lk-022](#req-lk-022)                | MUST    | 5.2     | consumer    |
+| [req-lk-023](#req-lk-023)                | MUST    | 5.5     | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -4008,11 +4288,92 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 123** (118 MUST, 5 SHOULD).
+**Total normative statements: 124** (119 MUST, 5 SHOULD).
+
+The [req-mf-016](#req-mf-016) consumer entry covers source anchoring,
+user-scope admission, remote-repository containment, and local
+internal-symlink handling. Its identifier, class, and MUST keyword
+are unchanged by the local-path correction; clauses (a)-(d) remain
+one indexed requirement.
 
 ---
 
 ## Appendix D. Revision history
+
+### v0.2.0 corrective foundation (draft, inactive; not published)
+
+This distinct minor reconciles the local-source correction in
+[microsoft/apm#2818](https://github.com/microsoft/apm/issues/2818)
+and the audit current-intent/read-only correction in
+[microsoft/apm#2816](https://github.com/microsoft/apm/issues/2816).
+Beyond the dependency below, only [req-mf-016](#req-mf-016)'s local-source
+contract and Section 5.5's audit contract change behavior; Section 8.4 and
+[req-pl-014](#req-pl-014) retain their corresponding selection and exit-scope
+clarifications.
+
+**Prospective dependency.** This draft inherits
+[microsoft/apm#2901](https://github.com/microsoft/apm/pull/2901) at exact commit
+[`5a0d872b9dd63b78b08923eddfad0ed1f9b369b4`](https://github.com/microsoft/apm/commit/5a0d872b9dd63b78b08923eddfad0ed1f9b369b4),
+not a published or ratified baseline. Its 0.1.41 candidate adds
+[req-mf-025](#req-mf-025) and the optional lock-entry `alias` field.
+Under Section 9.2 this is additive optional support and a defensive definition
+of previously unspecified behavior, not behavior-neutral errata: unsafe or
+reserved aliases can newly fail; valid dotted aliases remain accepted;
+whitespace is canonicalized; recorded aliases determine replay placement;
+absent aliases retain the unaliased layout. Source identity and source-path
+permissions do not change. Unknown-field preservation is not placement support.
+The requirement and its disclosure, cleanup, and threat mappings are inherited,
+not introduced by the local-source/audit correction. Its distinct schema
+resources and pending amendment status are recorded in
+[Appendix A](#appendix-a-normative-json-schemas-inline).
+
+Statement count from that prospective dependency: **123 -> 124**
+(119 MUST, 5 SHOULD); only [req-lk-023](#req-lk-023) is added to its inventory.
+The complete 0.1.40 amendment, including [req-pl-018](#req-pl-018), its identity,
+policy, disclosure, and security text, and Section 9.2's deterministic-evaluation
+allowance, remains inherited. No other identifier is added, removed, or renumbered.
+
+**Classification and preservation.** The local-source and audit corrections
+are substantive conformance changes under Sections 9.1, 9.2, and 9.4, not same-minor
+errata. The retained v0.1 artifact and requirements manifest match that exact
+prospective dependency byte-for-byte. Appendix A selects its two new schema
+resources; the four original v0.1 schemas retain their URLs and exact bytes
+from `e38261c5db4d893d6ddebc3925742e4e3bd2ba74`. The import establishes no
+publication or ratification. v0.1 remains active, available, and supported
+indefinitely, with no removal date.
+Section 9.5 constrains announcement-to-removal, not parallel availability
+of a new minor; no migration exception is claimed.
+
+An admitted local sibling outside the project root can satisfy this
+revision while violating the old blanket rule. Neither this correction
+nor any future test bindings establishes that the reference CLI ever
+conformed to the previous minor's req-mf-016.
+
+**Authorization and pending record.** The maintainer authorized immediate
+drafting of this bounded normative reconciliation and waived only the
+14-day public-comment period in Section 9.3 step 4 in the
+[one-amendment public decision](https://github.com/microsoft/apm/issues/2818#issuecomment-5558647529).
+This is not a conformance waiver. At least two qualified non-author human
+reviewers remain required under Section 9.3 step 3: one with implementation
+experience and one with consumer/integrator experience. Implementation
+evidence and ratification remain pending; AI review supplies no human approval.
+The publication owner supplies any actual record later. Section 9 remains
+unchanged from the prospective dependency.
+
+The [Status](#status-of-this-document) assigns foundation-only ownership to
+#2820, coupled executable assessment to #2919, and aggregation to #2923.
+This record activates no assessment selector, runtime behavior, publication,
+or latest alias and records no announcement, publication, or ratification date.
+
+No previously reserved workspace, nesting, attestation, HTTP wire,
+internationalization, range-widening, withdrawal, or default-frozen feature
+is activated. Independently versioned companions remain unchanged.
+
+### Previous-minor history (informative)
+
+The following entries are retained as history, not renewed feature promises
+or evidence of approval for this revision. The operative reservation text
+above controls this revision.
 
 | Version | Date       | Changes                                                  |
 |---------|------------|----------------------------------------------------------|
@@ -4058,7 +4419,6 @@ renumbering of conformance classes.
 | 0.1.38  | 2026-09-01 | Defensive amendment of [req-lk-005] (no new normative statement; count remains 120 (115 MUST, 5 SHOULD)): `generated_at` is optional advisory metadata, new lockfiles omit it by default, and later writes preserve an existing omission unless explicitly configured otherwise. |
 | 0.1.39  | 2026-09-01 | Spec-citation fold for user-scoped direct MCP target selection (closes #2548 Mode-B silent-extension gate). Added [req-tg-014] (Section 8.5.8, consumer MUST): explicit selection, the user-scope manifest, configured user default, and user-scope runtime discovery form one precedence chain; project-only signals cannot constrain final discovery; and a selected set with no user-capable runtime fails before user manifest, lockfile, or target-config mutation. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 120 -> 121 (116 MUST, 5 SHOULD). |
 | 0.1.40  | 2026-09-07 | Spec-citation fold for dependency-policy identity casing in PR #2706. Added [req-pl-018] (Section 6.3.1, governance MUST) and extended [req-rs-016] clause (3): dependency allow, deny, and exact require operands use the documented per-host repository case rule, while registry-sourced repository coordinates are case-insensitive regardless of host; case normalization is ASCII-only, is bounded identically on both operands, stops at recursive-glob ambiguity, and does not cross virtual-path, ref, registry-name, MCP-name, unmanaged-path, or case-sensitive host/source boundaries; deny precedence is unchanged. Defined the policy glob grammar, documented byte-exact Section 6.4 merge behavior, and added the threat mapping. Classified this as a non-breaking correction of previously unspecified evaluation behavior under Section 9.2: existing lowercase workarounds remain matching; on registry sources and hosts documented as case-insensitive, case-variant allow entries can newly match, deny entries can newly enforce, and exact require entries can newly be satisfied, so those policies should be re-audited. Sections 1.3, 6.3.1, 6.3.5, 6.4, 6.5, 6.9, 7.2, 9.2, 10.8, 10.11, 11.2, and 11.3.4, Appendix C, and conformance coverage updated. Statement count: 121 -> 122 (117 MUST, 5 SHOULD). |
-| 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Selects distinct 0.1.41 schema publication identities without changing published v0.1 URLs or bytes; Section 9.3 remains pending (see Appendix A). Sections 1.3, 4.9, 5.2, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
@@ -4072,14 +4432,14 @@ reference remain authoritative.
 
 **E.1 Manifest top-level `type` field.** [Section 4.2.2](#422-type-advisory)
 defines `type` (with values `instructions`, `skill`, `hybrid`, or
-`prompts`) as informational in v0.1; it exists so future minor
+`prompts`) as informational in this revision; it exists so future minor
 revisions can attach normative semantics (for example, packaging
-filters per type) without a breaking schema change. v0.1 consumers
+filters per type) without a breaking schema change. Consumers
 MUST ignore the value.
 
 **E.2 Target identifier reservation.** The target identifiers
 enumerated in the OpenAPM Target Registry companion are reserved
-in the v0.1 namespace; vendor extensions MUST use the
+in the current namespace; vendor extensions MUST use the
 `x-<vendor>-<name>` pattern of [req-tg-004](#req-tg-004) to avoid
 collision.
 

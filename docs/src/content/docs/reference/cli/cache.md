@@ -43,6 +43,12 @@ Commands that require current state -- `apm install --update`, `apm install
 outdated` -- resolve upstream first. Update may reuse content for the resolved
 SHA; `--refresh` bypasses it.
 
+After a current-state install or update successfully obtains a named ref's
+checkout, the Git cache remembers that ref's resolved SHA. A later unpinned
+install can reuse this observation instead of an older bare-repository ref.
+Replaying an older lock pin does not overwrite the observation or change
+another project's selected commit.
+
 ## Subcommands
 
 ### `apm cache info`

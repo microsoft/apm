@@ -105,6 +105,30 @@ An interrupted case-only rename can leave a hidden
 contents before renaming it back or removing it; APM does not delete an
 unverified recovery entry automatically.
 
+### Rejected dependency aliases
+
+APM now rejects aliases `.` and `..`. The alias directory must resolve strictly
+under `apm_modules/`, including through symlinks. Safe dotted names such as
+`.safe`, `safe.`, `foo..bar`, and `my-skill.v2` remain valid; see the
+[alias field reference](../../reference/manifest-schema/#412-object-form).
+
+1. In the declaring `apm.yml`, replace `alias: .` or `alias: ..` with
+   `alias: my-skill.v2`. Leave the source unchanged, including local `../` paths.
+2. Run `apm install`.
+3. Review `apm.lock.yaml`, installed package contents, and generated deployment
+   changes before committing. Do not assume previously incorrect metadata is
+   automatically repaired.
+
+Do not remove or prune the rejected alias path: it can refer to
+`apm_modules/` itself or its parent.
+
+Valid aliases now persist in the lockfile so audit replay, hooks, MCP,
+and cleanup use the same directory as installation. For an older aliased
+install, run `apm install` and review the new `alias` metadata before
+committing. Keep using the updated CLI: older readers may preserve this
+field without honoring its placement. A missing alias never defaults to
+the package's inventory `name`.
+
 ## 4. Compile strategy migration
 
 The compile step writes per-target output (e.g. `.github/copilot-instructions.md`, `.claude/`, `.cursor/rules/`). Some targets support both a single-file (monolithic) layout and a per-primitive (distributed) layout.

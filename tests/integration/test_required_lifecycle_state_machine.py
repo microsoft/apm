@@ -1363,9 +1363,11 @@ def test_required_lock_preserves_user_edited_dropped_file_and_row(
     assert _record_by_value(locked, dropped_skill).owners == dropped_record.owners
 
 
+@pytest.mark.parametrize("alias", [".safe", "safe.", "foo..bar", "my-skill.v2"])
 def test_required_reinstall_is_byte_idempotent_across_durable_state(
     tmp_path: Path,
     apm_binary_path: Path,
+    alias: str,
 ) -> None:
     scenario = _new_scenario(tmp_path / "reinstall-idempotency", apm_binary_path)
     source = _publish(
@@ -1376,7 +1378,8 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
     )
     consumer = scenario.consumers.create(
         "stable-consumer",
-        dependencies=(source.dependency,),
+        version="9.0.0",
+        dependencies=({**source.dependency, "alias": alias},),
         targets=("copilot",),
     )
 
@@ -1424,6 +1427,31 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
     assert_unchanged(before_artifacts, after_artifacts)
     assert after.file(".github/instructions/stable.instructions.md").kind == "file"
     assert audit["passed"] is True
+    locked = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert locked is not None
+    assert len(locked.dependencies) == 1
+    dependency = next(iter(locked.dependencies.values()))
+    installed = consumer.root / "apm_modules" / alias
+    assert dependency.name == source.package.name
+    assert dependency.version == load_yaml(source.package.manifest_path)["version"]
+    assert dependency.name != consumer.name
+    assert dependency.content_hash == compute_package_hash(installed)
+    assert not (consumer.root / "apm_modules" / _OWNER).exists()
+
+    for rejected in (".", ".."):
+        manifest = load_yaml(consumer.manifest_path)
+        manifest["dependencies"]["apm"][0]["alias"] = rejected
+        dump_yaml(manifest, consumer.manifest_path)
+        before_rejection = ArtifactSnapshot.capture(consumer.root)
+        result = scenario.runner.run(
+            _INSTALL_ARGS,
+            cwd=consumer.root,
+            env=source.environment,
+            scenario_id=f"reinstall-reject-alias-{len(rejected)}",
+        )
+        assert result.returncode != 0, _result_evidence(result)
+        assert "reserved directory names" in result.stdout + result.stderr
+        assert_unchanged(before_rejection, ArtifactSnapshot.capture(consumer.root))
 
 
 def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
@@ -1605,24 +1633,32 @@ def test_required_parallel_fresh_fetch_bypasses_legacy_cache_upgrade(
 
 
 @pytest.mark.parametrize(
-    "invalid_cache",
-    (
-        "plugin-path",
-        "missing-hash",
-        "missing-apm-yml",
-        "missing-apm-dir",
-        "apm-yml-symlink",
-        "apm-dir-symlink",
-        "package-root-symlink",
-    ),
+    ("invalid_cache", "replace_ref"),
+    [
+        *(
+            pytest.param(invalid_cache, False, id=invalid_cache)
+            for invalid_cache in (
+                "plugin-path",
+                "missing-hash",
+                "missing-apm-yml",
+                "missing-apm-dir",
+                "apm-yml-symlink",
+                "apm-dir-symlink",
+                "package-root-symlink",
+            )
+        ),
+        pytest.param("missing-apm-yml", True, id="replacement-missing-apm-yml"),
+        pytest.param("missing-apm-dir", True, id="replacement-missing-apm-dir"),
+    ],
 )
 @pytest.mark.lifecycle_merge_group
 def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
     tmp_path: Path,
     apm_binary_path: Path,
     invalid_cache: str,
+    replace_ref: bool,
 ) -> None:
-    """Reject invalid 0.28 cache state without mutating cache or deployments."""
+    """Reject invalid reused caches, but permit a requested replacement fetch."""
     scenario = _new_scenario(
         tmp_path / f"invalid-legacy-cache-{invalid_cache}",
         apm_binary_path,
@@ -1705,6 +1741,10 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
     else:
         locked_dependency["content_hash"] = compute_package_hash(cached_package)
     dump_yaml(lock_document, lock_path)
+    if replace_ref:
+        manifest = load_yaml(consumer.manifest_path)
+        manifest["dependencies"]["apm"][0]["ref"] = "HEAD"
+        dump_yaml(manifest, consumer.manifest_path)
 
     before_state = LifecycleStateSnapshot.capture(consumer.root, targets=("claude", "codex"))
     before_cache = ArtifactSnapshot.capture(cached_package)
@@ -1721,11 +1761,27 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
     )
     output = " ".join((result.stdout + result.stderr).split())
 
+    if replace_ref:
+        assert result.returncode == 0, _result_evidence(result)
+        assert receipt.is_file()
+        _, replaced = _single_locked_dependency(consumer.root)
+        assert replaced.resolved_commit == source.commit.sha
+        assert replaced.content_hash == compute_package_hash(cached_package)
+        assert (cached_package / "apm.yml").is_file()
+        for target in (".claude", ".agents"):
+            deployed = consumer.root / target / "skills" / "legacy-skill" / "SKILL.md"
+            assert deployed.read_text(encoding="utf-8") == _skill("legacy-skill")
+        return
+
     assert result.returncode != 0, _result_evidence(result)
     assert source.package.name in output
     assert str(cached_package) in "".join(output.split())
-    assert "apm deps clean --yes" in output
-    if invalid_cache == "plugin-path":
+    if invalid_cache == "package-root-symlink":
+        assert "unsafe destination" in output
+        assert "without removing its target" in output
+        assert "rerun apm install" in output
+        assert "apm deps clean --yes" not in output
+    elif invalid_cache == "plugin-path":
         assert "is invalid" in output
     elif invalid_cache == "missing-hash":
         assert "no content hash" in output
@@ -1735,6 +1791,8 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
         assert "required .apm directory is missing" in output
     else:
         assert "cache metadata contains a symlink" in output
+    if invalid_cache != "package-root-symlink":
+        assert "apm deps clean --yes" in output
 
     if package_link_target is not None:
         assert cached_package.is_symlink()
@@ -1807,8 +1865,8 @@ def test_required_dependency_prune_then_uninstall_cascades_owned_state(
     )
     after_prune = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
 
-    assert not (consumer.root / "apm_modules" / _OWNER / "beta-kit").exists()
-    assert (consumer.root / "apm_modules" / _OWNER / "alpha-kit").is_dir()
+    assert not (consumer.root / "apm_modules" / "beta-kit").exists()
+    assert (consumer.root / "apm_modules" / "alpha-kit").is_dir()
     assert "echo beta" not in _hook_commands(settings)
     assert _hook_commands(settings) == ["echo alpha"]
     assert not any(

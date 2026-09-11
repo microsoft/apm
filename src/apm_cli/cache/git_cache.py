@@ -33,6 +33,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..utils.atomic_io import atomic_write_text
 from ..utils.git_sparse import apply_sparse_cone, repair_dangling_cone_symlinks
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
@@ -231,6 +232,31 @@ class GitCache:
             sparse_paths=sparse_paths,
             promisor_url=url if use_partial else None,
         )
+
+    def _resolved_ref_path(self, url: str, ref: str) -> Path:
+        digest = hashlib.sha256(ref.encode("utf-8")).hexdigest()
+        path = self._db_root / f"{cache_shard_key(url)}-{digest}.ref"
+        ensure_path_within(path, self._db_root)
+        return path
+
+    def remember_resolved_ref(self, url: str, ref: str, sha: str) -> None:
+        """Persist an authorized remote observation independently of bare flavor."""
+        if not ref or not _SHA_RE.fullmatch(sha):
+            raise ValueError("A remote ref observation requires a ref and full SHA")
+        path = self._resolved_ref_path(url, ref)
+        with shard_lock(path):
+            atomic_write_text(path, sha.lower(), new_file_mode=0o600)
+
+    def read_resolved_ref(self, url: str, ref: str) -> tuple[bool, str | None]:
+        """Return receipt presence and SHA; corrupt receipts must not revive old refs."""
+        path = self._resolved_ref_path(url, ref)
+        try:
+            sha = path.read_text(encoding="ascii")
+        except FileNotFoundError:
+            return False, None
+        except (OSError, UnicodeError):
+            return True, None
+        return True, sha if _SHA_RE.fullmatch(sha) else None
 
     def _record_checkout_access(self, checkout_dir: Path) -> Path:
         """Record successful reuse of a finalized checkout under its shard lock."""
@@ -876,6 +902,8 @@ class GitCache:
                 if entry.is_dir(follow_symlinks=False) and not entry.name.endswith(".lock"):
                     db_count += 1
                     total_size += _dir_size(Path(entry.path))
+                elif entry.name.endswith(".ref") and entry.is_file(follow_symlinks=False):
+                    total_size += entry.stat(follow_symlinks=False).st_size
 
         if self._checkouts_root.is_dir():
             for shard_entry in os.scandir(str(self._checkouts_root)):

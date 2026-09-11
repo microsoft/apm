@@ -12,26 +12,27 @@ def _scan_installed_packages(apm_modules_dir: Path) -> list:
     """Scan *apm_modules_dir* for installed package paths.
 
     Walks the tree to find top-level directories containing ``apm.yml`` or
-    ``.apm``, supporting GitHub (2-level), ADO (3-level), and subdirectory
-    packages. Package manifests nested below another package are part of that
+    ``.apm``, supporting aliases (1-level), GitHub (2-level), ADO (3-level),
+    and subdirectory packages. Manifests nested below another package are part of that
     parent package and are excluded.
 
     Returns:
-        List of ``"owner/repo"`` or ``"org/project/repo"`` path keys.
+        List of installed relative paths, including flattened aliases.
     """
     installed: list = []
     if not apm_modules_dir.exists():
         return installed
     for candidate in apm_modules_dir.rglob("*"):
-        if not candidate.is_dir() or candidate.name.startswith("."):
+        if candidate.is_symlink() or not candidate.is_dir():
+            continue
+        if candidate.name.startswith(".") and candidate.parent != apm_modules_dir:
             continue
         if not ((candidate / APM_YML_FILENAME).exists() or (candidate / APM_DIR).exists()):
             continue
         if _is_nested_under_package(candidate, apm_modules_dir):
             continue
         rel_parts = candidate.relative_to(apm_modules_dir).parts
-        if len(rel_parts) >= 2:
-            installed.append("/".join(rel_parts))
+        installed.append("/".join(rel_parts))
     return installed
 
 
