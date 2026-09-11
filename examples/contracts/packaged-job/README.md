@@ -29,9 +29,11 @@ inputs come from the caller, not the package.
 
 `handoff.json` and its record remain below the caller's `.apm/runs/` directory.
 There is no automatic copy back to the caller root. Inspect the retained record
-and artifact before using the result. `VERIFIED` (exit 0) means these checks
-passed in the explicitly accepted **native-advisory** profile; it is not a
-sandbox guarantee or complete verification of the generated prose.
+and artifact before using the result. A completed run with passing checks still
+returns `UNPROVEN` (exit 21), because native execution is not sandboxed.
+The output was saved and checked; the overall result does not turn a passing
+check into a failure. These checks do not establish complete factual
+correctness of the generated prose.
 
 For a read-only local preview, replace `--allow-host-access` with `--plan`.
 An unresolved remote source or missing import may remain unproven offline;

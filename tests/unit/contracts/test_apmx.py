@@ -106,8 +106,9 @@ def test_cli_explicit_selection(args: list[str], code: int) -> None:
 
 
 @pytest.mark.parametrize("harness", ["codex", "unknown"])
+@pytest.mark.parametrize("verbose", [False, True])
 def test_cli_harness_admission_belongs_to_frontend(
-    caller: Path, monkeypatch: pytest.MonkeyPatch, harness: str
+    caller: Path, monkeypatch: pytest.MonkeyPatch, harness: str, verbose: bool
 ) -> None:
     (caller / "job.contract.md").write_text(
         "---\nproduces: result.txt\nverify: {content: 'true'}\n---\nWrite.\n",
@@ -115,9 +116,16 @@ def test_cli_harness_admission_belongs_to_frontend(
     )
     resolve_binary = Mock(side_effect=AssertionError("Unsupported harness cannot launch"))
     monkeypatch.setattr("apm_cli.runtime.utils.find_runtime_binary", resolve_binary)
-    result = CliRunner().invoke(main, ["job.contract.md", "--on", harness, "--plan"])
+    arguments = ["job.contract.md", "--on", harness, "--plan"]
+    if verbose:
+        arguments.append("--verbose")
+    result = CliRunner().invoke(main, arguments)
     assert result.exit_code == int(Outcome.UNPROVEN), result.output
-    assert "unsupported_harness" in result.output
+    assert harness in result.output
+    assert ("unsupported_harness" in result.output) is verbose
+    assert (
+        "does not support native contracts" if harness == "codex" else "Unknown runtime"
+    ) in result.output
     resolve_binary.assert_not_called()
     assert not (caller / ".apm").exists()
 

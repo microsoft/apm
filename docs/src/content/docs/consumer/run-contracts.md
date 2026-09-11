@@ -48,13 +48,17 @@ from the caller. Manifests, locks, and global configuration stay unchanged.
 `--allow-host-access` lets Copilot and checks use host files, network and
 available login details for this run. Run only contracts you trust.
 An interactive spinner stays active during quiet work; Copilot's public
-messages, tool activity and errors appear live above it.
+messages, tool activity and errors appear live above it. APM then reports the
+contract's check results separately.
 
 ## Inspect the result
 
 Follow the reported paths to `.apm/runs/<run-id>/artifacts/` and `record.json`.
 There is no automatic copy-back. The checker assesses JSON shape, exact source-ID
 coverage, nonempty strings, and the skill's caution prefix, not factual accuracy.
+**Expect `UNPROVEN` / exit `21` even when the check passes.** The output was
+saved and checked, but this native run was not sandboxed. That is not a failed
+check: inspect its result and the output before using the file.
 Read the [outcomes](../../reference/cli/apmx/#results-and-retained-files) before
 using the artifact.
 

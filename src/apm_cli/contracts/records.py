@@ -35,14 +35,23 @@ def reduce_outcome(
     checks: tuple[CheckObservation, ...],
     stop_reason: str | None,
 ) -> Outcome:
-    """Approved leaf-only precedence; this is not a general composition algebra."""
+    """Reduce native leaf results without claiming an enforced host boundary."""
     if stop_reason:
         return Outcome.HALTED
     if any(check.normalized == 1 for check in checks):
         return Outcome.REJECTED
-    if artifact is None or not checks or any(check.normalized != 0 for check in checks):
-        return Outcome.UNPROVEN
-    return Outcome.VERIFIED
+    return Outcome.UNPROVEN
+
+
+def native_assurance_limited(result: RunResult) -> bool:
+    """Identify completed passing checks whose only limit is the native host."""
+    return (
+        result.outcome == Outcome.UNPROVEN
+        and result.stop_reason is None
+        and result.artifact is not None
+        and bool(result.checks)
+        and all(check.normalized == 0 for check in result.checks)
+    )
 
 
 def _json_value(value: object) -> object:
@@ -175,7 +184,7 @@ class AttemptStore:
             self._data["transcript"] = inspect_retained_log(
                 self.directory, ContractLimits().transcript_bytes
             )
-        elif result.outcome == Outcome.VERIFIED:
+        elif result.outcome == Outcome.VERIFIED or native_assurance_limited(result):
             raise ContractError("Final transcript is missing.", code="transcript_missing")
         self._data.update(
             complete=True,

@@ -189,8 +189,11 @@ def test_packaged_job_resolves_one_skill_and_freezes_caller_source_and_checks(
     home_before = ArtifactSnapshot.capture(job.isolation.home)
     temp_before = ArtifactSnapshot.capture(job.isolation.temp_root)
     result = job.packaged()
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 21, result.stdout + result.stderr
     run, record = job.record()
+    assert record["result"]["outcome"] == {"name": "UNPROVEN", "exit_code": result.returncode}
+    assert record["result"]["stop_reason"] is None
+    assert "UNPROVEN" in result.stdout
     assert record["profile"] == "native-advisory"
     assert (
         record["source"]["sha256"]
@@ -288,7 +291,7 @@ def test_local_contract_without_manifest_uses_installed_entrypoint(job: Packaged
     shutil.copytree(job.package / "checks", job.caller / "checks")
     before = ArtifactSnapshot.capture(job.caller)
     result = job.run("local.contract.md")
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 21, result.stdout + result.stderr
     _, record = job.record()
     assert record["source"]["path"] == str(job.caller / "local.contract.md")
     assert not (job.caller / "apm.yml").exists()
@@ -311,7 +314,7 @@ def test_sibling_skill_resolves_from_original_package_not_caller(job: PackagedJo
     source_before = ArtifactSnapshot.capture(job.isolation.package_root)
     decoy_before = ArtifactSnapshot.capture(decoy)
     result = job.packaged()
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 21, result.stdout + result.stderr
     _, record = job.record()
     assert len(record["imports"]) == 1
     assert record["imports"][0]["lock_identity"] == "../handoff-style"
@@ -479,7 +482,7 @@ GitHubPackageDownloader.download_package = fixture_download
     source_before = ArtifactSnapshot.capture(job.package)
     temp_before = ArtifactSnapshot.capture(job.isolation.temp_root)
     result = job.run("--from", "example/packaged-job#v1", _CONTRACT)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 21, result.stdout + result.stderr
     downloaded = json.loads(download_log.read_bytes())
     assert not Path(downloaded["target"]).exists()
     run, record = job.record()

@@ -23,9 +23,18 @@ pytestmark = [
 ]
 
 
-@pytest.mark.parametrize("animate,interrupt", [(False, True), (True, True), (True, False)])
+@pytest.mark.parametrize(
+    "animate,interrupt,fail",
+    [
+        (False, True, False),
+        (True, True, False),
+        (True, False, False),
+        (False, False, False),
+        (True, False, True),
+    ],
+)
 def test_pty_streams_live_output_and_restores_terminal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, animate: bool, interrupt: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, animate: bool, interrupt: bool, fail: bool
 ) -> None:
     import pty
     import termios
@@ -61,7 +70,8 @@ def test_pty_streams_live_output_and_restores_terminal(
         "Path('handoff.json').write_text('[]\\n')\n"
         "emit('assistant.message', {'messageId':'pty-ready','content':'PTY actor ready\\n',"
         "'model':'gpt-6-astra'})\n"
-        "print(json.dumps({'type':'result','exitCode':0,'sessionId':'pty','usage':{}}),flush=True)\n",
+        f"print(json.dumps({{'type':'result','exitCode':{int(fail)},'sessionId':'pty','usage':{{}}}}),flush=True)\n"
+        f"raise SystemExit({int(fail)})\n",
         encoding="utf-8",
     )
     actor.chmod(0o755)
@@ -146,7 +156,7 @@ def test_pty_streams_live_output_and_restores_terminal(
                 break
         assert streamed_at is not None, output.decode("ascii", errors="replace")
         assert interrupted is interrupt, output.decode("ascii", errors="replace")
-        assert child.wait(timeout=2) == (22 if interrupt else 0), output.decode(
+        assert child.wait(timeout=2) == (22 if interrupt or fail else 21), output.decode(
             "ascii", errors="replace"
         )
         while select.select([master], [], [], 0.1)[0]:
@@ -158,18 +168,35 @@ def test_pty_streams_live_output_and_restores_terminal(
             child.wait(timeout=2)
         os.close(master)
         os.close(slave)
+    text = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", bytes(output))
+    (tmp_path / "terminal.ansi").write_bytes(output)
+    (tmp_path / "terminal.txt").write_bytes(text)
     records = list((project / ".apm" / "runs").glob("*/record.json"))
     assert len(records) == 1
     record = json.loads(records[0].read_text(encoding="utf-8"))
     assert record["complete"] is True
-    assert record["result"]["outcome"]["name"] == ("HALTED" if interrupt else "VERIFIED")
-    assert record["result"]["stop_reason"] == ("cancelled" if interrupt else None)
+    assert record["result"]["outcome"]["name"] == ("HALTED" if interrupt or fail else "UNPROVEN")
+    expected_reason = "cancelled" if interrupt else "producer_failed" if fail else None
+    assert record["result"]["stop_reason"] == expected_reason
     assert record["producer"]["cleanup_confirmed"] is True
     assert record["producer"]["returncode"] is not None
-    text = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", bytes(output))
     assert text.count(b"PTY actor ready") == 1
     assert b"PRIVATE_" not in output
-    assert (b"VERIFIED" in text) is not interrupt
+    assert b"VERIFIED" not in text
+    assert (b"UNPROVEN" in text) is not (interrupt or fail)
+    assert b"Copilot > PTY actor ready" in text
+    assert b"Copilot stderr > Native stderr ready" in text
+    assert b"(untrusted)" not in text
+    assert b"native-advisory" not in text
+    assert b"raw exit" not in text
+    assert b"[i]" not in text
+    if not interrupt and not fail:
+        assert b"Contract checks passed; this run was not sandboxed." in text
+        assert b"Output: .apm/runs/" in text
+        assert b"Record: .apm/runs/" in text
+    if fail:
+        assert b"Copilot did not complete successfully." in text
+        assert b"Review Copilot diagnostics and logs before retrying." in text
     if animate:
         assert spinner_seen_while_running
         assert b"\x1b[?25l" in output

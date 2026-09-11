@@ -165,7 +165,8 @@ def test_real_child_capture_and_each_check_gets_fresh_baseline(
     )
     _fake_adapter(monkeypatch, plan)
     result = engine.run_contract(plan, logger=ContractLogger(), allow_advisory=True)
-    assert result.outcome == Outcome.VERIFIED
+    assert result.outcome == Outcome.UNPROVEN
+    assert result.stop_reason is None
     assert result.artifact is not None
     assert result.artifact.path.read_bytes() == b"hello\n"
     assert result.artifact.sha256 == hashlib.sha256(b"hello\n").hexdigest()
@@ -175,6 +176,9 @@ def test_real_child_capture_and_each_check_gets_fresh_baseline(
     assert not (tmp_path / "check-local.txt").exists()
     assert (result.run_directory / "record.json").is_file()
     record = json.loads((result.run_directory / "record.json").read_text(encoding="utf-8"))
+    assert record["result"]["outcome"] == {"name": "UNPROVEN", "exit_code": 21}
+    assert record["controls"]["isolation"] == "unavailable"
+    assert record["result"]["stop_reason"] is None
     transcript = result.run_directory / "transcript.log"
     assert record["native_reported_exit_code"] == 0
     assert record["child_pid"] is None

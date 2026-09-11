@@ -53,15 +53,17 @@ does not establish a cryptographic pin or protected provenance.
 
 | Outcome | Meaning in this slice |
 | --- | --- |
-| VERIFIED / 0 | Captured output passed every required check under accepted native-advisory controls. |
+| VERIFIED / 0 | Reserved; the current native runner cannot establish this result. |
 | REJECTED / 20 | A check returned a failed condition, even if another check was incomplete. |
-| UNPROVEN / 21 | Output or assessment is missing/incomplete, or required consent/assurance is unavailable. |
+| UNPROVEN / 21 | Includes passing checks: this native run was not sandboxed. Also covers missing output, incomplete checks, or unavailable consent. |
 | HALTED / 22 | Execution, cancellation, watchdog, capture or recording stopped the invocation. |
 
 Raw check exits are retained: 0 passes, 1 fails, 2 is incomplete; unknown exits,
 missing tools and signals are incomplete. No output does not mean `no_change`.
 Every check gets a fresh baseline and the captured file. Patch checks apply
 their own patch; APM does not apply it first.
+Expect exit `21` for the completed examples with passing checks. The output
+and record are still saved; the host-isolation limit is not a check failure.
 
 The first profile supports macOS/Linux and positively established no-policy
 projects. Governed/unresolved-policy projects, Windows execution, command

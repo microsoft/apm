@@ -152,6 +152,8 @@ frozen-artifact assessment.
 
 See [outcomes and retained evidence](../apmx/#results-and-retained-files).
 Artifacts stay under the caller's `.apm/runs/`, without automatic copy-back.
+Native contract runs return `UNPROVEN` / `21` even when all checks pass,
+because host isolation is not enforced. Script exit codes above are unchanged.
 
 ## Related
 

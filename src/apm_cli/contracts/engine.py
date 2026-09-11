@@ -162,7 +162,15 @@ def run_contract(
         logger.attach_run(store.run_id, store.directory)
         events.emit(
             "selected",
-            contract=str(plan.contract.path),
+            contract=str(
+                (plan.source.original_root or plan.source.root) / plan.source.contract_relative_path
+                if plan.source
+                else plan.contract.path
+            ),
+            contract_relative_path=plan.source.contract_relative_path if plan.source else None,
+            package_ref=plan.source.package_ref if plan.source else None,
+            caller_root=str(plan.project_root),
+            produces=plan.contract.produces,
             harness=plan.harness,
             model=plan.model,
             run_directory=str(store.directory),

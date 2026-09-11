@@ -5,8 +5,8 @@ sidebar:
   order: 12
 ---
 
-Bundled with APM, `apmx` runs one explicit contract on one harness, captures one
-output, runs independent checks, and retains a record.
+Bundled with APM, `apmx` gives Copilot one explicit job, saves the output,
+runs the contract's checks afterwards, and keeps a record of the results.
 
 :::caution[Experimental]
 Enable contract planning and execution first:
@@ -77,14 +77,20 @@ The record identifies sources, inputs, artifact, checks, and execution details.
 Private logs are not guaranteed secret-free or safe to publish.
 
 During preparation, generation and checks, interactive terminals show a rotating
-ASCII spinner, as in `apm install`. Copilot's public messages, tool activity and
-errors appear as they arrive, above the spinner. Private reasoning and raw
+ASCII spinner, as in `apm install`. Its label names the current action rather
+than leaving an execution trace on screen. Copilot's public messages, tool activity and
+errors appear as they arrive, above the spinner, clearly attributed to Copilot.
+APM reports the check results separately. Private reasoning and raw
 protocol payloads are not displayed. Text is emitted at complete message or line
 boundaries so secret filtering can handle values split across stream chunks.
 
 Pipes, CI, `NO_COLOR`, and `APM_PROGRESS=never` use plain progress lines instead.
 Quiet subprocesses report that they are still running about every five seconds.
 Animation is never written to the retained transcript.
+Default output uses neutral text with color reserved for status. Output and
+record paths are relative to the caller when possible and remain copyable.
+Use `--verbose` for source identities, raw check exits, model observations,
+and the log location. Review logs for sensitive data before sharing them.
 
 ## Native execution boundary
 
@@ -140,8 +146,8 @@ Outcomes apply in this order:
 |---|---|---|
 | `22` | `HALTED` | Operational stop, cancellation, watchdog, capture-integrity, cleanup, or final-recording failure. |
 | `20` | `REJECTED` | A substantive check fails, even if another is incomplete. |
-| `21` | `UNPROVEN` | Missing artifact, required incomplete check, or unavailable consent/assurance, with no preceding outcome. |
-| `0` | `VERIFIED` | Fresh artifact, all checks pass, accepted advisory controls, and completed record. |
+| `21` | `UNPROVEN` | No preceding outcome, including when every check passes: the native runner cannot enforce host isolation. Also covers missing output, incomplete checks, and unavailable consent. |
+| `0` | `VERIFIED` | Reserved; not returned by the current native contract runner. Successful offline planning can still exit `0`. |
 
 CLI usage errors exit `2`. A refusal before admission need not create a run;
 a nonterminal record means incomplete or unknown, not permission to replay.
@@ -149,9 +155,16 @@ Credential-bearing URL text is redacted from retained package references.
 Transcript or record-write failures report finalization failure and retain an
 incomplete `HALTED` record when the filesystem still permits writing.
 
-`VERIFIED` / `0` means native-advisory check success, not factual correctness,
-sandboxing, signing, budget enforcement, or merge permission. There is no
-retry/resume, graph scheduling, or delivery facility.
+**Passed checks and an overall `UNPROVEN` result are compatible.** A completed
+local run can save the output and pass every check, but it was not sandboxed.
+The terminal, `record.json`, and exit code report this same distinction.
+`--allow-host-access` permits the run; it does not raise the result to `VERIFIED`.
+An earlier experimental build returned `0` for passing local checks; callers
+must now handle `21` and inspect the saved check results instead.
+
+Checks establish only the conditions they examine, not complete factual
+correctness, signing, spending limits, or merge permission. This runner has no
+sandbox mode, retry/resume, graph scheduling, or delivery facility.
 
 Contract checks do not replace package security: **built-in protection**
 automatically blocks critical findings during `install`, `compile`, and `unpack`,

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -18,6 +19,7 @@ from apm_cli.contracts.models import (
     CheckObservation,
     CheckSpec,
     ContractError,
+    ContractSource,
     FileEntry,
     ImportedSkill,
     LeafContract,
@@ -59,7 +61,7 @@ def test_reuse_plan_shows_resolved_skill_identity_before_consent(
     assert (
         "Source identity: ../handoff-style; observed-local-source, not a cryptographic pin"
         in output
-    )
+    ) is verbose
     assert (digest in output) is verbose
     assert not (tmp_path / ".apm").exists()
 
@@ -119,14 +121,23 @@ def test_ordered_phases_final_once_and_frozen_transcript(tmp_path: Path, capsys)
     output = capsys.readouterr().out
     positions = [
         output.index(name)
-        for name in ("Preflight", "Execution", "Capture", "Checks", "Record\n", "VERIFIED")
+        for name in (
+            "Preparing files",
+            "Running Copilot",
+            "Saving output",
+            "APM: checking",
+            "Saving results",
+            "VERIFIED",
+        )
     ]
     assert positions == sorted(positions)
     assert output.count("VERIFIED") == 1
-    assert output.index("Run: run-id") < output.index("Preflight")
+    assert output.index("Job: hello.contract.md") < output.index("Preparing files")
     assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
     assert b"VERIFIED" not in path.read_bytes()
-    assert "Observed execution model: unknown" in output
+    assert "Observed execution model" not in output
+    assert "Run: run-id" not in output
+    assert "Run: run-id" in path.read_text()
     if os.name == "posix":
         assert path.stat().st_mode & 0o777 == 0o600
 
@@ -190,10 +201,10 @@ def test_stop_request_precedes_observation_and_preserves_provisional_path(
         result=_result(tmp_path, Outcome.HALTED, stop_reason="cancelled", artifact=artifact),
     )
     output = capsys.readouterr().out
-    expected = "Original process-group stop confirmed" if confirmed else "Stop unconfirmed"
+    expected = "Managed process group stopped" if confirmed else "Stop unconfirmed"
     assert output.index("Stop requested") < output.index(expected) < output.index("HALTED")
-    assert "Provisional artifact:" in output
-    assert "answer.txt" in "".join(line[4:].strip() for line in output.splitlines())
+    assert "Output:" in output
+    assert "answer.txt" in output
     assert "cancelled successfully" not in output
 
 
@@ -275,7 +286,7 @@ def test_transcript_saturation_does_not_hide_lifecycle_or_stderr(tmp_path: Path,
     )
     output = capsys.readouterr().out
     assert "Useful last error" in output
-    assert "Record" in output
+    assert "Saving results" in output
     assert "HALTED" in output
     assert (tmp_path / "transcript.log").stat().st_size <= 1024
 
@@ -295,11 +306,13 @@ def test_closed_pipe_disables_human_output_but_not_recording(tmp_path: Path, mon
     emitter.emit("activity", source="harness", text="Still captured")
     emitter.emit("stop_requested", reason="cancelled")
     emitter.emit("stop_observed", confirmed=True, reason="cancelled")
+    emitter.emit("phase", name="record")
     logger.close()
     emitter.emit("finished", result=_result(tmp_path, Outcome.HALTED, stop_reason="cancelled"))
     logger.close()
     assert len(calls) == 1
     assert "Still captured" in (tmp_path / "transcript.log").read_text()
+    assert "Saving results" in (tmp_path / "transcript.log").read_text()
 
 
 def test_unrelated_renderer_errors_are_not_silently_swallowed(monkeypatch) -> None:
@@ -342,7 +355,10 @@ def test_rich_honors_machine_output_routing(capsys) -> None:
     assert "Inspect source" in captured.err
 
 
-def test_plan_is_nonexecuting_no_prompt_or_model_claim(capsys, tmp_path: Path) -> None:
+@pytest.mark.parametrize("verbose", [False, True])
+def test_plan_is_nonexecuting_no_prompt_or_model_claim(
+    capsys, tmp_path: Path, verbose: bool
+) -> None:
     plan = LeafPlan(
         contract=LeafContract(
             tmp_path / "hello.contract.md",
@@ -356,16 +372,26 @@ def test_plan_is_nonexecuting_no_prompt_or_model_claim(capsys, tmp_path: Path) -
         executable=Path("/native/copilot"),
         model=None,
     )
-    ContractLogger().render_plan(plan, (FileEntry("input.txt", "sha", 7, 0o644),))
+    ContractLogger(verbose=verbose).render_plan(plan, (FileEntry("input.txt", "sha", 7, 0o644),))
     output = capsys.readouterr().out
-    assert "Plan only -- no execution" in output
-    assert "Baseline: 1 files, 7 bytes" in output
-    assert "requested model: native default" in output
+    assert "Preview: hello.contract.md -> output.txt" in output
+    assert "Nothing will execute or download." in output
+    assert "Copilot / default model" in output
+    assert "native default" not in output
+    assert "Input: input.txt" in output
+    assert "Checks: content" in output
+    assert "Time limits: run" in output
+    assert "UNPROVEN because it is not sandboxed." in output
+    assert ("Baseline: 1 files, 7 bytes" in output) is verbose
+    assert ("Native executable:" in output) is verbose
+    assert ("Policy: no-policy" in output) is verbose
+    assert ("Requested model:" in output) is verbose
     assert "DO NOT DUMP" not in output
-    assert "private check command" not in output
-    assert "--allow-host-access" in output
-    assert "terminals and pipes" in output
-    assert "available login details" in output
+    assert ("private check command" in output) is verbose
+    assert "To run, use apmx with --allow-host-access and without --plan." in output
+    assert "Imported skill:" not in output
+    for stale in ("Installed skills: 0", "Watchdogs", "Harness:", "available login details", "[!]"):
+        assert stale not in output
     assert "***" not in output
     assert not (tmp_path / "transcript.log").exists()
 
@@ -379,7 +405,9 @@ def test_pre_admission_error_has_source_location_not_fake_run(capsys, tmp_path: 
         )
     )
     output = capsys.readouterr().out
-    assert "HALTED -- missing_executable" in output
+    assert "APM: HALTED" in output
+    assert "Install the required executable and retry." in output
+    assert "missing_executable" not in output
     assert "job.contract.md:7:3" in output
     assert "copilot login" not in output
     assert "Run:" not in output
@@ -452,12 +480,13 @@ def test_spinner_starts_immediately_updates_and_stops(
     status.start.assert_called_once()
     assert animated_console.status.call_args.kwargs == {
         "spinner": "line",
+        "spinner_style": "cyan",
         "refresh_per_second": 8,
     }
     assert animated_console.status.call_args.args[0].plain == "Running Copilot..."
     events.emit("check_started", name="handoff")
     status.update.assert_called_once()
-    assert status.update.call_args.args[0].plain == "Running check: handoff..."
+    assert status.update.call_args.args[0].plain == "Checking saved output (handoff)..."
     events.emit("heartbeat", elapsed_seconds=5)
     assert not any("still running" in call.args[0] for call in console._rich_echo.call_args_list)
     if finish == "close":
@@ -516,7 +545,7 @@ def test_public_subprocess_output_flows_while_spinner_remains_active(
     assert "Public line" in output
     assert "Reading input" in output
     assert "Tool started: view" in output
-    assert "copilot stderr (untrusted): Native diagnostic" in output
+    assert "Copilot stderr > Native diagnostic" in output
     assert "PRIVATE_" not in output
     animated_console.status.return_value.stop.assert_not_called()
     decoder.feed(
@@ -557,11 +586,14 @@ def test_broken_pipe_stops_animation_without_losing_transcript(
 def test_closed_output_cannot_start_animation(
     animated_console: Mock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(console, "_rich_echo", Mock(side_effect=BrokenPipeError))
+    animated_console.status.return_value.start.side_effect = BrokenPipeError
     logger = ContractLogger()
     logger.start_activity("Preparing package")
+    logger.start_activity("Running Copilot")
     logger.close()
-    animated_console.status.assert_not_called()
+    animated_console.status.assert_called_once()
+    animated_console.status.return_value.stop.assert_called_once()
+    assert not logger._human_enabled
 
 
 def test_transcript_cannot_overwrite_or_follow_existing_path(tmp_path: Path) -> None:
@@ -637,6 +669,10 @@ def test_analysis_phase_never_reaches_terminal_or_transcript(
         ("assistant.message_start", {"messageId": "hidden", "phase": "analysis"}),
         ("assistant.message_delta", {"messageId": "hidden", "deltaContent": "PRIVATE_ANALYSIS\n"}),
         ("assistant.message", {"messageId": "hidden", "content": "PRIVATE_ANALYSIS\n"}),
+        (
+            "assistant.message_delta",
+            {"messageId": "unlabeled", "deltaContent": "PRIVATE_UNKNOWN_PHASE\n"},
+        ),
         ("tool.execution_start", {"toolName": "apply_patch", "arguments": "PRIVATE_TOOL_ARGS"}),
         ("assistant.message_start", {"messageId": "answer", "phase": "final_answer"}),
         ("assistant.message_delta", {"messageId": "answer", "deltaContent": "Public answer\n"}),
@@ -677,7 +713,7 @@ def test_pre_engine_interrupt_reports_halted_without_claiming_child_cleanup(caps
     logger.close()
     output = capsys.readouterr().out
     assert "HALTED" in output
-    assert "cancelled" in output
+    assert "interrupted" in output
     assert "Run:" not in output
     assert "stop confirmed" not in output
     assert "terminated" not in output
@@ -696,8 +732,8 @@ def test_stop_confirmation_before_capture_does_not_claim_an_artifact(
     output = capsys.readouterr().out
     transcript = (tmp_path / "transcript.log").read_text()
     for text in (output, transcript):
-        assert "Original process-group stop confirmed" in text
-        assert "checking for provisional output" in text
+        assert "Managed process group stopped" in text
+        assert "looking for output" in text
         assert "retained" not in text
         assert "Artifact:" not in text
         assert "[+]" not in text
@@ -737,6 +773,9 @@ def test_colored_contract_mode_preserves_legacy_autoreset_setup(monkeypatch) -> 
     from colorama import initialise
 
     monkeypatch.delenv("NO_COLOR")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("CI", "false")
+    monkeypatch.setattr(console, "_get_console", lambda: Mock(is_terminal=True))
     monkeypatch.setattr(initialise, "atexit_done", True)
     calls = []
     monkeypatch.setattr(
@@ -891,7 +930,403 @@ def test_full_source_artifact_and_log_paths_stay_copyable(
     if no_color:
         assert "\x1b" not in output
     lines = click.unstyle(output).splitlines()
-    assert f"[>] Contract: {source}" in lines
-    assert f"[i] Provisional artifact: {artifact_path}" in lines
-    assert lines.count(f"[i] Record and logs: {directory}") == 2
-    assert not any(line.startswith("[i]   ") or line.startswith("[>]   ") for line in lines)
+    assert f"Job: {source.name} -> saved output" in lines
+    assert str(source) not in output
+    assert f"  Output: {artifact_path}" in lines
+    assert lines.count(f"  Record: {directory / 'record.json'}") == 1
+    assert not any(line.startswith("[i]") for line in lines)
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_default_job_to_saved_output_story_and_verbose_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, verbose: bool
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    directory = tmp_path / ".apm" / "runs" / "run"
+    directory.mkdir(parents=True)
+    logger = ContractLogger(verbose=verbose)
+    logger.attach_run("run", directory)
+    events = EventEmitter("run", logger.on_event)
+    events.emit(
+        "selected",
+        contract=str(tmp_path / "jobs" / "handoff.contract.md"),
+        caller_root=str(tmp_path),
+        produces="handoff.json",
+        model="requested-model",
+        harness="copilot",
+        run_directory=str(directory),
+    )
+    events.emit("phase", name="execution")
+    events.emit("activity", source="harness", text="The requested output is ready.")
+    events.emit("phase", name="checks")
+    events.emit("check_started", name="handoff")
+    events.emit(
+        "activity",
+        source="checker",
+        label="handoff",
+        text="Required fields present; 3 items checked.",
+    )
+    events.emit("check_finished", observation=_check(0, 0, "handoff"))
+    events.emit("phase", name="record")
+    logger.close()
+    logger.on_event(
+        RunEvent(
+            "run",
+            20,
+            12.34,
+            "finished",
+            "engine",
+            {
+                "result": _result(
+                    directory,
+                    Outcome.UNPROVEN,
+                    checks=(_check(0, 0, "handoff"),),
+                    observed_models=("observed-model",),
+                    artifact=Artifact(
+                        "handoff.json", directory / "artifacts/handoff.json", "sha", 4
+                    ),
+                )
+            },
+        )
+    )
+    output = capsys.readouterr().out
+    assert output.index("Job: jobs/handoff.contract.md -> handoff.json") < output.index("Copilot >")
+    assert output.index("Copilot >") < output.index("APM: checking handoff.json")
+    assert output.index("Check handoff > Required fields present") < output.index(
+        "[+] handoff: passed"
+    )
+    assert output.index("[+] handoff: passed") < output.index("[!] APM: UNPROVEN  12.3s")
+    assert "Contract checks passed; this run was not sandboxed." in output
+    assert "  Output: .apm/runs/run/artifacts/handoff.json\n" in output
+    assert "  Record: .apm/runs/run/record.json\n" in output
+    for jargon in (
+        "Preflight",
+        "Execution",
+        "Capture",
+        "native-advisory",
+        "(untrusted)",
+        "Provisional",
+        "[i]",
+        "not protected provenance",
+    ):
+        assert jargon not in output
+    assert output.count("requested-model") == 1 + int(verbose)
+    assert "(requested)" not in output
+    assert "[>] Checking handoff.json" not in output
+    for detail in (
+        "raw exit 0",
+        "Run: run",
+        "Source:",
+        "observed-model",
+        "Logs:",
+        "Logs may contain sensitive data. Review before sharing.",
+    ):
+        assert (detail in output) is verbose
+    transcript = (directory / "transcript.log").read_text()
+    assert "Check handoff (untrusted) > Required fields present" in transcript
+    assert "raw exit 0" in transcript
+    assert "Run: run" in transcript
+    assert "[!] APM: UNPROVEN" not in transcript
+
+
+def test_saved_paths_are_relative_to_original_caller_after_cwd_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    caller = tmp_path / "caller"
+    transient = tmp_path / "deleted-source-copy"
+    caller.mkdir()
+    transient.mkdir()
+    monkeypatch.chdir(caller)
+    logger = ContractLogger()
+    directory = caller / ".apm/runs/stable"
+    monkeypatch.chdir(transient)
+    EventEmitter("run", logger.on_event).emit(
+        "finished",
+        result=_result(
+            directory,
+            Outcome.UNPROVEN,
+            artifact=Artifact("output.txt", directory / "artifacts/output.txt", "digest", 1),
+        ),
+    )
+    output = capsys.readouterr().out
+    assert "Output: .apm/runs/stable/artifacts/output.txt" in output
+    assert "Record: .apm/runs/stable/record.json" in output
+    assert str(caller) not in output
+    assert str(transient) not in output
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+@pytest.mark.parametrize("local_package", [False, True])
+def test_packaged_job_identity_uses_stable_contract_path(
+    tmp_path: Path, capsys, verbose: bool, local_package: bool
+) -> None:
+    source = tmp_path / "private-source-copy" / "contract.contract.md"
+    package_ref = str(tmp_path / "local-package") if local_package else "org/jobs/handoff#v1"
+    events = EventEmitter("run", ContractLogger(verbose=verbose).on_event)
+    events.emit(
+        "selected",
+        contract=str(source),
+        contract_relative_path="contracts/handoff.contract.md",
+        package_ref=package_ref,
+        caller_root=str(tmp_path),
+        produces="handoff.json",
+        model="native-model",
+    )
+    output = capsys.readouterr().out
+    assert "Job: contracts/handoff.contract.md -> handoff.json" in output
+    assert ("private-source-copy" in output) is verbose
+    assert (f"Package: {package_ref}" in output) is verbose
+    assert output.count("native-model") == 1 + int(verbose)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "reason", "message", "color"),
+    [
+        (Outcome.VERIFIED, None, "Contract checks passed.", "green"),
+        (Outcome.REJECTED, None, "Contract checks found a problem.", "red"),
+        (Outcome.UNPROVEN, None, "Checks could not establish a result.", "yellow"),
+        (Outcome.HALTED, "cancelled", "Run interrupted.", "red"),
+        (Outcome.HALTED, "producer_failed", "Copilot did not complete successfully.", "red"),
+        (Outcome.HALTED, "checker_stop_unconfirmed", "A check may still be running.", "red"),
+        (Outcome.HALTED, "attempt_deadline", "The run exceeded its time limit.", "red"),
+    ],
+)
+def test_result_headline_color_and_reason_follow_owner(
+    tmp_path: Path,
+    animated_console: Mock,
+    outcome: Outcome,
+    reason: str | None,
+    message: str,
+    color: str,
+) -> None:
+    logger = ContractLogger()
+    events = EventEmitter("run", logger.on_event)
+    events.emit(
+        "finished",
+        result=_result(
+            tmp_path,
+            outcome,
+            stop_reason=reason,
+            artifact=Artifact("output.txt", tmp_path / "output.txt", "sha", 1),
+        ),
+    )
+    calls = console._rich_echo.call_args_list
+    headline = next(call for call in calls if f"APM: {outcome.name}" in call.args[0])
+    assert headline.kwargs["color"] == color
+    assert headline.args[0][: headline.kwargs["accent_length"]].endswith(outcome.name)
+    assert any(message in call.args[0] for call in calls)
+    assert any(call.args[0].startswith("  Output:") for call in calls)
+    assert not any("provisional" in call.args[0].lower() for call in calls)
+
+
+def test_animated_phases_are_transient_but_retained(tmp_path: Path, animated_console: Mock) -> None:
+    logger = ContractLogger()
+    logger.attach_run("run", tmp_path)
+    events = EventEmitter("run", logger.on_event)
+    for phase in ("preflight", "execution", "capture", "checks", "record"):
+        events.emit("phase", name=phase)
+    logger.close()
+    written = "\n".join(call.args[0] for call in console._rich_echo.call_args_list)
+    assert written.strip() == "APM: checking saved output"
+    for label in (
+        "Preparing files",
+        "Running Copilot",
+        "Saving output",
+        "Saving results",
+    ):
+        assert label in (tmp_path / "transcript.log").read_text()
+    status = animated_console.status.return_value
+    status.start.assert_called_once()
+    assert status.update.call_count == 4
+    status.stop.assert_called_once()
+
+
+@pytest.mark.parametrize("disabled", ["NO_COLOR", "CI", "TERM", "pipe"])
+def test_forced_progress_cannot_override_plain_terminal_policy(
+    animated_console: Mock, monkeypatch: pytest.MonkeyPatch, disabled: str
+) -> None:
+    monkeypatch.setenv("APM_PROGRESS", "always")
+    if disabled == "pipe":
+        animated_console.is_terminal = False
+    else:
+        monkeypatch.setenv(disabled, {"NO_COLOR": "", "CI": "true", "TERM": "dumb"}[disabled])
+    logger = ContractLogger()
+    logger.start_activity("Running Copilot")
+    logger.close()
+    animated_console.status.assert_not_called()
+    assert console._rich_echo.call_args.kwargs["plain"]
+
+
+def test_rich_accent_is_opt_in_and_never_styles_body_or_parses_markup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rich.console import Console
+
+    monkeypatch.delenv("NO_COLOR")
+    destination = io.StringIO()
+    rich_console = Console(file=destination, force_terminal=True, color_system="standard")
+    monkeypatch.setattr(console, "_get_console", lambda: rich_console)
+    console._rich_echo(
+        "[!] APM: UNPROVEN  [blue]literal[/blue]",
+        color="yellow",
+        bold=True,
+        accent_length=len("[!] APM: UNPROVEN"),
+        natural_wrap=True,
+    )
+    colored = destination.getvalue()
+    assert "\x1b[1;33m[!] APM: UNPROVEN\x1b[0m" in colored
+    assert "\x1b[39m  [blue]literal[/blue]\x1b[0m" in colored
+    assert "\x1b[34m" not in colored
+    destination.seek(0)
+    destination.truncate()
+    console._rich_echo("Legacy body", color="blue")
+    assert "\x1b[34mLegacy body\x1b[0m" in destination.getvalue()
+
+
+def test_checker_diagnostics_are_not_invented_from_passing_exit(capsys) -> None:
+    events = EventEmitter("run", ContractLogger().on_event)
+    events.emit("check_finished", observation=_check(0, 0, "nonempty"))
+    text = capsys.readouterr().out
+    assert text.strip() == "[+] nonempty: passed"
+    assert "valid" not in text.lower()
+    assert "schema" not in text.lower()
+
+
+def test_changed_check_subject_explanation_is_not_hidden_with_raw_zero(capsys) -> None:
+    events = EventEmitter("run", ContractLogger().on_event)
+    events.emit(
+        "check_finished",
+        observation=CheckObservation(
+            name="integrity",
+            command="private command",
+            process=ProcessObservation(returncode=0),
+            normalized=2,
+            subject_digest="sha",
+            resources_digest="sha",
+            reason="The supplied subject or check resources changed.",
+        ),
+    )
+    output = capsys.readouterr().out
+    assert "[!] integrity: incomplete" in output
+    assert "APM: check 'integrity': The supplied subject or check resources changed." in output
+    assert "Check integrity >" not in output
+    assert "raw exit" not in output
+
+
+@pytest.mark.parametrize("assurance_limited", [False, True])
+def test_assurance_explanation_routes_through_record_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, assurance_limited: bool
+) -> None:
+    result = _result(
+        tmp_path,
+        Outcome.UNPROVEN,
+        artifact=Artifact("output.txt", tmp_path / "output.txt", "sha", 1),
+        checks=(_check(0, 0),),
+    )
+    owner = Mock(return_value=assurance_limited)
+    monkeypatch.setattr("apm_cli.contracts.records.native_assurance_limited", owner)
+    EventEmitter("run", ContractLogger().on_event).emit("finished", result=result)
+    owner.assert_called_once_with(result)
+    output = capsys.readouterr().out
+    assert ("Contract checks passed; this run was not sandboxed." in output) is assurance_limited
+    assert ("Checks could not establish a result." in output) is not assurance_limited
+    assert "[!] APM: UNPROVEN" in output
+    assert "Stop reason:" not in output
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_packaged_preview_uses_stable_identity_and_gates_source_metadata(
+    tmp_path: Path, capsys, verbose: bool
+) -> None:
+    package = tmp_path / "local-package"
+    disposable = tmp_path / "private-source-copy"
+    relative = "contracts/handoff.contract.md"
+    plan = LeafPlan(
+        contract=LeafContract(
+            disposable / relative,
+            "source-digest",
+            "PRIVATE_PROMPT",
+            ("notes.txt",),
+            "handoff.json",
+            (CheckSpec("handoff", "PRIVATE_CHECK_COMMAND"),),
+        ),
+        project_root=tmp_path,
+        executable=Path("/native/copilot"),
+        model="fixture-model",
+        source=ContractSource(
+            root=disposable,
+            contract_relative_path=relative,
+            original_root=package,
+            package_ref=str(package),
+        ),
+    )
+    ContractLogger(verbose=verbose).render_plan(plan, ())
+    output = capsys.readouterr().out
+    assert "Preview: contracts/handoff.contract.md -> handoff.json" in output
+    assert "Nothing will execute or download." in output
+    assert "without --plan" in output
+    assert ("Source: " + str(package / relative) in output) is verbose
+    assert (f"Package: {package}" in output) is verbose
+    assert "private-source-copy" not in output
+    assert "PRIVATE_PROMPT" not in output
+    assert ("PRIVATE_CHECK_COMMAND" in output) is verbose
+    assert not (tmp_path / ".apm").exists()
+
+
+def test_plain_checks_have_one_heading_without_duplicate_phase_narration(capsys) -> None:
+    events = EventEmitter("run", ContractLogger().on_event)
+    events.emit("selected", contract="job.contract.md", produces="handoff.json")
+    events.emit("phase", name="checks")
+    for name in ("format", "coverage"):
+        events.emit("check_started", name=name)
+        events.emit("activity", source="checker", label=name, text="Observed checker diagnostic.")
+        events.emit("check_finished", observation=_check(0, 0, name))
+    output = capsys.readouterr().out
+    assert output.count("APM: checking handoff.json") == 1
+    assert "Copilot / default model" in output
+    assert "native default" not in output
+    assert "[>] Checking" not in output
+    assert "(saved output)" not in output
+    assert "Check format > Observed checker diagnostic." in output
+    assert "Check coverage > Observed checker diagnostic." in output
+    assert "[+] format: passed" in output
+    assert "[+] coverage: passed" in output
+
+
+@pytest.mark.parametrize(
+    ("process", "cause"),
+    [
+        (ProcessObservation(returncode=127), "The check exited with status 127."),
+        (ProcessObservation(returncode=2), "The check exited with status 2."),
+        (ProcessObservation(returncode=-9), "The check was terminated by signal 9."),
+        (ProcessObservation(returncode=None), "No exit status was observed."),
+        (
+            ProcessObservation(returncode=None, error="Unable to create check workspace."),
+            "Unable to create check workspace.",
+        ),
+        (
+            ProcessObservation(returncode=-15, stop_reason="timeout"),
+            "The check exceeded its time limit.",
+        ),
+        (
+            ProcessObservation(returncode=0, cleanup_confirmed=False),
+            "Process cleanup could not be confirmed.",
+        ),
+    ],
+)
+def test_incomplete_check_cause_is_visible_and_engine_owned(
+    tmp_path: Path, capsys, process: ProcessObservation, cause: str
+) -> None:
+    logger = ContractLogger()
+    logger.attach_run("run", tmp_path)
+    events = EventEmitter("run", logger.on_event)
+    events.emit(
+        "check_finished",
+        observation=replace(_check(process.returncode, 2), process=process),
+    )
+    logger.close()
+    output = capsys.readouterr().out
+    assert "[!] criterion: incomplete" in output
+    assert f"APM: check 'criterion': {cause}" in output
+    assert "Check criterion >" not in output
+    assert "untrusted" not in (tmp_path / "transcript.log").read_text()

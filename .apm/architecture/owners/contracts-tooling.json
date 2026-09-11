@@ -31,7 +31,7 @@
     },
     {
       "id": "contract-leaf-outcome",
-      "decision": "Contract check normalization, terminal reduction and atomic run records",
+      "decision": "Contract check normalization, native-host assurance ceiling, terminal reduction and atomic run records",
       "owner": "contracts/records.py with outcome vocabulary in contracts/models.py",
       "selectors": ["src/apm_cli/contracts/records.py", "src/apm_cli/contracts/models.py"],
       "guards": ["contracts-leaf-outcome"]

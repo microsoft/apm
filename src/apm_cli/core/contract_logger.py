@@ -9,6 +9,7 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
+from apm_cli.contracts import records
 from apm_cli.contracts.events import HEARTBEAT_SECONDS
 from apm_cli.contracts.models import (
     CheckObservation,
@@ -22,6 +23,7 @@ from apm_cli.contracts.models import (
 )
 from apm_cli.contracts.stream import safe_text
 from apm_cli.utils import console
+from apm_cli.utils.paths import portable_relpath
 
 from .command_logger import CommandLogger
 
@@ -91,28 +93,41 @@ class ContractLogger(CommandLogger):
         self._last_phase: str | None = None
         self._last_activity = 0.0
         self._status: Status | None = None
+        self._caller_root = Path.cwd()
+        self._produces = "saved output"
+        self._activity_label = "Working"
+        self._checks_heading_shown = False
 
     def start_activity(self, message: str, *, announce: bool = True) -> None:
         """Animate quiet work using the install spinner, never in retained logs."""
-        if self._closed or not self._human_enabled:
+        if self._closed:
             return
-        if announce:
-            self._write(message, severity="start")
-            if not self._human_enabled:
-                return
+        self._activity_label = message
+        if not self._human_enabled:
+            if announce:
+                self._write(message, severity="start")
+            return
         from apm_cli.utils.install_tui import should_animate
 
-        if "NO_COLOR" in os.environ or not should_animate():
-            return
         rich_console = console._get_console()
-        if rich_console is None or not rich_console.is_terminal:
+        animate = (
+            not self._plain_output()
+            and should_animate()
+            and rich_console is not None
+            and rich_console.is_terminal
+        )
+        if announce:
+            self._write(message, severity="start", detail=animate)
+        if not animate or not self._human_enabled:
             return
         from rich.text import Text
 
-        label = Text(safe_text(message) + "...", style="cyan")
+        label = Text(safe_text(message) + "...", style="default", no_wrap=True, overflow="ellipsis")
         try:
             if self._status is None:
-                self._status = rich_console.status(label, spinner="line", refresh_per_second=8)
+                self._status = rich_console.status(
+                    label, spinner="line", spinner_style="cyan", refresh_per_second=8
+                )
                 self._status.start()
             else:
                 self._status.update(label)
@@ -173,37 +188,73 @@ class ContractLogger(CommandLogger):
         severity: str = "info",
         detail: bool = False,
         attribution: str | None = None,
+        accent: str = "",
+        indent: int = 2,
     ) -> None:
         text = safe_text(message)
-        prefix = f"{safe_text(attribution, limit=256)}: " if attribution else ""
+        source = safe_text(attribution, limit=256) if attribution else ""
+        prefix = f"{source} > " if source else ""
         symbol, color = {
-            "start": ("running", "blue"),
-            "info": ("info", "blue"),
+            "start": ("running", "cyan"),
+            "info": ("", "default"),
+            "heading": ("", "default"),
             "warning": ("warning", "yellow"),
             "error": ("error", "red"),
             "success": ("check", "green"),
-            "detail": ("info", "dim"),
+            "detail": ("", "dim"),
         }[severity]
+        # Native diagnostics retain their source, never an engine status symbol.
+        marker = console.STATUS_SYMBOLS[symbol] + " " if symbol and not source else ""
+        line = " " * indent + marker + prefix + text
         if not self._closed:
-            self._transcript.append(f"{console.STATUS_SYMBOLS[symbol]} {prefix}{text}")
+            retained_prefix = f"{source} (untrusted) > " if source else ""
+            self._transcript.append(" " * indent + marker + retained_prefix + text)
         if not self._human_enabled or (detail and not self.verbose):
             return
+        accent_length = (
+            indent + len(marker) + len(safe_text(accent)) if accent else indent + len(marker)
+        )
+        if severity in {"detail", "heading"}:
+            accent_length = len(line)
         try:
             # Keep paths and messages as intact logical lines in pipes and
             # terminals. The terminal may wrap visually; the renderer must not
             # inject newlines or continuation prefixes into copyable paths.
             console._rich_echo(
-                prefix + text,
+                line,
                 color=color,
-                symbol=symbol,
+                bold=severity == "heading" or bool(accent),
                 propagate_broken_pipe=True,
-                plain="NO_COLOR" in os.environ,
+                plain=self._plain_output(),
                 natural_wrap=True,
+                accent_length=accent_length,
             )
         except BrokenPipeError:
             # Do not recursively try to print an error into the closed pipe.
             # Observation, stream draining, recording and process cleanup remain.
             self._disable_human_output()
+
+    @staticmethod
+    def _plain_output() -> bool:
+        """Keep noninteractive output escape-free, even with forced progress."""
+        if (
+            "NO_COLOR" in os.environ
+            or os.environ.get("CI", "").strip().lower() in {"1", "true", "yes"}
+            or os.environ.get("TERM", "").strip().lower() in {"", "dumb"}
+        ):
+            return True
+        rich_console = console._get_console()
+        if rich_console is not None:
+            return not rich_console.is_terminal
+        stream = sys.stderr if console._console_stderr else sys.stdout
+        return not stream.isatty()
+
+    def _path(self, path: Path | str) -> str:
+        """Keep saved paths copyable relative to the original caller, not cwd."""
+        path = Path(path)
+        if not path.is_absolute():
+            path = self._caller_root / path
+        return portable_relpath(path, self._caller_root)
 
     def _disable_human_output(self) -> None:
         self._human_enabled = False
@@ -258,17 +309,35 @@ class ContractLogger(CommandLogger):
         value = event.data.get(name)
         return value if isinstance(value, str) else default
 
+    def _job_identity(self, source: Path | str, relative: str = "") -> str:
+        """Prefer the selected contract's stable path over package-copy paths."""
+        if relative:
+            return relative
+        identity = self._path(source)
+        return Path(source).name if Path(identity).is_absolute() else identity
+
     def _selected(self, event: RunEvent) -> None:
-        self._write(f"Contract: {self._field(event, 'contract')}", severity="start")
+        caller = self._field(event, "caller_root", "")
+        if caller:
+            self._caller_root = Path(caller)
+        self._produces = self._field(event, "produces", "saved output")
+        source = self._field(event, "contract")
+        relative = self._field(event, "contract_relative_path", "")
+        package = self._field(event, "package_ref", "")
+        identity = self._job_identity(source, relative)
+        model = self._field(event, "model", "default model")
+        self._write(f"Job: {identity} -> {self._produces}", severity="heading", indent=0)
+        self._write(f"Copilot / {model}")
+        self._write("Running on your machine (not sandboxed).")
+        self._write(f"Source: {self._path(source)}", severity="detail", detail=True)
+        if package:
+            self._write(f"Package: {package}", severity="detail", detail=True)
+        self._write(f"Requested model: {model}", severity="detail", detail=True)
+        self._write(f"Run: {event.run_id}", severity="detail", detail=True)
         self._write(
-            f"Harness: {self._field(event, 'harness')}; "
-            f"requested model: {self._field(event, 'model', 'native default')}"
-        )
-        self._write(f"Run: {event.run_id}")
-        self._write(f"Record and logs: {self._field(event, 'run_directory')}")
-        self._write(
-            "Native host: advisory, not isolated. Consent does not override policy.",
-            severity="warning",
+            f"Record directory: {self._field(event, 'run_directory')}",
+            severity="detail",
+            detail=True,
         )
 
     def _phase(self, event: RunEvent) -> None:
@@ -276,20 +345,20 @@ class ContractLogger(CommandLogger):
         if phase == self._last_phase:
             return
         self._last_phase = phase
-        self._write(phase.capitalize(), severity="start")
-        self.start_activity(
-            {
-                "preflight": "Preparing files",
-                "execution": "Running Copilot",
-                "capture": "Saving output",
-                "checks": "Running checks",
-                "record": "Saving results",
-            }.get(phase, phase.capitalize()),
-            announce=False,
-        )
+        if phase == "checks":
+            self._checks_heading()
+        message = {
+            "preflight": "Preparing files",
+            "execution": "Running Copilot",
+            "capture": "Saving output",
+            "checks": f"Checking {self._produces}",
+            "record": "Saving results",
+        }.get(phase)
+        if message:
+            self.start_activity(message, announce=phase != "checks")
 
     def _attribution(self, event: RunEvent) -> str:
-        source = "copilot" if event.source == "harness" else event.source
+        source = {"harness": "Copilot", "checker": "Check"}.get(event.source, event.source)
         label = self._field(event, "label", "")
         stream = self._field(event, "stream", "")
         parts = [source]
@@ -297,7 +366,7 @@ class ContractLogger(CommandLogger):
             parts.append(label)
         if stream == "stderr":
             parts.append("stderr")
-        return " ".join(parts) + " (untrusted)"
+        return " ".join(parts)
 
     def _activity(self, event: RunEvent) -> None:
         self._write(self._field(event, "text", ""), attribution=self._attribution(event))
@@ -321,7 +390,10 @@ class ContractLogger(CommandLogger):
         )
         action = self._field(event, "action", "")
         if action:
-            self._write(action)
+            self._write(
+                action,
+                attribution=self._attribution(event) if event.source != "engine" else None,
+            )
 
     def _process_started(self, event: RunEvent) -> None:
         pid = event.data.get("pid")
@@ -336,13 +408,14 @@ class ContractLogger(CommandLogger):
     def _stop_requested(self, event: RunEvent) -> None:
         self.start_activity("Stopping processes", announce=False)
         self._write(
-            f"Stop requested -- {self._field(event, 'reason')}; waiting for confirmation.",
+            "Stop requested; waiting for managed processes.",
             severity="warning",
         )
+        self._write(f"Stop reason: {self._field(event, 'reason')}", severity="detail", detail=True)
 
     def _stop_observed(self, event: RunEvent) -> None:
         if event.data.get("confirmed") is True:
-            self._write("Original process-group stop confirmed; checking for provisional output.")
+            self._write("Managed process group stopped; looking for output.")
             self._write("Escaped descendants are unobserved.", severity="detail", detail=True)
         else:
             self._write(
@@ -351,8 +424,17 @@ class ContractLogger(CommandLogger):
             )
 
     def _check_started(self, event: RunEvent) -> None:
-        self._write(f"Check: {self._field(event, 'name')}", severity="start")
-        self.start_activity(f"Running check: {self._field(event, 'name')}", announce=False)
+        self._checks_heading()
+        self.start_activity(
+            f"Checking {self._produces} ({self._field(event, 'name')})",
+            announce=False,
+        )
+
+    def _checks_heading(self) -> None:
+        if not self._checks_heading_shown:
+            self._checks_heading_shown = True
+            self._write("", indent=0)
+            self._write(f"APM: checking {self._produces}", severity="heading", indent=0)
 
     def _check_finished(self, event: RunEvent) -> None:
         observation = event.data.get("observation")
@@ -364,10 +446,41 @@ class ContractLogger(CommandLogger):
         }.get(observation.normalized, ("incomplete", "warning"))
         raw = observation.process.returncode
         raw_text = "no exit status" if raw is None else f"raw exit {raw}"
-        self._write(f"{observation.name}: {status} ({raw_text})", severity=severity)
+        summary = f"{observation.name}: {status}"
+        self._write(summary, severity=severity, accent=summary)
+        self._write(f"Check {observation.name}: {raw_text}", severity="detail", detail=True)
         if observation.normalized != 0:
-            self._write(observation.reason)
-            self._write("Inspect the check definition and retained transcript, then rerun.")
+            if observation.normalized == 2:
+                self._write(
+                    f"APM: check '{observation.name}': {self._incomplete_check_reason(observation)}"
+                )
+            self._write(
+                f"APM: check '{observation.name}': {observation.reason}",
+                severity="detail",
+                detail=True,
+            )
+
+    @staticmethod
+    def _incomplete_check_reason(observation: CheckObservation) -> str:
+        """Explain observed process facts without inventing checker testimony."""
+        process = observation.process
+        if process.error:
+            return process.error
+        if process.stop_reason:
+            return {
+                "timeout": "The check exceeded its time limit.",
+                "attempt_deadline": "The run exceeded its time limit.",
+                "cancelled": "The check was interrupted.",
+            }.get(process.stop_reason, f"The check stopped ({process.stop_reason}).")
+        if not process.cleanup_confirmed:
+            return "Process cleanup could not be confirmed."
+        if process.returncode is None:
+            return "No exit status was observed."
+        if process.returncode < 0:
+            return f"The check was terminated by signal {-process.returncode}."
+        if process.returncode == 0:
+            return observation.reason
+        return f"The check exited with status {process.returncode}."
 
     def _heartbeat(self, event: RunEvent) -> None:
         elapsed = event.data.get("elapsed_seconds", event.elapsed_seconds)
@@ -377,7 +490,7 @@ class ContractLogger(CommandLogger):
             or elapsed - self._last_activity < HEARTBEAT_SECONDS
         ):
             return
-        self._write(f"Execution still running; {elapsed:.0f}s elapsed.")
+        self._write(f"{self._activity_label} -- still running; {elapsed:.0f}s elapsed.")
         self._last_activity = elapsed
 
     def _result(self, event: RunEvent) -> None:
@@ -388,53 +501,152 @@ class ContractLogger(CommandLogger):
             raise TypeError("finished requires a recorded RunResult.")
         self._finished = True
         self.stop_activity()
-        passed = sum(check.normalized == 0 for check in result.checks)
-        headline = f"{result.outcome.name} -- {passed}/{len(result.checks)} checks passed"
-        if result.outcome == Outcome.VERIFIED:
-            headline += "; native-advisory assessment"
-        elif result.stop_reason:
-            headline += f"; {result.stop_reason}; assessment incomplete"
-        elif result.artifact is None:
-            headline += "; declared output was not captured"
+        self._write("", indent=0)
+        headline = f"APM: {result.outcome.name}"
+        severity = {
+            Outcome.VERIFIED: "success",
+            Outcome.UNPROVEN: "warning",
+            Outcome.REJECTED: "error",
+            Outcome.HALTED: "error",
+        }[result.outcome]
         self._write(
-            headline,
-            severity="success" if result.outcome == Outcome.VERIFIED else "error",
+            f"{headline}  {event.elapsed_seconds:.1f}s",
+            severity=severity,
+            accent=headline,
+            indent=0,
         )
+        self._result_explanation(result)
         if result.artifact is not None:
-            label = "Artifact" if result.outcome == Outcome.VERIFIED else "Provisional artifact"
-            self._write(f"{label}: {result.artifact.path}")
-        if result.outcome != Outcome.VERIFIED:
-            self._write("Inspect the contract, retained record and transcript before retrying.")
+            self._write(f"Output: {self._path(result.artifact.path)}")
+        else:
+            self._write("No output was saved.")
+        self._write(f"Record: {self._path(result.run_directory / 'record.json')}")
         self._write(
             "Observed execution model: "
-            + (", ".join(result.observed_models) if result.observed_models else "unknown")
+            + (", ".join(result.observed_models) if result.observed_models else "unknown"),
+            severity="detail",
+            detail=True,
         )
-        self._write(f"Record and logs: {result.run_directory}")
-        self._write("Private, best-effort redacted local logs; not protected provenance.")
+        if result.stop_reason:
+            self._write(f"Stop reason: {result.stop_reason}", severity="detail", detail=True)
+        self._write(
+            f"Logs: {self._path(result.run_directory / 'transcript.log')}",
+            severity="detail",
+            detail=True,
+        )
+        self._write(
+            "Logs may contain sensitive data. Review before sharing.",
+            severity="detail",
+            detail=True,
+        )
+
+    def _result_explanation(self, result: RunResult) -> None:
+        """Explain the recorded outcome; never promote or downgrade it here."""
+        if result.outcome == Outcome.VERIFIED:
+            self._write("Contract checks passed.")
+        elif result.outcome == Outcome.REJECTED:
+            self._write("Contract checks found a problem.")
+            self._write("Review the failed checks and saved output before retrying.")
+        elif result.outcome == Outcome.UNPROVEN:
+            if records.native_assurance_limited(result):
+                self._write("Contract checks passed; this run was not sandboxed.")
+            elif result.artifact is None:
+                self._write("The declared output could not be checked.")
+                self._write(
+                    "Review the contract output path and Copilot diagnostics before retrying."
+                )
+            else:
+                self._write("Checks could not establish a result.")
+                self._write("Review incomplete checks and their prerequisites before retrying.")
+        else:
+            reason, action = {
+                "cancelled": ("Run interrupted.", "Review any saved output before rerunning."),
+                "producer_failed": (
+                    "Copilot did not complete successfully.",
+                    "Review Copilot diagnostics and logs before retrying.",
+                ),
+                "native_reported_failure": (
+                    "Copilot reported a failure.",
+                    "Review Copilot diagnostics and logs before retrying.",
+                ),
+                "native_protocol_error": (
+                    "Copilot output could not be interpreted.",
+                    "Review Copilot diagnostics and logs before retrying.",
+                ),
+                "native_completion_unobserved": (
+                    "Copilot completion was not observed.",
+                    "Review Copilot diagnostics and logs before retrying.",
+                ),
+                "attempt_deadline": (
+                    "The run exceeded its time limit.",
+                    "Review the contract workload before retrying.",
+                ),
+                "timeout": (
+                    "The process exceeded its time limit.",
+                    "Review the contract workload before retrying.",
+                ),
+                "producer_stop_unconfirmed": (
+                    "Copilot may still be running.",
+                    "Inspect the reported process before retrying.",
+                ),
+                "checker_stop_unconfirmed": (
+                    "A check may still be running.",
+                    "Inspect the reported process before retrying.",
+                ),
+            }.get(
+                result.stop_reason,
+                (
+                    "The run stopped before it could finish.",
+                    "Resolve the reported error before retrying.",
+                ),
+            )
+            self._write(reason)
+            self._write(action)
 
     def render_plan(self, plan: LeafPlan, inventory: tuple[FileEntry, ...]) -> None:
         """Show the admitted surface without printing source bodies or prompts."""
-        self._write("Plan only -- no execution", severity="start")
-        self._write(f"Contract: {plan.contract.path}")
-        self._write(f"Harness: {plan.harness}; requested model: {plan.model or 'native default'}")
-        self._write(f"Native executable: {plan.executable}")
-        self._write(
-            f"Baseline: {len(inventory)} files, {sum(item.size for item in inventory)} bytes"
+        relative = plan.source.contract_relative_path if plan.source else ""
+        source = (
+            (plan.source.original_root or plan.source.root) / relative
+            if plan.source
+            else plan.contract.path
         )
+        identity = self._job_identity(source, relative)
+        self._write(
+            f"Preview: {identity} -> {plan.contract.produces}", severity="heading", indent=0
+        )
+        self._write(f"Copilot / {plan.model or 'default model'}")
+        self._write("Nothing will execute or download.")
         for name in plan.contract.needs:
             self._write(f"Input: {name}")
-        self._write(f"Declared output: {plan.contract.produces}")
-        self._write(f"Checks: {len(plan.contract.checks)}")
-        for check in plan.contract.checks:
-            self._write(f"Check: {check.name}")
-            self._write(check.command, severity="detail", detail=True)
-        self._write(f"Installed skills: {len(plan.imported_skills)}")
+        self._write("Checks: " + ", ".join(check.name for check in plan.contract.checks))
         for skill in plan.imported_skills:
             self._write(f"Imported skill: {skill.name}")
+        self._write(
+            f"Time limits: run {plan.limits.attempt_seconds:g}s; "
+            f"each check {plan.limits.check_seconds:g}s"
+        )
+        self._write("Even with passing checks, a run returns UNPROVEN because it is not sandboxed.")
+        self._write("To run, use apmx with --allow-host-access and without --plan.")
+        self._write(f"Source: {self._path(source)}", severity="detail", detail=True)
+        if plan.source and plan.source.package_ref:
+            self._write(f"Package: {plan.source.package_ref}", severity="detail", detail=True)
+        self._write(
+            f"Requested model: {plan.model or 'default model'}", severity="detail", detail=True
+        )
+        self._write(f"Native executable: {plan.executable}", severity="detail", detail=True)
+        self._write(
+            f"Baseline: {len(inventory)} files, {sum(item.size for item in inventory)} bytes",
+            severity="detail",
+            detail=True,
+        )
+        for check in plan.contract.checks:
+            self._write(f"Check {check.name}: {check.command}", severity="detail", detail=True)
+        for skill in plan.imported_skills:
             identity = f"Source identity: {skill.lock_identity}; {skill.assurance}"
             if skill.assurance == "observed-local-source":
                 identity += ", not a cryptographic pin"
-            self._write(identity)
+            self._write(identity, severity="detail", detail=True)
             self._write(
                 f"Observed source SHA-256: {skill.source_digest}", severity="detail", detail=True
             )
@@ -442,23 +654,21 @@ class ContractLogger(CommandLogger):
                 self._write(
                     f"Resolved commit: {skill.resolved_commit}", severity="detail", detail=True
                 )
-        self._write(f"Policy: {plan.policy_status}")
-        self._write(
-            f"Watchdogs: attempt {plan.limits.attempt_seconds:g}s; "
-            f"each check {plan.limits.check_seconds:g}s"
-        )
-        self._write(
-            "Copilot and checks can read or change files, use the network, and use "
-            "available login details. --allow-host-access is required in terminals "
-            "and pipes; policy still applies.",
-            severity="warning",
-        )
+        self._write(f"Policy: {plan.policy_status}", severity="detail", detail=True)
 
     def render_error(self, error: ContractError) -> None:
         """Render a pre-admission refusal without inventing a run or a success."""
         self.stop_activity()
-        self._write(f"{error.outcome.name} -- {error.code}: {error}", severity="error")
+        headline = f"APM: {error.outcome.name}"
+        self._write(
+            headline,
+            severity="warning" if error.outcome == Outcome.UNPROVEN else "error",
+            accent=headline,
+            indent=0,
+        )
+        self._write(str(error))
+        self._write(f"Reason: {error.code}", severity="detail", detail=True)
         if error.location is not None:
             self._write(
-                f"Source: {error.location.path}:{error.location.line}:{error.location.column}"
+                f"Source: {self._path(error.location.path)}:{error.location.line}:{error.location.column}"
             )

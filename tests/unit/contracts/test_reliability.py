@@ -14,6 +14,7 @@ import pytest
 
 from apm_cli.contracts import process, records, workspace
 from apm_cli.contracts.models import (
+    Artifact,
     CheckObservation,
     ContractError,
     ContractLimits,
@@ -162,6 +163,50 @@ def test_empty_checks_and_failure_plus_incomplete_outcomes() -> None:
     assert records.reduce_outcome(None, (), None) == Outcome.UNPROVEN
     assert records.reduce_outcome(None, (incomplete, failed), None) == Outcome.REJECTED
     assert records.reduce_outcome(None, (failed,), "cancelled") == Outcome.HALTED
+
+
+@pytest.mark.parametrize(
+    ("statuses", "has_output", "stop_reason", "expected", "limited"),
+    [
+        ((0,), True, None, Outcome.UNPROVEN, True),
+        ((0, 0), True, None, Outcome.UNPROVEN, True),
+        ((0,), False, None, Outcome.UNPROVEN, False),
+        ((), True, None, Outcome.UNPROVEN, False),
+        ((0, 2), True, None, Outcome.UNPROVEN, False),
+        ((0, 1, 2), True, None, Outcome.REJECTED, False),
+        ((1,), False, None, Outcome.REJECTED, False),
+        ((0,), True, "cancelled", Outcome.HALTED, False),
+        ((1,), True, "producer_failed", Outcome.HALTED, False),
+    ],
+)
+def test_native_outcome_keeps_check_success_separate_from_isolation(
+    tmp_path: Path,
+    statuses: tuple[int, ...],
+    has_output: bool,
+    stop_reason: str | None,
+    expected: Outcome,
+    limited: bool,
+) -> None:
+    artifact = Artifact("output.txt", tmp_path / "output.txt", "digest", 1) if has_output else None
+    checks = tuple(
+        CheckObservation(str(index), "", ProcessObservation(status), status, "digest", "", "")
+        for index, status in enumerate(statuses)
+    )
+    outcome = records.reduce_outcome(artifact, checks, stop_reason)
+    assert outcome == expected
+    result = RunResult("run", tmp_path, outcome, artifact, checks, stop_reason)
+    assert records.native_assurance_limited(result) is limited
+
+
+def test_passing_native_run_still_requires_a_retained_transcript(tmp_path: Path) -> None:
+    store = records.AttemptStore.create(_plan(tmp_path))
+    artifact = Artifact("output.txt", store.directory / "output.txt", "digest", 1)
+    check = CheckObservation("shape", "", ProcessObservation(0), 0, "digest", "", "")
+    result = RunResult(store.run_id, store.directory, Outcome.UNPROVEN, artifact, (check,))
+    with pytest.raises(ContractError) as failure:
+        store.finish(result)
+    assert failure.value.code == "transcript_missing"
+    assert json.loads(store.record_path.read_text(encoding="utf-8"))["complete"] is False
 
 
 def test_both_streams_are_drained_and_spawn_failure_is_observed(tmp_path: Path) -> None:

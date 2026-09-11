@@ -38,6 +38,8 @@ decoder = ContractStreamDecoder(events)
 events.emit(
     "selected",
     contract=str(directory / "long-source-name.contract.md"),
+    caller_root=str(directory),
+    produces="handoff.json",
     harness="copilot",
     model="gpt-6-astra",
     run_directory=str(directory),
@@ -155,14 +157,14 @@ def test_real_pty_streams_before_completion_and_restores_terminal(
         text = output.decode("ascii").replace("\r", "")
         assert "\x1b" not in text
         lines = text.splitlines()
-        assert f"[>] Contract: {tmp_path / 'long-source-name.contract.md'}" in lines
-        assert f"[i] Record and logs: {tmp_path}" in lines
-        assert "[i] copilot (untrusted): Useful stream before completion" in lines
+        assert any("long-source-name.contract.md" in line for line in lines)
+        assert "  Record: record.json" in lines
+        assert "  Copilot > Useful stream before completion" in lines
         if cancel:
-            words = " ".join(line[4:].strip() for line in text.splitlines())
+            words = " ".join(line.strip() for line in text.splitlines())
             assert (
                 words.index("Stop requested")
-                < words.index("stop confirmed")
+                < words.index("Managed process group stopped")
                 < words.index("HALTED")
             )
             assert "UNPROVEN" not in text
@@ -192,7 +194,7 @@ def test_real_closed_stdout_pipe_keeps_draining_and_finishes_record(
     assert child.stdout is not None
     assert child.stderr is not None
     try:
-        assert b"Contract:" in child.stdout.readline()
+        assert b"long-source-name.contract.md" in child.stdout.readline()
         child.stdout.close()
         child.wait(timeout=12)
         errors = child.stderr.read()

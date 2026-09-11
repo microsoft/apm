@@ -19,7 +19,9 @@ GUARDS = (
 def check_contract_owners(provider: FactsProvider) -> tuple[Violation, ...]:
     """Reject dangerous bypasses using the existing shared syntax facts."""
     findings: list[Violation] = []
-    for path in inventory_paths(provider, prefixes=(PREFIX, *ENTRY_PREFIXES)):
+    for path in inventory_paths(
+        provider, prefixes=(PREFIX, *ENTRY_PREFIXES, "src/apm_cli/core/contract_logger.py")
+    ):
         if not path.endswith(".py"):
             continue
         facts, failures = checked_facts(provider, path, RULE_ID, require_python=True)
@@ -71,14 +73,14 @@ def check_contract_owners(provider: FactsProvider) -> tuple[Violation, ...]:
                 findings.append(violation(RULE_ID, path, message, line=call.line))
         for definition in facts.definitions:
             if (
-                definition.name in {"normalize_check", "reduce_outcome"}
+                definition.name in {"normalize_check", "reduce_outcome", "native_assurance_limited"}
                 and path != PREFIX + "records.py"
             ):
                 findings.append(
                     violation(
                         RULE_ID,
                         path,
-                        "Contract check normalization and outcome reduction belong to records.py.",
+                        "Contract check normalization, outcomes and assurance limits belong to records.py.",
                         line=definition.line,
                     )
                 )

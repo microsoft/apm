@@ -265,11 +265,18 @@ Artifacts stay in caller `.apm/runs/<id>/artifacts/`, without copy-back.
 `--allow-host-access` permits host-file, network and available login access for
 this run; it does not override policy. Interactive terminals show an ASCII
 spinner with live public Copilot messages, tool activity and errors. Pipes use
-plain progress and five-second updates while a subprocess is quiet.
+plain progress and five-second updates while a subprocess is quiet. Copilot's
+messages are attributed separately from APM's check results; `--verbose` adds
+source identities, raw exits and log details.
 
 Execution requires macOS/Linux, ready Copilot, an eligible no-policy caller,
 and invocation-only consent. Windows supports help/version, not contract
-execution. `VERIFIED` / 0 means check success, not isolation or merge permission.
+execution. Native runs return `UNPROVEN` / 21 even when every check passes:
+the output and results are saved, but host isolation is not enforced. Consent
+does not raise that result to `VERIFIED` / 0. An earlier experimental build
+returned 0 for passing local checks; callers must now handle 21 and inspect the
+record's individual check results. Rejected checks return 20; operational
+stops return 22. Offline planning can still succeed with 0.
 See the [apmx reference](https://microsoft.github.io/apm/reference/cli/apmx/)
 for limits and outcomes.
 

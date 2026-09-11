@@ -120,8 +120,9 @@ def _rich_echo(
     propagate_broken_pipe: bool = False,
     plain: bool = False,
     natural_wrap: bool = False,
+    accent_length: int | None = None,
 ):
-    """Echo message with Rich formatting or colorama fallback."""
+    """Echo with optional leading accent; existing callers retain full color."""
     # Handle backward compatibility - if style is provided, use it as color
     if style is not None:
         color = style
@@ -140,11 +141,18 @@ def _rich_echo(
             style_str = color
             if bold:
                 style_str = f"bold {color}"
+            rendered = message
+            if accent_length is not None:
+                from rich.text import Text
+
+                rendered = Text(message, style="default")
+                rendered.stylize(style_str, 0, accent_length)
+                style_str = "default"
             with _broken_pipe_policy(console, propagate_broken_pipe):
                 # Opt-in only: legacy callers retain Rich's usual wrapping.
                 wrap_options = {"soft_wrap": True} if natural_wrap else {}
                 console.print(
-                    message, style=style_str, highlight=False, markup=False, **wrap_options
+                    rendered, style=style_str, highlight=False, markup=False, **wrap_options
                 )
             return
         except BrokenPipeError:
@@ -169,6 +177,14 @@ def _rich_echo(
         }
         color_code = color_map.get(color, Fore.WHITE)
         style_code = Style.BRIGHT if bold else ""
+        if accent_length is not None:
+            accent = message[:accent_length]
+            body = message[accent_length:]
+            click.echo(
+                f"{color_code}{style_code}{accent}{Style.RESET_ALL}{body}",
+                err=_console_stderr,
+            )
+            return
         click.echo(f"{color_code}{style_code}{message}{Style.RESET_ALL}", err=_console_stderr)
     else:
         click.echo(message, err=_console_stderr)

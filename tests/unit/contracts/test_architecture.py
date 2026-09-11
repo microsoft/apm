@@ -40,6 +40,17 @@ def test_contract_owner_routes_are_accepted(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    "path", ["src/apm_cli/contracts/engine.py", "src/apm_cli/core/contract_logger.py"]
+)
+def test_native_assurance_decision_cannot_move_outside_records(tmp_path: Path, path: str) -> None:
+    source = "def native_assurance_limited(result):\n    return True\n"
+    provider = FactsProvider(tmp_path, (path,), None, source_overrides={path: source})
+    findings = check_contract_owners(provider)
+    assert len(findings) == 1
+    assert findings[0].path == path
+
+
+@pytest.mark.parametrize(
     "path",
     ["src/apm_cli/apmx.py", "src/apm_cli/install/contract_source.py"],
 )

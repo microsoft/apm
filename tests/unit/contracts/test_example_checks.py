@@ -58,6 +58,8 @@ def test_check_protocol_distinguishes_failed_conditions_from_incomplete(
     assert result.returncode == expected, result.stderr
     assert result.stdout.strip()
     assert result.stderr == ""
+    if expected == 0:
+        assert result.stdout.strip() == "JSON format is valid; every source note has one entry."
 
 
 def test_style_requirement_is_checked_without_corrupting_unicode(tmp_path: Path) -> None:

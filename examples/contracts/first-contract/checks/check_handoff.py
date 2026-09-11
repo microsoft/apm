@@ -29,7 +29,7 @@ def assess(output: Path, notes: Path, caution_prefix: str = "") -> tuple[int, st
         actual.append(item["source_id"])
     if len(actual) != len(expected) or set(actual) != set(expected):
         return 1, "The handoff must cover each source ID exactly once."
-    return 0, "JSON shape and source-ID coverage passed."
+    return 0, "JSON format is valid; every source note has one entry."
 
 
 def main() -> int:
