@@ -120,6 +120,15 @@ _POSIX_USER_HOOK_PATHS = os.name != "nt"
 _filter_hook_files_for_target = filter_hook_files_for_target
 
 
+def _wrapping_quote(command: str, match: re.Match[str]) -> str:
+    """Return the quote character wrapping a reference, or "" when it has none."""
+    if match.start() > 0 and match.end() < len(command):
+        quote = command[match.start() - 1]
+        if quote in "\"'" and command[match.end()] == quote:
+            return quote
+    return ""
+
+
 # DEPRECATED -- use IntegrationResult directly for new code.
 # Backward-compatible shim: accepts hooks_integrated= kwarg and
 # exposes a hooks_integrated property for consumers of the old API.
@@ -591,12 +600,15 @@ class HookIntegrator(BaseIntegrator):
         target_rel: str,
         deploy_root: Path | None,
         source_key: str | None = None,
-        path_is_quoted: bool = False,
+        path_quote: str = "",
     ) -> str:
         """Return a target-native script reference without sacrificing portability."""
         if deploy_root is not None:
             target_path = (deploy_root / target_rel).resolve()
-            if _POSIX_USER_HOOK_PATHS:
+            # A shell expands $HOME outside single quotes only, so a
+            # single-quoted reference keeps the previous absolute form instead
+            # of becoming a literal path the target would never expand.
+            if _POSIX_USER_HOOK_PATHS and path_quote != "'":
                 try:
                     relative_path = target_path.relative_to(deploy_root.resolve())
                 except ValueError:
@@ -624,7 +636,7 @@ class HookIntegrator(BaseIntegrator):
         ):
             return f"$env:{project_dir}/{target_rel}"
         path = f"${{{project_dir}}}/{target_rel}"
-        return path if path_is_quoted else f'"{path}"'
+        return path if path_quote else f'"{path}"'
 
     def _rewrite_command_for_target(
         self,
@@ -682,10 +694,7 @@ class HookIntegrator(BaseIntegrator):
                     target_rel,
                     deploy_root,
                     source_key,
-                    match.start() > 0
-                    and match.end() < len(command)
-                    and command[match.start() - 1] in "\"'"
-                    and command[match.end()] == command[match.start() - 1],
+                    _wrapping_quote(command, match),
                 )
                 new_command = new_command.replace(full_var, resolved_cmd)
             else:
@@ -735,10 +744,7 @@ class HookIntegrator(BaseIntegrator):
                     target_rel,
                     deploy_root,
                     source_key,
-                    match.start() > 0
-                    and match.end() < len(command)
-                    and command[match.start() - 1] in "\"'"
-                    and command[match.end()] == command[match.start() - 1],
+                    _wrapping_quote(command, match),
                 )
                 new_command = new_command.replace(rel_ref, resolved_cmd)
             else:

@@ -294,8 +294,9 @@ agent a procedure" fits a skill -- and reaches every harness.
   anchor resolves late, the hook runs the script under whatever `HOME` the
   launching shell provides -- keep `HOME` pointing at the installing user's
   home when a wrapper script, service, or CI job invokes the harness.
-  Windows keeps the absolute form, and a dynamic target root outside the
-  home directory (for example `CLAUDE_CONFIG_DIR`) stays absolute too.
+  Windows keeps the absolute form, and so do single-quoted references (a
+  shell does not expand `$HOME` inside single quotes) and a dynamic target
+  root outside the home directory (for example `CLAUDE_CONFIG_DIR`).
   Project-scope `apm install` (no `-g`) keeps
   non-Claude command paths repo-relative. Claude project hooks use
   `CLAUDE_PROJECT_DIR` (or `$env:CLAUDE_PROJECT_DIR` for PowerShell) so

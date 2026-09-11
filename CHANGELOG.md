@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- User-scope hook commands now anchor to `$HOME` on POSIX hosts instead of the installing host's home prefix, so a `~/.claude/settings.json` kept in a dotfiles repo stops churning between machines; Windows targets and dynamic config roots outside the home directory keep absolute paths. (closes #2821)
+- User-scope hook commands now anchor to `$HOME` on POSIX hosts instead of the installing host's home prefix, so a `~/.claude/settings.json` kept in a dotfiles repo stops churning between machines; Windows targets, single-quoted references, and dynamic config roots outside the home directory keep absolute paths. (closes #2821) (#2944)
 
 ### Security
 

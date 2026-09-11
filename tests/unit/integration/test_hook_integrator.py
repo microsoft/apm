@@ -3933,6 +3933,36 @@ class TestIssue1007Fixes:
         assert cmd == str((deploy_root / ".claude/hooks/my-pkg/hooks/run.sh").resolve())
         assert len(scripts) == 1
 
+    def test_rewrite_command_single_quoted_reference_stays_absolute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A single-quoted reference keeps its absolute form.
+
+        A shell expands $HOME outside single quotes only, so anchoring here
+        would hand the target a literal '$HOME/...' path that never resolves.
+        """
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        monkeypatch.setattr(hi_mod, "_POSIX_USER_HOOK_PATHS", True)
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "hooks" / "run.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho run", encoding="utf-8")
+        deploy_root = tmp_path / "home"
+
+        cmd, scripts = HookIntegrator()._rewrite_command_for_target(
+            "bash '${CLAUDE_PLUGIN_ROOT}/hooks/run.sh'",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=deploy_root,
+        )
+
+        assert "$HOME" not in cmd, f"$HOME stays literal inside single quotes; got {cmd!r}"
+        expected = str((deploy_root / ".claude/hooks/my-pkg/hooks/run.sh").resolve())
+        assert cmd == f"bash '{expected}'"
+        assert len(scripts) == 1
+
     def test_rewrite_command_dynamic_root_outside_home_stays_absolute(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
