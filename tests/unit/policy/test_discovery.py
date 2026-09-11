@@ -1204,6 +1204,9 @@ class TestAutoDiscover(unittest.TestCase):
         self.assertTrue(result.found)
         mock_gitlab_fetch.assert_called_once()
         self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "acme/dept-a/team-x")
+        # Won at a subgroup below the top-level group -> flagged so the
+        # resolved level is surfaced even at default verbosity (#2753).
+        self.assertTrue(result.subgroup_scoped)
 
     @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
     @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
@@ -1231,6 +1234,9 @@ class TestAutoDiscover(unittest.TestCase):
         self.assertEqual(mock_gitlab_fetch.call_count, 3)
         probed = [c.kwargs["org"] for c in mock_gitlab_fetch.call_args_list]
         self.assertEqual(probed, ["acme/dept-a/team-x", "acme/dept-a", "acme"])
+        # Resolved at the top-level group -> NOT subgroup-scoped, so the
+        # pre-#2753 default-verbosity silence is preserved for this case.
+        self.assertFalse(result.subgroup_scoped)
 
     @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
     @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
@@ -1310,6 +1316,59 @@ class TestAutoDiscover(unittest.TestCase):
         self.assertTrue(result.found)
         mock_gitlab_fetch.assert_called_once()
         self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "contoso")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy.discovery._gitlab_namespace_descending")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_gitlab_subgroup_empty_at_deep_level_shadows_ancestor(
+        self, mock_extract, mock_ns, mock_gitlab_fetch
+    ):
+        """An ``empty`` (present-but-no-rules) policy at a deep subgroup wins
+        and stops the ascent -- a README-only apm-policy at team-x is closest
+        and must NOT fall through to a real ancestor policy (#2753)."""
+        mock_extract.return_value = ("acme", "gitlab.com", None)
+        mock_ns.return_value = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        mock_gitlab_fetch.side_effect = [
+            PolicyFetchResult(
+                policy=ApmPolicy(),
+                source="org:gitlab.com/acme/dept-a/team-x/apm-policy",
+                outcome="empty",
+            ),  # team-x: present but empty -> closest wins, stop
+            PolicyFetchResult(policy=ApmPolicy(), outcome="found"),  # must NOT be reached
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(result.outcome, "empty")
+        mock_gitlab_fetch.assert_called_once()
+        self.assertEqual(mock_gitlab_fetch.call_args.kwargs["org"], "acme/dept-a/team-x")
+        self.assertTrue(result.subgroup_scoped)
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    @patch("apm_cli.policy._remote.subprocess.run")
+    def test_gitlab_subgroup_walk_wiring_from_real_remote(self, mock_run, mock_gitlab_fetch):
+        """End-to-end seam: a real nested origin URL flows through the actual
+        namespace-descending helper into the walk (no _gitlab_namespace_descending
+        mock), so the ``_auto_discover`` wiring -- read origin once, derive the
+        descending namespaces from that same URL, probe deepest-first -- is
+        exercised, not just each half in isolation (#2753)."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="https://gitlab.com/acme/dept-a/team-x/my-project.git\n",
+        )
+        mock_gitlab_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+
+        self.assertEqual(result.outcome, "absent")
+        probed = [c.kwargs["org"] for c in mock_gitlab_fetch.call_args_list]
+        self.assertEqual(probed, ["acme/dept-a/team-x", "acme/dept-a", "acme"])
+        # Every level targeted the project's own remote host, never a foreign one.
+        self.assertTrue(
+            all(c.kwargs["host"] == "gitlab.com" for c in mock_gitlab_fetch.call_args_list)
+        )
 
 
 class TestPolicyRepoCandidates(unittest.TestCase):
@@ -1467,6 +1526,31 @@ class TestGitlabPolicyInheritance(unittest.TestCase):
 
         self.assertEqual(mock_fetch.call_args.kwargs["org"], "acme/dept-a")
         self.assertEqual(mock_fetch.call_args.kwargs["repo"], "apm-policy")
+
+    @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
+    def test_gitlab_parent_accepts_host_qualified_ref_with_matching_port(self, mock_fetch):
+        """A host-qualified extends: ref whose ``host:port`` matches the leaf's
+        non-null port is stripped and fetched -- the positive side of the
+        ``explicit.port == port`` gate (mismatch/malformed are covered
+        separately). Pins that a matching self-managed port proceeds."""
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with (
+            patch.dict(os.environ, {"GITLAB_HOST": "gitlab.example.test"}, clear=False),
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            _fetch_chain_parent(
+                "gitlab.example.test:8443/acme/dept-a/apm-policy",
+                current_source="org:gitlab.example.test:8443/acme/dept-a/team-x/apm-policy",
+                leaf_host="gitlab.example.test",
+                leaf_port=8443,
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+
+        self.assertEqual(mock_fetch.call_args.kwargs["org"], "acme/dept-a")
+        self.assertEqual(mock_fetch.call_args.kwargs["repo"], "apm-policy")
+        self.assertEqual(mock_fetch.call_args.kwargs["port"], 8443)
 
     @patch("apm_cli.policy._gitlab._fetch_from_gitlab_repo")
     def test_gitlab_parent_rejects_single_segment_reference(self, mock_fetch):

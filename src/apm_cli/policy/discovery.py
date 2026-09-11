@@ -228,6 +228,13 @@ class PolicyFetchResult:
     raw_bytes_hash: str | None = None
     expected_hash: str | None = None  # The pin that was checked, if any
 
+    # -- Discovery-provenance fields (#2753) --
+    # True when GitLab subgroup discovery resolved a policy BELOW the
+    # top-level group (closest-wins diverged from the legacy top-level
+    # probe). Surfaced at info even in non-verbose warn mode so a dev can
+    # see which subgroup's policy applied without needing --verbose.
+    subgroup_scoped: bool = False
+
     @property
     def found(self) -> bool:
         return self.policy is not None
@@ -1012,6 +1019,11 @@ def _gitlab_walk_candidate(
             cache_only=cache_only,
         )
         if result.outcome != "absent":
+            # A namespace with more than one segment is a subgroup below the
+            # top-level group, so closest-wins diverged from the legacy
+            # top-level-only probe; flag it so the resolved level is surfaced
+            # to the user even at default verbosity (#2753).
+            result.subgroup_scoped = "/" in namespace
             return result
         logger.debug(
             "GitLab policy absent at %s/%s; trying parent group",

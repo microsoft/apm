@@ -348,6 +348,37 @@ class TestPolicyResolved:
         mock_info.assert_not_called()
 
     @patch("apm_cli.core.command_logger._rich_info")
+    def test_subgroup_scoped_visible_non_verbose_warn(self, mock_info):
+        """#2753: a GitLab subgroup policy (closest-wins below the top-level
+        group) names the resolved level at info even in non-verbose warn mode,
+        so the dev sees which subgroup applied without --verbose."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/dept-a/apm-policy",
+            cached=False,
+            enforcement="warn",
+            subgroup_scoped=True,
+        )
+        mock_info.assert_called_once()
+        msg = mock_info.call_args[0][0]
+        assert "org:gitlab.com/acme/dept-a/apm-policy" in msg
+        assert "enforcement=warn" in msg
+        assert mock_info.call_args[1].get("symbol") == "info"
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_top_level_scope_stays_silent_non_verbose_warn(self, mock_info):
+        """A top-level (non-subgroup) policy keeps the pre-#2753 silence:
+        non-verbose + warn emits nothing when subgroup_scoped is False."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_resolved(
+            source="org:gitlab.com/acme/apm-policy",
+            cached=False,
+            enforcement="warn",
+            subgroup_scoped=False,
+        )
+        mock_info.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_info")
     def test_off_verbose_shows_info(self, mock_info):
         logger = InstallLogger(verbose=True)
         logger.policy_resolved(

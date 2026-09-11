@@ -130,10 +130,12 @@ def _remote_url_parts(url: str) -> tuple[str, list[str]] | None:
         try:
             parsed = urlparse(url)
         except Exception:
-            # urlparse only raises ValueError in practice, but the legacy
-            # parser swallowed any exception here; preserve that. The
-            # ``/tfs/`` ValueError comes from parse_ado_repo_url (in
-            # _parse_remote_url), never from urlparse, so nothing to re-raise.
+            # Deliberately broad: the legacy parser swallowed ANY exception
+            # from ``urlparse`` here (cross-version defensiveness), and
+            # ``test_https_url_parse_exception_returns_none`` pins that
+            # contract. The ``/tfs/`` ValueError comes from
+            # ``parse_ado_repo_url`` (in ``_parse_remote_url``), never from
+            # ``urlparse`` here, so there is nothing to re-raise.
             return None
         host = parsed.hostname or ""
         segments = [

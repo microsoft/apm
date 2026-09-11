@@ -601,11 +601,15 @@ class InstallLogger(CommandLogger):
         cached: bool,
         enforcement: str,
         age_seconds: int | None = None,
+        subgroup_scoped: bool = False,
     ):
         """Log policy discovery outcome.
 
         Verbose by default; always shown when ``enforcement == "block"``
-        (users must know blocking is active).
+        (users must know blocking is active) or when ``subgroup_scoped``
+        is set -- a GitLab subgroup policy that closest-wins resolved
+        BELOW the top-level group is surprising enough that the resolved
+        level must name itself even at default verbosity (#2753).
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
@@ -629,9 +633,11 @@ class InstallLogger(CommandLogger):
         if enforcement == "block":
             # Always visible — blocking installs is a big deal
             _rich_warning(message, symbol="warning")
-        elif self.verbose:
+        elif self.verbose or subgroup_scoped:
+            # Subgroup-scoped GitLab policy: show at info even in non-verbose
+            # warn mode so the dev sees which subgroup level applied (#2753).
             _rich_info(message, symbol="info")
-        # Non-verbose + non-block: silent (no noise for warn/off)
+        # Non-verbose + non-block + top-level: silent (no noise for warn/off)
 
     def policy_discovery_miss(
         self,
