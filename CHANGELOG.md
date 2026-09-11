@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Preserve unmanaged Claude and Kiro skills when uninstalling an MCP-only package whose lockfile has no deployed files. — by @mfroembgen (fixes #2946)
+- Preserve unmanaged Claude and Kiro skills when uninstalling an MCP-only package whose lockfile has no deployed files. — by @mfroembgen (#2947)
 
 ### Added
 
