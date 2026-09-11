@@ -850,16 +850,17 @@ class TestClaudeIntegration:
             f"Project-scope command must not embed the installer's absolute prefix; got {cmd!r}"
         )
 
-    def test_user_scope_still_writes_absolute_hook_paths(self, temp_project):
-        """User-scope deploys must still absolutize hook commands --
-        ``~/.claude/settings.json`` runs without a fixed cwd, so relative
-        paths cannot resolve (#1310 / #1354).
+    def test_user_scope_writes_portable_home_hook_paths(self, temp_project, monkeypatch):
+        """POSIX user-scope commands anchor to HOME instead of the installer home.
 
         ``user_scope=True`` is the explicit signal the production dispatch
         (``services.integrate_package_primitives``) computes from the
         ``InstallScope`` enum, kept independent of deploy-root layout in
         ``core/scope.py``.
         """
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        monkeypatch.setattr(hi_mod, "_POSIX_USER_HOOK_PATHS", True)
         pkg_dir = temp_project / "scope-pkg"
         hooks_dir = pkg_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -889,10 +890,7 @@ class TestClaudeIntegration:
 
         settings = json.loads((temp_project / ".claude" / "settings.json").read_text())
         cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
-        assert Path(cmd).is_absolute(), f"User-scope command must be absolute; got {cmd!r}"
-        assert cmd == str(
-            (temp_project / ".claude" / "hooks" / "scope-pkg" / "hooks" / "stop.sh").resolve()
-        )
+        assert cmd == "$HOME/.claude/hooks/scope-pkg/hooks/stop.sh"
 
     def test_no_hooks_returns_empty_result(self, temp_project):
         """Test Claude integration with no hook files returns empty result."""
@@ -3338,8 +3336,11 @@ class TestScopeResolvedHookDeployment:
         monkeypatch.chdir(self.root)
         assert Path(cmd).resolve() == (scripts_dir / "run.sh").resolve()
 
-    def test_copilot_user_scope_writes_absolute_hook_paths(self, monkeypatch):
-        """Copilot user-scope hook commands must resolve from any cwd."""
+    def test_copilot_user_scope_writes_portable_home_hook_paths(self, monkeypatch):
+        """POSIX Copilot user hooks anchor to HOME instead of the installer home."""
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        monkeypatch.setattr(hi_mod, "_POSIX_USER_HOOK_PATHS", True)
         hooks_dir = self.pkg_dir / ".apm" / "hooks"
         script = hooks_dir / "run.sh"
         script.write_text("#!/bin/bash\necho test", encoding="utf-8")
@@ -3363,11 +3364,7 @@ class TestScopeResolvedHookDeployment:
             (self.root / ".copilot" / "hooks" / "scope-pkg-hooks.json").read_text(encoding="utf-8")
         )
         cmd = hooks_config["hooks"]["sessionStart"][0]["bash"]
-        assert Path(cmd).is_absolute(), f"User-scope Copilot command must be absolute; got {cmd!r}"
-        expected = (self.root / ".copilot" / "hooks" / "scripts" / "scope-pkg" / "run.sh").resolve()
-        assert cmd == str(expected)
-        monkeypatch.chdir(self.pkg_dir)
-        assert Path(cmd).resolve() == expected
+        assert cmd == "$HOME/.copilot/hooks/scripts/scope-pkg/run.sh"
 
     def test_sync_with_copilot_scope_prefix(self):
         """sync_integration removes .copilot/hooks/ files when target is present."""
@@ -3886,8 +3883,13 @@ class TestIssue1007Fixes:
         assert cmd == original, "Unknown variable must not be modified"
         assert scripts == [], "No scripts should be scheduled for copy"
 
-    def test_rewrite_command_deploy_root_produces_absolute_path(self, tmp_path: Path) -> None:
-        """deploy_root parameter makes _rewrite_command_for_target produce absolute paths."""
+    def test_rewrite_command_deploy_root_uses_portable_home_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """POSIX user hooks keep paths portable across home directories."""
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        monkeypatch.setattr(hi_mod, "_POSIX_USER_HOOK_PATHS", True)
         pkg_dir = tmp_path / "pkg"
         script = pkg_dir / "hooks" / "run.sh"
         script.parent.mkdir(parents=True, exist_ok=True)
@@ -3905,12 +3907,57 @@ class TestIssue1007Fixes:
 
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
         assert len(scripts) == 1, "Script copy entry must be produced"
-        assert cmd.startswith(str(deploy_root.resolve())), (
-            f"Command must be absolute path under deploy_root; got {cmd}"
+        assert cmd == "$HOME/.claude/hooks/my-pkg/hooks/run.sh"
+
+    def test_rewrite_command_deploy_root_keeps_windows_absolute_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Windows user hooks keep their existing absolute path representation."""
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        monkeypatch.setattr(hi_mod, "_POSIX_USER_HOOK_PATHS", False)
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "hooks" / "run.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho run", encoding="utf-8")
+        deploy_root = tmp_path / "home"
+
+        cmd, scripts = HookIntegrator()._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            deploy_root=deploy_root,
         )
-        assert cmd.replace("\\", "/").endswith(".claude/hooks/my-pkg/hooks/run.sh"), (
-            f"Command must end with .claude/hooks/my-pkg/hooks/run.sh; got {cmd}"
+
+        assert cmd == str((deploy_root / ".claude/hooks/my-pkg/hooks/run.sh").resolve())
+        assert len(scripts) == 1
+
+    def test_rewrite_command_dynamic_root_outside_home_stays_absolute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An absolute target root outside HOME is never mislabeled as portable."""
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        monkeypatch.setattr(hi_mod, "_POSIX_USER_HOOK_PATHS", True)
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "hooks" / "run.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho run", encoding="utf-8")
+        deploy_root = tmp_path / "home"
+        dynamic_root = tmp_path / "claude-config"
+
+        cmd, scripts = HookIntegrator()._rewrite_command_for_target(
+            "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+            root_dir=str(dynamic_root),
+            deploy_root=deploy_root,
         )
+
+        assert cmd == str(dynamic_root / "hooks" / "my-pkg" / "hooks" / "run.sh")
+        assert len(scripts) == 1
 
     def test_rewrite_command_deploy_root_absent_script_resolves_to_source(
         self, tmp_path: Path
@@ -3957,8 +4004,13 @@ class TestIssue1007Fixes:
         assert cmd == '"${CLAUDE_PROJECT_DIR}/.claude/hooks/my-pkg/hooks/run.sh"'
         assert not cmd.startswith("/"), "Command must not be absolute without deploy_root"
 
-    def test_rewrite_command_deploy_root_relative_path_handler(self, tmp_path: Path) -> None:
-        """deploy_root makes ./path references produce absolute paths too."""
+    def test_rewrite_command_deploy_root_relative_path_handler(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """User-scope ./path references use the portable home prefix on POSIX."""
+        from apm_cli.integration import hook_integrator as hi_mod
+
+        monkeypatch.setattr(hi_mod, "_POSIX_USER_HOOK_PATHS", True)
         pkg_dir = tmp_path / "pkg"
         script = pkg_dir / "hooks" / "run.sh"
         script.parent.mkdir(parents=True, exist_ok=True)
@@ -3977,9 +4029,7 @@ class TestIssue1007Fixes:
 
         assert "./" not in cmd, "Relative ./ reference must be replaced"
         assert len(scripts) == 1, "Script copy entry must be produced"
-        assert cmd.startswith(str(deploy_root.resolve())), (
-            f"Command must be absolute path under deploy_root; got {cmd}"
-        )
+        assert cmd == "$HOME/.claude/hooks/my-pkg/hooks/run.sh"
         assert not cmd.startswith("./"), "Command must not be relative"
 
     def test_rewrite_command_nonexistent_script_with_deploy_root(self, tmp_path: Path) -> None:

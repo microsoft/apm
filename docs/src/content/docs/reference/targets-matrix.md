@@ -126,8 +126,9 @@ GitHub Copilot (CLI and IDE).
   `instructions` from all packages are concatenated into
   `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file
   at user scope). User-scope deploys land under `~/.copilot/`, not
-  `~/.github/`; hook script commands are written as absolute paths so Copilot
-  CLI can invoke them from any working directory.
+  `~/.github/`; hook script commands are anchored so Copilot CLI can invoke
+  them from any working directory -- `$HOME`-relative on POSIX hosts,
+  absolute on Windows.
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 

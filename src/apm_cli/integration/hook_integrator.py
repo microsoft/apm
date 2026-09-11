@@ -44,6 +44,7 @@ Script path handling:
 
 import json
 import logging
+import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -111,6 +112,8 @@ if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
 
 _log = logging.getLogger(__name__)
+
+_POSIX_USER_HOOK_PATHS = os.name != "nt"
 
 # Testability seam: tests can patch deprecated filename routing without
 # replacing the imported helper for every call site.
@@ -592,7 +595,23 @@ class HookIntegrator(BaseIntegrator):
     ) -> str:
         """Return a target-native script reference without sacrificing portability."""
         if deploy_root is not None:
-            return str((deploy_root / target_rel).resolve())
+            target_path = (deploy_root / target_rel).resolve()
+            if _POSIX_USER_HOOK_PATHS:
+                try:
+                    relative_path = target_path.relative_to(deploy_root.resolve())
+                except ValueError:
+                    # A dynamic target root such as CLAUDE_CONFIG_DIR may live
+                    # outside the deploy root. Keep that explicit absolute path
+                    # rather than emitting a misleading $HOME-relative command.
+                    pass
+                else:
+                    # User-scope configs live in files people track in dotfiles
+                    # repos, so anchor the path to $HOME instead of embedding
+                    # the installing host's home prefix. Hooks run through a
+                    # shell, which expands $HOME at invocation time and keeps
+                    # the #1310 / #1354 cwd-independence intact.
+                    return f"$HOME/{relative_path.as_posix()}"
+            return str(target_path)
         if target != "claude":
             return target_rel
 
@@ -757,7 +776,7 @@ class HookIntegrator(BaseIntegrator):
             hook_file_dir: Directory containing the hook JSON file (for ./path resolution)
             root_dir: Override root directory (e.g. ".copilot" for user scope)
             deploy_root: Absolute root of the deployment directory.  When provided,
-                all rewritten script paths are resolved to absolute paths so the
+                all rewritten script paths are pinned to the deploy root so the
                 target can locate scripts regardless of the working directory.
                 When *None*, paths remain relative (backward-compatible behaviour).
 
@@ -1026,8 +1045,8 @@ class HookIntegrator(BaseIntegrator):
             force: If True, overwrite user-authored files on collision
             managed_files: Set of relative paths known to be APM-managed
             target: Optional TargetProfile for scope-resolved root_dir
-            user_scope: If True, rewrite hook script commands to absolute paths
-                so global hooks resolve from any working directory
+            user_scope: If True, rewrite hook script commands so global hooks
+                resolve from any working directory
 
         Returns:
             HookIntegrationResult: Results of the integration operation
@@ -1675,7 +1694,7 @@ class HookIntegrator(BaseIntegrator):
         ``_MERGE_HOOK_TARGETS`` registry.
 
         ``user_scope`` controls whether merged-hook ``command`` paths are
-        rewritten to absolute paths (required when deploying to
+        rewritten so they resolve from any cwd (required when deploying to
         ``~/.claude/settings.json`` -- see #1310 / #1354) or left
         repo-relative so checked-in project-scope configs stay portable
         across clones, contributors, and CI runners (#1394).
