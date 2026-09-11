@@ -1,96 +1,20 @@
 ---
 title: "Development Guide"
-description: "How to contribute to APM — setup, coding style, testing, and pull request process."
+description: "APM development setup, testing, coding guardrails, and extension recipes."
 sidebar:
   order: 1
 ---
 
-Thank you for considering contributing to APM! This document outlines the process for contributing to the project.
-
-## Code of Conduct
-
-By participating in this project, you agree to abide by our [Code of Conduct](https://github.com/microsoft/apm/blob/main/CODE_OF_CONDUCT.md). Please read it before contributing.
-
-## How to Contribute
-
-### Reporting Bugs
-
-Before submitting a bug report:
-
-1. Check the [GitHub Issues](https://github.com/microsoft/apm/issues) to see if the bug has already been reported.
-2. Update your copy of the code to the latest version to ensure the issue hasn't been fixed.
-
-When submitting a bug report:
-
-1. Use our bug report template.
-2. Include detailed steps to reproduce the bug.
-3. Describe the expected behavior and what actually happened.
-4. Include any relevant logs or error messages.
-
-### Suggesting Enhancements
-
-Enhancement suggestions are welcome! Please:
-
-1. Use our feature request template.
-2. Clearly describe the enhancement and its benefits.
-3. Provide examples of how the enhancement would work.
-
-### Development Process
-
-1. Fork the repository.
-2. Create a new branch for your feature/fix: `git checkout -b feature/your-feature-name` or `git checkout -b fix/issue-description`.
-3. Make your changes.
-4. Run tests: `uv run pytest`
-5. Ensure your code passes linting: `uv run --extra dev ruff check src/ tests/`
-6. Commit your changes with a descriptive message.
-7. Push to your fork.
-8. Submit a pull request.
-
-### Pull Request Process
-
-1. Fill out the PR template — describe what changed, why, and link the issue.
-2. Ensure your PR addresses only one concern (one feature, one bug fix).
-3. Include tests for new functionality.
-4. Update documentation if needed.
-5. PRs must pass all CI checks before they can be merged.
-
-### Workflow dependency updates
-
-When updating actions in generated `.github/workflows/*.lock.yml` files,
-keep their `gh-aw-manifest` headers, human-readable action lists, and
-`.github/aw/actions-lock.json` entries aligned with the runtime `uses:` pins.
-Dependabot does not update those metadata records. Preserve the compiler
-version and source hashes for dependency-only edits; recompile with
-`gh aw compile` when changing workflow source.
-
-Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py`
-to check setup and app-token action pin consistency across the manifest-bearing
-workflows.
-
-### Issue Triage
-
-Every new issue is automatically labeled `needs-triage`. Maintainers review incoming issues and:
-
-1. **Accept** — remove `needs-triage`, add `accepted`, and assign a milestone.
-2. **Prioritize** — optionally add `priority/high` or `priority/low`.
-3. **Close** — if it's a duplicate (`duplicate`) or out of scope, close with a comment explaining why.
-
-Labels used for triage: `needs-triage`, `accepted`, `needs-design`, `priority/high`, `priority/low`.
-
-### Code scanning on pull requests and merge queues
-
-The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
-pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
-Keep the workflow path, `analyze` job ID, and language matrix stable: they
-identify the analysis configurations GitHub compares against the base branch.
-PR results do not replace results for the merge queue's separate commit.
-
-If both analysis jobs succeed but Code scanning still reports a missing
-configuration, inspect the CodeQL check summary. An additional `API upload`
-configuration on the base branch belongs to a separate upload producer;
-rerunning this workflow cannot supply that producer's results. Coordinate
-matching PR and queue uploads with its owner rather than deleting findings,
-renaming categories, or weakening the code-scanning ruleset.
+Start with [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md)
+for issue-first scope approval, PR eligibility, small corrections, private
+security reporting, and the transition for existing contributions.
+[GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
+the responsible human maintainers and explains decisions and responsibilities.
+Its [roadmap and release planning model](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md#roadmap-and-release-planning)
+separates priorities from scope approval and release targets; Project rollout
+is pending.
+Those root documents own contribution policy; this guide covers technical work
+within the approved scope. Reporting and investigation need no prior permission.
 
 ## Development Environment
 
@@ -105,15 +29,75 @@ cd apm
 uv sync --extra dev
 ```
 
-## Testing
+## Optional agent tools
 
-We use pytest for testing. After completing the setup above, run the test suite with:
+No AI tool, harness, or repository skill is required to contribute. APM
+dogfoods its own primitives from
+[`.apm/skills/`](https://github.com/microsoft/apm/tree/main/.apm/skills) and
+[`.apm/agents/`](https://github.com/microsoft/apm/tree/main/.apm/agents), with
+local package dependencies declared in
+[`apm.yml`](https://github.com/microsoft/apm/blob/main/apm.yml).
+Automated recommendations are advisory, not scope approval or a substitute
+for human review.
+
+Issue triage produces a recommendation and a **proposed** scope, done-when,
+exclusions, and review-needs brief. Maintainers still decide acceptance,
+priority, contributor invitations, and milestones. The
+[triage label contract](https://github.com/microsoft/apm/blob/main/packages/apm-triage-panel/assets/label-contract.json)
+separates those decisions from advisory processing. During compatibility
+rollout, `status/triaged` records completed automated advice; the future
+`triage/recommended` marker means the same thing, not human review.
+`status/needs-triage` can remain after advice while awaiting a human decision.
+No label or milestone migration is performed by the advisory workflow.
+
+To use these tools, [install APM](../../getting-started/installation/) if needed,
+then run from the repository root:
 
 ```bash
-uv run pytest -q
+apm install
 ```
 
-If you don't have `uv` available, you can use a standard Python venv and pip:
+The manifest's `includes: auto` picks up `.apm/`. Its pinned `copilot` target
+deploys to the committed `.github/` and `.agents/skills/` tree, regardless of
+which harness your machine detects. Your harness can then discover and invoke
+the installed skills by name.
+
+For a different harness, exclude its generated roots locally before overriding
+the pinned target. For example, with Claude Code:
+
+```bash
+printf '.claude/\n' >> "$(git rev-parse --git-path info/exclude)"
+apm install --target claude
+```
+
+The local exclusion avoids changing repository-wide ignore rules. This install
+also adds deploy paths to `apm.lock.yaml`; leave that local override uncommitted.
+Check the [target catalogue](../../concepts/primitives-and-targets/#target-catalogue)
+for other targets; some write to more than one root.
+
+## Testing
+
+After setup, use pytest for focused feedback:
+
+```bash
+# Unit suite
+uv run pytest tests/unit tests/test_console.py -x
+
+# Focused file; replace with the test relevant to your change
+uv run pytest tests/test_console.py -x
+
+# Full suite, including integration and acceptance tests
+uv run pytest
+
+# Verbose unit results
+uv run pytest tests/unit -x -v
+```
+
+`pytest-xdist` is available: add `-n auto` for parallel execution or `-n0`
+to force serial execution. The default selection in `pyproject.toml` excludes
+`benchmark` and `live` tests.
+
+Without `uv`, use a standard Python venv and pip:
 
 ```bash
 # create and activate a venv (POSIX / WSL)
@@ -122,11 +106,48 @@ source .venv/bin/activate
 
 # install this package in editable mode and test deps
 pip install -U pip
-pip install -e .[dev]
+pip install -e '.[dev]'
 
-# run tests
-pytest -q
+# run unit tests
+pytest tests/unit tests/test_console.py -x
 ```
+
+### Running integration tests
+
+Tests under `tests/integration/` declare preconditions with `requires_*`
+markers. The `_MARKER_CHECKS` registry in `tests/integration/conftest.py`
+skips tests with missing prerequisites at collection time and reports why.
+Use the [marker registry](../integration-testing/#the-marker-registry) to
+find the token, runtime setup command, or opt-in flag each family needs.
+
+```bash
+# Run tests whose prerequisites your environment satisfies
+uv run pytest tests/integration -v
+
+# Select a prerequisite family
+uv run pytest tests/integration -m requires_github_token -v
+```
+
+When adding a precondition, add its check to `_MARKER_CHECKS` and declare the
+marker in `pyproject.toml`; do not duplicate the check in each test. For install,
+compile, pack, or audit lifecycle changes, reuse the
+[hermetic lifecycle fixtures](../integration-testing/#hermetic-lifecycle-fixtures)
+to exercise the real CLI with a sanitized child environment and reviewed local
+Git sources.
+
+### Coverage policy
+
+Both suites have hard CI coverage gates that must pass before merge:
+
+| Suite | Gate | Enforced in |
+| --- | --- | --- |
+| Unit | 80% | `pyproject.toml` (`fail_under`) and combined coverage in `.github/workflows/ci.yml` |
+| Integration | 70% | Combined coverage in `.github/workflows/ci-integration.yml` (`--fail-under`) |
+
+Gates only move upward. When actual coverage exceeds the gate by at least
+5 percentage points, raise the gate to `actual - 3` in the next release PR.
+CI's coverage summaries include a "Lowest-coverage files" section, rendered by
+`scripts/coverage-summary.py`, to identify where new tests would help.
 
 ### Running the bounded mutation pilot
 
@@ -147,9 +168,10 @@ uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
 ```
 
 The command fails on new survivors, timeouts, suspicious results, unchecked
-mutants, and incomplete outcomes. Its timestamp-free JSON report is suitable
-for comparing runs. Pass `--reuse-cache` only when the allowlisted source,
-tests, configuration, runner, and lockfile are unchanged.
+mutants, and incomplete outcomes. It writes a sorted, timestamp-free JSON
+report even when survivor comparison fails. Pass `--reuse-cache` only when
+the allowlisted source, test seams, configuration, runner, and lockfile
+are unchanged.
 
 To inspect existing mutmut metadata without executing mutants:
 
@@ -160,40 +182,30 @@ uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
 
 The reviewed survivor allowlist lives in
 [`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json).
-Do not update it to make a run green. Inspect surviving diffs with `mutmut show`
-and add behavioral tests for real contract gaps. Use `--update-baseline` only
-when the baseline change itself has been reviewed:
+Do not update it to make a run green. Review every surviving diff with
+`mutmut show` and add behavioral tests for real contract gaps.
+Use `--update-baseline` only when the baseline change itself has been reviewed:
 
 ```bash
 uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
   --update-baseline --output mutation-pilot-report.json
 ```
 
-The repository
-[`CONTRIBUTING.md`](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#running-the-bounded-mutation-pilot)
-owns the review policy for baseline changes.
-
 ## Coding Style
 
-This project follows:
-- [PEP 8](https://pep8.org/) for Python style guidelines
-- We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting
+APM follows [PEP 8](https://pep8.org/) and uses
+[Ruff](https://docs.astral.sh/ruff/) for linting and formatting. Follow the
+canonical [lint contract](https://github.com/microsoft/apm/blob/main/.apm/instructions/linting.instructions.md)
+for local commands, auto-fixes, and common diagnostics. The actual
+[`Lint` job in `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml)
+defines the complete enforced step list; mirror it before pushing or claiming
+green CI.
 
-CI enforces all lint and formatting rules automatically. You can run them locally:
-
-```bash
-uv run --extra dev ruff check src/ tests/         # lint
-uv run --extra dev ruff check --fix src/ tests/   # lint with auto-fix
-uv run --extra dev ruff format src/ tests/        # format
-```
-
-Verify Ruff lint and format before pushing:
-
-```bash
-uv run --extra dev ruff check src/ tests/ && uv run --extra dev ruff format --check src/ tests/
-```
-
-CI also runs repository guardrails from `.github/workflows/ci.yml`, including duplication and auth-boundary checks.
+Ruff lint and format are only part of that job. It also checks YAML I/O,
+file length, portable relative paths, duplication, auth-protocol boundaries,
+and architecture boundaries. Its Python scope includes the architecture-linter
+scripts as well as `src/` and `tests/`. CI checks the PR merge result, so changes
+on `main` can introduce failures even when the branch alone passes.
 
 ### Architecture guardrails
 
@@ -243,6 +255,53 @@ uv run pre-commit install
 
 This is optional -- CI is the authoritative gate. The pre-commit hook rev may lag behind the CI version; check `.pre-commit-config.yaml` against `uv.lock` if you see discrepancies.
 
+## CI and merging
+
+### How merging works
+
+A maintainer adds an approved PR to GitHub's native merge queue. The queue
+builds a tentative merge against the latest `main`, runs checks including the
+integration suite, and merges on success or ejects the PR on failure.
+There is no manual "Update branch" step just to enter the queue. If a real
+failure ejects your PR, push a fix and ask a maintainer to re-queue it.
+
+Fast unit and build checks (Tier 1) run on PR updates. The required Lifecycle
+Smoke check also runs on PRs and merge-queue commits. It selects
+`lifecycle_smoke and not lifecycle_merge_group` contracts with no network,
+credentials, or frozen binary required. See
+[Integration Testing](../integration-testing/) for the bounded selection,
+timeout, prerequisites, and local command.
+The full integration suite (Tier 2) runs in the queue rather than on every
+WIP push.
+
+### Workflow dependency updates
+
+When updating actions in generated `.github/workflows/*.lock.yml` files,
+keep their `gh-aw-manifest` headers, human-readable action lists, and
+`.github/aw/actions-lock.json` entries aligned with the runtime `uses:` pins.
+Dependabot does not update those metadata records. Preserve the compiler
+version and source hashes for dependency-only edits; recompile with
+`gh aw compile` when changing workflow source.
+
+Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py`
+to check setup and app-token action pin consistency across the manifest-bearing
+workflows.
+
+### Code scanning on pull requests and merge queues
+
+The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
+pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
+Keep the workflow path, `analyze` job ID, and language matrix stable: they
+identify the analysis configurations GitHub compares against the base branch.
+PR results do not replace results for the merge queue's separate commit.
+
+If both analysis jobs succeed but Code scanning still reports a missing
+configuration, inspect the CodeQL check summary. An additional `API upload`
+configuration on the base branch belongs to a separate upload producer;
+rerunning this workflow cannot supply that producer's results. Coordinate
+matching PR and queue uploads with its owner rather than deleting findings,
+renaming categories, or weakening the code-scanning ruleset.
+
 ## Documentation
 
 If your changes affect how users interact with the project, update the documentation accordingly.
@@ -256,10 +315,95 @@ npm --prefix docs run build
 uv run --frozen python scripts/check_cli_docs.py docs/dist
 ```
 
-## License
+## Extending APM
 
-By contributing to this project, you agree that your contributions will be licensed under the project's [MIT License](https://github.com/microsoft/apm/blob/main/LICENSE).
+### Adding or modifying an MCP client adapter
 
-## Questions?
+Adapters in `src/apm_cli/adapters/client/` inherit shared utilities from
+`MCPClientAdapter` in `base.py`:
 
-If you have any questions, feel free to open an issue or reach out to the maintainers.
+- Reuse `_apply_pypi_homebrew_generic_config`, `_apply_auth_and_headers_impl`,
+  and `_resolve_env_vars_with_prompting` rather than copying sibling adapters.
+- The pylint R0801 similarity threshold is 10 lines; duplicated blocks fail CI.
+- For marketplace tag parsing, use `marketplace._shared.iter_semver_tags`
+  rather than reimplementing the refs-iteration loop.
+
+### How to add an experimental feature flag
+
+Use an experimental flag for a user-visible behavior change that needs early
+adopter feedback, not a bug fix, internal refactor, or change that should ship
+as the default. Flags are ergonomic/UX toggles only. They MUST NOT gate
+security-critical behavior: content scanning, path validation, lockfile
+integrity, token handling, MCP trust, or collision detection.
+
+1. Register the flag in `src/apm_cli/core/experimental.py`'s `FLAGS` dict with
+   a frozen `ExperimentalFlag(name=..., description=..., default=False, hint=...)`.
+2. Import and call `is_enabled` at function scope to avoid import cycles and
+   config I/O at module import time. For example, the existing `verbose_version`
+   flag can be checked with:
+
+   ```python
+   def show_runtime_details():
+       from apm_cli.core.experimental import is_enabled
+
+       return is_enabled("verbose_version")
+   ```
+
+3. Test both enabled and disabled paths.
+4. Update the [experimental command reference](../../reference/experimental/).
+
+Use `snake_case` in the registry and config, and `kebab-case` for display and
+other user-facing strings. The CLI accepts both forms on input. Persist flag
+state only in `~/.apm/config.json` through `update_config`.
+
+When a flag graduates to the default, remove its gate and `FLAGS` entry in the
+same PR. Add a `CHANGELOG.md` entry under `Changed`, with a migration note if
+the previous default differed.
+
+## Adding or changing a normative requirement (OpenAPM v0.1)
+
+The [OpenAPM v0.1 specification](../../specs/openapm-v01/) and APM's
+implementation evolve together. Every normative change MUST include three
+coupled edits in the same PR:
+
+1. **Spec:** add or change a `<a id="req-XXX"></a>` anchor and its prose in
+   `docs/src/content/docs/specs/openapm-v0.1.md`, plus the matching Appendix C row.
+2. **Manifest:** update
+   `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`
+   to remain a byte-equivalent projection of the canonical anchors.
+3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test under
+   `tests/spec_conformance/`. If a real assertion is not yet possible, call
+   `waive("...")` from `_helpers.py` with a one-line rationale. The waiver
+   appears in `CONFORMANCE.md` as visible debt, not test coverage.
+
+Regenerate the conformance statement after these edits:
+
+```bash
+uv run --extra dev python -m tests.spec_conformance.gen_statement
+```
+
+Include the resulting root `CONFORMANCE.md` and `CONFORMANCE.json` in the
+same PR; CI requires a clean generated diff.
+
+The workflow distinguishes three modes:
+
+- **Mode A (silent regression):** a code change breaks an assertion bound to
+  a `req-XXX`. The spec-conformance pytest job fails. Fix the code, not the spec.
+- **Mode B (silent extension):** new behavior under a normative critical path
+  lacks a spec citation. The four-way `orphan_check` catches a requirement
+  marker missing its anchor, manifest row, or Appendix C row. The Mode B
+  detector catches substantive critical-path code with no spec artifacts at
+  all. Add the anchor, manifest row, and marker, with the Appendix C row as
+  above. For a true refactor, performance rewrite, or internal cleanup with
+  no observable behavior change, add `apm-spec-waiver: <one-line rationale>`
+  to the PR body or a commit message. The rationale must be at least
+  16 characters; CI echoes the waiver verbatim for reviewer inspection.
+  The critical-path allowlist lives in
+  `tests/spec_conformance/critical_paths.txt`; changes to that list are
+  themselves critical-path edits.
+- **Mode C (stale spec):** the prose misstates intended behavior. Amend the
+  anchor, Appendix C row, and manifest entry, with a test proving the intended
+  behavior in the same PR.
+
+These checks cannot detect every semantic drift. Choosing the appropriate
+mode remains a human decision; the harness exposes the choice, not the answer.

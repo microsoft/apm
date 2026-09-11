@@ -1,5 +1,5 @@
 lockfile_version: '1'
-apm_version: 0.29.0
+apm_version: 0.30.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot
   name: apm-issue-autopilot
@@ -37,10 +37,10 @@ dependencies:
   - .agents/skills/apm-issue-autopilot/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
   deployed_file_hashes:
-    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:9872bd7ada9903073c663a5b1d1bfaa15743d4bcb2f450631a4da610b1fd0a6e
+    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:9d7315e318d9b9d0cf80e97e9b74656fe240613970545495d862ead1c899265b
     .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
-    .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json: sha256:35d672ce4584fb576b3c16ce4dffbe29de6b3f6711725855b3c6eb0f338d464d
-    .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md: sha256:2d6eff739cd4ac1eb4533868cbdcf0c44d469ae247447f29595d05858b2d8a97
+    .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
+    .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
     .agents/skills/apm-issue-autopilot/assets/final-report-template.md: sha256:8088fe8f5bb9fd1ec93fbe806971465bb7f6850019af5be1a329e252d4818df2
     .agents/skills/apm-issue-autopilot/assets/ground-truth-table.md: sha256:00dd5a35ef0b39ba299e5fcd7f9ca682fc322792ec20440f7861edd39997d40e
     .agents/skills/apm-issue-autopilot/assets/ideate-prompt.md: sha256:abab1a5e2a765229d1cdd215b90c57036cdb4b2764866b68399eb81a51362ddc
@@ -54,7 +54,7 @@ dependencies:
     .agents/skills/apm-issue-autopilot/assets/solution-pipeline-prompt.md: sha256:812487116b89e66414562312992204dfb3132cc5e9265392b718d78e33cd9973
     .agents/skills/apm-issue-autopilot/assets/task-implement-prompt.md: sha256:397ab60c270f0312a3ddaac0fbc03e853fa16552a962f6b2ebca5ed27bab2818
     .agents/skills/apm-issue-autopilot/assets/triage-digest-template.md: sha256:78c2e7be93543122e485eb494a2b50ecac6e18d7e077a9e8edde12b478242ca9
-    .agents/skills/apm-issue-autopilot/assets/triage-prompt.md: sha256:5136ab42be575b58730a8d8a1614394813014ca74e2d6df3e56948e94c419470
+    .agents/skills/apm-issue-autopilot/assets/triage-prompt.md: sha256:79c4e60a16c3bd0cc1e09cb761af38dccf6ac2c676e89d16d97d25613f4324d2
     .agents/skills/apm-issue-autopilot/assets/wave-gate-rubric.md: sha256:a8bf5270c8d63c1d9ffcf0b3f18ba22d591b062e7b969982320150986ab211cd
     .agents/skills/apm-issue-autopilot/evals/.gitignore: sha256:f370ad043ec0c98a166fd98646c3b94280ed78bc996223b6cca2ba936f7c6781
     .agents/skills/apm-issue-autopilot/evals/README.md: sha256:79bb6636a89edce40fc24bde9576e351de57a0f828181def37c423a284cd1ef8
@@ -131,11 +131,15 @@ dependencies:
   - .agents/skills/apm-triage-panel
   - .agents/skills/apm-triage-panel/SKILL.md
   - .agents/skills/apm-triage-panel/apm.yml
+  - .agents/skills/apm-triage-panel/assets/label-contract.json
   - .agents/skills/apm-triage-panel/assets/triage-template.md
+  - .agents/skills/apm-triage-panel/scripts/triage_state.py
   deployed_file_hashes:
-    .agents/skills/apm-triage-panel/SKILL.md: sha256:9be296adfad117b54d3f86a0524c3eff92adbd2330cda16e5ea3804537084301
-    .agents/skills/apm-triage-panel/apm.yml: sha256:e8b7946f433abdc8342241483963bac2895182916ea66f5aa39497d00c7930a4
-    .agents/skills/apm-triage-panel/assets/triage-template.md: sha256:ea67af2e1f333fcc8e5e6cb01dbacc3d4807c2b7097834c16e38dc23f2914fde
+    .agents/skills/apm-triage-panel/SKILL.md: sha256:e1a5c4e751c7c12e3f056bd29310055456f9f5158b97b2dd2e03743fbecd2c0c
+    .agents/skills/apm-triage-panel/apm.yml: sha256:cf6e5657842e7e23a267f4c88e61708cb8acb6ba41576d357cbc79a9d13a6a78
+    .agents/skills/apm-triage-panel/assets/label-contract.json: sha256:3298cb9b030e215d3babc44f780250d80d80a22acf98ae22126f81a7af774c19
+    .agents/skills/apm-triage-panel/assets/triage-template.md: sha256:c06b5644eb85824c9b0d431467567a7ba4811737ba4a799f09d59cd5ef0ecfa6
+    .agents/skills/apm-triage-panel/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
   source: local
   local_path: ../apm-triage-panel
   declaring_parent: ./packages/apm-issue-autopilot
@@ -1684,7 +1688,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:9872bd7ada9903073c663a5b1d1bfaa15743d4bcb2f450631a4da610b1fd0a6e
+  content_hash: sha256:9d7315e318d9b9d0cf80e97e9b74656fe240613970545495d862ead1c899265b
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md
@@ -1702,7 +1706,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:35d672ce4584fb576b3c16ce4dffbe29de6b3f6711725855b3c6eb0f338d464d
+  content_hash: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md
@@ -1711,7 +1715,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:2d6eff739cd4ac1eb4533868cbdcf0c44d469ae247447f29595d05858b2d8a97
+  content_hash: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot/assets/final-report-template.md
@@ -1837,7 +1841,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:5136ab42be575b58730a8d8a1614394813014ca74e2d6df3e56948e94c419470
+  content_hash: sha256:79c4e60a16c3bd0cc1e09cb761af38dccf6ac2c676e89d16d97d25613f4324d2
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot/assets/wave-gate-rubric.md
@@ -2062,7 +2066,7 @@ deployments:
   owners:
   - local:packages/apm-triage-panel
   active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:9be296adfad117b54d3f86a0524c3eff92adbd2330cda16e5ea3804537084301
+  content_hash: sha256:e1a5c4e751c7c12e3f056bd29310055456f9f5158b97b2dd2e03743fbecd2c0c
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-triage-panel/apm.yml
@@ -2071,7 +2075,7 @@ deployments:
   owners:
   - local:packages/apm-triage-panel
   active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:e8b7946f433abdc8342241483963bac2895182916ea66f5aa39497d00c7930a4
+  content_hash: sha256:cf6e5657842e7e23a267f4c88e61708cb8acb6ba41576d357cbc79a9d13a6a78
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-triage-panel/assets/triage-template.md
@@ -2080,7 +2084,7 @@ deployments:
   owners:
   - local:packages/apm-triage-panel
   active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:ea67af2e1f333fcc8e5e6cb01dbacc3d4807c2b7097834c16e38dc23f2914fde
+  content_hash: sha256:c06b5644eb85824c9b0d431467567a7ba4811737ba4a799f09d59cd5ef0ecfa6
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd
@@ -2864,6 +2868,24 @@ deployments:
   - .
   active_owner: .
   content_hash: sha256:555f792adf02638f362891256f3f76f58dd89be30aaa40533e8fe2aadeb09eae
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-triage-panel/assets/label-contract.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-triage-panel
+  active_owner: local:packages/apm-triage-panel
+  content_hash: sha256:3298cb9b030e215d3babc44f780250d80d80a22acf98ae22126f81a7af774c19
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/apm-triage-panel/scripts/triage_state.py
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/apm-triage-panel
+  active_owner: local:packages/apm-triage-panel
+  content_hash: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
 local_deployed_files:
 - .agents/skills/apm-spec-guardian
 - .agents/skills/apm-spec-guardian/SKILL.md

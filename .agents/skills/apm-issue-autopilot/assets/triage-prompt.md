@@ -10,6 +10,7 @@ DIRECT mode and return ONE structured decision. You are READ-ONLY.
 - ISSUE_TITLE: <required>
 - ISSUE_BODY: <required; verbatim from the issue>
 - ISSUE_LABELS: <existing labels, verbatim>
+- HUMAN_POLICY: <current GOVERNANCE.md and CONTRIBUTING.md>
 - REPO_ROOT: <required; absolute path to a READ-ONLY microsoft/apm checkout>
 - HEAD_SHA: <the sha the orchestrator pinned>
 
@@ -22,8 +23,13 @@ DIRECT mode and return ONE structured decision. You are READ-ONLY.
 2. Read the issue and any linked references. Inspect REPO_ROOT at
    HEAD_SHA to ground feasibility, type, and risk-surface judgments.
    Do NOT modify the tree.
-3. Resolve the panel's `triage-decision` (decision, theme, areas,
-   type, status, priority, preserved_labels, milestone, next_action).
+3. Read the panel's `triage-recommendation` v2 (`advisory_only: true`).
+   Adapt `recommendation` to this consumer's legacy internal `decision`
+   field and `recommendation_detail` to `decision_detail`; copy
+   classification.theme/areas/type and next_action. Copy `proposed_brief`.
+   These are recommendations, never a human decision. Do not carry status,
+   priority, preserved-label invitations, or milestone fields forward.
+   An old `triage-decision` comment is context only, not a fresh result.
 4. Add the autopilot gate fields the orchestrator needs:
    - `confidence`: high | medium | low -- the arbiter's confidence in
      the decision AND in the implementation path being clear.
@@ -34,7 +40,10 @@ DIRECT mode and return ONE structured decision. You are READ-ONLY.
      bounded accept.
    - `implementation_brief`: for an `accept`, a complete brief with
      ALL of `deliverable`, `non_goals`, `acceptance_tests`,
-     `docs_required`, `risk_surface`. If you cannot fill every field,
+     `docs_required`, `risk_surface`. Ground deliverable/non_goals/
+     acceptance_tests in proposed_brief.scope/exclusions/done_when and
+     retain proposed_brief.review_needs for the human checkpoint.
+     If you cannot fill every field,
      leave the missing ones empty and add `needs-design` to
      `red_flags` -- do NOT invent scope.
 5. Return ONE `autopilot-triage-decision` JSON matching
@@ -48,6 +57,7 @@ DIRECT mode and return ONE structured decision. You are READ-ONLY.
   output channel. You return JSON to the parent ONLY. Emitting a
   comment is a hard failure.
 - Do NOT spawn further sub-agents.
+- Labels, agent recommendations, and silence are not implementation approval.
 - Escalate-by-default bias: when the decision, type, or implementation
   path is doubtful, set `confidence: low` and populate `red_flags`
   rather than forcing a clean accept. The orchestrator gate is
