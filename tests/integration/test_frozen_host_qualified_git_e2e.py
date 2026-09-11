@@ -53,6 +53,7 @@ def _cases() -> tuple[_FrozenGitCase, ...]:
                 repo_url="org/private-skills",
                 host="git.example.com",
                 resolved_ref="2026.06.10",
+                constraint="2026.06.10",
                 resolved_commit=_COMMIT,
                 depth=1,
                 name="private-skills",

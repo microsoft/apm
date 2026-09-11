@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from ..cache.git_cache import GitCache
     from ..deps.git_reference_resolver import GitReferenceResolver
     from ..deps.github_downloader import GitHubPackageDownloader
+    from ..deps.lockfile import LockFile
 
 _log = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ class RefFreshnessContext(Protocol):
     ref_freshness_policy: RefFreshnessPolicy | None
     update_refs: bool
     refresh: bool
+    existing_lockfile: LockFile | None
 
 
 def ref_freshness_policy_for_install(
@@ -118,6 +120,8 @@ def ref_freshness_policy_for_install(
         if not isinstance(configured, RefFreshnessPolicy):
             raise TypeError("ref_freshness_policy must be a RefFreshnessPolicy")
         return configured
+    if context.existing_lockfile is None:
+        return RefFreshnessPolicy.CURRENT_REMOTE
     return RefFreshnessPolicy.for_install_intent(
         update_refs=context.update_refs,
         refresh=context.refresh,

@@ -87,6 +87,32 @@ def test_lockfile_v1_remains_parseable_under_v2_reader():
     validate_against("lockfile-v0.1.schema.json", load_yaml_fixture(*V1))
 
 
+@pytest.mark.req("req-lk-003")
+def test_frozen_manifest_pin_requires_the_exact_locked_commit():
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.plan import lockfile_satisfies_manifest
+    from apm_cli.models.dependency import DependencyReference
+
+    pin = "abcdef0123456789" * 2 + "abcdef01"
+    declared = DependencyReference.parse(f"fixture/frozen-pin#{pin}")
+    entry = LockedDependency(
+        repo_url=declared.repo_url, resolved_ref=pin, resolved_commit=pin.upper()
+    )
+    lock = LockFile(dependencies={declared.get_unique_key(): entry})
+    before = lock.to_yaml()
+    assert lockfile_satisfies_manifest(lock, [declared]) == (True, [])
+    assert lock.to_yaml() == before
+
+    entry.resolved_commit = "0123456789abcdef" * 2 + "01234567"
+    mismatched = lock.to_yaml()
+    satisfied, reasons = lockfile_satisfies_manifest(lock, [declared])
+    assert satisfied is False
+    assert len(reasons) == 1
+    assert "manifest commit" in reasons[0]
+    assert "lockfile resolved_commit" in reasons[0]
+    assert lock.to_yaml() == mismatched
+
+
 @pytest.mark.req("req-lk-005")
 def test_lockfile_dependency_carries_resolved_field():
     schema = load_schema("lockfile-v0.1.schema.json")

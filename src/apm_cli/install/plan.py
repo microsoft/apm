@@ -457,9 +457,10 @@ def lockfile_satisfies_manifest(
     """Structural satisfaction check for ``apm install --frozen``.
 
     Verifies that every direct dependency declared in the manifest has
-    a corresponding entry in the lockfile.  Does NOT perform any
-    resolution or compare resolved refs against the remote -- those are
-    ``apm update``'s job.
+    a corresponding entry in the lockfile and that the manifest still
+    points at the same locked identity. Does NOT perform any remote
+    resolution; it only compares manifest-declared refs against the
+    already-recorded lockfile state.
 
     Args:
         lockfile: The on-disk lockfile.
@@ -473,6 +474,8 @@ def lockfile_satisfies_manifest(
         ``satisfied`` is True.
     """
     from apm_cli.deps.lockfile import _SELF_KEY
+    from apm_cli.deps.revision_pins import is_full_revision_pin
+    from apm_cli.drift import detect_ref_change
 
     locked_keys = {key for key in lockfile.dependencies if key != _SELF_KEY}
 
@@ -483,6 +486,23 @@ def lockfile_satisfies_manifest(
         key = _dep_ref_key(dep)
         if key not in locked_keys:
             reasons.append(f"  - {key} is declared in apm.yml but missing from apm.lock.yaml")
+            continue
+        locked_dep = lockfile.dependencies[key]
+        reference = dep.reference
+        if (
+            reference
+            and is_full_revision_pin(reference)
+            and (locked_dep.resolved_commit or "").lower() != reference.lower()
+        ):
+            reasons.append(
+                f"  - {key}: manifest commit '{dep.reference}' != "
+                f"lockfile resolved_commit '{locked_dep.resolved_commit or '(missing)'}'"
+            )
+            continue
+        if detect_ref_change(dep, locked_dep):
+            reasons.append(
+                f"  - {key}: declared source, ref, or transport differs from apm.lock.yaml"
+            )
 
     return (not reasons, reasons)
 

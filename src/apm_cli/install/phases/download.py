@@ -54,11 +54,7 @@ def run(ctx: InstallContext) -> None:
     _need_download = []
     for _pd_ref in deps_to_install:
         _pd_key = _pd_ref.get_unique_key()
-        _pd_path = (
-            (apm_modules_dir / _pd_ref.alias)
-            if _pd_ref.alias
-            else _pd_ref.get_install_path(apm_modules_dir)
-        )
+        _pd_path = _pd_ref.get_install_path(apm_modules_dir)
         # Skip local packages -- they are copied, not downloaded
         if _pd_ref.is_local:
             continue

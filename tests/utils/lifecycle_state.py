@@ -161,10 +161,16 @@ class LifecycleStateSnapshot:
         roles_by_path: dict[tuple[str, str], set[LifecycleFileRole]] = {}
         for record in records:
             if record.locator.kind is LocatorKind.PROJECT_RELATIVE:
+                if Path(record.locator.value).is_absolute():
+                    root_id, relative_path = _bounded_legacy_absolute_path(
+                        record, root, normalized_roots
+                    )
+                else:
+                    root_id, relative_path = _WORKSPACE_ROOT_ID, record.locator.value
                 _add_role(
                     roles_by_path,
-                    _WORKSPACE_ROOT_ID,
-                    record.locator.value,
+                    root_id,
+                    relative_path,
                     "deployment",
                 )
             elif record.locator.kind is LocatorKind.TARGET_RELATIVE:
@@ -304,6 +310,31 @@ class LifecycleStateSnapshot:
             f"Lifecycle snapshot path {relative_path!r} is not tracked in "
             f"root {root_id!r}; tracked paths: {tracked}"
         )
+
+
+def _bounded_legacy_absolute_path(
+    record: DeploymentRecord,
+    workspace_root: Path,
+    external_roots: tuple[LifecycleStateRoot, ...],
+) -> tuple[str, str]:
+    """Observe legacy global locators without resolving descendant links."""
+    candidate = Path(record.locator.value)
+    roots = [
+        (_WORKSPACE_ROOT_ID, workspace_root),
+        *(
+            (external.root_id, external.path)
+            for external in external_roots
+            if external.target == record.locator.target
+        ),
+    ]
+    for root_id, root_path in roots:
+        if candidate.is_relative_to(root_path):
+            relative = candidate.relative_to(root_path).as_posix()
+            _validate_relative_state_path(relative)
+            return root_id, relative
+    raise ValueError(
+        f"Lifecycle snapshot has no bounded root for absolute deployment {record.locator.value!r}"
+    )
 
 
 def _add_role(

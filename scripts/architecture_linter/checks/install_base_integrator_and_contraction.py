@@ -283,6 +283,9 @@ _REQUIRED_OWNER_CALLS = {
 }
 
 
+_SKILL_INTEGRATOR = "src/apm_cli/integration/skill_integrator.py"
+
+
 _OWNED_STATE_FIELDS = frozenset(
     {
         "deployed_files",
@@ -414,6 +417,35 @@ def _deployment_owner_findings(provider: FactsProvider, path: str, rule_id: str)
         findings.append(
             violation(rule_id, path, f"required canonical call {call} is missing", line=1)
         )
+    return findings
+
+
+def _skill_lockfile_root_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """User-scope skill ownership must read provenance from the canonical lockfile root."""
+    facts, fail = _facts_for(provider, _SKILL_INTEGRATOR, rule_id)
+    if fail:
+        return list(fail)
+
+    route_message = "user-scope skill ownership must route lockfile provenance through get_apm_dir(InstallScope.USER)"
+    forward_message = "skill ownership consumers must forward the canonical lockfile_root through every ownership-map integration path"
+    required_import = "from apm_cli.core.scope import InstallScope, get_apm_dir"
+    required_route = (
+        "get_apm_dir(InstallScope.USER) if scope is InstallScope.USER else project_root"
+    )
+    required_forward_count = 4
+    findings: list[Violation] = []
+    if not _present(facts, required_import) or not _present(facts, required_route):
+        findings.append(_summary(rule_id, _SKILL_INTEGRATOR, route_message))
+    if not _present(facts, "LockFile.read(get_lockfile_path(lockfile_root))"):
+        findings.append(
+            _summary(
+                rule_id,
+                _SKILL_INTEGRATOR,
+                "skill ownership maps must resolve deployment provenance from the selected lockfile_root",
+            )
+        )
+    if sum("lockfile_root=lockfile_root" in line for line in facts.lines) != required_forward_count:
+        findings.append(_summary(rule_id, _SKILL_INTEGRATOR, forward_message))
     return findings
 
 
@@ -727,6 +759,7 @@ def check_provenance_state(provider: FactsProvider) -> tuple[Violation, ...]:
     findings: list[Violation] = []
     for path in _REQUIRED_OWNER_CALLS:
         findings.extend(_deployment_owner_findings(provider, path, rule_id))
+    findings.extend(_skill_lockfile_root_findings(provider, rule_id))
     findings.extend(_legacy_scope_findings(provider, rule_id))
     findings.extend(_state_mutation_findings(provider, rule_id))
     findings.extend(_local_bundle_findings(provider, rule_id))

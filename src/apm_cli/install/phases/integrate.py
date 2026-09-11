@@ -614,12 +614,7 @@ def run(ctx: InstallContext) -> None:
         # e.g., microsoft/apm-sample-package -> apm_modules/microsoft/apm-sample-package/
         # For virtual packages: owner/repo/prompts/file.prompt.md -> apm_modules/owner/repo-file/
         # For subdirectory packages: owner/repo/subdir -> apm_modules/owner/repo/subdir/
-        if dep_ref.alias:
-            # If alias is provided, use it directly (assume user handles namespacing)
-            install_path = apm_modules_dir / dep_ref.alias
-        else:
-            # Use the canonical install path from DependencyReference
-            install_path = dep_ref.get_install_path(apm_modules_dir)
+        install_path = dep_ref.get_install_path(apm_modules_dir)
 
         # Skip deps that already failed during BFS resolution callback
         # to avoid a duplicate error entry in diagnostics.

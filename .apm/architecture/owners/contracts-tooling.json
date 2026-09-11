@@ -8,7 +8,10 @@
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",
         "src/apm_cli/models/dependency/materialization.py",
-        "src/apm_cli/models/dependency/reference.py"
+        "src/apm_cli/models/dependency/reference.py",
+        "src/apm_cli/install/phases/download.py",
+        "src/apm_cli/install/phases/integrate.py",
+        "src/apm_cli/install/plan.py"
       ],
       "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-policy-identity"]
     },

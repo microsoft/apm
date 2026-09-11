@@ -7,6 +7,7 @@ import re
 import shutil
 import stat
 from collections.abc import Callable, Iterable
+from copy import copy
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -863,28 +864,18 @@ class SkillIntegrator(BaseIntegrator):
         return promoted, deployed
 
     @staticmethod
-    def _build_ownership_maps(project_root: Path) -> tuple[dict[str, str], dict[str, str]]:
+    def _build_ownership_maps(lockfile_root: Path) -> tuple[dict[str, str], dict[str, str]]:
         """Read the lockfile once and build two ownership maps.
 
-        Returns a tuple of:
-        - owned_by: skill_name -> dep.get_unique_key(), for sub-skill self-overwrite detection.
-        - native_owners: skill_name -> dep.get_unique_key(), for native-skill cross-package
-          collision detection.  Only paths under a ``/skills/`` prefix are included to avoid
-          false attribution from non-skill deployed_files entries (prompts, hooks, commands, etc.).
-
-        Both maps key on the full unique dependency identity (owner/repo, or the
-        equivalent durable key for local/registry deps), NOT the last path
-        segment. Two different packages can share a repo/leaf name (e.g. two
-        orgs each publishing a "shared-skill" or "utils" repo); comparing only
-        the last segment would treat them as the same owner and silently
-        suppress the cross-package collision warning precisely when it matters
-        most -- an unrelated package overwriting another's skill undetected.
+        Both maps associate skill names with full dependency identities, never
+        just repository leaf names. The native-owner map includes only skill
+        paths, avoiding false attribution from prompts, hooks, or commands.
         """
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
         owned_by: dict[str, str] = {}
         native_owners: dict[str, str] = {}
-        lockfile = LockFile.read(get_lockfile_path(project_root))
+        lockfile = LockFile.read(get_lockfile_path(lockfile_root))
         if not lockfile:
             return owned_by, native_owners
         for dep in lockfile.get_package_dependencies():
@@ -901,28 +892,23 @@ class SkillIntegrator(BaseIntegrator):
         return owned_by, native_owners
 
     @staticmethod
-    def _build_skill_ownership_map(project_root: Path) -> dict[str, str]:
-        """Build a map of skill_name -> owner_package_name from the lockfile.
-
-        Used to distinguish self-overwrites (no warning) from cross-package
-        conflicts (warning) when promoting sub-skills.
-        """
-        owned_by, _ = SkillIntegrator._build_ownership_maps(project_root)
+    def _build_skill_ownership_map(lockfile_root: Path) -> dict[str, str]:
+        """Map skill names to durable owners for sub-skill collision detection."""
+        owned_by, _ = SkillIntegrator._build_ownership_maps(lockfile_root)
         return owned_by
 
     @staticmethod
-    def _build_native_skill_owner_map(project_root: Path) -> dict[str, str]:
-        """Build a map of skill_name -> dep.get_unique_key() from the lockfile.
-
-        Scoped to ``/skills/`` paths only -- see ``_build_ownership_maps`` for details.
-        """
-        _, native_owners = SkillIntegrator._build_ownership_maps(project_root)
+    def _build_native_skill_owner_map(lockfile_root: Path) -> dict[str, str]:
+        """Map native skill names to durable owners, excluding non-skill paths."""
+        _, native_owners = SkillIntegrator._build_ownership_maps(lockfile_root)
         return native_owners
 
     def _promote_sub_skills_standalone(
         self,
         package_info,
         project_root: Path,
+        *,
+        lockfile_root: Path | None = None,
         diagnostics=None,
         managed_files=None,
         force: bool = False,
@@ -964,7 +950,7 @@ class SkillIntegrator(BaseIntegrator):
         # _build_ownership_maps).
         _dep_ref = getattr(package_info, "dependency_ref", None)
         parent_name = _dep_ref.get_unique_key() if _dep_ref is not None else package_path.name
-        owned_by = self._build_skill_ownership_map(project_root)
+        owned_by = self._build_skill_ownership_map(lockfile_root or project_root)
         name_filter = (
             source_plan.selected_skill_names
             if source_plan is not None
@@ -1033,6 +1019,8 @@ class SkillIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         source_skill_md: Path,
+        *,
+        lockfile_root: Path | None = None,
         diagnostics=None,
         managed_files=None,
         force: bool = False,
@@ -1115,7 +1103,7 @@ class SkillIntegrator(BaseIntegrator):
         primary_skill_md: Path | None = None
 
         # Read lockfile once and derive both maps in a single pass.
-        owned_by, lockfile_native_owners = self._build_ownership_maps(project_root)
+        owned_by, lockfile_native_owners = self._build_ownership_maps(lockfile_root or project_root)
         sub_skills_dir = package_path / ".apm" / "skills"
 
         # Full unique key of the package currently being installed.
@@ -1274,6 +1262,8 @@ class SkillIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         skills_dir: Path,
+        *,
+        lockfile_root: Path | None = None,
         diagnostics=None,
         managed_files=None,
         force: bool = False,
@@ -1320,7 +1310,7 @@ class SkillIntegrator(BaseIntegrator):
         parent_name = (
             _dep_ref.get_unique_key() if _dep_ref is not None else package_info.install_path.name
         )
-        owned_by, lockfile_native_owners = self._build_ownership_maps(project_root)  # noqa: RUF059
+        owned_by, _ = self._build_ownership_maps(lockfile_root or project_root)
 
         total_promoted = 0
         all_deployed: list[Path] = []
@@ -1458,16 +1448,22 @@ class SkillIntegrator(BaseIntegrator):
             SkillIntegrationResult: Results of the integration operation
         """
         enforce_agent_plugin_deployment_boundary(package_info)
+        from apm_cli.core.scope import InstallScope, get_apm_dir
 
-        # Check if package type allows skill installation (T4 routing)
-        # SKILL and HYBRID -> install as skill
-        # INSTRUCTIONS and PROMPTS -> skip skill installation
+        lockfile_root = (
+            get_apm_dir(InstallScope.USER) if scope is InstallScope.USER else project_root
+        )
+
+        # Canonicalize only the root; preserve descendant links and caller metadata.
+        package_info = copy(package_info)
+        package_info.install_path = package_info.install_path.resolve()
+
         if not should_install_skill(package_info):
-            # Even non-skill packages may ship sub-skills under .apm/skills/.
-            # Promote them so Copilot can discover them independently.
+            # Non-skill packages may still ship sub-skills under .apm/skills/.
             sub_skills_count, sub_deployed = self._promote_sub_skills_standalone(
                 package_info,
                 project_root,
+                lockfile_root=lockfile_root,
                 diagnostics=diagnostics,
                 managed_files=managed_files,
                 force=force,
@@ -1545,6 +1541,7 @@ class SkillIntegrator(BaseIntegrator):
                     package_info,
                     project_root,
                     source_skill_md,
+                    lockfile_root=lockfile_root,
                     diagnostics=diagnostics,
                     managed_files=managed_files,
                     force=force,
@@ -1599,6 +1596,7 @@ class SkillIntegrator(BaseIntegrator):
                     package_info,
                     project_root,
                     package_path / ".apm" / "skills" if _is_plugin else root_skills_dir,
+                    lockfile_root=lockfile_root,
                     source_paths=_source_paths,
                     diagnostics=diagnostics,
                     managed_files=managed_files,
@@ -1618,6 +1616,7 @@ class SkillIntegrator(BaseIntegrator):
         sub_skills_count, sub_deployed = self._promote_sub_skills_standalone(
             package_info,
             project_root,
+            lockfile_root=lockfile_root,
             diagnostics=diagnostics,
             managed_files=managed_files,
             force=force,

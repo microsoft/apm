@@ -75,7 +75,9 @@ def _skill_document(marker: str) -> str:
     )
 
 
-def _new_scenario(root: Path, apm_binary_path: Path) -> _Scenario:
+def _new_scenario(
+    root: Path, apm_binary_path: Path, *, reference: str | None = "main"
+) -> _Scenario:
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     environment = isolated.subprocess_env(overrides={"APM_TIERED_RESOLVER": "1"})
     packages = LocalPackageFactory(isolated.package_root)
@@ -100,7 +102,7 @@ def _new_scenario(root: Path, apm_binary_path: Path) -> _Scenario:
         dependencies=(
             {
                 "git": remote_url,
-                "ref": "main",
+                **({"ref": reference} if reference is not None else {}),
             },
         ),
         targets=("copilot",),
@@ -193,6 +195,26 @@ def _assert_same_state(
 
 def _combined_output(result: CommandResult) -> str:
     return result.stdout + result.stderr
+
+
+def test_frozen_default_ref_rehydrates_cold_cache_without_ref_drift(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An omitted ref replays its locked SHA even after upstream advances."""
+    scenario = _new_scenario(tmp_path / "frozen-default-ref", apm_binary_path, reference=None)
+    _run(scenario, _INSTALL_ARGS, scenario_id="default-ref-install-a")
+    installed = _capture(scenario)
+    assert _locked_commit(scenario) == scenario.commit_a.sha
+    _advance(scenario, "commit-b")
+    _run(scenario, ("deps", "clean", "--yes"), scenario_id="default-ref-remove-modules")
+    _run(scenario, ("cache", "clean", "--yes"), scenario_id="default-ref-clear-cache")
+    assert not (scenario.consumer.root / "apm_modules").exists()
+    replay = _run(scenario, (*_INSTALL_ARGS, "--frozen"), scenario_id="default-ref-frozen-a")
+    assert _module_skill_bytes(scenario) == _skill_document("commit-a").encode()
+    assert _locked_commit(scenario) == scenario.commit_a.sha
+    _assert_same_state(installed, _capture(scenario))
+    assert "sha_passthrough=1" in _combined_output(replay)
+    _run(scenario, _AUDIT_ARGS, scenario_id="default-ref-audit-a")
 
 
 def test_installed_cli_current_state_commands_bypass_stale_bare_cache(

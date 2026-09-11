@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
 from apm_cli.cache.url_normalize import cache_shard_key
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.deps.tiered_ref_resolver import (
     L0PerRunCache,
     L1CommitsAPI,
@@ -29,6 +30,7 @@ from apm_cli.deps.tiered_ref_resolver import (
     _repository_cache_identity,
     build_tiered_ref_resolver,
     is_tiered_resolver_enabled,
+    ref_freshness_policy_for_install,
 )
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
@@ -66,6 +68,27 @@ def test_freshness_policy_maps_install_intent_once(update_refs, refresh, expecte
     assert policy.requires_remote is (expected is RefFreshnessPolicy.CURRENT_REMOTE)
     assert policy.allows_lock_seed is (expected is RefFreshnessPolicy.REPRODUCIBLE)
     assert policy.allows_bare_cache is (expected is RefFreshnessPolicy.REPRODUCIBLE)
+
+
+@pytest.mark.parametrize("has_lock", [False, True])
+@pytest.mark.parametrize("update_refs", [False, True])
+def test_install_freshness_requires_remote_without_replayable_lock(
+    has_lock: bool, update_refs: bool
+) -> None:
+    context = types.SimpleNamespace(
+        ref_freshness_policy=None,
+        update_refs=update_refs,
+        refresh=False,
+        existing_lockfile=LockFile() if has_lock else None,
+    )
+    policy = ref_freshness_policy_for_install(context)
+    assert policy is (
+        RefFreshnessPolicy.REPRODUCIBLE
+        if has_lock and not update_refs
+        else RefFreshnessPolicy.CURRENT_REMOTE
+    )
+    context.ref_freshness_policy = RefFreshnessPolicy.CURRENT_REMOTE
+    assert ref_freshness_policy_for_install(context) is RefFreshnessPolicy.CURRENT_REMOTE
 
 
 @pytest.mark.parametrize(

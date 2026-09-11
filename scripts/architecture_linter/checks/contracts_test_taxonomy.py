@@ -457,6 +457,15 @@ _REFERENCE_OWNER = "src/apm_cli/models/dependency/reference.py"
 _RESOLVE_PHASE = "src/apm_cli/install/phases/resolve.py"
 
 
+_DOWNLOAD_PHASE = "src/apm_cli/install/phases/download.py"
+
+
+_INTEGRATE_PHASE = "src/apm_cli/install/phases/integrate.py"
+
+
+_INSTALL_PLAN = "src/apm_cli/install/plan.py"
+
+
 def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
     """Guard dependency identity, materialization, and embedded-subpath ownership."""
     rule_id = _GUARD_DEPENDENCY_IDENTITY
@@ -464,7 +473,18 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
     materialization, mat_fail = _facts_for(provider, _MATERIALIZATION_OWNER, rule_id)
     reference, ref_fail = _facts_for(provider, _REFERENCE_OWNER, rule_id)
     resolve, resolve_fail = _facts_for(provider, _RESOLVE_PHASE, rule_id)
-    failures = list(identity_fail) + list(mat_fail) + list(ref_fail) + list(resolve_fail)
+    download, download_fail = _facts_for(provider, _DOWNLOAD_PHASE, rule_id)
+    integrate, integrate_fail = _facts_for(provider, _INTEGRATE_PHASE, rule_id)
+    plan, plan_fail = _facts_for(provider, _INSTALL_PLAN, rule_id)
+    failures = (
+        list(identity_fail)
+        + list(mat_fail)
+        + list(ref_fail)
+        + list(resolve_fail)
+        + list(download_fail)
+        + list(integrate_fail)
+        + list(plan_fail)
+    )
     if failures:
         return tuple(failures)
 
@@ -528,6 +548,33 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 embedded_subpath_message,
             )
         )
+    install_path_message = "Install phase materialization paths must route through DependencyReference.get_install_path"
+    download_body = _awk_body(download, re.compile(r"^def run\("), re.compile(r"^def "))
+    if not _body_has(download_body, "_pd_path = _pd_ref.get_install_path(apm_modules_dir)") or (
+        _body_has(download_body, "apm_modules_dir / _pd_ref.alias")
+        or _body_has(download_body, "if _pd_ref.alias")
+    ):
+        findings.append(_summary(rule_id, _DOWNLOAD_PHASE, install_path_message))
+
+    integrate_body = _awk_body(integrate, re.compile(r"^def run\("), re.compile(r"^def "))
+    if not _body_has(
+        integrate_body, "install_path = dep_ref.get_install_path(apm_modules_dir)"
+    ) or (
+        _body_has(integrate_body, "apm_modules_dir / dep_ref.alias")
+        or _body_has(integrate_body, "if dep_ref.alias")
+    ):
+        findings.append(_summary(rule_id, _INTEGRATE_PHASE, install_path_message))
+
+    frozen_identity_message = "Frozen manifest drift checks must route through full-SHA comparison and drift.detect_ref_change"
+    plan_body = _awk_body(
+        plan, re.compile(r"^def lockfile_satisfies_manifest\("), re.compile(r"^def ")
+    )
+    if (
+        not _body_has(plan_body, "is_full_revision_pin(reference)")
+        or not _body_has(plan_body, "detect_ref_change(dep, locked_dep)")
+        or not _body_has(plan_body, "locked_dep.resolved_commit")
+    ):
+        findings.append(_summary(rule_id, _INSTALL_PLAN, frozen_identity_message))
     primitive_dirs = re.compile(r"_APM_PRIMITIVE_DIRS")
     for path in _python_paths(provider, _SRC_PREFIX):
         if path == _REFERENCE_OWNER:
