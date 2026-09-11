@@ -8,6 +8,22 @@
     { "$ref": "#/definitions/conflict_resolution_return" }
   ],
   "definitions": {
+    "lifecycle_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Summary of a native full-lane lifecycle run. The executing repository provider verifies it with --completion and independently reruns the candidate; schema validity alone is not proof.",
+      "required": ["version", "base_sha", "head_sha", "tested_tree", "lane", "status", "report_path", "report_sha256"],
+      "properties": {
+        "version": { "const": 1 },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tested_tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "lane": { "const": "full" },
+        "status": { "enum": ["passed", "not_applicable"] },
+        "report_path": { "type": "string", "minLength": 1 },
+        "report_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
     "owner_touch_report": {
       "type": "object",
       "additionalProperties": false,
@@ -335,16 +351,19 @@
         },
         "architecture_evidence": {
           "$ref": "#/definitions/architecture_evidence_v2"
+        },
+        "lifecycle_evidence": {
+          "$ref": "#/definitions/lifecycle_evidence"
         }
       },
       "allOf": [
         {
           "if": { "properties": { "status": { "const": "ready-to-merge" } } },
-          "then": { "required": ["ci_evidence", "lint_evidence", "head_sha", "mergeable", "merge_state_status", "ci_status", "architecture_evidence"] }
+          "then": { "required": ["ci_evidence", "lint_evidence", "head_sha", "mergeable", "merge_state_status", "ci_status", "architecture_evidence", "lifecycle_evidence"] }
         },
         {
           "if": { "properties": { "status": { "const": "advisory-with-deferred" } } },
-          "then": { "required": ["ci_evidence", "deferred_items", "head_sha", "mergeable", "merge_state_status", "ci_status", "architecture_evidence"] }
+          "then": { "required": ["ci_evidence", "deferred_items", "head_sha", "mergeable", "merge_state_status", "ci_status", "architecture_evidence", "lifecycle_evidence"] }
         },
         {
           "if": { "properties": { "status": { "const": "blocked" } } },
@@ -383,6 +402,9 @@
         "rebase_evidence": {
           "type": "string",
           "description": "Brief human-readable narrative of the rebase: base SHA, head SHA pre-rebase, head SHA post-rebase, conflicts resolved, fallback used (merge-of-main) if any. Required when status=resolved."
+        },
+        "lifecycle_evidence": {
+          "$ref": "#/definitions/lifecycle_evidence"
         },
         "push_command": {
           "type": "string",
@@ -442,7 +464,7 @@
         {
           "if": { "properties": { "status": { "const": "resolved" } } },
           "then": {
-            "required": ["rebase_evidence", "push_command", "mergeStateStatus_post", "lint_evidence", "comment_url"],
+            "required": ["rebase_evidence", "push_command", "mergeStateStatus_post", "lint_evidence", "comment_url", "lifecycle_evidence"],
             "properties": {
               "mergeStateStatus_post": { "enum": ["CLEAN", "UNSTABLE", "HAS_HOOKS"] }
             }

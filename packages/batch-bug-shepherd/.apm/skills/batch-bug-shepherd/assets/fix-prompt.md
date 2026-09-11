@@ -14,6 +14,14 @@ under microsoft/apm.
 
 ## Procedure
 
+Before planning, load `$REPO_ROOT/.apm/instructions/lifecycle.instructions.md`.
+P8 acceptance covers the entire applicable command state machine, with
+separate deterministic and generated-model evidence. Run its full
+executing gate at the final integrated head before opening a ready PR.
+Missing infrastructure or evidence blocks shipping; install-only
+success cannot discharge the issue. Do not defer lifecycle gaps as
+outside the proposed patch's scope.
+
 1. Re-read the issue and the repro steps. Confirm the bug still
    reproduces on HEAD.
 2. Design the minimum fix. Identify the canonical sibling code paths

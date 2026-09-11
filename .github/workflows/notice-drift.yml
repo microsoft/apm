@@ -53,7 +53,6 @@ name: NOTICE Drift Check
 
 on:
   pull_request:
-    branches: [ main ]
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]

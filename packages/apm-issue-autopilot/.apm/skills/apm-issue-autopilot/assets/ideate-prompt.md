@@ -25,6 +25,12 @@ OBSERVER), so make it concrete and testable, not aspirational.
 
 ## What to produce
 
+First load `$REPO_ROOT/.apm/instructions/lifecycle.instructions.md`.
+Include its P8 command map, deterministic trajectory and generated-model
+obligations in `acceptance_shape` for every applicable change, regardless
+of issue type. A brief that excludes required lifecycle work must be
+re-planned or escalated, not accepted as install-only scope.
+
 1. Survey the touched surface read-only (`grep`, `view`, `gh issue
    view`). Understand the user-facing shape and where it lives.
 2. Frame the **design brief** through the DevX lens: who the change

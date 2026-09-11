@@ -14,7 +14,6 @@ name: Devcontainer Feature - Test
 
 on:
   pull_request:
-    branches: [ main ]
     paths:
       - 'devcontainer/**'
       - '.github/workflows/devcontainer-feature-test.yml'

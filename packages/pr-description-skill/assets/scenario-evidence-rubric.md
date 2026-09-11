@@ -27,6 +27,13 @@ SCENARIO coverage: the user-facing flows that, if they silently
 break, erode trust in APM as a tool. Pure coverage metrics are not
 the gate; scenario-test mapping is.
 
+Before synthesis, load `.apm/instructions/lifecycle.instructions.md`
+from the consumer repository. For a P8-applicable change, present the
+complete command applicability, connected deterministic trajectory,
+generated-model dimensions and actual candidate-bound gate result.
+Missing required evidence is a shipping blocker, not a trade-off row.
+This table describes evidence; it does not replace executing the gate.
+
 ## APM principle taxonomy
 
 Every scenario in a PR maps to AT LEAST ONE of these principles
@@ -159,3 +166,7 @@ following is true (state which one in trade-offs):
   evidence; cite the suite that ran green).
 
 Any other PR that omits the table is incomplete.
+
+These are presentation exemptions only. A lifecycle-affecting refactor
+still needs current P8 execution; a lockfile or installed-markdown change
+can alter runtime behavior and is not automatically exempt.

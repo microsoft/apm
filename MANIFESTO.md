@@ -14,6 +14,11 @@ Shareable workflow packages with dependency management. Community-driven knowled
 ### **Reliability over Magic**
 Predictable, step-by-step execution over black-box AI Agent behavior. Transparent processes that teams can audit, understand, and trust. No surprises, just results.
 
+[P8: Lifecycle completeness](PRINCIPLES.md#p8----lifecycle-completeness)
+makes this a shipping requirement: a feature must remain correct across
+its applicable command state machine, not merely succeed at installation.
+Developers and agents supply executable lifecycle evidence before shipping.
+
 ### **Developer Experience over AI Sophistication**
 Simple CLI tooling over complex agent frameworks. Fast iteration and local execution over cloud-dependent workflows. 
 

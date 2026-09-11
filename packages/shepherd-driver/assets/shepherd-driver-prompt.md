@@ -45,6 +45,8 @@ are part of your contract:
   table parsed by the deterministic gate (Step X.2.5)
 - `owner_touch_gate.py` -- exact-revision owner detection and terminal
   evidence verification (Step X.2.5)
+- `$REPO_ROOT/.apm/instructions/lifecycle.instructions.md` -- P8 shipping
+  precondition and repository executing provider (Step X.2.6)
 - `../apm-review-panel/SKILL.md`      -- panel composition contract
 - `../pr-description-skill/SKILL.md`   -- superseding-PR body author (Path B)
 
@@ -57,6 +59,7 @@ X.0 fetch + classify Copilot
 X.1 invoke apm-review-panel skill
 X.2 merge follow-ups, apply fold-vs-defer rubric
 X.2.5 canonical-owner gate (classify + evidence, FAIL CLOSED)
+X.2.6 lifecycle gate (execute full candidate evidence, FAIL CLOSED)
 X.3 edit code, fold foldable items
 X.4 lint contract (silent)
 X.5 push (author fork or superseding PR)
@@ -351,6 +354,31 @@ classification may interpret its result but may not override it.
    If evidence cannot be produced within the loop cap, return `blocked`
    with the missing owner/test named. Never defer the gate.
 
+### Step X.2.6 -- lifecycle shipping gate (FAIL CLOSED)
+
+Load `$REPO_ROOT/.apm/instructions/lifecycle.instructions.md` and probe
+`$REPO_ROOT/scripts/check_lifecycle_evidence.py`. Either missing means
+`blocked`; do not recreate the provider inside this package. At loop
+entry, plan any missing P8 obligations for Step X.3. Once the integrated
+candidate is committed and clean, execute the rule's full-lane gate
+before certifying completion. Re-run after any later edit or rebase.
+
+Record `lifecycle_evidence` from the native report: version 1,
+`base_sha` from `base`, `head_sha` from `head`, `tested_tree`, lane
+`full`, status `passed` or `not_applicable`, the report's absolute
+`report_path`, and its tool-computed byte `report_sha256`. Never author
+a passing report or relabel an old head. The preliminary `pr` lane
+cannot supply terminal evidence.
+
+Schema-validate the completion referencing the report just produced; do
+not repeat an identical native run just to serialize its summary. The
+parent independently executes the same full gate with
+`--completion <return-json>` and a new report path, checking the reference
+and freshly running the candidate rather than importing a receipt.
+Missing lifecycle work is in scope even if the original brief omitted it.
+Repair it within the loop or return `blocked`; neither a panel stance
+nor `advisory-with-deferred` can waive P8.
+
 ### Step X.3 -- edit code, fold foldable items
 
 For each FOLD item:
@@ -482,6 +510,8 @@ On cap hit: `status: blocked` with failing job + log excerpt in
 - CEO stance is `ship_now`, OR `ship_with_followups` where all
   remaining followups are tagged DEFER with valid scope-boundary
   notes.
+- The full executing lifecycle gate (Step X.2.6) passed on this exact
+  candidate; no required deterministic or generated-model gap remains.
 
 In this case: re-run the apm-review-panel ONE LAST TIME so the
 visible comment reflects the converged state. That final run posts its
@@ -491,7 +521,9 @@ the panel always posts its result via `gh`). Move to "Finalize" below.
 **Terminal `status: advisory-with-deferred`** when:
 
 - Iteration cap (4) is hit, AND
-- Foldable items remain unresolved.
+- Foldable items remain unresolved, AND
+- P8 full-lane lifecycle evidence is complete. Any missing required
+  lifecycle work instead returns `blocked`, regardless of the cap.
 
 In this case: re-run the apm-review-panel one last time so its final
 recommendation comment reflects the converged (capped) state, carrying
@@ -603,6 +635,16 @@ most one short clause (e.g. `pending required review`,
   "ci_evidence": "string (required for ready-to-merge or advisory-with-deferred)",
   "lint_evidence": "string (required when status=ready-to-merge)",
   "mutation_break_evidence": [...],
+  "lifecycle_evidence": {
+    "version": 1,
+    "base_sha": "40-char comparison base",
+    "head_sha": "40-char final candidate",
+    "tested_tree": "40-char tested tree",
+    "lane": "full",
+    "status": "passed|not_applicable",
+    "report_path": "absolute native report path outside checkout",
+    "report_sha256": "64-char byte digest"
+  },
   "architecture_evidence": {
     "version": "2",
     "classification": "ordinary-fix|owner-extension|new-owner|split-authority-repair|not-applicable",
@@ -672,6 +714,8 @@ Use `status` (NOT `terminal_state`) and `pr` (NOT `pr_number`).
 migration: version 1 self-classified `decisions[]` returns now fail and
 force one re-spawn under v2. Blocked and superseded returns remain
 compatible because they do not require architecture evidence.
+Both terminal success statuses also require `lifecycle_evidence`;
+older returns without it must re-run P8, not invent the new fields.
 
 ## Hard rules
 

@@ -52,6 +52,12 @@ ISSUE_NUMBER, AUTHOR, HEAD_REPO, HEAD_BRANCH, MAINTAINER_CAN_MODIFY,
 REPO_ROOT, ORIGIN, optional PANEL_PRIOR). The subagent owns the whole
 convergence loop end-to-end and returns a `completion_return`.
 
+The consumer repository supplies `.apm/instructions/lifecycle.instructions.md`
+and `scripts/check_lifecycle_evidence.py`; probe both before execution.
+The driver and parent independently run the full P8 gate; the parent uses
+`--completion` before accepting either shipping-eligible status. Missing
+assets or evidence block completion; do not bundle another lifecycle owner.
+
 After every shepherded PR returns `ready-to-merge`, the orchestrator
 runs the conflict-resolution phase: probe mergeability and, on
 DIRTY / BEHIND / CONFLICTING, spawn one conflict-resolution subagent

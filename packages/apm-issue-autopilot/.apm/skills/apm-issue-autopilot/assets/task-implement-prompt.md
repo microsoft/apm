@@ -37,6 +37,13 @@ Read TASK.type and load the matching lens; do not load the others:
 
 The lens defines the coverage discipline -- follow it exactly.
 
+All lenses also inherit P8 from
+`$WORKTREE/.apm/instructions/lifecycle.instructions.md`; load it before
+editing. Keep the assigned lifecycle obligations executable across task
+boundaries. If they are absent from the plan, escalate for re-planning
+rather than silently narrowing to one command. Acceptance close verifies
+the integrated candidate, not independent per-task success claims.
+
 ## Discipline
 
 1. Work ONLY inside WORKTREE on TASK_BRANCH. Never touch another

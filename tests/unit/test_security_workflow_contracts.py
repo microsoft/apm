@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from tests.workflow_contracts import (
     assert_unconditional,
     load_workflow,
@@ -12,6 +14,31 @@ from tests.workflow_contracts import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "ci.yml",
+        "merge-gate.yml",
+        "notice-drift.yml",
+        "codeql.yml",
+        "spec-conformance.yml",
+        "devcontainer-feature-test.yml",
+        "crlf-invariance.yml",
+        "docs.yml",
+    ],
+)
+def test_pr_checks_cover_stacked_bases(filename: str) -> None:
+    """An upper PR needs checks on its own head before its base reaches main."""
+    workflow = load_workflow(ROOT / ".github" / "workflows" / filename)
+    events = workflow["on"]
+    assert "pull_request" in events
+    assert "pull_request_target" not in events
+    filters = events["pull_request"] or {}
+    assert not {"branches", "branches-ignore"}.intersection(filters)
+    if filename in {"ci.yml", "merge-gate.yml", "notice-drift.yml"}:
+        assert not {"paths", "paths-ignore"}.intersection(filters)
+
+
 def test_codeql_covers_merge_queue_with_existing_analysis_configurations() -> None:
     """Required scans must run on the queue SHA, not just the earlier PR SHA."""
     workflow = load_workflow(ROOT / ".github" / "workflows" / "codeql.yml")
@@ -19,8 +46,7 @@ def test_codeql_covers_merge_queue_with_existing_analysis_configurations() -> No
         "branches": ["main"],
         "types": ["checks_requested"],
     }
-    for event in ("pull_request", "push"):
-        assert workflow["on"][event] == {"branches": ["main"]}
+    assert workflow["on"]["push"] == {"branches": ["main"]}
 
     analyze = workflow_job(workflow, "analyze")
     assert analyze["strategy"]["matrix"]["language"] == ["python", "actions"]

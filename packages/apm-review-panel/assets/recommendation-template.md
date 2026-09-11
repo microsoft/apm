@@ -11,8 +11,9 @@ Everything else is collapsed or omitted unless it adds signal.
 RENDERING RULES (the orchestrator follows these literally):
 
 - ASCII only. No emojis, no Unicode dashes, no box-drawing characters.
-- The panel is ADVISORY. NEVER render the words "Verdict", "APPROVE",
-  "REJECT", "blocked", "merge gate", or any equivalent.
+- The panel emits no verdict labels or merge checks. Report unmet P8
+  evidence explicitly: "P8 shipping precondition unsatisfied; return to
+  implementation." This reports repository policy, not a panel-imposed gate.
 - Sections are SKIPPED (not rendered as empty placeholders) when their
   source field is empty or missing. A section that adds no signal is
   worse than no section.

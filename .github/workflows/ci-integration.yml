@@ -169,6 +169,8 @@ jobs:
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       # Artifact root is ./dist/ (least common ancestor of the uploaded paths in
       # the build job), so download to ./dist/ to preserve dist/apm-linux-x86_64/apm.
@@ -240,6 +242,25 @@ jobs:
         # Keep an outer cap above the runtime setup and sharded integration
         # suite so runner variance does not turn into an unbounded job.
         timeout-minutes: 20
+
+      - name: Execute full lifecycle contracts
+        if: github.event_name == 'merge_group' && matrix.shard == 1
+        env:
+          LIFECYCLE_BASE: ${{ github.event.merge_group.base_sha }}
+          LIFECYCLE_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          git fetch --no-tags origin "$LIFECYCLE_BASE" "$LIFECYCLE_HEAD"
+          uv run --extra dev python scripts/check_lifecycle_evidence.py \
+            --base "$LIFECYCLE_BASE" --head "$LIFECYCLE_HEAD" --lane full \
+            --report "$RUNNER_TEMP/lifecycle-evidence-full.json"
+        timeout-minutes: 20
+
+      - name: Upload full lifecycle evidence
+        if: always() && github.event_name == 'merge_group' && matrix.shard == 1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lifecycle-evidence-full
+          path: ${{ runner.temp }}/lifecycle-evidence-full.json
 
       - name: Rename coverage data for shard
         if: always()

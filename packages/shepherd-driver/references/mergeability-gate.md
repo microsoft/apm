@@ -114,6 +114,13 @@ table + progress diagram (P5c done, P6 active).
 
 ## Trust-but-verify discipline
 
+Every `resolved` return also requires post-rebase `lifecycle_evidence`.
+Load the row worktree's `.apm/instructions/lifecycle.instructions.md`;
+derive the new comparison base and independently execute the full
+provider with `--completion <resolution-return>` and a fresh parent
+report path. A failed P8 gate changes the result to `resolution-failed`,
+even if GitHub reports CLEAN. Do not reuse pre-rebase lifecycle proof.
+
 The orchestrator's 5c re-probe is mandatory even when the subagent
 returned `status: resolved` with `mergeStateStatus_post: CLEAN`.
 Two reasons:
@@ -135,7 +142,7 @@ re-probe is the gate.
   belong to the maintainer's policy workflow, not to the bbs.
 - Does NOT re-run the apm-review-panel. The shepherd-driver
   convergence loop already owned review, fold/defer, implementation,
-  push, and CI; Phase 5 owns ONLY rebase and re-probe. Conflict
+  push, and CI; Phase 5 owns rebase, fresh P8 evidence and re-probe. Conflict
   resolution is a mechanical merge, not a fresh judgment pass.
 - Does NOT open new PRs. Supersession is a Phase 4 affordance; if
   a fork-with-flag-false PR shows up here, it routes to

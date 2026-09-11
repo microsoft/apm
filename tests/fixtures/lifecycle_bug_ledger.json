@@ -1,6 +1,58 @@
 {
   "schema_version": 1,
   "scope": "Representative post-0.26 escaped defects with reviewable regression evidence; this is not an issue-count census.",
+  "lifecycle_contracts": [],
+  "non_runtime_changes": [
+    {
+      "paths": ["scripts/check_lifecycle_evidence.py", "scripts/lifecycle_contracts.py"],
+      "reason": "Repository-only lifecycle evidence provider and authored-contract validator; neither module is shipped in apm_cli or invoked by an APM command. Exercised by tests/unit/scripts/test_lifecycle_evidence.py and the existing quality/CI topology gates."
+    },
+    {
+      "paths": [
+        ".apm/instructions/lifecycle.instructions.md",
+        ".github/instructions/lifecycle.instructions.md",
+        ".apm/agents/apm-ceo.agent.md",
+        ".github/agents/apm-ceo.agent.md",
+        ".apm/agents/test-coverage-expert.agent.md",
+        ".github/agents/test-coverage-expert.agent.md",
+        "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/SKILL.md",
+        ".agents/skills/apm-issue-autopilot/SKILL.md",
+        "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/assets/acceptance-observer.md",
+        ".agents/skills/apm-issue-autopilot/assets/acceptance-observer.md",
+        "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/assets/ideate-prompt.md",
+        ".agents/skills/apm-issue-autopilot/assets/ideate-prompt.md",
+        "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/assets/solution-pipeline-prompt.md",
+        ".agents/skills/apm-issue-autopilot/assets/solution-pipeline-prompt.md",
+        "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/assets/task-implement-prompt.md",
+        ".agents/skills/apm-issue-autopilot/assets/task-implement-prompt.md",
+        "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/SKILL.md",
+        ".agents/skills/batch-bug-shepherd/SKILL.md",
+        "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/assets/fix-prompt.md",
+        ".agents/skills/batch-bug-shepherd/assets/fix-prompt.md",
+        "packages/apm-review-panel/SKILL.md",
+        ".agents/skills/apm-review-panel/SKILL.md",
+        "packages/apm-review-panel/references/conditional-panelists.md",
+        ".agents/skills/apm-review-panel/references/conditional-panelists.md",
+        "packages/apm-review-panel/assets/panelist-return-schema.json",
+        ".agents/skills/apm-review-panel/assets/panelist-return-schema.json",
+        "packages/apm-review-panel/assets/recommendation-template.md",
+        ".agents/skills/apm-review-panel/assets/recommendation-template.md",
+        "packages/pr-description-skill/assets/scenario-evidence-rubric.md",
+        ".agents/skills/pr-description-skill/assets/scenario-evidence-rubric.md",
+        "packages/shepherd-driver/SKILL.md",
+        ".agents/skills/shepherd-driver/SKILL.md",
+        "packages/shepherd-driver/assets/completion-schema.json",
+        ".agents/skills/shepherd-driver/assets/completion-schema.json",
+        "packages/shepherd-driver/assets/conflict-resolution-prompt.md",
+        ".agents/skills/shepherd-driver/assets/conflict-resolution-prompt.md",
+        "packages/shepherd-driver/assets/shepherd-driver-prompt.md",
+        ".agents/skills/shepherd-driver/assets/shepherd-driver-prompt.md",
+        "packages/shepherd-driver/references/mergeability-gate.md",
+        ".agents/skills/shepherd-driver/references/mergeability-gate.md"
+      ],
+      "reason": "This change binds maintainer and coding-agent planning, review and completion to P8 and tightens their evidence JSON contracts. These exact source files and regenerated mirrors are contributor/shipping workflow content; no APM command implementation, dependency pin, deployed primitive format, target layout or package ownership semantics changes here. Schema and consumer-link regressions exercise this tooling change. This assessment does not exempt future payload, format or runtime changes to these paths."
+    }
+  ],
   "property_catalog": [
     {
       "id": "filesystem.open_world_observation",

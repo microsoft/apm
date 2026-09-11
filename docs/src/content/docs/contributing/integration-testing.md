@@ -34,24 +34,96 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
 ### 3. **Lifecycle Smoke** (PR-time required check)
-- **Location**: selected declaratively via `lifecycle_smoke and not lifecycle_merge_group`. Tests marked `lifecycle_merge_group` remain outside the bounded required set.
-- **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
-- **Scope**: the family contains a static authority guard plus content-hash, policy, hook, virtual-package, audit, auth, and installed-console rows. Real subprocess cases use the uv-installed `apm` command and local Git. This is not frozen PyInstaller coverage.
-- **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: the required expression must remain inside its hard 6-minute job timeout; hosted duration is authoritative.
-- **Trigger**: every pull request and merge queue run (`ci.yml`'s `lifecycle-smoke` job, required via `merge-gate.yml`)
-- **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
-- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs unfiltered `pytest tests/integration/`, so the complete lifecycle family remains exercised.
-- **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, and required selections; verifies their set partition; and preserves the required expression, full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
-- **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection. These are internal test controls, not user-facing APM settings.
-- **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
-- **Generated lifecycle model**: `test_generated_lifecycle_state_machine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, and prune sequences against the real CLI. The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Every transition captures complete project and user roots, and mutating commands must stay inside reviewed write sets. It stays in the merge-group family until hosted runtime supports promotion to the bounded PR-time smoke set.
-- **Known gap**: a late lockfile replacement failure can leave target files on the newly declared target while retaining the prior lockfile. The required lifecycle suite bounds that blast radius and proves the next install converges; expanding the install transaction is a separate design decision recorded in the ledger.
-- **Run it locally** (the exact command CI runs):
-  ```bash
-  APM_E2E_TESTS=1 uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
-    -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
-  ```
+
+Every human or agent change requires lifecycle applicability assessment under
+[P8](https://github.com/microsoft/apm/blob/main/PRINCIPLES.md#p8----lifecycle-completeness)
+and the [lifecycle shipping rule](https://github.com/microsoft/apm/blob/main/.apm/instructions/lifecycle.instructions.md).
+Applicable changes need both deterministic real-CLI trajectories and generated
+state-machine evidence; install-only success is insufficient.
+
+#### Author the contract
+
+Add or extend a `lifecycle_contracts` row in
+`tests/fixtures/lifecycle_bug_ledger.json`; `scripts/lifecycle_contracts.py`
+validates it. Preserve existing obligations.
+
+1. Give the row an `id`, fresh reviewed `assessment`, exact changed `paths`,
+   and `properties` from the ledger's `property_catalog`.
+2. Populate `commands` from `command_inventory()` in
+   `scripts/lifecycle_contracts.py`. It recursively walks actual Click
+   registrations, including hidden commands, groups, aliases, and the root
+   (`""`). Every entry needs a `reason` and a `disposition`: `applicable` or
+   `semantic_na`. Reserve `semantic_na` for commands unrelated to the changed
+   behavior or state. Observers, no-ops, refusals, and failure/recovery count;
+   missing fixtures or model support do not justify N/A.
+3. Reference both `deterministic` and `generated` witnesses for each applicable
+   command. Each witness needs an `id`, `kind`, exact collected pytest `nodeid`
+   (including parameter IDs), `dimensions` matching actual pytest parameters,
+   and ordered `transitions`. Cover every required dimension value in both
+   layers and review changed interactions—not a blanket Cartesian product.
+4. Each transition records `command`, `argv_contains`, `returncode`, and
+   `state` (`observed`, `unchanged`, or `changed`). Use at least two connected
+   transitions in one persistent isolated workspace. Record intentional
+   between-command fixture mutations with a reviewed `preparation` rationale.
+
+Use the [hermetic lifecycle fixtures](#hermetic-lifecycle-fixtures) and
+`ApmLifecycleRunner`. Assert property semantics, deployed bytes, lock/ownership
+consistency, permitted writes, and survival of unowned sentinel files. Observe
+physical project/user roots independently of ownership records. Inject relevant
+faults, assert allowed effects, restore the precondition, and retry without
+resetting state; do not assume universal atomicity.
+
+Extend `test_generated_lifecycle_state_machine.py` for relevant feature
+dimensions. A generated witness must execute a genuine Hypothesis state
+machine and its required CLI trajectory inside that model; a generated label
+or an unexecuted parameter is not evidence.
+
+#### Execute and interpret evidence
+
+Replace the placeholders below. The checkout must be clean and committed,
+including no untracked files; `--head` must resolve to its exact current
+commit, and `--base` must be a distinct ancestor. Keep reports outside it.
+
+```bash
+uv run --extra dev python scripts/check_lifecycle_evidence.py \
+  --base <comparison-base-sha> --head <candidate-sha> \
+  --lane full --report <absolute-path-outside-checkout>
+```
+
+The gate executes tests, not imported receipts. `full` runs both witness kinds
+and rejects missing, uncollected, deselected, skipped, xfailed, failed, stale,
+or unexercised required evidence. Re-run after changing the candidate.
+`pr` executes deterministic witnesses only: applicable changes return
+`pending`, **never shipping proof**, even with exit code zero.
+`not_applicable` means an assessed repository-only change, not proof of runtime
+behavior.
+
+The profile is source-Python, with the verified installed Unix `apm`
+entrypoint where available—not frozen-binary certification. Semantic test
+relevance and N/A rationales still require human review. Bounded execution
+provides neither exhaustive coverage nor a mathematical guarantee.
+[Architecture lint and ownership evidence](../development-guide/#architecture-guardrails)
+remain separate obligations.
+
+#### CI lanes
+
+The required `ci.yml` `lifecycle-smoke` job has a 12-minute whole-job timeout.
+Hermetic smoke defers exact contracted deterministic nodes to the immediately
+following native `pr` gate, avoiding duplicate execution without importing
+receipts. `ci-integration.yml` runs the complete merge-group integration family;
+its native `full` evidence step has a 20-minute timeout.
+Standard PR checks cover all base branches, including stacked PRs, subject to
+existing path filters; secret-bearing integration remains merge-group-only.
+`tests/quality/test_ci_topology.py` and
+`tests/unit/test_security_workflow_contracts.py` guard this wiring; do not change
+jobs or required-check policy to waive P8.
+
+For focused smoke feedback only:
+
+```bash
+APM_E2E_TESTS=1 uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+  -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+```
 
 ### 4. **Live Guardrailing Hero** (scheduled/manual)
 - **Location**: `tests/integration/test_guardrailing_hero_e2e.py`
@@ -466,13 +538,8 @@ Promotion integration tests run on:
 - [+] Release pipeline integrity (GitHub Release -> PyPI)
 
 ### Lifecycle Smoke Verifies:
-- Install content-hash roundtrip (Consume contract)
-- Virtual-skill lock convergence (Produce contract, adjacent to the #2226 ADO lock-coordinate fix)
-- Policy pinned-constraint enforcement (Govern contract)
-- The virtual/manifestless lifecycle matrix: install, lock, frozen-install, update, and audit stay consistent (the direct #2240 regression)
-- The ADO lock-coordinate single-owner guard (the direct #2226 regression)
-- Prune's merged-hook and ownership-sidecar reconciliation for the `claude` target (the direct #2249 regression -- an orphaned package's merged hook entries and sidecar markers must be cleaned up, not left pointing at deleted scripts)
-- No network, no credentials, no built binary required for any of the above
+See [Tier 3](#3-lifecycle-smoke-pr-time-required-check) for the lifecycle
+contract and evidence lanes; the ledger owns regression-to-property mappings.
 
 ## Benefits
 
@@ -513,7 +580,8 @@ Promotion integration tests run on:
 
 ### Lifecycle Smoke Failures
 - These tests are hermetic -- no credentials, no built binary, no network (a real socket attempt raises `OSError`, it does not hang or retry). A failure is a genuine regression, not an environment issue.
-- Run the exact CI command from the "Run it locally" block under Tier 3 above to reproduce.
+- Use [Tier 3's focused smoke command](#ci-lanes) to reproduce smoke failures;
+  run the full evidence lane before lifecycle completion.
 - If the failure is about the CI job's shape (marker not registered, wrong `-m`/`--strict-markers` invocation, unbounded root, timeout, empty marker family, or required-check wiring) rather than test logic, check `tests/quality/test_ci_topology.py` -- that guard pins the job's contract and its own failure message will point at what drifted.
 - For hanging issues: Check command transformation in script runner (codex expects prompt content, not file paths)
 
@@ -531,10 +599,7 @@ Promotion integration tests run on:
    support.
 
 ### For New Features:
-1. Add a smoke test for compilation/validation.
-2. Add an E2E test if the feature requires API calls -- pick the
-   smallest set of markers that captures its real preconditions
-   (`requires_github_token`, `requires_network_integration`, etc.)
-   so contributors without those credentials still get a clean
-   `SKIPPED` rather than a hard failure.
-3. Keep tests focused and fast.
+Follow [Tier 3's contract workflow](#author-the-contract), including both
+lifecycle layers. Declare real preconditions through the
+[marker registry](#the-marker-registry); a skipped required witness blocks
+lifecycle completion.

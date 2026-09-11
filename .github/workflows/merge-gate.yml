@@ -41,7 +41,6 @@ name: Merge Gate
 
 on:
   pull_request:
-    branches: [ main ]
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
@@ -118,14 +117,16 @@ jobs:
           # allocation latency on the critical path.
           # merge_group context: Coverage Combine IS required, so the
           # global 80% floor blocks the actual merge.
-          # Lifecycle Smoke (Linux) is required in BOTH contexts: it's a
-          # hermetic, ~65-70s ci.yml job (runs on pull_request AND
+          # Lifecycle Smoke (Linux) is required in BOTH contexts: its
+          # bounded ci.yml job runs hermetic smoke and fresh deterministic
+          # lifecycle evidence (runs on pull_request AND
           # merge_group, same as APM Self-Check / NOTICE Drift Check),
           # promoting the smallest stable subset of the real
           # Consume/Produce/Govern lifecycle contracts -- selected
           # declaratively via the `lifecycle_smoke` pytest marker,
           # including the direct #2226/#2240 regression tests -- onto
-          # the PR-time critical path.
+          # the PR-time critical path. Preliminary evidence is not full
+          # shipping proof; ci-integration.yml runs the full queue lane.
           # "Windows Compatibility Gate" is also required at BOTH
           # PR-time and merge-queue-time: it is the only Windows signal
           # that runs before merge (build-release.yml's full Windows
@@ -146,5 +147,3 @@ jobs:
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh
-
-

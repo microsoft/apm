@@ -290,12 +290,17 @@ uv run python <row-worktree>/.agents/skills/shepherd-driver/scripts/owner_touch_
   --head <returned-head-sha> --completion <session-return-json>
 ```
 
-Do not write terminal state until both gates pass. A schema or semantic
+Load `<row-worktree>/.apm/instructions/lifecycle.instructions.md` and
+independently execute its repository provider with `--lane full`,
+`--base $BASE_SHA --head <returned-head-sha>`,
+`--completion <session-return-json>`, and a new parent report path.
+Do not write terminal state until schema, owner and lifecycle gates pass.
+A schema or semantic
 failure gets one re-spawn; a second failure marks the row `blocked`
 with the verifier diagnostic. This prevents stale evidence or child
 self-classification from bypassing canonical owner detection.
 
-After both gates pass, write `head_sha` and the
+After all gates pass, write `head_sha` and the
 `mergeable/merge_state_status/ci_status` projection into the row's
 `head_sha` and `merge_state` columns (the crash-survivable A11 stop
 evidence), and remove ONLY the `status/shepherding` labels listed in

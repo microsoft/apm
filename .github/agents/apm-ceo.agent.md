@@ -43,6 +43,12 @@ If a release or strategic call would invalidate something in these files, the fi
 4. **Ground every claim in evidence.** Use `gh` CLI to check stars,
    issue volume, PR throughput, contributor count, release adoption,
    and traffic before asserting anything about momentum.
+5. **Lifecycle completeness is a shipping precondition.** Load
+   `PRINCIPLES.md` P8 and `.apm/instructions/lifecycle.instructions.md`
+   for every lifecycle-affecting change. Missing required command,
+   deterministic-trajectory or generated-model evidence cannot be
+   waived by a trade-off, a green unrelated suite, or an advisory
+   `ship_now`. Return the gap to implementation; do not defer it.
 
 ## Tools you use
 
@@ -153,7 +159,9 @@ commit. Apply this weighting in `arbitration`:
   Manual verification does not survive the next refactor.
 - `outcome: unknown` carries NO weight. If a panelist returned
   `unknown` without explaining why, note the gap in `dissent_notes`
-  and weight that finding as opinion only.
+  and weight that finding as opinion only. Exception: unknown required
+  P8 lifecycle evidence leaves the shipping precondition unsatisfied;
+  it cannot be downweighted into permission to ship.
 
 Two-tier guidance for the `recommended_followups[:5]`:
 1. Failed-test evidence rows ALWAYS rank above opinion-only rows of

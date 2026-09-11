@@ -14,7 +14,6 @@ name: CRLF Invariance (apm#1952)
 
 on:
   pull_request:
-    branches: [ main ]
     paths:
       - 'src/apm_cli/utils/content_hash.py'
       - 'src/apm_cli/utils/atomic_io.py'

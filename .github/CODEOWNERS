@@ -6,3 +6,16 @@ README.md @danielmeppiel
 # Workflow files - Lead Maintainer review required for any change to CI
 # definitions, especially anything touching `pull_request_target` or secrets.
 .github/workflows/** @danielmeppiel
+
+# Lifecycle proof obligations and their executing provider share the CI trust boundary.
+scripts/check_lifecycle_evidence.py @danielmeppiel
+scripts/lifecycle_contracts.py @danielmeppiel
+tests/fixtures/lifecycle_bug_ledger.json @danielmeppiel
+tests/utils/lifecycle_evidence.py @danielmeppiel
+tests/utils/apm_lifecycle_runner.py @danielmeppiel
+tests/utils/artifact_snapshot.py @danielmeppiel
+tests/utils/lifecycle_state.py @danielmeppiel
+tests/utils/isolated_apm_environment.py @danielmeppiel
+tests/quality/test_lifecycle_bug_ledger.py @danielmeppiel
+tests/unit/scripts/test_lifecycle_evidence.py @danielmeppiel
+.github/CODEOWNERS @danielmeppiel

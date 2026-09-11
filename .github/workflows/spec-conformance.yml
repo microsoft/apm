@@ -8,7 +8,6 @@ name: Spec conformance
 
 on:
   pull_request:
-    branches: [ main ]
     paths:
       - 'docs/src/content/docs/specs/**'
       - 'tests/fixtures/spec-conformance/**'

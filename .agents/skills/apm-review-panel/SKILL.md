@@ -4,7 +4,7 @@ description: >-
   Use this skill to run a multi-persona expert advisory review on a labelled
   pull request in microsoft/apm. The panel fans out to five mandatory
   specialists plus a test-coverage specialist (active on every PR that
-  touches src/) plus three conditional specialists (auth, doc-writer,
+  touches runtime behavior) plus three conditional specialists (auth, doc-writer,
   performance-expert), all running in their own agent threads, and a CEO
   synthesizer. The orchestrator is the sole writer to the PR: ONE
   recommendation comment, no verdict labels, no merge gating. The panel
@@ -88,7 +88,7 @@ surfaces findings; the maintainer and the PR author decide ship.
 | [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Adoption Strategist | Yes |
 | [Auth Expert](../../agents/auth-expert.agent.md) | Auth / Token Reviewer | Conditional (see below) |
 | [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Conditional (see below) |
-| [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer (paired with DevX UX) | Yes (skipped only on docs-only PRs -- see below) |
+| [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer (paired with DevX UX) | Yes for src or P8 lifecycle surfaces (see below) |
 | [Performance Expert](../../agents/performance-expert.agent.md) | Package-Manager Performance Reviewer | Conditional (see below) |
 | [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Yes |
 
@@ -132,126 +132,27 @@ surfaces findings; the maintainer and the PR author decide ship.
 
 ## Conditional panelists
 
-Three personas are conditional (auth, doc-writer, performance-expert). A
-fourth (test-coverage) is mandatory on every PR that touches `src/` and
-only skipped on documentation-only PRs -- see its section below for why.
-The orchestrator ALWAYS spawns ALL four tasks to keep the schema
-return shape uniform; the prompt instructs the subagent to set
-`active: false` with an `inactive_reason` if the condition does not
-hold.
-
-### Auth Expert
-
-Activate when the PR changes any of:
-- `src/apm_cli/core/auth.py`
-- `src/apm_cli/core/token_manager.py`
-- `src/apm_cli/core/azure_cli.py`
-- `src/apm_cli/deps/github_downloader.py`
-- `src/apm_cli/marketplace/client.py`
-- `src/apm_cli/utils/github_host.py`
-- `src/apm_cli/install/validation.py`
-- `src/apm_cli/install/pipeline.py`
-- `src/apm_cli/deps/registry_proxy.py`
-
-Fallback self-check (when no fast-path file matched): "Does this PR
-change authentication behavior, token management, credential resolution,
-host classification used by `AuthResolver`, git or HTTP authorization
-headers, or remote-host fallback semantics? If unsure, answer YES."
-
-### Doc Writer
-
-Activate when the PR changes any of:
-- `README.md`
-- `CHANGELOG.md`
-- `MANIFESTO.md`
-- `docs/src/content/docs/**`
-- `.apm/skills/**/*.md`
-- `.apm/agents/**/*.md`
-- `.github/skills/**/*.md`
-- `.github/agents/**/*.md`
-- `.github/instructions/**/*.md`
-- `.github/workflows/*.md` (gh-aw natural-language workflows)
-- `packages/apm-guide/**`
-
-Fallback self-check (when no fast-path file matched): "Does this PR
-change user-facing documentation, agent or skill prose, instruction
-files, CHANGELOG entries, README claims, or any natural-language
-artifact a reader will rely on? If unsure, answer YES."
-
-When the doc-writer is active and the PR includes documentation changes,
-the persona reviews them for: (a) consistency with the existing voice
-and structure, (b) accuracy against the code being changed, (c)
-completeness for the typical reader (no orphan claims, no missing
-prerequisites), (d) discoverability (cross-links, sidebar order if
-Starlight content). When the doc-writer is active because of code
-changes that SHOULD have updated docs but did not, the persona surfaces
-that gap as a finding.
-
-### Performance Expert
-
-Activate when the PR changes any of:
-- `src/apm_cli/cache/**`
-- `src/apm_cli/deps/**`
-- `src/apm_cli/install/phases/**`
-- `src/apm_cli/install/pipeline.py`
-- `src/apm_cli/install/resolve.py`
-- `src/apm_cli/utils/**`
-- `src/apm_cli/marketplace/**`
-- `src/apm_cli/compilation/**`
-- `scripts/perf/**`
-- `src/apm_cli/core/command_logger.py` (when the diff adds perf-instrumentation logs)
-
-Also activate when:
-- The PR description claims a performance win (speedup ratio, latency
-  reduction, bytes-on-disk reduction, throughput improvement) or
-  attaches a perf-harness measurement table.
-- The diff introduces loops over collections (`for x in collection`)
-  where the collection may grow with dependency count or file count.
-- The diff adds `os.scandir`, `os.walk`, `os.listdir`, or
-  `subprocess.run` calls on a path that executes per-package or
-  per-dependency.
-- The diff adds `x in list_variable` inside a loop body.
-
-Fallback self-check (when no fast-path file matched): "Does this PR
-change the hot path for dependency download, materialization, cache
-layout, transport (git protocol, partial clone, sparse checkout),
-parallelism, or any user-visible install/update wall-time? Does it
-introduce an algorithmic complexity regression (O(n^2) loops, repeated
-I/O, missing indexes, unconditional full scans, blocking synchronous
-calls, heavy top-level imports)? If unsure, answer YES."
-
-When active, the performance-expert reviews against BOTH:
-1. The package-manager performance playbook: transport minimization
-   (depth, filter, sparse scope), cache layering and dedup keys,
-   parallelism and lock contention, working-tree materialization cost,
-   perf-harness methodology (cache wipe, warm/cold separation,
-   statistical noise), and pervasive application of the chosen
-   technique across install / update / run surfaces.
-2. The algorithmic performance lens (Big O analysis): complexity class
-   of every loop/lookup in the diff, index vs linear scan patterns,
-   unconditional expensive operations, import startup costs, redundant
-   computation, and parallelism opportunities. See the agent's
-   `references/algorithmic-patterns.md` for the full pattern catalogue.
+Before selecting activation, load
+[references/conditional-panelists.md](references/conditional-panelists.md)
+for auth, doc-writer and performance triggers. Test coverage follows the
+P8 rule below. ALWAYS spawn all four tasks to keep the return shape
+uniform; an inactive persona returns `active: false` and a specific
+`inactive_reason`.
 
 ### Test Coverage Expert
 
-**Active by default on every PR that touches `src/**/*.py`.** The only
-condition that flips this persona to `active: false` is a
-documentation-only PR -- the diff contains zero `src/**/*.py` files.
-In that case set `inactive_reason: "documentation-only PR -- no
-runtime code paths to defend"`.
+**Active on every PR touching `src/**/*.py` or a P8 lifecycle surface.**
+Before classifying, load the consumer repository's
+`.apm/instructions/lifecycle.instructions.md`. Absence of Python changes
+does not exempt installed payloads, manifests, shared state or tooling
+that alters lifecycle behavior. Only a demonstrated unrelated change
+may set `active: false`, with a specific `inactive_reason`.
 
-The activation rule is intentionally narrow: under the advisory regime,
-test outcomes are LOAD-BEARING for CEO arbitration (passed / failed /
-missing test evidence outranks opinion-only findings -- see
-`apm-ceo.agent.md` and `panelist-return-schema.json` evidence block).
-A persona whose findings carry that weight cannot be silently skipped
-on a heuristic. Better to spawn it on a pure refactor and have it
-return a single `nit`-severity "no behavior surface touched -- no
-coverage finding" line than to skip it and leave the CEO without
-evidence to weigh. (Earlier revisions of this skill paired test-coverage
-with auth and doc-writer as conditional for symmetry; that symmetry
-broke when test evidence became load-bearing.)
+Pass that rule and the candidate-bound lifecycle evidence to the
+coverage reviewer and CEO. Missing required deterministic or generated
+coverage is a blocking P8 gap, not a deferrable recommendation.
+The panel remains advisory; the executing repository gate, not a
+`ship_now` opinion, discharges the shipping precondition.
 
 The test-coverage-expert is paired with the devx-ux-expert lens and
 defends the user-promise contracts the DevX persona enumerates (CLI
@@ -259,7 +160,7 @@ surface, error wording, install idempotency, lockfile determinism, auth
 resolution). It MUST verify "no test exists" claims with `view`/`grep`
 on the test tree before emitting a finding -- false-positive coverage
 findings destroy trust in the field. It does NOT compute coverage
-percentages, does NOT flag tests for pure refactors, and does NOT
+percentages, does NOT demand artificial new tests for refactors, and does NOT
 duplicate python-architect on test-code design.
 
 ## Routing matrix (CEO synthesis emphasis only)
@@ -410,8 +311,8 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
      invent diagrams).
    - The recommended follow-ups list renders the CEO's curated subset,
      not every finding. Full per-persona findings collapse at the bottom.
-   - NEVER render the words "Verdict", "APPROVE", "REJECT", "blocked",
-     "merge gate", or any equivalent. The panel is advisory.
+   - Follow the template's advisory-versus-P8 distinction. Reporting an
+     unmet repository shipping precondition is not a panel verdict.
 
 8. **Sweep labels** via `safe-outputs.remove-labels`. The list MUST be
    `[panel-review, panel-approved, panel-rejected]` -- always all three,
@@ -482,12 +383,8 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
   a diff changes how a remote host, org, token source, or fallback path
   is selected and you are not certain it is auth-neutral, activate
   auth-expert as `active: true`.
-- **Test-coverage probe is mandatory.** The test-coverage-expert MUST
-  verify "no test exists for X" via `view`/`grep` on the `tests/` tree
-  before emitting a finding. A false-positive coverage finding (test
-  exists but persona claimed it does not) destroys maintainer trust in
-  the field. The persona scope file enforces this; the orchestrator
-  passes the diff and trusts the persona to probe.
+- **Test-coverage probe is mandatory.** Confirm missing-test claims
+  against `tests/`, as required by the coverage persona.
 - **Subagent write enforcement is contract-based, not sandbox-based.**
   Tool permissions are workflow-scoped, not subagent-scoped, so every
   spawned task technically inherits the same `gh` toolset. The
@@ -505,7 +402,4 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
   the turn MUST end with a safe output -- the comment, or an explicit
   `noop`. See the "Synchronous fan-out" and "Non-empty turn exit"
   architecture invariants and step 9.
-- **No verdict-label reset workflow.** The previous regime had a
-  companion workflow `pr-panel-label-reset.yml` that stripped verdict
-  labels on every push. The advisory regime has no verdict labels to
-  strip; that workflow is removed.
+- **No verdict-label reset.** Advisory panels emit no verdict labels.

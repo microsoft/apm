@@ -325,14 +325,18 @@ uv run python <row-worktree>/.agents/skills/shepherd-driver/scripts/owner_touch_
   --head <returned-head-sha> --completion <session-return-json>
 ```
 
-Do not update the table or labels until schema AND semantic
+Load `<row-worktree>/.apm/instructions/lifecycle.instructions.md` and
+independently execute its repository provider with `--lane full`,
+`--base $BASE_SHA --head <returned-head-sha>`,
+`--completion <session-return-json>`, and a new parent report path.
+Do not update the table or labels until schema, owner AND lifecycle
 verification pass. A non-zero verifier result gets the same retry-once
 treatment as malformed schema; on a second failure mark the row
 `blocked` with the diagnostic. This parent re-probe prevents a child
 from bypassing deterministic owner detection or presenting stale
 functional evidence.
 
-After both gates pass, write `head_sha`, `mergeable`,
+After all gates pass, write `head_sha`, `mergeable`,
 `merge_state_status`, and `ci_status` from the return into the table,
 and remove the `status/shepherding` label from the driven issue
 (assignment stays). The orchestrator owns only validation, table

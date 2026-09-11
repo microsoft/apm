@@ -7,6 +7,13 @@ only place a PR is opened in Phase 4 (task children never open PRs).
 
 ## Procedure (pipeline child, in the issue worktree)
 
+Load `$REPO_ROOT/.apm/instructions/lifecycle.instructions.md` before
+acceptance. P8 applies even if the original `acceptance_shape` omitted it.
+Execute its full lifecycle gate on the integrated candidate; preliminary
+PR-lane, missing, skipped, failed, or stale evidence is not completion.
+Re-plan missing lifecycle work under the same failure cap below; do not
+open a ready PR or defer that work as out of scope.
+
 1. Reload plan.json (B8 ATTENTION ANCHOR). Read `acceptance_shape`.
 2. Run the full lint contract one last time (must be silent) and the
    full test suite (`uv run --extra dev pytest -q`, must be green).

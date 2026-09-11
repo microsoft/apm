@@ -26,6 +26,11 @@ parallelizing the work within an issue.
 Reload plan.md and (once it exists) plan.json before EACH stage and
 before EACH spawn (B8 ATTENTION ANCHOR). Never drive from recall.
 
+Load `$REPO_ROOT/.apm/instructions/lifecycle.instructions.md` before
+Ideate. Carry P8 into `acceptance_shape` and wave `integration_check`;
+assign shared lifecycle/model files to one wave owner. Task-local success
+does not certify the integrated candidate's lifecycle.
+
 ## Model routing (B12)
 
 Every child below is spawned with an EXPLICIT model, resolved from

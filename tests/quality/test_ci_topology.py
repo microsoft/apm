@@ -63,7 +63,7 @@ REQUIRED_SHARD_ROOTS = (
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 6
+LIFECYCLE_SMOKE_MAX_TIMEOUT_MINUTES = 12
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
@@ -83,6 +83,66 @@ FORBIDDEN_NETWORK_ENV = ("APM_RUN_INTEGRATION_TESTS",)
 # Covers the `${{ github.token }}` context alias, which does not contain any
 # FORBIDDEN_CREDENTIAL_ENV substring but resolves to the same automatic token.
 FORBIDDEN_CREDENTIAL_EXPRESSIONS = (*FORBIDDEN_CREDENTIAL_ENV, "github.token")
+
+
+def _assert_lifecycle_provider_pair(job: WorkflowNode) -> None:
+    smoke = workflow_step(job, LIFECYCLE_SMOKE_RUN_STEP)
+    native = workflow_step(job, "Execute changed lifecycle contracts")
+    assert job["steps"].index(native) == job["steps"].index(smoke) + 1
+    assert "if" not in native and "continue-on-error" not in native
+    assert "scripts/check_lifecycle_evidence.py" in native["run"]
+    assert '--base "$LIFECYCLE_BASE" --head "$LIFECYCLE_HEAD" --lane pr' in native["run"]
+    assert "-p tests.utils.lifecycle_evidence" in smoke["run"]
+    assert "python -m pytest" in smoke["run"]
+    assert '--lifecycle-defer-base "$LIFECYCLE_BASE"' in smoke["run"]
+    assert '--lifecycle-defer-head "$LIFECYCLE_HEAD"' in smoke["run"]
+    assert all(
+        smoke["env"][key] == native["env"][key] for key in ("LIFECYCLE_BASE", "LIFECYCLE_HEAD")
+    )
+
+
+def test_lifecycle_evidence_is_executed_in_required_candidate_lanes() -> None:
+    """A saved receipt cannot replace either required executing provider lane."""
+    smoke = workflow_job(load_workflow(REPO_ROOT / ".github/workflows/ci.yml"), LIFECYCLE_SMOKE_JOB)
+    _assert_lifecycle_provider_pair(smoke)
+    step = workflow_step(smoke, "Execute changed lifecycle contracts")
+    assert "scripts/check_lifecycle_evidence.py" in step["run"]
+    assert '--base "$LIFECYCLE_BASE" --head "$LIFECYCLE_HEAD" --lane pr' in step["run"]
+    assert "github.event.pull_request.base.sha" in step["env"]["LIFECYCLE_BASE"]
+    assert "github.event.merge_group.base_sha" in step["env"]["LIFECYCLE_BASE"]
+    assert step["env"]["LIFECYCLE_HEAD"] == "${{ github.sha }}"
+    checkout = next(s for s in smoke["steps"] if "actions/checkout@" in s.get("uses", ""))
+    assert checkout["with"]["fetch-depth"] == 0
+    integration = workflow_job(
+        load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW), MERGE_GROUP_INTEGRATION_JOB
+    )
+    checkout = next(s for s in integration["steps"] if "actions/checkout@" in s.get("uses", ""))
+    assert checkout["with"]["fetch-depth"] == 0
+    full = workflow_step(integration, "Execute full lifecycle contracts")
+    assert full["if"] == "github.event_name == 'merge_group' && matrix.shard == 1"
+    assert full["timeout-minutes"] == 20
+    assert "scripts/check_lifecycle_evidence.py" in full["run"]
+    assert '--base "$LIFECYCLE_BASE" --head "$LIFECYCLE_HEAD" --lane full' in full["run"]
+    assert full["env"]["LIFECYCLE_BASE"] == "${{ github.event.merge_group.base_sha }}"
+    assert full["env"]["LIFECYCLE_HEAD"] == "${{ github.event.merge_group.head_sha }}"
+    assert 'git fetch --no-tags origin "$LIFECYCLE_BASE" "$LIFECYCLE_HEAD"' in full["run"]
+    assert "continue-on-error" not in step and "continue-on-error" not in full
+
+
+@pytest.mark.parametrize("mutation", ["missing", "conditional", "base", "head"])
+def test_smoke_deferral_cannot_outlive_its_mandatory_provider(mutation: str) -> None:
+    job = deepcopy(
+        workflow_job(load_workflow(REPO_ROOT / ".github/workflows/ci.yml"), LIFECYCLE_SMOKE_JOB)
+    )
+    native = workflow_step(job, "Execute changed lifecycle contracts")
+    if mutation == "missing":
+        job["steps"].remove(native)
+    elif mutation == "conditional":
+        native["if"] = "false"
+    else:
+        native["env"][f"LIFECYCLE_{mutation.upper()}"] = "different-candidate"
+    with pytest.raises((AssertionError, KeyError)):
+        _assert_lifecycle_provider_pair(job)
 
 
 def _pytest_ini_markers() -> list[str]:
@@ -504,7 +564,7 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
         "lifecycle-smoke must use loadgroup to preserve xdist_group serialization"
     )
     assert "-m" in tokens
-    marker_index = tokens.index("-m")
+    marker_index = tokens.index("-m", tokens.index("pytest") + 1)
     assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
     targets = [token for token in tokens if token.startswith("tests/")]
     assert targets == [LIFECYCLE_SMOKE_ROOT], (
@@ -556,6 +616,8 @@ def _assert_lifecycle_smoke_e2e_mode(job: WorkflowNode) -> None:
     run_step = workflow_step(job, LIFECYCLE_SMOKE_RUN_STEP)
     assert run_step.get("env") == {
         LIFECYCLE_SMOKE_E2E_ENV: LIFECYCLE_SMOKE_E2E_VALUE,
+        "LIFECYCLE_BASE": "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}",
+        "LIFECYCLE_HEAD": "${{ github.sha }}",
     }, (
         f"{LIFECYCLE_SMOKE_RUN_STEP!r} must bind exactly "
         f"{LIFECYCLE_SMOKE_E2E_ENV}={LIFECYCLE_SMOKE_E2E_VALUE!r}"

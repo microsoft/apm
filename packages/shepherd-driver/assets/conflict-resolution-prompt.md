@@ -106,6 +106,13 @@ regression-trap test, `--force-with-lease` only (never bare
    resolution-failed`, `blocker: "lint noisy post-rebase: <first
    diagnostic>"`. Do not push.
 
+   Also load `$REPO_ROOT/.apm/instructions/lifecycle.instructions.md`.
+   Rebase invalidates the previous lifecycle result. Execute its full
+   gate against the new base/head before claiming resolution; include
+   the native report summary as `lifecycle_evidence` in the return.
+   Missing, skipped, failed or stale P8 evidence means
+   `resolution-failed`, not `resolved`.
+
 7. PUSH WITH `--force-with-lease`. Choose the remote based on
    HEAD_REPO:
    - Head on a fork: `git push --force-with-lease=<HEAD_BRANCH>:<pre_rebase_head> <fork-remote> HEAD:<HEAD_BRANCH>`.
@@ -151,7 +158,7 @@ regression-trap test, `--force-with-lease` only (never bare
    return shapes on this const). Required fields by status:
     - resolved: pr, status, mergeStateStatus_pre,
       mergeStateStatus_post, rebase_evidence, push_command,
-      lint_evidence, comment_url. Plus mutation_break_evidence
+      lint_evidence, comment_url, lifecycle_evidence. Plus mutation_break_evidence
       and rebase_touched_regression_test=true if step 5 ran.
     - requires-author-action: pr, status, mergeStateStatus_pre,
       fork_url, head_branch, maintainer_can_modify=false,

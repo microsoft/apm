@@ -4,8 +4,8 @@ env:
   PYTHON_VERSION: '3.12'
 
 on:
+  # Upper stacked PRs need their own head checks before their base reaches main.
   pull_request:
-    branches: [ main ]
   # Tier 1 also runs in merge queue context so the same unit + build checks
   # execute against the tentative merge commit that the queue creates. See
   # microsoft/apm#770 for the design.
@@ -195,6 +195,7 @@ jobs:
         uv run --frozen --extra dev pytest -p no:cacheprovider -q \
           tests/unit/scripts/test_check_test_assertions.py \
           tests/unit/scripts/test_check_exact_test_duplicates.py \
+          tests/unit/scripts/test_lifecycle_evidence.py \
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
           tests/quality/test_lifecycle_bug_ledger.py \
@@ -514,12 +515,16 @@ jobs:
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    # Five deterministic witnesses alone measured 201s; leave bounded room for
+    # the deferred-smoke remainder and dependency/runtime setup.
+    timeout-minutes: 12
     permissions:
       contents: read
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -547,7 +552,26 @@ jobs:
     - name: Run required lifecycle smoke subset
       env:
         APM_E2E_TESTS: "1"
+        LIFECYCLE_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        LIFECYCLE_HEAD: ${{ github.sha }}
       run: |
-        uv run --extra dev pytest -p no:cacheprovider -q --strict-markers \
+        uv run --extra dev python -m pytest -p no:cacheprovider -p tests.utils.lifecycle_evidence -q --strict-markers \
           -n 2 --dist loadgroup \
-          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration \
+          --lifecycle-defer-base "$LIFECYCLE_BASE" --lifecycle-defer-head "$LIFECYCLE_HEAD"
+
+    - name: Execute changed lifecycle contracts
+      env:
+        LIFECYCLE_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        LIFECYCLE_HEAD: ${{ github.sha }}
+      run: |
+        uv run --extra dev python scripts/check_lifecycle_evidence.py \
+          --base "$LIFECYCLE_BASE" --head "$LIFECYCLE_HEAD" --lane pr \
+          --report "$RUNNER_TEMP/lifecycle-evidence-pr.json"
+
+    - name: Upload lifecycle evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: lifecycle-evidence-pr
+        path: ${{ runner.temp }}/lifecycle-evidence-pr.json

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-import ast
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
+
+from scripts.lifecycle_contracts import command_inventory, validate_contracts
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _LEDGER_PATH = _REPOSITORY_ROOT / "tests/fixtures/lifecycle_bug_ledger.json"
@@ -30,17 +34,6 @@ def _load_ledger() -> dict[str, object]:
     payload = json.loads(_LEDGER_PATH.read_text(encoding="ascii"))
     assert isinstance(payload, dict)
     return payload
-
-
-def _defined_test_names(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
-            "test_"
-        ):
-            names.add(node.name)
-    return names
 
 
 def test_lifecycle_bug_ledger_has_valid_taxonomy_and_unique_references() -> None:
@@ -79,6 +72,9 @@ def test_lifecycle_bug_ledger_has_valid_taxonomy_and_unique_references() -> None
         assert row["regression_tests"]
         referenced_properties.update(row["properties"])
 
+    contracts = validate_contracts(ledger, command_inventory())
+    for contract in contracts.values():
+        referenced_properties.update(contract["properties"])
     assert referenced_properties == set(property_ids)
     gap_ids = [gap["id"] for gap in known_gaps]
     assert gap_ids
@@ -90,22 +86,38 @@ def test_lifecycle_bug_ledger_has_valid_taxonomy_and_unique_references() -> None
 
 
 def test_lifecycle_bug_ledger_regression_nodeids_exist() -> None:
+    """Legacy bug rows may name parameter families; pytest must collect each one.
+
+    General feature contracts require exact parameterized nodes at execution.
+    This inventory check is not a substitute for their executing gate.
+    """
     ledger = _load_ledger()
-    defined_by_path: dict[Path, set[str]] = {}
-
-    for row in ledger["bugs"]:
-        for nodeid in row["regression_tests"]:
-            path_text, separator, test_name = nodeid.partition("::")
-            leaf_name = test_name.split("::")[-1]
-            assert separator and leaf_name.startswith("test_"), f"Invalid test nodeid: {nodeid}"
-            path = _REPOSITORY_ROOT / path_text
-            assert path.is_file(), f"Missing regression test file: {path_text}"
-            names = defined_by_path.setdefault(path, _defined_test_names(path))
-            assert leaf_name in names, f"Missing regression test: {nodeid}"
-
-    for gap in ledger["known_gaps"]:
-        path_text, separator, test_name = gap["bounded_by"].partition("::")
-        assert separator and test_name.startswith("test_")
-        path = _REPOSITORY_ROOT / path_text
-        assert path.is_file()
-        assert test_name in _defined_test_names(path)
+    references = {nodeid for row in ledger["bugs"] for nodeid in row["regression_tests"]} | {
+        gap["bounded_by"] for gap in ledger["known_gaps"]
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "--collect-only",
+            "-q",
+            "-o",
+            "addopts=",
+            *sorted(references),
+        ],
+        cwd=_REPOSITORY_ROOT,
+        env={**os.environ, "PYTEST_ADDOPTS": ""},
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    collected = {line.strip() for line in result.stdout.splitlines() if line.startswith("tests/")}
+    for nodeid in references:
+        assert any(
+            candidate == nodeid or candidate.startswith(f"{nodeid}[") for candidate in collected
+        ), f"Uncollected regression reference: {nodeid}"

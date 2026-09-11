@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from jsonschema import Draft7Validator
 
+pytestmark = pytest.mark.component
 ROOT = Path(__file__).parents[2]
 CANONICAL_SCHEMA = ROOT / "packages/shepherd-driver/assets/completion-schema.json"
 MIRROR_SCHEMA = ROOT / ".agents/skills/shepherd-driver/assets/completion-schema.json"
@@ -78,6 +79,16 @@ def _ready_completion(
         "mergeable": "MERGEABLE",
         "merge_state_status": "CLEAN",
         "ci_status": "green",
+        "lifecycle_evidence": {
+            "version": 1,
+            "base_sha": BASE_SHA,
+            "head_sha": HEAD_SHA,
+            "tested_tree": "d" * 40,
+            "lane": "full",
+            "status": "not_applicable",
+            "report_path": "/session/lifecycle-evidence.json",
+            "report_sha256": "e" * 64,
+        },
         "architecture_evidence": {
             "version": "2",
             "classification": classification,
@@ -133,6 +144,49 @@ def test_owner_touch_requires_functional_evidence() -> None:
     document["architecture_evidence"]["functional_tests"] = []
 
     assert list(_validator().iter_errors(document))
+
+
+@pytest.mark.parametrize("status", ["ready-to-merge", "advisory-with-deferred"])
+def test_terminal_completion_cannot_omit_lifecycle_evidence(status: str) -> None:
+    """A panel recommendation or deferral cannot waive the P8 precondition."""
+    document = _ready_completion("ordinary-fix")
+    document["status"] = status
+    document["deferred_items"] = []
+    del document["lifecycle_evidence"]
+
+    assert list(_validator().iter_errors(document))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("status", "pending"), ("status", "blocked"), ("lane", "pr"), ("report_sha256", "")],
+)
+def test_terminal_lifecycle_summary_rejects_nonshipping_evidence(field: str, value: str) -> None:
+    """Only a full-lane report reference can be handed to native verification."""
+    document = _ready_completion("ordinary-fix")
+    document["lifecycle_evidence"][field] = value
+
+    assert list(_validator().iter_errors(document))
+
+
+@pytest.mark.parametrize("include_evidence", [False, True])
+def test_resolved_rebase_requires_fresh_lifecycle_summary(include_evidence: bool) -> None:
+    """Resolving conflicts cannot carry forward the old candidate's eligibility."""
+    document = {
+        "kind": "conflict-resolution",
+        "pr": 1,
+        "status": "resolved",
+        "mergeStateStatus_pre": "DIRTY",
+        "mergeStateStatus_post": "CLEAN",
+        "rebase_evidence": "Resolved against the new base.",
+        "push_command": "git push --force-with-lease",
+        "lint_evidence": "Exit 0.",
+        "comment_url": "https://example.com/rebase",
+    }
+    if include_evidence:
+        document["lifecycle_evidence"] = _ready_completion("ordinary-fix")["lifecycle_evidence"]
+
+    assert bool(list(_validator().iter_errors(document))) is not include_evidence
 
 
 @pytest.mark.parametrize("classification", ["ordinary-fix", "not-applicable"])
