@@ -7,8 +7,9 @@ import stat
 import sys
 from collections import deque
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
+from apm_cli.contracts.events import HEARTBEAT_SECONDS
 from apm_cli.contracts.models import (
     CheckObservation,
     ContractError,
@@ -23,6 +24,9 @@ from apm_cli.contracts.stream import safe_text
 from apm_cli.utils import console
 
 from .command_logger import CommandLogger
+
+if TYPE_CHECKING:
+    from rich.status import Status
 
 
 class _Transcript:
@@ -86,6 +90,43 @@ class ContractLogger(CommandLogger):
         self._human_enabled = True
         self._last_phase: str | None = None
         self._last_activity = 0.0
+        self._status: Status | None = None
+
+    def start_activity(self, message: str, *, announce: bool = True) -> None:
+        """Animate quiet work using the install spinner, never in retained logs."""
+        if self._closed or not self._human_enabled:
+            return
+        if announce:
+            self._write(message, severity="start")
+            if not self._human_enabled:
+                return
+        from apm_cli.utils.install_tui import should_animate
+
+        if "NO_COLOR" in os.environ or not should_animate():
+            return
+        rich_console = console._get_console()
+        if rich_console is None or not rich_console.is_terminal:
+            return
+        from rich.text import Text
+
+        label = Text(safe_text(message) + "...", style="cyan")
+        try:
+            if self._status is None:
+                self._status = rich_console.status(label, spinner="line", refresh_per_second=8)
+                self._status.start()
+            else:
+                self._status.update(label)
+        except BrokenPipeError:
+            self._disable_human_output()
+
+    def stop_activity(self) -> None:
+        """Restore the terminal before reporting an error or a final result."""
+        status, self._status = self._status, None
+        if status is not None:
+            try:
+                status.stop()
+            except BrokenPipeError:
+                self._disable_human_output()
 
     @property
     def transcript_metadata(self) -> dict[str, int | str]:
@@ -116,6 +157,7 @@ class ContractLogger(CommandLogger):
         if self._closed:
             return
         self._closed = True
+        self.stop_activity()
         if self._file is not None:
             try:
                 self._transcript.write(self._file)
@@ -165,6 +207,7 @@ class ContractLogger(CommandLogger):
 
     def _disable_human_output(self) -> None:
         self._human_enabled = False
+        self.stop_activity()
         # TextIO may retain a failed write and retry it during interpreter
         # shutdown. Silence only the already-broken human descriptor (stderr
         # in machine mode), without changing the healthy machine-output stream.
@@ -234,6 +277,16 @@ class ContractLogger(CommandLogger):
             return
         self._last_phase = phase
         self._write(phase.capitalize(), severity="start")
+        self.start_activity(
+            {
+                "preflight": "Preparing files",
+                "execution": "Running Copilot",
+                "capture": "Saving output",
+                "checks": "Running checks",
+                "record": "Saving results",
+            }.get(phase, phase.capitalize()),
+            announce=False,
+        )
 
     def _attribution(self, event: RunEvent) -> str:
         source = "copilot" if event.source == "harness" else event.source
@@ -281,6 +334,7 @@ class ContractLogger(CommandLogger):
         )
 
     def _stop_requested(self, event: RunEvent) -> None:
+        self.start_activity("Stopping processes", announce=False)
         self._write(
             f"Stop requested -- {self._field(event, 'reason')}; waiting for confirmation.",
             severity="warning",
@@ -298,6 +352,7 @@ class ContractLogger(CommandLogger):
 
     def _check_started(self, event: RunEvent) -> None:
         self._write(f"Check: {self._field(event, 'name')}", severity="start")
+        self.start_activity(f"Running check: {self._field(event, 'name')}", announce=False)
 
     def _check_finished(self, event: RunEvent) -> None:
         observation = event.data.get("observation")
@@ -316,7 +371,11 @@ class ContractLogger(CommandLogger):
 
     def _heartbeat(self, event: RunEvent) -> None:
         elapsed = event.data.get("elapsed_seconds", event.elapsed_seconds)
-        if not isinstance(elapsed, (int, float)) or elapsed - self._last_activity < 15:
+        if (
+            self._status is not None
+            or not isinstance(elapsed, (int, float))
+            or elapsed - self._last_activity < HEARTBEAT_SECONDS
+        ):
             return
         self._write(f"Execution still running; {elapsed:.0f}s elapsed.")
         self._last_activity = elapsed
@@ -328,6 +387,7 @@ class ContractLogger(CommandLogger):
         if not isinstance(result, RunResult):
             raise TypeError("finished requires a recorded RunResult.")
         self._finished = True
+        self.stop_activity()
         passed = sum(check.normalized == 0 for check in result.checks)
         headline = f"{result.outcome.name} -- {passed}/{len(result.checks)} checks passed"
         if result.outcome == Outcome.VERIFIED:
@@ -388,14 +448,15 @@ class ContractLogger(CommandLogger):
             f"each check {plan.limits.check_seconds:g}s"
         )
         self._write(
-            "Native execution is not isolated: host files, network and ambient credentials "
-            "may be accessible. --allow-advisory is required in TTY and pipes; "
-            "it does not override mandatory policy.",
+            "Copilot and checks can read or change files, use the network, and use "
+            "available login details. --allow-host-access is required in terminals "
+            "and pipes; policy still applies.",
             severity="warning",
         )
 
     def render_error(self, error: ContractError) -> None:
         """Render a pre-admission refusal without inventing a run or a success."""
+        self.stop_activity()
         self._write(f"{error.outcome.name} -- {error.code}: {error}", severity="error")
         if error.location is not None:
             self._write(

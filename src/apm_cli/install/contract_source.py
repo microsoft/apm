@@ -127,7 +127,8 @@ def _offline_source(
     root = _installed_source(pin[1], caller_root, limits) if pin else None
     if root is None:
         raise ContractError(
-            "Remote source is unresolved offline. Execute with --allow-advisory to acquire it.",
+            "Remote source is unresolved offline. "
+            "Run with --allow-host-access to download and execute it.",
             code="unresolved_source",
             outcome=Outcome.UNPROVEN,
         )

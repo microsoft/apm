@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import click
 import pytest
@@ -23,6 +24,8 @@ from apm_cli.contracts.models import (
     LeafPlan,
     Outcome,
     ProcessObservation,
+    ProcessRequest,
+    RunEvent,
     RunResult,
     SourceLocation,
 )
@@ -360,8 +363,10 @@ def test_plan_is_nonexecuting_no_prompt_or_model_claim(capsys, tmp_path: Path) -
     assert "requested model: native default" in output
     assert "DO NOT DUMP" not in output
     assert "private check command" not in output
-    assert "--allow-advisory" in output
-    assert "TTY and pipes" in " ".join(line[4:].strip() for line in output.splitlines())
+    assert "--allow-host-access" in output
+    assert "terminals and pipes" in output
+    assert "available login details" in output
+    assert "***" not in output
     assert not (tmp_path / "transcript.log").exists()
 
 
@@ -382,13 +387,181 @@ def test_pre_admission_error_has_source_location_not_fake_run(capsys, tmp_path: 
 
 def test_heartbeat_is_liveness_not_fake_progress(capsys) -> None:
     emitter = EventEmitter("run", ContractLogger().on_event)
-    emitter.emit("heartbeat", elapsed_seconds=2)
-    emitter.emit("heartbeat", elapsed_seconds=15)
-    emitter.emit("heartbeat", elapsed_seconds=16)
-    emitter.emit("heartbeat", elapsed_seconds=31)
+    emitter.emit("heartbeat", elapsed_seconds=4)
+    emitter.emit("heartbeat", elapsed_seconds=5)
+    emitter.emit("heartbeat", elapsed_seconds=6)
+    emitter.emit("heartbeat", elapsed_seconds=10)
     output = capsys.readouterr().out
     assert output.count("still running") == 2
     assert "%" not in output
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Managed subprocesses require POSIX")
+def test_quiet_subprocess_reports_liveness_within_six_seconds(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    from apm_cli.contracts.process import supervise_process
+
+    logger = ContractLogger()
+    heartbeats = []
+
+    def observe(event: RunEvent) -> None:
+        if event.kind == "heartbeat":
+            heartbeats.append(event.elapsed_seconds)
+        logger.on_event(event)
+
+    result = supervise_process(
+        ProcessRequest(
+            argv=(sys.executable, "-c", "import time; time.sleep(5.5)"),
+            cwd=tmp_path,
+            timeout_seconds=8,
+        ),
+        on_bytes=lambda stream, chunk: None,
+        events=EventEmitter("run", observe),
+    )
+    logger.close()
+    assert result.returncode == 0
+    assert result.cleanup_confirmed
+    assert len(heartbeats) == 1
+    assert 5 <= heartbeats[0] < 6
+    assert "still running; 5s elapsed" in capsys.readouterr().out
+
+
+@pytest.fixture
+def animated_console(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    """Use the install capability policy without a real refresh thread."""
+    rich_console = Mock(is_terminal=True, is_interactive=True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("CI", "false")
+    monkeypatch.setenv("APM_PROGRESS", "auto")
+    monkeypatch.setattr(console, "_get_console", lambda: rich_console)
+    monkeypatch.setattr("apm_cli.utils.install_tui._get_console", lambda: rich_console)
+    monkeypatch.setattr(console, "_rich_echo", Mock())
+    return rich_console
+
+
+@pytest.mark.parametrize("finish", ["close", "error", "result"])
+def test_spinner_starts_immediately_updates_and_stops(
+    tmp_path: Path, animated_console: Mock, finish: str
+) -> None:
+    logger = ContractLogger()
+    events = EventEmitter("run", logger.on_event)
+    events.emit("phase", name="execution")
+    status = animated_console.status.return_value
+    status.start.assert_called_once()
+    assert animated_console.status.call_args.kwargs == {
+        "spinner": "line",
+        "refresh_per_second": 8,
+    }
+    assert animated_console.status.call_args.args[0].plain == "Running Copilot..."
+    events.emit("check_started", name="handoff")
+    status.update.assert_called_once()
+    assert status.update.call_args.args[0].plain == "Running check: handoff..."
+    events.emit("heartbeat", elapsed_seconds=5)
+    assert not any("still running" in call.args[0] for call in console._rich_echo.call_args_list)
+    if finish == "close":
+        logger.close()
+    elif finish == "error":
+        logger.render_error(ContractError("Cannot proceed"))
+    else:
+        events.emit("finished", result=_result(tmp_path, Outcome.HALTED))
+    logger.close()
+    status.stop.assert_called_once()
+    assert logger._status is None
+
+
+@pytest.mark.parametrize("disabled", ["NO_COLOR", "CI", "TERM", "APM_PROGRESS", "pipe"])
+def test_noninteractive_progress_never_starts_a_spinner(
+    tmp_path: Path, animated_console: Mock, monkeypatch: pytest.MonkeyPatch, disabled: str
+) -> None:
+    values = {"NO_COLOR": "1", "CI": "true", "TERM": "dumb", "APM_PROGRESS": "never"}
+    if disabled == "pipe":
+        animated_console.is_terminal = False
+        monkeypatch.setenv("APM_PROGRESS", "always")
+    else:
+        monkeypatch.setenv(disabled, values[disabled])
+    logger = ContractLogger()
+    logger.attach_run("run", tmp_path)
+    logger.start_activity("Preparing package")
+    EventEmitter("run", logger.on_event).emit("heartbeat", elapsed_seconds=5)
+    logger.close()
+    animated_console.status.assert_not_called()
+    transcript = (tmp_path / "transcript.log").read_text()
+    assert "Preparing package" in transcript
+    assert "still running; 5s elapsed" in transcript
+    assert "\x1b" not in transcript
+
+
+def test_public_subprocess_output_flows_while_spinner_remains_active(
+    tmp_path: Path, animated_console: Mock
+) -> None:
+    logger = ContractLogger()
+    logger.attach_run("run", tmp_path)
+    logger.start_activity("Running Copilot")
+    decoder = ContractStreamDecoder(EventEmitter("run", logger.on_event))
+    for kind, data in [
+        ("assistant.message_start", {"messageId": "public", "phase": "final_answer"}),
+        ("assistant.message_delta", {"messageId": "public", "deltaContent": "Public line\n"}),
+        ("assistant.intent", {"intent": "Reading input"}),
+        ("tool.execution_start", {"toolName": "view", "arguments": "PRIVATE_ARGUMENTS"}),
+        (
+            "assistant.message",
+            {"messageId": "hidden", "phase": "analysis", "content": "PRIVATE_ANALYSIS"},
+        ),
+    ]:
+        decoder.feed("stdout", (json.dumps({"type": kind, "data": data}) + "\n").encode())
+    decoder.feed("stderr", b"Native diagnostic\n")
+    output = "\n".join(call.args[0] for call in console._rich_echo.call_args_list)
+    assert "Public line" in output
+    assert "Reading input" in output
+    assert "Tool started: view" in output
+    assert "copilot stderr (untrusted): Native diagnostic" in output
+    assert "PRIVATE_" not in output
+    animated_console.status.return_value.stop.assert_not_called()
+    decoder.feed(
+        "stdout",
+        (
+            json.dumps(
+                {
+                    "type": "assistant.message",
+                    "data": {"messageId": "public", "content": "Public line\n"},
+                }
+            )
+            + "\n"
+        ).encode(),
+    )
+    decoder.finish()
+    logger.close()
+    transcript = (tmp_path / "transcript.log").read_text()
+    assert transcript.count("Public line") == 1
+    assert "Native diagnostic" in transcript
+    assert "PRIVATE_" not in transcript
+    assert "\x1b" not in transcript
+
+
+def test_broken_pipe_stops_animation_without_losing_transcript(
+    tmp_path: Path, animated_console: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logger = ContractLogger()
+    logger.attach_run("run", tmp_path)
+    logger.start_activity("Running Copilot")
+    monkeypatch.setattr(console, "_rich_echo", Mock(side_effect=BrokenPipeError))
+    events = EventEmitter("run", logger.on_event)
+    events.emit("activity", source="harness", text="Captured despite closed output")
+    logger.close()
+    animated_console.status.return_value.stop.assert_called_once()
+    assert "Captured despite closed output" in (tmp_path / "transcript.log").read_text()
+
+
+def test_closed_output_cannot_start_animation(
+    animated_console: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(console, "_rich_echo", Mock(side_effect=BrokenPipeError))
+    logger = ContractLogger()
+    logger.start_activity("Preparing package")
+    logger.close()
+    animated_console.status.assert_not_called()
 
 
 def test_transcript_cannot_overwrite_or_follow_existing_path(tmp_path: Path) -> None:

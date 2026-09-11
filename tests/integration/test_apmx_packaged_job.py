@@ -85,7 +85,7 @@ class PackagedJob:
         """Launch actual installed argv with piped stdin/stdout and a hard bound."""
         command = [str(self.executable), *args, "--on", "copilot", "--model", "fixture-model"]
         if consent:
-            command.append("--allow-advisory")
+            command.append("--allow-host-access")
         return subprocess.run(
             command,
             cwd=self.caller,
@@ -381,7 +381,9 @@ def test_piped_execution_without_consent_never_infers_or_writes(job: PackagedJob
     before = ArtifactSnapshot.capture(job.isolation.root)
     result = job.packaged(consent=False)
     assert result.returncode == 21, result.stdout + result.stderr
-    assert "--allow-advisory" in result.stdout + result.stderr
+    assert "--allow-host-access" in result.stdout + result.stderr
+    assert "available login details" in result.stdout
+    assert "***" not in result.stdout
     assert not job.actor_log.exists()
     assert_unchanged(before, ArtifactSnapshot.capture(job.isolation.root))
 

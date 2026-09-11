@@ -34,7 +34,10 @@ from apm_cli.version import get_version
     "--plan", "planning", is_flag=True, help="Inspect locally, offline and without execution."
 )
 @click.option(
-    "--allow-advisory", is_flag=True, help="Accept native execution without host isolation."
+    "--allow-host-access",
+    "allow_advisory",
+    is_flag=True,
+    help="Allow Copilot and checks to use host files, network and available login details.",
 )
 @click.option(
     "--verbose", "-v", is_flag=True, help="Show detailed planning and execution observations."
@@ -76,14 +79,18 @@ def main(
         admit_caller_policy(caller_root, limits=limits)
         if not planning and not allow_advisory:
             raise ContractError(
-                "Native execution is not isolated. Review host access and pass "
-                "--allow-advisory to execute; use --plan for offline inspection.",
+                "Copilot and checks can read or change files, use the network, and use "
+                "available login details. Run only contracts you trust. Add "
+                "--allow-host-access to allow this run; policy still applies. "
+                "Use --plan to preview without running.",
                 code="advisory_consent_required",
                 outcome=Outcome.UNPROVEN,
             )
+        logger.start_activity("Preparing package")
         with prepare_contract_source(
             package_ref, contract, caller_root=caller_root, planning=planning, limits=limits
         ) as source:
+            logger.stop_activity()
             invoke_contract(
                 ctx,
                 contract,

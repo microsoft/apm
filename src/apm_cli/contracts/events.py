@@ -5,6 +5,8 @@ from typing import Literal
 
 from .models import EventSink, RunEvent
 
+HEARTBEAT_SECONDS = 5
+
 
 class EventEmitter:
     """Assign observation order in the conductor/supervisor thread."""

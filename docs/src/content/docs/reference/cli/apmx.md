@@ -19,8 +19,8 @@ apm experimental enable contracts
 ## Synopsis
 
 ```bash
-apmx CONTRACT --on copilot [--model MODEL] --allow-advisory [-v]
-apmx --from PACKAGE_REF contracts/file.contract.md --on copilot [--model MODEL] --allow-advisory [-v]
+apmx CONTRACT --on copilot [--model MODEL] --allow-host-access [-v]
+apmx --from PACKAGE_REF contracts/file.contract.md --on copilot [--model MODEL] --allow-host-access [-v]
 apmx [--from PACKAGE_REF] CONTRACT --on copilot --plan [--model MODEL]
 ```
 
@@ -29,7 +29,7 @@ apmx [--from PACKAGE_REF] CONTRACT --on copilot --plan [--model MODEL]
 | `--from PACKAGE_REF` | Local APM directory or ordinary Git reference, including subdirectories and existing `#ref` syntax. |
 | `--on copilot` | Required; the only supported harness. |
 | `--model MODEL` | Request a model; recorded separately from the observed model. |
-| `--allow-advisory` | Required for execution in terminals and pipes; accepts native-host limits, not a policy override. |
+| `--allow-host-access` | Allow Copilot and checks to use host files, network and available login details for this run. Required in terminals and pipes; does not override policy. |
 | `--plan` | Inspect local or valid installed sources offline/read-only. Unresolved remote sources fail explicitly with `UNPROVEN` / `21`. |
 | `-v, --verbose` | Show detailed output. |
 | `--help`, `--version` | Show usage or version, including on Windows. Contract execution requires macOS/Linux. |
@@ -76,6 +76,16 @@ Artifacts stay in `.apm/runs/<run-id>/artifacts/`, without automatic copy-back.
 The record identifies sources, inputs, artifact, checks, and execution details.
 Private logs are not guaranteed secret-free or safe to publish.
 
+During preparation, generation and checks, interactive terminals show a rotating
+ASCII spinner, as in `apm install`. Copilot's public messages, tool activity and
+errors appear as they arrive, above the spinner. Private reasoning and raw
+protocol payloads are not displayed. Text is emitted at complete message or line
+boundaries so secret filtering can handle values split across stream chunks.
+
+Pipes, CI, `NO_COLOR`, and `APM_PROGRESS=never` use plain progress lines instead.
+Quiet subprocesses report that they are still running about every five seconds.
+Animation is never written to the retained transcript.
+
 ## Native execution boundary
 
 - **Host access, not a sandbox.** Copilot and checks run as you and may access
@@ -102,7 +112,7 @@ From your caller directory, use an invocation-local fresh profile for testing:
 
 ```bash
 COPILOT_HOME="$(mktemp -d)" apmx ./handoff.contract.md \
-  --on copilot --model gpt-6-astra --allow-advisory
+  --on copilot --model gpt-6-astra --allow-host-access
 ```
 
 It still needs authentication and model access. This separates native user

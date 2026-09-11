@@ -248,8 +248,8 @@ Contract planning and execution are disabled by default. Enable them once with
 `apm experimental enable contracts`.
 
 ```bash
-apmx CONTRACT --on copilot [--model MODEL] --allow-advisory
-apmx --from PACKAGE_REF contracts/file.contract.md --on copilot [--model MODEL] --allow-advisory
+apmx CONTRACT --on copilot [--model MODEL] --allow-host-access
+apmx --from PACKAGE_REF contracts/file.contract.md --on copilot [--model MODEL] --allow-host-access
 apmx [--from PACKAGE_REF] CONTRACT --on copilot --plan
 ```
 
@@ -261,6 +261,10 @@ exit 21. A matching direct caller declaration/lock binds Git source planning and
 execution to the same verified pin, without rewriting the caller lock.
 See [source selection](https://microsoft.github.io/apm/reference/cli/apmx/#sources-inputs-and-retained-output).
 Artifacts stay in caller `.apm/runs/<id>/artifacts/`, without copy-back.
+`--allow-host-access` permits host-file, network and available login access for
+this run; it does not override policy. Interactive terminals show an ASCII
+spinner with live public Copilot messages, tool activity and errors. Pipes use
+plain progress and five-second updates while a subprocess is quiet.
 
 Execution requires macOS/Linux, ready Copilot, an eligible no-policy caller,
 and invocation-only consent. Windows supports help/version, not contract
@@ -269,7 +273,7 @@ See the [apmx reference](https://microsoft.github.io/apm/reference/cli/apmx/)
 for limits and outcomes.
 
 Legacy `apm plan CONTRACT --on copilot` and `apm run CONTRACT --on copilot
---allow-advisory` remain local-only. Without `--on`, `apm run` keeps `start`,
+--allow-host-access` remain local-only. Without `--on`, `apm run` keeps `start`,
 named-script and prompt fallback semantics.
 
 ## Security and audit

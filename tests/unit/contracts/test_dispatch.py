@@ -5,11 +5,28 @@ from unittest.mock import Mock
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.apmx import main as apmx
 from apm_cli.commands import contracts as commands
 from apm_cli.commands.plan import plan
 from apm_cli.commands.run import run
 
 pytestmark = pytest.mark.component
+
+
+@pytest.mark.parametrize("command", [run, apmx])
+def test_consent_help_names_host_access(command) -> None:
+    result = CliRunner().invoke(command, ["--help"])
+    assert result.exit_code == 0
+    assert "--allow-host-access" in result.output
+    assert "--allow-advisory" not in result.output
+    assert "host files, network and available login details" in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize("command", [run, apmx])
+def test_old_unreleased_consent_name_is_not_accepted(command) -> None:
+    result = CliRunner().invoke(command, ["job.contract.md", "--on", "copilot", "--allow-advisory"])
+    assert result.exit_code == 2
+    assert "No such option" in result.output
 
 
 @pytest.mark.parametrize(
@@ -18,7 +35,7 @@ pytestmark = pytest.mark.component
         ["--on", "copilot"],
         ["job.contract.md", "--on", "copilot", "--param", "name=value"],
         ["script", "--model", "gpt-6-astra"],
-        ["script", "--allow-advisory"],
+        ["script", "--allow-host-access"],
     ],
 )
 def test_invalid_mode_options_never_launch(
@@ -46,7 +63,7 @@ def test_contract_mode_forwards_explicit_selection_without_script_fallback(
             "copilot",
             "--model",
             "gpt-6-astra",
-            "--allow-advisory",
+            "--allow-host-access",
         ],
     )
     assert result.exit_code == 0

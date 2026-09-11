@@ -163,7 +163,7 @@ pages:
     promise: 1
     documents_symbols:
       cli: [apmx]
-      flags: [--from, --plan, --on, --model, --allow-advisory]
+      flags: [--from, --plan, --on, --model, --allow-host-access]
       schemas: [.contract.md]
 
   - path: docs/src/content/docs/reference/cli/apmx.md
@@ -172,7 +172,7 @@ pages:
     promise: 1
     documents_symbols:
       cli: [apmx]
-      flags: [--from, --plan, --on, --model, --allow-advisory, --verbose, --version]
+      flags: [--from, --plan, --on, --model, --allow-host-access, --verbose, --version]
       schemas: [.contract.md, apm.yml.dependencies, apm.lock.yaml]
 
   - path: docs/src/content/docs/reference/cli/plan.md
@@ -190,7 +190,7 @@ pages:
     promise: 1
     documents_symbols:
       cli: [apm run]
-      flags: [--param, --verbose, --on, --model, --allow-advisory]
+      flags: [--param, --verbose, --on, --model, --allow-host-access]
       schemas: [apm.yml.scripts, .contract.md]
 
   - path: docs/src/content/docs/producer/index.md

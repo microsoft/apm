@@ -12,7 +12,7 @@ from pathlib import Path
 from apm_cli.utils.git_env import get_git_executable
 from apm_cli.utils.subprocess_env import external_process_env
 
-from .events import EventEmitter
+from .events import HEARTBEAT_SECONDS, EventEmitter
 from .models import (
     ByteSink,
     ContractError,
@@ -109,7 +109,7 @@ def supervise_process(
     stop_started: float | None = None
     sent: list[str] = []
     cleanup_confirmed = False
-    next_heartbeat = started + 10
+    next_heartbeat = started + HEARTBEAT_SECONDS
     leader_exited_at: float | None = None
     residual_group: tuple[dict[str, object], ...] = ()
     selector = selectors.DefaultSelector()
@@ -135,7 +135,7 @@ def supervise_process(
                 if now >= next_heartbeat and returncode is None and stop_started is None:
                     if events is not None:
                         events.emit("heartbeat", pid=child.pid)
-                    next_heartbeat = now + 10
+                    next_heartbeat = now + HEARTBEAT_SECONDS
                 if returncode is not None and not group_alive and not selector.get_map():
                     cleanup_confirmed = True
                     break

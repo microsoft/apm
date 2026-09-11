@@ -18,7 +18,7 @@ the flag.
 
 ```bash
 apm run [SCRIPT_NAME] [OPTIONS]
-apm run CONTRACT --on copilot [--model MODEL] --allow-advisory [-v]
+apm run CONTRACT --on copilot [--model MODEL] --allow-host-access [-v]
 ```
 
 Without `--on`, omitting `SCRIPT_NAME` runs `start`; if absent, APM exits
@@ -47,10 +47,10 @@ If none of these resolve, the command exits non-zero with an error listing the a
 | `-v, --verbose` | Show detailed compilation and execution output. |
 | `--on copilot` | Select contract mode; require a local `.contract.md`, without script/prompt discovery or installation. |
 | `--model MODEL` | Request a native model; requires `--on`. |
-| `--allow-advisory` | Accept native-host limits for this contract invocation; requires `--on`. |
+| `--allow-host-access` | Allow Copilot and checks to use host files, network and available login details for this run; requires `--on`. |
 | `--help` | Show help for the command. |
 
-`--param` is rejected in contract mode. `--model` and `--allow-advisory` cannot
+`--param` is rejected in contract mode. `--model` and `--allow-host-access` cannot
 alter legacy scripts. There is no command-level `--json` flag.
 
 ## Examples
@@ -132,7 +132,7 @@ Other parameterization belongs in the shell script body.
 The explicit local leaf remains supported:
 
 ```bash
-apm run ./handoff.contract.md --on copilot --model gpt-6-astra --allow-advisory
+apm run ./handoff.contract.md --on copilot --model gpt-6-astra --allow-host-access
 ```
 
 Use [`apmx`](../apmx/) for package-selected contracts. Both entrypoints use the

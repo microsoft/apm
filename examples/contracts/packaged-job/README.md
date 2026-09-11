@@ -16,7 +16,7 @@ mkdir "$caller" &&
 cp "$package/caller/notes.md" "$caller/notes.md" &&
 cd "$caller" &&
 apmx --from "$package" contracts/handoff.contract.md \
-  --on copilot --allow-advisory
+  --on copilot --allow-host-access
 ```
 
 Choose an unused caller path outside this checkout and any repository with a
@@ -33,7 +33,7 @@ and artifact before using the result. `VERIFIED` (exit 0) means these checks
 passed in the explicitly accepted **native-advisory** profile; it is not a
 sandbox guarantee or complete verification of the generated prose.
 
-For a read-only local preview, replace `--allow-advisory` with `--plan`.
+For a read-only local preview, replace `--allow-host-access` with `--plan`.
 An unresolved remote source or missing import may remain unproven offline;
 planning never fetches it or runs inference.
 

@@ -6,6 +6,7 @@ This is cancellation/terminal coverage, not the required live Copilot demo.
 import errno
 import json
 import os
+import re
 import select
 import shutil
 import signal
@@ -22,8 +23,9 @@ pytestmark = [
 ]
 
 
-def test_pty_interrupt_leaves_halted_record_and_no_success(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("animate,interrupt", [(False, True), (True, True), (True, False)])
+def test_pty_streams_live_output_and_restores_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, animate: bool, interrupt: bool
 ) -> None:
     import pty
     import termios
@@ -31,18 +33,35 @@ def test_pty_interrupt_leaves_halted_record_and_no_success(
     source_root = Path(__file__).resolve().parents[3]
     project = tmp_path / "fixture"
     shutil.copytree(source_root / "examples/contracts/first-contract", project)
+    (project / "handoff.contract.md").write_text(
+        "---\nproduces: handoff.json\nverify:\n  handoff: 'test -s handoff.json'\n---\n"
+        "Write handoff.json.\n",
+        encoding="ascii",
+    )
     tools = tmp_path / "bin"
     tools.mkdir()
     actor = tools / "copilot"
     actor.write_text(
         f"#!{sys.executable}\n"
         "import json,sys,time\n"
+        "from pathlib import Path\n"
         "if 'mcp' in sys.argv:\n"
         "    print(json.dumps({'mcpServers':{}}),flush=True)\n"
         "    raise SystemExit(0)\n"
-        "print(json.dumps({'type':'assistant.message','data':"
-        "{'messageId':'pty-ready','content':'PTY actor ready','model':'gpt-6-astra'}}),flush=True)\n"
-        "time.sleep(30)\n",
+        "def emit(kind, data):\n"
+        "    print(json.dumps({'type':kind,'data':data}),flush=True)\n"
+        "emit('assistant.message_start', {'messageId':'pty-ready','phase':'final_answer'})\n"
+        "emit('assistant.message_delta', {'messageId':'pty-ready',"
+        "'deltaContent':'PTY actor ready\\n'})\n"
+        "emit('tool.execution_start', {'toolName':'view','arguments':'PRIVATE_ARGUMENTS'})\n"
+        "emit('assistant.message', {'messageId':'private','phase':'analysis',"
+        "'content':'PRIVATE_ANALYSIS'})\n"
+        "print('Native stderr ready',file=sys.stderr,flush=True)\n"
+        "time.sleep(2)\n"
+        "Path('handoff.json').write_text('[]\\n')\n"
+        "emit('assistant.message', {'messageId':'pty-ready','content':'PTY actor ready\\n',"
+        "'model':'gpt-6-astra'})\n"
+        "print(json.dumps({'type':'result','exitCode':0,'sessionId':'pty','usage':{}}),flush=True)\n",
         encoding="utf-8",
     )
     actor.chmod(0o755)
@@ -62,7 +81,12 @@ def test_pty_interrupt_leaves_halted_record_and_no_success(
         "PYTHONPATH": str(source_root / "src"),
         "NO_COLOR": "1",
         "COLUMNS": "48",
+        "TERM": "xterm-256color",
+        "CI": "false",
+        "APM_PROGRESS": "auto",
     }
+    if animate:
+        env.pop("NO_COLOR")
     master, slave = pty.openpty()
     settings = termios.tcgetattr(slave)
     child = subprocess.Popen(
@@ -76,7 +100,7 @@ def test_pty_interrupt_leaves_halted_record_and_no_success(
             "copilot",
             "--model",
             "gpt-6-astra",
-            "--allow-advisory",
+            "--allow-host-access",
         ],
         cwd=project,
         env=env,
@@ -87,6 +111,8 @@ def test_pty_interrupt_leaves_halted_record_and_no_success(
     )
     output = bytearray()
     interrupted = False
+    streamed_at: float | None = None
+    spinner_seen_while_running = False
     deadline = time.monotonic() + 15
     try:
         while time.monotonic() < deadline:
@@ -100,13 +126,31 @@ def test_pty_interrupt_leaves_halted_record_and_no_success(
                 if not chunk:
                     break
                 output.extend(chunk)
-            if not interrupted and b"PTY actor ready" in output:
-                os.kill(child.pid, signal.SIGINT)
-                interrupted = True
+            if (
+                streamed_at is None
+                and b"PTY actor ready" in output
+                and b"Native stderr ready" in output
+                and b"Tool started: view" in output
+            ):
+                assert child.poll() is None
+                streamed_at = time.monotonic()
+            if b"Running Copilot" in output and child.poll() is None:
+                spinner_seen_while_running = True
+            if interrupt and not interrupted and streamed_at is not None:
+                if not animate or (
+                    spinner_seen_while_running and time.monotonic() - streamed_at >= 0.5
+                ):
+                    os.kill(child.pid, signal.SIGINT)
+                    interrupted = True
             if child.poll() is not None:
                 break
-        assert interrupted, output.decode("ascii", errors="replace")
-        assert child.wait(timeout=2) == 22, output.decode("ascii", errors="replace")
+        assert streamed_at is not None, output.decode("ascii", errors="replace")
+        assert interrupted is interrupt, output.decode("ascii", errors="replace")
+        assert child.wait(timeout=2) == (22 if interrupt else 0), output.decode(
+            "ascii", errors="replace"
+        )
+        while select.select([master], [], [], 0.1)[0]:
+            output.extend(os.read(master, 65536))
         assert termios.tcgetattr(slave) == settings
     finally:
         if child.poll() is None:
@@ -118,10 +162,24 @@ def test_pty_interrupt_leaves_halted_record_and_no_success(
     assert len(records) == 1
     record = json.loads(records[0].read_text(encoding="utf-8"))
     assert record["complete"] is True
-    assert record["result"]["outcome"]["name"] == "HALTED"
-    assert record["result"]["stop_reason"] == "cancelled"
+    assert record["result"]["outcome"]["name"] == ("HALTED" if interrupt else "VERIFIED")
+    assert record["result"]["stop_reason"] == ("cancelled" if interrupt else None)
     assert record["producer"]["cleanup_confirmed"] is True
     assert record["producer"]["returncode"] is not None
-    assert b"VERIFIED" not in output
-    assert b"\x1b" not in output
+    text = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", bytes(output))
+    assert text.count(b"PTY actor ready") == 1
+    assert b"PRIVATE_" not in output
+    assert (b"VERIFIED" in text) is not interrupt
+    if animate:
+        assert spinner_seen_while_running
+        assert b"\x1b[?25l" in output
+        assert b"\x1b[?25h" in output
+        assert output.count(b"Running Copilot") >= 2
+    else:
+        assert b"\x1b" not in output
     assert all(byte < 128 for byte in output)
+    transcript = (records[0].parent / "transcript.log").read_bytes()
+    assert b"\x1b" not in transcript
+    assert transcript.count(b"PTY actor ready") == 1
+    assert b"Native stderr ready" in transcript
+    assert b"PRIVATE_" not in transcript

@@ -13,12 +13,12 @@ From the copied `first-contract/` directory:
 ```sh
 apm experimental enable contracts
 apm plan ./handoff.contract.md --on copilot --model gpt-6-astra
-apm run ./handoff.contract.md --on copilot --model gpt-6-astra --allow-advisory
+apm run ./handoff.contract.md --on copilot --model gpt-6-astra --allow-host-access
 ```
 
 The model is an explicit demonstration selection, not an APM default.
 Planning does not call a model, install packages or execute checks.
-`--allow-advisory` is required in terminals and pipes, with no prompt or
+`--allow-host-access` is required in terminals and pipes, with no prompt or
 remembered consent. Native processes use your host identity: this is not
 filesystem/network isolation or a hard spending cap.
 
@@ -40,7 +40,7 @@ cd reuse-contract
 apm install --only apm --target copilot
 apm experimental enable contracts
 apm plan ./handoff.contract.md --on copilot --model gpt-6-astra
-apm run ./handoff.contract.md --on copilot --model gpt-6-astra --allow-advisory
+apm run ./handoff.contract.md --on copilot --model gpt-6-astra --allow-host-access
 ```
 
 Installation is a separate, explicit action. The contract names the declared

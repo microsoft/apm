@@ -132,9 +132,9 @@ def run_contract(
     """Admit, execute, capture, assess and atomically record one fresh run."""
     if not allow_advisory:
         raise ContractError(
-            "Native execution is not isolated. Run again with --allow-advisory "
-            "only if host filesystem, network and ambient credential access are acceptable. "
-            "This consent does not override policy.",
+            "Copilot and checks can read or change files, use the network, and use "
+            "available login details. Run only contracts you trust. Add "
+            "--allow-host-access to allow this run; policy still applies.",
             code="advisory_consent_required",
             outcome=Outcome.UNPROVEN,
         )

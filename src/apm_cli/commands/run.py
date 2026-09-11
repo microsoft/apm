@@ -26,9 +26,10 @@ from ._helpers import (
 )
 @click.option("--model", default=None, help="Native model for contract mode only")
 @click.option(
-    "--allow-advisory",
+    "--allow-host-access",
+    "allow_advisory",
     is_flag=True,
-    help="Consent to this native contract run without isolation; does not override policy",
+    help="Allow Copilot and checks to use host files, network and available login details",
 )
 @click.pass_context
 def run(
@@ -59,7 +60,7 @@ def run(
         )
         return
     if model is not None or allow_advisory:
-        raise click.UsageError("--model and --allow-advisory require contract mode (--on).", ctx)
+        raise click.UsageError("--model and --allow-host-access require contract mode (--on).", ctx)
     logger = CommandLogger("run", verbose=verbose)
     try:
         # If no script name specified, use 'start' script

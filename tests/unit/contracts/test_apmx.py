@@ -208,7 +208,7 @@ def test_no_policy_gate_precedes_remote_acquisition(
     monkeypatch.setattr("apm_cli.apmx.prepare_contract_source", acquire)
     monkeypatch.setenv("APM_POLICY_DISABLE", "1")
     result = CliRunner().invoke(
-        main, ["--from", "org/job", "job.contract.md", "--on", "copilot", "--allow-advisory"]
+        main, ["--from", "org/job", "job.contract.md", "--on", "copilot", "--allow-host-access"]
     )
     assert result.exit_code == 21, result.output
     acquire.assert_not_called()

@@ -92,7 +92,9 @@ def test_run_without_consent_refuses_without_native_or_run_directory(
     project, _, marker = _prepare(tmp_path, monkeypatch)
     result = CliRunner().invoke(cli, ["run", "handoff.contract.md", "--on", "copilot"])
     assert result.exit_code == 21, result.output
-    assert "--allow-advisory" in result.output
+    assert "--allow-host-access" in result.output
+    assert "available login details" in result.output
+    assert "***" not in result.output
     assert not marker.exists()
     assert not (project / ".apm" / "runs").exists()
 
@@ -108,7 +110,7 @@ def test_unsupported_source_cannot_be_waived_with_consent(
         encoding="utf-8",
     )
     result = CliRunner().invoke(
-        cli, ["run", "handoff.contract.md", "--on", "copilot", "--allow-advisory"]
+        cli, ["run", "handoff.contract.md", "--on", "copilot", "--allow-host-access"]
     )
     assert result.exit_code in {21, 22}, result.output
     assert not marker.exists()

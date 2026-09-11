@@ -27,6 +27,7 @@ def invoke_contract(
     logger = ContractLogger(verbose=verbose)
     try:
         require_contracts_enabled()
+        logger.start_activity("Reading contract")
         plan = frontend.plan_contract(
             Path(contract),
             Path.cwd(),
@@ -35,6 +36,7 @@ def invoke_contract(
             source=source,
         )
         inventory = workspace.inspect_workspace(plan)
+        logger.stop_activity()
         if planning:
             logger.render_plan(plan, inventory)
             return

@@ -37,13 +37,18 @@ mkdir "$caller" &&
 cp "$package/caller/notes.md" "$caller/notes.md" &&
 cd "$caller" &&
 apmx --from "$package" contracts/handoff.contract.md \
-  --on copilot --model gpt-6-astra --allow-advisory
+  --on copilot --model gpt-6-astra --allow-host-access
 ```
 
 `mkdir` refuses an existing directory; choose another unused path rather than
 reusing it. Choose an accessible model. No caller manifest or install is required.
 The package supplies its checker and one self-contained skill; `notes.md` comes
 from the caller. Manifests, locks, and global configuration stay unchanged.
+
+`--allow-host-access` lets Copilot and checks use host files, network and
+available login details for this run. Run only contracts you trust.
+An interactive spinner stays active during quiet work; Copilot's public
+messages, tool activity and errors appear live above it.
 
 ## Inspect the result
 
@@ -53,7 +58,7 @@ coverage, nonempty strings, and the skill's caution prefix, not factual accuracy
 Read the [outcomes](../../reference/cli/apmx/#results-and-retained-files) before
 using the artifact.
 
-For offline inspection, replace `--allow-advisory` with `--plan`. A missing skill
+For offline inspection, replace `--allow-host-access` with `--plan`. A missing skill
 or unresolved remote source refuses without fetching. For local-file execution,
-use `apmx ./handoff.contract.md --on copilot --allow-advisory`; see the
+use `apmx ./handoff.contract.md --on copilot --allow-host-access`; see the
 [source format](../../reference/cli/plan/#contract-source).
