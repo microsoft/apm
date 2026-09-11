@@ -1123,7 +1123,8 @@ class AuthResolver:
         4. Host-specific git credential helper
 
         Resolution order (``gitlab``): ``GITLAB_APM_PAT`` -> ``GITLAB_TOKEN`` ->
-        credential helper. GitHub env vars are not consulted.
+        credential helper when the remote transport permits lookup.
+        GitHub env vars are not consulted.
 
         Resolution order (``generic``): credential helper only (no GitHub or
         GitLab platform env vars).
@@ -1187,7 +1188,7 @@ class AuthResolver:
 
         # 4. Git credential helper (not for ADO)
         if host_info.kind not in ("ado",) and (
-            host_info.kind != "generic" or allow_generic_credential_lookup
+            host_info.kind not in ("generic", "gitlab") or allow_generic_credential_lookup
         ):
             # Most primary resolution calls remain host-scoped. The public
             # github.com anonymous-first fallback supplies path= after a

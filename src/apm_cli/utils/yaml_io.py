@@ -420,12 +420,17 @@ def dump_yaml_roundtrip(data: Any, path: str | Path) -> None:
     """
     from .atomic_io import write_text_lf
 
+    write_text_lf(Path(path), yaml_roundtrip_to_str(data))
+
+
+def yaml_roundtrip_to_str(data: Any) -> str:
+    """Serialize comment-preserving YAML for callers using atomic writes."""
     stream = StringIO()
     try:
         _roundtrip_yaml().dump(data, stream)
     except Exception as exc:
         _raise_as_pyyaml_error(exc)
-    write_text_lf(Path(path), stream.getvalue())
+    return stream.getvalue()
 
 
 class _BoundedYAMLHandler(_FrontmatterYAMLHandler):

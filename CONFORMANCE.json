@@ -796,9 +796,10 @@
       "keyword": "MUST",
       "section": "8.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_namespaces_primitives_by_source"
+        "tests/spec_conformance/test_resolution_reqs.py::test_consumer_namespaces_primitives_by_source",
+        "tests/spec_conformance/test_resolution_reqs.py::test_local_native_skill_overrides_dependency_and_reports_conflict"
       ]
     },
     {
@@ -1058,8 +1059,11 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 7,
+      "test_count": 10,
       "tests": [
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[main]",
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[sha]",
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[v1]",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_isolates_l0_cache_across_hosts",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_isolates_same_host_nested_repositories_through_resolver",
         "tests/spec_conformance/test_resolution_reqs.py::test_repository_identity_normalizes_safe_syntax_dimensions",
@@ -1233,8 +1237,11 @@
       "keyword": "MUST",
       "section": "10.3",
       "status": "active",
-      "test_count": 1,
+      "test_count": 4,
       "tests": [
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[main]",
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[sha]",
+        "tests/spec_conformance/test_gitlab_sparse_transport_reqs.py::test_gitlab_sparse_fetch_preserves_port_identity_and_ref[v1]",
         "tests/spec_conformance/test_manifest_reqs.py::test_configured_host_class_precedence_is_credential_isolated"
       ]
     },

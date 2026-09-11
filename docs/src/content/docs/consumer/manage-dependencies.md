@@ -152,9 +152,8 @@ the HTTP file-read path. If a private host fails with 401/403, use a whole-repo
 git dependency for full clone auth support, or choose the supported HTTP backend
 signal (`type: gitlab` for GitLab-compatible hosts, `GITHUB_HOST` for GHES).
 
-**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over
-git transport (not the REST API), so self-hosted instances with the API disabled
-still install. See [Authentication](../authentication/#gitlab-saas-or-self-managed).
+**GitLab `path:` files** use Git first, with
+[restricted REST fallback](../authentication/#gitlab-saas-or-self-managed).
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
@@ -209,12 +208,13 @@ Git-hook isolation guarantee.
 
 ## Transport selection
 
-APM selects one initial transport per dependency. Git then applies any matching
-safe `url.<base>.insteadOf` rule to that selected URL.
+APM selects one initial transport per dependency, including GitLab `path:`
+single-file sparse fetches. Git then applies matching safe
+`url.<base>.insteadOf` rules.
 
 | Dependency form | Initial transport |
 |---|---|
-| `ssh://...` or `git@host:...` | SSH |
+| `ssh://...` or `user@host:...` (SCP-style) | SSH |
 | `https://...` or `http://...` | The explicit HTTP(S) scheme |
 | Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
 | Other shorthand | HTTPS |
@@ -231,6 +231,13 @@ Cross-protocol retry is off by default. Use `--allow-protocol-fallback` or
 preference with `apm config set prefer-ssh true`, or save the retry escape hatch
 with `apm config set allow-protocol-fallback true`. See the
 [`apm config` reference](../../reference/cli/config/).
+
+Opt-in SSH/HTTPS fallback warns when a failed attempt switches protocol.
+It reuses the declared custom port and warns about that port once; it does
+not map an SSH alias to a web hostname. If protocols use different endpoints,
+declare the intended URL instead. GitLab REST additionally requires an
+executed same-origin HTTPS attempt; see
+[GitLab authentication](../authentication/#gitlab-saas-or-self-managed).
 
 If Git reports an HTTPS `Failed to connect...` / `Couldn't connect to server`
 error for the requested remote, APM retries that Git action once after 1 second

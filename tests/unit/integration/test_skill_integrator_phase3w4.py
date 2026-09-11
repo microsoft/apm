@@ -628,16 +628,29 @@ class TestIntegrateNativeSkillCollision:
         with patch.object(
             SkillIntegrator,
             "_build_ownership_maps",
-            return_value=({}, {"my-skill": "prev-owner/pkg"}),
+            return_value=(
+                {},
+                {target_skill_dir.relative_to(tmp_path).as_posix(): "prev-owner/pkg"},
+            ),
         ):
-            _result = integrator._integrate_native_skill(
+            result = integrator._integrate_native_skill(
                 pi,
                 tmp_path,
                 skill_md,
                 logger=logger,
                 targets=[target],
             )
-        logger.warning.assert_called()
+        logger.warning.assert_called_once_with(
+            "Skill 'my-skill' from 'other/repo' replaced "
+            "'prev-owner/pkg' -- remove one package to avoid this"
+        )
+        assert result.skill_updated is True
+        assert result.skill_created is False
+        assert result.skill_skipped is False
+        assert result.skill_path == target_skill_dir / "SKILL.md"
+        assert result.target_paths == [target_skill_dir]
+        assert result.references_copied == 1
+        assert (target_skill_dir / "SKILL.md").read_bytes() == skill_md.read_bytes() == b"# skill"
 
 
 # ---------------------------------------------------------------------------
