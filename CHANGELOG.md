@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Preserve marketplace discovery provenance across dependency updates so `plugin@marketplace` uninstall aliases keep working in project and global scope. -- by @mfroembgen
+- Preserve marketplace discovery provenance across dependency updates so `plugin@marketplace` uninstall aliases keep working in project and global scope. -- by @mfroembgen (#2949)
 
 ### Added
 
