@@ -74,11 +74,30 @@ On GitHub and GitHub API-compatible hosts, the `.github-private` repo is preferr
 
 ```
 <top-level-group>/
-  apm-policy/
-    apm-policy.yml         # auto-discovered by projects whose remote starts with <top-level-group>/
+  [<subgroups>/]           # optional -- apm-policy may sit at any level
+    apm-policy/
+      apm-policy.yml       # discovered by projects under this group or any descendant
 ```
 
-GitLab discovery uses only the top-level group: APM takes the first path segment from the project remote and looks for `<top-level-group>/apm-policy`. It does not search nested subgroup scopes. Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project without `apm-policy` (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
+GitLab discovery walks the subgroup tree from the project's own group up to the top-level group, and the **closest** `apm-policy` wins. For a project remote `gitlab.com/acme/dept-a/team-x/my-project`, APM probes in order:
+
+1. `acme/dept-a/team-x/apm-policy`
+2. `acme/dept-a/apm-policy`
+3. `acme/apm-policy`
+
+This lets an individual team publish its own `apm-policy` under its subgroup without affecting the rest of the organization, while a top-level `acme/apm-policy` still applies to every project that has no closer policy. A flat `<group>/<project>` remote (including a personal namespace like `gitlab.com/<user>/<project>`) probes only `<group>/apm-policy`, identical to the previous behaviour.
+
+Composing policies across levels is opt-in via `extends:`. A team policy can extend an ancestor group's policy to inherit and tighten it, using either an explicit path (`extends: "acme/dept-a/apm-policy"` for the immediate parent group, or a deeper ancestor) or the `extends: "org"` shorthand, which on GitLab always resolves to the **top-level** group's policy (`<top-level-group>/apm-policy`) -- not the nearest ancestor. Children can only tighten, never relax.
+
+:::note[Host-qualified `extends:` on GitLab]
+A bare nested `extends:` ref whose first segment contains a dot (e.g. a group named `acme.tools`) is read as a host, so `extends: "acme.tools/team/apm-policy"` is rejected as cross-host. Spell it host-qualified instead -- `extends: "gitlab.com/acme.tools/team/apm-policy"` (or `<GITLAB_HOST>/...` on self-managed) -- so the leaf host is matched and stripped. When the project's remote uses an explicit port, the host-qualified ref must carry the exact `host:port` authority (e.g. `gitlab.example.com:8443/acme/team/apm-policy`); `GITLAB_HOST` is only the hostname, so a ref without the matching port is rejected.
+:::
+
+Set `APM_GITLAB_POLICY_REPO` to use a different project name if your org already publishes policy under another name. A project with no `apm-policy` at any level (or the configured override) is treated as a clean "no policy" outcome, matching the fallthrough behaviour on GitHub and ADO -- it does not print a warning.
+
+:::caution[GitLab conceals private projects with 404]
+GitLab returns HTTP 404 both for a missing `apm-policy` project and for a private one the token cannot read. A closer policy the CI token is denied is therefore indistinguishable from "no policy at this level," so the walk skips it and applies the next ancestor -- the same `404 == no policy` behaviour GitHub and ADO discovery already have. Grant the CI token read access to every `apm-policy` project it should honour, so a closer policy is never silently skipped.
+:::
 
 :::caution[Self-managed GitLab requires GITLAB_HOST or APM_GITLAB_HOSTS]
 An arbitrary FQDN is never auto-classified as GitLab -- the same domain shape could be Bitbucket, Gitea, or a plain git server. `gitlab.com` is recognised automatically, but a self-managed instance (e.g. `gitlab.example.com`) is only recognised once you set `GITLAB_HOST=gitlab.example.com` (or `APM_GITLAB_HOSTS` for more than one instance). Without it, APM falls through to the GitHub-style cascade above, which is invalid on GitLab and behaves exactly like the unfixed discovery this section describes. This mirrors `GITHUB_HOST` for GitHub Enterprise Server and `ADO_HOST` for on-prem Azure DevOps Server -- see [Environment Variables](../../reference/environment-variables/).

@@ -423,9 +423,17 @@ may use. This section covers how that contract is enforced at `apm install` time
 APM auto-discovers org policy from the project's git remote by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
 API-compatible hosts. Azure DevOps hosts use repository `apm-policy` in project
-`apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab uses
-`<top-level-group>/apm-policy/apm-policy.yml`, derived from the first remote
-path segment; nested subgroup scopes are not searched. Configure a self-managed host with
+`apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab walks the subgroup
+tree from the project's own group up to the top-level group and applies the
+closest `apm-policy` (e.g. `acme/dept-a/team-x/apm-policy` before
+`acme/dept-a/apm-policy` before `acme/apm-policy`), so a team can scope its own
+policy under a subgroup; a team policy can `extends:` an ancestor group's policy
+to inherit it. A flat `<group>/<project>` remote probes only `<group>/apm-policy`.
+GitLab 404s a private project the token cannot read, so a closer `apm-policy` the
+token is denied is indistinguishable from "no policy here" and is skipped in
+favour of the next ancestor (same `404 == no policy` behaviour as GitHub/ADO) --
+grant the token read access to every `apm-policy` it should honour.
+Configure a self-managed host with
 `GITLAB_HOST` or `APM_GITLAB_HOSTS`, and use `APM_GITLAB_POLICY_REPO` to select
 another project name. Repositories with no detectable git remote (unpacked
 bundles, temp dirs) emit an explicit "could not determine org" line and skip
@@ -675,7 +683,8 @@ as `[x]` errors and exit `1`.
 Checklist to publish a policy:
 
 1. Create `apm-policy.yml` in the org policy repo (`.github-private` or `.github` on GitHub, `apm`
-   project and `apm-policy` repository on Azure DevOps, or `apm-policy` under the top-level GitLab group).
+   project and `apm-policy` repository on Azure DevOps, or an `apm-policy` project under the GitLab
+   group you want it to govern -- any ancestor namespace of the project, closest wins).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming

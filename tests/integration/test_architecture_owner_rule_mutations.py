@@ -398,6 +398,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Effective package-target authorization loses its single resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-remote-origin-owner",
+        rule_id="install-deployment-policy-remote-origin-owner",
+        path="src/apm_cli/policy/_remote.py",
+        old='[get_git_executable(), "remote", "get-url", "origin"],',
+        new=(
+            '[get_git_executable(), "remote", "get-url", "origin"],\n'
+            '            [get_git_executable(), "remote", "get-url", "origin"],'
+        ),
+        intent="A second git-remote origin read appears outside the single canonical reader.",
+    ),
+    MutationCase(
         guard_id="install-deployment-primitive-classification",
         rule_id="install-deployment-primitive-classification",
         path="src/apm_cli/install/primitive_classification.py",

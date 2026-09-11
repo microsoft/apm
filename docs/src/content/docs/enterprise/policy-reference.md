@@ -100,8 +100,9 @@ Inherit from a parent policy. See [Inheritance](#inheritance).
 
 | Value | Source |
 |-------|--------|
-| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`) |
+| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`); on GitLab, the top-level group's `apm-policy` |
 | `owner/repo` | Cross-org policy from a specific repository |
+| `namespace/.../repo` | On GitLab, an ancestor subgroup's policy, e.g. `acme/dept-a/apm-policy` (host-qualify a namespace whose first segment contains a dot) |
 | `https://...` | Direct URL to a policy file |
 
 ### `fetch_failure`
@@ -475,7 +476,7 @@ There are 21 policy checks.
 ## Inheritance
 
 :::note[Discovery vs. `extends:` -- two different concepts]
-APM auto-discovers exactly **one** policy file: `<org>/.github/apm-policy.yml`, derived from the project's git remote. There is no automatic per-repo or per-enterprise discovery. `extends:` is what composes policies **inside** that one discovered file -- it lets the discovered policy pull in a parent (and that parent's parent, up to `MAX_CHAIN_DEPTH=5`) so you can model an enterprise -> org -> team chain through composition. Most teams who say "3 levels (repo, org, enterprise)" actually want `extends:`, not more discovery sites.
+APM auto-discovers exactly **one** policy file per project, derived from the git remote: on GitHub `<org>/.github/apm-policy.yml`, and on GitLab the **closest** `apm-policy` walking up the subgroup tree to the top-level group (see [Policy Files](./apm-policy/#where-it-lives)). There is no automatic per-repo or per-enterprise discovery. `extends:` is what composes policies **inside** that one discovered file -- it lets the discovered policy pull in a parent (and that parent's parent, up to `MAX_CHAIN_DEPTH=5`) so you can model an enterprise -> org -> team chain through composition. Most teams who say "3 levels (repo, org, enterprise)" actually want `extends:`, not more discovery sites.
 :::
 
 Policies can inherit from a parent using `extends`. This enables a three-level chain:
@@ -619,8 +620,9 @@ found in the organization cascade: `.github-private`, `.github`, `.apm`, then
 `_apm`. Azure DevOps remotes use the org `apm` project and `apm-policy`
 repository. Legacy `_apm/_apm` is a temporary fallback after a 404 from the
 primary coordinate.
-GitLab remotes use `<top-level-group>/apm-policy/apm-policy.yml`, using the
-first path segment of the remote; nested subgroup scopes are not searched. Set
+GitLab walks the subgroup tree from the project's own group up to the top-level
+group and applies the closest `apm-policy` project; a flat `<group>/<project>`
+remote probes only `<group>/apm-policy`. Set
 `GITLAB_HOST` or `APM_GITLAB_HOSTS` to recognize a self-managed host, and use
 `APM_GITLAB_POLICY_REPO` to select another project name. Plain git remotes
 fall through with no policy applied. Repositories with no detectable git remote

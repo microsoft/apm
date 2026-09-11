@@ -157,6 +157,13 @@
       "owner": "models/dependency/selection.py (via DependencyReference)",
       "selectors": ["src/apm_cli/models/dependency/selection.py"],
       "guards": ["install-deployment-uninstall-selection"]
+    },
+    {
+      "id": "policy-remote-origin-reader",
+      "decision": "Reading and parsing the project git remote for org-policy discovery",
+      "owner": "policy/_remote.py (_git_remote_origin_url, _remote_url_parts, _parse_remote_url, _extract_org_host_port_from_git_remote)",
+      "selectors": ["src/apm_cli/policy/_remote.py"],
+      "guards": ["install-deployment-policy-remote-origin-owner"]
     }
   ]
 }
