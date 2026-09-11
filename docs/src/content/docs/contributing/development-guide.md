@@ -349,7 +349,7 @@ the previous default differed.
 
 ## Adding or changing a normative requirement (OpenAPM v0.1)
 
-The [OpenAPM v0.1 specification](../../specs/openapm-v0.1/) and APM's
+The [OpenAPM v0.1 specification](../../specs/openapm-v01/) and APM's
 implementation evolve together. Every normative change MUST include three
 coupled edits in the same PR:
 
