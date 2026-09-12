@@ -350,6 +350,8 @@ def integrate_package_primitives(  # noqa: PLR0913
         hooks_approved=_hooks_approved,
         canvas_approved=_canvas_approved or is_first_party,
         skip_bin=_skip_bin,
+        diagnostics=diagnostics,
+        package_name=package_name,
         plugin_bin_deployable=_plugin_bin_deployable(
             package_info,
             targets,

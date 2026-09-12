@@ -9,13 +9,14 @@ because it happens to be scanned.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within_resolved,
@@ -23,14 +24,23 @@ from apm_cli.utils.path_security import (
 )
 from apm_cli.utils.paths import portable_relpath
 
+if TYPE_CHECKING:
+    from apm_cli.utils.diagnostics import DiagnosticCollector
 
-def _is_safe_source_path(path: Path, source_root: Path) -> bool:
-    """Return whether a source candidate stays in the real package tree."""
+
+def _is_safe_source_path(
+    path: Path,
+    source_root: Path,
+    on_symlink: Callable[[Path], None] | None = None,
+) -> bool:
+    """Check containment; notify on_symlink only for symlink-component rejection."""
     try:
         path.relative_to(source_root)
     except ValueError:
         return False
     if has_symlink_component(source_root, path):
+        if on_symlink is not None:
+            on_symlink(path)
         return False
     try:
         ensure_path_within_resolved(path, source_root)
@@ -73,6 +83,8 @@ class DeployableSourcePlan:
         canvas_approved: bool,
         skip_bin: bool,
         plugin_bin_deployable: bool = False,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str = "",
     ) -> DeployableSourcePlan:
         """Build the authorized deploy set after all deployment gates resolve."""
         source_root = Path(package_info.install_path).resolve()
@@ -81,19 +93,36 @@ class DeployableSourcePlan:
         hook_source_selection = None
         target_primitives = {primitive for target in targets for primitive in target.primitives}
 
-        def add_file(path: Path) -> None:
-            if _is_safe_source_path(path, source_root) and path.is_file():
+        def warn_agent_symlink(path: Path) -> None:
+            if diagnostics is not None:
+                # Name the rejected link, not the target portable_relpath resolves.
+                relative = path.relative_to(source_root).as_posix()
+                diagnostics.warn(
+                    message=(
+                        "Skipped symlinked agent source: "
+                        f"{printable_ascii_text(relative)}. "
+                        "Symlinked agent sources are not deployed. "
+                        "Use real files and directories in .apm/agents/ "
+                        "(or real *.agent.md files at the package root), then rerun apm install."
+                    ),
+                    package=printable_ascii_text(package_name),
+                )
+
+        def add_file(path: Path, on_symlink: Callable[[Path], None] | None = None) -> None:
+            if _is_safe_source_path(path, source_root, on_symlink) and path.is_file():
                 paths.add(portable_relpath(path, source_root))
 
-        def tree_files(root: Path) -> Iterator[Path]:
-            if not _is_safe_source_path(root, source_root) or not root.is_dir():
+        def tree_files(
+            root: Path, on_symlink: Callable[[Path], None] | None = None
+        ) -> Iterator[Path]:
+            if not _is_safe_source_path(root, source_root, on_symlink) or not root.is_dir():
                 return
             for parent, directory_names, file_names in os.walk(root, followlinks=False):
                 parent_path = Path(parent)
                 directory_names[:] = [
                     name
                     for name in directory_names
-                    if _is_safe_source_path(parent_path / name, source_root)
+                    if _is_safe_source_path(parent_path / name, source_root, on_symlink)
                 ]
                 yield from (parent_path / name for name in file_names)
 
@@ -101,25 +130,29 @@ class DeployableSourcePlan:
             for path in tree_files(root):
                 add_file(path)
 
-        def add_matching_files(root: Path, pattern: str) -> None:
-            for path in tree_files(root):
+        def add_matching_files(
+            root: Path, pattern: str, on_symlink: Callable[[Path], None] | None = None
+        ) -> None:
+            for path in tree_files(root, on_symlink):
                 if path.match(pattern):
-                    add_file(path)
+                    add_file(path, on_symlink)
 
-        def add_direct_matching_files(root: Path, pattern: str) -> None:
-            if not _is_safe_source_path(root, source_root) or not root.is_dir():
+        def add_direct_matching_files(
+            root: Path, pattern: str, on_symlink: Callable[[Path], None] | None = None
+        ) -> None:
+            if not _is_safe_source_path(root, source_root, on_symlink) or not root.is_dir():
                 return
             for path in root.iterdir():
                 if path.match(pattern):
-                    add_file(path)
+                    add_file(path, on_symlink)
 
         if "prompts" in target_primitives or "commands" in target_primitives:
             add_direct_matching_files(source_root, "*.prompt.md")
             add_matching_files(source_root / ".apm" / "prompts", "*.prompt.md")
 
         if "agents" in target_primitives:
-            add_direct_matching_files(source_root, "*.agent.md")
-            add_matching_files(source_root / ".apm" / "agents", "*.md")
+            add_direct_matching_files(source_root, "*.agent.md", warn_agent_symlink)
+            add_matching_files(source_root / ".apm" / "agents", "*.md", warn_agent_symlink)
 
         if "instructions" in target_primitives:
             add_matching_files(source_root / ".apm" / "instructions", "*.instructions.md")
