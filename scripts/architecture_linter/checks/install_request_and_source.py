@@ -339,6 +339,9 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
     engine, engine_fail = _facts_for(provider, "src/apm_cli/commands/uninstall/engine.py", rule_id)
     skill, skill_fail = _facts_for(provider, "src/apm_cli/integration/skill_integrator.py", rule_id)
     hook, hook_fail = _facts_for(provider, "src/apm_cli/integration/hook_integrator.py", rule_id)
+    hook_bundle, hook_bundle_fail = _facts_for(
+        provider, "src/apm_cli/integration/hook_bundle.py", rule_id
+    )
     kiro, kiro_fail = _facts_for(
         provider, "src/apm_cli/integration/kiro_hook_integrator.py", rule_id
     )
@@ -349,6 +352,7 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
         + list(engine_fail)
         + list(skill_fail)
         + list(hook_fail)
+        + list(hook_bundle_fail)
         + list(kiro_fail)
     )
     if failures:
@@ -375,6 +379,7 @@ def check_source_plan(provider: FactsProvider) -> tuple[Violation, ...]:
         or not _present(skill, "source_plan = DeployableSourcePlan.create(")
         or not _present(owner, "HookIntegrator.select_deployable_hook_sources")
         or not _present(hook, "selected_bundle_files=hook_sources.bundle_for")
+        or not _present(hook_bundle, "manifest_source in selected_bundle_files")
         or not _present(kiro, "selected_bundle_files=selected_bundle_files")
         or not _present(owner, "CanvasIntegrator.find_canvas_bundles")
         or bool(duplicates)

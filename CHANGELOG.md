@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm compile` now reuses the resolved project base path during instruction matching and placement, avoiding repeated filesystem path resolution. (by @aryansk, #2587)
 
 ## [0.29.1] - 2026-09-06
+### Fixed
+
+- Non-Copilot/VS Code hook bundles now copy `.claude-plugin/plugin.json` to preserve script-relative manifest reads. (by @lkshrk, #2826)
+
+## [0.29.1] - 2026-09-05
 
 ### Security
 

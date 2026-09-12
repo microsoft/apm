@@ -1169,10 +1169,10 @@ class HookIntegrator(BaseIntegrator):
                     rewritten,
                 )
             )
-
             copy_result = copy_deployed_hook_bundle(
                 self,
                 package_path=package_info.install_path,
+                package_name=package_name,
                 hook_file_dir=hook_file.parent,
                 project_root=project_root,
                 scripts=scripts,
@@ -1516,10 +1516,10 @@ class HookIntegrator(BaseIntegrator):
                     hook_file,
                     config.target_key,
                 )
-
             copy_result = copy_deployed_hook_bundle(
                 self,
                 package_path=package_info.install_path,
+                package_name=package_name,
                 hook_file_dir=hook_file.parent,
                 project_root=project_root,
                 scripts=scripts,

@@ -1183,6 +1183,27 @@ def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> 
     )
 
 
+def test_source_plan_guard_rejects_unselected_hook_manifest_copy() -> None:
+    """The source-plan guard must keep hook materialization on the selected set."""
+    path = "src/apm_cli/integration/hook_bundle.py"
+    source = _source(path)
+    old = "manifest_source in selected_bundle_files"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "manifest_source not in selected_bundle_files", 1)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(
+        ROOT,
+        ("install-deployment-source-plan",),
+        source_overrides={path: mutated},
+    )
+
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == "install-deployment-source-plan" for violation in report.violations
+    )
+
+
 @pytest.mark.parametrize("case", MUTATIONS, ids=CASE_IDS)
 def test_owner_rule_catches_its_guard_mutation(
     case: MutationCase, baseline_violated_rule_ids: frozenset[str]
