@@ -192,21 +192,11 @@ def _new_scenario(
         source_tree=marketplace.package.root,
     )
     marketplace_remote = f"https://{_HOST}/{_OWNER}/{_MARKETPLACE}"
-    marketplace_remote_forms = repositories.install_url_rewrite(
+    repositories.install_url_rewrite(
         marketplace_repository,
         marketplace_remote,
     )
-    environment = repositories.url_rewrite_subprocess_env(
-        package_repository,
-        package_remote,
-    )
-    rewrite_key = f"url.{marketplace_repository.file_url}/.insteadOf"
-    rewrite_count = int(environment["GIT_CONFIG_COUNT"])
-    for offset, remote_form in enumerate(marketplace_remote_forms):
-        index = rewrite_count + offset
-        environment[f"GIT_CONFIG_KEY_{index}"] = rewrite_key
-        environment[f"GIT_CONFIG_VALUE_{index}"] = remote_form
-    environment["GIT_CONFIG_COUNT"] = str(rewrite_count + len(marketplace_remote_forms))
+    (isolated.home / ".gitconfig").write_bytes(Path(environment["GIT_CONFIG_GLOBAL"]).read_bytes())
 
     scenario = _Scenario(
         isolated=isolated,
@@ -532,9 +522,17 @@ def test_invalid_or_unmatched_patterns_fail_without_consumer_writes(
             "main",
         ),
         "tag-pattern-malformed",
+    )
+    malformed_output = " ".join((malformed.stdout + malformed.stderr).split())
+    assert "contains 1 unsupported or malformed plugin entry" in malformed_output
+    malformed_validation = _run(
+        scenario,
+        malformed_workspace,
+        ("marketplace", "validate", _MARKETPLACE),
+        "tag-pattern-malformed-validation",
         expected_returncode=1,
     )
-    malformed_output = malformed.stdout + malformed.stderr
+    malformed_output = malformed_validation.stdout + malformed_validation.stderr
     assert "source.tag_pattern" in malformed_output
     assert "must contain exactly one {version} placeholder" in malformed_output
     _assert_same_state(

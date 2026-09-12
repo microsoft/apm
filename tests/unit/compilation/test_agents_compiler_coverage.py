@@ -195,7 +195,26 @@ class TestAgentsCompilerCompileException(unittest.TestCase):
         ) as mock_disc:
             result = compiler.compile(config)  # no primitives passed → discovers  # noqa: F841
 
-        mock_disc.assert_called_once_with(str(compiler.base_dir), exclude_patterns=config.exclude)
+        mock_disc.assert_called_once()
+        args, kwargs = mock_disc.call_args
+        self.assertEqual(args, (str(compiler.base_dir),))
+        self.assertEqual(kwargs["exclude_patterns"], config.exclude)
+        self.assertIn("inventory", kwargs)
+
+    def test_compile_uses_excluded_source_and_full_deploy_inventories(self):
+        """Source exclusions do not hide stale deploy outputs from cleanup."""
+        (Path(self.tmp) / "vendor" / "generated.py").parent.mkdir(parents=True)
+        (Path(self.tmp) / "vendor" / "generated.py").touch()
+        compiler = AgentsCompiler(self.tmp)
+        config = CompilationConfig(strategy="single-file", dry_run=True, exclude=["vendor"])
+
+        compiler.compile(config, _make_primitives())
+
+        assert compiler._source_inventory is not None
+        assert compiler._deploy_inventory is not None
+        vendor = (Path(self.tmp) / "vendor").resolve()
+        self.assertFalse(compiler._source_inventory.contains_directory(vendor))
+        self.assertTrue(compiler._deploy_inventory.contains_directory(vendor))
 
 
 # ---------------------------------------------------------------------------

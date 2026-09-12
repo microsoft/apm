@@ -181,3 +181,38 @@ def test_credentials_scrubbed_from_external_references():
     )
     out = export_sbom(_lockfile(dep), "cyclonedx", timestamp=_TS)
     assert "secret" not in out
+
+
+# ------------------------------------------------------- timestamp validation
+
+
+def test_resolve_export_timestamp_valid_iso():
+    from apm_cli.commands.lock import _normalize_utc_designator, _resolve_export_timestamp
+
+    valid_ts = "2024-06-01T00:00:00+00:00"
+    assert _resolve_export_timestamp(valid_ts, None) == valid_ts
+    assert _resolve_export_timestamp("2024-06-01T00:00:00Z", None) == valid_ts
+    assert _normalize_utc_designator("2024-06-01T00:00:00Z") == valid_ts
+
+
+def test_resolve_export_timestamp_invalid_iso_raises_bad_parameter():
+    import click
+    import pytest
+
+    from apm_cli.commands.lock import _resolve_export_timestamp
+
+    for invalid in [
+        "",
+        "   ",
+        "not-a-date",
+        "99999-99-99",
+        "2024-13-45T99:99:99Z",
+        "2024-06-01",
+        "2024-06-01T12:00:00",
+    ]:
+        with pytest.raises(click.BadParameter) as exc_info:
+            _resolve_export_timestamp(invalid, None)
+        assert "Expected timezone-aware ISO 8601 format" in str(exc_info.value)
+
+    with pytest.raises(click.BadParameter, match="Invalid timestamp ''"):
+        _resolve_export_timestamp("   ", None)

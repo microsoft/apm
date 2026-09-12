@@ -1,0 +1,22 @@
+{
+  "site": {
+    "repository": "agentplugins/agent-plugins-site",
+    "commit": "b946d6f331055fe83bc675f213e49b53d9371d20",
+    "specificationSource": {
+      "repository": "https://github.com/agentplugins/agent-plugins-spec",
+      "version": "1.0.0",
+      "status": "working-draft",
+      "commit": "b78a4f162d92c4b09ee205a11f59a6187926d947"
+    }
+  },
+  "spec": {
+    "repository": "agentplugins/agent-plugins-spec",
+    "commit": "b78a4f162d92c4b09ee205a11f59a6187926d947",
+    "path": "spec/1.0.0.md",
+    "sha256": "367152c5f3d619f7d8bef05ce528b0ed810ad95cff72a2f40d85c0ef52b383d1"
+  },
+  "schemas": {
+    "plugin": "0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883",
+    "mcp": "6539175bfcdf43085855183e86da40ea94b166547a72b47ae9a0a390516d3acb"
+  }
+}

@@ -261,9 +261,8 @@ class TestTargetField:
         assert isinstance(pkg.target, str)
 
     def test_target_list(self, tmp_path):
-        """``target: [claude, copilot]`` is now alias-resolved through the
-        shared parser -- ``copilot`` collapses to its canonical name
-        ``vscode`` (#820).  Multi-target lists stay as lists."""
+        """``target: [claude, copilot]`` uses the shared parser while preserving
+        Copilot's configuration destination. Multi-target lists stay as lists."""
         yml = _write_apm_yml(
             tmp_path,
             {
@@ -275,7 +274,7 @@ class TestTargetField:
 
         pkg = APMPackage.from_apm_yml(yml)
 
-        assert pkg.target == ["claude", "vscode"]
+        assert pkg.target == ["claude", "copilot"]
         assert isinstance(pkg.target, list)
 
     def test_target_missing(self, tmp_path):

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 class PromptIntegrator(BaseIntegrator):
     """Handles integration of APM package prompts into target prompt directories."""
 
-    def find_prompt_files(self, package_path: Path) -> list[Path]:
+    def find_prompt_files(self, package_path: Path, source_plan=None) -> list[Path]:
         """Find all .prompt.md files in a package.
 
         Searches in:
@@ -31,7 +31,10 @@ class PromptIntegrator(BaseIntegrator):
         Returns:
             List[Path]: List of absolute paths to .prompt.md files
         """
-        return self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"])
+        return self.filter_authorized_files(
+            self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"]),
+            source_plan,
+        )
 
     def copy_prompt(self, source: Path, target: Path) -> int:
         """Copy prompt file verbatim with link resolution.
@@ -77,6 +80,7 @@ class PromptIntegrator(BaseIntegrator):
         managed_files: set[str] | None = None,
         diagnostics=None,
         scope=None,
+        source_plan=None,
     ) -> IntegrationResult:
         """Integrate prompts for a single *target*."""
         mapping = target.primitives.get("prompts")
@@ -119,6 +123,7 @@ class PromptIntegrator(BaseIntegrator):
             managed_files=managed_files,
             diagnostics=diagnostics,
             target=target,
+            source_plan=source_plan,
         )
 
     def sync_for_target(
@@ -219,6 +224,7 @@ class PromptIntegrator(BaseIntegrator):
         diagnostics=None,
         logger=None,
         target: TargetProfile | None = None,
+        source_plan=None,
     ) -> IntegrationResult:
         """Integrate all prompts from a package into the target prompts directory.
 
@@ -247,7 +253,7 @@ class PromptIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         # Find all prompt files in the package
-        prompt_files = self.find_prompt_files(package_info.install_path)
+        prompt_files = self.find_prompt_files(package_info.install_path, source_plan)
 
         if not prompt_files:
             return IntegrationResult(

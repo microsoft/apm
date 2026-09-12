@@ -5,7 +5,11 @@ from pathlib import Path  # noqa: F401
 
 import pytest  # noqa: F401
 
-from apm_cli.security.content_scanner import ContentScanner, ScanFinding
+from apm_cli.security.content_scanner import (
+    ContentScanner,
+    ScanFinding,
+    _combine_surrogate_pairs,
+)
 
 
 class TestScanText:
@@ -20,6 +24,11 @@ class TestScanText:
     def test_empty_string_returns_empty(self):
         findings = ContentScanner.scan_text("")
         assert findings == []
+
+    def test_surrogate_normalizer_returns_common_non_ascii_input_unchanged(self):
+        content = "caf\u00e9" * 10_000
+
+        assert _combine_surrogate_pairs(content) is content
 
     def test_whitespace_only_returns_empty(self):
         findings = ContentScanner.scan_text("   \n\n\t\t\n")
@@ -36,6 +45,21 @@ class TestScanText:
         assert findings[0].category == "tag-character"
         assert findings[0].codepoint == "U+E0001"
         assert findings[0].file == "test.md"
+
+    def test_utf16_surrogate_pair_is_scanned_as_unicode_scalar(self):
+        findings = ContentScanner.scan_text("\udb40\udc01", filename="decoded.yml")
+
+        assert len(findings) == 1
+        assert findings[0].severity == "critical"
+        assert findings[0].category == "tag-character"
+        assert findings[0].codepoint == "U+E0001"
+
+    def test_unpaired_utf16_surrogate_is_critical(self):
+        findings = ContentScanner.scan_text("\udb40", filename="decoded.yml")
+
+        assert len(findings) == 1
+        assert findings[0].severity == "critical"
+        assert findings[0].category == "invalid-surrogate"
 
     def test_multiple_tag_characters(self):
         """Full range of tag chars embedded in text."""

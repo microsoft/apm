@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import dataclasses
+import json
 from pathlib import Path
 
 import pytest
@@ -317,15 +318,92 @@ def test_diff_engine_unrecorded_exempts_hook_merge_targets(tmp_path):
     assert diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=targets) == []
 
 
+def test_diff_engine_ignores_user_hooks_in_shared_config(tmp_path):
+    """A user hook beside an APM hook is not shared-config drift."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo apm-managed"}],
+    }
+    user_owned = {
+        "matcher": "Write",
+        "hooks": [{"type": "command", "command": "echo user-owned"}],
+    }
+    sidecar = {**managed, "_apm_source": "example/pkg"}
+    _write(
+        scratch / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [managed]}}).encode(),
+    )
+    _write(
+        project / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [managed, user_owned]}}).encode(),
+    )
+    sidecar_bytes = json.dumps({"PreToolUse": [sidecar]}).encode()
+    _write(scratch / ".claude" / "apm-hooks.json", sidecar_bytes)
+    _write(project / ".claude" / "apm-hooks.json", sidecar_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch,
+        project,
+        _empty_lockfile(),
+        targets=[KNOWN_TARGETS["claude"]],
+    )
+
+    assert findings == []
+
+
 def test_diff_engine_hook_merge_target_tampering_is_modified(tmp_path):
-    """Membership exemption cannot suppress the existing byte comparison."""
+    """Membership exemption cannot suppress APM-owned hook comparison."""
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     scratch = tmp_path / "scratch"
     project = tmp_path / "project"
     rel = ".claude/settings.json"
-    _write(scratch / rel, b'{"hooks": {}}\n')
-    _write(project / rel, b'{"hooks": {"changed": true}}\n')
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo apm-managed"}],
+    }
+    tampered = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo tampered"}],
+    }
+    sidecar = {**managed, "_apm_source": "example/pkg"}
+    _write(scratch / rel, json.dumps({"hooks": {"PreToolUse": [managed]}}).encode())
+    _write(project / rel, json.dumps({"hooks": {"PreToolUse": [tampered]}}).encode())
+    sidecar_bytes = json.dumps({"PreToolUse": [sidecar]}).encode()
+    _write(scratch / ".claude" / "apm-hooks.json", sidecar_bytes)
+    _write(project / ".claude" / "apm-hooks.json", sidecar_bytes)
+
+    findings = diff_scratch_against_project(
+        scratch,
+        project,
+        _empty_lockfile(),
+        targets=[KNOWN_TARGETS["claude"]],
+    )
+
+    assert [(finding.kind, finding.path) for finding in findings] == [("modified", rel)]
+
+
+def test_diff_engine_reports_malformed_shared_hook_event_as_modified(tmp_path):
+    """A malformed native event remains drift rather than aborting audit."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    rel = ".claude/settings.json"
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo apm-managed"}],
+    }
+    sidecar = {**managed, "_apm_source": "example/pkg"}
+    _write(scratch / rel, json.dumps({"hooks": {"PreToolUse": [managed]}}).encode())
+    _write(project / rel, b'{"hooks":{"PreToolUse":null}}')
+    sidecar_bytes = json.dumps({"PreToolUse": [sidecar]}).encode()
+    _write(scratch / ".claude" / "apm-hooks.json", sidecar_bytes)
+    _write(project / ".claude" / "apm-hooks.json", sidecar_bytes)
 
     findings = diff_scratch_against_project(
         scratch,

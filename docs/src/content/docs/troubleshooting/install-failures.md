@@ -251,6 +251,13 @@ The cache short-circuits already-downloaded packages and the integrate phase ove
 
 If resolution rejects a cyclic dependency graph, fix the package manifests and run `apm install` again. APM rolls back only the package snapshots staged by the rejected resolution, so no manual `apm_modules/` deletion is required.
 
+If an MCP command names `.apm-resolution-staging`, upgrade to a release that
+contains the staging-path fix and retry the same `apm install` command once. If
+the reference or refusal repeats, stop and report the redacted error plus the
+named MCP entry. Do not edit package files, delete the lockfile, or use
+`--refresh` or `--force` solely to repair this path; those actions can move pins
+or bypass unrelated protections.
+
 If files in `apm_modules/` or under target harness directories look corrupt, force a fresh deploy by combining cache bypass with overwrite:
 
 ```bash

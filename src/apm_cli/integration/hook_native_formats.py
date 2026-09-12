@@ -4,81 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from .hook_ir import HookBinding, HookDocument, HookHandler
+from apm_cli.hook_contract import (
+    HookDocument,
+    HookHandler,
+    _entries_to_ir,
+    _handler_to_ir,
+)
 
 _ANTIGRAVITY_NESTED_EVENTS: frozenset[str] = frozenset({"PreToolUse", "PostToolUse"})
-
-
-def _handler_to_ir(raw: dict[str, Any], inherited_source: str | None) -> HookHandler:
-    """Translate one native source handler into portable intent."""
-    data = dict(raw)
-    command = data.pop("command", None)
-    platform = "all"
-    if command is None:
-        for key, candidate_platform in (
-            ("bash", "posix"),
-            ("powershell", "windows"),
-            ("windows", "windows"),
-        ):
-            if key in data:
-                command = data.pop(key)
-                platform = candidate_platform
-                break
-    timeout_seconds = data.pop("timeoutSec", None)
-    if timeout_seconds is None and "timeout" in data:
-        timeout_seconds = data.pop("timeout")
-    provenance = data.pop("_apm_source", None) or inherited_source
-    return HookHandler(
-        command=command,
-        platform=platform,
-        timeout_seconds=timeout_seconds,
-        provenance=provenance,
-        metadata=data,
-    )
-
-
-def _entries_to_ir(entries: list, event: str = "") -> HookDocument:
-    """Translate accepted source shapes into neutral bindings at the edge."""
-    bindings: list[HookBinding] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            bindings.append(
-                HookBinding(
-                    event=event,
-                    handlers=(),
-                    metadata={"raw_entry": entry},
-                )
-            )
-            continue
-        data = dict(entry)
-        nested = data.pop("hooks", None)
-        matcher = data.pop("matcher", None)
-        provenance = data.pop("_apm_source", None)
-        if isinstance(nested, list):
-            handlers = tuple(
-                _handler_to_ir(handler, provenance)
-                for handler in nested
-                if isinstance(handler, dict)
-            )
-            bindings.append(
-                HookBinding(
-                    event=event,
-                    handlers=handlers,
-                    matcher=matcher,
-                    provenance=provenance,
-                    metadata=data,
-                )
-            )
-            continue
-        bindings.append(
-            HookBinding(
-                event=event,
-                handlers=(_handler_to_ir(data, provenance),),
-                matcher=matcher,
-                provenance=provenance,
-            )
-        )
-    return HookDocument(bindings=tuple(bindings))
 
 
 def _handler_from_ir(handler: HookHandler, *, timeout_milliseconds: bool) -> dict[str, Any]:

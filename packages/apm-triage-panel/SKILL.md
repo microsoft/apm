@@ -1,17 +1,26 @@
 ---
 name: apm-triage-panel
 description: >-
-  Use this skill to triage a single newly opened, reopened, or
-  `status/needs-triage`-labelled issue in microsoft/apm. Emit one
-  synthesized comment with a triage decision, label set, milestone,
-  and suggested next action.
+  Use this skill to triage one microsoft/apm issue selected by the
+  daily sweep, an advisory re-triage request, or manual dispatch, even
+  when the request only asks whether one proposal is ready for discussion.
+  Return one advisory recommendation and a proposed scope brief, never
+  human approval. Do not implement the issue or manage the backlog.
 ---
 
 # APM Triage Panel -- Single-Issue Triage Orchestration
 
-The panel is fixed at **3 mandatory specialist lenses + up to 3
-conditional lenses + 1 arbiter lens = up to 6 active persona sections
-in one triage comment** (3 mandatory + 3 conditional). You play each
+**Advisory only.** Read `assets/label-contract.json` before reasoning.
+The caller supplies the repository's GOVERNANCE.md and CONTRIBUTING.md:
+those human policies override persona instructions. If unavailable, do
+not invent authority or review contacts; flag the missing context.
+An `accept` recommendation is not acceptance. Labels and silence are not
+approval. Only a responsible human maintainer approves scope, priority,
+contributor invitations, review capacity, and release targeting.
+
+The panel is fixed at **2 mandatory specialist lenses + up to 3
+conditional lenses + 1 always-active arbiter = 6 persona sections in
+one triage comment**. You play each
 lens in turn from inside a single agent loop (progressive-disclosure
 skill model -- no sub-agent dispatch). Routing chooses *which* lenses
 execute; it never changes which headings appear in the final comment.
@@ -54,8 +63,8 @@ by `apm-review-panel` once a PR exists.
 ```
 
 - **Specialists raise findings independently** -- no implicit consensus.
-- **CEO arbitrates** the theme, milestone, priority, and tone of the
-  reply. CEO has the final call on the decision rubric.
+- **CEO synthesizes advice** on classification, readiness, and reply tone.
+  The persona is not a project officer and cannot ratify human decisions.
 - **Growth Hacker, Python Architect, and Doc Writer are side-channels**
   to the CEO when activated. They never block a specialist finding;
   they feed the CEO's arbitration:
@@ -72,7 +81,7 @@ by `apm-review-panel` once a PR exists.
 Three personas are conditional: OSS Growth Hacker, Python Architect,
 and Doc Writer. Each follows the same shape: an explicit YES/NO
 activation rule plus an inactive-reason fallback. Maximum lenses in a
-single triage = 6 (3 mandatory + 3 conditional).
+single triage = 6 (2 mandatory + 3 conditional + 1 arbiter).
 
 ### OSS Growth Hacker
 
@@ -167,15 +176,14 @@ Routing rule:
 - **NO**  -> record `Doc Writer inactive reason: <one sentence>` in
   working notes; do not take the lens.
 
-## Triage decision rubric
+## Triage recommendation rubric
 
-The CEO arbiter picks exactly ONE outcome from this rubric:
+The CEO lens recommends exactly ONE outcome from this rubric:
 
-- `accept` -- direction is clear and aligned with the README spine and
-  the roadmap. Assigns full label set + milestone if a current
-  candidate exists.
+- `accept` -- direction appears clear and aligned. Propose bounded scope
+  for a responsible maintainer to approve; do not invite implementation.
 - `needs-design` -- direction is sound but the design must be settled
-  before code lands. Apply `status/needs-design` and name in the
+  before code lands. Recommend design discussion and name in the
   comment exactly what must be designed (interface, data model,
   migration, security boundary).
 - `decline-with-reason` -- out of scope for APM as positioned by the
@@ -183,74 +191,47 @@ The CEO arbiter picks exactly ONE outcome from this rubric:
   upstream project. Always courteous, always concrete.
 - `duplicate-of #N` -- propose the canonical issue. The orchestrator
   must verify the link resolves before posting.
-- `defer-later` -- accepted in principle but no current milestone.
-  Sits as `status/accepted` plus `theme/* + area/*` only; no
-  `priority/*`, no milestone.
+- `defer-later` -- not ready to invite work, including absent review
+  capacity. Recommend deferral (`status/deferred` if a human chooses).
+  NEVER map `defer-later` to `status/accepted`. A missing milestone alone
+  does not prevent acceptance: scope approval and release targeting differ.
 - `auto-handle` -- automated noise such as a daily CLI-consistency
   report PR or scheduled bot issue. Propose closing if the report has
   zero unaddressed High findings; otherwise propose splitting into
   individual issues with the right `area/*` labels and reference back
   to the parent.
 
-## Label-set construction rules
+## Classification and proposed brief
 
-Triage produces a single proposed label set. The taxonomy:
+`assets/label-contract.json` is the canonical label contract, including
+human decision states, bot processing, legacy read aliases, and safe
+rollout. Do not duplicate or expand its allowlist. Contributors need
+not supply a five-axis taxonomy. Propose only useful type/area/theme
+classification; null or an empty list is valid when uncertain. At most
+six classification labels, with at most one type and one primary theme.
 
-- **Mega-themes** (one of):
-  `theme/portability`, `theme/security`, `theme/governance`.
-- **Sub-themes** (`area/*`, one or more):
-  `area/multi-target`, `area/marketplace`, `area/package-authoring`,
-  `area/distribution`, `area/mcp-config`, `area/content-security`,
-  `area/lockfile`, `area/mcp-trust`, `area/audit-policy`,
-  `area/enterprise`, `area/cli`, `area/ci-cd`, `area/testing`,
-  `area/docs-site`.
-- **Types** (exactly one):
-  `type/bug`, `type/feature`, `type/docs`, `type/refactor`,
-  `type/architecture`, `type/automation`, `type/release`,
-  `type/performance`.
-- **Statuses** (exactly one):
-  `status/needs-triage`, `status/accepted`, `status/needs-design`,
-  `status/blocked`, `status/in-flight`.
-- **Priorities** (optional):
-  `priority/high`, `priority/low`.
-- **Preserved** (apply when relevant):
-  `breaking-change`, `good first issue`, `help wanted`,
-  `experimental`, `panel-review`, `dx`, `agentic-workflows`,
-  `dependencies`.
+Preserve existing labels, priority, invitations, milestone, and human
+approval records. A conflicting classification belongs in advice, not a
+replacement. Legacy aliases are read-only compatibility, not permission
+to relabel anything. The workflow owns processing markers independently
+of the recommendation; this skill never chooses a human status to apply.
 
-Construction rules:
+Every recommendation includes a concise **proposed**, not approved, brief:
+`scope`, `done_when`, `exclusions`, and `review_needs`. State missing
+information explicitly. Identify needed expertise and unresolved review
+capacity, not an invented assignment or promise. Use the human roster:
+core maintainers overlap project-wide; registry public API work goes to
+its primary maintainer with core backup, not unrelated registry internals.
+Do not require the lead to reapprove every routine decision.
 
-- Exactly one `theme/<mega>` label is required UNLESS the issue is
-  pure infra (only `area/cli`, `area/ci-cd`, `area/testing`, or
-  `area/docs-site` apply, with no product surface implication). State
-  this explicitly in the per-lens notes when omitting the theme.
-- Multi-theme labels are allowed; the **primary theme** is listed
-  first and drives the milestone.
-- Exactly one `type/*` label.
-- Exactly one `status/*` label. The default `status/needs-triage` is
-  always replaced by the triage outcome (`status/accepted`,
-  `status/needs-design`, `status/blocked`, etc.). Do not leave
-  `status/needs-triage` on a triaged issue.
-- `priority/*` only on `accept` with a current milestone or next
-  minor. Never on `defer-later`, `needs-design`, or `decline-*`.
+No release milestone, priority, or contributor invitation is emitted as a
+machine-actionable field. These remain human decisions.
 
-## Milestone assignment rules
-
-- **Current patch milestone** (e.g., `0.9.x`) for bug fixes and small
-  DX work that fits a patch release.
-- **Next minor** (e.g., `0.10.0`) for `type/feature` accepted with
-  `priority/high`.
-- **No milestone (`null`)** for `defer-later` and `needs-design`.
-
-The orchestrator looks up open milestones with:
-
-```
-gh api repos/microsoft/apm/milestones --jq '.[]|select(.state=="open")|.title'
-```
-
-The lowest-numbered open patch milestone is "current patch"; the
-lowest-numbered open minor is "next minor". If neither exists, set
-milestone to `null` and note it.
+The caller uses `scripts/triage_state.py` for deterministic, read-only
+selection and label planning against the contract. Run it with `--help`
+for invocation; it reads normalized JSON from stdin, writes a JSON plan
+to stdout, and reports failures on stderr with a nonzero exit. It never
+calls GitHub, posts comments, or verifies human approval.
 
 ## Quality gates
 
@@ -260,9 +241,9 @@ A triage comment passes when:
       (or fails to map) to a concrete README-anchored capability
 - [ ] Supply Chain Security Expert: P/G/S risk surfaces assessed; if
       the issue touches lockfile, marketplace, MCP config, signing,
-      or auth, `theme/security` or `theme/governance` is on the set
-- [ ] APM CEO: theme, milestone, priority, decision, and reply tone
-      ratified
+      or auth, name the relevant risk and review expertise
+- [ ] APM CEO: recommendation, classification, brief, and tone synthesized;
+      human approval is explicitly still required
 - [ ] OSS Growth Hacker lens taken or inactive reason recorded; if
       taken, tone tuned for a new or low-interaction contributor and
       the reply names a concrete next step they can take
@@ -291,9 +272,9 @@ in order, in a single agent loop. Do not skip ahead and do not emit
 any output before the final step.
 
 1. Read the issue context (title, body, labels, author,
-   `author_association`, prior comments). The orchestrating workflow
-   already fetches this with `gh issue view --json` -- do not
-   re-fetch from inside the skill.
+   `author_association`, prior comments), supplied human governance,
+   and `assets/label-contract.json`. Do not re-fetch issue context
+   from inside the skill.
 2. Resolve the **three conditional cases** -- OSS Growth Hacker,
    Python Architect, Doc Writer -- using the rules in "Conditional
    panelists" above. For each, record either an activation decision
@@ -314,21 +295,25 @@ any output before the final step.
    Do not proceed to step 5 until the gate passes.
 5. Take the **APM CEO** lens (load
    `../../agents/apm-ceo.agent.md`) and arbitrate the collected
-   findings into a single decision: rubric outcome, primary theme,
-   `area/*` set, `type/*`, `status/*`, optional `priority/*`,
-   milestone, and reply tone. Still in your own context. CEO
+   findings into a single recommendation, useful classification,
+   proposed brief, and reply tone. Still in your own context. CEO
    arbitration may run only after the completeness gate has passed.
-6. If the rubric outcome is `duplicate-of #N`, verify the candidate
-   issue exists and is open with `gh issue view N --json state,title`
-   before committing the link.
+6. If the rubric outcome is `duplicate-of #N`, use the caller's
+   authenticated GitHub issue-read tool to verify the candidate exists
+   and is open before committing the link. If it cannot be verified,
+   use `accept` or `needs-design` as appropriate and mention the
+   suspected duplicate only in prose.
 7. Now (and only now) load `assets/triage-template.md` and fill it
-   in with the collected findings, decision, label set, milestone,
-   and proposed comment body.
-8. Emit the filled template as exactly ONE comment via the workflow's
-   `safe-outputs.add-comment` channel. For direct (non-workflow)
-   invocation, return the comment text and the structured
-   `triage-decision` JSON tail so an orchestrator can apply labels
-   and post the comment without parsing prose. This is the ONLY
+   in with the collected findings, recommendation, classification,
+   proposed brief, and suggested comment body.
+8. Verify the rendered comment contains every top-level heading from
+   the template, all six persona `<details>` sections, and the closing
+   `triage-recommendation` JSON block. If any element is missing, re-render
+   from the template instead of posting a hand-composed substitute.
+9. Return the filled template and its structured `triage-recommendation`
+   JSON tail to the caller. The workflow alone posts it via its
+   safe-output channel; direct callers receive advice without writes.
+   Never post from inside the skill or authorize implementation. This is the ONLY
    output emission for the entire panel run -- no per-persona
    comments, no progress comments.
 
@@ -359,10 +344,11 @@ per-persona noise.
   section headings exactly as written. Adapt the body of each
   section to the issue. Do not invent new top-level sections or drop
   existing ones.
-- The trailing fenced ```json block named `triage-decision` is
-  REQUIRED. It is the machine-readable contract that downstream
-  automation uses to apply labels, set the milestone, and post the
-  reply without parsing prose.
+- The trailing fenced ```json block named `triage-recommendation` is
+  REQUIRED. Its `schema_version: 2` and `advisory_only: true` distinguish
+  it from legacy `triage-decision` comments. Consumers must not interpret
+  either format as human approval. No operative status, priority,
+  invitation, or milestone fields are present.
 - ASCII only inside the comment body and JSON tail. No emojis, no
   Unicode dashes, no box-drawing characters. Use `[+] [!] [x] [i] [*] [>]`
   if status symbols are needed.
@@ -374,23 +360,20 @@ per-persona noise.
 
 ## Anti-patterns
 
-- **Over-labelling.** Do not exceed 6 labels per issue across
-  `theme/* + area/* + type/* + status/* + priority/* + preserved/*`.
+- **Over-labelling.** Do not exceed 6 proposed classification labels.
   If you find yourself reaching for 7+, prune the weakest `area/*`.
-- **Milestone without status.** Never assign a milestone to an issue
-  whose status is not `status/accepted` or `status/in-flight`.
-  `needs-design` and `defer-later` are explicitly milestone-free.
+- **Approval by proxy.** A recommendation, accepted label, agent
+  persona, or silence never authorizes implementation or a release.
 - **Silent decline.** Do not auto-close or `decline-with-reason`
   without a courteous reason linked to the README spine, the
-  manifesto, or the public roadmap. Every decline names where the
+  manifesto. Every decline names where the
   user can go instead.
-- **Vague needs-design.** Never apply `status/needs-design` without
+- **Vague needs-design.** Never recommend `needs-design` without
   naming, in the suggested comment, exactly what must be designed
   (interface, data model, migration, security boundary). "We need to
   think about this" is not a design-needed reason.
-- **Naked `status/needs-triage` carryover.** Triage replaces the
-  default `status/needs-triage` label. Leaving it on a triaged issue
-  is a routing bug.
+- **Consuming human state.** Keep `status/needs-triage` after advice;
+  human decision state and bot processing state are independent.
 - **Wildcard heuristics.** Do not activate the OSS Growth Hacker on
   `*new*` or `*first*` keyword matches alone -- always cross-check
   `author_association` and prior interactions on `microsoft/apm`.
@@ -410,12 +393,9 @@ per-persona noise.
   `oss-growth-hacker`, `python-architect`, and `doc-writer`. Do not
   create a `triage-*` persona; the README spine plus the label
   taxonomy plus the existing CEO arbiter are sufficient grounding.
-- **Bundle layout on the runner.** When this skill runs inside an
-  agentic workflow, the APM bundle is unpacked under
-  `.github/skills/apm-triage-panel/` first, with `.apm/skills/...`
-  as a fallback. The asset path is the same relative to the skill
-  root (`assets/triage-template.md`) in both layouts -- prefer the
-  `.github/...` path when present.
+- **Bundle layout on the runner.** Resolve
+  `assets/triage-template.md` relative to the loaded `SKILL.md`.
+  Never hard-code an installation directory.
 - **No multi-persona-in-one-pass.** Each persona has its own
   `.agent.md` for a reason -- read it when you take that lens, write
   the findings, then drop the lens before moving on.

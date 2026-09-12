@@ -507,7 +507,7 @@ def _packed_local_bundle_consumer(fixture: _Fixture) -> None:
         (
             ("install", *_TARGET_ARGS),
             ("compile", "--target", "copilot", "--force-instructions"),
-            ("pack", "--format", "plugin", "--offline"),
+            ("pack", "--format", "claude-plugin", "--offline"),
         ),
     )
     bundle = producer.root / "build" / f"{producer.name}-0.1.0"
@@ -628,6 +628,143 @@ def test_package_shape_lifecycle_contract(
     case.execute(_fixture(tmp_path / case.id, apm_binary_path))
 
 
+@pytest.mark.lifecycle_smoke
+def test_manifestless_skill_bundle_subset_lifecycle(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A selected manifestless collection resolves, rehydrates, fails closed, and cleans up."""
+    fixture = _fixture(tmp_path, apm_binary_path)
+    source = fixture.packages.create("skill-collection")
+    for name in ("find-skills", "other-skill"):
+        fixture.packages.add_skill(source, name, _skill_document(name))
+    source.manifest_path.unlink()
+    remote = _commit_package(
+        fixture,
+        source,
+        remote_url="https://gitlab.example.invalid/shapes/skill-collection.git",
+    )
+    declaration = {**_git_dependency(remote), "skills": ["find-skills"]}
+    consumer = _consumer(fixture, "collection-consumer", dependencies=(declaration,))
+    child_env = fixture.repositories.url_rewrite_subprocess_env(
+        remote.repository, remote.remote_url
+    )
+    manifest_bytes = consumer.manifest_path.read_bytes()
+    project = consumer.root
+
+    def materialized_bytes() -> dict[Path, bytes]:
+        """Observe cached package bytes as well as deployed state during a failed refresh."""
+        return {
+            path: path.read_bytes()
+            for path in (project / "apm_modules").rglob("*")
+            if path.is_file()
+        }
+
+    def assert_selection(names: tuple[str, ...]) -> None:
+        """Check source identity, complete ownership, and the exact deployed selection."""
+        dependencies = _dependencies(project)
+        assert len(dependencies) == 1
+        locked = dependencies[0]
+        assert locked["package_type"] == "skill_bundle"
+        assert locked["skill_subset"] == list(names)
+        assert locked["resolved_commit"] == remote.commit.sha
+        assert locked["resolved_ref"] == remote.commit.sha
+        assert locked["repo_url"] == "shapes/skill-collection"
+        assert locked["host"] == "gitlab.example.invalid"
+        assert sorted(path.name for path in (project / ".agents/skills").iterdir()) == list(names)
+        assert set(locked["deployed_files"]) == {
+            path
+            for name in names
+            for path in (f".agents/skills/{name}", f".agents/skills/{name}/SKILL.md")
+        }
+        for name in names:
+            assert (project / f".agents/skills/{name}/SKILL.md").read_text(
+                encoding="utf-8"
+            ) == _skill_document(name)
+
+    _run(fixture, project, "collection-fresh", (("install", *_TARGET_ARGS),), env=child_env)
+    assert_selection(("find-skills",))
+    initial = _snapshot(project)
+    _run(
+        fixture,
+        project,
+        "collection-reinstall",
+        (("install", *_TARGET_ARGS), _AUDIT_ARGS),
+        env=child_env,
+    )
+    assert_selection(("find-skills",))
+    converged = _snapshot(project)
+    _run(
+        fixture,
+        project,
+        "collection-converged-reinstall",
+        (("install", *_TARGET_ARGS),),
+        env=child_env,
+    )
+    assert _snapshot(project) == converged
+    _assert_clean_audit(project)
+
+    shutil.rmtree(project / "apm_modules")
+    shutil.rmtree(fixture.isolated.cache_root)
+    _run(
+        fixture,
+        project,
+        "collection-cold-frozen",
+        (("install", *_TARGET_ARGS, "--frozen"), _AUDIT_ARGS),
+        env=child_env,
+    )
+    assert_selection(("find-skills",))
+    assert _snapshot(project).semantic_bytes == initial.semantic_bytes
+    assert consumer.manifest_path.read_bytes() == manifest_bytes
+    _assert_clean_audit(project)
+
+    bad_skill = remote.repository.worktree / "skills/find-skills/SKILL.md"
+    bad_skill.write_text("---\nname: [unterminated\n---\n", encoding="utf-8")
+    bad_commit = fixture.repositories.commit(remote.repository, message="malformed skill")
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["dependencies"]["apm"][0]["ref"] = bad_commit.sha
+    dump_yaml(manifest, consumer.manifest_path)
+    before_failure = _snapshot(project)
+    before_materialized = materialized_bytes()
+    failed = fixture.runner.run(
+        ("install", *_TARGET_ARGS),
+        scenario_id="collection-invalid-refresh",
+        cwd=project,
+        env=child_env,
+    )
+    assert failed.returncode != 0
+    assert "failed to parse frontmatter" in failed.stdout + failed.stderr
+    assert _snapshot(project) == before_failure
+    assert materialized_bytes() == before_materialized
+    assert_selection(("find-skills",))
+
+    manifest["dependencies"]["apm"][0]["ref"] = remote.commit.sha
+    manifest["dependencies"]["apm"][0]["skills"] = ["other-skill"]
+    dump_yaml(manifest, consumer.manifest_path)
+    _run(
+        fixture,
+        project,
+        "collection-subset-change",
+        (("install", *_TARGET_ARGS), _AUDIT_ARGS),
+        env=child_env,
+    )
+    assert_selection(("other-skill",))
+    _assert_clean_audit(project)
+    _run(
+        fixture,
+        project,
+        "collection-uninstall",
+        (("uninstall", remote.remote_url), ("prune",), _AUDIT_ARGS),
+        env=child_env,
+    )
+    assert _snapshot(project).deployment_records == ()
+    assert not (project / ".agents/skills/other-skill").exists()
+    assert not (project / ".agents/skills/find-skills").exists()
+    if (project / "apm.lock.yaml").exists():
+        assert _dependencies(project) == []
+    _assert_clean_audit(project)
+
+
 def test_tampered_local_bundle_fails_before_consumer_state_writes(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -646,7 +783,7 @@ def test_tampered_local_bundle_fails_before_consumer_state_writes(
         fixture,
         producer.root,
         "tampered-local-bundle-producer",
-        (("install", *_TARGET_ARGS), ("pack", "--format", "plugin", "--offline")),
+        (("install", *_TARGET_ARGS), ("pack", "--format", "claude-plugin", "--offline")),
     )
     bundle = producer.root / "build" / f"{producer.name}-0.1.0"
     tampered = fixture.isolated.work_root / "tampered-bundle"

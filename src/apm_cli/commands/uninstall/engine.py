@@ -1,6 +1,7 @@
 """APM uninstall engine  -- validation, removal, and cleanup helpers."""
 
 import builtins
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -19,6 +20,16 @@ from ...models.dependency.selection import (
 )
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
+
+
+class MCPUninstallCleanupError(RuntimeError):
+    """Aggregate target-specific MCP cleanup failures."""
+
+    def __init__(self, failures: list[tuple[str, Exception]]) -> None:
+        self.failures = tuple(failures)
+        noun = "target" if len(failures) == 1 else "targets"
+        details = "; ".join(f"{runtime}: {error}" for runtime, error in failures)
+        super().__init__(f"MCP cleanup failed for {len(failures)} {noun}: {details}")
 
 
 def _is_marketplace_ref(package: str) -> bool:
@@ -284,11 +295,9 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     Seeds the forward reachability walk (see
     :func:`apm_cli.deps.reachability.compute_forward_reachable_keys`) with
     the project's SURVIVING direct dependencies. For the real uninstall
-    path *apm_yml_path* is already post-edit (Step 3 in ``cli.py`` runs
-    before ``_cleanup_transitive_orphans``), so the identity subtraction
-    below is a no-op there; for the ``--dry-run`` preview (called BEFORE
-    apm.yml is rewritten) it is what turns the pre-edit dependency list
-    into the correct post-removal survivor set, mirroring the identity
+    path and ``--dry-run`` preview, *apm_yml_path* is still pre-edit.
+    Identity subtraction turns the pre-edit dependency list into the
+    correct post-removal survivor set, mirroring the identity
     matching ``_validate_uninstall_packages`` already uses.
 
     Returns an empty list -- never raises -- if *apm_yml_path* is ``None``,
@@ -358,6 +367,8 @@ def _compute_actual_orphans(
     packages_to_remove,
     apm_modules_dir,
     logger,
+    *,
+    warn_on_incomplete: bool = True,
 ):
     """Decide which candidate orphans are truly unreachable and safe to delete.
 
@@ -416,7 +427,8 @@ def _compute_actual_orphans(
         lockfile, project_root, apm_modules_dir, direct_refs, candidate_orphans
     )
     if not reachability.complete:
-        _warn_reachability_incomplete(reachability, logger)
+        if warn_on_incomplete:
+            _warn_reachability_incomplete(reachability, logger)
         return builtins.frozenset(), {}
 
     rescued = candidate_orphans & reachability.reachable
@@ -806,60 +818,65 @@ def _remove_packages_from_disk(
     staged_refreshes=None,
     refreshed_survivor_keys=None,
 ):
-    """Remove direct packages from apm_modules/ and return removal count."""
+    """Remove direct packages, stopping on failure before ownership is released."""
     removed = 0
     if not apm_modules_dir.exists():
         return removed
 
     deleted_pkg_paths = []
     activated_refresh_paths: set[Path] = set()
-    for package in packages_to_remove:
-        package_label = _dependency_public_label(package)
-        try:
-            dep_ref = _parse_dependency_entry(package)
-            package_path = dep_ref.get_install_path(apm_modules_dir)
-        except PathTraversalError as e:
-            logger.error(f"Refusing to remove {package_label}: {e}")
-            continue
-        except (ValueError, TypeError, AttributeError, KeyError):
-            package_str = package if isinstance(package, str) else str(package)
-            repo_parts = package_str.split("/")
-            if len(repo_parts) >= 2:
-                package_path = apm_modules_dir.joinpath(*repo_parts)
-            else:
-                package_path = apm_modules_dir / package_str
+    from ...integration.base_integrator import BaseIntegrator
 
-        refresh = (staged_refreshes or {}).get(package_path)
-        if refresh is not None:
-            if package_path in activated_refresh_paths:
-                continue
-            _activate_staged_local_refresh(refresh, apm_modules_dir)
-            activated_refresh_paths.add(package_path)
-            if refreshed_survivor_keys is not None:
-                refreshed_survivor_keys.update(refresh.survivor_keys)
-            logger.progress(
-                f"Refreshed {package_label} in apm_modules/ for "
-                f"{len(refresh.survivor_keys)} surviving declaration(s)"
-            )
-            continue
-
-        if package_path.exists():
+    try:
+        for package in packages_to_remove:
+            package_label = _dependency_public_label(package)
             try:
-                safe_rmtree(package_path, apm_modules_dir)
-                logger.progress(f"Removed {package_label} from apm_modules/")
-                logger.verbose_detail(
-                    f"    Path: {portable_relpath(package_path, apm_modules_dir)}"
+                dep_ref = _parse_dependency_entry(package)
+                package_path = dep_ref.get_install_path(apm_modules_dir)
+            except PathTraversalError as e:
+                logger.error(f"Refusing to remove {package_label}: {e}")
+                raise
+            except (ValueError, TypeError, AttributeError, KeyError):
+                package_str = package if isinstance(package, str) else str(package)
+                repo_parts = package_str.split("/")
+                if len(repo_parts) >= 2:
+                    package_path = apm_modules_dir.joinpath(*repo_parts)
+                else:
+                    package_path = apm_modules_dir / package_str
+
+            refresh = (staged_refreshes or {}).get(package_path)
+            if refresh is not None:
+                if package_path in activated_refresh_paths:
+                    continue
+                _activate_staged_local_refresh(refresh, apm_modules_dir)
+                activated_refresh_paths.add(package_path)
+                if refreshed_survivor_keys is not None:
+                    refreshed_survivor_keys.update(refresh.survivor_keys)
+                logger.progress(
+                    f"Refreshed {package_label} in apm_modules/ for "
+                    f"{len(refresh.survivor_keys)} surviving declaration(s)"
                 )
-                removed += 1
-                deleted_pkg_paths.append(package_path)
-            except Exception as e:
-                logger.error(f"Failed to remove {package_label} from apm_modules/: {e}")
-        else:
-            logger.warning(f"Package {package_label} not found in apm_modules/")
+                continue
 
-    from ...integration.base_integrator import BaseIntegrator as _BI2
-
-    _BI2.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
+            if package_path.exists():
+                try:
+                    safe_rmtree(package_path, apm_modules_dir)
+                    logger.progress(f"Removed {package_label} from apm_modules/")
+                    logger.verbose_detail(
+                        f"    Path: {portable_relpath(package_path, apm_modules_dir)}"
+                    )
+                    removed += 1
+                    deleted_pkg_paths.append(package_path)
+                except PathTraversalError as e:
+                    logger.error(f"Refusing to remove {package_label} from apm_modules/: {e}")
+                    raise
+                except OSError as e:
+                    logger.error(f"Failed to remove {package_label} from apm_modules/: {e}")
+                    raise
+            else:
+                logger.warning(f"Package {package_label} not found in apm_modules/")
+    finally:
+        BaseIntegrator.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
     return removed
 
 
@@ -870,6 +887,89 @@ def _cleanup_transitive_orphans(
 
     if not lockfile or not apm_modules_dir.exists():
         return 0, builtins.set()
+
+    actual_orphans, resolved_by_repairs = _project_transitive_orphans(
+        lockfile,
+        packages_to_remove,
+        apm_modules_dir,
+        apm_yml_path,
+        logger,
+    )
+
+    # Repair rescued candidates' resolved_by/local_path BEFORE deleting
+    # the true orphans below. Without this, a rescued entry keeps pointing
+    # at a parent that may no longer be in the lockfile, which silently
+    # defeats the NEXT uninstall's backward orphan-candidate scan
+    # (_build_children_index is keyed on resolved_by) and permanently
+    # fail-closes any later reachability walk needing to re-resolve this
+    # same entry's on-disk directory (see _compute_actual_orphans'
+    # docstring). Real removal path only -- --dry-run never reaches here.
+    for rescued_key, (new_parent_repo_url, new_local_path) in resolved_by_repairs.items():
+        rescued_dep = lockfile.get_dependency(rescued_key)
+        if rescued_dep is None:
+            continue
+        rescued_dep.resolved_by = new_parent_repo_url
+        if new_local_path is not None:
+            rescued_dep.local_path = new_local_path
+
+    if not actual_orphans:
+        return 0, builtins.set()
+
+    removed = 0
+    deleted_orphan_paths = []
+    from ...integration.base_integrator import BaseIntegrator
+
+    try:
+        for orphan_key in actual_orphans:
+            orphan_dep = lockfile.get_dependency(orphan_key)
+            if not orphan_dep:
+                continue
+            try:
+                orphan_ref = orphan_dep.to_dependency_ref()
+                orphan_path = orphan_ref.get_install_path(apm_modules_dir)
+            except PathTraversalError as e:
+                logger.error(f"Refusing to remove transitive dep {orphan_key}: {e}")
+                raise
+            except ValueError:
+                parts = orphan_key.split("/")
+                orphan_path = (
+                    apm_modules_dir.joinpath(*parts)
+                    if len(parts) >= 2
+                    else apm_modules_dir / orphan_key
+                )
+
+            if orphan_path.exists():
+                try:
+                    safe_rmtree(orphan_path, apm_modules_dir)
+                    logger.progress(f"Removed transitive dependency {orphan_key} from apm_modules/")
+                    logger.verbose_detail(
+                        f"    Path: {portable_relpath(orphan_path, apm_modules_dir)}"
+                    )
+                    removed += 1
+                    deleted_orphan_paths.append(orphan_path)
+                except PathTraversalError as e:
+                    logger.error(f"Refusing to remove transitive dep {orphan_key}: {e}")
+                    raise
+                except OSError as e:
+                    logger.error(f"Failed to remove transitive dep {orphan_key}: {e}")
+                    raise
+    finally:
+        BaseIntegrator.cleanup_empty_parents(deleted_orphan_paths, stop_at=apm_modules_dir)
+    return removed, actual_orphans
+
+
+def _project_transitive_orphans(
+    lockfile,
+    packages_to_remove,
+    apm_modules_dir,
+    apm_yml_path,
+    logger,
+    *,
+    warn_on_incomplete: bool = True,
+):
+    """Return the post-uninstall orphan set without mutating package state."""
+    if not lockfile or not apm_modules_dir.exists():
+        return builtins.frozenset(), {}
 
     removed_repo_urls = builtins.set()
     for pkg in packages_to_remove:
@@ -893,12 +993,12 @@ def _cleanup_transitive_orphans(
             queue.append(dep.repo_url)
 
     if not orphans:
-        return 0, builtins.set()
+        return builtins.frozenset(), {}
 
     # Determine which candidates are truly unreachable (still-needed direct
     # deps and lockfile survivors, PLUS anything a surviving package's own
     # real manifest still forward-reaches -- see _compute_actual_orphans).
-    actual_orphans, resolved_by_repairs = _compute_actual_orphans(
+    return _compute_actual_orphans(
         lockfile,
         orphans,
         removed_repo_urls,
@@ -906,55 +1006,101 @@ def _cleanup_transitive_orphans(
         packages_to_remove,
         apm_modules_dir,
         logger,
+        warn_on_incomplete=warn_on_incomplete,
     )
 
-    # Repair rescued candidates' resolved_by/local_path BEFORE deleting
-    # the true orphans below. Without this, a rescued entry keeps pointing
-    # at a parent that may no longer be in the lockfile, which silently
-    # defeats the NEXT uninstall's backward orphan-candidate scan
-    # (_build_children_index is keyed on resolved_by) and permanently
-    # fail-closes any later reachability walk needing to re-resolve this
-    # same entry's on-disk directory (see _compute_actual_orphans'
-    # docstring). Real removal path only -- --dry-run never reaches here.
-    for rescued_key, (new_parent_repo_url, new_local_path) in resolved_by_repairs.items():
-        rescued_dep = lockfile.get_dependency(rescued_key)
-        if rescued_dep is None:
+
+def _preflight_uninstall_survivors(
+    surviving_dependencies: list[object],
+    modules_dir: Path,
+    *,
+    lockfile: LockFile | None = None,
+    excluded_keys: set[str] | None = None,
+    require_valid_installed: bool = False,
+    source_root: Path | None = None,
+    logger: CommandLogger | None = None,
+) -> list[tuple[DependencyReference, object]]:
+    """Validate every reintegration survivor before uninstall can mutate state."""
+    from ...agent_plugins.errors import (
+        AgentPluginTargetExcludedError,
+        enforce_agent_plugin_deployment_boundary,
+        preflight_reintegration_survivors,
+    )
+    from ...models.apm_package import PackageInfo
+    from ...models.validation import validate_apm_package
+
+    del logger  # Nothing to warn about: target exclusion is routine and silent.
+    excluded = excluded_keys or set()
+    if source_root is not None:
+        for entry in surviving_dependencies:
+            dep_ref = _parse_dependency_entry(entry)
+            if not dep_ref.is_local or not dep_ref.local_path:
+                continue
+            source_path = Path(dep_ref.local_path).expanduser()
+            if not source_path.is_absolute():
+                source_path = (source_root / source_path).resolve()
+            validation = validate_apm_package(source_path, source_path=source_path)
+            if validation.is_valid and validation.package is not None:
+                with contextlib.suppress(AgentPluginTargetExcludedError):
+                    enforce_agent_plugin_deployment_boundary(
+                        PackageInfo(
+                            package=validation.package,
+                            install_path=source_path,
+                            dependency_ref=dep_ref,
+                            package_type=validation.package_type,
+                        )
+                    )
+    if lockfile is not None:
+        refs = [
+            dependency.to_dependency_ref()
+            for dependency in lockfile.get_package_dependencies()
+            if dependency.get_unique_key() not in excluded
+        ]
+    else:
+        refs = [_parse_dependency_entry(entry) for entry in surviving_dependencies]
+
+    installed_refs = [
+        dep_ref
+        for dep_ref in refs
+        if dep_ref.get_unique_key() not in excluded
+        and not (source_root is not None and dep_ref.is_local)
+    ]
+    return preflight_reintegration_survivors(
+        installed_refs,
+        modules_dir,
+        require_valid_installed=require_valid_installed,
+    )
+
+
+@dataclass(frozen=True)
+class IntegrationCleanupOutcome:
+    """Complete result of the post-uninstall integration cleanup."""
+
+    counts: dict[str, int]
+    deployed_files: dict[str, list[str]]
+    failed_paths: list[str]
+    error_count: int
+
+    @property
+    def complete(self) -> bool:
+        """Return whether every integration cleanup operation succeeded."""
+        return self.error_count == 0
+
+
+def _native_hook_state_exists(project_root: Path, targets: list[object]) -> bool:
+    """Return whether cleanup may rewrite a merged native-hook config."""
+    from ...integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
+
+    for target in targets:
+        config = _MERGE_HOOK_TARGETS.get(target.name)
+        if config is None:
             continue
-        rescued_dep.resolved_by = new_parent_repo_url
-        if new_local_path is not None:
-            rescued_dep.local_path = new_local_path
-
-    removed = 0
-    deleted_orphan_paths = []
-    for orphan_key in actual_orphans:
-        orphan_dep = lockfile.get_dependency(orphan_key)
-        if not orphan_dep:
-            continue
-        try:
-            orphan_ref = orphan_dep.to_dependency_ref()
-            orphan_path = orphan_ref.get_install_path(apm_modules_dir)
-        except ValueError:
-            parts = orphan_key.split("/")
-            orphan_path = (
-                apm_modules_dir.joinpath(*parts)
-                if len(parts) >= 2
-                else apm_modules_dir / orphan_key
-            )
-
-        if orphan_path.exists():
-            try:
-                safe_rmtree(orphan_path, apm_modules_dir)
-                logger.progress(f"Removed transitive dependency {orphan_key} from apm_modules/")
-                logger.verbose_detail(f"    Path: {portable_relpath(orphan_path, apm_modules_dir)}")
-                removed += 1
-                deleted_orphan_paths.append(orphan_path)
-            except Exception as e:
-                logger.error(f"Failed to remove transitive dep {orphan_key}: {e}")
-
-    from ...integration.base_integrator import BaseIntegrator as _BI
-
-    _BI.cleanup_empty_parents(deleted_orphan_paths, stop_at=apm_modules_dir)
-    return removed, actual_orphans
+        target_dir = project_root / target.root_dir
+        if (target_dir / config.config_filename).exists() or (
+            target_dir / _APM_HOOKS_SIDECAR
+        ).exists():
+            return True
+    return False
 
 
 def _sync_integrations_after_uninstall(
@@ -965,7 +1111,9 @@ def _sync_integrations_after_uninstall(
     user_scope: bool = False,
     lockfile: LockFile | None = None,
     modules_dir: Path | None = None,
-) -> tuple[dict[str, int], dict[str, list[str]]]:
+    survivor_plan: list[tuple[DependencyReference, object]] | None = None,
+    deployed_file_hashes: dict[str, str] | None = None,
+) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
     When *user_scope* is ``True``, targets are resolved for user-level
@@ -976,16 +1124,37 @@ def _sync_integrations_after_uninstall(
     stale at this point in the uninstall pipeline, so Phase 2 must not
     re-read it from disk.
     """
-    from ...install.services import _deployed_path_entry, _skill_bundle_file_entries
+    from ...install.services import (
+        IntegratorBundle,
+        integrate_package_primitives,
+    )
     from ...install.target_filter import resolve_effective_package_targets
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
     from ...integration.targets import resolve_targets
-    from ...models.apm_package import (
-        build_installed_package_info,
-        surviving_dependency_refs_for_reintegration,
-    )
     from ...primitives.discovery import clear_discovery_cache
+
+    installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
+    config_target = list(apm_package.canonical_targets)
+    _explicit = config_target or None
+    _resolved_targets = resolve_targets(
+        project_root, user_scope=user_scope, explicit_target=_explicit
+    )
+    require_valid_survivors = bool(all_deployed_files) or _native_hook_state_exists(
+        project_root,
+        _resolved_targets,
+    )
+    validated_survivors = (
+        survivor_plan
+        if survivor_plan is not None
+        else _preflight_uninstall_survivors(
+            list(apm_package.get_all_apm_dependencies()),
+            installed_modules_dir,
+            lockfile=lockfile,
+            require_valid_installed=require_valid_survivors,
+            logger=logger,
+        )
+    )
 
     # Phase 2 re-integration walks the on-disk primitive set after Phase 1
     # has removed the uninstalled package's files. The process-scoped
@@ -996,31 +1165,19 @@ def _sync_integrations_after_uninstall(
 
     _dispatch = get_dispatch_table()
     _integrators = {name: entry.integrator_class() for name, entry in _dispatch.items()}
+    _integrator_bundle = IntegratorBundle(
+        prompt=_integrators["prompts"],
+        agent=_integrators["agents"],
+        skill=_integrators["skills"],
+        instruction=_integrators["instructions"],
+        command=_integrators["commands"],
+        hook=_integrators["hooks"],
+        canvas=_integrators["canvas"],
+    )
 
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
-    config_target = list(apm_package.canonical_targets)
-    _explicit = config_target or None
-    _resolved_targets = resolve_targets(
-        project_root, user_scope=user_scope, explicit_target=_explicit
-    )
-    installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
-    survivor_plan = []
-    for dep_ref in surviving_dependency_refs_for_reintegration(
-        apm_package,
-        project_root,
-        lockfile=lockfile,
-    ):
-        install_path = dep_ref.get_install_path(installed_modules_dir)
-        pkg_info = build_installed_package_info(
-            dep_ref,
-            installed_modules_dir,
-        )
-        if pkg_info is None:
-            if install_path.exists():
-                raise ValueError(
-                    f"Cannot validate surviving package before hook rebuild: {dep_ref.get_identity()}"
-                )
-            continue
+    target_survivor_plan = []
+    for dep_ref, pkg_info in validated_survivors:
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
             dep_ref.target_subset,
@@ -1028,7 +1185,10 @@ def _sync_integrations_after_uninstall(
             None,
             dep_ref.get_identity(),
         )
-        survivor_plan.append((dep_ref, pkg_info, target_selection))
+        authorized_targets = []
+        for target in target_selection.targets:
+            authorized_targets.append(target)
+        target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
 
     sync_managed = all_deployed_files if all_deployed_files else None
     if sync_managed is not None:
@@ -1172,11 +1332,38 @@ def _sync_integrations_after_uninstall(
         apm_package,
         project_root,
         managed_files=_buckets["hooks"] if _buckets else None,
+        managed_file_hashes=deployed_file_hashes,
         targets=_resolved_targets,
     )
     counts["hooks"] = result.get("files_removed", 0)
+    unsafe_hook_paths = result.get("unsafe_paths", [])
+    if unsafe_hook_paths:
+        noun = "path" if len(unsafe_hook_paths) == 1 else "paths"
+        logger.warning(
+            f"Skipped {len(unsafe_hook_paths)} managed hook {noun} that failed "
+            "containment validation. Inspect or repair symlinked parents before "
+            "removing anything."
+        )
+    failed_hook_paths = sorted(set(result.get("failed_paths", [])).union(unsafe_hook_paths))
+    for failed_path in failed_hook_paths:
+        path = Path(failed_path)
+        if not path.is_absolute():
+            path = project_root / path
+        if user_scope:
+            try:
+                display_path = f"~/{path.relative_to(project_root).as_posix()}"
+            except ValueError:
+                display_path = path.as_posix()
+        else:
+            display_path = path.as_posix()
+        logger.warning(f"Preserved managed hook path: {display_path}")
 
-    # Phase 2: Re-integrate from remaining installed packages
+    # Phase 2: Re-integrate from remaining installed packages.
+    #
+    # Route every primitive through the install service so its post-authorization
+    # DeployableSourcePlan and pre-deploy SecurityGate scan protect this lifecycle
+    # path too.  Calling individual integrators here would create a second,
+    # unscanned materialization path after the cleanup pass.
     # Re-clear the discovery memo: Phase 1 mutated the on-disk primitive
     # set (removed files), so any cache snapshot taken between entry and
     # here is stale. Integrator dispatch below walks discovery internally.
@@ -1184,33 +1371,33 @@ def _sync_integrations_after_uninstall(
     _targets = _resolved_targets
 
     # The complete survivor plan was validated before Phase 1 mutated disk.
-    for dep_ref, pkg_info, target_selection in survivor_plan:
+    from ...core.scope import InstallScope
+    from ...utils.diagnostics import DiagnosticCollector
+
+    _rebuild_scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    _allow_executables = getattr(apm_package, "allow_executables", None)
+    reintegration_diagnostics = DiagnosticCollector()
+    for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
         dep_key = dep_ref.get_unique_key()
         deployed_files = package_deployed_files.setdefault(dep_key, [])
 
         try:
-            for _target in target_selection.targets:
-                for _prim_name in _target.primitives:
-                    _entry = _dispatch.get(_prim_name)
-                    if not _entry or _entry.multi_target:
-                        continue
-                    integration_result = getattr(_integrators[_prim_name], _entry.integrate_method)(
-                        _target,
-                        pkg_info,
-                        project_root,
-                    )
-                    deployed_files.extend(
-                        _deployed_path_entry(path, project_root, _targets)
-                        for path in integration_result.target_paths
-                    )
-            skill_result = _integrators["skills"].integrate_package_skill(
+            integration_result = integrate_package_primitives(
                 pkg_info,
                 project_root,
-                targets=target_selection.targets,
+                targets=authorized_targets,
+                integrators=_integrator_bundle,
+                force=False,
+                managed_files=None,
+                diagnostics=reintegration_diagnostics,
+                package_name=dep_ref.get_identity(),
+                logger=logger,
+                scope=_rebuild_scope,
+                allow_executables=_allow_executables,
+                trust_bin=False,
+                bin_skip_reason_override="not_retrusted_on_uninstall",
             )
-            for path in skill_result.target_paths:
-                deployed_files.append(_deployed_path_entry(path, project_root, _targets))
-                deployed_files.extend(_skill_bundle_file_entries(path, project_root, _targets))
+            deployed_files.extend(integration_result["deployed_files"])
         except Exception as exc:
             pkg_id = _dependency_public_label(dep_ref)
             logger.warning(
@@ -1221,7 +1408,59 @@ def _sync_integrations_after_uninstall(
                 f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"
             )
 
-    return counts, package_deployed_files
+    reintegration_diagnostics.render_summary()
+    return IntegrationCleanupOutcome(
+        counts=counts,
+        deployed_files=package_deployed_files,
+        failed_paths=failed_hook_paths,
+        error_count=result.get("errors", 0),
+    )
+
+
+def _remove_stale_mcp_from_recorded_targets(
+    stale_servers: set[str],
+    lockfile: LockFile,
+    *,
+    project_root: Path | None,
+    user_scope: bool,
+    scope: object | None,
+    target_servers: dict[str, set[str]] | None = None,
+) -> dict[str, set[str]]:
+    """Clean only runtimes recorded in the deployment ledger, without fail-fast."""
+    if target_servers is None:
+        from ...install.mcp.ownership import resolve_mcp_target_servers
+
+        target_servers = resolve_mcp_target_servers(
+            recorded_target_servers={
+                runtime: builtins.set(servers)
+                for runtime, servers in (lockfile.mcp_target_servers or {}).items()
+            },
+            ownership_present=lockfile._mcp_target_servers_present,
+            server_names=stale_servers,
+            stored_configs=lockfile.mcp_configs,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
+
+    failures: list[tuple[str, Exception]] = []
+    for runtime, managed_servers in sorted(target_servers.items()):
+        scoped_stale = stale_servers.intersection(managed_servers)
+        if not scoped_stale:
+            continue
+        try:
+            MCPIntegrator.remove_stale(
+                scoped_stale,
+                runtime=runtime,
+                project_root=project_root,
+                user_scope=user_scope,
+                scope=scope,
+                fail_on_write_error=True,
+            )
+        except Exception as exc:
+            failures.append((runtime, exc))
+    if failures:
+        raise MCPUninstallCleanupError(failures) from failures[0][1]
+    return target_servers
 
 
 def _cleanup_stale_mcp(
@@ -1236,7 +1475,17 @@ def _cleanup_stale_mcp(
     persist: bool = True,
 ):
     """Remove MCP servers that are no longer needed after uninstall."""
-    if not old_mcp_servers:
+    managed_servers = set(old_mcp_servers or ())
+    target_ownership = {}
+    if lockfile is not None:
+        managed_servers.update(getattr(lockfile, "mcp_servers", ()) or ())
+        target_ownership = getattr(lockfile, "mcp_target_servers", {}) or {}
+        if isinstance(target_ownership, dict):
+            for servers in target_ownership.values():
+                managed_servers.update(servers or ())
+        else:
+            target_ownership = {}
+    if not managed_servers:
         return
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 
@@ -1248,33 +1497,54 @@ def _cleanup_stale_mcp(
         trust_transitive_self_defined=True,
     )
     new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies)
-    stale_servers = old_mcp_servers - new_mcp_servers
+    stale_servers = managed_servers - new_mcp_servers
+    from ...install.mcp.ownership import resolve_mcp_target_servers
+
+    target_servers = resolve_mcp_target_servers(
+        recorded_target_servers={
+            runtime: builtins.set(servers)
+            for runtime, servers in (lockfile.mcp_target_servers or {}).items()
+        },
+        ownership_present=lockfile._mcp_target_servers_present,
+        server_names=managed_servers,
+        stored_configs=lockfile.mcp_configs,
+        project_root=project_root,
+        user_scope=user_scope,
+    )
+    retained_unowned: set[str] = set()
     if stale_servers:
-        MCPIntegrator.remove_stale(
+        _remove_stale_mcp_from_recorded_targets(
             stale_servers,
+            lockfile,
             project_root=project_root,
             user_scope=user_scope,
             scope=scope,
+            target_servers=target_servers,
         )
+        owned_servers = {server for servers in target_servers.values() for server in servers}
+        retained_unowned = stale_servers - owned_servers
+    contracted_target_servers = {
+        runtime: sorted(servers.intersection(new_mcp_servers))
+        for runtime, servers in target_servers.items()
+        if servers.intersection(new_mcp_servers)
+    }
+    surviving_mcp_servers = new_mcp_servers | retained_unowned
     if persist:
         MCPIntegrator.update_lockfile(
-            new_mcp_servers,
+            surviving_mcp_servers,
             lockfile_path,
             mcp_configs=dict(view.configs),
             mcp_config_provenance=dict(view.provenance),
+            mcp_target_servers=contracted_target_servers,
         )
         return
 
-    lockfile.mcp_servers = sorted(new_mcp_servers)
+    lockfile.mcp_servers = sorted(surviving_mcp_servers)
     lockfile.mcp_configs = dict(view.configs)
     lockfile.mcp_config_provenance = dict(view.provenance)
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     DeploymentLedgerCodec.replace_mcp_target_servers(
         lockfile,
-        {
-            runtime: sorted(set(servers).intersection(new_mcp_servers))
-            for runtime, servers in lockfile.mcp_target_servers.items()
-            if set(servers).intersection(new_mcp_servers)
-        },
+        contracted_target_servers,
     )

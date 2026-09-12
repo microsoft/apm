@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "apm-issue-autopilot-triage-schema.json",
   "title": "apm-issue-autopilot triage decision",
-  "description": "Return shape for a Phase 1 triage child. Extends the apm-triage-panel triage-decision contract with the autopilot gate fields (confidence, red_flags, implementation_brief).",
+  "description": "Adapts apm-triage-panel v2 advice into the existing internal decision field plus gate fields. Decision is a recommendation, never human approval; legacy status/priority/milestone writes are rejected.",
   "type": "object",
   "required": ["kind", "issue", "decision", "confidence", "red_flags"],
   "additionalProperties": false,
@@ -20,10 +20,17 @@
       "type": "string",
       "enum": ["type/bug", "type/feature", "type/docs", "type/refactor", "type/architecture", "type/automation", "type/release", "type/performance"]
     },
-    "status": { "type": ["string", "null"] },
-    "priority": { "type": ["string", "null"] },
-    "preserved_labels": { "type": "array", "items": { "type": "string" } },
-    "milestone": { "type": ["string", "null"] },
+    "proposed_brief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "done_when", "exclusions", "review_needs"],
+      "properties": {
+        "scope": { "type": "string" },
+        "done_when": { "type": "string" },
+        "exclusions": { "type": "string" },
+        "review_needs": { "type": "string" }
+      }
+    },
     "next_action": { "type": "string" },
     "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
     "red_flags": {
@@ -52,7 +59,7 @@
         "properties": { "decision": { "const": "accept" } }
       },
       "then": {
-        "required": ["type", "implementation_brief"],
+        "required": ["type", "implementation_brief", "proposed_brief"],
         "properties": {
           "implementation_brief": {
             "type": "object",

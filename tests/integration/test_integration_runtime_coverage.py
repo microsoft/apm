@@ -26,6 +26,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.integration.hook_source_selection import HookSourceSelection
+
 # ---------------------------------------------------------------------------
 # kiro_hook_integrator -- pure helpers
 # ---------------------------------------------------------------------------
@@ -232,7 +234,7 @@ class TestIntegrateKiroHooksFlow:
         """Build a mock HookIntegrator."""
         integrator = MagicMock()
         integrator.HOOK_COMMAND_KEYS = ("bash", "command")
-        integrator.find_hook_files.return_value = []
+        integrator.select_hook_sources_for_target.return_value = HookSourceSelection({}, {})
         integrator._get_package_name.return_value = "my-pkg"
         integrator._parse_hook_json.return_value = None
         integrator._rewrite_hooks_data.return_value = ({}, [])
@@ -257,7 +259,7 @@ class TestIntegrateKiroHooksFlow:
         kiro_dir = tmp_path / ".kiro"
         kiro_dir.mkdir()
         integrator = self._make_integrator()
-        integrator.find_hook_files.return_value = []
+        integrator.select_hook_sources_for_target.return_value = HookSourceSelection({}, {})
         pkg_info = self._make_package_info(tmp_path / "pkg")
         result = integrate_kiro_hooks(integrator, pkg_info, tmp_path)
         assert result.files_integrated == 0
@@ -275,7 +277,10 @@ class TestIntegrateKiroHooksFlow:
         hook_file.write_text('{"hooks":{}}', encoding="utf-8")
 
         integrator = self._make_integrator()
-        integrator.find_hook_files.return_value = [hook_file]
+        integrator.select_hook_sources_for_target.return_value = HookSourceSelection(
+            {"kiro": frozenset({hook_file})},
+            {"kiro": frozenset()},
+        )
         rewritten = {
             "hooks": {
                 "preToolUse": [
@@ -316,7 +321,10 @@ class TestIntegrateKiroHooksFlow:
         }
 
         integrator = self._make_integrator()
-        integrator.find_hook_files.return_value = [hook_file]
+        integrator.select_hook_sources_for_target.return_value = HookSourceSelection(
+            {"kiro": frozenset({hook_file})},
+            {"kiro": frozenset()},
+        )
         integrator._parse_hook_json.return_value = rewritten
         integrator._rewrite_hooks_data.return_value = (rewritten, [])
 
@@ -356,7 +364,9 @@ class TestLSPTargetSpec:
 
         spec = _LSP_TARGET_SPECS["claude"]
         path = spec.path(tmp_path, user_scope=False)
-        assert path == tmp_path / ".lsp.json"
+        assert path == (
+            tmp_path / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        )
 
     def test_user_scope_label(self) -> None:
         """User-scope label differs from project-scope label."""
@@ -365,12 +375,23 @@ class TestLSPTargetSpec:
         spec = _LSP_TARGET_SPECS["copilot"]
         assert spec.label(user_scope=True) != spec.label(user_scope=False)
 
-    def test_servers_key_project_scope(self) -> None:
-        """Claude project scope has None servers_key (top-level map)."""
+    def test_claude_user_scope_uses_personal_skills_plugin(self, tmp_path: Path) -> None:
+        """Claude user LSP config uses the documented personal skills plugin."""
         from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
 
         spec = _LSP_TARGET_SPECS["claude"]
-        assert spec.servers_key(user_scope=False) is None
+        assert spec.path(tmp_path, user_scope=True) == (
+            Path.home() / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        )
+        assert spec.label(user_scope=True) == "~/.claude/skills/apm-lsp/.claude-plugin/plugin.json"
+        assert ("name", "apm-lsp") in spec.config_defaults(user_scope=True)
+
+    def test_servers_key_project_scope(self) -> None:
+        """Claude project plugin manifest uses the lspServers wrapper key."""
+        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+        spec = _LSP_TARGET_SPECS["claude"]
+        assert spec.servers_key(user_scope=False) == "lspServers"
 
     def test_servers_key_user_scope(self) -> None:
         """Claude user scope uses lspServers wrapper key."""
@@ -442,8 +463,8 @@ class TestLSPReadWriteHelpers:
         )
         assert len(changed2) == 0
 
-    def test_write_claude_project_no_wrapper(self, tmp_path: Path) -> None:
-        """Claude project scope writes to top-level (no servers_key wrapper)."""
+    def test_write_claude_project_plugin_manifest(self, tmp_path: Path) -> None:
+        """Claude project scope writes a discoverable plugin manifest."""
         from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS, LSPIntegrator
 
         spec = _LSP_TARGET_SPECS["claude"]
@@ -451,8 +472,8 @@ class TestLSPReadWriteHelpers:
         LSPIntegrator._write_target_config(spec, servers, project_root=tmp_path, user_scope=False)
         config_path = spec.path(tmp_path, user_scope=False)
         data = json.loads(config_path.read_text(encoding="utf-8"))
-        assert "python" in data
-        assert "lspServers" not in data
+        assert data["name"] == "apm-lsp"
+        assert "python" in data["lspServers"]
 
 
 class TestLSPCleanTargetConfig:

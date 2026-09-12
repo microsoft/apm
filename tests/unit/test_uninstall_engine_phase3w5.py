@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -221,7 +223,7 @@ class TestRemovePackagesFromDisk:
         assert result == 0
         logger.warning.assert_called()
 
-    def test_path_traversal_error_skips(self, tmp_path):
+    def test_path_traversal_error_propagates(self, tmp_path):
         from apm_cli.commands.uninstall.engine import _remove_packages_from_disk
         from apm_cli.utils.path_security import PathTraversalError
 
@@ -229,12 +231,14 @@ class TestRemovePackagesFromDisk:
         apm_modules = tmp_path / "apm_modules"
         apm_modules.mkdir()
 
-        with patch(
-            "apm_cli.models.apm_package.DependencyReference.parse",
-            side_effect=PathTraversalError("traversal"),
+        with (
+            patch(
+                "apm_cli.models.apm_package.DependencyReference.parse",
+                side_effect=PathTraversalError("traversal"),
+            ),
+            pytest.raises(PathTraversalError, match="traversal"),
         ):
-            result = _remove_packages_from_disk(["../evil"], apm_modules, logger)
-        assert result == 0
+            _remove_packages_from_disk(["../evil"], apm_modules, logger)
         logger.error.assert_called()
 
     def test_removes_existing_package(self, tmp_path):
@@ -363,8 +367,9 @@ class TestCleanupTransitiveOrphans:
                 side_effect=OSError("permission denied"),
             ),
             patch("apm_cli.integration.base_integrator.BaseIntegrator.cleanup_empty_parents"),
+            pytest.raises(OSError, match="permission denied"),
         ):
-            _removed, _orphans = _cleanup_transitive_orphans(
+            _cleanup_transitive_orphans(
                 lf, ["org/parent"], apm_modules, tmp_path / "apm.yml", logger
             )
         # Error logged

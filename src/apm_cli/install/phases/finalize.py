@@ -29,7 +29,7 @@ _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
 
 
 def _compile_hint_targets(
-    ctx: InstallContext, *, user_scope: bool
+    ctx: InstallContext, *, user_scope: bool, scoped_instructions_only: bool = False
 ) -> tuple[list[str], frozenset[str]]:
     """Return display names and compiler families that need root-context hints."""
     target_names: list[str] = []
@@ -44,6 +44,8 @@ def _compile_hint_targets(
         if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
             continue
         if not user_scope and scoped.compile_family == "claude":
+            continue
+        if scoped_instructions_only and not scoped.include_scoped_in_user_root_context:
             continue
         families.add(scoped.compile_family)
         if scoped.name not in seen:
@@ -168,17 +170,27 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
     from apm_cli.core.scope import InstallScope, get_apm_dir
 
     source_root = get_apm_dir(InstallScope.USER)
-    if not discover_global_instructions(source_root):
+    include_scoped = any(
+        scoped is not None and scoped.include_scoped_in_user_root_context
+        for target in ctx.targets
+        if (scoped := target.for_scope(user_scope=True)) is not None
+    )
+    instructions = discover_global_instructions(source_root, include_scoped=include_scoped)
+    if not instructions:
         return
 
-    target_names, _ = _compile_hint_targets(ctx, user_scope=True)
+    target_names, _ = _compile_hint_targets(
+        ctx,
+        user_scope=True,
+        scoped_instructions_only=not any(not instruction.apply_to for instruction in instructions),
+    )
     if not target_names:
         return
 
     if ctx.logger:
         targets = ", ".join(target_names)
         message = (
-            "Global instructions installed. Run 'apm compile -g' "
+            "Applicable instructions are available. Run 'apm compile -g' "
             f"to update root context files for: {targets}."
         )
         ctx.logger.info(message, symbol="info")

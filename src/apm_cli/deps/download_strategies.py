@@ -17,14 +17,19 @@ import threading
 import time
 import weakref
 import zipfile
+from functools import partial
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
+from ..cache.url_normalize import normalize_repo_url
 from ..core.auth import AuthResolver, HostInfo
 from ..models.apm_package import DependencyReference
+from ..models.dependency.host_virtual import dependency_repository_owner, repository_owner_and_repo
 from ..utils.archive import ArchiveError, safe_extract_zip
+from ..utils.console import _rich_warning
+from ..utils.git_env import redact_git_diagnostic, validate_git_url_rewrite_safety
 from ..utils.github_host import (
     build_ado_api_url,
     build_artifactory_archive_url,
@@ -33,17 +38,16 @@ from ..utils.github_host import (
     build_ssh_url,
     default_host,
     is_github_hostname,
-    set_authorization_header_git_env,
 )
-from ..utils.path_security import PathTraversalError
+from .artifactory_entry import _NoNetrcSession
 from .git_file_transport import (
     GitFileFetchResult,
     GitFileTransportError,
-    GitFileTransportSecurityError,
     GitSparseFileTransport,
 )
 from .github_rate_limit import GitHubThrottleError, github_throttle_error
 from .host_backends import backend_for
+from .transport_selection import fallback_port_warning, initial_transport_scheme
 
 # ---------------------------------------------------------------------------
 # Module-level debug helper (mirrors the one in github_downloader so that
@@ -54,7 +58,7 @@ from .host_backends import backend_for
 def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
-        print(f"[DEBUG] {message}", file=sys.stderr)
+        print(f"[DEBUG] {redact_git_diagnostic(message)}", file=sys.stderr)
 
 
 def _close_response(response: requests.Response, context: str) -> None:
@@ -107,9 +111,7 @@ class DownloadDelegate:
                 this delegate.
         """
         self._host = host
-        self._git_file_transports: dict[
-            tuple[str, str, str, int | None], GitSparseFileTransport
-        ] = {}
+        self._git_file_transports: dict[tuple[str, str, str, str, str], GitSparseFileTransport] = {}
         self._git_file_transports_lock = threading.Lock()
         self._git_file_transport_factory = git_file_transport_factory
         self._git_file_transport_finalizer = weakref.finalize(
@@ -131,6 +133,7 @@ class DownloadDelegate:
         *,
         stream: bool = False,
         retry_throttles: bool = True,
+        allow_netrc: bool = True,
     ) -> requests.Response:
         """HTTP GET with selectable retries for transient HTTP failures.
 
@@ -143,6 +146,7 @@ class DownloadDelegate:
             retry_throttles: Whether general callers retry a classified
                 throttle. Virtual-file download callers disable this so they
                 can select sparse Git without a retry or sleep.
+            allow_netrc: Whether Requests may use ambient netrc credentials.
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -154,7 +158,21 @@ class DownloadDelegate:
         last_response = None
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=headers, timeout=timeout, stream=stream)
+                if allow_netrc:
+                    response = requests.get(
+                        url,
+                        headers=headers,
+                        timeout=timeout,
+                        stream=stream,
+                    )
+                else:
+                    with _NoNetrcSession() as session:
+                        response = session.get(
+                            url,
+                            headers=headers,
+                            timeout=timeout,
+                            stream=stream,
+                        )
 
                 throttle = github_throttle_error(response, "GitHub API")
                 if throttle is not None:
@@ -423,7 +441,13 @@ class DownloadDelegate:
             _debug(f"Trying Artifactory archive: {url}")
             resp = None
             try:
-                resp = self._host._resilient_get(url, headers=headers, timeout=60, stream=True)
+                resp = self._host._resilient_get(
+                    url,
+                    headers=headers,
+                    timeout=60,
+                    stream=True,
+                    allow_netrc=False,
+                )
                 if resp.status_code == 200:
                     target_path.mkdir(parents=True, exist_ok=True)
                     with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
@@ -477,6 +501,7 @@ class DownloadDelegate:
         error.
         """
         # Fast path: use the RegistryClient interface for entry download
+        artifactory_get = partial(self._host._resilient_get, allow_netrc=False)
         cfg = self._host.registry_config
         if cfg is not None and cfg.host == host:
             client = cfg.get_client()
@@ -485,7 +510,7 @@ class DownloadDelegate:
                 repo,
                 file_path,
                 ref,
-                resilient_get=self._host._resilient_get,
+                resilient_get=artifactory_get,
             )
         else:
             # No RegistryConfig or host mismatch (explicit FQDN mode) --
@@ -501,7 +526,7 @@ class DownloadDelegate:
                 ref,
                 scheme=scheme,
                 headers=self.get_artifactory_headers(),
-                resilient_get=self._host._resilient_get,
+                resilient_get=artifactory_get,
             )
         if content is not None:
             return content
@@ -515,7 +540,12 @@ class DownloadDelegate:
 
         for url in archive_urls:
             try:
-                resp = self._host._resilient_get(url, headers=headers, timeout=60)
+                resp = self._host._resilient_get(
+                    url,
+                    headers=headers,
+                    timeout=60,
+                    allow_netrc=False,
+                )
                 if resp.status_code != 200:
                     continue
                 with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -739,42 +769,66 @@ class DownloadDelegate:
             raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
 
     def _git_file_transport_key(
-        self, dep_ref: DependencyReference, ref: str
-    ) -> tuple[str, str, str, int | None]:
+        self,
+        dep_ref: DependencyReference,
+        ref: str,
+        requested_url: str,
+        effective_url: str,
+        auth_mode: str,
+    ) -> tuple[str, str, str, str, str]:
         """Return the cache key for one path-scoped Git file checkout."""
-        return (dep_ref.host or default_host(), dep_ref.repo_url, ref, dep_ref.port)
+        provider = self._host.auth_resolver.classify_host(
+            dep_ref.host or default_host(), port=dep_ref.port, host_type=dep_ref.host_type
+        )
+        return (
+            provider.kind,
+            ref,
+            normalize_repo_url(requested_url),
+            normalize_repo_url(effective_url),
+            auth_mode,
+        )
 
-    def _discard_git_file_transport(self, key: tuple[str, str, str, int | None]) -> None:
+    def _discard_git_file_transport(
+        self, key: tuple[str, str, str, str, str], failed_transport: GitSparseFileTransport
+    ) -> None:
         """Close and remove a failed cached git-file checkout."""
         with self._git_file_transports_lock:
-            transport = self._git_file_transports.pop(key, None)
-        if transport is not None:
-            transport.close()
+            if self._git_file_transports.get(key) is failed_transport:
+                del self._git_file_transports[key]
+        failed_transport.close()
 
     def _download_gitlab_file_via_git(
         self,
         dep_ref: DependencyReference,
         file_path: str,
         ref: str,
+        *,
+        requested_url: str,
+        effective_url: str,
+        git_env: dict[str, str],
+        auth_mode: str,
     ) -> bytes:
-        """Fetch a GitLab path: file via a reusable sparse checkout."""
-        key = self._git_file_transport_key(dep_ref, ref)
+        """Execute one prepared GitLab attempt through a reusable sparse checkout."""
+        key = self._git_file_transport_key(dep_ref, ref, requested_url, effective_url, auth_mode)
+
+        def _prepared_repo_url(repo_ref: str, *, dep_ref: DependencyReference) -> str:
+            return requested_url
+
         with self._git_file_transports_lock:
             transport = self._git_file_transports.get(key)
             if transport is None:
-                git_env = {**os.environ, **(self._host.git_env or {})}
                 transport_factory = self._git_file_transport_factory or GitSparseFileTransport
                 transport = transport_factory(
                     dep_ref,
                     ref,
-                    build_repo_url_fn=self.build_repo_url,
+                    build_repo_url_fn=_prepared_repo_url,
                     git_env=git_env,
                 )
                 self._git_file_transports[key] = transport
         try:
             return transport.fetch_file(file_path)
         except GitFileTransportError:
-            self._discard_git_file_transport(key)
+            self._discard_git_file_transport(key, transport)
             raise
 
     def _download_github_file_via_git(
@@ -784,7 +838,6 @@ class DownloadDelegate:
         ref: str,
     ) -> GitFileFetchResult:
         """Fetch a throttled GitHub virtual file through one sparse Git transport."""
-        key = self._git_file_transport_key(dep_ref, ref)
         host = dep_ref.host or default_host()
         if (
             self._host.auth_resolver.uses_public_github_anonymous_first(
@@ -796,17 +849,10 @@ class DownloadDelegate:
         ):
 
             def _fetch(
-                token: str | None,
+                _token: str | None,
                 git_env: dict[str, str],
             ) -> GitFileFetchResult:
                 attempt_env = dict(git_env)
-                if token:
-                    set_authorization_header_git_env(
-                        attempt_env,
-                        "Bearer",
-                        token,
-                    )
-                    attempt_env.pop("GIT_TOKEN", None)
 
                 def _tokenless_repo_url(
                     repo_ref: str,
@@ -835,7 +881,7 @@ class DownloadDelegate:
             return self._host.auth_resolver.try_with_fallback(
                 host,
                 _fetch,
-                org=dep_ref.repo_url.split("/", 1)[0],
+                org=dependency_repository_owner(dep_ref),
                 port=dep_ref.port,
                 path=dep_ref.repo_url,
                 host_type=dep_ref.host_type,
@@ -844,27 +890,26 @@ class DownloadDelegate:
             )
 
         auth_ctx = self._host.auth_resolver.resolve_for_dep(dep_ref)
+        remote_url = self.build_repo_url(
+            dep_ref.repo_url,
+            dep_ref=dep_ref,
+            token="",
+            auth_scheme="basic",
+        )
         if auth_ctx.token:
-            # AuthResolver owns credential resolution. Convert its resolved
-            # GitHub credential into Git's header channel so the token remains
-            # out of the remote URL and is actually consumed by git.
-            git_env = dict(auth_ctx.git_env)
-            set_authorization_header_git_env(git_env, "Bearer", auth_ctx.token)
-            git_env.pop("GIT_TOKEN", None)
-            auth_scheme = "basic"
+            git_env = self._host.auth_resolver.git_env_for_remote(auth_ctx, remote_url)
         else:
             # Public repositories use normal non-interactive Git. Do not
             # inherit an unrelated downloader token into this fallback.
             git_env = self._host._build_noninteractive_git_env()
-            auth_scheme = "basic"
+
+        effective_url = validate_git_url_rewrite_safety(remote_url, git_env) or remote_url
+        key = self._git_file_transport_key(
+            dep_ref, ref, remote_url, effective_url, "managed" if auth_ctx.token else "native"
+        )
 
         def _tokenless_repo_url(repo_ref: str, *, dep_ref: DependencyReference) -> str:
-            return self.build_repo_url(
-                repo_ref,
-                dep_ref=dep_ref,
-                token="",
-                auth_scheme=auth_scheme,
-            )
+            return remote_url
 
         with self._git_file_transports_lock:
             transport = self._git_file_transports.get(key)
@@ -880,7 +925,7 @@ class DownloadDelegate:
         try:
             return transport.fetch_file_with_commit(file_path)
         except GitFileTransportError:
-            self._discard_git_file_transport(key)
+            self._discard_git_file_transport(key, transport)
             raise
 
     def download_github_file_via_throttle_fallback(
@@ -908,6 +953,17 @@ class DownloadDelegate:
     # GitLab file download
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _gitlab_rest_eligible(effective_url: str, api_base: str) -> bool:
+        """Authorize REST only for an executed same-origin HTTPS Git attempt."""
+        remote = urlsplit(effective_url)
+        api = urlsplit(api_base)
+        return (
+            remote.scheme.lower() == api.scheme.lower() == "https"
+            and remote.hostname == api.hostname
+            and (remote.port or 443) == (api.port or 443)
+        )
+
     def download_gitlab_file(
         self,
         dep_ref: DependencyReference,
@@ -915,17 +971,7 @@ class DownloadDelegate:
         ref: str = "main",
         verbose_callback=None,
     ) -> bytes:
-        """Download a GitLab file: git-transport-first, REST API as fallback.
-
-        Primary path (the 410-killer): extracts the file via git sparse/
-        partial checkout (blob:none + file-level sparse paths) so SSH keys and
-        system git credentials are sufficient -- no REST API token needed.
-
-        Fallback (thin GITLAB_PAT path): if the git transport fails (e.g.
-        SSH not available, network restriction), the existing GitLab REST v4
-        ``repository/files/.../raw`` endpoint is tried with the GITLAB_APM_PAT
-        / GITLAB_TOKEN credential, mirroring the ADO_APM_PAT pattern.
-        """
+        """Execute the selected Git plan before an authorized HTTPS REST fallback."""
         host = dep_ref.host or default_host()
         host_info = self._host.auth_resolver.classify_host(
             host,
@@ -936,27 +982,132 @@ class DownloadDelegate:
         if not project_path:
             raise RuntimeError("Missing repository path for GitLab file download")
 
-        # -- Primary: git sparse/partial checkout (works even when API is 410) --
-        try:
-            content = self._download_gitlab_file_via_git(dep_ref, file_path, ref)
-            if verbose_callback:
-                verbose_callback(
-                    f"Fetched file via git transport: {host}/{dep_ref.repo_url}/{file_path}"
-                )
-            return content
-        except (PathTraversalError, GitFileTransportSecurityError):
-            # A traversal / symlink-escape attempt must hard-fail. It must
-            # NOT be silently retried over the REST transport -- letting a
-            # rejected path fall through would hand an attacker a second
-            # transport to probe. Propagate the security failure unchanged.
-            raise
-        except (GitFileTransportError, RuntimeError, OSError) as exc:
-            fallback_target = f"{host}/{dep_ref.repo_url}"
-            _debug(
-                f"git transport unavailable for {fallback_target}; "
-                f"falling back to GitLab REST API ({type(exc).__name__})"
+        resolver = self._host.auth_resolver
+        candidate_url = self.build_repo_url(
+            project_path,
+            dep_ref=dep_ref,
+            use_ssh=initial_transport_scheme(dep_ref, self._host._protocol_pref) == "ssh",
+            token="",
+        )
+        anonymous_plan = self._host._transport_selector.select(
+            dep_ref=dep_ref,
+            cli_pref=self._host._protocol_pref,
+            allow_fallback=self._host._allow_fallback,
+            has_token=False,
+            candidate_url=candidate_url,
+        )
+        initial = anonymous_plan.attempts[0]
+        initial_ctx = resolver.resolve_for_remote(
+            host,
+            initial.effective_url or initial.requested_url or candidate_url,
+            dependency_repository_owner(dep_ref),
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
+        )
+        plan = self._host._transport_selector.select(
+            dep_ref=dep_ref,
+            cli_pref=self._host._protocol_pref,
+            allow_fallback=self._host._allow_fallback,
+            has_token=bool(initial_ctx.token),
+            candidate_url=candidate_url,
+        )
+        notice = fallback_port_warning(dep_ref, plan)
+        if notice:
+            warn_key = (host.lower(), project_path, dep_ref.port)
+            with self._host._fallback_port_warned_lock:
+                should_warn = warn_key not in self._host._fallback_port_warned
+                self._host._fallback_port_warned.add(warn_key)
+            if should_warn:
+                _rich_warning(notice, symbol="warning")
+
+        rest_eligible = False
+        failures: list[str] = []
+        last_error: GitFileTransportError | None = None
+        previous_attempt = None
+        for attempt in plan.attempts:
+            requested_url = attempt.requested_url or self.build_repo_url(
+                project_path,
+                dep_ref=dep_ref,
+                use_ssh=attempt.scheme == "ssh",
+                token="",
             )
-        # -- Fallback: GitLab REST v4 API (requires GITLAB_APM_PAT / GITLAB_TOKEN) --
+            effective_url = attempt.effective_url or requested_url
+            attempt_ctx = resolver.resolve_for_remote(
+                host,
+                effective_url,
+                dependency_repository_owner(dep_ref),
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            )
+            git_env = (
+                resolver.git_env_for_remote(attempt_ctx, effective_url)
+                if attempt.use_token
+                else resolver.build_native_git_credential_env(host_info, effective_url)
+            )
+            # Revalidate before reuse: a cached checkout must not bypass changed policy.
+            effective_url = validate_git_url_rewrite_safety(requested_url, git_env) or effective_url
+            if (
+                not plan.strict
+                and previous_attempt is not None
+                and previous_attempt.scheme != attempt.scheme
+            ):
+                _rich_warning(
+                    redact_git_diagnostic(
+                        f"Protocol fallback: {previous_attempt.label} GitLab sparse fetch of "
+                        f"{project_path} failed; retrying with {attempt.label}."
+                    ),
+                    symbol="warning",
+                )
+            try:
+                content = self._download_gitlab_file_via_git(
+                    dep_ref,
+                    file_path,
+                    ref,
+                    requested_url=requested_url,
+                    effective_url=effective_url,
+                    git_env=git_env,
+                    auth_mode="managed" if attempt.use_token else "native",
+                )
+            except GitFileTransportError as exc:
+                last_error = exc
+                previous_attempt = attempt
+                failures.append(redact_git_diagnostic(f"{attempt.label}: {exc}"))
+                rest_eligible = rest_eligible or self._gitlab_rest_eligible(
+                    effective_url, host_info.api_base
+                )
+            else:
+                if verbose_callback:
+                    verbose_callback(
+                        f"Fetched file via git transport: {host}/{project_path}/{file_path}"
+                    )
+                return content
+
+        if rest_eligible:
+            return self._download_gitlab_file_via_rest(dep_ref, file_path, ref, verbose_callback)
+        failure_detail = "; ".join(failures)
+        raise RuntimeError(
+            redact_git_diagnostic(
+                f"Failed to download {file_path} at ref '{ref}' from {host}/{project_path}. "
+                f"Git transport failed ({failure_detail}); GitLab REST is not authorized "
+                "by the selected transport plan. Verify access using the selected Git "
+                "transport (including SSH keys for SSH), or explicitly configure an HTTPS "
+                "dependency using the web endpoint."
+            )
+        ) from last_error
+
+    def _download_gitlab_file_via_rest(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str,
+        verbose_callback=None,
+    ) -> bytes:
+        """Read the existing GitLab REST endpoint after transport authorization."""
+        host = dep_ref.host or default_host()
+        host_info = self._host.auth_resolver.classify_host(
+            host, port=dep_ref.port, host_type=dep_ref.host_type
+        )
+        project_path = dep_ref.repo_url
         org = project_path.split("/")[0]
         file_ctx = self._host.auth_resolver.resolve(
             host,
@@ -1039,7 +1190,10 @@ class DownloadDelegate:
     ) -> bytes:
         """Fetch one github.com file anonymously, resolving auth only on 4xx."""
         host = dep_ref.host or default_host()
-        owner, repo = dep_ref.repo_url.split("/", 1)
+        owner_repo = repository_owner_and_repo(dep_ref.repo_url)
+        if owner_repo is None:
+            raise RuntimeError(f"Invalid repository path for {dep_ref.repo_url}")
+        owner, repo = owner_repo
         refs = [ref]
         if ref in ("main", "master"):
             refs.append("master" if ref == "main" else "main")
@@ -1109,11 +1263,17 @@ class DownloadDelegate:
         except requests.exceptions.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else "unknown"
             if status in (401, 403):
+                context = self._host.auth_resolver.build_error_context(
+                    host,
+                    "download",
+                    org=owner,
+                    port=dep_ref.port,
+                    dep_url=dep_ref.repo_url,
+                )
                 raise RuntimeError(
                     f"Authentication failed for {dep_ref.repo_url} "
                     f"(file: {file_path}, ref: {ref}). "
-                    "The repository may be private or the resolved credential "
-                    "may lack access."
+                    f"{context}"
                 ) from exc
             if status == 404:
                 raise RuntimeError(
@@ -1193,7 +1353,10 @@ class DownloadDelegate:
             )
 
         # Parse owner/repo from repo_url
-        owner, repo = dep_ref.repo_url.split("/", 1)
+        owner_repo = repository_owner_and_repo(dep_ref.repo_url)
+        if owner_repo is None:
+            raise RuntimeError(f"Invalid repository path for {dep_ref.repo_url}")
+        owner, repo = owner_repo
 
         # Resolve auth once through the same per-dependency boundary used by
         # clone URLs. Generic hosts intentionally return None here so APM

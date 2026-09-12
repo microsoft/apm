@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import (
     DeploymentIntent,
     DeploymentLedger,
@@ -13,6 +14,7 @@ from apm_cli.core.deployment_state import (
     NativePayloadValidation,
 )
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.policy.ci_checks import _check_content_integrity
 from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -81,11 +83,29 @@ def test_install_update_compile_uninstall_share_one_owner(tmp_path: Path) -> Non
     assert uninstall.removed == (locator,)
 
 
+def test_legacy_shared_agents_path_remains_unattributed(tmp_path: Path) -> None:
+    """A persisted legacy shared-root path must synthesize neutral provenance."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    lock_path.write_text(
+        "lockfile_version: '1'\n"
+        "dependencies:\n"
+        "  - repo_url: owner/package\n"
+        "    deployed_files:\n"
+        "      - .agents/skills/demo/SKILL.md\n",
+        encoding="utf-8",
+    )
+
+    lockfile = LockFile.read(lock_path)
+
+    assert lockfile is not None
+    ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+    record = next(iter(ledger.records.values()))
+    assert record.locator.target == "legacy"
+
+
 def test_content_integrity_fails_when_ownership_row_is_absent(
     tmp_path: Path,
 ) -> None:
-    from apm_cli.deps.lockfile import LockFile
-
     path = tmp_path / ".github" / "agents" / "demo.agent.md"
     path.parent.mkdir(parents=True)
     path.write_text("demo", encoding="utf-8")

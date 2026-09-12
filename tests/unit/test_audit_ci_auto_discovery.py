@@ -71,7 +71,9 @@ def _setup_project_with_unmanaged_file(project: Path) -> None:
     (prompts_dir / "sideloaded.md").write_text("evil\n", encoding="utf-8")
 
 
-def _make_policy_fetch_with_unmanaged_deny() -> PolicyFetchResult:
+def _make_policy_fetch_with_unmanaged_deny(
+    source: str = "org:test-org/.github",
+) -> PolicyFetchResult:
     """An auto-discovered policy that bans unmanaged files in .github/prompts."""
     policy = ApmPolicy(
         enforcement="block",
@@ -82,7 +84,7 @@ def _make_policy_fetch_with_unmanaged_deny() -> PolicyFetchResult:
     )
     return PolicyFetchResult(
         policy=policy,
-        source="org:test-org/.github",
+        source=source,
         cached=False,
         outcome="found",
     )
@@ -125,6 +127,25 @@ class TestAutoDiscoveryRuns:
         mock_discover.assert_called_once()
         # Sideloaded file violates the policy -> exit 1.
         assert result.exit_code == 1, result.output
+
+    @patch("apm_cli.policy.discovery.discover_policy_with_chain")
+    def test_gitlab_found_deny_blocks_audit_without_persisting_state(
+        self, mock_discover, runner, tmp_path
+    ):
+        """A found GitLab policy enforces audit without writing project state."""
+        _setup_project_with_unmanaged_file(tmp_path)
+        lockfile = tmp_path / "apm.lock.yaml"
+        before = lockfile.read_bytes()
+        mock_discover.return_value = _make_policy_fetch_with_unmanaged_deny(
+            source="org:gitlab.com/test-org/apm-policy"
+        )
+
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
+
+        assert result.exit_code == 1, result.output
+        assert lockfile.read_bytes() == before
+        assert not (tmp_path / ".apm").exists()
 
     @patch("apm_cli.policy.discovery.discover_policy_with_chain")
     def test_auto_discovery_no_policy_baseline_only_passes(self, mock_discover, runner, tmp_path):

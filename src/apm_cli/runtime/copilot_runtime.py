@@ -117,8 +117,7 @@ class CopilotRuntime(RuntimeAdapter):
 
             version = version_result.stdout.strip() if version_result.returncode == 0 else "unknown"
 
-            # Check for MCP configuration
-            mcp_config_path = Path.home() / ".copilot" / "mcp-config.json"
+            mcp_config_path = self.get_mcp_config_path()
             mcp_configured = mcp_config_path.exists()
 
             return {
@@ -128,7 +127,7 @@ class CopilotRuntime(RuntimeAdapter):
                 "capabilities": {
                     "model_execution": True,
                     "mcp_servers": "native_support" if mcp_configured else "manual_setup_required",
-                    "configuration": "~/.copilot/mcp-config.json",
+                    "configuration": str(mcp_config_path),
                     "interactive_mode": True,
                     "background_processes": True,
                     "file_operations": True,
@@ -160,12 +159,14 @@ class CopilotRuntime(RuntimeAdapter):
         return "copilot"
 
     def get_mcp_config_path(self) -> Path:
-        """Get the path to the MCP configuration file.
+        """Get the user-scope MCP configuration path from the canonical adapter.
 
         Returns:
             Path: Path to the MCP configuration file
         """
-        return Path.home() / ".copilot" / "mcp-config.json"
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+        return Path(CopilotClientAdapter(user_scope=True).get_config_path())
 
     def is_mcp_configured(self) -> bool:
         """Check if MCP servers are configured.
@@ -188,7 +189,12 @@ class CopilotRuntime(RuntimeAdapter):
         try:
             with open(mcp_config_path, encoding="utf-8") as f:
                 config = json.load(f)
-                return config.get("servers", {})
+                from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+                return config.get(
+                    CopilotClientAdapter.mcp_servers_key,
+                    config.get("servers", {}),
+                )
         except Exception as e:
             return {"error": f"Failed to read MCP configuration: {e}"}
 

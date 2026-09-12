@@ -7,6 +7,14 @@ assignees: ''
 
 ---
 
+Reporting and investigating a bug need no permission. Before implementing a
+substantive fix for inclusion in APM, obtain human scope approval and a review
+contact on this issue. Trivial documentation corrections have standing
+preapproval. See [Contributing](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md).
+
+For vulnerabilities, use [SECURITY.md](https://github.com/microsoft/apm/blob/main/SECURITY.md)
+instead of a public issue. Remove credentials and other sensitive data from logs.
+
 **Describe the bug**
 A clear and concise description of what the bug is.
 

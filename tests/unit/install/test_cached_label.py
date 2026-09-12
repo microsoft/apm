@@ -20,10 +20,16 @@ from unittest.mock import MagicMock
 from apm_cli.install.sources import CachedDependencySource
 
 
-def _make_source(*, fetched_this_run: bool, sha: str = "abcd1234deadbeef"):
+def _make_source(
+    install_path: Path,
+    *,
+    fetched_this_run: bool,
+    sha: str = "abcd1234deadbeef",
+):
     ctx = MagicMock()
     ctx.targets = []  # short-circuit acquire() before integration
     ctx.logger = MagicMock()
+    install_path.mkdir()
 
     dep_ref = MagicMock()
     dep_ref.is_virtual = False
@@ -36,7 +42,7 @@ def _make_source(*, fetched_this_run: bool, sha: str = "abcd1234deadbeef"):
     return CachedDependencySource(
         ctx=ctx,
         dep_ref=dep_ref,
-        install_path=Path("/tmp/fake-install-path"),
+        install_path=install_path,
         dep_key="owner/repo@v1.2.3",
         resolved_ref=None,
         dep_locked_chk=dep_locked_chk,
@@ -44,18 +50,18 @@ def _make_source(*, fetched_this_run: bool, sha: str = "abcd1234deadbeef"):
     )
 
 
-def test_cached_source_default_passes_cached_true():
-    src = _make_source(fetched_this_run=False)
+def test_cached_source_default_passes_cached_true(tmp_path: Path):
+    src = _make_source(tmp_path / "cached", fetched_this_run=False)
     src.acquire()
     kwargs = src.ctx.logger.download_complete.call_args.kwargs
     assert kwargs["cached"] is True
 
 
-def test_cached_source_fetched_this_run_passes_cached_false():
+def test_cached_source_fetched_this_run_passes_cached_false(tmp_path: Path):
     """When the resolver callback downloaded this package earlier in
     the same install, the ``cached`` flag must flip to False so the
     user does not see a misleading "(cached)" suffix."""
-    src = _make_source(fetched_this_run=True)
+    src = _make_source(tmp_path / "fresh", fetched_this_run=True)
     src.acquire()
     kwargs = src.ctx.logger.download_complete.call_args.kwargs
     assert kwargs["cached"] is False

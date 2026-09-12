@@ -27,6 +27,9 @@ class ServiceCommandContext(Protocol):
     trust_transitive_mcp: bool
     no_policy: bool
     verbose: bool
+    force: bool
+    exec_allow_map: dict[str, dict[str, bool]] | None
+    exec_allow_resolved: bool
 
 
 @dataclass(frozen=True)
@@ -60,7 +63,8 @@ def run_service_integrations(
     from apm_cli.install.lsp import run_lsp_integration
     from apm_cli.install.mcp import run_mcp_integration
 
-    should_install = ctx.install_mode != InstallMode.APM
+    should_install_mcp = ctx.install_mode != InstallMode.APM
+    should_install_lsp = ctx.install_mode is InstallMode.ALL
     lsp_deps = apm_package.get_lsp_dependencies()
     if not isinstance(lsp_deps, list):
         ctx.logger.verbose_detail("LSP dependencies were not a list; defaulting to empty")
@@ -68,7 +72,7 @@ def run_service_integrations(
     old_lsp_servers = set(existing_lock.lsp_servers) if existing_lock else set()
     if (
         target_decision is None
-        and should_install
+        and (should_install_mcp or should_install_lsp)
         and (mcp_deps or lsp_deps or old_mcp_servers or old_lsp_servers)
     ):
         target_decision = resolve_package_target_decision(
@@ -91,7 +95,7 @@ def run_service_integrations(
         old_mcp_target_servers_present=old_mcp_target_servers_present,
         project_root=ctx.project_root,
         user_scope=ctx.scope is InstallScope.USER,
-        should_install=should_install,
+        should_install=should_install_mcp,
         logger=ctx.logger,
         diagnostics=diagnostics,
         runtime=ctx.runtime,
@@ -110,7 +114,7 @@ def run_service_integrations(
         existing_lock=existing_lock,
         project_root=ctx.project_root,
         user_scope=ctx.scope is InstallScope.USER,
-        should_install=should_install,
+        should_install=should_install_lsp,
         logger=ctx.logger,
         diagnostics=diagnostics,
         runtime=ctx.runtime,
@@ -122,5 +126,9 @@ def run_service_integrations(
         ),
         target_decision=target_decision,
         fail_on_write_error=True,
+        effective_allow_executables=ctx.exec_allow_map,
+        effective_allow_resolved=ctx.exec_allow_resolved,
+        force=ctx.force,
+        no_policy=ctx.no_policy,
     )
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)

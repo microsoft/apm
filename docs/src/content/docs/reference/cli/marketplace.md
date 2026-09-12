@@ -64,7 +64,11 @@ Register a marketplace from a source reference. Accepted forms:
   `https://gitlab.com/acme/marketplace.git#v1.0.0`.
 - Hosted `marketplace.json` URL --
   `https://catalog.example.com/marketplace.json`.
-- SSH URL -- `git@host:org/repo.git` style.
+- SSH URL -- SCP-like `git@host:org/repo.git` or fully qualified
+  `ssh://git@host[:PORT]/org/repo.git`. Use the fully qualified form when the
+  server listens on a non-default SSH port; the port is optional otherwise.
+  SSH URLs cannot include passwords, queries, or fragments; use `--ref` to
+  select a branch, tag, or commit.
 - Local filesystem path -- absolute (`/srv/marketplaces/agent-forge`),
   relative (`./local-mkt`), home-based (`~/code/marketplace`), or a
   direct `marketplace.json` file.
@@ -96,6 +100,7 @@ apm marketplace add https://catalog.example.com/marketplace.json --name catalog
 
 # SSH
 apm marketplace add git@gitea.example.com:org/repo.git --name custom
+apm marketplace add ssh://git@gitea.example.com:2222/org/repo.git --name custom
 
 # Local filesystem (bare repo, working directory, or marketplace.json file)
 apm marketplace add /srv/marketplaces/agent-forge.git --name agent-forge
@@ -116,9 +121,12 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 **Trust boundary.** APM forwards its authentication tokens
 (`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
 marketplace host is classified as GitHub, GitLab, or Azure DevOps.
-Other git hosts -- generic HTTPS, SSH, self-hosted -- are fetched via
-subprocess `git` through `GitCache`, and authentication falls through
-to the host's local git credential helper. Hosted `marketplace.json`
+Other git hosts are fetched via subprocess `git` through `GitCache`.
+Generic HTTPS can use a local Git credential helper; plain HTTP suppresses
+credentials, HTTPS-to-HTTP Git URL rewrites are rejected, and generic SSH is
+token-free and noninteractive. See the
+[authentication transport table](../../../getting-started/authentication/#generic-marketplace-git-transport)
+for the full policy. Hosted `marketplace.json`
 URLs are public HTTPS only: APM sends no auth headers. Use a
 git-backed marketplace for private catalogs. When packages are
 installed from a hosted JSON URL, the lockfile records the source URL

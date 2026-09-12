@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "contract-stdio": {
+      "type": "stdio",
+      "command": "printf",
+      "args": [
+        "${PLUGIN_ROOT}/bin/tool",
+        "${PLUGIN_DATA}/state",
+        "${UNKNOWN_VAR}"
+      ],
+      "env": {
+        "ROOT_REF": "${PLUGIN_ROOT}/config",
+        "DATA_REF": "${PLUGIN_DATA}/cache",
+        "UNKNOWN_REF": "${UNKNOWN_VAR}"
+      },
+      "cwd": "${PLUGIN_ROOT}"
+    },
+    "contract-remote": {
+      "type": "streamable-http",
+      "url": "https://example.invalid/${PLUGIN_ROOT}/mcp",
+      "headers": {
+        "X-Plugin-Data": "${PLUGIN_DATA}",
+        "X-Unknown": "${UNKNOWN_VAR}"
+      }
+    }
+  }
+}

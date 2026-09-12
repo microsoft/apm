@@ -1,7 +1,6 @@
 """APM mcp command group."""
 
 import builtins
-import os
 import sys
 
 import click
@@ -18,55 +17,63 @@ MCP_REGISTRY_ENV = "MCP_REGISTRY_URL"
 def _build_registry_with_diag(console, logger):
     """Construct ``RegistryIntegration`` honouring the registry URL precedence chain.
 
-    Resolution order: MCP_REGISTRY_URL env > apm config mcp-registry-url > default.
+    Resolution order (MCP_REGISTRY_URL env > apm config mcp-registry-url >
+    default) is owned by
+    :func:`~apm_cli.registry.client.resolve_mcp_registry_url`, which the client
+    applies for itself. The URL is therefore NOT pre-resolved here and passed
+    in: a caller-supplied URL is by definition the ``"explicit"`` layer, so
+    doing that would relabel every ambient source and leave
+    ``registry_url_source`` unable to tell an env override from a persisted
+    config entry.
+
     Emits a one-line diagnostic naming the resolved registry URL whenever
     a non-default source is in effect, so enterprise users can confirm they
     are hitting the override and not the public default. Stays silent for the
     default public registry (defaults are quiet, overrides are visible).
     """
+    from ..registry.client import REGISTRY_SOURCE_LABELS, redact_mcp_registry_url
     from ..registry.integration import RegistryIntegration
 
-    override = os.environ.get(MCP_REGISTRY_ENV)
-    config_url = None
-    if not override:
-        from ..config import get_mcp_registry_url as _get_mcp_registry_url
-
-        config_url = _get_mcp_registry_url()
-    registry = (
-        RegistryIntegration(config_url)
-        if config_url
-        else RegistryIntegration()  # architecture-authority-exempt: env/default fallback
-    )
-    if override:
-        url = registry.client.registry_url
+    registry = RegistryIntegration()
+    # The label table holds exactly the ambient layers worth announcing, so a
+    # missing entry (the public default) is the "stay quiet" case -- no second
+    # condition needed, and nothing can raise on an unexpected source.
+    label = REGISTRY_SOURCE_LABELS.get(registry.client.registry_url_source)
+    if label:
+        safe_url = redact_mcp_registry_url(registry.client.registry_url)
+        line = f"Registry: {safe_url} ({label})"
         if console:
-            console.print(f"[muted]Registry: {url} (from MCP_REGISTRY_URL)[/muted]")
+            console.print(f"[muted]{line}[/muted]")
         else:
-            logger.progress(f"Registry: {url} (from MCP_REGISTRY_URL)")
-    elif config_url:
-        url = registry.client.registry_url
-        if console:
-            console.print(f"[muted]Registry: {url} (from apm config)[/muted]")
-        else:
-            logger.progress(f"Registry: {url} (from apm config)")
+            logger.progress(line)
     return registry
 
 
 def _handle_registry_network_error(exc, registry, console, logger, action):
-    """Render a registry network failure with env-var-aware guidance.
+    """Render a registry network failure with override-aware guidance.
 
     ``action`` is a short verb phrase like ``"reach"`` so the message reads
-    naturally: ``Could not <action> MCP registry at <url>``. Returns once
-    the message is emitted; caller is responsible for ``sys.exit(1)``.
+    naturally: ``Could not <action> MCP registry at <url>``. The hint names the
+    precedence layer that actually supplied the URL, so a user who persisted it
+    with ``apm config`` is not sent looking at an env var they never exported.
+    Returns once the message is emitted; caller is responsible for
+    ``sys.exit(1)``.
     """
     if registry is None:
         # Fell over before the registry was constructed; let the caller
         # emit its generic error path with the original exception.
         return False
-    url = registry.client.registry_url
-    override = os.environ.get(MCP_REGISTRY_ENV)
-    if override:
+    from ..registry.client import redact_mcp_registry_url
+
+    url = redact_mcp_registry_url(registry.client.registry_url)
+    source = registry.client.registry_url_source
+    if source == "env":
         hint = f"{MCP_REGISTRY_ENV} is set -- verify the URL is correct and reachable."
+    elif source == "config":
+        hint = (
+            "mcp-registry-url is set in apm config -- verify the URL is correct "
+            "and reachable, or run 'apm config unset mcp-registry-url'."
+        )
     else:
         hint = "The registry may be temporarily unavailable. Retry shortly."
 

@@ -12,16 +12,19 @@ report) that claims CI is green.
 
 The `Lint` job runs (see `.github/workflows/ci.yml`):
 
-1. `uv run --extra dev ruff check src/ tests/`
-2. `uv run --extra dev ruff format --check src/ tests/`
+1. `uv run --extra dev ruff check src/ tests/ \
+   scripts/lint_architecture_boundaries.py scripts/architecture_linter/`
+2. `uv run --extra dev ruff format --check src/ tests/ \
+   scripts/lint_architecture_boundaries.py scripts/architecture_linter/`
 3. YAML I/O safety guard (rejects raw `yaml.dump(..., handle)` outside
    `utils/yaml_io.py`; mark approved exceptions with `# yaml-io-exempt`).
-4. File length guardrail (no `src/**/*.py` may exceed **2450 lines**).
+4. File length guardrail (no covered Python file may exceed **2100 lines**).
 5. No raw `str(path.relative_to(...))` patterns -- use
    `portable_relpath()` from `apm_cli.utils.paths`.
 6. **Code duplication guardrail (pylint R0801):**
    `uv run --extra dev python -m pylint --disable=all --enable=R0801 \
-   --min-similarity-lines=10 --fail-on=R0801 src/apm_cli/`
+   --min-similarity-lines=10 --fail-on=R0801 src/apm_cli/ \
+   scripts/lint_architecture_boundaries.py scripts/architecture_linter/`
 7. Auth-protocol boundary check: `bash scripts/lint-auth-signals.sh`
 
 All seven must succeed. CI evaluates these on the **PR merge commit**
@@ -31,14 +34,19 @@ Always merge `main` locally before running the mirror.
 
 ## Local workflow
 
-- **Auto-fix style+imports:** `uv run --extra dev ruff check src/ tests/ --fix`
-- **Apply formatter:** `uv run --extra dev ruff format src/ tests/`
+- **Auto-fix style+imports:** `uv run --extra dev ruff check src/ tests/ \
+  scripts/lint_architecture_boundaries.py scripts/architecture_linter/ --fix`
+- **Apply formatter:** `uv run --extra dev ruff format src/ tests/ \
+  scripts/lint_architecture_boundaries.py scripts/architecture_linter/`
 - **Verify the full Lint job (must all be silent / exit 0):**
   ```bash
   uv run --extra dev ruff check src/ tests/ \
+       scripts/lint_architecture_boundaries.py scripts/architecture_linter/ \
     && uv run --extra dev ruff format --check src/ tests/ \
+       scripts/lint_architecture_boundaries.py scripts/architecture_linter/ \
     && uv run --extra dev python -m pylint --disable=all --enable=R0801 \
        --min-similarity-lines=10 --fail-on=R0801 src/apm_cli/ \
+       scripts/lint_architecture_boundaries.py scripts/architecture_linter/ \
     && bash scripts/lint-auth-signals.sh
   ```
   (The YAML, file-length, and `relative_to` guards are pure-grep one-liners

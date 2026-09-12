@@ -251,12 +251,14 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
     if not local.is_dir():
         logger.error(f"Local package path does not exist: {dep_ref.local_path}")
         return None
+    from apm_cli.deps._shared import has_marketplace_deployable_manifest
     from apm_cli.utils.helpers import find_plugin_json
 
     if (
         not (local / "apm.yml").exists()
         and not (local / "SKILL.md").exists()
         and find_plugin_json(local) is None
+        and not has_marketplace_deployable_manifest(dep_ref)
     ):
         logger.error(
             "Local package is not a valid APM package "

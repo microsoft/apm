@@ -555,6 +555,13 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
     assert rebuilt.is_semantically_equivalent(lockfile)
 
 
+def test_legacy_shared_agents_path_has_unattributable_target() -> None:
+    """A shared .agents root must not be attributed to the deprecated alias."""
+    locator = DeploymentLedgerCodec._legacy_locator(".agents/skills/demo/SKILL.md")
+
+    assert locator.target == "legacy"
+
+
 def test_legacy_owner_update_preserves_canonical_shared_root_locator() -> None:
     """A compatibility projection must not demote a concrete shared-root target."""
     path = ".agents/skills/demo/SKILL.md"
@@ -657,6 +664,30 @@ def test_local_bundle_provenance_survives_canonical_ledger_rebuilds() -> None:
     assert DeploymentLedgerCodec.local_bundle_paths(lockfile) == frozenset({renamed, sibling})
     rebuilt = LockFile.from_yaml(lockfile.to_yaml())
     assert DeploymentLedgerCodec.local_bundle_paths(rebuilt) == frozenset({renamed, sibling})
+
+
+def test_service_rows_with_same_name_and_runtime_keep_distinct_targets() -> None:
+    """MCP and LSP URI ownership must not collide in canonical state."""
+    lockfile = LockFile()
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lockfile,
+        {"claude": ["shared-server"]},
+    )
+    DeploymentLedgerCodec.replace_lsp_target_servers(
+        lockfile,
+        {"claude": ["shared-server"]},
+    )
+
+    rebuilt = LockFile.from_yaml(lockfile.to_yaml())
+
+    assert rebuilt.mcp_target_servers == {"claude": ["shared-server"]}
+    assert rebuilt.lsp_target_servers == {"claude": ["shared-server"]}
+    service_targets = {
+        record.locator.target
+        for record in rebuilt.deployment_ledger.records.values()
+        if record.locator.value == "shared-server"
+    }
+    assert service_targets == {"mcp", "lsp"}
 
 
 def test_local_bundle_provenance_rejects_missing_or_malformed_hashes() -> None:

@@ -21,6 +21,7 @@ from apm_cli.utils.console import (
 CATEGORY_COLLISION = "collision"
 CATEGORY_OVERWRITE = "overwrite"
 CATEGORY_WARNING = "warning"
+WARNING_AGENT_PLUGIN_TARGET_EXCLUDED = "agent_plugin_target_excluded"
 # Reserved for agent source semantics dropped during target-format translation.
 CATEGORY_AGENT_LOSSY_COMPILATION = "agent_lossy_compilation"
 CATEGORY_ERROR = "error"
@@ -63,7 +64,7 @@ class Diagnostic:
     category: str
     package: str = ""
     detail: str = ""
-    severity: str = ""  # e.g. "critical", "warning", "info" -- used by security category
+    severity: str = ""  # e.g. "critical", "warning", "info", or warning subtype
 
 
 class DiagnosticCollector:
@@ -106,7 +107,13 @@ class DiagnosticCollector:
                 )
             )
 
-    def warn(self, message: str, package: str = "", detail: str = "") -> None:
+    def warn(
+        self,
+        message: str,
+        package: str = "",
+        detail: str = "",
+        severity: str = "",
+    ) -> None:
         """Record a general warning."""
         with self._lock:
             self._diagnostics.append(
@@ -115,8 +122,23 @@ class DiagnosticCollector:
                     category=CATEGORY_WARNING,
                     package=package,
                     detail=detail,
+                    severity=severity,
                 )
             )
+
+    def agent_plugin_target_excluded(
+        self,
+        message: str,
+        package: str = "",
+        detail: str = "",
+    ) -> None:
+        """Record an Agent Plugin target exclusion warning."""
+        self.warn(
+            message,
+            package=package,
+            detail=detail,
+            severity=WARNING_AGENT_PLUGIN_TARGET_EXCLUDED,
+        )
 
     def lossy_agent_compilation(
         self,
@@ -254,6 +276,15 @@ class DiagnosticCollector:
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_ERROR)
 
     @property
+    def agent_plugin_target_excluded_count(self) -> int:
+        """Return target-excluded Agent Plugin warning count."""
+        return sum(
+            1
+            for d in self._diagnostics
+            if d.category == CATEGORY_WARNING and d.severity == WARNING_AGENT_PLUGIN_TARGET_EXCLUDED
+        )
+
+    @property
     def security_count(self) -> int:
         """Return number of security findings."""
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_SECURITY)
@@ -356,6 +387,8 @@ class DiagnosticCollector:
                 bold=True,
             )
             _rich_info("    Run 'apm audit' for full details")
+            for detail in dict.fromkeys(d.detail for d in critical if d.detail):
+                _rich_info(f"    {detail}")
             if self.verbose:
                 by_pkg = _group_by_package(critical)
                 for pkg, diags in by_pkg.items():

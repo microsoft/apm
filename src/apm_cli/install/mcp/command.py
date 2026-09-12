@@ -19,6 +19,7 @@ import click
 from ..errors import InstallFailureAlreadyRendered
 
 if TYPE_CHECKING:
+    from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import EffectiveTargetDecision
 
 from .args import parse_env_pairs, parse_header_pairs
@@ -41,6 +42,47 @@ except ImportError:
     pass
 
 
+def run_mcp_policy_preflight(
+    *,
+    mcp_name: str,
+    transport: str | None,
+    url: str | None,
+    command_argv: Sequence[str] | None,
+    no_policy: bool,
+    logger,
+    target_decision: EffectiveTargetDecision,
+) -> None:
+    """Run policy checks for a direct MCP install before any persistent write."""
+    from ...core.target_detection import normalize_policy_targets
+    from ...models.dependency.mcp import MCPDependency
+    from ...policy.install_preflight import PolicyBlockError, run_policy_preflight
+
+    resolved_transport = transport
+    if resolved_transport is None:
+        if command_argv:
+            resolved_transport = "stdio"
+        elif url:
+            resolved_transport = "http"
+    dependency = MCPDependency(
+        name=mcp_name,
+        transport=resolved_transport,
+        registry=False if url or command_argv else None,
+        url=url,
+    )
+    try:
+        run_policy_preflight(
+            project_root=Path.cwd(),
+            mcp_deps=[dependency],
+            no_policy=no_policy,
+            logger=logger,
+            dry_run=logger.dry_run,
+            effective_target=normalize_policy_targets(target_decision.value),
+        )
+    except PolicyBlockError:
+        logger.render_summary()
+        raise click.exceptions.Exit(1) from None
+
+
 def run_mcp_install(  # noqa: PLR0913
     *,
     mcp_name: str,
@@ -56,10 +98,13 @@ def run_mcp_install(  # noqa: PLR0913
     exclude: str | None,
     logger,
     apm_dir: Path,
-    scope: str | None,
+    scope: InstallScope | None,
     target: str | list[str] | None = None,
     target_decision: EffectiveTargetDecision | None = None,
     registry_url: str | None = None,
+    registry_allow_http: bool = True,
+    registry_source: str | None = None,
+    initial_manifest_config: dict | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
@@ -76,7 +121,7 @@ def run_mcp_install(  # noqa: PLR0913
     # Build entry (validates through MCPDependency).  Convert ValueError
     # to UsageError so the CLI exits 2 with the model wording.
     try:
-        entry, _is_self_defined = build_mcp_entry(
+        entry, is_self_defined = build_mcp_entry(
             mcp_name,
             transport=transport,
             url=url,
@@ -97,7 +142,57 @@ def run_mcp_install(  # noqa: PLR0913
     stdio_command = command_argv[0] if command_argv else None
     warn_shell_metachars(env, logger, command=stdio_command)
 
-    # Write to apm.yml.
+    # Build MCPDependency for install.  ``entry`` may be a bare string.
+    if isinstance(entry, str):
+        dep = MCPDependency.from_string(entry)
+    else:
+        dep = MCPDependency.from_dict(entry)
+
+    prevalidated_registry_servers = None
+    if not is_self_defined:
+        if not APM_DEPS_AVAILABLE:
+            raise click.ClickException(
+                f"MCP registry validation is unavailable for '{mcp_name}'. "
+                "Install the package dependencies and retry; no state was changed"
+            )
+        with registry_env_override(
+            registry_url,
+            allow_http=registry_allow_http,
+            source=registry_source,
+        ):
+            try:
+                prevalidated_registry_servers = MCPIntegrator.prevalidate_registry_dependencies(
+                    [dep],
+                    registry_url=registry_url,
+                    registry_source=registry_source,
+                    verbose=verbose,
+                    logger=logger,
+                )
+            except Exception as exc:
+                detail = str(exc)
+                if detail.startswith("Could not reach MCP registry"):
+                    logger.error(f"{detail} No state was changed.")
+                    raise InstallFailureAlreadyRendered(detail) from None
+                if detail.startswith("Cannot install ") and "missing server" in detail:
+                    raise InstallFailureAlreadyRendered(detail) from None
+                logger.verbose_detail(f"MCP registry validation error: {detail}")
+                raise click.ClickException(
+                    f"MCP registry validation failed for '{mcp_name}'. Check the server "
+                    "name and registry reachability/configuration, then retry; "
+                    "no state was changed"
+                ) from None
+
+    if getattr(logger, "dry_run", False) is True:
+        logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {manifest_path}")
+        return
+
+    if initial_manifest_config is not None:
+        from ...commands._helpers import _create_minimal_apm_yml
+
+        apm_dir.mkdir(parents=True, exist_ok=True)
+        _create_minimal_apm_yml(initial_manifest_config, target_path=manifest_path)
+        logger.success(f"Created {manifest_path}")
+
     status, _diff = add_mcp_to_apm_yml(
         mcp_name,
         entry,
@@ -106,29 +201,22 @@ def run_mcp_install(  # noqa: PLR0913
         manifest_path=manifest_path,
         logger=logger,
     )
-
     if status == "skipped":
         logger.progress(f"MCP server '{mcp_name}' already declared; checking integrations")
-        # Fall through intentionally: unchanged entries still need legacy
-        # IntelliJ migration and per-target ownership repair.
-
-    # Build MCPDependency for install.  ``entry`` may be a bare string.
-    if isinstance(entry, str):
-        dep = MCPDependency.from_string(entry)
-    else:
-        dep = MCPDependency.from_dict(entry)
 
     # Install just this MCP via the integrator and update lockfile.
     # ``registry_env_override`` exports MCP_REGISTRY_URL for THIS call so
     # MCPServerOperations() (constructed deep inside MCPIntegrator.install)
     # picks up the override; prior env restored on exit.
     if APM_DEPS_AVAILABLE:
-        if registry_url and logger:
-            logger.verbose_detail(f"Registry: {registry_url}")
         if target is not None and logger:
             rendered_target = target if isinstance(target, str) else ", ".join(target)
             logger.verbose_detail(f"Target: {rendered_target}")
-        with registry_env_override(registry_url):
+        with registry_env_override(
+            registry_url,
+            allow_http=registry_allow_http,
+            source=registry_source,
+        ):
             try:
                 # Migrate before creating apm.lock.yaml so legacy state is not shadowed.
                 migrate_lockfile_if_needed(apm_dir)
@@ -153,10 +241,12 @@ def run_mcp_install(  # noqa: PLR0913
                 from ...core.scope import InstallScope
 
                 user_scope = scope is InstallScope.USER
-                if _existing_lock and not target_servers_present and old_servers and old_configs:
-                    from .ownership import adopt_legacy_mcp_target_servers
+                if _existing_lock:
+                    from .ownership import resolve_mcp_target_servers
 
-                    old_target_servers = adopt_legacy_mcp_target_servers(
+                    old_target_servers = resolve_mcp_target_servers(
+                        recorded_target_servers=old_target_servers,
+                        ownership_present=target_servers_present,
                         server_names=old_servers,
                         stored_configs=old_configs,
                         project_root=apm_dir,
@@ -182,6 +272,7 @@ def run_mcp_install(  # noqa: PLR0913
                     project_root=apm_dir,
                     user_scope=user_scope,
                     managed_target_servers=requested_target_servers,
+                    prevalidated_registry_servers=prevalidated_registry_servers,
                 )
                 new_names = MCPIntegrator.get_server_names([dep])
                 new_configs = MCPIntegrator.get_server_configs([dep])

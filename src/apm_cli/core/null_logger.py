@@ -5,7 +5,7 @@ console helpers.  This is NOT a silent null object -- every implemented
 method produces visible terminal output.
 
 Use this instead of ``logger=None`` checks inside ``MCPIntegrator``
-methods.  It is NOT a drop-in replacement for the full
+and ``LSPIntegrator`` methods.  It is NOT a drop-in replacement for the full
 ``CommandLogger`` or ``InstallLogger`` interfaces used in CLI command
 functions.
 """
@@ -23,7 +23,7 @@ class NullCommandLogger:
     """Partial ``CommandLogger`` facade for ``MCPIntegrator`` contexts.
 
     Implements only the subset of ``CommandLogger`` needed by
-    ``MCPIntegrator``: ``start``, ``progress``, ``success``,
+    the integrators: ``start``, ``progress``, ``info``, ``success``,
     ``warning``, ``error``, ``verbose_detail``, ``tree_item``, and
     ``package_inline_warning``.
 
@@ -49,6 +49,9 @@ class NullCommandLogger:
         _rich_info(message, symbol=symbol)
 
     def progress(self, message: str, symbol: str = "info"):
+        _rich_info(message, symbol=symbol)
+
+    def info(self, message: str, symbol: str = "info"):
         _rich_info(message, symbol=symbol)
 
     def mcp_lookup_heartbeat(self, count: int):

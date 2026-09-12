@@ -35,3 +35,20 @@ apm install
 APM v0.21.0+ always writes `"version": 1` to `.cursor/hooks.json` on a
 fresh install. Existing files that already contain a `"version"` key are
 left untouched.
+
+---
+
+### Agent Plugin does not load in Copilot
+
+**Symptom:** `apm install --target copilot` succeeds and writes the native
+registration, but Copilot does not load the plugin.
+
+**Cause:** APM does not discover, execute, or version-check the Copilot runtime
+during install. Stable Copilot CLI `1.0.81` or newer is required to load APM's
+live-directory projection. Older clients may instead copy plugins into private
+state outside APM ownership.
+
+**Fix:** Upgrade to stable GitHub Copilot CLI `1.0.81` or newer. If an older
+client created a private copy, remove that copy with the client after upgrading;
+APM uninstall and prune can retire only APM-owned registration state. See
+[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/#requirements).

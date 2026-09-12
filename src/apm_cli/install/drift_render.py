@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.utils.console import STATUS_SYMBOLS
 
 if TYPE_CHECKING:
     from apm_cli.install.drift import DriftFinding
+
+_INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
+
+
+def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
+    """Build an inline diff hint, capped to keep findings compact."""
+    try:
+        scratch_size = scratch_path.stat().st_size
+        project_size = project_path.stat().st_size
+    except OSError:
+        return ""
+    if scratch_size > _INLINE_DIFF_BYTE_CAP or project_size > _INLINE_DIFF_BYTE_CAP:
+        return "(file too large for inline diff; use 'git diff --no-index' to compare)"
+    return ""
 
 
 def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> str:

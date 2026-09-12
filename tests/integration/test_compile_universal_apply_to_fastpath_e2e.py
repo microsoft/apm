@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,9 +10,11 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.compilation.context_optimizer import ContextOptimizer
+from apm_cli.compilation.inventory import CompileInventory
 
 UNIVERSAL_SENTINEL = "Universal fast path sentinel."
 EXPLICIT_SENTINEL = "Explicit all files sentinel."
+BOM_SCOPED_SENTINEL = "BOM scoped sentinel."
 
 
 def _write_project_file(project_root: Path, relative_path: str, content: str = "x\n") -> None:
@@ -61,6 +64,39 @@ def _build_project(project_root: Path) -> set[str]:
     _write_project_file(project_root, "tests/test_app.py")
     (project_root / "empty").mkdir()
     return expected_directories
+
+
+def _agents_snapshot(project_root: Path) -> dict[str, bytes]:
+    """Return generated AGENTS.md files keyed by portable project path."""
+    return {
+        path.relative_to(project_root).as_posix(): path.read_bytes()
+        for path in sorted(project_root.rglob("AGENTS.md"))
+    }
+
+
+def _write_literal_scope_fixture(project_root: Path, apply_to: str) -> None:
+    """Create a placement-threshold fixture with unrelated project accounting."""
+    (project_root / "apm.yml").write_text(
+        "name: literal-scope-e2e\nversion: 0.1.0\ntarget: agents\n",
+        encoding="utf-8",
+    )
+    instructions_dir = project_root / ".apm" / "instructions"
+    instructions_dir.mkdir(parents=True)
+    (instructions_dir / "literal.instructions.md").write_text(
+        "---\n"
+        "description: Literal-root placement rule\n"
+        f'applyTo: "{apply_to}"\n'
+        "---\n\n"
+        "Literal scope sentinel.\n",
+        encoding="utf-8",
+    )
+    for directory in ("api", "cli", "worker", "web"):
+        _write_project_file(project_root, f"src/{directory}/app.py")
+    # Keep the historical ``src`` placement candidate populated without
+    # widening the instruction's four matching directories.
+    _write_project_file(project_root, "src/README.md")
+    for index in range(20):
+        _write_project_file(project_root, f"vendor-{index:02d}/large.txt")
 
 
 def test_compile_agents_universal_apply_to_fast_path_preserves_match_set(
@@ -138,3 +174,151 @@ def test_compile_agents_universal_apply_to_fast_path_preserves_match_set(
     agents_content = agents_md.read_text(encoding="utf-8")
     assert UNIVERSAL_SENTINEL in agents_content
     assert EXPLICIT_SENTINEL in agents_content
+
+
+def test_compile_agents_bom_frontmatter_preserves_apply_to(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Compile must preserve scope from BOM-prefixed instruction frontmatter."""
+    project_root = tmp_path
+    (project_root / "apm.yml").write_text(
+        "name: bom-frontmatter-e2e\nversion: 0.1.0\ntarget: agents\n",
+        encoding="utf-8",
+    )
+    instruction = project_root / ".apm/instructions/scoped.instructions.md"
+    instruction.parent.mkdir(parents=True)
+    instruction.write_bytes(
+        (
+            "---\n"
+            "description: BOM-scoped rule\n"
+            'applyTo: "src/**/*.py"\n'
+            "---\n\n"
+            f"{BOM_SCOPED_SENTINEL}\n"
+        ).encode("utf-8-sig")
+    )
+    _write_project_file(project_root, "src/pkg/app.py")
+    _write_project_file(project_root, "docs/readme.md")
+
+    monkeypatch.chdir(project_root)
+    result = CliRunner().invoke(
+        cli,
+        ["compile", "--target", "agents"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    compiled_files = sorted(project_root.rglob("AGENTS.md"))
+    compiled_content = {
+        path.relative_to(project_root).as_posix(): path.read_text(encoding="utf-8")
+        for path in compiled_files
+    }
+    sentinel_locations = {
+        path for path, content in compiled_content.items() if BOM_SCOPED_SENTINEL in content
+    }
+    assert sentinel_locations
+    assert all(path == "src/AGENTS.md" or path.startswith("src/") for path in sentinel_locations)
+    assert all("---" not in content for content in compiled_content.values())
+    assert all("applyTo:" not in content for content in compiled_content.values())
+
+
+def test_compile_literal_roots_preserve_generated_artifacts_against_full_fallback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Literal-root pruning must be invisible in generated AGENTS.md artifacts."""
+    project_root = tmp_path
+    literal_apply_to = "src/**/*.py"
+    _write_literal_scope_fixture(project_root, literal_apply_to)
+
+    monkeypatch.chdir(project_root)
+    with patch(
+        "apm_cli.compilation.inventory.CompileInventory.collect",
+        wraps=CompileInventory.collect,
+    ) as collect:
+        literal_result = CliRunner().invoke(
+            cli,
+            ["compile", "--target", "agents"],
+            catch_exceptions=False,
+        )
+        assert literal_result.exit_code == 0, literal_result.output
+        literal_artifacts = _agents_snapshot(project_root)
+
+        for path in project_root.rglob("AGENTS.md"):
+            path.unlink()
+
+        # A separate ``**/*.never`` primitive would become a root-level rule and
+        # legitimately alter generated bytes. Force the classifier's documented
+        # conservative result instead, while running the real CLI and optimizer.
+        with patch(
+            "apm_cli.compilation.context_optimizer.literal_apply_to_top_level_roots",
+            return_value=None,
+        ):
+            full_fallback_result = CliRunner().invoke(
+                cli,
+                ["compile", "--target", "agents"],
+                catch_exceptions=False,
+            )
+        assert full_fallback_result.exit_code == 0, full_fallback_result.output
+        assert collect.call_count == 2
+
+    assert _agents_snapshot(project_root) == literal_artifacts
+    assert set(literal_artifacts) == {"src/AGENTS.md"}
+
+
+def test_compile_does_not_re_resolve_context_optimizer_base_dir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Compile must reuse the optimizer's constructor-resolved base path."""
+    project_root = tmp_path
+    _write_literal_scope_fixture(project_root, "src/**/*.py")
+    entered_methods: list[str] = []
+    base_resolve_callers: list[str] = []
+
+    original_resolve = Path.resolve
+    original_file_matches = ContextOptimizer._file_matches_pattern
+    original_minimal_placement = ContextOptimizer._find_minimal_coverage_placement
+
+    def spy_resolve(path: Path, strict: bool = False) -> Path:
+        caller = sys._getframe(1).f_code.co_name
+        if path == project_root:
+            base_resolve_callers.append(caller)
+        return original_resolve(path, strict=strict)
+
+    def spy_file_matches(
+        self: ContextOptimizer,
+        file_path: Path,
+        pattern: str,
+    ) -> bool:
+        entered_methods.append("_file_matches_pattern")
+        return original_file_matches(self, file_path, pattern)
+
+    def spy_minimal_placement(
+        self: ContextOptimizer,
+        matching_directories: set[Path],
+    ) -> Path | None:
+        entered_methods.append("_find_minimal_coverage_placement")
+        return original_minimal_placement(self, matching_directories)
+
+    monkeypatch.chdir(project_root)
+    with (
+        patch.object(Path, "resolve", spy_resolve),
+        patch.object(ContextOptimizer, "_file_matches_pattern", spy_file_matches),
+        patch.object(
+            ContextOptimizer,
+            "_find_minimal_coverage_placement",
+            spy_minimal_placement,
+        ),
+    ):
+        result = CliRunner().invoke(
+            cli,
+            ["compile", "--target", "agents"],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "_file_matches_pattern" in entered_methods
+    assert "_find_minimal_coverage_placement" in entered_methods
+    assert "_file_matches_pattern" not in base_resolve_callers
+    assert "_find_minimal_coverage_placement" not in base_resolve_callers

@@ -125,7 +125,7 @@ class TestInitCommand:
 
                 assert result.exit_code == 0
                 assert "apm.yml already exists" in result.output
-                assert "--yes specified, overwriting apm.yml..." in result.output
+                assert "--yes specified, overwriting: apm.yml" in result.output
             finally:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
@@ -407,7 +407,8 @@ class TestPluginNameValidation:
         assert _validate_plugin_name("") is False
         assert _validate_plugin_name("A") is False
         assert _validate_plugin_name("my_plugin") is False
-        assert _validate_plugin_name("1plugin") is False
+        # Agent Plugins canonical rules allow a leading digit; validate via agent_plugins
+        assert _validate_plugin_name("1plugin") is True
         assert _validate_plugin_name("-plugin") is False
         assert _validate_plugin_name("a" * 65) is False
         assert _validate_plugin_name("My-Plugin") is False

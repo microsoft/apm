@@ -1,0 +1,13 @@
+{
+  "lspServers": {
+    "contract-lsp": {
+      "command": "printf",
+      "args": [
+        "lsp"
+      ],
+      "extensionToLanguage": {
+        ".txt": "text"
+      }
+    }
+  }
+}

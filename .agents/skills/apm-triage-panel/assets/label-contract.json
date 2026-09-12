@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "authority": "GOVERNANCE.md and CONTRIBUTING.md: a responsible human maintainer records scope approval. Labels, recommendations and silence are not authorization. GitHub Triage access is not a per-label ACL.",
+  "human_decisions": {
+    "status/needs-triage": "Awaiting a human scope decision, even after automated advice.",
+    "status/needs-design": "Design discussion is required before implementation.",
+    "status/accepted": "Communicates human approval; the issue's human approval record is authoritative.",
+    "status/deferred": "Not invited for implementation now; never equivalent to accepted."
+  },
+  "human_metadata": ["priority/*", "help wanted", "good first issue", "milestone"],
+  "classification_labels": [
+    "theme/governance", "theme/portability", "theme/security",
+    "area/audit-policy", "area/ci-cd", "area/cli", "area/content-security",
+    "area/distribution", "area/docs-site", "area/enterprise", "area/lockfile",
+    "area/marketplace", "area/mcp-config", "area/mcp-trust", "area/multi-target",
+    "area/package-authoring", "area/testing",
+    "type/architecture", "type/automation", "type/bug", "type/docs",
+    "type/feature", "type/performance", "type/refactor", "type/release"
+  ],
+  "classification_policy": "Optional, useful classification only. No mandatory five-axis taxonomy. Add only existing allowlisted labels to empty dimensions; preserve human choices and discuss conflicts in the comment.",
+  "processing": {
+    "reviewed": "triage/recommended",
+    "requested": "triage/requested",
+    "read_reviewed": ["triage/recommended", "status/triaged"],
+    "request_triggers": ["triage/requested", "status/needs-triage"],
+    "active_write_reviewed": "status/triaged",
+    "removable": ["triage/requested"],
+    "meaning": "Advisory processing and deduplication only, never human acceptance."
+  },
+  "legacy_read_aliases": {
+    "needs-triage": "status/needs-triage",
+    "needs-design": "status/needs-design",
+    "accepted": "status/accepted",
+    "status/triaged": "triage/recommended",
+    "bug": "type/bug",
+    "enhancement": "type/feature",
+    "type/enhancement": "type/feature",
+    "documentation": "type/docs"
+  },
+  "legacy_manual_review": [
+    "status/triage-pending", "status/blocked", "status/in-flight", "status/declined",
+    "needs-triage]", "enhancement]", "documentation]", "type/automation]"
+  ],
+  "legacy_policy": "Aliases are read compatibility, not migrations or proof of approval. Do not infer deferred versus accepted from historic bot labels. Preserve unknown labels; malformed and ambiguous names require human review. Shepherd status labels remain separate processing metadata.",
+  "rollout": [
+    "Phase 2 is compatibility mode. Do not create, rename or delete live labels or milestones, and do not migrate issues.",
+    "Read both completed-advice markers but write only the existing active_write_reviewed label. triage/recommended is deliberately absent from the workflow add-labels allowlist.",
+    "Read repository label definitions before any emission. If active_write_reviewed is missing or unreadable, stop with an actionable run-log error; do not create it or emit repeated advisory comments without durable deduplication.",
+    "Before a later rollout, a maintainer must separately approve and provision canonical processing labels and status/deferred, then change active_write_reviewed and the workflow allowlist together and recompile.",
+    "Keep both reviewed markers in read filters during rollout. Preserve legacy markers until separately approved migration and rollback have been checked. Never remove status/needs-triage when an advisory completes.",
+    "triage/requested is the canonical advisory request. Until provisioned, use manual dispatch or the legacy status/needs-triage labeled event. The legacy human decision label is not consumed.",
+    "Paginate oldest-first past skipped, reviewed and per-author-quota items until the eligible batch is full or candidates are exhausted. Never stop at an all-skipped first page."
+  ]
+}

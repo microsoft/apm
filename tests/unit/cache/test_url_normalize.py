@@ -30,6 +30,20 @@ class TestNormalizeRepoUrl:
         result = normalize_repo_url("ssh://git@github.com:22/owner/repo")
         assert result == "ssh://git@github.com/owner/repo"
 
+    def test_normalizes_bracketed_ipv6_default_port(self) -> None:
+        default_port = normalize_repo_url("ssh://git@[2001:DB8::1]:22/Team/Repo.git")
+        implicit_port = normalize_repo_url("ssh://git@[2001:db8::1]/Team/Repo")
+
+        assert default_port == "ssh://git@[2001:db8::1]/Team/Repo"
+        assert default_port == implicit_port
+
+    def test_preserves_bracketed_ipv6_non_default_port(self) -> None:
+        custom_port = normalize_repo_url("ssh://git@[2001:db8::1]:2222/Team/Repo.git")
+        default_port = normalize_repo_url("ssh://git@[2001:db8::1]/Team/Repo.git")
+
+        assert custom_port == "ssh://git@[2001:db8::1]:2222/Team/Repo"
+        assert cache_shard_key(custom_port) != cache_shard_key(default_port)
+
     def test_preserve_non_default_port(self) -> None:
         result = normalize_repo_url("https://github.example.com:8443/owner/repo")
         assert result == "https://github.example.com:8443/owner/repo"

@@ -42,7 +42,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
+from apm_cli.deps.path_anchoring import (
+    LocalResolutionError,
+    build_local_parent_index,
+    resolve_local_dep_dir,
+)
 from apm_cli.models.apm_package import APMPackage
 
 if TYPE_CHECKING:
@@ -122,12 +126,22 @@ def _build_local_dir_index(
     cannot rule out that some survivor reaches that entry.
     """
     index: dict[Path, str] = {}
+    parent_index = build_local_parent_index(lockfile)
+    resolved_cache: dict[str, Path] = {}
     for key in candidate_orphans:
         dep = lockfile.get_dependency(key)
         if dep is None or dep.source != "local":
             continue
         try:
-            index[resolve_local_dep_dir(dep, lockfile, project_root)] = key
+            index[
+                resolve_local_dep_dir(
+                    dep,
+                    lockfile,
+                    project_root,
+                    parent_index=parent_index,
+                    resolved_cache=resolved_cache,
+                )
+            ] = key
         except LocalResolutionError as exc:
             unverifiable.append((key, str(exc)))
     return index

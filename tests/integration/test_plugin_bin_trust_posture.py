@@ -11,9 +11,16 @@ import pytest
 
 from apm_cli.core.scope import InstallScope
 from apm_cli.install.exec_gate import log_bin_status
-from apm_cli.install.services import _resolve_bin_skip
+from apm_cli.install.services import (
+    IntegratorBundle,
+    _resolve_bin_skip,
+    integrate_package_primitives,
+)
+from apm_cli.integration.dispatch import get_dispatch_table
 from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import PackageInfo, PackageType, validate_apm_package
+from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX mode hardening only")
 
@@ -140,6 +147,64 @@ def test_trust_bin_none_deploys_with_warning(tmp_path: Path) -> None:
     assert any("adds executables to Claude Code's PATH" in msg for msg in logger.warning_messages)
 
 
+def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path) -> None:
+    """The canonical install service blocks a hostile authorized plugin bin."""
+    project_root = tmp_path / "home"
+    (project_root / ".claude").mkdir(parents=True)
+    clean_info, _clean_bin = _write_marketplace_plugin(
+        tmp_path / "packages" / "clean-tool",
+        manifest_name="MyOwner/CleanTool",
+    )
+    package_info, source_bin = _write_marketplace_plugin(
+        tmp_path / "packages" / "hostile-tool",
+        manifest_name="MyOwner/HostileTool",
+    )
+    source_bin.write_text("#!/bin/sh\necho hostile \u202e\n", encoding="utf-8")
+    dispatch = get_dispatch_table()
+    integrators = {name: entry.integrator_class() for name, entry in dispatch.items()}
+    bundle = IntegratorBundle(
+        prompt=integrators["prompts"],
+        agent=integrators["agents"],
+        skill=integrators["skills"],
+        instruction=integrators["instructions"],
+        command=integrators["commands"],
+        hook=integrators["hooks"],
+        canvas=integrators["canvas"],
+    )
+    clean_result = integrate_package_primitives(
+        clean_info,
+        project_root,
+        targets=[KNOWN_TARGETS["claude"]],
+        integrators=bundle,
+        force=False,
+        managed_files=None,
+        diagnostics=DiagnosticCollector(),
+        package_name="owner/clean-tool",
+        scope=InstallScope.USER,
+        trust_bin=True,
+    )
+    clean_deployed = project_root / ".claude" / "skills" / "clean-tool" / "bin" / "tool"
+    assert clean_deployed.is_file()
+    assert ".claude/skills/clean-tool/bin/tool" in clean_result["deployed_files"]
+
+    result = integrate_package_primitives(
+        package_info,
+        project_root,
+        targets=[KNOWN_TARGETS["claude"]],
+        integrators=bundle,
+        force=False,
+        managed_files=None,
+        diagnostics=DiagnosticCollector(),
+        package_name="owner/hostile-tool",
+        scope=InstallScope.USER,
+        trust_bin=True,
+    )
+
+    deployed = project_root / ".claude" / "skills" / "hostile-tool" / "bin" / "tool"
+    assert result["deployed_files"] == []
+    assert not deployed.exists()
+
+
 def test_trust_bin_none_non_tty_skips() -> None:
     """_resolve_bin_skip: non-interactive + no flag -> skip with not_trusted."""
     skip, reason = _resolve_bin_skip(True, None, non_interactive=True)
@@ -162,7 +227,42 @@ def test_log_bin_status_not_trusted() -> None:
 
     log_bin_status(skill_result, "", "pkg", SimpleNamespace(name="pkg"), lines.append)
 
-    assert lines == ["  |-- bin/ executables skipped (--no-trust-bin). Pass --trust-bin to deploy."]
+    assert lines == [
+        "  |-- bin/ executables skipped (not trusted). Run 'apm install --trust-bin pkg' to deploy."
+    ]
+
+
+def test_log_bin_status_sanitizes_not_approved_package_name() -> None:
+    """Approval guidance must not echo hidden package-name characters."""
+    skill_result = SimpleNamespace(bin_deployed=0, bin_skipped_reason="not_approved")
+    lines: list[str] = []
+
+    log_bin_status(
+        skill_result,
+        "",
+        "unsafe\u202ename",
+        SimpleNamespace(name="pkg"),
+        lines.append,
+    )
+
+    assert "\u202e" not in lines[0]
+    assert all(ord(character) < 128 for character in lines[0])
+
+
+def test_log_bin_status_explains_uninstall_retrust() -> None:
+    """Uninstall reconciliation should name why approved bin/ was skipped."""
+    skill_result = SimpleNamespace(
+        bin_deployed=0,
+        bin_skipped_reason="not_retrusted_on_uninstall",
+    )
+    lines: list[str] = []
+
+    log_bin_status(skill_result, "", "pkg", SimpleNamespace(name="pkg"), lines.append)
+
+    assert lines == [
+        "  |-- bin/ executables not re-deployed during uninstall cleanup. "
+        "Run 'apm install --trust-bin pkg' to restore them."
+    ]
 
 
 @pytest.mark.parametrize(

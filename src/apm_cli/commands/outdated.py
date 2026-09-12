@@ -438,7 +438,7 @@ def outdated(global_, verbose, parallel_checks):
     """
     from ..core.command_logger import CommandLogger
     from ..core.scope import InstallScope, get_apm_dir
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 
     logger = CommandLogger("outdated", verbose=verbose)
 
@@ -446,8 +446,7 @@ def outdated(global_, verbose, parallel_checks):
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     project_root = get_apm_dir(scope)
 
-    migrate_lockfile_if_needed(project_root)
-    lockfile_path = get_lockfile_path(project_root)
+    lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
     lockfile = LockFile.read(lockfile_path)
 
     if lockfile is None:
@@ -543,11 +542,17 @@ def outdated(global_, verbose, parallel_checks):
     # Check if everything is up-to-date
     has_outdated = any(row.status == "outdated" for row in rows)
     has_unknown = any(row.status == "unknown" for row in rows)
+    has_outside_constraint = any(row.outside_constraint for row in rows)
 
-    if not has_outdated and not has_unknown:
+    if not has_outdated and not has_unknown and not has_outside_constraint:
         logger.success("All dependencies are up-to-date")
         return
 
+    show_wanted = any(row.wanted is not None for row in rows)
+    sources = [
+        f"{row.source} (outside constraint)" if row.outside_constraint else row.source
+        for row in rows
+    ]
     # Render the table
     try:
         from rich.table import Table
@@ -565,6 +570,8 @@ def outdated(global_, verbose, parallel_checks):
         )
         table.add_column("Package", style="white", min_width=20)
         table.add_column("Current", style="white", min_width=10)
+        if show_wanted:
+            table.add_column("Wanted", style="white", min_width=10)
         table.add_column("Latest", style="white", min_width=10)
         table.add_column("Status", min_width=12)
         table.add_column("Source", style="dim", min_width=20, no_wrap=True)
@@ -575,29 +582,38 @@ def outdated(global_, verbose, parallel_checks):
             "unknown": "dim",
         }
 
-        for row in rows:
+        for row, source in zip(rows, sources, strict=True):
             style = status_styles.get(row.status, "white")
             table.add_row(
                 row.package,
                 row.current,
+                *([row.wanted or "-"] if show_wanted else []),
                 row.latest,
                 f"[{style}]{row.status}[/{style}]",
-                row.source,
+                source,
             )
 
             if verbose and row.extra_tags:
                 tags_str = ", ".join(row.extra_tags)
-                table.add_row("", "", f"[dim]tags: {tags_str}[/dim]", "", "")
+                table.add_row(
+                    "", "", *([""] if show_wanted else []), f"[dim]tags: {tags_str}[/dim]", "", ""
+                )
 
         console.print(table)
 
     except (ImportError, Exception):
         # Fallback: plain text output
-        click.echo(f"{'Package':<24}{'Current':<13}{'Latest':<13}{'Status':<15}{'Source'}")
-        click.echo("-" * 82)
-        for row in rows:
+        wanted_header = f"{'Wanted':<13}" if show_wanted else ""
+        header = (
+            f"{'Package':<24}{'Current':<13}{wanted_header}{'Latest':<13}{'Status':<15}{'Source'}"
+        )
+        click.echo(header)
+        click.echo("-" * len(header))
+        for row, source in zip(rows, sources, strict=True):
+            wanted_cell = f"{row.wanted or '-':<13}" if show_wanted else ""
             click.echo(
-                f"{row.package:<24}{row.current:<13}{row.latest:<13}{row.status:<15}{row.source}"
+                f"{row.package:<24}{row.current:<13}{wanted_cell}"
+                f"{row.latest:<13}{row.status:<15}{source}"
             )
             if verbose and row.extra_tags:
                 click.echo(f"{'':24}tags: {', '.join(row.extra_tags)}")
@@ -610,7 +626,13 @@ def outdated(global_, verbose, parallel_checks):
             f"{'dependency' if outdated_count == 1 else 'dependencies'} found"
         )
     elif has_unknown:
-        logger.progress("Some dependencies could not be checked (branch/commit refs)")
+        logger.progress("Some dependencies could not be checked")
+    if has_outside_constraint:
+        logger.progress(
+            "Registry Latest is published; Wanted respects the manifest constraint. "
+            "'apm update' stays within that constraint. Select a newer version explicitly "
+            "in apm.yml, then run 'apm install' to take an outside-constraint release."
+        )
 
 
 def _check_deps_with_progress(

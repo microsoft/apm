@@ -9,6 +9,7 @@ from apm_cli.core.apm_yml import parse_targets_field
 from apm_cli.models.apm_package import canonical_package_targets
 
 if TYPE_CHECKING:
+    from apm_cli.core.command_logger import InstallLogger
     from apm_cli.integration.targets import TargetProfile
 
     from ..utils.diagnostics import DiagnosticCollector
@@ -25,6 +26,24 @@ class EffectivePackageTargets:
     package_declared_targets: tuple[str, ...]
     package_allowed_targets: frozenset[str]
     package_restriction_active: bool
+
+
+def log_package_target_restriction(
+    logger: InstallLogger | None,
+    target_selection: EffectivePackageTargets,
+) -> None:
+    """Name declared and effective targets when a package narrows them."""
+    if logger is None or not target_selection.package_restriction_active:
+        return
+    declared = (
+        ", ".join(target_selection.package_declared_targets)
+        if target_selection.package_declared_targets
+        else "unrestricted"
+    )
+    effective = ", ".join(target.name for target in target_selection.targets) or "none"
+    logger.verbose_detail(
+        f"Package target restriction: [{declared}]; effective targets: [{effective}]"
+    )
 
 
 def filter_targets_for_dependency(

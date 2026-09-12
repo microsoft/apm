@@ -11,35 +11,35 @@ from apm_cli.install.mcp.ownership import (
 )
 
 
-def test_legacy_copilot_ownership_migrates_to_active_vscode_runtime() -> None:
+def test_legacy_vscode_ownership_migrates_to_active_copilot_runtime() -> None:
     target_servers = {
-        "copilot": {"managed", "shared"},
-        "vscode": {"existing", "shared"},
+        "vscode": {"managed", "shared"},
+        "copilot": {"existing", "shared"},
     }
 
     migrate_legacy_project_target_servers(
         target_servers,
-        active_runtimes={"vscode", "codex"},
+        active_runtimes={"copilot", "codex"},
         user_scope=False,
     )
 
     assert target_servers == {
-        "vscode": {"existing", "managed", "shared"},
+        "copilot": {"existing", "managed", "shared"},
     }
 
 
 @pytest.mark.parametrize(
     ("active_runtimes", "user_scope"),
     [
-        ({"copilot"}, False),
-        ({"vscode"}, True),
+        ({"vscode"}, False),
+        ({"copilot"}, True),
     ],
 )
-def test_legacy_copilot_ownership_stays_for_native_or_user_scope(
+def test_legacy_vscode_ownership_stays_for_native_or_user_scope(
     active_runtimes: set[str],
     user_scope: bool,
 ) -> None:
-    target_servers = {"copilot": {"managed"}}
+    target_servers = {"vscode": {"managed"}}
 
     migrate_legacy_project_target_servers(
         target_servers,
@@ -47,7 +47,7 @@ def test_legacy_copilot_ownership_stays_for_native_or_user_scope(
         user_scope=user_scope,
     )
 
-    assert target_servers == {"copilot": {"managed"}}
+    assert target_servers == {"vscode": {"managed"}}
 
 
 @pytest.mark.parametrize(

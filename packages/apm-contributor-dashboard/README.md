@@ -20,6 +20,12 @@ issues, pull requests, CI pipelines, and panel reviews in real time.
 - **Session integration** -- start or open Copilot sessions directly from
   issue detail modals
 
+The triage tab reads current recommendations and legacy decision comments as
+**advice only**. It does not present their old status, priority, or milestone
+fields as project decisions. Starting a session does not approve implementation:
+the session must check the issue's human-approved scope and review contact.
+An accepted label alone does not indicate panel approval.
+
 ## Install (end users)
 
 ```bash
@@ -50,6 +56,24 @@ trust.
 The canvas is a Solid.js + Vite single-page app served by a Node.js HTTP
 handler. It uses the `gh` CLI for all GitHub API calls, so it inherits
 your existing GitHub authentication -- no tokens to configure.
+
+The dashboard refreshes GitHub data every 15 minutes by default. Set
+`APM_DASHBOARD_REFRESH_INTERVAL_MINUTES` before starting Copilot CLI to choose
+a different interval:
+
+```bash
+APM_DASHBOARD_REFRESH_INTERVAL_MINUTES=30 copilot
+```
+
+The minimum accepted interval is one minute; invalid values fall back to 15
+minutes. Browser polling follows the same interval. Manual refreshes remain
+available from the dashboard. After a GitHub rate-limit error, automatic
+refresh waits at least one hour before retrying.
+
+To reduce GraphQL usage, the dashboard now limits GraphQL polling to the issue
+and PR list queries. Panel comments use the REST API only for panel-labelled
+PRs and are cached until the PR changes. Workflow-run lookups also use REST and
+are cached until the PR head changes.
 
 ## Package layout
 

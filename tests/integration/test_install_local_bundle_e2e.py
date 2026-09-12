@@ -26,6 +26,7 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.bundle.packer import pack_bundle
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
@@ -93,6 +94,35 @@ def _make_plugin_bundle(
         )
 
     return bundle
+
+
+def _make_native_agent_plugin_bundle(tmp_path: Path) -> Path:
+    """Create native Agent Plugin input that must stop at the G2 boundary."""
+    bundle = _make_plugin_bundle(tmp_path)
+    (bundle / "plugin.json").write_text(
+        json.dumps(
+            {
+                "$schema": PLUGIN_SCHEMA_ID,
+                "name": "native-bundle",
+                "description": "Native components are not deployable at G2",
+            }
+        ),
+        encoding="ascii",
+    )
+    return bundle
+
+
+def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes | None]]:
+    snapshot = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            snapshot[relative] = ("symlink", str(path.readlink()).encode())
+        elif path.is_dir():
+            snapshot[relative] = ("dir", None)
+        else:
+            snapshot[relative] = ("file", path.read_bytes())
+    return snapshot
 
 
 def _make_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
@@ -207,8 +237,29 @@ class TestInstallLocalBundleE2E:
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         # copilot project-scope root_dir is ".github"; skills route to ".agents"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
-        assert (project / ".github" / "agents" / "reviewer.md").is_file()
-        assert (project / ".github" / "instructions" / "style.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.agent.md").is_file()
+        assert (project / ".github" / "instructions" / "style.instructions.md").is_file()
+
+    def test_install_packed_claude_commands_to_copilot_prompts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Install a packed Claude command as a native Copilot prompt."""
+        bundle = _make_plugin_bundle(
+            tmp_path / "src",
+            pack_target="claude",
+            files={"commands/test-command.md": "# Test Command\n"},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_install(
+            project, str(bundle), "--target", "copilot", monkeypatch=monkeypatch
+        )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert (project / ".github/prompts/test-command.prompt.md").read_text(
+            encoding="utf-8"
+        ) == "# Test Command\n"
+        assert not (project / ".github/commands/test-command.md").exists()
 
     def test_install_local_bundle_from_tarball(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -224,7 +275,7 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
-        assert (project / ".github" / "agents" / "reviewer.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.agent.md").is_file()
 
     def test_install_local_bundle_from_zip(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -244,13 +295,13 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
-        assert (project / ".github" / "agents" / "reviewer.md").is_file()
-        assert (project / ".github" / "instructions" / "style.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.agent.md").is_file()
+        assert (project / ".github" / "instructions" / "style.instructions.md").is_file()
 
     def test_install_local_bundle_from_pack_tar_gz(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Pack tar.gz escape hatch -> local install deploys files without network."""
+        """Explicit legacy pack tar.gz installs files without network."""
         source = tmp_path / "source-project"
         source.mkdir()
         (source / "apm.yml").write_text(
@@ -264,7 +315,7 @@ class TestInstallLocalBundleE2E:
         archive = pack_bundle(
             source,
             tmp_path / "archives",
-            fmt="plugin",
+            fmt="claude-plugin",
             archive=True,
             archive_format="tar.gz",
         ).bundle_path
@@ -281,6 +332,54 @@ class TestInstallLocalBundleE2E:
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
 
+    @pytest.mark.lifecycle_smoke
+    def test_install_native_pack_is_blocked_before_project_mutation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Native packed input reaches the local-bundle fail-closed gate."""
+        source = tmp_path / "source-project"
+        source.mkdir()
+        (source / "apm.yml").write_text(
+            yaml.dump({"name": "native-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        LockFile().write(source / "apm.lock.yaml")
+        skill_path = source / ".apm" / "skills" / "coding" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text(
+            "---\nname: coding\ndescription: Coding support\n---\n\nUse this skill.\n",
+            encoding="utf-8",
+        )
+        archive = pack_bundle(
+            source,
+            tmp_path / "archives",
+            fmt="agent-plugin",
+            archive=True,
+            archive_format="tar.gz",
+        ).bundle_path
+        project = _make_project(tmp_path / "dst")
+        before_paths = sorted(path.relative_to(project) for path in project.rglob("*"))
+        before_files = {
+            path.relative_to(project): path.read_bytes()
+            for path in project.rglob("*")
+            if path.is_file()
+        }
+
+        result = _invoke_install(
+            project, str(archive), "--target", "copilot", monkeypatch=monkeypatch
+        )
+
+        assert result.exit_code == 1
+        output = " ".join(result.output.split())
+        assert "cannot be installed through the imperative" in output
+        assert "apm install --target copilot" in output
+        assert sorted(path.relative_to(project) for path in project.rglob("*")) == before_paths
+        assert {
+            path.relative_to(project): path.read_bytes()
+            for path in project.rglob("*")
+            if path.is_file()
+        } == before_files
+
     def test_install_local_bundle_multi_target(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -296,7 +395,7 @@ class TestInstallLocalBundleE2E:
         # copilot routes skills to ".agents" ; claude root_dir = ".claude"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
         assert (project / ".claude" / "skills" / "coding" / "SKILL.md").is_file()
-        assert (project / ".github" / "agents" / "reviewer.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.agent.md").is_file()
         assert (project / ".claude" / "agents" / "reviewer.md").is_file()
 
     def test_install_local_bundle_auto_detect_target(
@@ -337,11 +436,12 @@ class TestInstallLocalBundleE2E:
         )
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        deployed_paths = {
+            "skills/coding/SKILL.md": project / ".agents" / "skills" / "coding" / "SKILL.md",
+            "agents/reviewer.md": project / ".github" / "agents" / "reviewer.agent.md",
+        }
         for rel, expected_content in files.items():
-            # copilot routes ``skills/`` to ``.agents/``; other primitives
-            # stay under ``.github/``.
-            root = ".agents" if rel.startswith("skills/") else ".github"
-            deployed = project / root / rel
+            deployed = deployed_paths[rel]
             assert deployed.is_file(), f"missing {deployed}"
             assert deployed.read_text(encoding="utf-8") == expected_content
 
@@ -506,6 +606,120 @@ class TestInstallLocalBundleDryRun:
                 assert files == [], f"dry-run wrote files: {files}"
         # Lockfile must not be created on dry-run.
         assert not (project / "apm.lock.yaml").exists()
+
+    def test_global_dry_run_all_targets_does_not_create_user_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Global local-bundle dry-run keeps target-gate config reads read-only."""
+        bundle = _make_plugin_bundle(tmp_path / "src")
+        project = _make_project(tmp_path / "dst")
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        config_dir = fake_home / ".apm"
+        config_file = config_dir / "config.json"
+
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+        monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(config_dir))
+        monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(config_file))
+        monkeypatch.setattr("apm_cli.config._config_cache", None)
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--global",
+            "--target",
+            "all",
+            "--dry-run",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert not config_file.exists()
+        assert not config_dir.exists()
+
+    def test_root_redirect_reads_allow_executables_from_source_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--root redirects writes, but executable consent stays source-owned."""
+        bundle = _make_plugin_bundle(tmp_path / "src")
+        project = _make_project(tmp_path / "source")
+        deploy_root = tmp_path / "deploy"
+        deploy_root.mkdir()
+        captured: dict[str, object] = {}
+
+        def fake_effective_allow(
+            project_root: Path,
+            *,
+            no_policy: bool,
+            logger: object,
+            migrate_user_legacy: bool = True,
+        ) -> dict | None:
+            captured["project_root"] = project_root
+            captured["migrate_user_legacy"] = migrate_user_legacy
+            return {}
+
+        def fake_install_local_bundle(**_kwargs: object) -> None:
+            return None
+
+        with (
+            patch(
+                "apm_cli.install.local_bundle_handler.effective_bundle_allow_map",
+                fake_effective_allow,
+            ),
+            patch(
+                "apm_cli.install.local_bundle_handler.install_local_bundle",
+                fake_install_local_bundle,
+            ),
+        ):
+            result = _invoke_install(
+                project,
+                str(bundle),
+                "--root",
+                str(deploy_root),
+                "--dry-run",
+                monkeypatch=monkeypatch,
+            )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert captured["project_root"] == project
+        assert captured["migrate_user_legacy"] is False
+
+
+@pytest.mark.lifecycle_smoke
+@pytest.mark.parametrize("archive", (False, True), ids=("directory", "archive"))
+@pytest.mark.parametrize("dry_run", (False, True), ids=("real", "dry-run"))
+def test_native_local_bundle_boundary_renders_typed_cli_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    archive: bool,
+    dry_run: bool,
+) -> None:
+    bundle = _make_native_agent_plugin_bundle(tmp_path / "src")
+    bundle_arg = _make_zip(tmp_path / "archive", bundle) if archive else bundle
+    project = _make_project(tmp_path / "dst", targets=["copilot"])
+    project_before = _tree_snapshot(project)
+    source_before = bundle_arg.read_bytes() if bundle_arg.is_file() else _tree_snapshot(bundle_arg)
+    args = ("--dry-run",) if dry_run else ()
+
+    result = _invoke_install(
+        project,
+        str(bundle_arg),
+        *args,
+        monkeypatch=monkeypatch,
+    )
+
+    assert result.exit_code == 1
+    assert _tree_snapshot(project) == project_before
+    source_after = bundle_arg.read_bytes() if bundle_arg.is_file() else _tree_snapshot(bundle_arg)
+    assert source_after == source_before
+    output = " ".join(result.output.split())
+    assert "cannot be installed through the imperative" in output
+    assert "apm install --target copilot" in output
+    assert "registers it natively with GitHub Copilot" in output
+    assert "Error installing dependencies" not in output
+    assert "Run with --verbose" not in output
+    assert "Install complete" not in output
+    assert "Dry run complete" not in output
 
 
 # ---------------------------------------------------------------------------
@@ -861,7 +1075,7 @@ class TestLocalInstallAirGap:
 
 class TestInstallLegacyApmFormatBundle:
     """``apm install <legacy-bundle>`` must reject legacy --format apm tarballs
-    with an actionable error pointing at ``apm unpack`` or ``--format plugin``."""
+    with an actionable error pointing at ``apm unpack`` or ``apm pack --claude-plugin``."""
 
     def test_legacy_apm_tarball_rejected_with_actionable_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -869,7 +1083,8 @@ class TestInstallLegacyApmFormatBundle:
         """A tarball produced by ``apm pack --format apm --archive`` has
         ``apm.lock.yaml`` at the root but no ``plugin.json``.  The install
         command must reject it with a message that names the legacy format
-        and suggests either repacking or using ``apm unpack``."""
+        and suggests either repacking with the installable Claude-plugin
+        format or using ``apm unpack``."""
         # Build a legacy apm-format bundle directory
         bundle = tmp_path / "test-pkg-0.1.0"
         bundle.mkdir(parents=True)
@@ -911,7 +1126,11 @@ class TestInstallLegacyApmFormatBundle:
         # The error must mention the legacy format
         assert "--format apm" in result.output or "legacy format" in result.output
         # The error must offer actionable guidance
-        assert "apm unpack" in result.output or "--format plugin" in result.output
+        assert "apm unpack" in result.output
+        # The suggested repack command must actually produce an installable
+        # Keep recovery advice explicit even though the legacy ``plugin`` alias
+        # is Claude-compatible.
+        assert "apm pack --claude-plugin" in result.output
         # No files should be deployed
         assert not (project / ".github" / "copilot-instructions.md").exists()
 
@@ -958,8 +1177,8 @@ class TestInstallLocalBundleIssue1207:
                 "copilot",
                 [
                     ".agents/skills/coding/SKILL.md",
-                    ".github/agents/reviewer.md",
-                    ".github/instructions/style.md",
+                    ".github/agents/reviewer.agent.md",
+                    ".github/instructions/style.instructions.md",
                 ],
             ),
             (
@@ -967,7 +1186,7 @@ class TestInstallLocalBundleIssue1207:
                 [
                     ".claude/skills/coding/SKILL.md",
                     ".claude/agents/reviewer.md",
-                    ".claude/instructions/style.md",
+                    ".claude/rules/style.md",
                 ],
             ),
             (
@@ -975,7 +1194,7 @@ class TestInstallLocalBundleIssue1207:
                 [
                     ".agents/skills/coding/SKILL.md",
                     ".cursor/agents/reviewer.md",
-                    ".cursor/instructions/style.md",
+                    ".cursor/rules/style.mdc",
                 ],
             ),
             (
@@ -990,7 +1209,7 @@ class TestInstallLocalBundleIssue1207:
                 "codex",
                 [
                     ".agents/skills/coding/SKILL.md",
-                    ".codex/agents/reviewer.md",
+                    ".codex/agents/reviewer.toml",
                     "apm_modules/test-plugin/.apm/instructions/style.md",
                 ],
             ),
@@ -1079,14 +1298,407 @@ class TestInstallLocalBundleIssue1207:
         result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
 
         assert result.exit_code == 0, f"stdout={result.output!r}"
-        # copilot side: instructions deploy verbatim to .github/instructions.
-        assert (project / ".github" / "instructions" / "style.md").is_file()
+        # copilot side: instructions deploy to the target's native suffix.
+        assert (project / ".github" / "instructions" / "style.instructions.md").is_file()
         # opencode side: instructions staged for apm compile.
         assert (
             project / "apm_modules" / "test-plugin" / ".apm" / "instructions" / "style.md"
         ).is_file()
         # Skills shared dir from both target profiles.
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+
+
+# ---------------------------------------------------------------------------
+# E2E: bundle LSP wiring through the owned lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestInstallLocalBundleLsp:
+    """Local-bundle LSP writes must preserve consent and owner lifecycle."""
+
+    @staticmethod
+    def _bundle(tmp_path: Path, *, include_skill: bool = False) -> Path:
+        lsp_json = json.dumps(
+            {
+                "lspServers": {
+                    "bundle-lsp": {
+                        "command": "bundle-language-server",
+                        "extensionToLanguage": {".bundle": "bundle"},
+                    }
+                }
+            }
+        )
+        files = {"lsp.json": lsp_json}
+        if include_skill:
+            files["skills/coding/SKILL.md"] = "# Coding Skill\n"
+        return _make_plugin_bundle(tmp_path, files=files)
+
+    @staticmethod
+    def _approve_exact_bundle(project: Path, bundle: Path) -> str:
+        from apm_cli.bundle.local_bundle import detect_local_bundle
+        from apm_cli.security.executables import local_bundle_approval_key
+
+        bundle_info = detect_local_bundle(bundle)
+        assert bundle_info is not None
+        approval_key = local_bundle_approval_key(
+            bundle_info.package_id,
+            str(bundle_info.plugin_json.get("version") or ""),
+            bundle_info.source_dir,
+            bundle_info.lockfile,
+        )
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {approval_key: {"lsp": True}}}
+        manifest_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+        return approval_key
+
+    def test_generic_identity_cannot_approve_changed_bundle_content(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {"test-plugin": {"lsp": True}}}
+        manifest_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        normalized_output = " ".join(result.output.split())
+        assert "approve this exact local bundle" in normalized_output
+        assert "test-plugin#local@sha256:" in normalized_output
+        assert not (
+            project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+
+    def test_exact_bundle_digest_approval_enables_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        approval_key = self._approve_exact_bundle(project, bundle)
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert approval_key not in result.output
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        assert "bundle-lsp" in json.loads(plugin_path.read_text())["lspServers"]
+
+    def test_unsupported_target_refuses_bundle_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source", include_skill=True)
+        project = _make_project(tmp_path / "consumer", targets=["cursor"])
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "cursor",
+            "--no-policy",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "no LSP-compatible runtime" in result.output
+        assert not (
+            project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+        assert not (project / ".agents" / "skills" / "coding" / "SKILL.md").exists()
+        lockfile = LockFile.read(project / "apm.lock.yaml")
+        assert lockfile is None or "cursor" not in lockfile.lsp_target_servers
+
+    def test_all_targets_record_only_lsp_compatible_bundle_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["all"])
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "all",
+            "--no-policy",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        lockfile = LockFile.read(project / "apm.lock.yaml")
+        assert lockfile is not None
+        assert set(lockfile.lsp_target_servers) <= {"claude", "copilot"}
+        assert "bundle-lsp" in lockfile.lsp_servers
+
+    def test_root_install_reads_source_policy_for_bundle_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        manifest_path = project / "apm.yml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        manifest["executables"] = {"allow": {}}
+        manifest_path.write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--root",
+            "out",
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Skipped 1 bundle LSP executable" in result.output
+        assert not (
+            project / "out" / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+
+    def test_root_install_reads_source_policy_for_bundle_integrity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.policy.discovery import PolicyFetchResult
+        from apm_cli.policy.schema import ApmPolicy, IntegrityPolicy, SecurityPolicy
+
+        bundle = _make_plugin_bundle(
+            tmp_path / "source",
+            files={},
+            include_lockfile=False,
+        )
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        policy = ApmPolicy(security=SecurityPolicy(integrity=IntegrityPolicy(require_hashes=True)))
+
+        def discover_policy(project_root: Path, **_kwargs) -> PolicyFetchResult:
+            if project_root == project.resolve():
+                return PolicyFetchResult(policy=policy, source="test", outcome="found")
+            return PolicyFetchResult(policy=None, source="", outcome="absent")
+
+        with patch(
+            "apm_cli.policy.install_preflight.discover_policy_with_chain",
+            side_effect=discover_policy,
+        ):
+            result = _invoke_install(
+                project,
+                str(bundle),
+                "--root",
+                "out",
+                "--target",
+                "claude",
+                monkeypatch=monkeypatch,
+            )
+
+        assert result.exit_code == 1, result.output
+        assert "requires integrity hashes" in result.output
+
+    def test_symlinked_lsp_metadata_directory_is_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_plugin_bundle(
+            tmp_path / "source",
+            files={},
+            include_lockfile=False,
+        )
+        external = tmp_path / "external-metadata"
+        external.mkdir()
+        (external / "lsp.json").write_text(
+            json.dumps(
+                {
+                    "lspServers": {
+                        "evil-lsp": {
+                            "command": "evil-language-server",
+                            "extensionToLanguage": {".evil": "evil"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        namespace = bundle / "com.microsoft.apm"
+        try:
+            namespace.symlink_to(external, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks unavailable: {exc}")
+        project = _make_project(tmp_path / "symlink-consumer", targets=["claude"])
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            "--no-policy",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert not (
+            project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+
+    def test_org_deny_overrides_exact_bundle_lsp_approval(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.policy.discovery import PolicyFetchResult
+        from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
+
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        self._approve_exact_bundle(project, bundle)
+        policy = ApmPolicy(executables=ExecutablesPolicy(deny=("test-plugin",)))
+        policy_fetch = PolicyFetchResult(policy=policy, source="test", outcome="found")
+
+        with (
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain",
+                return_value=policy_fetch,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=policy_fetch,
+            ),
+        ):
+            result = _invoke_install(
+                project,
+                str(bundle),
+                "--target",
+                "claude",
+                monkeypatch=monkeypatch,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Skipped 1 bundle LSP executable" in result.output
+        assert not (
+            project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        ).exists()
+
+    def test_copilot_aliases_are_normalized_for_bundle_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lsp_json = json.dumps(
+            {
+                "lspServers": {
+                    "bundle-lsp": {
+                        "command": "bundle-language-server",
+                        "fileExtensions": {".bundle": "bundle"},
+                        "warmupTimeoutMs": 1234,
+                    }
+                }
+            }
+        )
+        bundle = _make_plugin_bundle(
+            tmp_path / "source",
+            files={"lsp.json": lsp_json},
+        )
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, result.output
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        server = json.loads(plugin_path.read_text())["lspServers"]["bundle-lsp"]
+        assert server["extensionToLanguage"] == {".bundle": "bundle"}
+        assert server["startupTimeout"] == 1234
+
+    def test_lsp_collision_force_reconciles(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Foreign plugin content survives unless the operator passes --force."""
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+        plugin_path.parent.mkdir(parents=True)
+        foreign = b'{"name":"apm-lsp","lspServers":{"bundle-lsp":{"command":"foreign"}}}\n'
+        plugin_path.write_bytes(foreign)
+
+        refused = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert refused.exit_code != 0
+        assert plugin_path.read_bytes() == foreign
+
+        forced = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            "--force",
+            monkeypatch=monkeypatch,
+        )
+
+        assert forced.exit_code == 0, forced.output
+        plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+        assert plugin["name"] == "apm-lsp"
+        assert plugin["lspServers"]["bundle-lsp"]["command"] == "bundle-language-server"
+
+    def test_explicit_deny_revokes_previously_owned_lsp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reinstalling under a closed gate removes the bundle's old command."""
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        plugin_path = project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+
+        installed = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+        assert installed.exit_code == 0, installed.output
+        assert "bundle-lsp" in json.loads(plugin_path.read_text())["lspServers"]
+
+        manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+        manifest["allowExecutables"] = {}
+        (project / "apm.yml").write_text(
+            yaml.safe_dump(manifest, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        denied = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "claude",
+            monkeypatch=monkeypatch,
+        )
+
+        assert denied.exit_code == 0, denied.output
+        assert not plugin_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1204,6 +1816,11 @@ class TestBundleMcpWiringE2E:
 
         # ``project_root`` is the consumer project, not the bundle.
         assert Path(captured["kwargs"]["project_root"]).resolve() == project.resolve()
+        persisted = LockFile.from_yaml((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+        assert persisted.mcp_config_provenance == {
+            "filesystem": "bundle:test-plugin",
+            "github": "bundle:test-plugin",
+        }
 
     def test_bundle_without_mcp_does_not_call_integrator(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1223,12 +1840,10 @@ class TestBundleMcpWiringE2E:
         assert result.exit_code == 0, result.output
         mock_install.assert_not_called()
 
-    def test_bundle_mcp_integrator_failure_does_not_break_install(
+    def test_bundle_mcp_integrator_failure_fails_install(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """If the integrator raises, the install still succeeds with
-        a warning -- file deploys must not be undone by an MCP wiring
-        hiccup."""
+        """MCP wiring failures must fail rather than report partial success."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         bundle = self._make_mcp_bundle(tmp_path)
@@ -1241,10 +1856,9 @@ class TestBundleMcpWiringE2E:
         ):
             result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
-        # Warning should mention MCP wiring.
-        assert "MCP" in result.output or "mcp" in result.output
+        assert "integrator blew up" in result.output
 
     def test_bundle_mcp_dry_run_does_not_call_integrator(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1262,6 +1876,22 @@ class TestBundleMcpWiringE2E:
 
         assert result.exit_code == 0, result.output
         mock_install.assert_not_called()
+
+    def test_bundle_v3_lockfile_fails_before_project_mutation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path / "src", pack_target="all")
+        lock_path = bundle / "apm.lock.yaml"
+        lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        lock["lockfile_version"] = "3"
+        lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
+
+        assert result.exit_code == 2
+        assert "Unsupported lockfile version '3'; supported versions: 1, 2" in result.output
+        assert not (project / "apm.lock.yaml").exists()
 
 
 # ---------------------------------------------------------------------------

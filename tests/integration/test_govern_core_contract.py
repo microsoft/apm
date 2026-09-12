@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from unittest.mock import patch
 
 import pytest
 
@@ -26,7 +27,7 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
 ]
 
-_POLICY_SOURCE = "dev.azure.com/contoso/_apm/_apm"
+_POLICY_SOURCE = "dev.azure.com/contoso/apm/apm-policy"
 _POLICY_REMOTE = "https://dev.azure.com/contoso/project/_git/govern-contract"
 _POLICY_DIAGNOSTIC = f"Policy: org:{_POLICY_SOURCE} (cached"
 _EXPECTED_BUNDLE_FILES = {
@@ -183,9 +184,16 @@ def _write_policy_leaf(project_root: Path, strict_policy: Path) -> Path:
     return leaf
 
 
-def _policy_cache_bytes(project_root: Path) -> tuple[bytes, bytes]:
+def _policy_cache_bytes(
+    project_root: Path,
+    *,
+    env: dict[str, str],
+) -> tuple[bytes, bytes]:
     """Return the sole persisted merged-policy and metadata byte images."""
-    cache_root = _owned_path(project_root, "apm_modules/.policy-cache")
+    from apm_cli.policy.discovery import _get_cache_dir
+
+    with patch.dict(os.environ, env, clear=True):
+        cache_root = _get_cache_dir(project_root)
     metadata_paths = tuple(cache_root.glob("*.meta.json"))
     policy_paths = tuple(cache_root.glob("*.yml"))
     assert len(metadata_paths) == 1
@@ -251,7 +259,7 @@ def _run_policy_matrix(
         cwd=project_root,
         env=env,
     )
-    cold_cache_policy, cold_cache_metadata = _policy_cache_bytes(project_root)
+    cold_cache_policy, cold_cache_metadata = _policy_cache_bytes(project_root, env=env)
 
     leaf.unlink()
     warm_status = _run_expected(
@@ -270,7 +278,7 @@ def _run_policy_matrix(
         cwd=project_root,
         env=env,
     )
-    warm_cache_policy, warm_cache_metadata = _policy_cache_bytes(project_root)
+    warm_cache_policy, warm_cache_metadata = _policy_cache_bytes(project_root, env=env)
 
     return _PolicyMatrix(
         cold_status=_json_output(cold_status),
@@ -468,7 +476,7 @@ def _run_govern_contract(root: Path, binary: Path) -> _GovernReceipt:
     )
     _run_expected(
         runner,
-        ("pack", "--format", "plugin", "--offline"),
+        ("pack", "--format", "claude-plugin", "--offline"),
         expected_returncode=0,
         scenario_id="govern-pack",
         cwd=producer.root,

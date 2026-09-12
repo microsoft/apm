@@ -97,6 +97,13 @@ file lives in `hooks/` or `.apm/hooks/`, a path like
 `./hooks/run-hook.sh` resolves from the package root so the deployed
 path is not doubled.
 
+Quote the complete path when it may contain spaces:
+`"${PLUGIN_ROOT}/scripts/my hook.sh"`. A split-quoted path such as
+`"${PLUGIN_ROOT}"/scripts/my\ hook.sh` is also accepted. If a supported
+plugin-root token cannot be resolved, install names the package and explains
+whether to balance the quotes, add a relative path, or keep the path inside the
+package. Fix the package hook command, then run `apm install` again.
+
 When a hook command points at a script inside a package hook directory,
 APM deploys the hook source bundle so sibling helper modules stay
 available at runtime:
@@ -275,8 +282,8 @@ agent a procedure" fits a skill -- and reaches every harness.
   command transformer today, so any prompt-only metadata is dropped
   with a diagnostic. Keep Cursor commands to the preserved key set.
 - **Script paths.** Use `${PLUGIN_ROOT}` (or the harness-specific
-  alias) for scripts that ship inside the package. Plain absolute
-  paths break on consumers' machines.
+  alias) for scripts that ship inside the package, using the quoting forms
+  described above. Plain absolute paths break on consumers' machines.
 - **Hook script path resolution.** `apm install -g` (user-scope)
   rewrites `${PLUGIN_ROOT}` and relative `./` references to absolute
   paths so Claude Code and Copilot CLI can execute scripts regardless

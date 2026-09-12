@@ -46,7 +46,6 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 from apm_cli.models.dependency.reference import DependencyReference
-from apm_cli.utils.path_security import PathTraversalError
 
 # Two sibling subdirs under the same upstream repo+ref. Both are
 # present on github/awesome-copilot at the time of writing; if either
@@ -411,7 +410,7 @@ def test_nested_gitlab_identity_survives_cache_lock_and_deployment(
 
 def test_nested_gitlab_traversal_cannot_alias_repository_identity() -> None:
     """Encoded traversal cannot manufacture a sibling cache identity."""
-    with pytest.raises(PathTraversalError, match="traversal sequence"):
+    with pytest.raises(ValueError, match="residual percent-encoding"):
         DependencyReference.parse_from_dict(
             {
                 "git": f"{_REMOTE_A}/%252e%252e/repo-b.git",

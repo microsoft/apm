@@ -65,10 +65,11 @@ parent's remote host/repo/ref and fetches the sibling from the same origin.
 Absolute paths, paths that escape the repo root, and cross-repo local paths
 are rejected.
 
-**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over git
-transport, not the REST API, so self-hosted instances with the API disabled
-still install. Path containment is enforced on the materialized file to reject
-symlink or traversal escapes. For fallback token setup, see `authentication.md`.
+**GitLab `path:` fetch transport:** GitLab `path:` files use Git first, so
+self-hosted instances with the API disabled still install. Restricted REST
+fallback requires an exhausted plan with an executed same-origin effective
+HTTPS attempt. Path containment rejects symlink or traversal escapes.
+See [GitLab authentication and fetch policy](authentication.md#gitlab-saas-or-self-managed).
 
 ### Custom git ports
 
@@ -99,15 +100,20 @@ fallback enabled with `--allow-protocol-fallback`).
 Strict by default. Pick the transport up front; APM never silently retries
 across protocols.
 
-| Dependency form | What APM tries |
+| Dependency form | Initial transport |
 |-----------------|----------------|
-| `ssh://...` or `git@host:...` | SSH only |
-| `https://...` or `http://...` | HTTP(S) only |
-| Shorthand with `git config url.<base>.insteadOf` rewriting to SSH | SSH only |
-| Shorthand otherwise | HTTPS only |
+| `ssh://...` or `git@host:...` | SSH |
+| `https://...` or `http://...` | The explicit HTTP(S) scheme |
+| Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh`, or saved `prefer-ssh` | SSH |
+| Shorthand otherwise | HTTPS |
 
 A failed clone fails loudly, naming the URL and the protocol attempted.
-Explicit URL schemes are honored exactly.
+An explicit scheme prevents APM from selecting another protocol unless
+cross-protocol fallback is enabled. Git still applies a matching safe
+`url.<base>.insteadOf` rule to the selected URL, which may choose the same host
+over SSH or a local mirror.
+For rewrite rejection and local-mirror recovery, see
+[authentication](authentication.md).
 This includes in-repository plugins from GitLab and generic git marketplaces:
 an SSH registration is persisted as SSH `git:` and `path:`; an HTTPS
 registration remains HTTPS.
@@ -122,6 +128,10 @@ export APM_GIT_PROTOCOL=ssh            # session default
 
 `--ssh` and `--https` are mutually exclusive and apply only to shorthand.
 URLs with an explicit scheme ignore them.
+Use `apm config set prefer-ssh true` to persist the shorthand preference.
+Cross-protocol retry remains off unless `--allow-protocol-fallback`,
+`APM_ALLOW_PROTOCOL_FALLBACK=1`, or
+`apm config set allow-protocol-fallback true` enables it.
 The selected protocol also governs remote tag enumeration when APM resolves a
 Git-source semver range.
 
@@ -131,6 +141,9 @@ Match local `git clone` behavior by configuring `insteadOf` once:
 git config --global url."git@github.com:".insteadOf "https://github.com/"
 apm install owner/repo                 # APM clones over SSH
 ```
+
+Safe rewrites remain active. For rejection rules and recovery, see
+[authentication](authentication.md).
 
 Restore the legacy permissive chain (escape hatch -- not a long-term
 setting):
@@ -164,8 +177,11 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
 | `allow_insecure` | OPTIONAL | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
-| `skills` | OPTIONAL | Install only named skills from a skill bundle. |
+| `skills` | OPTIONAL | Select deployed skills, not a repo slice; use `path` for a subdirectory. |
 | `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
+
+Git [skill collections](../../../../../docs/src/content/docs/reference/package-types.md)
+with `skills/<name>/SKILL.md` support `skills: [name]` without root `apm.yml` or `SKILL.md`.
 
 Unknown fields are rejected. A Git `version` field reports an actionable error
 to use `ref` for a branch, tag, or commit; `version` belongs to registry and
@@ -253,6 +269,13 @@ path. Both survive into the concrete `git:`, `path:`, and `ref:` manifest
 entry and the lockfile. Invalid URLs or unsafe paths fail before durable
 project writes.
 
+Catalog-only entries with inline `lspServers` or `mcpServers` remain valid
+marketplace dependencies when downloaded source has no package manifest. Keep
+the consumer declaration in the object form above; catalog server fields do not
+belong in `dependencies.apm`. APM ignores unrelated catalog dependency fields
+and rejects the package if any declared server is invalid. See
+[Catalog-only marketplace packages](../../../../../docs/src/content/docs/reference/package-types.md#catalog-only-marketplace-package).
+
 If the marketplace plugin entry declares `registry`, APM creates a
 registry-sourced dependency instead of Git coordinates. Enable registry support
 with `apm experimental enable registries` and configure the named registry.
@@ -274,7 +297,8 @@ Behind `apm experimental enable registries`. Registry deps resolve over the
 REST [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
 alongside the Git resolver -- declare registries in `apm.yml` (or in
 `~/.apm/config.json`) and reference them from `dependencies.apm`. See
-`authentication.md` (Registry tokens) for `APM_REGISTRY_TOKEN_{NAME}`.
+`authentication.md` (Registry tokens) for the required user-owned URL
+binding and `APM_REGISTRY_TOKEN_{NAME}`.
 
 ```yaml
 registries:
@@ -384,7 +408,7 @@ dependency's target-scoped primitives. They compose via intersection. See
 
 - Type: list of target keys. Stable targets are `copilot`, `claude`, `grok-build`,
   `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`,
-  `opencode`, and `agent-skills`. Experimental targets are `openclaw`, `hermes`,
+  `opencode`, `agent-skills`, and `hermes`. Experimental targets are `openclaw`,
   `copilot-cowork`, `copilot-app`, and `grok-cloud`. Use `copilot`, not the
   target alias `vscode`, for Copilot-family dependency routing.
 - Default: omitted means all active install targets.
@@ -466,7 +490,8 @@ dependencies:
     # Self-defined remote with harness-specific extra keys
     # Unknown keys (e.g. oauth) are passthrough: preserved and written into
     # the generated config for EVERY installed harness. Keys that collide with
-    # a modeled field (command/url/headers/env/...) are rejected with a warning.
+    # a modeled or adapter-owned field
+    # (command/url/headers/env/enabled/environment/http_headers/id/...) are rejected.
     - name: slack
       registry: false
       transport: http
@@ -555,12 +580,27 @@ Optional fields: `args`, `transport`, `env`, `initializationOptions`,
 `settings`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`,
 `restartOnCrash`, `maxRestarts`.
 
-`apm install` writes LSP config to the detected runtime targets:
-Claude Code uses `.lsp.json` or `~/.claude.json`, and GitHub Copilot CLI
-uses `.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI
-uses `fileExtensions` on disk; manifests continue to use
-`extensionToLanguage`. Plugin `.lsp.json` files may use either a flat
-server map or a `{ "lspServers": { ... } }` envelope.
+`apm install` writes LSP config to the detected runtime targets. Claude Code
+project installs use the `lspServers` section in
+`.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs use
+`~/.claude/skills/apm-lsp/.claude-plugin/plugin.json`. GitHub Copilot CLI uses
+`.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI uses
+`fileExtensions` on disk;
+manifests continue to use `extensionToLanguage`. A dependency package's source
+`.lsp.json` may use either a flat server map or a
+`{ "lspServers": { ... } }` envelope; it is distinct from the Claude project
+plugin manifest that APM generates. Dependency-provided LSP commands require
+executable approval for the declaring package when a project or org
+`executables` block enables the gate; the compatibility default permits them
+when no layer opts in. For Copilot-dialect plugin input, APM accepts
+`fileExtensions` as an alias for `extensionToLanguage` and `warmupTimeoutMs` as
+an alias for `startupTimeout`; a non-null canonical value wins when both are
+supplied, while a null canonical value falls back to its alias. APM ignores the
+unsupported Copilot `cwd` field and warns that the consumer runtime chooses the
+working directory. Copilot output uses `fileExtensions` and `warmupTimeoutMs`;
+manifests and lockfiles retain `extensionToLanguage` and `startupTimeout`. APM
+records target-scoped LSP ownership in the lockfile so target changes and
+package uninstall revoke only entries it wrote.
 
 ## Version pinning
 

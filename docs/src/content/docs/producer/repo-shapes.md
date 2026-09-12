@@ -35,7 +35,7 @@ Scaffold:
 ```bash
 apm plugin init my-plugin --yes
 apm marketplace init --owner acme-org --name my-marketplace
-apm marketplace package add ./ --name my-plugin --version 0.1.0
+apm marketplace package add ./ --name my-plugin --version 0.1.0 --no-verify
 ```
 
 Resulting `apm.yml`:
@@ -104,7 +104,7 @@ writes `marketplace.json` only. No bundle is produced because
 
 > **Advanced.** Most first-time authors should start with single-plugin or aggregator. Reach for hybrid when you're shipping your own plugin *and* curating others. [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config) is the live reference: 7 plugins under `plugins/`, one root `apm.yml`, releases via [microsoft/apm-action@v1](https://github.com/microsoft/apm-action) `mode: release`.
 
-One repo, many plugins under `packages/`, one marketplace at the root
+One repo, many plugins under `plugins/`, one marketplace at the root
 that lists them as local-path entries. Each plugin gets its own
 `apm.yml` so it can be compiled and tested in isolation.
 
@@ -113,7 +113,7 @@ Layout:
 ```text
 my-monorepo/
   apm.yml                          # marketplace + local-path packages
-  packages/
+  plugins/
     plugin-a/
       apm.yml                      # plugin-a's manifest
       .apm/
@@ -139,28 +139,41 @@ my-monorepo/
 > including after `apm init` writes `includes: auto`. Mixed layouts pack from
 > `.apm/` and warn about each skipped root source. `apm install` only discovers
 > instructions, commands, and prompts under `.apm/<type>/`, so authoring
-> `packages/plugin-a/instructions/style.instructions.md` instead of
-> `packages/plugin-a/.apm/instructions/style.instructions.md` can install
+> `plugins/plugin-a/instructions/style.instructions.md` instead of
+> `plugins/plugin-a/.apm/instructions/style.instructions.md` can install
 > incomplete. See [Pack a bundle -- source layout and install-time
 > discovery](../pack-a-bundle/#source-layout-and-install-time-discovery)
 > for the full per-primitive scan-path reference.
 
+`plugins/` is not an APM CLI repository requirement: a package `source:` can
+point to another directory. This walkthrough uses `plugins/` because
+`microsoft/apm-action` with `mode: release` autodetects aggregator members
+only at `plugins/<name>/apm.yml`.
+
 Scaffold:
 
 ```bash
-apm plugin init plugin-a --yes              # cd packages/plugin-a first
-apm plugin init plugin-b --yes              # cd packages/plugin-b first
-cd ../..
+# From the empty my-monorepo repository root
+mkdir -p plugins
+cd plugins
+apm plugin init plugin-a --yes
+apm plugin init plugin-b --yes
+cd ..
 apm marketplace init --owner acme-org --name acme-monorepo
-apm marketplace package add ./packages/plugin-a --name plugin-a
-apm marketplace package add ./packages/plugin-b --name plugin-b
+apm marketplace package remove example-package --yes
+apm marketplace package add ./plugins/plugin-a --name plugin-a --version 0.1.0 --no-verify
+apm marketplace package add ./plugins/plugin-b --name plugin-b --version 0.1.0 --no-verify
 ```
+
+`--version` avoids resolving a Git ref, while `--no-verify` skips remote
+reachability checks for the local sources. The scaffold starts every manifest
+at `0.1.0`, satisfying the lockstep strategy below.
 
 Resulting root `apm.yml`:
 
 ```yaml
 name: acme-monorepo
-version: 1.0.0
+version: 0.1.0
 description: Acme plugins shipped together
 
 marketplace:
@@ -173,11 +186,11 @@ marketplace:
     strategy: lockstep              # see versioning-strategies
   packages:
     - name: plugin-a
-      source: ./packages/plugin-a
-      version: 1.0.0
+      source: ./plugins/plugin-a
+      version: 0.1.0
     - name: plugin-b
-      source: ./packages/plugin-b
-      version: 1.0.0
+      source: ./plugins/plugin-b
+      version: 0.1.0
 ```
 
 Local-path entries skip remote resolution. Each plugin's own

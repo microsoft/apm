@@ -3,6 +3,8 @@
 import json
 import logging
 import shutil
+from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -97,6 +99,31 @@ def _is_root_hook_descriptor(
     return stem == "hooks" or stem.startswith("hooks-") or stem.endswith("-hooks")
 
 
+def iter_deployable_hook_bundle_files(
+    source_root: Path,
+    *,
+    descriptor_files: set[Path] | None = None,
+    exclude_json_files: bool = False,
+) -> Iterator[Path]:
+    """Yield source files that hook bundle materialization may copy."""
+    descriptors = descriptor_files or set()
+    for source_file in sorted(source_root.rglob("*")):
+        if exclude_json_files and source_file.suffix.lower() == ".json":
+            _log.debug(
+                "Skipping JSON hook bundle asset %s for recursive-scanner target",
+                source_file,
+            )
+            continue
+        if (
+            source_file.is_symlink()
+            or not source_file.is_file()
+            or source_file.name in {"package.json", MARKER_FILENAME}
+            or _is_root_hook_descriptor(source_file, source_root, descriptors)
+        ):
+            continue
+        yield source_file
+
+
 def copy_deployed_hook_bundle(
     integrator: BaseIntegrator,
     *,
@@ -110,6 +137,8 @@ def copy_deployed_hook_bundle(
     target_paths: list[Path],
     hook_descriptor_files: set[Path] | None = None,
     exclude_json_files: bool = False,
+    source_plan=None,
+    selected_bundle_files: frozenset[Path],
 ) -> HookBundleCopyResult:
     """Copy each referenced script's whole hooks root and module type.
 
@@ -123,10 +152,14 @@ def copy_deployed_hook_bundle(
     CommonJS.
     """
     result = HookBundleCopyResult()
+    package_path = package_path.resolve()
+    if hook_file_dir is not None:
+        hook_file_dir = hook_file_dir.resolve()
+    selected_bundle_files = frozenset(path.resolve() for path in selected_bundle_files)
     source_target_roots: dict[tuple[Path, Path], str] = {}
     root_has_js_hook: dict[tuple[Path, Path], bool] = {}
     command_target_rels = {target_rel for _source_file, target_rel in scripts}
-    descriptor_files = hook_descriptor_files or set()
+    descriptor_files = {path.resolve() for path in hook_descriptor_files or set()}
 
     for source_file, target_rel in scripts:
         target_script = project_root / target_rel
@@ -143,19 +176,20 @@ def copy_deployed_hook_bundle(
         root_has_js_hook.setdefault((source_root, target_root), False)
 
     copy_plan: dict[str, Path] = {}
+    files_by_ancestor: dict[Path, list[Path]] = defaultdict(list)
+    for source_file in selected_bundle_files:
+        current = source_file.parent
+        while current.is_relative_to(package_path):
+            files_by_ancestor[current].append(source_file)
+            if current == package_path:
+                break
+            current = current.parent
     for source_root, target_root in source_target_roots:
-        for source_file in sorted(source_root.rglob("*")):
-            if exclude_json_files and source_file.suffix.lower() == ".json":
-                _log.debug(
-                    "Skipping JSON hook bundle asset %s for recursive-scanner target",
-                    source_file,
-                )
+        for source_file in files_by_ancestor.get(source_root, ()):
+            if source_file in descriptor_files:
                 continue
-            if (
-                source_file.is_symlink()
-                or not source_file.is_file()
-                or source_file.name in {"package.json", MARKER_FILENAME}
-                or _is_root_hook_descriptor(source_file, source_root, descriptor_files)
+            if source_plan is not None and not source_plan.includes(
+                portable_relpath(source_file, source_plan.source_root)
             ):
                 continue
             source_rel = source_file.relative_to(source_root)

@@ -15,7 +15,9 @@ apm uninstall [OPTIONS] PACKAGES...
 
 ## Description
 
-`apm uninstall` is the inverse of `apm install <package>`. It strips a package from the manifest, deletes its source from `apm_modules/`, prunes any transitive dependencies that nothing else depends on, and removes every tracked file the package deployed to configured targets.
+`apm uninstall` is the inverse of `apm install <package>`. It removes selected
+packages and unused transitive dependencies from APM-managed state,
+including `apm_modules/`, configured targets, the manifest, and the lockfile.
 
 The command only deletes files tracked in the lockfile's `deployed_files` manifest, so hand-authored content in the same harness folders is left alone.
 
@@ -90,18 +92,69 @@ apm uninstall https://github.com/acme/my-package.git
 
 What gets removed, in order:
 
-1. The package entry in `apm.yml` under `dependencies.apm` or `devDependencies.apm`.
-2. The package folder under `apm_modules/owner/repo/`.
-3. Transitive dependencies that no remaining package depends on (npm-style pruning, computed from `apm.lock.yaml`). A transitive dependency still declared by any surviving package is preserved, even when two packages share it (a diamond-shaped install). If a surviving package's manifest can't be read, APM keeps every remaining candidate for that run rather than guessing -- re-run with `--verbose` to see which manifest failed, then fix or restore it and re-run to complete cleanup.
-4. Every file in the lockfile's `deployed_files` for the removed packages and pruned orphans, across configured target-owned folders such as `.github/`, `.claude/`, `.grok/`, and `.agents/`.
-5. Hook entries inside `.claude/settings.json`, `.cursor/hooks.json`, `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages contributed. Remaining packages -- including transitive dependencies still required by another package -- have their hook entries rebuilt from the post-removal lockfile.
-6. MCP servers contributed only by the removed packages.
-7. The lockfile entries themselves. If no dependencies remain, `apm.lock.yaml` is deleted.
-8. Empty parent directories left behind by the cleanup.
+1. Package folders under `apm_modules/`, including requested packages and
+   transitive dependencies that no remaining package needs. A transitive
+   dependency still required by a surviving package is preserved, including
+   shared diamond dependencies. If a surviving package's manifest cannot be
+   read, APM keeps every remaining candidate rather than guessing. Run again
+   with `--verbose`, fix or restore the reported manifest, then retry.
+   Now-empty `apm_modules/` parent directories are cleaned at this step.
+2. Target-scoped files owned only by the removed packages, while lockfile
+   ownership is still available for safe cleanup.
+3. Package declarations in `apm.yml`.
+4. Remaining files in the lockfile's `deployed_files` for the removed packages
+   and pruned orphans, across target-owned folders such as `.github/`,
+   `.claude/`, `.grok/`, and `.agents/`.
+5. Hook entries inside `.claude/settings.json`, `.cursor/hooks.json`,
+   `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages
+   contributed. Remaining packages -- including transitive dependencies still
+   required by another package -- have their hook entries rebuilt from the
+   post-removal lockfile.
+6. MCP and LSP servers contributed only by the removed packages. For current
+   lockfiles, MCP cleanup touches only the runtimes recorded as owners in
+   `mcp_target_servers`. An explicitly empty ownership map is a no-op. Older
+   lockfiles adopt only self-defined entries that exactly match their stored
+   configuration baseline. When another surviving package declares the same LSP
+   server name, ownership transfers to that package instead of deleting the
+   shared entry. Cleanup attempts every owning runtime before exiting nonzero on
+   failure. Fix the reported configs, then run `apm install` to reconcile stale
+   entries.
+7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
 
 Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No
 matched package in the same invocation is removed. Fix the identifier and retry.
+
+If deletion of a requested or orphan materialized directory fails, or APM
+refuses an unsafe path that fails containment checks, uninstall exits 1 without
+printing `Uninstall complete`. These deletions precede all target cleanup and
+manifest or lockfile writes, so declarations, the on-disk lockfile, and deployed
+ownership remain. Earlier deletions are not rolled back.
+
+Fix permission or file-lock errors; for a containment refusal, correct the
+unsafe path instead. Retry the same `apm uninstall` command, or restore declared
+packages with `apm install` (`apm install --global` for user scope).
+
+If replacing a shared local install slot fails, uninstall also retains manifest
+and lockfile ownership. Resolve the filesystem problem and retry the same
+command; `--verbose` includes the underlying error. Earlier deletions in a
+multi-package request are not rolled back.
+
+If a target-scoped file owned only by a removed package was edited or cannot be
+deleted, uninstall lists the retained paths and exits before changing `apm.yml`
+or the on-disk `apm.lock.yaml`. Direct and orphan directories run first and may
+already be gone; declarations and deployed ownership remain. Resolve the listed
+files and retry the same uninstall command.
+
+If a managed hook changes after the initial check or is beneath a symlinked
+parent, uninstall preserves and lists the path. Package removal finishes, but the
+command exits nonzero because hook cleanup is incomplete. Inspect or repair the
+path before removing anything manually.
+
+If safe LSP cleanup fails after package removal, uninstall exits nonzero,
+preserves the conflicting configuration, and tells you to repair the path or
+ownership conflict. Run `apm install` to reconcile project state, or
+`apm install --global` after a global uninstall.
 
 `_local/<name>` is resolved from the manifest and lockfile metadata that produced
 the `apm deps list` row. APM does not reinterpret it as `owner/repo` or rebuild an

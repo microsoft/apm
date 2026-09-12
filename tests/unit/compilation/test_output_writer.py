@@ -55,6 +55,22 @@ def test_passes_through_content_without_placeholder(tmp_path: Path):
     assert target.read_text(encoding="utf-8") == content
 
 
+def test_preserves_line_endings_per_output_in_a_batch(tmp_path: Path):
+    managed_target = tmp_path / "managed" / "AGENTS.md"
+    generated_target = tmp_path / "generated" / "AGENTS.md"
+
+    CompiledOutputWriter().write_many(
+        {
+            managed_target: "Hand-authored\r\ncontent\r\n",
+            generated_target: "Generated\r\ncontent\r\n",
+        },
+        preserve_line_endings={managed_target: True, generated_target: False},
+    )
+
+    assert managed_target.read_bytes() == b"Hand-authored\r\ncontent\r\n"
+    assert generated_target.read_bytes() == b"Generated\ncontent\n"
+
+
 def test_raises_when_placeholder_unresolvable(tmp_path: Path, monkeypatch):
     """Defense-in-depth: if a future code path mutates content so the
     placeholder survives stabilization, the writer must refuse to persist.

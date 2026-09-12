@@ -442,7 +442,11 @@ class TestPluginManifestProducer:
 
     def test_produces_claude_plugin_json(self, tmp_path: Path) -> None:
         apm = self._apm_yml(tmp_path, "claude")
-        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            bundle_format="claude-plugin",
+        )
 
         result = PluginManifestProducer().produce(opts, logger=None)
 
@@ -460,7 +464,7 @@ class TestPluginManifestProducer:
         assert expected in result.outputs
         assert expected.exists()
 
-    def test_produces_both_when_target_has_both(self, tmp_path: Path) -> None:
+    def test_default_legacy_mode_produces_both_sidecars(self, tmp_path: Path) -> None:
         apm = tmp_path / "apm.yml"
         _write(
             apm,
@@ -476,6 +480,23 @@ class TestPluginManifestProducer:
         assert copilot_out in result.outputs
         assert claude_out.exists()
         assert copilot_out.exists()
+
+    def test_explicit_agent_mode_only_produces_copilot_sidecar(self, tmp_path: Path) -> None:
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: test-plugin\nversion: 1.0.0\ndescription: d\ntarget: [claude, copilot]\n",
+        )
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            bundle_format="agent-plugin",
+        )
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        assert (tmp_path / ".github" / "plugin" / "plugin.json") in result.outputs
+        assert not (tmp_path / ".claude-plugin" / "plugin.json").exists()
 
     def test_deduplicates_by_output_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -503,7 +524,12 @@ class TestPluginManifestProducer:
 
     def test_dry_run_does_not_write_files(self, tmp_path: Path) -> None:
         apm = self._apm_yml(tmp_path, "claude")
-        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, dry_run=True)
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            bundle_format="claude-plugin",
+            dry_run=True,
+        )
 
         result = PluginManifestProducer().produce(opts, logger=None)
 
@@ -541,7 +567,11 @@ class TestPluginManifestProducer:
         apm = self._apm_yml(tmp_path, "claude")
         existing = tmp_path / ".claude-plugin" / "plugin.json"
         _write(existing, '{"name": "hand-authored"}')
-        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            bundle_format="claude-plugin",
+        )
 
         result = PluginManifestProducer().produce(opts, logger=None)
 
@@ -553,7 +583,12 @@ class TestPluginManifestProducer:
         apm = self._apm_yml(tmp_path, "claude")
         existing = tmp_path / ".claude-plugin" / "plugin.json"
         _write(existing, '{"name": "hand-authored"}')
-        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, bundle_force=True)
+        opts = BuildOptions(
+            project_root=tmp_path,
+            apm_yml_path=apm,
+            bundle_format="claude-plugin",
+            bundle_force=True,
+        )
 
         result = PluginManifestProducer().produce(opts, logger=None)
 

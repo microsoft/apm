@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "contract-plugin",
+  "version": "1.0.0",
+  "description": "Hermetic Agent Plugins contract fixture",
+  "extensions": {
+    "com.microsoft.apm": {
+      "schemaVersion": "1"
+    }
+  }
+}

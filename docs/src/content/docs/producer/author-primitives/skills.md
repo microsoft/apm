@@ -109,6 +109,8 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 | `windsurf`        | `.agents/skills/<name>/SKILL.md`             |
 | `agent-skills`    | `.agents/skills/<name>/SKILL.md` (explicit)  |
 
+For user-scope locations, see the [Targets matrix](../../../reference/targets-matrix/).
+
 Seven harnesses converge on the cross-tool `.agents/skills/`
 directory. Claude, Kiro, and Grok Build keep their harness-native paths
 (`.claude/skills/`, `.kiro/skills/`, `.grok/skills/`) because those clients' default
