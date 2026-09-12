@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm compile --target claude` now includes `CLAUDE.md` imports for Azure DevOps three-level dependency paths (`apm_modules/org/project/repo`), matching GitHub two-level packages. (#2951)
+
 ### Added
 
 - `apm init --discover` previews existing agent content; consented `--apply` declares supported local packages without changing source files, ready for a separate `apm install`. Builds on discovery work by @chkp-roniz in #2857. (#2937)
