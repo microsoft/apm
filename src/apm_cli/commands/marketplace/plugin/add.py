@@ -37,6 +37,7 @@ from . import (
 @click.option("-s", "--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
 @click.option("--tags", default=None, help="Comma-separated tags")
+@click.option("--category", default=None, help="Marketplace category")
 @click.option("--include-prerelease", is_flag=True, help="Include prerelease versions")
 @click.option("--no-verify", is_flag=True, help="Skip remote reachability check")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
@@ -49,6 +50,7 @@ def add(
     subdir,
     tag_pattern,
     tags,
+    category,
     include_prerelease,
     no_verify,
     verbose,
@@ -87,6 +89,7 @@ def add(
             tag_pattern=tag_pattern,
             tags=parsed_tags,
             include_prerelease=include_prerelease,
+            category=category,
         )
     except MarketplaceYmlError as exc:
         logger.error(str(exc), symbol="error")
