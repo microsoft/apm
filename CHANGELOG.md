@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve unmanaged Claude and Kiro skills when uninstalling an MCP-only package whose lockfile has no deployed files. — by @mfroembgen (#2947)
+
 ### Added
 
 - `apm init --discover` previews existing agent content; consented `--apply` declares supported local packages without changing source files, ready for a separate `apm install`. Builds on discovery work by @chkp-roniz in #2857. (#2937)
