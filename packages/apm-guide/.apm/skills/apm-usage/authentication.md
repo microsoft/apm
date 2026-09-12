@@ -13,26 +13,32 @@ Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the
 Managed GitHub, GitLab, and Azure DevOps credentials use process-scoped
 Authorization headers. They are never embedded in Git URL userinfo.
 
-Before each dependency Git operation that consumes a remote URL, APM rejects a
-matching rewrite that embeds credentials, downgrades to insecure transports such
-as `http://` or `git://`, selects remote-helper syntax such as `ext::` or
-`https::`, or redirects any network remote to another host, regardless of host
-class. A managed HTTPS credential cannot cross a scheme, host, or port boundary.
-Same-host SSH and local-mirror selections remain credential-free. Inspect
-rejected rules with:
+Before each dependency Git operation that uses a remote URL, APM checks the
+longest matching rewrite. It rejects rewrites that embed credentials, switch to
+insecure transports such as `http://` or `git://`, use remote-helper syntax
+such as `ext::` or `https::`, or send a network remote to a different host. A
+managed HTTPS credential cannot cross a scheme, host, or port boundary.
+Same-host SSH rewrites and local mirrors remain credential-free.
+
+If a rewrite is rejected and it should be safe, inspect the effective Git
+config and matching `insteadOf` rules, then retry:
 
 ```bash
 git config --show-origin --get-regexp '^url\..*\.insteadOf$'
 ```
 
+Remove or replace the rule only if it is unsafe or misconfigured.
+
 If the selected rewrite is a `file://` mirror and the clone fails, verify that
 the local path exists and is readable. Fix or remove that rewrite; host
 credentials cannot repair a missing local mirror.
 
-APM snapshots effective Git config, validates the longest matching rewrite, and
-freezes the result for the child. It drops malformed ambient HTTP headers before
-applying an anonymous empty-header fence or one path-scoped AuthResolver header.
-Dependency clones ignore Git templates and checkout hooks.
+APM snapshots the effective Git config, validates the longest matching rewrite,
+and passes that fixed result to the child Git process. It drops malformed
+ambient HTTP headers before it applies either an anonymous empty-header fence or
+one path-scoped AuthResolver header. For effective URLs outside HTTP(S), APM
+skips the `http.extraHeader` URL-match probe. Dependency clones ignore Git
+templates and checkout hooks.
 
 When fallback is required, APM checks these sources in order:
 

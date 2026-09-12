@@ -41,15 +41,25 @@ every cross-host network target, regardless of host class. A managed HTTPS
 credential also cannot cross a scheme, host, or port boundary. Same-host SSH and
 local-mirror selections remain credential-free.
 
-If a rewrite is rejected, find its source and remove or replace it:
+If a rewrite is rejected, inspect the matching rules first:
 
 ```bash
 git config --show-origin --get-regexp '^url\..*\.insteadOf$'
 ```
 
+APM only runs the `http.extraHeader` URL-match probe when the effective
+rewritten URL is HTTP(S). Safe same-host SSH rewrites remain
+credential-free, so a same-host SSH target does not use that probe.
+Confirm that the longest matching rule keeps the target on the same host
+and does not introduce credentials or an insecure transport, then retry.
+If a rewrite that should be safe still cannot be verified, fix the
+matching rule or the config that sets it before removing a rule that may
+be safe.
+
 If the selected rewrite is a `file://` mirror and the clone fails, verify that
-the local path exists and is readable. Fix or remove that rewrite; configuring
-an SSH key or token does not repair a missing local mirror.
+the local path exists and is readable. Fix that rewrite or remove it if the
+mirror is stale; configuring an SSH key or token does not repair a missing
+local mirror.
 
 APM snapshots the effective Git config, validates the longest matching rewrite,
 and freezes the result for the child process. It drops malformed ambient HTTP

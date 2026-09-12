@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** after consumers re-vendor the shared gh-aw `apm.md`, its import requires an explicit `target` instead of deprecated `all`; `apm-action` otherwise writes `all` into the isolated `apm.yml`, where it degrades to auto-detection without harness markers. Set the workflow engine's target and recompile; see the [gh-aw migration recipe](https://microsoft.github.io/apm/integrations/gh-aw/#shared-apmmd-import-recommended). (#2706)
 - Re-vendored shared gh-aw workflows now default to APM 0.28.0 for both pack and restore, the version used for the recorded `microsoft/apm-action@v1.10.0` compatibility proof, not the latest CLI release; an explicit `apm-version` still overrides it. (#2706)
 
+### Fixed
+
+- Installing a private Git dependency no longer fails with `Unable to verify Git URL rewrite safety` when a `url.<ssh-target>.insteadOf` rule rewrites the fetched HTTPS URL to SSH. The `http.extraHeader` URL-match probe now runs only for HTTP(S) effective URLs, because Git rejects SCP-style targets such as `git@github.com:owner/repo`. (#2906)
+
 ### Security
 
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
