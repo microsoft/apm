@@ -16,7 +16,8 @@
 #   "Merge Gate / gate"; this script verifies all underlying checks.
 #
 # Inputs (environment variables):
-#   GH_TOKEN          required. Token with 'checks:read' for the repo.
+#   GH_TOKEN          required. Token with checks, actions, and security-events read.
+#   GITHUB_*          runner-owned event metadata for the trusted CodeQL policy.
 #   REPO              required. owner/repo (e.g. microsoft/apm).
 #   SHA               required. Head SHA to poll (PR head, merge_group temp
 #                     branch head, or workflow_dispatch-resolved PR head).
@@ -85,6 +86,10 @@ done
 deadline=$(( $(date +%s) + TIMEOUT_MIN * 60 ))
 poll_count=0
 
+# This script and the policy are both checked out from the immutable base commit.
+# The first rollout PR therefore keeps the old gate until its implementation lands.
+python3 "$(dirname "$0")/codeql_policy.py" --deadline "$deadline"
+
 echo "[merge-gate] waiting for ${#checks[@]} check(s) on ${REPO}@${SHA}"
 for c in "${checks[@]}"; do
   echo "[merge-gate]   - ${c}"
@@ -143,6 +148,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   done
 
   if [ "$pending_count" -eq 0 ]; then
+    python3 "$(dirname "$0")/codeql_policy.py" --deadline "$deadline"
     echo "[merge-gate] all ${#checks[@]} check(s) completed successfully"
     exit 0
   fi
