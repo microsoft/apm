@@ -53,7 +53,9 @@ class SkillSpectorAdapter:
     #: Flag names a user may pass through via ``--external-args`` /
     #: ``external.skillspector.args``. Deliberately narrow: only tuning knobs
     #: that neither write files, load external rulesets/code, nor carry
-    #: credentials. Everything else is rejected fail-closed (see
+    #: credentials. ``--baseline`` is the single path-valued entry: SkillSpector
+    #: only reads that file, and it is kept inside the scan directory like any
+    #: other path value. Everything else is rejected fail-closed (see
     #: :func:`options.validate_extra_args`).
     ALLOWED_ARG_PREFIXES = frozenset(
         {
@@ -66,8 +68,15 @@ class SkillSpectorAdapter:
             "--language",
             "--exclude",
             "--include",
+            "--baseline",
         }
     )
+
+    #: Allowlisted flags that must carry exactly one value. ``extra_args`` are
+    #: appended before the positional scan targets, so a bare ``--baseline``
+    #: would make SkillSpector read the first target as the baseline path and
+    #: silently scan one path fewer (see :func:`options.validate_value_arity`).
+    VALUE_REQUIRED_ARG_PREFIXES = frozenset({"--baseline"})
 
     def is_available(self, *, options: ScannerOptions | None = None) -> tuple[bool, str | None]:
         """Available iff the binary is on PATH (and, under LLM, a key is set)."""
@@ -98,7 +107,7 @@ class SkillSpectorAdapter:
         self, paths: list[Path], *, options: ScannerOptions | None = None
     ) -> dict[str, list[ScanFinding]]:
         """Invoke SkillSpector over *paths* and parse its SARIF output."""
-        from .options import ScannerOptions, validate_extra_args
+        from .options import ScannerOptions, validate_extra_args, validate_value_arity
         from .sarif_ingest import sarif_to_findings
 
         if options is None:
@@ -122,6 +131,12 @@ class SkillSpectorAdapter:
             self.name,
             options.extra_args,
             self.ALLOWED_ARG_PREFIXES,
+            base_dir=Path.cwd(),
+        )
+        extra_args = validate_value_arity(
+            self.name,
+            extra_args,
+            self.VALUE_REQUIRED_ARG_PREFIXES,
             base_dir=Path.cwd(),
         )
 

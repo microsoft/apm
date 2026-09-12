@@ -20,6 +20,9 @@ injecting argv or forcing outbound network egress.
 each adapter declares a small allowlist of safe flag prefixes, and any token
 that is not allowed, names a secret, or is a path escaping the scan root is
 rejected fail-closed (raising :class:`ExternalScanError`).
+
+:func:`validate_value_arity` is a second, optional pass an adapter runs after
+that gate when one of its allowlisted flags must carry exactly one value.
 """
 
 from __future__ import annotations
@@ -175,5 +178,91 @@ def validate_extra_args(
             raise ExternalScanError(
                 f"External scanner '{name}': path argument '{token}' must stay "
                 f"within the scan directory."
+            )
+    return args
+
+
+def _reject_escaping_value(name: str, flag: str, value: str, base_dir: Path) -> None:
+    """Reject a declared path value that resolves outside *base_dir*.
+
+    :func:`_value_escapes_root` deliberately treats a separator-free token as a
+    non-path, which is right for tuning knobs like ``--model gpt-4o``.  A flag
+    declared path-valued is different: ``--baseline .skillspector-baseline.yaml``
+    is a path even though it carries no separator, and if that name is a symlink
+    to a file outside the scan directory the scanner would read outside it.  So
+    resolve every declared path value, separators or not.
+    """
+    from ...utils.path_security import ensure_path_within
+
+    try:
+        ensure_path_within(base_dir / value, base_dir)
+    except (ValueError, OSError) as exc:
+        raise ExternalScanError(
+            f"External scanner '{name}': argument '{flag}' value '{value}' resolves "
+            f"outside the scan directory."
+        ) from exc
+
+
+def validate_value_arity(
+    name: str,
+    args: tuple[str, ...],
+    value_required_prefixes: frozenset[str],
+    *,
+    base_dir: Path,
+) -> tuple[str, ...]:
+    """Require each flag in *value_required_prefixes* to carry exactly one value.
+
+    Run this *after* :func:`validate_extra_args`, which owns the allowlist.
+    That pass skips containment for separator-free tokens, so this one resolves
+    every declared path value itself (see :func:`_reject_escaping_value`).  Arity
+    matters
+    because adapters append ``extra_args`` **before** their positional targets:
+    a flag left without a value would make the scanner consume the first target
+    as that value, silently scanning one path fewer.  A stray second value is
+    rejected for the mirror reason -- the scanner would read it as an extra
+    target.
+
+    Both spellings are accepted: ``--flag=value`` and ``--flag`` ``value``.
+
+    Args:
+        name: Scanner name, for error messages.
+        args: Argv tokens already checked by :func:`validate_extra_args`.
+        value_required_prefixes: Flag names that must carry exactly one value.
+
+    Returns:
+        The validated *args* unchanged.
+
+    Raises:
+        ExternalScanError: When such a flag carries no value or a second one.
+    """
+    index = 0
+    while index < len(args):
+        token = args[index]
+        index += 1
+        flag_name, separator, inline_value = token.partition("=")
+        if flag_name not in value_required_prefixes:
+            continue
+        missing = (
+            f"External scanner '{name}': argument '{flag_name}' requires exactly "
+            f"one value (e.g. '{flag_name} path/to/baseline')."
+        )
+        if separator:
+            if not inline_value:
+                raise ExternalScanError(missing)
+            _reject_escaping_value(name, flag_name, inline_value, base_dir)
+            if index < len(args) and not args[index].startswith("-"):
+                raise ExternalScanError(
+                    f"External scanner '{name}': argument '{flag_name}' takes exactly one "
+                    f"value, but a second value '{args[index]}' followed it."
+                )
+            continue
+        if index >= len(args) or args[index].startswith("-"):
+            raise ExternalScanError(missing)
+        _reject_escaping_value(name, flag_name, args[index], base_dir)
+        index += 1
+        if index < len(args) and not args[index].startswith("-"):
+            raise ExternalScanError(
+                f"External scanner '{name}': argument '{flag_name}' takes exactly one "
+                f"value, but a second value '{args[index]}' followed it."
             )
     return args

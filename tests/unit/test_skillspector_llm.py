@@ -8,6 +8,8 @@ Covers the behaviour added by the scanner-config surface:
 * the subprocess env drops LLM keys offline (env minimisation) and stderr is
   secret-redacted before reaching an error message.
 * argv is always a list (no ``shell=True``).
+* ``--baseline`` is allowlisted, must carry exactly one value, and may not
+  point outside the working directory.
 """
 
 from __future__ import annotations
@@ -137,3 +139,74 @@ class TestCredentialHygiene:
         monkeypatch.setattr(mod.subprocess, "run", _raise)
         with pytest.raises(ExternalScanError, match="timed out"):
             mod.SkillSpectorAdapter().scan([Path(".")], options=ScannerOptions())
+
+
+class TestBaselinePassthrough:
+    """``--baseline`` carries a SkillSpector suppression baseline (issue #2331)."""
+
+    def test_baseline_inside_working_directory_reaches_argv(self, monkeypatch, tmp_path) -> None:
+        captured = _capture_run(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".skillspector-baseline.yaml").write_text("suppressions: []\n")
+
+        mod.SkillSpectorAdapter().scan(
+            [Path("pkg")],
+            options=ScannerOptions(extra_args=("--baseline", ".skillspector-baseline.yaml")),
+        )
+
+        cmd = list(captured["cmd"])
+        assert cmd[cmd.index("--baseline") + 1] == ".skillspector-baseline.yaml"
+        assert cmd.index("--baseline") < cmd.index("pkg")
+        assert cmd[-1] == "pkg"
+
+    def test_baseline_inline_value_reaches_argv(self, monkeypatch, tmp_path) -> None:
+        captured = _capture_run(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "base.yaml").write_text("suppressions: []\n")
+
+        mod.SkillSpectorAdapter().scan(
+            [Path(".")], options=ScannerOptions(extra_args=("--baseline=base.yaml",))
+        )
+        assert "--baseline=base.yaml" in captured["cmd"]
+
+    def test_baseline_without_value_rejected(self, monkeypatch, tmp_path) -> None:
+        _capture_run(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ExternalScanError, match=r"requires exactly one value"):
+            mod.SkillSpectorAdapter().scan(
+                [Path(".")], options=ScannerOptions(extra_args=("--baseline",))
+            )
+
+    def test_baseline_with_two_values_rejected(self, monkeypatch, tmp_path) -> None:
+        _capture_run(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ExternalScanError, match=r"second value"):
+            mod.SkillSpectorAdapter().scan(
+                [Path(".")],
+                options=ScannerOptions(extra_args=("--baseline", "a.yaml", "b.yaml")),
+            )
+
+    def test_absolute_baseline_path_rejected(self, monkeypatch, tmp_path) -> None:
+        _capture_run(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        outside = tmp_path.parent / "outside.yaml"
+        with pytest.raises(ExternalScanError, match=r"scan directory"):
+            mod.SkillSpectorAdapter().scan(
+                [Path(".")],
+                options=ScannerOptions(extra_args=("--baseline", str(outside))),
+            )
+
+    def test_relative_escape_baseline_path_rejected(self, monkeypatch, tmp_path) -> None:
+        _capture_run(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ExternalScanError, match=r"scan directory"):
+            mod.SkillSpectorAdapter().scan(
+                [Path(".")],
+                options=ScannerOptions(extra_args=("--baseline", "../outside.yaml")),
+            )
+
+    def test_no_baseline_leaves_argv_unchanged(self, monkeypatch, tmp_path) -> None:
+        captured = _capture_run(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        mod.SkillSpectorAdapter().scan([Path(".")], options=ScannerOptions())
+        assert list(captured["cmd"])[1:] == ["scan", "--format", "sarif", "--no-llm", "."]
