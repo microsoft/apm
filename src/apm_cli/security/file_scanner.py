@@ -128,7 +128,7 @@ def _scan_deployed_trees(
     project_root: Path,
     targets: Sequence[TargetProfile] = (),
 ) -> _FileScanResult:
-    """Scan every file under the deploy trees this project's targets govern.
+    """Scan every file under the deploy directories this project's targets govern.
 
     Hash verification has to be manifest-driven: comparing a hash needs a
     recorded baseline to compare against. Hidden-Unicode detection does not --
@@ -138,15 +138,24 @@ def _scan_deployed_trees(
     scope narrowed (issue #2379). For this signal the deploy tree is the
     boundary, not manifest membership.
 
-    Targets are resolved from the project, which is sufficient: a deploy tree
-    absent from disk has nothing to scan, and one present on disk is exactly
-    what ``detect_by_dir`` resolution keys on. Sources under ``.apm/`` are not
-    in scope here -- the install-time pre-deployment gate owns those.
+    Callers holding scope-resolved *targets* pass them: a global audit's
+    user-scope roots (``~/.copilot``) are not what a fresh project-scope
+    resolution returns. Without them, targets are resolved from the project,
+    which is sufficient: a deploy tree absent from disk has nothing to scan,
+    and one present on disk is exactly what ``detect_by_dir`` resolution keys
+    on. Sources under ``.apm/`` are not in scope here -- the install-time
+    pre-deployment gate owns those.
+
+    The walk is bounded to each target's primitive deploy directories and
+    generated files rather than its whole root: at user scope a root such as
+    ``~/.claude`` also holds session transcripts APM never deploys, and
+    walking those costs minutes for no signal the audit can remediate.
     """
     from ..install.manifest_reconcile import install_governance
     from ..integration.targets import resolve_targets
 
-    file_prefixes, _uri_schemes = install_governance(resolve_targets(project_root))
+    scoped = list(targets) if targets else resolve_targets(project_root)
+    file_prefixes, _uri_schemes = install_governance(scoped, bounded=True)
     result = _empty_scan()
 
     for rel_path in _minimal_governed_prefixes(file_prefixes):
