@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2938)
+- Cursor instruction output now ports a universal `applyTo: "**"` to
+  `alwaysApply: true` instead of `globs: "**"`, preserving always-on intent
+  while leaving scoped globs unchanged. (by @WilliamK112, closes #1744)
 
 ## [0.30.0] - 2026-09-07
 
