@@ -1161,6 +1161,25 @@ def test_owner_rules_report_nothing_before_mutation(
     assert baseline_violated_rule_ids == frozenset()
 
 
+def test_ref_freshness_guard_rejects_unconditional_cache_publication() -> None:
+    """A checkout must not promote a lock pin into a fresh named observation."""
+    path = "src/apm_cli/deps/github_downloader.py"
+    source = _source(path)
+    old = "resolver.remotely_resolved(dep_ref, locked_sha) is True"
+    assert source.count(old) == 1
+    mutated = source.replace(old, "True", 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(
+        ROOT,
+        ("transport-platform-ref-freshness",),
+        source_overrides={path: mutated},
+    )
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == "transport-platform-ref-freshness" for violation in report.violations
+    )
+
+
 def test_git_semver_guard_rejects_bypassing_selected_attempt_requested_url() -> None:
     """AC13 must retain the selected transport attempt as the requested-URL owner."""
     path = "src/apm_cli/install/helpers/ref_reuse.py"

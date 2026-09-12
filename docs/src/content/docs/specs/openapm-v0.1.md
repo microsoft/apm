@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **122 normative statements (117 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **123 normative statements (118 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -544,8 +544,39 @@ and MUST NOT use both on the same entry.
 | `version`| yes (registry form)                     | Opaque version selector; semver range when registry publishes semver. |
 | `ref`    | no                                      | Branch, tag, semver range, or commit SHA (git form).                  |
 | `path`   | no / yes (local form)                   | Subpath within repo, or local filesystem path.                        |
-| `alias`  | no                                      | Local alias.                                                          |
+| `alias`  | no                                      | Local install-directory override; see [req-mf-025](#req-mf-025).        |
 | `skills` | no                                      | Skill-subset selection for dependencies that expose selectable skills (see [Section 8.1](#81-primitive-types)). |
+
+<a id="req-mf-025"></a>
+**[req-mf-025]** A conforming **consumer** implementation that supports
+dependency aliases MUST validate a supplied alias, after trimming surrounding
+whitespace, as a non-empty string containing only ASCII letters, digits,
+periods, underscores, and hyphens, excluding the reserved names `.` and `..`.
+It MUST reject an invalid alias with a diagnostic identifying the alias.
+Names such as `.safe`, `safe.`, `foo..bar`, and `my-skill.v2` remain valid.
+The alias selects a directory directly below `apm_modules`; before using
+that destination, the consumer MUST reject a path that resolves, including
+through symlinks, to `apm_modules` itself or outside it.
+
+An alias changes placement, not repository identity, source path, or revision.
+The validated, trimmed token, preserving ASCII case and periods, is the
+canonical alias used for placement and lock emission. Trimming is permitted
+canonicalization under [req-cf-001](#req-cf-001); subsequent round trips preserve
+the canonical token. The lock-entry schema describes canonical writer output;
+readers trim input before validation.
+Consumers MUST preserve the resolved dependency reference's canonical alias in its lock entry and
+restore it for subsequent materialization, replay, and removal. Lock readers
+MUST apply the same alias validation. An absent alias retains the existing
+unaliased layout; consumers MUST NOT infer an alias from package inventory
+such as `name`. Local source references, including `../sibling`, retain
+their declaring source anchor independently of alias placement. This
+requirement does not expand source-path permissions; repository-relative
+references in remote packages remain bounded by the authenticated clone root.
+
+Alias support follows the optional-feature disclosure in
+[Section 11.2](#112-how-to-claim-conformance). Older readers may preserve
+the unknown `alias` field without implementing its placement semantics;
+field preservation alone does not establish alias lifecycle support.
 
 <a id="req-mf-011"></a>
 **[req-mf-011]** A conforming **consumer** implementation MUST reject
@@ -790,6 +821,7 @@ This section's normative statements are:
   [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
+  [req-mf-025](#req-mf-025),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-tg-004](#req-tg-004), [req-sc-006](#req-sc-006).
@@ -848,6 +880,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 |---------------------------|---------------------------------------------------------------------------------|
 | `repo_url`                | Canonical repo identity. REQUIRED for git-sourced entries. Cache isolation additionally follows [req-rs-016](#req-rs-016). |
 | `materialization_repo_url` | Optional source-cased repository identifier following the same host/owner/repo-path grammar as `repo_url`, used to reconstruct materialization and generated-link paths. See [req-lk-022](#req-lk-022). |
+| `alias`                   | Optional validated install-directory override, independent of source identity and inventory `name`. See [req-mf-025](#req-mf-025). |
 | `host`                    | FQDN when not inferable from `repo_url`.                                        |
 | `port`                    | Non-standard port. Validated to `1..65535` on read.                             |
 | `registry_prefix`         | Path prefix when resolved via registry proxy.                                   |
@@ -3155,6 +3188,9 @@ to its registered deploy root(s). The self-entry isolation in
 [Section 5.3](#53-self-entry-semantics) prevents the cleanup logic
 of one dependency from claiming the project's own files. Orphan
 detection MUST scope per-dependency, not globally.
+For supported dependency aliases, [req-mf-025](#req-mf-025) constrains
+destinations and records canonical placement for later cleanup. Containment
+alone does not establish ownership or authorize deletion of existing content.
 
 ### 10.8 Policy bypass via crafted manifest
 
@@ -3219,7 +3255,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
-| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); self-entry isolation | Consumer-default  |
+| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021); [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010), [req-pl-018](#req-pl-018) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
@@ -3460,6 +3496,7 @@ conformance statement identifying:
 [req-mf-019](#req-mf-019), [req-mf-020](#req-mf-020),
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
 [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
+[req-mf-025](#req-mf-025),
 [req-ext-001](#req-ext-001),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -3773,31 +3810,40 @@ provided under the published docs site:
 | `https://microsoft.github.io/apm/spec/latest`       | Newest ratified version      | Human citation in prose. Toolchains MUST NOT pin to `latest`; pin to a versioned URL. |
 | `https://microsoft.github.io/apm/spec`              | Alias of `latest`            | Short prose citation. Same restriction as `latest` -- do not pin tooling. |
 
-The JSON Schemas published alongside this specification (Appendix
-A) are themselves identified by the `$id` URL embedded in each
-schema. Toolchains MUST pin to the `$id` URL verbatim; the schema
-files are byte-immortal at those URLs for the lifetime of this
-version.
+Each schema's embedded `$id` identifies it. Toolchains MUST pin to that
+URL verbatim; schema files are byte-immortal there for this version's
+lifetime. The published [`manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json) and
+[`lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json) URLs and bytes remain unchanged and available;
+[Appendix A](#appendix-a-normative-json-schemas-inline) selects this
+amendment's distinct resources.
 
 ## Appendix A. Normative JSON Schemas (inline)
 
-The machine-readable schemas backing this specification are
-published alongside this document and are normative.
+The schemas below define this specification's normative structural contract.
+
+:::note[Planned]
+Amendment 0.1.41 selects new, independent manifest and lockfile resources
+with distinct `$id` URLs. Human approval and the public comment period under
+[Section 9.3](#93-amendment-process) remain pending; listing these URLs does
+not establish approval or publication.
+:::
 
 | Schema                | Authoritative source (in-tree)                                                                       |
 |-----------------------|------------------------------------------------------------------------------------------------------|
-| Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.schema.json`](/apm/specs/schemas/manifest-v0.1.schema.json) (JSON Schema 2020-12).    |
-| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json) (JSON Schema 2020-12). |
+| Manifest (`apm.yml`)  | [`schemas/manifest-v0.1.41.schema.json`](/apm/specs/schemas/manifest-v0.1.41.schema.json) (JSON Schema 2020-12).    |
+| Lockfile (`apm.lock.yaml`) | [`schemas/lockfile-v0.1.41.schema.json`](/apm/specs/schemas/lockfile-v0.1.41.schema.json) (JSON Schema 2020-12). |
 | Policy (`apm-policy.yml`) | [`schemas/policy-v0.1.schema.json`](/apm/specs/schemas/policy-v0.1.schema.json) (JSON Schema 2020-12).   |
 | Claude-Code marketplace (informational, emitted output) | `tests/fixtures/schemas/claude-code-marketplace.schema.json`         |
 | Claude-Code plugin (informational, emitted output)      | `tests/fixtures/schemas/claude-code-plugin.schema.json`              |
 
-The reference Python validator `src/apm_cli/policy/schema.py`
-remains in-tree as a **non-normative cross-reference** for
-implementers; the JSON Schema is authoritative. Schemas for
-manifest and lockfile validation are JSON-Schema-only in v0.1; a
-reference Python validator MAY be added in a future minor revision
-without normative effect.
+Consumers checking the structural constraints for [req-mf-025](#req-mf-025)
+choose the distinct 0.1.41 `$id` URLs above. Validation against the older
+structural schemas does not waive newer prose or runtime requirements.
+
+`src/apm_cli/policy/schema.py` is a **non-normative cross-reference**;
+the policy JSON Schema is authoritative. Manifest and lockfile validation
+are JSON-Schema-only in v0.1; a reference Python validator MAY be added
+in a future minor revision without normative effect.
 
 Where a JSON Schema and the prose of this specification disagree,
 the **prose** is authoritative and the schema is treated as an
@@ -3862,6 +3908,7 @@ renumbering of conformance classes.
 | [req-mf-022](#req-mf-022)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-023](#req-mf-023)                | MUST    | 4.5     | consumer    |
 | [req-mf-024](#req-mf-024)                | MUST    | 4.3.2   | consumer    |
+| [req-mf-025](#req-mf-025)                | MUST    | 4.3.2   | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-lk-001](#req-lk-001)                | MUST    | 5.1     | consumer    |
@@ -3961,7 +4008,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 122** (117 MUST, 5 SHOULD).
+**Total normative statements: 123** (118 MUST, 5 SHOULD).
 
 ---
 
@@ -4011,6 +4058,7 @@ renumbering of conformance classes.
 | 0.1.38  | 2026-09-01 | Defensive amendment of [req-lk-005] (no new normative statement; count remains 120 (115 MUST, 5 SHOULD)): `generated_at` is optional advisory metadata, new lockfiles omit it by default, and later writes preserve an existing omission unless explicitly configured otherwise. |
 | 0.1.39  | 2026-09-01 | Spec-citation fold for user-scoped direct MCP target selection (closes #2548 Mode-B silent-extension gate). Added [req-tg-014] (Section 8.5.8, consumer MUST): explicit selection, the user-scope manifest, configured user default, and user-scope runtime discovery form one precedence chain; project-only signals cannot constrain final discovery; and a selected set with no user-capable runtime fails before user manifest, lockfile, or target-config mutation. Section 8.7, Section 11.3.2, and Appendix C updated. Statement count: 120 -> 121 (116 MUST, 5 SHOULD). |
 | 0.1.40  | 2026-09-07 | Spec-citation fold for dependency-policy identity casing in PR #2706. Added [req-pl-018] (Section 6.3.1, governance MUST) and extended [req-rs-016] clause (3): dependency allow, deny, and exact require operands use the documented per-host repository case rule, while registry-sourced repository coordinates are case-insensitive regardless of host; case normalization is ASCII-only, is bounded identically on both operands, stops at recursive-glob ambiguity, and does not cross virtual-path, ref, registry-name, MCP-name, unmanaged-path, or case-sensitive host/source boundaries; deny precedence is unchanged. Defined the policy glob grammar, documented byte-exact Section 6.4 merge behavior, and added the threat mapping. Classified this as a non-breaking correction of previously unspecified evaluation behavior under Section 9.2: existing lowercase workarounds remain matching; on registry sources and hosts documented as case-insensitive, case-variant allow entries can newly match, deny entries can newly enforce, and exact require entries can newly be satisfied, so those policies should be re-audited. Sections 1.3, 6.3.1, 6.3.5, 6.4, 6.5, 6.9, 7.2, 9.2, 10.8, 10.11, 11.2, and 11.3.4, Appendix C, and conformance coverage updated. Statement count: 121 -> 122 (117 MUST, 5 SHOULD). |
+| 0.1.41  | 2026-09-09 | Alias containment and lock-replay contract for PR #2901. Added [req-mf-025] (Section 4.3.2, consumer MUST), the optional lock-entry `alias` field, and conformance coverage. Under Section 9.2 this is an additive optional field and a defensive definition of previously unspecified alias behavior, not behavior-neutral errata: unsafe or reserved aliases can newly fail; valid dotted aliases remain accepted; surrounding whitespace is canonicalized; recorded aliases determine replay placement; absent aliases retain the unaliased layout. Source identity and permitted local source paths are unchanged. Older readers preserving the unknown field do not thereby implement placement support. Selects distinct 0.1.41 schema publication identities without changing published v0.1 URLs or bytes; Section 9.3 remains pending (see Appendix A). Sections 1.3, 4.9, 5.2, 11.3.2, and Appendix C updated. Statement count: 122 -> 123 (118 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

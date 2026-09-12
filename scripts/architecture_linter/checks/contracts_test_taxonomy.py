@@ -469,6 +469,74 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
         return tuple(failures)
 
     findings: list[Violation] = []
+    alias_consumers = {
+        "src/apm_cli/deps/lockfile.py": (
+            "self.alias = parse_alias_override(self.alias)",
+            'result["alias"] = self.alias',
+            'alias=data.get("alias")',
+            "alias=dep_ref.alias",
+            "alias=self.alias",
+        ),
+        _REFERENCE_OWNER: ("alias = parse_alias_override(alias)",),
+        "src/apm_cli/models/dependency/registry_entry.py": (
+            'alias = parse_alias_override(entry.get("alias"))',
+        ),
+        "src/apm_cli/models/dependency/object_fields.py": (
+            'validate_path_segments(alias, context="dependency alias")',
+        ),
+        _MATERIALIZATION_OWNER: (
+            "alias = parse_alias_override(dependency.alias)",
+            "if alias is not None:",
+            "resolved = ensure_path_within(result, apm_modules_dir)",
+            "if resolved == ensure_path_within(apm_modules_dir, apm_modules_dir):",
+            "if dependency.alias is not None or not dependency.has_case_insensitive_repo_identity:",
+        ),
+        "src/apm_cli/install/phases/download.py": (
+            "_pd_path = _pd_ref.get_install_path(apm_modules_dir)",
+        ),
+        "src/apm_cli/install/phases/integrate.py": (
+            "install_path = dep_ref.get_install_path(apm_modules_dir)",
+        ),
+        _RESOLVE_PHASE: (
+            "        cache_validation_callback=partial(",
+            "validate_cached_legacy_plugin,",
+        ),
+        "src/apm_cli/deps/apm_resolver.py": (
+            "if parent_dep.alias:",
+            "replace(parent_dep, alias=None).get_install_path(self._apm_modules_dir)",
+            "repo_root, parent_source = self._remote_source_paths_for_parent(",
+            "self._cache_validation_callback(install_path, dep_ref.get_unique_key())",
+            "and self._download_dedup_key(dep_ref, parent_pkg) not in self._downloaded_packages",
+        ),
+        "src/apm_cli/install/legacy_plugin_compat.py": (
+            "plugin_json_path = validate_cached_legacy_plugin(",
+        ),
+    }
+    for path, required in alias_consumers.items():
+        facts, errors = _facts_for(provider, path, rule_id)
+        findings.extend(errors)
+        source = "\n".join(_lines(facts))
+        reuse_order = (
+            source.find("if dep_ref.is_local or not install_path.exists()"),
+            source.find("self._cache_validation_callback(install_path,"),
+            source.find("materialize_marketplace_manifest(dep_ref, install_path)"),
+        )
+        misplaced_cache_validation = (
+            path == "src/apm_cli/deps/apm_resolver.py"
+            and not (0 <= reuse_order[0] < reuse_order[1] < reuse_order[2])
+        ) or (path == _RESOLVE_PHASE and "validate_cached_legacy_plugin(" in source)
+        if not errors and (
+            any(not _present(facts, needle) for needle in required)
+            or _present_re(facts, re.compile(r"/\s*\w+\.alias\b"))
+            or misplaced_cache_validation
+        ):
+            findings.append(
+                _summary(
+                    rule_id,
+                    path,
+                    "Dependency aliases must use shared validation and strict materialization ownership",
+                )
+            )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )

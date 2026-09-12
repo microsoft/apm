@@ -612,12 +612,18 @@ class TestRemoteParentLocalPathFailClosed(unittest.TestCase):
             )
 
     def test_remote_parent_same_repo_sibling_path_expands_to_remote_virtual_dep(self):
+        for alias in (None, ".safe", "safe.", "foo..bar", "my-skill.v2"):
+            with self.subTest(alias=alias):
+                self._assert_same_repo_remote_sibling(alias)
+
+    def _assert_same_repo_remote_sibling(self, alias):
         with TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir) / "consumer"
             modules_dir = project_root / "apm_modules"
             project_root.mkdir()
+            alias_line = f"      alias: {alias}\n" if alias else ""
             (project_root / "apm.yml").write_text(
-                """
+                f"""
 name: consumer
 version: 1.0.0
 dependencies:
@@ -625,7 +631,7 @@ dependencies:
     - git: microsoft/mono
       path: packages/frontend
       ref: feature
-""".lstrip()
+{alias_line}""".lstrip()
             )
             callback_refs = []
 
@@ -669,6 +675,8 @@ version: 1.0.0
             self.assertFalse(Path(shared.dependency_ref.virtual_path).is_absolute())
             self.assertFalse(PureWindowsPath(shared.dependency_ref.virtual_path).is_absolute())
             self.assertEqual(shared.dependency_ref.reference, "feature")
+            self.assertEqual(shared.dependency_ref.host, callback_refs[0].host)
+            self.assertEqual(shared.dependency_ref.port, callback_refs[0].port)
             self.assertFalse(shared.dependency_ref.is_local)
             self.assertEqual(resolver._rejected_remote_local_keys, set())
             self.assertTrue(
@@ -679,34 +687,42 @@ version: 1.0.0
             )
 
     def test_remote_parent_path_escape_outside_repo_root_is_rejected(self):
-        self._assert_remote_local_path_rejected(
-            parent_path="packages/frontend",
-            child_path="../../../outside",
-            rejected_key="../../../outside",
-        )
+        for alias in (None, ".safe"):
+            with self.subTest(alias=alias):
+                self._assert_remote_local_path_rejected(
+                    parent_path="packages/frontend",
+                    child_path="../../../outside",
+                    rejected_key="../../../outside",
+                    alias=alias,
+                )
 
     def test_remote_parent_path_to_different_repo_clone_is_rejected(self):
-        self._assert_remote_local_path_rejected(
-            parent_path=None,
-            child_path="../repo-b/shared",
-            rejected_key="../repo-b/shared",
-        )
+        for alias in (None, ".safe"):
+            with self.subTest(alias=alias):
+                self._assert_remote_local_path_rejected(
+                    parent_path=None,
+                    child_path="../repo-b/shared",
+                    rejected_key="../repo-b/shared",
+                    alias=alias,
+                )
 
     def _assert_remote_local_path_rejected(
-        self, *, parent_path: str | None, child_path: str, rejected_key: str
+        self, *, parent_path: str | None, child_path: str, rejected_key: str, alias=None
     ):
         with TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir) / "consumer"
             modules_dir = project_root / "apm_modules"
             project_root.mkdir()
             if parent_path is None:
-                dep_block = "    - microsoft/repo-a\n"
+                dep_block = "    - git: microsoft/repo-a\n"
                 parent_virtual_path = None
             else:
                 dep_block = (
                     f"    - git: microsoft/repo-a\n      path: {parent_path}\n      ref: main\n"
                 )
                 parent_virtual_path = parent_path
+            if alias:
+                dep_block += f"      alias: {alias}\n"
             (project_root / "apm.yml").write_text(
                 f"""
 name: consumer

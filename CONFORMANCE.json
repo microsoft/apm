@@ -581,6 +581,61 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-mf-025",
+      "keyword": "MUST",
+      "section": "4.3.2",
+      "status": "active",
+      "test_count": 45,
+      "tests": [
+        "tests/spec_conformance/test_alias_reqs.py::test_absent_alias_is_not_inferred_from_inventory_name",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_rejects_symlink_destination[outside]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_rejects_symlink_destination[root]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[ \\r..\\t-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[ \\tMy.Safe\\n-True-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[ \\t\\n-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[.-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[..-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[../escape-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[..\\n-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[.safe-True-True]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[1-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[foo..bar-True-True]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[my-skill.v2-True-True]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[safe.-True-True]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[safe/name-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[safe\\n-True-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_schemas_distinguish_input_from_canonical_output[safe\\ninside-False-False]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git- \\tMy.Safe\\n]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-.safe]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-None]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-foo..bar]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-my-skill.v2]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[git-safe.]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local- \\tMy.Safe\\n]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-.safe]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-None]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-foo..bar]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-my-skill.v2]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[local-safe.]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry- \\tMy.Safe\\n]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-.safe]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-None]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-foo..bar]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-my-skill.v2]",
+        "tests/spec_conformance/test_alias_reqs.py::test_alias_survives_lock_replay_without_changing_source[registry-safe.]",
+        "tests/spec_conformance/test_alias_reqs.py::test_invalid_lock_alias_guidance_repairs_the_lock_not_the_manifest",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[%2e%2e]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[../escape]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[..]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[.]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[1]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[]",
+        "tests/spec_conformance/test_alias_reqs.py::test_lock_alias_rejects_invalid_destination_names[foo/../bar]"
+      ]
+    },
+    {
       "conformance_class": "governance",
       "id": "req-pl-001",
       "keyword": "MUST",
@@ -1433,7 +1488,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 90,
+      "active": 91,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1457,5 +1512,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 122
+  "total_requirements": 123
 }

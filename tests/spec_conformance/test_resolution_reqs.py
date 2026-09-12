@@ -190,7 +190,7 @@ def test_resolver_fails_closed_on_ambiguous_resolution():
     )
     # Schema enum pin (round-3 fold): the manifest schema MUST admit
     # only `intersection-pick` in v0.1; `nest` is reserved for v0.2.
-    schema = load_schema("manifest-v0.1.schema.json")
+    schema = load_schema("manifest-v0.1.41.schema.json")
     enum = schema["$defs"]["depsBlock"]["properties"]["conflict_resolution"]["enum"]
     assert enum == ["intersection-pick"], (
         f"manifest schema conflict_resolution enum MUST be exactly "

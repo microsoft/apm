@@ -77,7 +77,7 @@ apm prune     # cleans up what is no longer declared
 
 For each orphaned package, `apm prune`:
 
-1. Removes the package directory from `apm_modules/<owner>/<repo>` using a path-traversal-safe delete.
+1. Removes the orphan's installed directory under `apm_modules/`, including flat [alias directories](../../lockfile-spec/#per-entry-fields), using a path-traversal-safe delete.
 2. Reads `deployed_files` from the lockfile entry and deletes each deployed file or directory inside the project root.
 3. Removes the entry from `apm.lock.yaml`.
 4. Cleans up empty parent directories under both `apm_modules/` and the harness deploy roots.
