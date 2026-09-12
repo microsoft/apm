@@ -40,7 +40,7 @@ log_test() {
 
 # Source the GitHub token management helper
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/github-token-helper.sh"
+source "$SCRIPT_DIR/../src/apm_cli/runtime/scripts/github-token-helper.sh"
 
 # Source the dependency integration testing functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from importlib.resources import files
 from pathlib import Path
 
 import click
@@ -43,23 +44,15 @@ class RuntimeManager:
     def get_embedded_script(self, script_name: str) -> str:
         """Get embedded setup script content."""
         try:
-            # Try PyInstaller bundle first
             if getattr(sys, "frozen", False):
-                # Running in PyInstaller bundle
                 bundle_dir = Path(sys._MEIPASS)
                 script_path = bundle_dir / "scripts" / "runtime" / script_name
-                if script_path.exists():
-                    return script_path.read_text(encoding="utf-8")
-
-            # Fall back to direct file access for development
-            # Look for scripts relative to the repo structure
-            current_file = Path(__file__)
-            repo_root = current_file.parent.parent.parent.parent  # Go up to repo root
-            script_path = repo_root / "scripts" / "runtime" / script_name
-            if script_path.exists():
                 return script_path.read_text(encoding="utf-8")
 
-            raise FileNotFoundError(f"Script not found: {script_name}")
+            script = files("apm_cli.runtime").joinpath("scripts", "runtime", script_name)
+            if not script.is_file():
+                raise FileNotFoundError(f"Script not found: {script_name}")
+            return script.read_text(encoding="utf-8")
         except Exception as e:
             click.echo(
                 f"{Fore.RED}[x] Failed to load embedded script {script_name}: {e}{Style.RESET_ALL}",
@@ -78,23 +71,15 @@ class RuntimeManager:
             # On Windows, tokens are passed via environment variables directly
             return ""
         try:
-            # Try PyInstaller bundle first
             if getattr(sys, "frozen", False):
-                # Running in PyInstaller bundle
                 bundle_dir = Path(sys._MEIPASS)
                 script_path = bundle_dir / "scripts" / "github-token-helper.sh"
-                if script_path.exists():
-                    return script_path.read_text(encoding="utf-8")
-
-            # Fall back to direct file access for development
-            # Look for scripts relative to the repo structure
-            current_file = Path(__file__)
-            repo_root = current_file.parent.parent.parent.parent  # Go up to repo root
-            script_path = repo_root / "scripts" / "github-token-helper.sh"
-            if script_path.exists():
                 return script_path.read_text(encoding="utf-8")
 
-            raise FileNotFoundError("github-token-helper.sh not found")
+            script = files("apm_cli.runtime").joinpath("scripts", "github-token-helper.sh")
+            if not script.is_file():
+                raise FileNotFoundError("github-token-helper.sh not found")
+            return script.read_text(encoding="utf-8")
         except Exception as e:
             click.echo(
                 f"{Fore.RED}[x] Failed to load github-token-helper.sh: {e}{Style.RESET_ALL}",
