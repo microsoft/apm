@@ -6,6 +6,15 @@ Installed wheels do not borrow an enclosing repository's SHA. Source/editable
 checkouts, including forks and worktrees, show their revision when Git can
 verify it; otherwise the SHA is omitted.
 Standalone `apm --version` does not require Git to be installed.
+## User metadata root
+
+`APM_HOME` is the root for APM-owned user metadata: `apm.yml`,
+`apm.lock.yaml`, `apm_modules/`, `config.json`, lifecycle trust, and lifecycle
+logs. It defaults to `~/.apm`; every `~/.apm` path below describes that
+default. Global package, dependency, lock, compile, lifecycle, and config
+commands honor the override. Target deployments do not: target-specific home
+variables take precedence for their own destinations, with the operating-system
+home as the fallback.
 
 ## Project setup
 

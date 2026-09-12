@@ -11,6 +11,7 @@ from apm_cli.core.scope import (
     InstallScope,
     ensure_user_dirs,
     get_apm_dir,
+    get_apm_home,
     get_deploy_root,
     get_lockfile_dir,
     get_manifest_path,
@@ -81,6 +82,18 @@ class TestGetApmDir:
         with patch.object(Path, "home", return_value=tmp_path):
             assert get_apm_dir(InstallScope.USER) == tmp_path / USER_APM_DIR
 
+    def test_user_honors_apm_home(self, tmp_path, monkeypatch):
+        apm_home = tmp_path / "isolated-apm"
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+
+        assert get_apm_home() == apm_home
+        assert get_apm_dir(InstallScope.USER) == apm_home
+
+    def test_empty_apm_home_uses_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("APM_HOME", "")
+        with patch.object(Path, "home", return_value=tmp_path):
+            assert get_apm_home() == tmp_path / USER_APM_DIR
+
 
 # ---------------------------------------------------------------------------
 # get_modules_dir
@@ -97,6 +110,12 @@ class TestGetModulesDir:
     def test_user_modules(self, tmp_path):
         with patch.object(Path, "home", return_value=tmp_path):
             assert get_modules_dir(InstallScope.USER) == tmp_path / ".apm" / "apm_modules"
+
+    def test_user_modules_honor_apm_home(self, tmp_path, monkeypatch):
+        apm_home = tmp_path / "metadata"
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+
+        assert get_modules_dir(InstallScope.USER) == apm_home / "apm_modules"
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +134,12 @@ class TestGetManifestPath:
         with patch.object(Path, "home", return_value=tmp_path):
             assert get_manifest_path(InstallScope.USER) == tmp_path / ".apm" / "apm.yml"
 
+    def test_user_manifest_honors_apm_home(self, tmp_path, monkeypatch):
+        apm_home = tmp_path / "metadata"
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+
+        assert get_manifest_path(InstallScope.USER) == apm_home / "apm.yml"
+
 
 # ---------------------------------------------------------------------------
 # get_lockfile_dir
@@ -131,6 +156,12 @@ class TestGetLockfileDir:
     def test_user_lockfile(self, tmp_path):
         with patch.object(Path, "home", return_value=tmp_path):
             assert get_lockfile_dir(InstallScope.USER) == tmp_path / ".apm"
+
+    def test_user_lockfile_honors_apm_home(self, tmp_path, monkeypatch):
+        apm_home = tmp_path / "metadata"
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+
+        assert get_lockfile_dir(InstallScope.USER) == apm_home
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +184,24 @@ class TestEnsureUserDirs:
             ensure_user_dirs()
             ensure_user_dirs()  # Should not raise
             assert (tmp_path / ".apm").is_dir()
+
+    def test_honors_apm_home(self, tmp_path, monkeypatch):
+        apm_home = tmp_path / "metadata"
+        monkeypatch.setenv("APM_HOME", str(apm_home))
+
+        assert ensure_user_dirs() == apm_home
+        assert (apm_home / "apm_modules").is_dir()
+
+
+def test_apm_home_does_not_redirect_target_deployment(tmp_path, monkeypatch):
+    """APM_HOME isolates metadata while target deployment stays under HOME."""
+    apm_home = tmp_path / "metadata"
+    os_home = tmp_path / "home"
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+
+    with patch.object(Path, "home", return_value=os_home):
+        assert get_apm_dir(InstallScope.USER) == apm_home
+        assert get_deploy_root(InstallScope.USER) == os_home
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,8 @@ Defines where packages are deployed based on scope:
 - **project** (default): Deploy to the current working directory.
   Manifest, lockfile, and modules live at the project root.
 - **user**: Deploy to user-level directories (``~/.claude/``, etc.).
-  Manifest, lockfile, and modules live under ``~/.apm/``.
+  Manifest, lockfile, and modules live under ``$APM_HOME`` (default
+  ``~/.apm/``).
 
 User-scope support varies by target -- see ``TargetProfile.user_supported``
 in ``apm_cli.integration.targets`` for the canonical registry.
@@ -29,6 +30,7 @@ deploy root.  Source helpers (:func:`get_source_root`,
 from __future__ import annotations
 
 import contextvars
+import os
 from enum import Enum
 from pathlib import Path
 
@@ -38,6 +40,19 @@ from pathlib import Path
 
 USER_APM_DIR = ".apm"
 """Directory under ``$HOME`` for user-scope metadata."""
+
+
+def get_apm_home() -> Path:
+    """Return the canonical root for APM-owned user metadata.
+
+    ``APM_HOME`` overrides the default ``~/.apm`` location.  An unset or
+    empty value preserves the platform default.  Target deployment roots are
+    deliberately resolved elsewhere and are not affected by this helper.
+    """
+    configured = os.environ.get("APM_HOME")
+    if configured:
+        return Path(configured)
+    return Path.home() / USER_APM_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -146,10 +161,10 @@ def get_apm_dir(scope: InstallScope) -> Path:
     """Return the directory that holds APM metadata (lockfile, modules).
 
     * Project scope: ``<cwd>/`` (the active deploy root)
-    * User scope: ``~/.apm/``
+    * User scope: ``$APM_HOME/`` (default ``~/.apm/``)
     """
     if scope is InstallScope.USER:
-        return Path.home() / USER_APM_DIR
+        return get_apm_home()
     return Path.cwd()
 
 
@@ -198,13 +213,13 @@ def get_lockfile_dir(scope: InstallScope) -> Path:
 
 
 def ensure_user_dirs() -> Path:
-    """Create ``~/.apm/`` and ``~/.apm/apm_modules/`` if they do not exist.
+    """Create the user APM root and its ``apm_modules/`` directory.
 
-    Returns the user APM root (``~/.apm/``).
+    Returns ``$APM_HOME`` when configured, otherwise ``~/.apm/``.
     """
     from ..constants import APM_MODULES_DIR
 
-    user_root = Path.home() / USER_APM_DIR
+    user_root = get_apm_home()
     user_root.mkdir(parents=True, exist_ok=True)
     (user_root / APM_MODULES_DIR).mkdir(exist_ok=True)
     return user_root

@@ -550,8 +550,10 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     if updated and updated != allow_exec:
         save_user_executables(updated, deny_exec)
         if ctx.logger:
+            from apm_cli import config
+
             ctx.logger.info(
-                "Updated ~/.apm/config.json. "
+                f"Updated {config.CONFIG_FILE}. "
                 "Run 'apm install' again to deploy approved executables.",
                 symbol="info",
             )

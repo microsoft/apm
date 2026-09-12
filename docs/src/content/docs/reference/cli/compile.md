@@ -167,7 +167,7 @@ globally installed instruction packages -- one command, no per-tool setup.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --global` | Compile user-scope root context files from `~/.apm/apm_modules`. Writes targets declared by `target:` or `targets:` in `~/.apm/apm.yml`, or every supported user-scope target when neither field is declared. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if `~/.apm/apm_modules` does not exist. |
+| `-g, --global` | Compile user-scope root context files from `$APM_HOME/apm_modules` (default `~/.apm/apm_modules`). Writes targets declared by `target:` or `targets:` in `$APM_HOME/apm.yml`, or every supported user-scope target when neither field is declared. `APM_HOME` selects the input metadata only; compiled files use each target's home variable or the operating-system home. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if the user-scope modules directory does not exist. |
 
 `apm compile --global` is explicit. `apm install -g` does not run it; instead,
 when global instructions land on a root-context-only target, install prints a
@@ -200,7 +200,7 @@ coverage still produces fallback content rather than deleting the root.
 Dry-run never writes or deletes files.
 
 Because `--target` is rejected alongside `--global`, `target:` or `targets:` in
-`~/.apm/apm.yml` is how you narrow user-scope output. When it declares a target
+`$APM_HOME/apm.yml` is how you narrow user-scope output. When it declares a target
 set, `apm compile -g` writes only those targets. If you install with an explicit
 `apm install -g --target`, update the manifest declaration before compiling;
 the explicit install flag does not replace it. Declare nothing and every
@@ -211,7 +211,7 @@ before any target output is written; fix the reported manifest problem and
 rerun the command.
 
 ```yaml
-# ~/.apm/apm.yml
+# $APM_HOME/apm.yml
 targets: [claude, codex]
 ```
 

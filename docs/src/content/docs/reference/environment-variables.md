@@ -82,7 +82,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `APM_CACHE_DIR` | Override the APM cache root. | platform default (XDG / `LOCALAPPDATA`) | Must be writable. See [`apm cache`](../cli/cache/). |
 | `APM_NO_CACHE` | `1`/`true`/`yes` disables read and write of the cache for the current invocation. | unset | Equivalent to `--no-cache` on commands that support it. |
 | `APM_TEMP_DIR` | Override the temp directory used by clone and download operations. | system default | Useful on Windows when endpoint security blocks `%TEMP%`. Resolution: env var > `temp_dir` in `~/.apm/config.json` > system default. |
-| `APM_HOME` | Override the APM home directory used for user config and state. | platform default | Must be writable. |
+| `APM_HOME` | Override the root for APM-owned user metadata and configuration. | `~/.apm` | Must be writable. Does not redirect files deployed to agent targets. |
 | `APM_NO_REFLINK` | Any non-empty value disables copy-on-write (reflink) optimisation; APM falls back to plain copies. | unset | Diagnostic / portability escape hatch. |
 | `APM_COPILOT_COWORK_SKILLS_DIR` | Override the destination directory for Copilot cowork skills. | platform auto-detect | Resolution: env var > config > auto-detect. |
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
@@ -93,6 +93,44 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
 | `CLAUDE_CONFIG_DIR` | Override the user-scope destination Claude reads for skills, agents, and MCP config. | Claude default | For MCP config, nonblank values must be absolute. User-scope MCP servers are managed in `$CLAUDE_CONFIG_DIR/.claude.json` (including installation and stale cleanup); when unset or blank, APM uses `~/.claude.json`. |
+
+### `APM_HOME` path contract
+
+`APM_HOME` is the single root for APM-owned user metadata. When it is unset or
+empty, the root is `~/.apm`. When set, global commands and lifecycle processing
+use the same overridden root:
+
+| State | Path |
+|---|---|
+| User manifest | `$APM_HOME/apm.yml` |
+| User lockfile | `$APM_HOME/apm.lock.yaml` |
+| Installed package metadata and content | `$APM_HOME/apm_modules/` |
+| User configuration | `$APM_HOME/config.json` |
+| Lifecycle trust | `$APM_HOME/scripts-trust.json` |
+| Lifecycle logs | `$APM_HOME/logs/` |
+
+This applies to user-scope operations such as `apm install --global`, `apm
+update --global`, `apm lock --global`, `apm deps ... --global`, `apm compile
+--global`, and `apm config`.
+
+`APM_HOME` does **not** redirect target deployment. A target-specific home
+variable, when supported, selects that target's destination (for example,
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `HERMES_HOME`); otherwise the destination
+is derived from the operating-system home. These settings control different
+path families, so a target-specific variable does not override `APM_HOME`, and
+`APM_HOME` does not act as a fallback for target deployment.
+
+To isolate APM metadata for a temporary global install:
+
+```bash
+export APM_HOME="$(mktemp -d)/apm"
+apm install --global example-org/example-package
+```
+
+The manifest, lockfile, modules, configuration, and lifecycle state remain
+under `$APM_HOME`; deployed target files still go to their normal user-scope
+destinations. For complete filesystem isolation, also run with an isolated
+operating-system home and/or set the selected targets' home variables.
 
 ## Policy
 

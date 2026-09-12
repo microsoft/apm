@@ -112,7 +112,7 @@ def mcp():
         "  -t, --target TARGET    Agent target(s) to deploy to\n"
         "  --registry URL         Custom registry URL\n"
         "  --mcp-version VER      Pin registry entry to a specific version\n"
-        "  -g, --global           Install to user scope (~/.apm/)\n"
+        "  -g, --global           Install to the APM user home\n"
         "  --trust-transitive-mcp Trust MCP servers from transitive dependencies\n"
         "  --dev / --dry-run / --force / --verbose / --no-policy"
     ),

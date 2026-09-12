@@ -4,6 +4,8 @@ import contextlib
 import json
 import os
 
+from apm_cli.core.scope import get_apm_home
+
 # ---------------------------------------------------------------------------
 # Public env-var names (re-declared here to avoid a circular import with the
 # transport_selection module which also defines them).
@@ -11,7 +13,7 @@ import os
 _ENV_ALLOW_PROTOCOL_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
 _ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
 
-CONFIG_DIR = os.path.expanduser("~/.apm")
+CONFIG_DIR = os.fspath(get_apm_home())
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 _INSTALL_TARGET_KEY = "install_target"
 _SELF_UPDATE_CHANNEL_KEY = "self_update_channel"

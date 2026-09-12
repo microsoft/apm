@@ -972,7 +972,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project. Direct MCP installs create or update ~/.apm/apm.yml. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing the user manifest, lockfile, or runtime configuration. Supported runtimes include Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot.",
+    help="Install to the APM user home ($APM_HOME, default ~/.apm) instead of the current project. Direct MCP installs create or update the user manifest. APM_HOME controls metadata but not target deployment. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing the user manifest, lockfile, or runtime configuration. Supported runtimes include Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot.",
 )
 @click.option(
     "--ssh",

@@ -557,8 +557,10 @@ def set(key, value):  # noqa: F811
     import os as _os
 
     if key == "allow-protocol-fallback" and enabled and _os.environ.get("CI"):
+        from .. import config as config_module
+
         logger.warning(
-            "allow-protocol-fallback is now persisted to ~/.apm/config.json. "
+            f"allow-protocol-fallback is now persisted to {config_module.CONFIG_FILE}. "
             "In CI environments with a shared $HOME this will affect all subsequent "
             "apm install runs on this host. "
             "Prefer APM_ALLOW_PROTOCOL_FALLBACK=1 as an invocation-scoped alternative."

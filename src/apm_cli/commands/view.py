@@ -690,7 +690,7 @@ _VIEW_HELP = (
     "global_",
     is_flag=True,
     default=False,
-    help="Inspect package from user scope (~/.apm/)",
+    help="Inspect a package from the APM user home",
 )
 @click.option(
     "--registry",

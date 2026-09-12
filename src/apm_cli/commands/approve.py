@@ -83,7 +83,11 @@ def _save_store(
 
 
 def _store_label(user_scope: bool) -> str:
-    return "~/.apm/config.json" if user_scope else "apm.yml executables block"
+    if user_scope:
+        from .. import config
+
+        return config.CONFIG_FILE
+    return "apm.yml executables block"
 
 
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
@@ -130,7 +134,7 @@ def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> 
     "--user",
     "user_scope",
     is_flag=True,
-    help="Persist to your personal ~/.apm/config.json (lowest authority) "
+    help="Persist to your personal APM user config (lowest authority) "
     "instead of the shared project apm.yml.",
 )
 @serialized_lifecycle
@@ -195,7 +199,7 @@ def approve_cmd(
     "--user",
     "user_scope",
     is_flag=True,
-    help="Record the deny in your personal ~/.apm/config.json instead of apm.yml.",
+    help="Record the deny in your personal APM user config instead of apm.yml.",
 )
 @serialized_lifecycle
 def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:

@@ -620,7 +620,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
     "global_",
     is_flag=True,
     default=False,
-    help="List user-scope dependencies (~/.apm/) instead of project",
+    help="List dependencies in the APM user home instead of the project",
 )
 @click.option(
     "--all",
@@ -822,7 +822,7 @@ def _build_dep_tree(apm_dir):
     "global_",
     is_flag=True,
     default=False,
-    help="Show user-scope dependency tree (~/.apm/)",
+    help="Show the dependency tree in the APM user home",
 )
 def tree(global_):
     """Display dependencies in hierarchical tree format using lockfile."""
@@ -1013,7 +1013,7 @@ def clean(dry_run: bool, yes: bool):
     "global_",
     is_flag=True,
     default=False,
-    help="Update user-scope dependencies (~/.apm/)",
+    help="Update dependencies in the APM user home",
 )
 @click.option(
     "--legacy-skill-paths",
@@ -1075,7 +1075,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     apm_yml_path = project_root / APM_YML_FILENAME
 
     if not apm_yml_path.exists():
-        scope_hint = "~/.apm/" if global_ else "current directory"
+        scope_hint = str(project_root) if global_ else "current directory"
         logger.error(f"No {APM_YML_FILENAME} found in {scope_hint}")
         sys.exit(1)
 

@@ -1261,12 +1261,14 @@ def _user_config_file() -> Path:
 
 
 def _legacy_approvals_path() -> Path:
-    """Return the path to the deprecated ``~/.apm/approvals.yml`` store.
+    """Return the path to the deprecated user ``approvals.yml`` store.
 
-    Read-only: the file is migrated into ``~/.apm/config.json`` on first read
-    and deleted. There is no writer for this path anymore (#1873).
+    Read-only: the file is migrated into the adjacent ``config.json`` on first
+    read and deleted. There is no writer for this path anymore (#1873).
     """
-    return Path.home() / ".apm" / "approvals.yml"
+    from ..core.scope import get_apm_home
+
+    return get_apm_home() / "approvals.yml"
 
 
 def _migrate_legacy_approvals(

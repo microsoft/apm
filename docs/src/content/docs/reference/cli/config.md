@@ -5,7 +5,8 @@ sidebar:
   order: 10
 ---
 
-Read and write APM CLI configuration stored in `~/.apm/config.json`.
+Read and write APM CLI configuration stored in `$APM_HOME/config.json`
+(default `~/.apm/config.json`).
 
 ## Synopsis
 
@@ -19,10 +20,10 @@ apm config unset KEY             # remove a key
 
 ## Description
 
-`apm config` manages the user-level CLI configuration file at `~/.apm/config.json`. It is independent of `apm.yml`, which describes a project. With no subcommand, `apm config` prints a table that combines:
+`apm config` manages the user-level CLI configuration file at `$APM_HOME/config.json` (default `~/.apm/config.json`). It is independent of `apm.yml`, which describes a project. With no subcommand, `apm config` prints a table that combines:
 
 - **Project** values from `apm.yml` in the current directory (when present): name, version, entrypoint, MCP dependency count, and compilation settings.
-- **Global** values from `~/.apm/config.json`: CLI version, `temp-dir`, and any other set keys.
+- **Global** values from `$APM_HOME/config.json`: CLI version, `temp-dir`, and any other set keys.
 
 Use `get`/`set`/`unset` to manipulate individual keys. Boolean values accept `true`, `false`, `yes`, `no`, `1`, or `0`.
 
@@ -46,7 +47,7 @@ Familiar with `npm config list` or `git config --list`? `apm config list` is the
 
 ### `apm config set KEY VALUE`
 
-Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
+Write `KEY` to `$APM_HOME/config.json`. Validates the value before writing:
 
 - `temp-dir` must be an existing, writable directory. The path is expanded (`~`) and stored absolute.
 - `target` must be a valid install target token (or comma-separated list), using the same validator as `apm install --target`.
@@ -58,7 +59,7 @@ Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 
 ### `apm config unset KEY`
 
-Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `target`, `self-update.channel`, `self-update.install-dir`, `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `audit-on-install`, `external.<name>.{llm,args}`, `mcp-registry-url`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
+Remove `KEY` from `$APM_HOME/config.json`. No-op if the key is not set. Supported unset keys: `target`, `self-update.channel`, `self-update.install-dir`, `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `audit-on-install`, `external.<name>.{llm,args}`, `mcp-registry-url`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
 
 ## Configuration keys
 
@@ -77,7 +78,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | `external.<name>.args` | string | unset | Extra scanner CLI flags, stored shlex-split as a list (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter at run time. Overridable per-run with `--external-args`. Requires the `external-scanners` experimental flag. |
 | `mcp-registry-url` | URL | public registry | Persist a private MCP registry endpoint. Accepts `http://` or `https://` URLs. Provides a persistent fallback below `MCP_REGISTRY_URL` and above the built-in default, and applies to every registry lookup: `apm mcp list/search/show`, `apm install --mcp NAME`, and the `dependencies.mcp` entries `apm install` reads from `apm.yml`. |
 | `registry.<name>.url` | URL | unset | Base URL for registry `<name>`. Requires `registries` experimental flag. |
-| `registry.<name>.token` | string | unset | Bearer token for registry `<name>`. Stored in `~/.apm/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
+| `registry.<name>.token` | string | unset | Bearer token for registry `<name>`. Stored in `$APM_HOME/config.json`; never in repo-tracked files. Requires `registries` experimental flag. |
 | `registry.<name>.default` | boolean | `false` | Mark `<name>` as the user-scoped default registry. Only one registry may be default at a time; setting `true` clears any previous default. Requires `registries` experimental flag. |
 
 ### Resolution order
@@ -85,14 +86,14 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 `temp-dir` and `copilot-cowork-skills-dir` are resolved at runtime as:
 
 1. Environment variable (`APM_TEMP_DIR`, `APM_COPILOT_COWORK_SKILLS_DIR`)
-2. Value in `~/.apm/config.json`
+2. Value in `$APM_HOME/config.json`
 3. Built-in default (system temp / platform auto-detection)
 
 `mcp-registry-url` follows a four-layer precedence chain (CLI flag wins):
 
 1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (used immediately and persisted on the dependency in `apm.yml`)
 2. `MCP_REGISTRY_URL` environment variable
-3. `mcp-registry-url` value in `~/.apm/config.json`
+3. `mcp-registry-url` value in `$APM_HOME/config.json`
 4. Built-in public default registry
 
 A per-dependency `registry:` URL in `apm.yml` overrides the chain for that entry
@@ -104,26 +105,26 @@ needs no opt-in, since setting it is already the explicit choice.
 
 1. CLI flag (`--allow-protocol-fallback`, `--ssh`) -- highest priority
 2. Environment variable (`APM_ALLOW_PROTOCOL_FALLBACK=1`, `APM_GIT_PROTOCOL=ssh`)
-3. Value in `~/.apm/config.json` (`apm config set ...`)
+3. Value in `$APM_HOME/config.json` (`apm config set ...`)
 4. Built-in default (`false` / no preference)
 
 Registry tokens are resolved as:
 
 1. `APM_REGISTRY_TOKEN_<NAME>` environment variable (uppercase name, `-`/`.` -> `_`)
-2. `registry.<name>.token` in `~/.apm/config.json`
+2. `registry.<name>.token` in `$APM_HOME/config.json`
 3. Unauthenticated (APM surfaces a remediation hint on 401/403)
 
 Registry URLs are merged at install time (highest wins):
 
 1. `apm-policy.yml`
 2. Project `apm.yml` `registries:` block
-3. Workspace `~/.apm/apm.yml`
-4. `registry.<name>.url` in `~/.apm/config.json`
+3. User workspace `$APM_HOME/apm.yml`
+4. `registry.<name>.url` in `$APM_HOME/config.json`
 
 Default registry selection (highest wins):
 
 1. `registries.default` in project `apm.yml`
-2. The registry entry in `~/.apm/config.json` with `"default": true` (set via `registry.<name>.default true`)
+2. The registry entry in `$APM_HOME/config.json` with `"default": true` (set via `registry.<name>.default true`)
 
 `apm self-update` installer inputs resolve as:
 
@@ -248,7 +249,7 @@ See [External scanners](../../../integrations/external-scanners/).
 
 ## Configuration file
 
-- **Location:** `~/.apm/config.json`
+- **Location:** `$APM_HOME/config.json` (default `~/.apm/config.json`)
 - **Format:** JSON object, one entry per stored key.
 - **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 

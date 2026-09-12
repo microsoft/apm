@@ -404,9 +404,9 @@ _CAPTURE_DRAIN_GRACE = 0.5
 
 def _get_scripts_log_path() -> Path:
     """Return the path to the scripts output log file."""
-    apm_home = os.environ.get("APM_HOME")
-    base = Path(apm_home) if apm_home else Path.home() / ".apm"
-    return base / "logs" / "scripts.log"
+    from apm_cli.core.scope import get_apm_home
+
+    return get_apm_home() / "logs" / "scripts.log"
 
 
 _LINE_BREAK_ESCAPES = {
