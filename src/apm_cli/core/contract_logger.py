@@ -190,6 +190,7 @@ class ContractLogger(CommandLogger):
         attribution: str | None = None,
         accent: str = "",
         indent: int = 2,
+        dim_remainder: bool = False,
     ) -> None:
         text = safe_text(message)
         source = safe_text(attribution, limit=256) if attribution else ""
@@ -203,6 +204,8 @@ class ContractLogger(CommandLogger):
             "success": ("check", "green"),
             "detail": ("", "dim"),
         }[severity]
+        if source and severity == "info":
+            color = "dim cyan"
         # Native diagnostics retain their source, never an engine status symbol.
         marker = console.STATUS_SYMBOLS[symbol] + " " if symbol and not source else ""
         line = " " * indent + marker + prefix + text
@@ -211,15 +214,13 @@ class ContractLogger(CommandLogger):
             self._transcript.append(" " * indent + marker + retained_prefix + text)
         if not self._human_enabled or (detail and not self.verbose):
             return
-        accent_length = (
-            indent + len(marker) + len(safe_text(accent)) if accent else indent + len(marker)
-        )
+        prefix_length = indent + len(marker) + len(prefix)
+        accent_length = prefix_length + len(safe_text(accent)) if accent else prefix_length
         if severity in {"detail", "heading"}:
             accent_length = len(line)
         try:
-            # Keep paths and messages as intact logical lines in pipes and
-            # terminals. The terminal may wrap visually; the renderer must not
-            # inject newlines or continuation prefixes into copyable paths.
+            # Only attributed prose receives hanging indentation. Saved paths
+            # and plain output keep their original, copyable logical lines.
             console._rich_echo(
                 line,
                 color=color,
@@ -228,6 +229,8 @@ class ContractLogger(CommandLogger):
                 plain=self._plain_output(),
                 natural_wrap=True,
                 accent_length=accent_length,
+                body_style="dim" if dim_remainder else "default",
+                hanging_indent=prefix_length if source else None,
             )
         except BrokenPipeError:
             # Do not recursively try to print an error into the closed pipe.
@@ -327,7 +330,7 @@ class ContractLogger(CommandLogger):
         identity = self._job_identity(source, relative)
         model = self._field(event, "model", "default model")
         self._write(f"Job: {identity} -> {self._produces}", severity="heading", indent=0)
-        self._write(f"Copilot / {model}")
+        self._write(f"Copilot / {model}", severity="detail")
         self._write("Running on your machine (not sandboxed).")
         self._write(f"Source: {self._path(source)}", severity="detail", detail=True)
         if package:
@@ -339,6 +342,7 @@ class ContractLogger(CommandLogger):
             severity="detail",
             detail=True,
         )
+        self._write("", indent=0)
 
     def _phase(self, event: RunEvent) -> None:
         phase = self._field(event, "name")
@@ -369,7 +373,15 @@ class ContractLogger(CommandLogger):
         return " ".join(parts)
 
     def _activity(self, event: RunEvent) -> None:
-        self._write(self._field(event, "text", ""), attribution=self._attribution(event))
+        text = self._field(event, "text", "")
+        tool_status = self._field(event, "tool_status", "")
+        severity = "error" if tool_status == "failed" else "detail" if tool_status else "info"
+        self._write(
+            text,
+            severity=severity,
+            attribution=self._attribution(event),
+            accent=text if tool_status == "failed" else "",
+        )
 
     def _metadata(self, event: RunEvent) -> None:
         self._write(
@@ -514,6 +526,7 @@ class ContractLogger(CommandLogger):
             severity=severity,
             accent=headline,
             indent=0,
+            dim_remainder=True,
         )
         self._result_explanation(result)
         if result.artifact is not None:
@@ -615,7 +628,7 @@ class ContractLogger(CommandLogger):
         self._write(
             f"Preview: {identity} -> {plan.contract.produces}", severity="heading", indent=0
         )
-        self._write(f"Copilot / {plan.model or 'default model'}")
+        self._write(f"Copilot / {plan.model or 'default model'}", severity="detail")
         self._write("Nothing will execute or download.")
         for name in plan.contract.needs:
             self._write(f"Input: {name}")

@@ -63,6 +63,8 @@ def test_pty_streams_live_output_and_restores_terminal(
         "emit('assistant.message_delta', {'messageId':'pty-ready',"
         "'deltaContent':'PTY actor ready\\n'})\n"
         "emit('tool.execution_start', {'toolName':'view','arguments':'PRIVATE_ARGUMENTS'})\n"
+        "emit('assistant.message', {'messageId':'pty-wrapped','phase':'commentary',"
+        "'content':'Visible narration wraps across rows without losing its source or hiding live progress.'})\n"
         "emit('assistant.message', {'messageId':'private','phase':'analysis',"
         "'content':'PRIVATE_ANALYSIS'})\n"
         "print('Native stderr ready',file=sys.stderr,flush=True)\n"
@@ -190,6 +192,21 @@ def test_pty_streams_live_output_and_restores_terminal(
     assert b"native-advisory" not in text
     assert b"raw exit" not in text
     assert b"[i]" not in text
+    plain_lines = text.replace(b"\r", b"")
+    if animate:
+        assert b"\n            without losing its source or hiding\n" in plain_lines
+        assert b"\n            live progress.\n" in plain_lines
+        assert b"\x1b[2;36m" in output
+        styled_segments = re.findall(rb"\x1b\[([0-9;]+)m([^\x1b]*)", output)
+        assert any(
+            b"Tool started: view" in segment and b"2" in codes.split(b";")
+            for codes, segment in styled_segments
+        )
+    else:
+        assert (
+            b"Copilot > Visible narration wraps across rows without losing its source "
+            b"or hiding live progress."
+        ) in plain_lines
     if not interrupt and not fail:
         assert b"Contract checks passed; this run was not sandboxed." in text
         assert b"Output: .apm/runs/" in text

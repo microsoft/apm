@@ -230,6 +230,7 @@ def test_tool_metadata_never_forwards_arguments_results_or_reasoning() -> None:
     decoder.feed("stdout", _frame("tool.execution_complete", success=False, result="PRIVATE"))
     decoder.finish()
     assert _text(events) == "Tool started: read_file\nTool failed"
+    assert [event.data["tool_status"] for event in events] == ["started", "failed"]
     assert "PRIVATE" not in str(events)
     assert not decoder.completion_seen
 

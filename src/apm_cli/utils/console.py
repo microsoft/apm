@@ -121,8 +121,10 @@ def _rich_echo(
     plain: bool = False,
     natural_wrap: bool = False,
     accent_length: int | None = None,
+    body_style: str = "default",
+    hanging_indent: int | None = None,
 ):
-    """Echo with optional leading accent; existing callers retain full color."""
+    """Echo with opt-in accents and TTY prose layout; legacy output is unchanged."""
     # Handle backward compatibility - if style is provided, use it as color
     if style is not None:
         color = style
@@ -142,12 +144,29 @@ def _rich_echo(
             if bold:
                 style_str = f"bold {color}"
             rendered = message
-            if accent_length is not None:
+            if accent_length is not None or hanging_indent is not None:
                 from rich.text import Text
 
                 rendered = Text(message, style="default")
                 rendered.stylize(style_str, 0, accent_length)
+                if accent_length is not None and body_style != "default":
+                    rendered.stylize(body_style, accent_length)
                 style_str = "default"
+                if hanging_indent is not None and console.is_terminal:
+                    width = max(1, console.width)
+                    if 0 < hanging_indent < width:
+                        prefix = rendered[:hanging_indent]
+                        lines = rendered[hanging_indent:].wrap(
+                            console, width - hanging_indent, overflow="fold"
+                        )
+                        for line in lines:
+                            line.rstrip()
+                        rendered = Text("\n").join(
+                            (prefix if index == 0 else Text(" " * hanging_indent)) + line
+                            for index, line in enumerate(lines)
+                        )
+                    else:
+                        rendered = Text("\n").join(rendered.wrap(console, width, overflow="fold"))
             with _broken_pipe_policy(console, propagate_broken_pipe):
                 # Opt-in only: legacy callers retain Rich's usual wrapping.
                 wrap_options = {"soft_wrap": True} if natural_wrap else {}
@@ -178,10 +197,18 @@ def _rich_echo(
         color_code = color_map.get(color, Fore.WHITE)
         style_code = Style.BRIGHT if bold else ""
         if accent_length is not None:
+            if color in {"default", "dim"}:
+                color_code = Fore.RESET
+            elif color.startswith("dim "):
+                color_code = color_map.get(color[4:], Fore.RESET)
+            if "dim" in color.split():
+                style_code += Style.DIM
             accent = message[:accent_length]
             body = message[accent_length:]
+            body_code = Style.DIM if body_style == "dim" else ""
+            body_reset = Style.RESET_ALL if body_code else ""
             click.echo(
-                f"{color_code}{style_code}{accent}{Style.RESET_ALL}{body}",
+                f"{color_code}{style_code}{accent}{Style.RESET_ALL}{body_code}{body}{body_reset}",
                 err=_console_stderr,
             )
             return

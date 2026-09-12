@@ -6,10 +6,15 @@ self-contained local skill. The checker and skill reuse the original
 `apmx` prepares the declared skill privately, without deploying it to your
 project or changing this package.
 
-From the repository root, with `apmx` installed and Copilot authenticated:
+With `apmx` installed and Copilot authenticated, enable contracts once:
 
 ```sh
 apm experimental enable contracts
+```
+
+Then run from the repository root:
+
+```sh
 package="$(pwd)/examples/contracts/packaged-job"
 caller="$HOME/apmx-contract-example"
 mkdir "$caller" &&

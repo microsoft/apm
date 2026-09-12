@@ -11,6 +11,7 @@ from unittest.mock import Mock
 
 import click
 import pytest
+from rich.console import Console
 
 from apm_cli.contracts.events import EventEmitter
 from apm_cli.contracts.frontend import parse_contract
@@ -1182,6 +1183,152 @@ def test_rich_accent_is_opt_in_and_never_styles_body_or_parses_markup(
     destination.truncate()
     console._rich_echo("Legacy body", color="blue")
     assert "\x1b[34mLegacy body\x1b[0m" in destination.getvalue()
+
+
+@pytest.fixture
+def styled_console(monkeypatch: pytest.MonkeyPatch) -> tuple[Console, Mock]:
+    monkeypatch.delenv("NO_COLOR")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("CI", "false")
+    rich_console = Console(
+        file=io.StringIO(), force_terminal=True, color_system="standard", width=80, record=True
+    )
+    printed = Mock(wraps=rich_console.print)
+    monkeypatch.setattr(rich_console, "print", printed)
+    monkeypatch.setattr(console, "_get_console", lambda: rich_console)
+    return rich_console, printed
+
+
+def test_header_gap_metadata_and_elapsed_time_form_a_secondary_level(
+    tmp_path: Path, styled_console: tuple[Console, Mock]
+) -> None:
+    rich_console, printed = styled_console
+    logger = ContractLogger()
+    events = EventEmitter("run", logger.on_event)
+    events.emit(
+        "selected",
+        contract="contracts/handoff.contract.md",
+        produces="handoff.json",
+        caller_root=str(tmp_path),
+        model="native-model",
+    )
+    context = rich_console.export_text(clear=False)
+    assert context.endswith("  Running on your machine (not sandboxed).\n\n")
+    model = next(
+        call.args[0] for call in printed.call_args_list if "native-model" in call.args[0].plain
+    )
+    assert model.get_style_at_offset(rich_console, 2).dim is True
+    events.emit("finished", result=_result(tmp_path, Outcome.UNPROVEN))
+    headline = next(
+        call.args[0] for call in printed.call_args_list if "APM: UNPROVEN" in call.args[0].plain
+    )
+    result_style = headline.get_style_at_offset(rich_console, 0)
+    assert result_style.color.name == "yellow"
+    assert result_style.bold is True
+    assert not result_style.dim
+    assert headline.get_style_at_offset(rich_console, len(headline) - 1).dim is True
+
+
+def test_native_tool_metadata_controls_emphasis_not_assistant_wording(
+    styled_console: tuple[Console, Mock],
+) -> None:
+    rich_console, printed = styled_console
+    decoder = ContractStreamDecoder(EventEmitter("run", ContractLogger().on_event))
+    for kind, data in (
+        ("tool.execution_start", {"toolName": "view"}),
+        ("tool.execution_complete", {"success": True}),
+        ("tool.execution_complete", {"success": False}),
+        (
+            "assistant.message",
+            {
+                "messageId": "prose",
+                "phase": "commentary",
+                "content": "Tool failed",
+                "tool_status": "failed",
+            },
+        ),
+    ):
+        decoder.feed("stdout", (json.dumps({"type": kind, "data": data}) + "\n").encode())
+    started, completed, failed, prose = [call.args[0] for call in printed.call_args_list]
+    body = len("  Copilot > ")
+    assert started.get_style_at_offset(rich_console, body).dim is True
+    assert completed.get_style_at_offset(rich_console, body).dim is True
+    assert failed.get_style_at_offset(rich_console, body).color.name == "red"
+    assert failed.get_style_at_offset(rich_console, body).bold is True
+    assert "[x]" not in failed.plain
+    assert prose.get_style_at_offset(rich_console, 2).color.name == "cyan"
+    assert prose.get_style_at_offset(rich_console, 2).dim is True
+    assert prose.get_style_at_offset(rich_console, body).color.name == "default"
+    assert not prose.get_style_at_offset(rich_console, body).dim
+
+
+@pytest.mark.parametrize("width", [30, 40, 80])
+def test_narration_has_hanging_indentation_without_wrapping_saved_paths(
+    tmp_path: Path, styled_console: tuple[Console, Mock], width: int
+) -> None:
+    rich_console, printed = styled_console
+    rich_console.width = width
+    logger = ContractLogger()
+    logger.attach_run("run", tmp_path)
+    message = (
+        "I will read the source notes and then write one entry per source ID "
+        "with a brief summary and a caution grounded in the original notes."
+    )
+    EventEmitter("run", logger.on_event).emit("activity", source="harness", text=message)
+    lines = printed.call_args.args[0].plain.splitlines()
+    prefix = "  Copilot > "
+    assert len(lines) > 1
+    assert lines[0].startswith(prefix)
+    assert all(line.startswith(" " * len(prefix)) for line in lines[1:])
+    assert all(len(line) <= width for line in lines)
+    assert " ".join(line[len(prefix) :] for line in lines) == message
+    logger.close()
+    assert f"  Copilot (untrusted) > {message}\n" == (tmp_path / "transcript.log").read_text()
+    path = "Output: .apm/runs/" + "long-run-" * 12 + "/artifacts/handoff.json"
+    logger._write(path)
+    assert printed.call_args.args[0].plain == "  " + path
+    assert rich_console.export_text().endswith("  " + path + "\n")
+
+
+@pytest.mark.parametrize("width", [8, 12])
+def test_narration_with_a_prefix_wider_than_the_terminal_keeps_its_text(
+    styled_console: tuple[Console, Mock], width: int
+) -> None:
+    rich_console, printed = styled_console
+    rich_console.width = width
+    message = "  Copilot stderr > Connection retry in progress."
+    console._rich_echo(
+        message, accent_length=19, hanging_indent=19, color="dim cyan", natural_wrap=True
+    )
+    rendered = printed.call_args.args[0].plain
+    assert all(len(line) <= width for line in rendered.splitlines())
+    assert "".join(rendered.split()) == "".join(message.split())
+
+
+@pytest.mark.parametrize("plain", [False, True])
+def test_prose_layout_keeps_plain_and_nonterminal_output_intact(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, plain: bool
+) -> None:
+    destination = io.StringIO()
+    rich_console = Console(file=destination, force_terminal=False, width=20)
+    monkeypatch.setattr(console, "_get_console", lambda: rich_console)
+    message = "  Copilot > A long progress message that must remain one logical line."
+    console._rich_echo(message, plain=plain, accent_length=12, hanging_indent=12, natural_wrap=True)
+    output = capsys.readouterr().out if plain else destination.getvalue()
+    assert output == message + "\n"
+
+
+def test_colorama_fallback_preserves_muted_accents_and_elapsed_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NO_COLOR")
+    monkeypatch.setattr(console, "_get_console", lambda: None)
+    echo = Mock()
+    monkeypatch.setattr(click, "echo", echo)
+    console._rich_echo("Copilot > Body", color="dim cyan", accent_length=10)
+    assert echo.call_args.args[0] == "\x1b[36m\x1b[2mCopilot > \x1b[0mBody"
+    console._rich_echo("[!] UNPROVEN  1s", color="yellow", accent_length=12, body_style="dim")
+    assert echo.call_args.args[0] == "\x1b[33m[!] UNPROVEN\x1b[0m\x1b[2m  1s\x1b[0m"
 
 
 def test_checker_diagnostics_are_not_invented_from_passing_exit(capsys) -> None:

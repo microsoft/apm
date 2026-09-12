@@ -78,7 +78,8 @@ Private logs are not guaranteed secret-free or safe to publish.
 
 During preparation, generation and checks, interactive terminals show a rotating
 ASCII spinner, as in `apm install`. Its label names the current action rather
-than leaving an execution trace on screen. Copilot is asked for brief progress
+than leaving an execution trace on screen. Job context, live activity, checks and
+the final result are separated into blocks. Copilot is asked for brief progress
 updates before reading inputs and writing the output. Its public progress messages,
 final response, tool activity and errors appear above the spinner as they arrive,
 clearly attributed to Copilot. The amount of narration depends on the model.
@@ -89,8 +90,12 @@ boundaries so secret filtering can handle values split across stream chunks.
 Pipes, CI, `NO_COLOR`, and `APM_PROGRESS=never` use plain progress lines instead.
 Quiet subprocesses report that they are still running about every five seconds.
 Animation is never written to the retained transcript.
-Default output uses neutral text with color reserved for status. Output and
+Default output uses neutral body text with small color accents. Output and
 record paths are relative to the caller when possible and remain copyable.
+In colored terminals, source prefixes use a subdued cyan accent; model details,
+elapsed time and routine tool activity are dimmed. Tool failures remain prominent.
+Long narration aligns beneath its message text, while saved paths and plain
+output retain intact logical lines.
 Use `--verbose` for source identities, raw check exits, model observations,
 and the log location. Review logs for sensitive data before sharing them.
 

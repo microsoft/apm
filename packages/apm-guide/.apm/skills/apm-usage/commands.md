@@ -269,6 +269,8 @@ and errors as they arrive. Private reasoning and raw tool payloads stay hidden. 
 plain progress and five-second updates while a subprocess is quiet. Copilot's
 messages are attributed separately from APM's check results; `--verbose` adds
 source identities, raw exits and log details.
+Colored terminals dim metadata and routine tool activity, accent source labels,
+and align wrapped narration. Saved paths and plain output remain copyable.
 
 Execution requires macOS/Linux, ready Copilot, an eligible no-policy caller,
 and invocation-only consent. Windows supports help/version, not contract

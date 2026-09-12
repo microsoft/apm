@@ -180,11 +180,18 @@ class ContractStreamDecoder:
     def _emit(self, kind: str, **data: object) -> None:
         self.events.emit(kind, source=self.source, label=self.label, **data)
 
-    def _activity(self, text: str, stream: str = "stdout") -> None:
+    def _activity(
+        self, text: str, stream: str = "stdout", *, tool_status: str | None = None
+    ) -> None:
         if text:
             # Both consumers use safe_text; keep raw bounded text in the
             # transient event only, avoiding a second escape of literal paths.
-            self._emit("activity", text=text, stream=stream)
+            self._emit(
+                "activity",
+                text=text,
+                stream=stream,
+                **({"tool_status": tool_status} if tool_status is not None else {}),
+            )
 
     def _notice_once(self, key: str, message: str) -> None:
         if key not in self._omission_notices:
@@ -416,16 +423,16 @@ class ContractStreamDecoder:
     def _tool_started(self, data: dict) -> None:
         name = data.get("toolName")
         if isinstance(name, str) and len(name) <= 256:
-            self._activity(f"Tool started: {name}")
+            self._activity(f"Tool started: {name}", tool_status="started")
         else:
-            self._activity("Tool started")
+            self._activity("Tool started", tool_status="started")
 
     def _tool_finished(self, data: dict) -> None:
         status = {True: "completed", False: "failed"}.get(
             data.get("success") if isinstance(data.get("success"), bool) else None,
             "completion observed",
         )
-        self._activity(f"Tool {status}")
+        self._activity(f"Tool {status}", tool_status=status)
 
     def _session_error(self, data: dict) -> None:
         message = data.get("message")
