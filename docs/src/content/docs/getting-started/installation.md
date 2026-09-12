@@ -606,7 +606,7 @@ For existing installations, follow [ownership and migration](#unix-install-owner
 
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 
-Prebuilt Linux binaries require glibc 2.35+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or Python 3.10+ and pip. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
+Prebuilt Linux binaries (x86_64 and ARM64) require glibc 2.38+. Use a compatible base image (for example, `mcr.microsoft.com/devcontainers/universal:24-trixie`) or [pip with a working Python 3.10+](#pip-install). This glibc floor applies to prebuilt binaries, not your system Python. Eligible automatic fallback runs the selected interpreter's `python3 -m pip` or `python -m pip` command and follows the [ownership rules](#unix-install-ownership-and-migration). If that interpreter's user scripts directory cannot be represented as one `PATH` entry, use the absolute launcher command printed by the installer. Update or uninstall a fallback install with the same Python interpreter's `-m pip`; uninstall it before switching to the binary installer.
 
 ### Authentication errors when installing packages
 
