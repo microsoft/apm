@@ -204,6 +204,31 @@ class DeploymentLedgerCodec:
         )
 
     @staticmethod
+    def merge_dependencies(
+        lockfile: LockFile,
+        updated: LockFile,
+        *,
+        project_root: Path,
+        diagnostics: DiagnosticCollector,
+    ) -> None:
+        """Merge processed dependencies without discarding concrete deployment locators."""
+        current = DeploymentLedgerCodec.from_lockfile(updated)
+        retained = DeploymentLedgerCodec.reconcile_owner_references(
+            lockfile,
+            excluded_dependency_keys=updated.dependencies,
+            project_root=project_root,
+            diagnostics=diagnostics,
+        )
+        # add_dependency invalidates the legacy projection. Capture both
+        # canonical ledgers first, then restore their reconciled records once.
+        for dependency in updated.dependencies.values():
+            lockfile.add_dependency(dependency)
+        DeploymentLedgerCodec.apply_to_lockfile(
+            DeploymentLedger(records={**retained.ledger.records, **current.records}),
+            lockfile,
+        )
+
+    @staticmethod
     def from_lockfile(lockfile: LockFile) -> DeploymentLedger:
         """Read canonical rows or synthesize them from legacy ownership views."""
         current = getattr(lockfile, "deployment_ledger", None)

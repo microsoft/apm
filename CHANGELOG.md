@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Partial dependency updates preserve concrete deployment targets for refreshed and untouched packages, including skills under `.agents/skills/`, instead of demoting them to `legacy`. (#2924)
+
 ### Added
 
 - `apm init --discover` previews existing agent content; consented `--apply` declares supported local packages without changing source files, ready for a separate `apm install`. Builds on discovery work by @chkp-roniz in #2857. (#2937)
