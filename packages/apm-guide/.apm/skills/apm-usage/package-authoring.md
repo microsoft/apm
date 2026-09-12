@@ -803,10 +803,12 @@ Schema rules:
 - `source` accepts three remote forms: `owner/repo` (default host),
   `host.tld/owner/repo` (non-default host shorthand), or
   `https://host.tld/path/to/repo[.git]` (full URL with two or more path
-  segments). Non-default hosts
-  resolve auth via the standard APM token chain
-  (`docs/getting-started/authentication.md`); the default-host token is
-  never forwarded.
+  segments). APM never embeds tokens in the source URL. During online
+  validation (`apm marketplace check`), source resolution follows the
+  standard auth rules in `docs/getting-started/authentication.md`:
+  default-host shorthand uses the configured default host, and explicit
+  hosts resolve through that host class's auth path. Offline checks
+  resolve no credentials.
 - `versioning.strategy` is optional. When present, it is consumed by
   the `apm pack --check-versions` release gate to enforce alignment
   between each local package's `version:` field and the marketplace
