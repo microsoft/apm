@@ -128,6 +128,21 @@ class _FakeDepRef:
 
 
 class TestApplyCliSkillPin:
+    def test_package_subset_unions_with_cli_subset(self):
+        dep_ref = _FakeDepRef("owner/bundle", "owner/bundle@main", "owner/bundle")
+        entries: dict = {}
+        apply_cli_skill_pin(
+            dep_ref,
+            ("beta",),
+            True,
+            [],
+            entries,
+            package_subset=("alpha",),
+            dependency_reference_cls=object,
+        )
+        assert dep_ref.skill_subset == ["alpha", "beta"]
+        assert entries == {}
+
     def test_star_reset_clears_pin_and_records_full_entry(self):
         # `--skill '*'`: clear the pin and write the refreshed full-bundle entry.
         dep_ref = _FakeDepRef("owner/bundle", "owner/bundle@main", "owner/bundle")

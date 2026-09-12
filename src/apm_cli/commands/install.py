@@ -75,6 +75,7 @@ from apm_cli.install.package_resolution import (
     apply_cli_skill_pin,
     cli_skill_subset,
     dependency_reference_to_yaml_entry,
+    normalize_github_skill_urls,
     persist_dependency_list_if_changed,
     propagate_existing_registry_source,
     resolve_parsed_dependency_reference,
@@ -281,8 +282,8 @@ def _resolve_package_references(
     """
     from ..install.registry_wiring import should_skip_github_probe_for_dep, validate_registry_ref
 
+    packages, package_skill_subsets, invalid_outcomes = normalize_github_skill_urls(packages)
     valid_outcomes = []  # (canonical, already_present) tuples
-    invalid_outcomes = []  # (package, reason) tuples
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
     validated_packages = []
@@ -290,7 +291,9 @@ def _resolve_package_references(
     manifest_identities = builtins.set(existing_identities)
 
     if logger:
-        logger.validation_start(len(packages))
+        logger.validation_start(len(packages) + len(invalid_outcomes))
+        for package, reason in invalid_outcomes:
+            logger.validation_fail(package, reason)
 
     for package in packages:
         # --- Marketplace pre-parse intercept ---
@@ -403,6 +406,7 @@ def _resolve_package_references(
                 skill_subset_from_cli,
                 current_deps,
                 _apm_yml_entries,
+                package_subset=(package_skill_subsets or {}).get(package),
                 dependency_reference_cls=DependencyReference,
                 logger=logger,
             )
@@ -437,8 +441,6 @@ def _resolve_package_references(
                 logger.validation_fail(package, scope_reject)
             continue
 
-        if skill_subset and canonical not in _apm_yml_entries:
-            _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
         _apm_yml_entries.setdefault(canonical, dep_ref.to_apm_yml_entry())
 
         # Check if package is already in dependencies (by identity)
@@ -604,7 +606,6 @@ def _validate_and_add_packages_to_apm_yml(
         data[dep_section]["apm"] = []
 
     current_deps = data[dep_section]["apm"] or []
-
     # Detect duplicates against existing deps
     existing_identities = _check_package_conflicts(current_deps)
 
