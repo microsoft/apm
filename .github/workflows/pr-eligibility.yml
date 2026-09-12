@@ -42,23 +42,20 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Resolve trusted default branch
-        id: base
+      - name: Verify trusted default branch
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const { data: repo } = await github.rest.repos.get(context.repo);
-            const { data: commit } = await github.rest.repos.getCommit({
-              ...context.repo, ref: repo.default_branch
-            });
-            if (!/^[a-f0-9]{40}$/.test(commit.sha)) throw new Error('Trusted base unavailable');
-            core.setOutput('sha', commit.sha);
+            if (repo.default_branch !== 'main') {
+              throw new Error('Trusted default branch must be main; review workflow before resuming');
+            }
 
       - name: Checkout trusted implementation only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ steps.base.outputs.sha }}
+          ref: main
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
@@ -67,9 +64,10 @@ jobs:
 
       - name: Read metadata and publish neutral reports
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          TRUSTED_SHA: ${{ steps.base.outputs.sha }}
         with:
           script: |
+            const { execFileSync } = require('node:child_process');
+            const trustedSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+            if (!/^[a-f0-9]{40}$/.test(trustedSha)) throw new Error('Trusted base unavailable');
             const { run } = require('./scripts/governance/run.cjs');
-            await run({ github, context, core, trustedSha: process.env.TRUSTED_SHA });
+            await run({ github, context, core, trustedSha });

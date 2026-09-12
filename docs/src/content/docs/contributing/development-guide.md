@@ -96,6 +96,11 @@ compiled capabilities are deployed and verified. Opening or merging the PR
 does not authorize resuming the disabled workflow; a maintainer does that
 separately.
 
+The eligibility workflow verifies that `main` is still the repository default
+branch before checking out that literal ref, then uses the checked-out commit
+for both implementation and policy. A default-branch rename stops the workflow
+until maintainers review this boundary; it never falls back to a PR or event ref.
+
 ### Installing optional skills
 
 To use these tools, [install APM](../../getting-started/installation/) if needed,

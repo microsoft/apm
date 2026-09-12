@@ -108,6 +108,18 @@ def test_cli_consistency_uses_one_type_without_false_docs_classification() -> No
         assert config["create_issue"]["labels"] == expected
 
 
+def test_docs_workflow_never_treats_a_label_as_companion_approval() -> None:
+    source, lock, text = _workflow("docs-sync")
+    assert source["checkout"] is False
+    assert "CONFIRM_PRESENT" not in text
+    assert "IF AND ONLY IF" not in text
+    assert "Both label and manual dispatch are advisory-only" in text
+    assert "fresh responsible-human issue-scope checkpoint" in text
+    assert "Steps 1-6" in text
+    for config in _output_configs(lock).values():
+        assert "create_pull_request" not in config
+
+
 @pytest.mark.parametrize(
     "path",
     [

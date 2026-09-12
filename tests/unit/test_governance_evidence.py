@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -53,9 +54,13 @@ def test_advisory_workflow_executes_only_trusted_default_branch_code() -> None:
     assert workflow["concurrency"]["cancel-in-progress"] is False
     steps = workflow["jobs"]["report"]["steps"]
     assert len(steps) == 3
-    assert steps[1]["with"]["ref"] == "${{ steps.base.outputs.sha }}"
+    assert steps[1]["with"]["ref"] == "main"
     assert steps[1]["with"]["persist-credentials"] is False
-    assert "repo.default_branch" in steps[0]["with"]["script"]
+    assert "repo.default_branch !== 'main'" in steps[0]["with"]["script"]
+    assert "['rev-parse', 'HEAD']" in steps[2]["with"]["script"]
+    assert steps[2]["with"]["script"].index("rev-parse") < steps[2]["with"]["script"].index(
+        "require('./scripts/governance/run.cjs')"
+    )
     assert "require('./scripts/governance/run.cjs')" in steps[2]["with"]["script"]
     assert all("run" not in step for step in steps)
     assert "head.repo" not in text
@@ -63,6 +68,39 @@ def test_advisory_workflow_executes_only_trusted_default_branch_code() -> None:
     assert "npm install" not in text
     assert "secrets." not in text
     assert "eligibility" not in (ROOT / ".github/workflows/merge-gate.yml").read_text()
+
+
+@pytest.mark.parametrize(
+    ("branch", "api_failure", "expected_code"),
+    [("main", False, 0), ("feature", False, 1), ("refs/heads/main", False, 1), ("main", True, 1)],
+)
+def test_trusted_checkout_guard_fails_closed(
+    branch: str, api_failure: bool, expected_code: int
+) -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/pr-eligibility.yml").read_text())
+    script = workflow["jobs"]["report"]["steps"][0]["with"]["script"]
+    result = subprocess.run(
+        [
+            "node",
+            "-e",
+            """
+const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const github = {rest: {repos: {get: async () => {
+  if (input.apiFailure) throw new Error('API unavailable');
+  return {data: {default_branch: input.branch}};
+}}}};
+new AsyncFunction('github', 'context', input.script)(github, {repo: {}})
+  .catch(error => { console.error(error.message); process.exitCode = 1; });
+""",
+        ],
+        input=json.dumps({"script": script, "branch": branch, "apiFailure": api_failure}),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == expected_code
+    assert bool(result.stderr) == bool(expected_code)
 
 
 def test_cli_help_is_noninteractive_and_explains_authority_boundary() -> None:
