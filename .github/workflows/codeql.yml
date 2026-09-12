@@ -19,11 +19,14 @@ jobs:
     permissions:
       security-events: write
       contents: read
+    env:
+      # The merge policy covers all open findings, not only changed-line alerts.
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
 
     strategy:
       fail-fast: false
       matrix:
-        language: [ python, actions ]
+        language: [ python, actions, javascript-typescript ]
 
     steps:
       - name: Checkout repository
@@ -35,4 +38,40 @@ jobs:
           languages: ${{ matrix.language }}
 
       - name: Perform CodeQL Analysis
+        id: analyze
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          # Microsoft CodeQL Central consumes default-branch database uploads
+          # for its separate SDL analysis. Keep local queries and SARIF uploads.
+          upload-database: true
+          wait-for-processing: true
+
+      - name: Record CodeQL upload identity
+        env:
+          LANGUAGE: ${{ matrix.language }}
+          SARIF_ID: ${{ steps.analyze.outputs.sarif-id }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          fields = {
+              "run_id": "GITHUB_RUN_ID", "run_attempt": "GITHUB_RUN_ATTEMPT",
+              "sha": "GITHUB_SHA", "ref": "GITHUB_REF",
+              "language": "LANGUAGE", "sarif_id": "SARIF_ID",
+          }
+          evidence = {key: os.environ[value] for key, value in fields.items()}
+          if not evidence["sarif_id"]:
+              raise SystemExit("CodeQL did not produce a SARIF upload ID")
+          path = Path(os.environ["RUNNER_TEMP"]) / f"codeql-policy-{evidence['language']}.json"
+          path.write_text(json.dumps(evidence) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload CodeQL policy evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codeql-policy-${{ matrix.language }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codeql-policy-${{ matrix.language }}.json
+          if-no-files-found: error
+          retention-days: 14

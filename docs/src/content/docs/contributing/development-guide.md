@@ -363,18 +363,57 @@ workflows.
 
 ### Code scanning on pull requests and merge queues
 
-The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
-pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
-Keep the workflow path, `analyze` job ID, and language matrix stable: they
-identify the analysis configurations GitHub compares against the base branch.
-PR results do not replace results for the merge queue's separate commit.
+`codeql.yml` analyzes `python`, `actions`, and `javascript-typescript` on pull
+requests, pushes to `main`, merge-group `checks_requested` events, and weekly.
+JavaScript adds coverage; preserve stable workflow, job, and category identities.
+Explicit `upload-database: true` and `wait-for-processing: true` retain existing
+defaults; local queries and database uploads remain enabled. Diff-informed
+queries are disabled so PR scans include findings outside changed lines.
 
-If both analysis jobs succeed but Code scanning still reports a missing
-configuration, inspect the CodeQL check summary. An additional `API upload`
-configuration on the base branch belongs to a separate upload producer;
-rerunning this workflow cannot supply that producer's results. Coordinate
-matching PR and queue uploads with its owner rather than deleting findings,
-renaming categories, or weakening the code-scanning ruleset.
+A separate scan producer consumes default-branch database uploads and returns
+the separate `default` API configuration on `main` only. Preserve these uploads
+for compliance; PR and queue workflow analyses do not replace that producer.
+
+`.github/workflows/merge-gate.yml` still requires only the `gate` check and adds
+`actions: read` and `security-events: read`. The base-checked-out
+`merge_gate_wait.sh` unconditionally calls `.github/scripts/ci/codeql_policy.py`
+before polling and immediately before success, within the shared deadline.
+Runner event metadata selects the exact PR merge
+or merge-queue ref and SHA, not the PR head or a moving branch tip.
+
+The policy requires the latest CodeQL workflow run and every `Analyze` job
+(`python`, `actions`, `javascript-typescript`) to succeed. Analyses must match
+the exact ref and commit, full stable workflow key, category, and environment,
+with positive `rules_count`. Small, per-language evidence artifacts bind each
+SARIF upload ID to its workflow run and attempt; older uploads cannot satisfy
+a rerun. These artifacts are parsed as data, never executed. They expire after
+14 days; rerun CodeQL before rerunning `gate` when evidence has expired.
+The policy paginates API results and checks per-alert
+instances. It blocks **all open, undismissed workflow-scoped alerts with
+high/critical security severity or error severity**, including pre-existing
+alerts—not just new findings. GitHub dismissals are honored; the separate
+external `default` API configuration is excluded. API failures, timeouts, and
+stale state fail closed. Enabling another language may expose existing findings
+that must be fixed or reviewed before rollout.
+
+**Post-merge rollout (maintainer action):**
+
+1. Keep the native `code_scanning` rule enabled for the initial PR: its gate
+   runs the **old trusted base script**, not the proposed policy.
+2. After merge, verify the new base gate enforces the policy and succeeds on
+   both a fresh PR and a merge-queue run. Verify `main` publishes all three
+   language databases and analyses before changing protection.
+3. Back up `main-protection` (ruleset ID `9294522`) through the GitHub rulesets
+   API. Re-read and compare immediately before updating; abort on concurrent changes.
+4. Only then may a maintainer remove **only CodeQL** from the rule's
+   `parameters.code_scanning_tools`
+   via the API. Retain the rule if other tools remain; remove it only if empty.
+   Preserve `gate` and every other rule, threshold, tool, and bypass setting.
+   Verify the saved ruleset afterward. Neither this PR nor this documentation
+   changes live settings or removes the live blocker.
+
+**Rollback:** Reinstate the prior native code-scanning rule **before** reverting
+the custom gate.
 
 ## Documentation
 

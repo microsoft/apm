@@ -59,6 +59,8 @@ permissions:
   contents: read
   checks: read
   pull-requests: read
+  actions: read
+  security-events: read
 
 jobs:
   gate:
@@ -112,6 +114,10 @@ jobs:
           # Keep this in sync with the underlying workflows.
           # NOTE: 'gate' (this job) MUST NOT appear here -- it would
           # deadlock waiting for itself.
+          # CodeQL is evaluated separately inside the trusted base script:
+          # jobs must succeed AND scoped alerts must meet the severity policy.
+          # Do not substitute the tool-wide CodeQL check (SDL API uploads on
+          # main have no matching PR/queue configuration).
           # PR context: only the shard jobs gate. Coverage Combine runs
           # in parallel as a non-required signal so global 80% drift is
           # visible in the PR UI without paying ~3 min of runner-
@@ -146,5 +152,4 @@ jobs:
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh
-
 

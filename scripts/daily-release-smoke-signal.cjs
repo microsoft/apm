@@ -39,8 +39,8 @@ function extractFailedTests(logText) {
   const tests = new Set();
   const cleanLog = stripAnsi(logText);
   const patterns = [
-    /\b(?:FAILED|ERROR)\s+(tests\/[^\s]+(?:::[^\s]+)*)/g,
-    /\b(tests\/[^\s]+(?:::[^\s]+)*)\s+(?:FAILED|ERROR)\b/g,
+    /\b(?:FAILED|ERROR)\s+(tests\/[^\s]+)/g,
+    /\b(tests\/[^\s]+)\s+(?:FAILED|ERROR)\b/g,
   ];
   for (const pattern of patterns) {
     for (const match of cleanLog.matchAll(pattern)) {

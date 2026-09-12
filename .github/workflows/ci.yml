@@ -35,6 +35,7 @@ jobs:
         src/ tests/
         scripts/lint_architecture_boundaries.py
         scripts/architecture_linter/
+        .github/scripts/ci/codeql_policy.py
 
     - name: Ruff format check
       run: >-
@@ -42,6 +43,7 @@ jobs:
         src/ tests/
         scripts/lint_architecture_boundaries.py
         scripts/architecture_linter/
+        .github/scripts/ci/codeql_policy.py
 
     - name: Check YAML encoding safety
       run: |
@@ -66,7 +68,7 @@ jobs:
         VIOLATIONS=$(
           {
             find src/ scripts/architecture_linter/ -name '*.py' -print0
-            printf '%s\0' scripts/lint_architecture_boundaries.py
+            printf '%s\0' scripts/lint_architecture_boundaries.py .github/scripts/ci/codeql_policy.py
           } | xargs -0 -I{} awk -v max="$MAX_LINES" \
             'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {}
         )
@@ -92,7 +94,8 @@ jobs:
           --fail-on=R0801 \
           src/apm_cli/ \
           scripts/lint_architecture_boundaries.py \
-          scripts/architecture_linter/
+          scripts/architecture_linter/ \
+          .github/scripts/ci/codeql_policy.py
 
     - name: Lint - auth-protocol boundary (#1212 anti-regression)
       run: bash scripts/lint-auth-signals.sh
