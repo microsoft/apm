@@ -565,8 +565,39 @@ For an org standardizing on APM:
 - Publish an `apm-policy.yml` from your `<org>/.github` repo with an allow list and an MCP transport restriction. See [Governance Guide](../governance-guide/).
 - Require signed commits on the source repos APM pulls from -- this is where the trust chain bottoms out.
 - Route dep traffic through an enterprise proxy with audit logging. See [Registry Proxy & Air-gapped](../registry-proxy/).
-- Forbid `allow_insecure: true` via the policy allow list, except where an air-gapped mirror demands it.
+- Treat insecure transport as a separate CI control. `apm-policy.yml` has no
+  dedicated `allow_insecure` field: `dependencies.allow` and
+  `dependencies.deny` match scheme-blind canonical package identities. The
+  default `github.com` host is omitted while non-default hosts are retained, so
+  rules can restrict package and host identity but cannot distinguish
+  `http://` from `https://` for the same canonical host and path. Reject committed
+  `allow_insecure: true` entries and prohibit `--allow-insecure` and
+  `--allow-insecure-host` in standard CI; review both explicit gates for any
+  air-gapped exception. `registry_source.allow_non_registry` is a separate
+  source-routing control, not an insecure-transport setting.
 - Scan committed `apm.yml` for literal secrets in `mcp.env` values -- APM assumes env-var indirection (`GITHUB_TOKEN: ${GITHUB_TOKEN}`) but does not enforce it. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
+
+A restrictive dependency policy is still valuable, but it is identity-based,
+not transport-aware:
+
+```yaml
+# apm-policy.yml
+name: contoso-security
+version: "1.0"
+enforcement: block
+
+dependencies:
+  allow:
+    - "contoso/approved-agent-config"
+    - "microsoft/*"
+```
+
+This example blocks every unlisted package identity regardless of transport; it
+does **not** enforce HTTPS for the two allowed patterns. See the
+[HTTP dependency two-gate model](#http-insecure-dependencies),
+[dependency pattern matching](../policy-reference/#pattern-matching), and the
+[`registry_source` policy](../../reference/policy-schema/#registry_source) for
+the three distinct controls.
 
 ## Frequently asked questions
 

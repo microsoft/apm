@@ -113,6 +113,22 @@ def test_enterprise_security_docs_transport_trust_model():
     assert "Rust" in security
 
 
+def test_enterprise_security_docs_do_not_claim_transport_aware_policy():
+    security = (
+        _repo_root() / "docs" / "src" / "content" / "docs" / "enterprise" / "security.md"
+    ).read_text(encoding="utf-8")
+    # Keep this contract about the guidance rather than Markdown presentation.
+    normalized = " ".join(security.replace("**", "").split())
+
+    assert "no dedicated `allow_insecure` field" in normalized
+    assert "scheme-blind canonical package identities" in normalized
+    assert "non-default hosts are retained" in normalized
+    assert "host-blind" not in normalized
+    assert "does not enforce HTTPS" in normalized
+    assert "`registry_source.allow_non_registry`" in normalized
+    assert "Forbid `allow_insecure: true` via the policy allow list" not in normalized
+
+
 def test_ssl_docs_verify_apm_path_and_mark_planned_scope():
     docs = (
         _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
