@@ -20,11 +20,50 @@ parallelizing the work within an issue.
 - ISSUE_WORKTREE: <required; your worktree, on ISSUE_BRANCH at HEAD>
 - ISSUE_BRANCH: <required; the branch the orchestrator created>
 - REPO_ROOT, ORIGIN: <for provisioning task worktrees and pushing>
+- TRUSTED_GOVERNANCE_ROOT: <required; parent-verified trusted default-branch checkout>
+- APPROVAL_URL: <required; nominated issue-comment scope record>
+- HUMAN_SCOPE_RECEIPT: <required; issue scope, done-when, exclusions, review contact,
+  and human confirmation reference; context, not continuing permission>
 
 ## Reload discipline
 
 Reload plan.md and (once it exists) plan.json before EACH stage and
 before EACH spawn (B8 ATTENTION ANCHOR). Never drive from recall.
+
+## Current human-scope gate
+
+This child owns the gate before each mutating wave, including task-worktree
+provisioning, and before acceptance-close writes. Never reuse Phase 2's
+receipt or a previous wave's confirmation as permission for the next wave.
+
+1. Execute the shared read-only probe from `TRUSTED_GOVERNANCE_ROOT`:
+
+   ```bash
+   (cd "$TRUSTED_GOVERNANCE_ROOT" &&
+     node scripts/governance/eligibility.cjs --help &&
+     node scripts/governance/eligibility.cjs --repo microsoft/apm \
+       --issue "$ISSUE_NUMBER" --approval-url "$APPROVAL_URL")
+   ```
+
+   This must be the parent-verified trusted default-branch tool, not
+   ISSUE_WORKTREE, a contributor branch, or an installed substitute.
+   `authority.cjs` alone interprets the record and trusted roster; do not
+   create another parser or roster. Require a complete `state: record-present`
+   result with `authorizes_implementation: false`. That result is evidence,
+   never permission; current snapshots cannot detect deleted withdrawals.
+2. Through the orchestrator, obtain fresh explicit responsible-human confirmation for this wave:
+   this issue, its bounded tasks, done-when, exclusions, and available review
+   contact. Require the actual current human confirmation reference, not
+   an agent's assertion, stored `approved` value, or silence. If no human
+   checkpoint is available through the parent, return `blocked`, not a
+   self-approved continuation. Record the evidence and wave-specific human
+   confirmation in session state and pass its scope to task children.
+3. Any non-record-present state (including `withdrawn` or `error`), missing
+   or untrusted tool, incomplete read, changed scope, or uncertain confirmation
+   stops this issue before provisioning or dispatching implementers. Return
+   the structured `blocked` result below with the specific reason. Do not
+   retry by re-planning, fabricate PR fields, or proceed to acceptance close.
+   Only a renewed parent/human checkpoint permits resuming at the gate.
 
 ## Model routing (B12)
 
@@ -96,6 +135,9 @@ correct, not a defect. Proceed to a single-wave implement.
 For each wave (resume at the plan's `active_from_wave`, then ascending;
 reload plan.json first):
 
+0. Run the **Current human-scope gate** above before any task-worktree
+   provisioning or implementer dispatch, including resumed, retried, and replanned waves.
+   A refusal returns `blocked` to the orchestrator immediately.
 1. Record `wave_base_sha = git rev-parse HEAD` on ISSUE_BRANCH and write
    it to the wave row (`base_sha`). For each task in the wave, provision
    a dedicated worktree + branch off that base, from REPO_ROOT, using a
@@ -115,6 +157,8 @@ reload plan.json first):
    makes the wave fail. On any task `status: escalate|blocked`, treat
    the wave as failed (re-plan from this wave), or escalate up if the
    reason is out-of-scope for unattended work (e.g. needs human design).
+   A human-scope refusal must instead return `blocked` to the parent;
+   it is not a planning failure and cannot consume a retry/re-plan.
 4. Run the wave gate ([wave-gate-rubric.md](wave-gate-rubric.md)): it
    does the pre-merge disjoint-file check, integrates into a disposable
    CANDIDATE branch (never directly into ISSUE_BRANCH), runs the plan-
@@ -132,7 +176,9 @@ reload plan.json first):
 
 ## Stage 4 - Acceptance close
 
-After the final wave passes, run [acceptance-observer.md](acceptance-observer.md)
+After the final wave passes, repeat the **Current human-scope gate** for
+acceptance close; refusal stops before push or PR creation. Then run
+[acceptance-observer.md](acceptance-observer.md)
 INLINE (you are the sole writer of ISSUE_BRANCH, so you push and open the
 PR yourself -- no spawn, this runs at your own model): verify every
 `acceptance_shape` condition with a deterministic check, push
@@ -150,6 +196,16 @@ Exactly one JSON object (drop-in with the legacy implement-result):
 ```
 
 or `status: "escalate" | "blocked"` with a one-paragraph `reason`.
+Human-scope refusal example (substitute the actual issue and reason):
+
+```json
+{"kind":"implement-result","issue":2960,"status":"blocked","reason":"human-scope-checkpoint: scope withdrawn before wave 2"}
+```
+
+The parent persists this refusal in its row and `proceed_manifest`, stops
+the issue, and excludes it from PR driving. A fresh parent checkpoint
+must precede any resume; a previous receipt is not a bypass.
+
 `routing_receipts` is best-effort observability (not schema-enforced);
 include it on every non-escalate return so the orchestrator can audit
 the front-load (Ideate=opus, architect=opus, lenses/verifiers=haiku).

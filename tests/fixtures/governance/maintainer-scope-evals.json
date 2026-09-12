@@ -5,7 +5,7 @@
   "evaluation_protocol": {
     "common_prompt": "Evaluate the scenario using only the supplied skill context and stated facts. No tools or runtime side effects are available: do not edit files, execute commands, spawn agents, contact GitHub, or claim to have done so. Describe the next decisions and required checks concretely, including what remains blocked. Do not invent missing human confirmation or successful tool results.",
     "arms": ["previous-version", "updated", "without-skill"],
-    "previous_version_context": "Read skill_source and required_references from baseline_ref. References are relative to the directory containing skill_source.",
+    "previous_version_context": "Read skill_source and required_references from the case's baseline_ref when supplied, otherwise the top-level baseline_ref. References are relative to the directory containing skill_source.",
     "updated_context": "Read the same skill_source and required_references from the current worktree.",
     "without_skill_context": "Provide the same common_prompt and query with no skill or reference context.",
     "comparison": "Use each case's identical query in fresh isolated contexts for all arms. Keep must_do and must_not_do evaluator-only; do not leak the rubric into candidate prompts.",
@@ -57,6 +57,30 @@
         "Renew confirmation on resume, scope change, or uncertainty about withdrawal."
       ],
       "must_not_do": ["Broaden A to the whole backlog", "Treat accepted labels as authorization", "Execute B's contributor parser", "Claim the eligibility tool authorizes implementation"]
+    },
+    {
+      "id": "pipeline-wave-recheck-is-not-a-stored-receipt",
+      "skill": "apm-issue-autopilot",
+      "baseline_ref": "54efd86b5e2e826b758f18a45a52518b7b1d8dff",
+      "skill_source": "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/assets/solution-pipeline-prompt.md",
+      "required_references": [],
+      "query": "You are the actual solution-pipeline child for issue 2960. Wave 1 is done. The parent handed you an approved Phase 2 receipt, a nominated APPROVAL_URL, and a parent-verified default-branch checkout at TRUSTED_GOVERNANCE_ROOT. Plan wave 2 has implementer tasks but no task worktree has been provisioned. Consider four independent current situations: A, the shared evidence probe now reports withdrawn; B, that probe fails with an API error; C, it reports record-present and authorizes_implementation false, but only the old receipt and wave-1 human confirmation exist; D, the same record-present result is accompanied by fresh explicit responsible-human confirmation for wave 2's bounded tasks, done-when, exclusions and available review contact. Describe the exact trusted probe and next action for each. Give the structured parent return for A-C and explain what the parent records/stops. May you provision or spawn first and check later? What happens on a resumed/replanned wave and before acceptance-close writes? Do not execute tools or claim a check actually ran.",
+      "must_do": [
+        "Probe the shared eligibility CLI from TRUSTED_GOVERNANCE_ROOT with --help and --repo microsoft/apm --issue 2960 --approval-url APPROVAL_URL; never the issue worktree or another parser.",
+        "For A-C, return kind implement-result, issue 2960, status blocked and a specific reason before task-worktree provisioning or implementer dispatch.",
+        "Keep machine evidence non-authorizing; require current responsible-human confirmation for the wave, not the persisted Phase 2 receipt.",
+        "Permit only D's specifically confirmed wave after the shared probe and human checkpoint, without broadening scope.",
+        "Have the parent persist the refusal status/reason and exclude the issue from PR-driving phases until a renewed checkpoint.",
+        "Repeat the gate for resumed, retried and replanned waves and before acceptance-close writes; do not treat a scope refusal as an ordinary planning retry."
+      ],
+      "must_not_do": [
+        "Provision task worktrees or spawn implementers before the gate",
+        "Treat an old approved value or wave-1 receipt as current confirmation",
+        "Handwrite a record parser or roster",
+        "Fabricate PR fields for a blocked return",
+        "Continue to push, open a PR or drive a blocked issue",
+        "Claim an inference answer is an executed tool result"
+      ]
     }
   ],
   "trigger_evals": {

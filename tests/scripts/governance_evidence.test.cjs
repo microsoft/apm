@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const authority = require('../../scripts/governance/authority.cjs');
 const eligibility = require('../../scripts/governance/eligibility.cjs');
@@ -126,7 +127,10 @@ test('strict records reject quotes, duplicate keys, unknown fields and missing c
   for (const body of [
     `Quoted example:\n${record}`, record + '\nDecision: approve',
     record + '\nAuthorization: true', record.replace('Done when: Focused regressions and a reviewable PR.', ''),
+    record.replace('Out of scope: Merges and other issue approval.', ''),
+    record.replace('Out of scope: Merges and other issue approval.', 'Out of scope:   '),
   ]) assert.equal(authority.parseRecord(body), null);
+  assert.ok(authority.parseRecord(record.replace('Merges and other issue approval.', 'None')));
 });
 
 test('approval edits and deletion never fall back to an older record', () => {
@@ -198,6 +202,186 @@ test('upstream refs, HTML/Markdown captions, quoted snippets and PR URLs do not 
     '`#128`', '> #129', '```text\n#130\n```',
   ].join('\n'), repository);
   assert.deepEqual(parsed.issues, []);
+});
+
+test('hidden comments cannot nominate any form of issue or approval evidence', () => {
+  const parsed = eligibility.references(
+    `<!-- #12 microsoft/apm#13 https://github.com/microsoft/apm/issues/14 ${approvalUrl} -->\nVisible #15.`,
+    repository);
+  assert.deepEqual(parsed.issues, [15]);
+  assert.equal(parsed.approvals.size, 0);
+});
+
+test('trusted gh resolution excludes project PATH entries and symlink targets', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'governance-gh-'));
+  try {
+    const project = path.join(temp, 'project');
+    const trusted = path.join(temp, 'trusted');
+    const linkdir = path.join(temp, 'links');
+    for (const directory of [project, trusted, linkdir]) fs.mkdirSync(directory);
+    const cwd = path.join(project, 'nested');
+    fs.mkdirSync(cwd);
+    fs.writeFileSync(path.join(project, '.git'), 'gitdir: irrelevant');
+    const executable = process.platform === 'win32' ? 'gh.exe' : 'gh';
+    const hostile = path.join(project, executable);
+    fs.writeFileSync(hostile, 'not a trusted executable', { mode: 0o755 });
+    const real = path.join(trusted, executable);
+    fs.writeFileSync(real, 'trusted test executable', { mode: 0o755 });
+    if (process.platform !== 'win32') fs.symlinkSync(hostile, path.join(linkdir, executable));
+    const env = { PATH: [project, linkdir, trusted].join(path.delimiter) };
+    assert.equal(eligibility.getGhExecutable({ cwd, env }), fs.realpathSync(real));
+    const commands = [];
+    const client = eligibility.ghClient({ cwd, env, execute: (file, args, options) => {
+      commands.push({ file, args, options });
+      return '{"read":true}';
+    } });
+    assert.deepEqual(await client.get('/metadata'), { read: true });
+    assert.equal(commands[0].file, fs.realpathSync(real));
+    assert.equal(commands[0].args.at(-1), '/metadata');
+    assert.equal(commands[0].options.timeout, 15000);
+    assert.throws(() => eligibility.getGhExecutable({ cwd,
+      env: { PATH: ['', project, linkdir].join(path.delimiter) } }), /trusted PATH/);
+    fs.unlinkSync(path.join(project, '.git'));
+    fs.writeFileSync(path.join(project, 'apm.yml'), 'name: test');
+    assert.equal(eligibility.getGhExecutable({ cwd, env }), fs.realpathSync(real));
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+test('reference limit is checked before issue API fanout', async () => {
+  assert.deepEqual(eligibility.LIMITS,
+    { references: 25, pages: 10, targets: 100, requests: 500, bytes: 32 * 1024 * 1024 });
+  const atLimit = Array.from({ length: eligibility.LIMITS.references }, (_, i) => `#${i + 1}`);
+  assert.equal(eligibility.references(atLimit.join(' '), repository).issues.length, atLimit.length);
+  const client = api();
+  const result = await eligibility.evaluatePull({ client, repository, policy,
+    pr: pr({ body: [...atLimit, `#${atLimit.length + 1}`].join(' ') }) });
+  assert.equal(result.state, 'error');
+  assert.equal(result.authorizes_implementation, false);
+  assert.deepEqual(result.issues, []);
+  assert.deepEqual(client.calls, []);
+});
+
+test('pagination and shared operation budgets stop without partial evidence', async () => {
+  let pages = 0;
+  const manyPages = { get: async () => {
+    const start = pages++ * 100;
+    return Array.from({ length: 100 }, (_, i) => ({ id: start + i }));
+  } };
+  await assert.rejects(eligibility.listAll(manyPages, '/items'), /page limit/);
+  assert.equal(pages, eligibility.LIMITS.pages);
+  pages = 0;
+  const completedPages = { get: async () => {
+    const start = pages++ * 100;
+    return Array.from({ length: pages === eligibility.LIMITS.pages ? 99 : 100 }, (_, i) => ({ id: start + i }));
+  } };
+  assert.equal((await eligibility.listAll(completedPages, '/items')).length, eligibility.LIMITS.pages * 100 - 1);
+  const original = api({ [`/repos/${repository}/issues/2961`]: issue({ number: 2961 }) });
+  const client = eligibility.boundedClient({ get: route => route.startsWith('/burn/')
+    ? Promise.resolve(null) : original.get(route) });
+  for (let i = 0; i < eligibility.LIMITS.requests - 3; i++) await client.get(`/burn/${i}`);
+  const result = await eligibility.evaluatePull({ client, repository, policy,
+    pr: pr({ body: `${approvalUrl}\nAlso #2961.` }) });
+  assert.equal(result.state, 'error');
+  assert.deepEqual(result.issues, []);
+  assert.equal(original.calls.length, 3);
+});
+
+test('operation-local cache cannot accumulate unbounded response bodies', async () => {
+  let calls = 0;
+  const client = eligibility.boundedClient({ get: async () => {
+    calls++;
+    return 'x'.repeat(eligibility.LIMITS.bytes);
+  } });
+  await assert.rejects(client.get('/large'), /byte limit/);
+  await assert.rejects(client.get('/later'), /byte limit/);
+  assert.equal(calls, 1);
+});
+
+test('event target limit is enforced before any assessment fanout', async () => {
+  const values = Array.from({ length: eligibility.LIMITS.targets + 1 },
+    (_, id) => pr({ id, number: id + 1 }));
+  const route = `/repos/${repository}/pulls?state=open&sort=created&direction=asc&per_page=100&page=`;
+  const client = api({ [route + 1]: values.slice(0, 100), [route + 2]: values.slice(100) });
+  await assert.rejects(runner.targets(client, repository, 'push', {}), /target limit/);
+  assert.equal(client.calls.length, 2);
+  const exactly = api({ [route + 1]: values.slice(0, eligibility.LIMITS.targets), [route + 2]: [] });
+  assert.equal((await runner.targets(exactly, repository, 'push', {})).length, eligibility.LIMITS.targets);
+  const currentSize = Array.from({ length: 62 },
+    (_, id) => pr({ id, number: id + 1, body: id < 2 ? '#2960' : '#100' }));
+  const normal = api({ [`/repos/${repository}/pulls?state=open&sort=created&direction=asc&per_page=100&page=1`]: currentSize });
+  assert.deepEqual(await runner.targets(normal, repository, 'issues', { issue: issue() }), [1, 2]);
+  assert.equal(normal.calls.length, 1);
+});
+
+test('a full 62-PR policy refresh fits the budget and caches only operation-local evidence', async () => {
+  for (const sharedIssue of [true, false]) {
+    const responses = {};
+    const pulls = Array.from({ length: 62 }, (_, i) => {
+      const number = sharedIssue ? 2960 : i + 1;
+      const commentId = number + 500;
+      responses[`/repos/${repository}/issues/${number}`] = issue({ number });
+      responses[`/repos/${repository}/issues/${number}/comments?per_page=100&page=1`] = [comment({ id: commentId })];
+      const pull = pr({ id: i + 1, number: i + 3000,
+        body: `Refs #${number}. https://github.com/${repository}/issues/${number}#issuecomment-${commentId}` });
+      responses[`/repos/${repository}/pulls/${pull.number}`] = pull;
+      return pull;
+    });
+    responses[`/repos/${repository}/pulls?state=open&sort=created&direction=asc&per_page=100&page=1`] = pulls;
+    const client = api(responses);
+    const env = environment(client, 'push', {});
+    await runner.run(env);
+    assert.equal(env.writes.length, 62);
+    assert.deepEqual(env.failures, []);
+    assert.ok(env.writes.every(value => value.conclusion === 'neutral'));
+    assert.equal(client.calls.length, 2 + 62 * 2 + (sharedIssue ? 2 : 62 * 2));
+  }
+});
+
+test('manual rechecks use default-branch repository dispatch, not branch-selected workflows', async () => {
+  const client = api();
+  assert.deepEqual(await runner.targets(client, repository, 'repository_dispatch',
+    { action: 'pr-eligibility-recheck', client_payload: { pr_number: 3000 } }), [3000]);
+  await assert.rejects(runner.targets(client, repository, 'workflow_dispatch',
+    { inputs: { pr_number: 3000 } }), /Unsupported event/);
+  for (const value of ['3000; ignored', [3000], {}]) {
+    await assert.rejects(runner.targets(client, repository, 'repository_dispatch',
+      { action: 'pr-eligibility-recheck', client_payload: { pr_number: value } }));
+  }
+  assert.deepEqual(client.calls, []);
+});
+
+test('default-branch workflow_run consumes only queue metadata, never artifacts or head code', async () => {
+  const queueSha = 'd'.repeat(40);
+  const signal = {
+    id: 90, workflow_id: 91, repository: { full_name: repository }, head_repository: { full_name: repository },
+    name: 'PR eligibility queue signal', event: 'merge_group', status: 'completed',
+    head_sha: queueSha,
+  };
+  const workflow = { id: 91, name: signal.name, path: '.github/workflows/pr-eligibility-queue.yml' };
+  const responses = {
+    [`/repos/${repository}/actions/runs/90`]: signal,
+    [`/repos/${repository}/actions/workflows/91`]: workflow,
+    [`/repos/${repository}/commits/${queueSha}/pulls?per_page=100&page=1`]: [pr()],
+  };
+  const client = api(responses);
+  const payload = { workflow_run: { id: 90, head_sha: 'e'.repeat(40),
+    artifacts_url: 'https://untrusted.invalid/artifact', head_branch: 'untrusted-code' } };
+  const env = environment(client, 'workflow_run', payload);
+  await runner.run(env);
+  assert.deepEqual(env.writes.map(value => value.head_sha), [sha, queueSha]);
+  assert.ok(env.writes.every(value => value.conclusion === 'neutral'));
+  assert.deepEqual(env.failures, []);
+  for (const bad of [
+    { [`/repos/${repository}/actions/runs/90`]: { ...signal, event: 'pull_request' } },
+    { [`/repos/${repository}/actions/runs/90`]: { ...signal, head_repository: { full_name: 'untrusted/fork' } } },
+    { [`/repos/${repository}/actions/runs/90`]: httpError(403) },
+    { [`/repos/${repository}/actions/workflows/91`]: { ...workflow, path: '.github/workflows/other.yml' } },
+  ]) {
+    const rejected = environment(api({ ...responses, ...bad }), 'workflow_run', payload);
+    await runner.run(rejected);
+    assert.equal(rejected.failures.length, 1);
+    assert.deepEqual(rejected.writes, []);
+  }
 });
 
 test('real API objects distinguish issues from arbitrary nonexistent numbers and PRs', async () => {

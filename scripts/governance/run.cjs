@@ -1,9 +1,17 @@
 'use strict';
 
 const { MARKER, RESET, evidence, requireValue } = require('./authority.cjs');
-const { references, listAll, trustedPolicy, evaluatePull, errorEvidence, positiveNumber } = require('./eligibility.cjs');
+const { references, listAll, trustedPolicy, evaluatePull, errorEvidence, positiveNumber,
+  boundedClient, BudgetError, LIMITS } = require('./eligibility.cjs');
 
 const CHECK_NAME = 'PR eligibility (advisory only)';
+const QUEUE_SIGNAL = 'PR eligibility queue signal';
+
+function boundedTargets(numbers) {
+  const unique = [...new Set(numbers)];
+  if (unique.length > LIMITS.targets) throw new BudgetError('PR target limit exceeded');
+  return unique;
+}
 
 function relevantEvent(eventName, payload) {
   if (eventName !== 'issue_comment') return true;
@@ -14,22 +22,26 @@ function relevantEvent(eventName, payload) {
 }
 
 async function targets(client, repository, eventName, payload) {
+  client = boundedClient(client);
   const root = `/repos/${repository}`;
   if (eventName === 'pull_request_target') return [positiveNumber(payload.pull_request?.number)];
-  if (eventName === 'workflow_dispatch') return [positiveNumber(payload.inputs?.pr_number)];
+  if (eventName === 'repository_dispatch') {
+    requireValue(payload.action === 'pr-eligibility-recheck', 'Unsupported repository dispatch');
+    return [positiveNumber(payload.client_payload?.pr_number)];
+  }
   if (eventName === 'merge_group') {
     const sha = payload.merge_group?.head_sha;
     requireValue(/^[a-f0-9]{40}$/.test(sha || ''), 'Missing queue SHA');
     const pulls = await listAll(client, `${root}/commits/${sha}/pulls`);
     requireValue(pulls.length > 0, 'Queue association evidence unavailable');
-    return pulls.filter(pr => pr.state === 'open').map(pr => positiveNumber(pr.number));
+    return boundedTargets(pulls.filter(pr => pr.state === 'open').map(pr => positiveNumber(pr.number)));
   }
   requireValue(['issues', 'issue_comment', 'push'].includes(eventName), 'Unsupported event');
   const pulls = await listAll(client, `${root}/pulls?state=open&sort=created&direction=asc`);
-  if (eventName === 'push') return pulls.map(pr => positiveNumber(pr.number));
+  if (eventName === 'push') return boundedTargets(pulls.map(pr => positiveNumber(pr.number)));
   const issue = positiveNumber(payload.issue?.number);
-  return pulls.filter(pr => references(pr.body, repository).issues.includes(issue))
-    .map(pr => positiveNumber(pr.number));
+  return boundedTargets(pulls.filter(pr => references(pr.body, repository).issues.includes(issue))
+    .map(pr => positiveNumber(pr.number)));
 }
 
 function render(result) {
@@ -49,9 +61,12 @@ function render(result) {
 
 async function run({ github, context, core, trustedSha }) {
   const repository = `${context.repo.owner}/${context.repo.repo}`;
-  const client = { get: async path => (await github.request(`GET ${path}`)).data };
-  const payload = context.payload;
-  if (!relevantEvent(context.eventName, payload)) return [];
+  const client = boundedClient({
+    get: async path => (await github.request(`GET ${path}`, { request: { timeout: 15000 } })).data,
+  });
+  let payload = context.payload;
+  let eventName = context.eventName;
+  if (!relevantEvent(eventName, payload)) return [];
   let numbers;
   let policy;
   let assessmentFailed = false;
@@ -65,9 +80,24 @@ async function run({ github, context, core, trustedSha }) {
     results.push(result);
   };
   try {
+    if (eventName === 'workflow_run') {
+      const runId = positiveNumber(payload.workflow_run?.id);
+      const signal = await client.get(`/repos/${repository}/actions/runs/${runId}`);
+      const sameRepository = value => value?.full_name?.toLowerCase() === repository.toLowerCase();
+      requireValue(signal.id === runId && signal.name === QUEUE_SIGNAL && signal.event === 'merge_group'
+        && signal.status === 'completed' && sameRepository(signal.repository)
+        && sameRepository(signal.head_repository), 'Unsupported queue signal');
+      requireValue(/^[a-f0-9]{40}$/.test(signal.head_sha || ''), 'Missing queue SHA');
+      const workflowId = positiveNumber(signal.workflow_id);
+      const workflow = await client.get(`/repos/${repository}/actions/workflows/${workflowId}`);
+      requireValue(workflow.id === workflowId && workflow.name === QUEUE_SIGNAL
+        && workflow.path === '.github/workflows/pr-eligibility-queue.yml', 'Unrecognized queue workflow');
+      payload = { merge_group: { head_sha: signal.head_sha } };
+      eventName = 'merge_group';
+    }
     ({ policy } = await trustedPolicy(client, repository, trustedSha));
-    numbers = await targets(client, repository, context.eventName, payload);
-    requireValue(context.eventName !== 'merge_group' || numbers.length > 0, 'No open queue associations');
+    numbers = await targets(client, repository, eventName, payload);
+    requireValue(eventName !== 'merge_group' || numbers.length > 0, 'No open queue associations');
   } catch (error) {
     const result = errorEvidence(error);
     const sha = payload.merge_group?.head_sha || payload.pull_request?.head?.sha;
@@ -76,7 +106,7 @@ async function run({ github, context, core, trustedSha }) {
     core.setFailed('Eligibility evidence unavailable. No approval granted. Check API permissions, pagination and trusted base configuration.');
     return results;
   }
-  const changedIssue = ['issues', 'issue_comment'].includes(context.eventName)
+  const changedIssue = ['issues', 'issue_comment'].includes(eventName)
     && ['edited', 'deleted'].includes(payload.action) ? payload.issue.number : undefined;
   for (const number of [...new Set(numbers)]) {
     let pr;
@@ -87,7 +117,7 @@ async function run({ github, context, core, trustedSha }) {
       if (pr.state !== 'open') continue;
       const result = await evaluatePull({ client, repository, policy, pr, changedIssue });
       // Re-read references and head before publishing: a result for an obsolete body is not current evidence.
-      const fresh = await client.get(`/repos/${repository}/pulls/${number}`);
+      const fresh = await client.get(`/repos/${repository}/pulls/${number}`, { refresh: true });
       if (fresh.state !== 'open') continue;
       if (fresh.head?.sha !== pr.head.sha || fresh.body !== pr.body) {
         await publish(fresh.head?.sha, evidence('needs-evidence', 'PR head or references changed during assessment; rerun the advisory.'));
@@ -106,7 +136,7 @@ async function run({ github, context, core, trustedSha }) {
       core.setFailed('PR eligibility could not be assessed or published; no approval granted.');
     }
   }
-  if (context.eventName === 'merge_group') {
+  if (eventName === 'merge_group') {
     await publish(payload.merge_group.head_sha, assessmentFailed
       ? evidence('error', 'Associated PR evidence could not be completely read; queue scope evidence is unknown.')
       : evidence('merge-queue-manual-review',
@@ -117,4 +147,4 @@ async function run({ github, context, core, trustedSha }) {
   return results;
 }
 
-module.exports = { run, targets, relevantEvent, render, CHECK_NAME };
+module.exports = { run, targets, relevantEvent, render, CHECK_NAME, QUEUE_SIGNAL };

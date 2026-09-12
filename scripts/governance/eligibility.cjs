@@ -1,7 +1,34 @@
 'use strict';
 
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { readPolicy, commentReference, evaluateIssue, evidence, requireValue, EvidenceError } = require('./authority.cjs');
+
+const LIMITS = Object.freeze({ references: 25, pages: 10, targets: 100, requests: 500, bytes: 32 * 1024 * 1024 });
+const budgetedClients = new WeakSet();
+class BudgetError extends EvidenceError {}
+
+function boundedClient(client) {
+  if (budgetedClients.has(client)) return client;
+  let requests = 0;
+  let bytes = 0;
+  const cache = new Map();
+  const bounded = { async get(route, { refresh = false } = {}) {
+    if (bytes > LIMITS.bytes) throw new BudgetError('Metadata byte limit exceeded');
+    if (!refresh && cache.has(route)) return cache.get(route);
+    if (requests >= LIMITS.requests) throw new BudgetError('Metadata request limit exceeded');
+    requests += 1;
+    const result = await client.get(route);
+    bytes += Buffer.byteLength(JSON.stringify(result), 'utf8');
+    if (bytes > LIMITS.bytes) throw new BudgetError('Metadata byte limit exceeded');
+    cache.set(route, result);
+    return result;
+  } };
+  budgetedClients.add(bounded);
+  return bounded;
+}
 
 function repositoryName(value) {
   requireValue(typeof value === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value),
@@ -10,7 +37,8 @@ function repositoryName(value) {
 }
 
 function positiveNumber(value) {
-  requireValue(/^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value)),
+  requireValue(['string', 'number'].includes(typeof value)
+    && /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value)),
     'Expected positive issue or PR number');
   return Number(value);
 }
@@ -18,7 +46,12 @@ function positiveNumber(value) {
 function references(body, repository) {
   const issues = new Set();
   const approvals = new Map();
-  let text = (body || '').replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '')
+  const addIssue = number => {
+    issues.add(positiveNumber(number));
+    if (issues.size > LIMITS.references) throw new BudgetError('Issue reference limit exceeded');
+  };
+  let text = (body || '').replace(/<!--[\s\S]*?(?:-->|$)/g, '')
+    .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '')
     .replace(/`[^`\n]*`/g, '').replace(/^\s*>.*$/gm, '');
   text = text.replace(/\[[^\]\n]*\]\((https?:\/\/[^)\s]+)\)/g, '$1');
   // Consume qualified URLs/refs before bare #N so upstream references never become local.
@@ -27,7 +60,7 @@ function references(body, repository) {
     try { url = new URL(value.replace(/[.,;]+$/, '')); } catch { return ' '; }
     const approval = commentReference(url.href, repository);
     if (approval) {
-      issues.add(approval.issue);
+      addIssue(approval.issue);
       if (!approvals.has(approval.issue)) approvals.set(approval.issue, []);
       const normalized = `https://github.com/${repository.toLowerCase()}/issues/${approval.issue}#issuecomment-${approval.comment}`;
       if (!approvals.get(approval.issue).includes(normalized)) approvals.get(approval.issue).push(normalized);
@@ -36,18 +69,18 @@ function references(body, repository) {
     if (url.origin === 'https://github.com' && !url.username && !url.password
         && parts.length === 5 && parts.slice(1, 3).join('/').toLowerCase() === repository.toLowerCase()
         && parts[3] === 'issues' && /^[1-9]\d*$/.test(parts[4])) {
-      issues.add(positiveNumber(parts[4]));
+      addIssue(parts[4]);
     }
     return ' ';
   });
   text = text.replace(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9]\d*)\b/g, (_, repo, number) => {
-    if (repo.toLowerCase() === repository.toLowerCase()) issues.add(positiveNumber(number));
+    if (repo.toLowerCase() === repository.toLowerCase()) addIssue(number);
     return ' ';
   });
   // Ignore HTML link captions: Dependabot's upstream #123 captions are not local references.
-  text = text.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
+  text = text.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, '');
   for (const match of text.matchAll(/(^|[\s([:])#([1-9]\d*)\b/g)) {
-    issues.add(positiveNumber(match[2]));
+    addIssue(match[2]);
   }
   return { issues: [...issues], approvals };
 }
@@ -59,6 +92,9 @@ function privateReview(pr) {
 }
 
 function errorEvidence(error) {
+  if (error instanceof BudgetError) {
+    return evidence('error', `${error.message}. Request a focused PR recheck or human review; do not truncate evidence.`);
+  }
   if (error instanceof EvidenceError) {
     return evidence('error', `${error.message}. Evidence is unknown; obtain human review.`);
   }
@@ -69,11 +105,12 @@ function errorEvidence(error) {
 }
 
 async function listAll(client, path) {
+  client = boundedClient(client);
   const result = [];
   const seen = new Set();
-  for (let page = 1; ; page += 1) {
+  for (let page = 1; page <= LIMITS.pages; page += 1) {
     const values = await client.get(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
-    requireValue(Array.isArray(values), 'Expected a complete metadata page');
+    requireValue(Array.isArray(values) && values.length <= 100, 'Expected a complete metadata page');
     for (const value of values) {
       requireValue(value && Number.isSafeInteger(value.id) && !seen.has(value.id),
         'Incomplete or repeated metadata pagination');
@@ -82,9 +119,11 @@ async function listAll(client, path) {
     }
     if (values.length < 100) return result;
   }
+  throw new BudgetError('Metadata page limit exceeded');
 }
 
 async function trustedPolicy(client, repository, trustedSha) {
+  client = boundedClient(client);
   repositoryName(repository);
   let sha = trustedSha;
   if (!sha) {
@@ -102,6 +141,7 @@ async function trustedPolicy(client, repository, trustedSha) {
 }
 
 async function issueEvidence({ client, repository, policy, number, approvalUrl, changed = false }) {
+  client = boundedClient(client);
   let issue;
   try {
     issue = await client.get(`/repos/${repository}/issues/${positiveNumber(number)}`);
@@ -116,6 +156,7 @@ async function issueEvidence({ client, repository, policy, number, approvalUrl, 
 }
 
 async function evaluatePull({ client, repository, policy, pr, changedIssue }) {
+  client = boundedClient(client);
   requireValue(pr && Number.isSafeInteger(pr.number) && /^[a-f0-9]{40}$/.test(pr.head?.sha || ''),
     'Incomplete PR metadata');
   if (privateReview(pr)) {
@@ -123,7 +164,9 @@ async function evaluatePull({ client, repository, policy, pr, changedIssue }) {
       'Security/dependency coordination may use private tracking. Confirm privately; do not publish confidential links.',
       { pr: pr.number, issues: [] });
   }
-  const links = references(pr.body, repository);
+  let links;
+  try { links = references(pr.body, repository); }
+  catch (error) { return { ...errorEvidence(error), pr: pr.number, issues: [] }; }
   const issues = [];
   for (const number of links.issues) {
     const urls = links.approvals.get(number) || [];
@@ -135,6 +178,7 @@ async function evaluatePull({ client, repository, policy, pr, changedIssue }) {
       issues.push({ number, ...await issueEvidence({ client, repository, policy, number,
         approvalUrl: urls[0], changed: number === changedIssue }) });
     } catch (error) {
+      if (error instanceof BudgetError) return { ...errorEvidence(error), pr: pr.number, issues: [] };
       issues.push({ number, ...errorEvidence(error) });
     }
   }
@@ -160,12 +204,43 @@ async function evaluatePull({ client, repository, policy, pr, changedIssue }) {
     { pr: pr.number, issues });
 }
 
-function ghClient() {
-  return {
-    async get(path) {
+// Cross-language equivalent of utils.git_env.get_gh_executable: never resolve inside the project.
+function getGhExecutable({ cwd = process.cwd(), env = process.env } = {}) {
+  const current = fs.realpathSync(cwd);
+  const ancestors = [current];
+  while (path.dirname(ancestors.at(-1)) !== ancestors.at(-1)) ancestors.push(path.dirname(ancestors.at(-1)));
+  const exclusion = ancestors.find(directory => fs.existsSync(path.join(directory, '.git')))
+    || ancestors.find(directory => fs.existsSync(path.join(directory, 'apm.yml'))
+      && fs.statSync(path.join(directory, 'apm.yml')).isFile()) || current;
+  const outside = value => {
+    const relative = path.relative(exclusion, value);
+    return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+  };
+  for (const entry of (env.PATH || '').split(path.delimiter)) {
+    if (!entry) continue;
+    const expanded = entry === '~' ? os.homedir()
+      : /^~[/\\]/.test(entry) ? path.join(os.homedir(), entry.slice(2)) : entry;
+    try {
+      const directory = fs.realpathSync(path.resolve(current, expanded));
+      if (!outside(directory)) continue;
+      const executable = fs.realpathSync(path.join(directory, process.platform === 'win32' ? 'gh.exe' : 'gh'));
+      if (!outside(executable) || !fs.statSync(executable).isFile()) continue;
+      fs.accessSync(executable, fs.constants.X_OK);
+      return executable;
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'ELOOP'].includes(error.code)) throw error;
+    }
+  }
+  throw new EvidenceError('gh executable not found on trusted PATH directories outside the project');
+}
+
+function ghClient({ cwd = process.cwd(), env = process.env, execute = execFileSync } = {}) {
+  const executable = getGhExecutable({ cwd, env });
+  return boundedClient({
+    async get(route) {
       try {
-        return JSON.parse(execFileSync('gh', ['api', '--hostname', 'github.com', '--method', 'GET', path],
-          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+        return JSON.parse(execute(executable, ['api', '--hostname', 'github.com', '--method', 'GET', route],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000, cwd, env }));
       } catch (cause) {
         const error = new Error('GitHub metadata request failed');
         const match = /\(HTTP (\d{3})\)/.exec(String(cause.stderr || ''));
@@ -173,7 +248,7 @@ function ghClient() {
         throw error;
       }
     },
-  };
+  });
 }
 
 async function main(argv) {
@@ -181,7 +256,10 @@ async function main(argv) {
     console.log('Read-only governance evidence (never implementation permission).\n'
       + 'node scripts/governance/eligibility.cjs --repo OWNER/REPO --issue N --approval-url URL\n'
       + 'node scripts/governance/eligibility.cjs --repo OWNER/REPO --pr N\n'
-      + 'Reads policy from the trusted default branch. JSON on stdout; read errors exit 1.');
+      + 'Reads policy from the trusted default branch; gh must resolve outside the project.\n'
+      + `Limits: ${LIMITS.references} issue refs/PR, ${LIMITS.pages} pages/list, ${LIMITS.requests} metadata requests.\n`
+      + `At most ${LIMITS.bytes / (1024 * 1024)} MiB of metadata per operation; no persistent cache.\n`
+      + 'JSON on stdout; read errors or exceeded limits exit 1.');
     return;
   }
   const options = {};
@@ -213,4 +291,5 @@ if (require.main === module) {
 }
 
 module.exports = { references, privateReview, listAll, trustedPolicy, issueEvidence,
-  evaluatePull, errorEvidence, repositoryName, positiveNumber };
+  evaluatePull, errorEvidence, repositoryName, positiveNumber, LIMITS, BudgetError,
+  boundedClient, getGhExecutable, ghClient };

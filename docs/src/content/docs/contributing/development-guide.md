@@ -65,15 +65,26 @@ Humans still decide whether the change matches the linked scope.
 After the workflow reaches the default branch, PR updates and relevant
 issue/comment changes refresh evidence without invoking an LLM panel.
 Forks and stacked PRs use default-branch governance and code, never the head
-or a feature-branch approval roster. Merge-queue reports refresh associated
-PR evidence, but commit associations do not prove complete queue membership;
+or a feature-branch approval roster. A permissionless queue signal wakes the
+default-branch reporter through `workflow_run`; the reporter verifies GitHub's
+run, repository, event, and workflow metadata without consuming artifacts or
+contributor code. Commit associations do not prove complete queue membership;
 missing association/read access is reported as unknown/error. The check is
 not part of the required merge gate, and this PR does not deploy itself.
-Native event delivery and queue limits still apply; use the workflow's
-manual PR-number recheck if a refresh is missed.
+Native event delivery and queue limits still apply. Maintainers can request a
+default-branch recheck without selecting a branch-controlled workflow definition:
+
+```bash
+gh api --method POST repos/microsoft/apm/dispatches \
+  -f event_type=pr-eligibility-recheck -F 'client_payload[pr_number]=123'
+```
+
+There is no `workflow_dispatch` entrypoint. These workflow-definition
+guarantees target GitHub.com, not older GitHub Enterprise Server versions.
 
 For a read-only local assessment, run the tool from a trusted default-branch
-checkout with Node.js and an authenticated `gh`:
+checkout with Node.js and an authenticated `gh` installed outside the project.
+The tool excludes project PATH entries and symlinks back into the project:
 
 ```bash
 node scripts/governance/eligibility.cjs --repo microsoft/apm --pr 123
@@ -85,6 +96,16 @@ format is deployed there, it deliberately reports a policy error rather than
 using a feature branch as authority. A snapshot cannot recover deleted
 withdrawals, so manual automation still requires fresh responsible-human
 confirmation of the bounded issue scope. No historical acceptance is restored.
+
+Each assessment is bounded: 25 visible unique issue references per PR, 10
+metadata pages per collection, 100 matched PR targets, 500 total metadata reads,
+and 32 MiB of metadata per operation. Issue events may inspect more than 100
+open PRs; only matched targets count toward that cap. A full final page is incomplete evidence.
+Exceeding a bound reports `error`, never a truncated `record-present` result.
+Reads are cached only within one operation; the final PR head/body refresh
+bypasses that cache. This accommodates the current 62-PR policy refresh while
+bounding genuinely oversized operations. Hidden HTML comments are not issue
+traceability or approval nominations.
 
 Once deployed, Daily Docs Updater runs discovery only, without issue/PR creation
 or auto-merge capabilities. Scheduled and manual runs stop at a human handoff.

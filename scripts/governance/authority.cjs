@@ -63,7 +63,7 @@ function parseRecord(body) {
   }
   if (!REMITS.has(record.Area)) return null;
   if (record.Decision === 'withdraw') return record.Reason ? record : null;
-  if (record.Decision !== 'approve' || !record.Scope || !record['Done when']
+  if (record.Decision !== 'approve' || !record.Scope || !record['Done when'] || !record['Out of scope']
       || !/^@[a-zA-Z0-9-]+$/.test(record['Review contact'] || '')) return null;
   return record;
 }

@@ -19,6 +19,7 @@ ROOT = Path(__file__).parents[2]
 pytestmark = pytest.mark.component
 
 
+@pytest.mark.windows_compat
 def test_governance_node_regressions() -> None:
     """Run real deterministic metadata/parser/event scenarios without network."""
     result = subprocess.run(
@@ -40,11 +41,12 @@ def test_advisory_workflow_executes_only_trusted_default_branch_code() -> None:
         "pull_request_target",
         "issue_comment",
         "issues",
-        "merge_group",
+        "workflow_run",
         "push",
-        "workflow_dispatch",
+        "repository_dispatch",
     }
     assert workflow["permissions"] == {
+        "actions": "read",
         "contents": "read",
         "issues": "read",
         "pull-requests": "read",
@@ -68,6 +70,25 @@ def test_advisory_workflow_executes_only_trusted_default_branch_code() -> None:
     assert "npm install" not in text
     assert "secrets." not in text
     assert "eligibility" not in (ROOT / ".github/workflows/merge-gate.yml").read_text()
+    assert triggers["repository_dispatch"]["types"] == ["pr-eligibility-recheck"]
+    signal_text = (ROOT / ".github/workflows/pr-eligibility-queue.yml").read_text()
+    signal = yaml.safe_load(signal_text)
+    assert set(signal.get("on", signal.get(True))) == {"merge_group"}
+    assert signal["permissions"] == {}
+    assert triggers["workflow_run"] == {
+        "workflows": [signal["name"]],
+        "types": ["completed"],
+    }
+    queue_name = subprocess.check_output(
+        ["node", "-p", "require('./scripts/governance/run.cjs').QUEUE_SIGNAL"],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+    assert signal["name"] == queue_name
+    assert "secrets." not in signal_text
+    for job in signal["jobs"].values():
+        assert not job.get("permissions")
+        assert job["steps"] == [{"run": ":"}]
 
 
 @pytest.mark.parametrize(

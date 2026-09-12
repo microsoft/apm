@@ -9,22 +9,21 @@ on:
     types: [created, edited, deleted]
   issues:
     types: [edited, reopened, closed]
-  merge_group:
-    types: [checks_requested]
+  workflow_run:
+    workflows: [PR eligibility queue signal]
+    types: [completed]
   push:
     branches: [main]
     paths:
       - GOVERNANCE.md
       - scripts/governance/**
       - .github/workflows/pr-eligibility.yml
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: PR number to reassess (never an implementation approval)
-        required: true
-        type: string
+  # Unlike workflow_dispatch, this loads the workflow definition from the default branch.
+  repository_dispatch:
+    types: [pr-eligibility-recheck]
 
 permissions:
+  actions: read
   contents: read
   issues: read
   pull-requests: read

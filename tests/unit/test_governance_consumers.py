@@ -241,7 +241,7 @@ def test_triage_keeps_receipt_recovery_and_explicit_retriage() -> None:
 
 
 def test_scope_eval_inventory_is_inputs_not_fake_results() -> None:
-    """Preserve three content cases and 20 balanced 60/40 dispatch examples."""
+    """Preserve original cases plus the child-wave regression and unchanged routing inputs."""
     manifest = json.loads(
         (ROOT / "tests/fixtures/governance/maintainer-scope-evals.json").read_text()
     )
@@ -254,6 +254,7 @@ def test_scope_eval_inventory_is_inputs_not_fake_results() -> None:
         "bug-union-is-not-approval",
         "docs-label-and-record-are-not-ratification",
         "bounded-human-checkpoint-and-missing-owner",
+        "pipeline-wave-recheck-is-not-a-stored-receipt",
     }
     for case in manifest["content_evals"]:
         assert case["must_do"] and case["must_not_do"]
@@ -285,6 +286,46 @@ def test_trimmed_summaries_explicitly_load_binding_references() -> None:
     assert "the **Human scope checkpoint** in `references/invariants.md`" in batch
     assert "Load `assets/solution-pipeline-prompt.md` on entering Phase 4" in autopilot
     assert "It owns the full four-stage procedure" in autopilot
+
+
+def test_pipeline_child_rechecks_scope_before_each_mutating_boundary() -> None:
+    """The actual child brief, not only its parent's receipt, guards provisioning."""
+    prompt = (AUTOPILOT / "assets/solution-pipeline-prompt.md").read_text()
+    skill = (AUTOPILOT / "SKILL.md").read_text()
+    for required_input in ("TRUSTED_GOVERNANCE_ROOT", "APPROVAL_URL", "HUMAN_SCOPE_RECEIPT"):
+        assert required_input in prompt
+        assert required_input in skill
+    gate = prompt.split("## Current human-scope gate", 1)[1].split("## Model routing", 1)[0]
+    assert 'cd "$TRUSTED_GOVERNANCE_ROOT"' in gate
+    assert "node scripts/governance/eligibility.cjs --help" in gate
+    assert '--issue "$ISSUE_NUMBER" --approval-url "$APPROVAL_URL"' in gate
+    assert "authority.cjs" in gate
+    assert "authorizes_implementation: false" in gate
+    assert "fresh explicit responsible-human confirmation for this wave" in gate
+    assert "deleted withdrawals" in gate
+    for failure in ("withdrawn", "error", "uncertain confirmation"):
+        assert failure in gate
+    wave = prompt.split("## Stage 3 - Implement", 1)[1].split("## Stage 4 -", 1)[0]
+    assert wave.index("0. Run the **Current human-scope gate**") < wave.index("git worktree add")
+    assert "including resumed, retried, and replanned waves" in wave
+    close = prompt.split("## Stage 4 - Acceptance close", 1)[1].split("## Return", 1)[0]
+    assert close.index("Current human-scope gate") < close.index("acceptance-observer.md")
+
+
+def test_pipeline_scope_refusal_stops_parent_before_pr_consumption() -> None:
+    """Blocked child output has no fabricated PR and is excluded from downstream driving."""
+    prompt = (AUTOPILOT / "assets/solution-pipeline-prompt.md").read_text()
+    examples = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", prompt, re.S)]
+    refusal = next(example for example in examples if example["status"] == "blocked")
+    assert set(refusal) == {"kind", "issue", "status", "reason"}
+    assert refusal["kind"] == "implement-result"
+    assert isinstance(refusal["issue"], int) and refusal["issue"] > 0
+    assert refusal["reason"]
+    skill = " ".join((AUTOPILOT / "SKILL.md").read_text().split())
+    phase = skill.split("### Phase 4 -", 1)[1].split("### Phase 5 -", 1)[0]
+    assert "persist its status and reason in the row and `proceed_manifest`" in phase
+    assert "do not read PR fields or dispatch Phase 5/6" in phase
+    assert "Only `pr-opened` returns" in phase
 
 
 def test_local_docs_install_preserves_resolved_links_and_hashes() -> None:

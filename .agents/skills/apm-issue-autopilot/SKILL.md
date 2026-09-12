@@ -244,6 +244,10 @@ labels.
 
 ### Phase 4 - solution pipeline (Ideate -> Plan -> Implement waves)
 
+Refresh Phase 2 before provisioning. Pass `TRUSTED_GOVERNANCE_ROOT`,
+`APPROVAL_URL`, and `HUMAN_SCOPE_RECEIPT`; the child enforces its current
+human-scope gate before each wave and acceptance close.
+
 For each proceed row WITHOUT an in-flight PR, spawn ONE solution-
 pipeline child in its OWN git worktree on the issue branch (provision
 with `git worktree add` at HEAD; record its slug in the row's
@@ -274,10 +278,11 @@ docs: docs build/link check; refactor/perf: behavior-preserving test +
 benchmark) for its task type, never opens a PR, and never spawns
 children. The orchestrator then applies the Phase 3 ownership signaling
 to the new PR. Rows WITH an in-flight PR skip Phase 4 and go straight
-to Phase 5. On a `status: escalate|blocked` return, write the reason to
-the row and surface it in Phase 7 (no PR opened). On a `pr-opened`
-return, record `routing_receipts` in the row's notes so model routing
-is auditable from plan.md without reading child transcripts.
+to Phase 5. On `escalate|blocked`, persist its status and reason in the
+row and `proceed_manifest`; stop the issue for a renewed human checkpoint,
+and do not read PR fields or dispatch Phase 5/6. Surface it in Phase 7.
+Only `pr-opened` returns supply PR fields; record `routing_receipts`
+in the row's notes for the model-routing audit.
 
 ### Phase 5 - shepherd-driver fan-out (drive to merge)
 

@@ -37,7 +37,7 @@ dependencies:
   - .agents/skills/apm-issue-autopilot/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
   deployed_file_hashes:
-    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:abbd32f92624aeff7c4ec7a9b68ed161a06d3278305831d3a12e77a14a0d1720
+    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:bab3fa80122d45fa1f8be338cd54aa1e7a83baffaedc0f90b04636920f24ef76
     .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
     .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
     .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
@@ -51,7 +51,7 @@ dependencies:
     .agents/skills/apm-issue-autopilot/assets/model-routing.md: sha256:4d1ffaf63fab75a7a7de265ff77d457c0636939d36a373dc9ce485ba76275209
     .agents/skills/apm-issue-autopilot/assets/plan-panel-prompt.md: sha256:422daafc8fcdf26f1096787075b2e8c15722df6b51e1d1784ea3b1435809b09f
     .agents/skills/apm-issue-autopilot/assets/plan-schema.json: sha256:f766382fbac2a2b99c0dad1d0327659103c4482cc155854ea7ef2e3c82fce8f2
-    .agents/skills/apm-issue-autopilot/assets/solution-pipeline-prompt.md: sha256:812487116b89e66414562312992204dfb3132cc5e9265392b718d78e33cd9973
+    .agents/skills/apm-issue-autopilot/assets/solution-pipeline-prompt.md: sha256:557a32e60bcda98d023904da6ca5b50033fcfa086fcbac1bbb819307d8bb7656
     .agents/skills/apm-issue-autopilot/assets/task-implement-prompt.md: sha256:397ab60c270f0312a3ddaac0fbc03e853fa16552a962f6b2ebca5ed27bab2818
     .agents/skills/apm-issue-autopilot/assets/triage-digest-template.md: sha256:78c2e7be93543122e485eb494a2b50ecac6e18d7e077a9e8edde12b478242ca9
     .agents/skills/apm-issue-autopilot/assets/triage-prompt.md: sha256:79c4e60a16c3bd0cc1e09cb761af38dccf6ac2c676e89d16d97d25613f4324d2
@@ -1688,7 +1688,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:abbd32f92624aeff7c4ec7a9b68ed161a06d3278305831d3a12e77a14a0d1720
+  content_hash: sha256:bab3fa80122d45fa1f8be338cd54aa1e7a83baffaedc0f90b04636920f24ef76
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md
@@ -1814,7 +1814,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:812487116b89e66414562312992204dfb3132cc5e9265392b718d78e33cd9973
+  content_hash: sha256:557a32e60bcda98d023904da6ca5b50033fcfa086fcbac1bbb819307d8bb7656
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot/assets/task-implement-prompt.md
