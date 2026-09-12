@@ -219,8 +219,13 @@ merged target keeps APM reconciliation ownership in a sibling `apm-hooks.json`
 sidecar, so clones, contributors, and CI runners do not see the installer's
 machine-local absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
-references to absolute paths because the user-scope config is read
-without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+references so the user-scope config resolves without a fixed cwd: on POSIX
+hosts the rewritten path is anchored to `$HOME` (for example
+`$HOME/.claude/hooks/<pkg>/run.sh`), which the invoking shell expands, so the
+merged file stays identical across machines. Windows keeps the absolute form,
+and so do single-quoted references (a shell does not expand `$HOME` inside
+single quotes) and dynamic target roots outside the home directory such as
+`CLAUDE_CONFIG_DIR`. If a manifest in `hooks/` or `.apm/hooks/` uses
 `./hooks/<script>`, APM first resolves it from the hook file directory,
 then falls back to the package root to avoid deploying a doubled
 `hooks/hooks/` path. If a referenced hook script is missing at install

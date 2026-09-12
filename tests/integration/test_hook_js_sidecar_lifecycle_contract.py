@@ -725,13 +725,17 @@ def test_required_global_copilot_sidecar_lifecycle(
     descriptor = copilot_root.joinpath(*_GLOBAL_DESCRIPTOR.parts)
     payload = json.loads(descriptor.read_text(encoding="utf-8"))
     command = tuple(shlex.split(payload["hooks"]["preToolUse"][0]["bash"]))
-    assert Path(command[1]).is_absolute()
+    # POSIX user-scope commands anchor to $HOME so `~/.copilot` config stays
+    # portable across hosts. The real harness runs hooks through a shell, which
+    # expands it; mirror that here because the runner executes directly.
+    hook_argv = [arg.replace("$HOME", str(scenario.isolated.home)) for arg in command[1:]]
+    assert Path(hook_argv[0]).is_absolute()
     hook_result = ApmLifecycleRunner(
         (command[0],),
         timeout_seconds=30,
         scenario_timeout_seconds=30,
     ).run(
-        command[1:],
+        hook_argv,
         scenario_id="global-copilot-execute",
         cwd=cwd,
         env=published.environment,
