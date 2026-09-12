@@ -7,11 +7,13 @@ The contribution process lives in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Maintainers and scope
 
-| Maintainer | Role | Responsibility |
-| --- | --- | --- |
-| [Daniel Meppiel](https://github.com/danielmeppiel) | Lead and core maintainer | Project-wide scope approval, roadmap coordination, and resolution of unresolved direction disagreements. |
-| [Sergio](https://github.com/sergio-sisternes-epam) | Core maintainer | Project-wide scope approval and technical maintenance, without requiring the lead to approve routine work again. |
-| [Nadav](https://github.com/nadav-y) | Registry public API maintainer | Primary scope and technical owner for the APM registry public API. Core maintainers provide backup. |
+<!-- apm-scope-roster:start -->
+| Maintainer | Role | Responsibility | Approval remit |
+| --- | --- | --- | --- |
+| [Daniel Meppiel](https://github.com/danielmeppiel) | Lead and core maintainer | Project-wide scope approval, roadmap coordination, and resolution of unresolved direction disagreements. | `project` |
+| [Sergio](https://github.com/sergio-sisternes-epam) | Core maintainer | Project-wide scope approval and technical maintenance, without requiring the lead to approve routine work again. | `project` |
+| [Nadav](https://github.com/nadav-y) | Registry public API maintainer | Primary scope and technical owner for the APM registry public API. Core maintainers provide backup. | `registry-public-api` |
+<!-- apm-scope-roster:end -->
 
 Core maintainers have overlapping project-wide responsibility; the project
 does not require an artificial split of every file into exclusive domains.
@@ -53,6 +55,30 @@ separate decisions. Automated recommendations, labels alone, and silence
 do not authorize implementation or commit a release. An accepted issue
 does not need a release milestone. The same contribution rules apply to
 maintainers and automated submissions.
+
+### Machine-readable scope evidence
+
+The table above is the only approval roster. The advisory reader uses its
+`Approval remit` column from the trusted default branch; neither CODEOWNERS
+nor a contributor's branch supplies authority. `registry-public-api` means
+exactly the public API, not all registry, MCP, OCI, or authentication work.
+Humans still judge whether a proposal fits that remit.
+GitHub Triage access can change labels; no protected per-label approval ACL
+is implied, and this policy does not change GitHub access grants.
+
+New approval comments use the [contribution record](CONTRIBUTING.md#scope-record-format).
+The September 12 acceptance reset is not undone by labels, silence, edits,
+or removal of an old comment. Earlier approvals require fresh evidence.
+
+<!-- apm-scope-reset-before:2026-09-12T00:00:00Z -->
+
+The deterministic PR eligibility report is **always neutral and advisory**.
+It distinguishes a present record, withdrawal, missing evidence, and read
+errors, but never grants implementation permission. GitHub's current comment
+snapshot cannot prove that a withdrawal was not deleted. Fresh human
+confirmation of the bounded issue scope is therefore still required before
+an automation run implements changes. No persistent authorization ledger,
+required check, or automatic closing/acceptance policy is introduced.
 
 ## Roadmap and release planning
 
@@ -101,10 +127,11 @@ and their milestone history, including completed work in the active release.
 
 ### Native Project settings
 
-**Rollout pending:** these are intended settings, not a live board announcement.
-The retired board is not the active roadmap. Creating or reopening a Project,
-enabling automation, populating it, and changing live metadata require the
-separate final rollout approval.
+**Rollout pending:** Project preparation is not an active roadmap announcement.
+The setup board has verified Horizon columns, Milestone grouping, saved views,
+and existing issue intake. Native auto-add still needs configuration and
+verification through the supported UI. Keep the active roadmap announcement
+on hold; further live changes require maintainer approval.
 
 In Project settings, use public visibility and one single-select field,
 `Horizon`, with `Now`, `Next`, and `Later` in that order. Leave it unset by
@@ -115,8 +142,8 @@ Save these views with `repo:microsoft/apm is:issue` plus the filters below:
 
 | View | Layout and additional filter |
 | --- | --- |
-| Intake | Table: `is:open`. All open issues are visible, not implicitly approved. |
 | Roadmap | Board: `is:open horizon:Now,Next,Later`. Group by Horizon in Now / Next / Later order and manually rank issues within each group, highest first. Unselected intake stays out. |
+| Intake | Table: `is:open`. All open issues are visible, not implicitly approved. |
 | Ready to contribute | Table: `is:open label:"status/accepted" label:"help wanted" no:assignee`. A discovery shortlist, not an approval check. |
 | Release | Table: `has:milestone`, grouped by Milestone. Narrow to an existing milestone when needed; do not filter out closed issues. |
 
@@ -139,16 +166,15 @@ instructions.
 
 After explicit rollout approval, maintainers:
 
-- [ ] Choose whether to reopen the retired Project or create its replacement;
-  establish one public planning surface and verify access under existing controls.
-- [ ] Configure the field and saved views above. Review built-in workflows:
-  leave auto-archive off and ensure none assigns Horizon or implies approval.
-- [ ] Enable the repository-scoped auto-add workflow and bulk-add existing
-  open issues through the native add-items dialog. Leave Horizon empty unless
-  a human has selected it; reconcile legacy metadata against issue decisions,
-  preserving completed issue and release history. If replacing the board,
-  keep its history accessible and include completed issues from the active
-  release cohort in the new Project.
+- [x] Prepare the existing public Project, Horizon, saved views, and existing
+  open-issue intake while preserving completed issue and release history.
+- [x] Verify native Roadmap Horizon columns, Release Milestone grouping, and
+  manual ordering while preserving all existing items and historical fields.
+- [ ] Enable and verify repository-scoped auto-add. Recheck the existing-issue
+  backfill; enabling auto-add alone does not perform it. Leave Horizon empty
+  unless a human selected it, and retain legacy planning history without
+  treating it as renewed approval. Leave other native workflows, including
+  auto-archive, off.
 - [ ] Record human priority choices and release targets, then populate the
   selected Horizons and rank them. Confirm unselected intake stays off Roadmap,
   Ready to contribute reflects supported unclaimed work, and Release includes

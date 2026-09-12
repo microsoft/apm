@@ -37,7 +37,7 @@ dependencies:
   - .agents/skills/apm-issue-autopilot/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
   deployed_file_hashes:
-    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:9d7315e318d9b9d0cf80e97e9b74656fe240613970545495d862ead1c899265b
+    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:abbd32f92624aeff7c4ec7a9b68ed161a06d3278305831d3a12e77a14a0d1720
     .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
     .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
     .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
@@ -97,14 +97,14 @@ dependencies:
   - .agents/skills/batch-bug-shepherd/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
   deployed_file_hashes:
-    .agents/skills/batch-bug-shepherd/SKILL.md: sha256:c5b0f8752e726d123f61491c959681134882dfddbc9f5d15ac5c47e55931375f
+    .agents/skills/batch-bug-shepherd/SKILL.md: sha256:87068cc1905f833605a2cb4c7f672d65bd45517ad359964041768ab58e8c3f04
     .agents/skills/batch-bug-shepherd/assets/final-report-template.md: sha256:ea280a4d1e15a9b56ba8d3ef5f0e931754cc44ae29d5615da58da8d445f455c2
-    .agents/skills/batch-bug-shepherd/assets/fix-prompt.md: sha256:ea4fde3d619f12fc7e05f27d6b440b48f3ef66cb9509b2efb85aed66439438f9
-    .agents/skills/batch-bug-shepherd/assets/ground-truth-table.md: sha256:981ebeee98596beb6a00db6edb35a8e871acdd52a938faa8d8915edfd01ba15b
+    .agents/skills/batch-bug-shepherd/assets/fix-prompt.md: sha256:56ea0fa38b6fe576b319f9b8e38ba748f1136facff70c90f21d4356e00bc07f7
+    .agents/skills/batch-bug-shepherd/assets/ground-truth-table.md: sha256:ca5cf460d3b9f0f529a675d4d9f6d9cfc9fcf2f750428b19dda051642f58a5a3
     .agents/skills/batch-bug-shepherd/assets/progress-diagram.md: sha256:72c4606899f50b0761a7683f6ab17878472bc45b18fe03869aae65e3bd6a7bb2
-    .agents/skills/batch-bug-shepherd/assets/strategic-alignment-prompt.md: sha256:67db0bb51d6cbdafad4ea8224ab2012f02e6341b2fd4eb7a09b2a24cc9cb4d7e
+    .agents/skills/batch-bug-shepherd/assets/strategic-alignment-prompt.md: sha256:351820afd4835e37486c71733244643687037b2567275b51f1cbb0256a949e40
     .agents/skills/batch-bug-shepherd/assets/triage-prompt.md: sha256:51bab548ac85044400b77858c6a1554f59bda197c388d9a8546076d87380b060
-    .agents/skills/batch-bug-shepherd/assets/verdict-schema.json: sha256:d82b7ed0791b89617be965097fce1ace9ec6f6b5a33d9a1567cdf4b3651cd83a
+    .agents/skills/batch-bug-shepherd/assets/verdict-schema.json: sha256:f57cc96c4ede3f7c66c8acf7674a57c1c49ae9cf0b545721947703df5206ef22
     .agents/skills/batch-bug-shepherd/evals/.gitignore: sha256:f370ad043ec0c98a166fd98646c3b94280ed78bc996223b6cca2ba936f7c6781
     .agents/skills/batch-bug-shepherd/evals/README.md: sha256:7d0a5c983612953289a8e34c0b95995ccad7273653c4ab145c3f10b9adafa905
     .agents/skills/batch-bug-shepherd/evals/content/sweep-bug-queue.json: sha256:f865943bbe523d22555d6e69834f47364237ce27388cb7732795a6887f6820ee
@@ -115,8 +115,8 @@ dependencies:
     .agents/skills/batch-bug-shepherd/evals/fixtures/three-issues-mixed.with_skill.md: sha256:ab8707f0842af611fe135029a7002356a0bececfbb3abbe442dbc196d48be7ed
     .agents/skills/batch-bug-shepherd/evals/fixtures/three-issues-mixed.without_skill.md: sha256:8bf17d4cdc3c10beb54bcb1348efb4a111846d49d9548ca714e4354b4eccff22
     .agents/skills/batch-bug-shepherd/evals/triggers.json: sha256:f195dc4b80b66f23a5fd9cfc6c60cf3fa1bba5b09b97f044d31f8dae27445470
-    .agents/skills/batch-bug-shepherd/references/invariants.md: sha256:3af10723afea02e7d4c4cb7ae08cb60eee621da3a3d0ffb1f041b70fb29fb6cd
-    .agents/skills/batch-bug-shepherd/references/strategic-alignment-gate.md: sha256:66613a8344411a2f9d5147b4acea798887bed20132ffd27bac9b3f5ba6bb65ed
+    .agents/skills/batch-bug-shepherd/references/invariants.md: sha256:732b9c804215c51d1cbd8c9ff25ddce00e1a26a65444462371279788c06d6133
+    .agents/skills/batch-bug-shepherd/references/strategic-alignment-gate.md: sha256:b612c4f00684c90e96635d891ace0d3de1125d1441cfd99dbc8ede71f81c8ee4
     .agents/skills/batch-bug-shepherd/scripts/run_evals.py: sha256:ecc003164e65cb002f301a7cdff9c0a2e39eddc35a81ede63da8934519e483c9
   source: local
   local_path: ./packages/batch-bug-shepherd
@@ -137,7 +137,7 @@ dependencies:
   deployed_file_hashes:
     .agents/skills/apm-triage-panel/SKILL.md: sha256:e1a5c4e751c7c12e3f056bd29310055456f9f5158b97b2dd2e03743fbecd2c0c
     .agents/skills/apm-triage-panel/apm.yml: sha256:cf6e5657842e7e23a267f4c88e61708cb8acb6ba41576d357cbc79a9d13a6a78
-    .agents/skills/apm-triage-panel/assets/label-contract.json: sha256:3298cb9b030e215d3babc44f780250d80d80a22acf98ae22126f81a7af774c19
+    .agents/skills/apm-triage-panel/assets/label-contract.json: sha256:b1ae10c85bffe63998d1c6e07a34a3d3c345572f4774114e36bd5f42dd8f1627
     .agents/skills/apm-triage-panel/assets/triage-template.md: sha256:c06b5644eb85824c9b0d431467567a7ba4811737ba4a799f09d59cd5ef0ecfa6
     .agents/skills/apm-triage-panel/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
   source: local
@@ -1544,7 +1544,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:2214d7ce6770f3e8cfe53a3b7de6efccceb5810db3e78da79de7a970a4be23bd
+  content_hash: sha256:8587900dd05ff28c05053c55a54b0dfb9e54310cb1c4ecb3404991226dfb6cfe
 - kind: project-relative
   target: agents
   value: .agents/skills/docs-sync/assets/advisory-comment-template.md
@@ -1553,7 +1553,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:9abbd82239925a85a2b2c08d84130259044660c8114245b7e939d4c761c0053e
+  content_hash: sha256:14f23594a9ad139db5e41c684c01ef2fbc007c42b860ceb22b77b1175c1164c8
 - kind: project-relative
   target: agents
   value: .agents/skills/docs-sync/assets/classifier-return-schema.json
@@ -1688,7 +1688,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:9d7315e318d9b9d0cf80e97e9b74656fe240613970545495d862ead1c899265b
+  content_hash: sha256:abbd32f92624aeff7c4ec7a9b68ed161a06d3278305831d3a12e77a14a0d1720
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md
@@ -2102,7 +2102,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:c5b0f8752e726d123f61491c959681134882dfddbc9f5d15ac5c47e55931375f
+  content_hash: sha256:87068cc1905f833605a2cb4c7f672d65bd45517ad359964041768ab58e8c3f04
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/assets/final-report-template.md
@@ -2120,7 +2120,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:ea4fde3d619f12fc7e05f27d6b440b48f3ef66cb9509b2efb85aed66439438f9
+  content_hash: sha256:56ea0fa38b6fe576b319f9b8e38ba748f1136facff70c90f21d4356e00bc07f7
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/assets/ground-truth-table.md
@@ -2129,7 +2129,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:981ebeee98596beb6a00db6edb35a8e871acdd52a938faa8d8915edfd01ba15b
+  content_hash: sha256:ca5cf460d3b9f0f529a675d4d9f6d9cfc9fcf2f750428b19dda051642f58a5a3
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/assets/progress-diagram.md
@@ -2147,7 +2147,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:67db0bb51d6cbdafad4ea8224ab2012f02e6341b2fd4eb7a09b2a24cc9cb4d7e
+  content_hash: sha256:351820afd4835e37486c71733244643687037b2567275b51f1cbb0256a949e40
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/assets/triage-prompt.md
@@ -2165,7 +2165,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:d82b7ed0791b89617be965097fce1ace9ec6f6b5a33d9a1567cdf4b3651cd83a
+  content_hash: sha256:f57cc96c4ede3f7c66c8acf7674a57c1c49ae9cf0b545721947703df5206ef22
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/evals/.gitignore
@@ -2264,7 +2264,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:3af10723afea02e7d4c4cb7ae08cb60eee621da3a3d0ffb1f041b70fb29fb6cd
+  content_hash: sha256:732b9c804215c51d1cbd8c9ff25ddce00e1a26a65444462371279788c06d6133
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/references/strategic-alignment-gate.md
@@ -2273,7 +2273,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:66613a8344411a2f9d5147b4acea798887bed20132ffd27bac9b3f5ba6bb65ed
+  content_hash: sha256:b612c4f00684c90e96635d891ace0d3de1125d1441cfd99dbc8ede71f81c8ee4
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/scripts/run_evals.py
@@ -2876,7 +2876,7 @@ deployments:
   owners:
   - local:packages/apm-triage-panel
   active_owner: local:packages/apm-triage-panel
-  content_hash: sha256:3298cb9b030e215d3babc44f780250d80d80a22acf98ae22126f81a7af774c19
+  content_hash: sha256:b1ae10c85bffe63998d1c6e07a34a3d3c345572f4774114e36bd5f42dd8f1627
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-triage-panel/scripts/triage_state.py
@@ -3280,8 +3280,8 @@ local_deployed_file_hashes:
   .agents/skills/docs-impact-architect/SKILL.md: sha256:3bc13d5ac9e59b094573565ef5fd07cdbf355b6ba64235e399e2f72b2ba587c6
   .agents/skills/docs-impact-classifier/SKILL.md: sha256:3540bb7062835ba254d971be636a60763448aa6b7e0dd1b7624d959c9495e6c2
   .agents/skills/docs-impact-localizer/SKILL.md: sha256:1a46fb1da757ace60ed4bd80a308136a4c0e7ecd62447f1581a51664993dbe0e
-  .agents/skills/docs-sync/SKILL.md: sha256:2214d7ce6770f3e8cfe53a3b7de6efccceb5810db3e78da79de7a970a4be23bd
-  .agents/skills/docs-sync/assets/advisory-comment-template.md: sha256:9abbd82239925a85a2b2c08d84130259044660c8114245b7e939d4c761c0053e
+  .agents/skills/docs-sync/SKILL.md: sha256:8587900dd05ff28c05053c55a54b0dfb9e54310cb1c4ecb3404991226dfb6cfe
+  .agents/skills/docs-sync/assets/advisory-comment-template.md: sha256:14f23594a9ad139db5e41c684c01ef2fbc007c42b860ceb22b77b1175c1164c8
   .agents/skills/docs-sync/assets/classifier-return-schema.json: sha256:9e9fda0c39bfe684f367f4c89e69814d43a23e68c18a3603e9d212659c1a8689
   .agents/skills/docs-sync/assets/panelist-return-schema.json: sha256:6e661b1042e8475e15fcc943a290891f041509a903dfa770a6e0ef4bc793326d
   .agents/skills/docs-sync/evals/README.md: sha256:7dbf5dfa89e78f7d5a3214b01bb5fabfee59c2979827c2a0c72f008fa9c69de5

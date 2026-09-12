@@ -2,6 +2,13 @@
   "version": 1,
   "owners": [
     {
+      "id": "human-scope-evidence",
+      "decision": "Trusted governance roster and immutable issue-scope record interpretation; evidence never grants automated permission",
+      "owner": "scripts/governance/authority.cjs",
+      "selectors": ["scripts/governance/*.cjs"],
+      "guards": ["contracts-tooling-governance-evidence"]
+    },
+    {
       "id": "onboarding-metadata-only",
       "decision": "Discovery inventory and consented consumer dependency delta; never source or deployment mutation",
       "owner": "adopt/discovery.py + adopt/materialize.py + adopt/manifest_edit.py",

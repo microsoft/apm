@@ -4,7 +4,7 @@ description: Drive a batch of suspected bugs from raw issue list to mergeable PR
 interval: manual
 mode: interactive
 input:
-  - targets: "Either a space-separated issue list (e.g. '#123 #456 #789') OR the literal word 'sweep-all' to expand to every open bug-labeled issue plus untyped issues with bug-suspicion keywords"
+  - targets: "Either a space-separated issue list (e.g. '#123 #456 #789') OR 'sweep-all' for the deduplicated union of open type/bug, legacy bug, and untyped bug-suspicion issues; discovery is not implementation approval"
 ---
 
 # Batch Bug Shepherd
@@ -28,10 +28,11 @@ Targets for this run: **${input:targets}**
    with a clear error naming the skill.
 
 2. SCOPE RESOLUTION:
-   - If `${input:targets}` is `sweep-all`: run
-     `gh issue list --label bug --state open --json
-     number,title,labels,body` plus a suspicion-keyword scan on
-     untyped open issues.
+   - If `${input:targets}` is `sweep-all`: query BOTH
+     `gh issue list --repo microsoft/apm --label type/bug --state open --json number,title,labels,body`
+     and `gh issue list --repo microsoft/apm --label bug --state open --json number,title,labels,body`,
+     plus the existing suspicion-keyword scan on untyped open issues.
+     Paginate all queries and union/deduplicate by issue number before triage.
    - Otherwise: parse the issue numbers from `${input:targets}` and
      fetch each via `gh issue view <n> --json
      number,title,body,labels`.
@@ -41,7 +42,7 @@ Targets for this run: **${input:targets}**
    fix m -> completion k+m), the disciplines that will be enforced,
    and where the ground-truth table will live (this session's
    plan.md). If `sweep-all` produced more than 20 candidates, ASK for
-   confirmation; otherwise proceed.
+   confirmation; otherwise proceed with read-only discovery only.
 
    Then RENDER the progress mermaid diagram per the skill's
    `assets/progress-diagram.md` -- every phase styled `pending`,
@@ -53,7 +54,12 @@ Targets for this run: **${input:targets}**
    ground-truth-table asset shipped with the skill. One row per
    candidate. Status `pending-triage`.
 
-5. EXECUTE the skill phases in order. For each phase boundary:
+5. EXECUTE the skill phases in order. Its Phase 2.5 human scope checkpoint
+   is mandatory before every fix/drive implementation, including existing
+   community PRs. Probe the trusted target-repository governance tool and
+   obtain fresh responsible-human confirmation; labels, CEO advice, and
+   evidence records alone are not permission. Missing tool or checkpoint
+   means STOP/escalate, not an inline alternate parser. For each phase boundary:
    - reload the ground-truth table from plan.md (B4 PLAN MEMENTO),
    - re-render the progress mermaid with the just-entered phase
      styled `active` and earlier phases `done` / `blocked` /

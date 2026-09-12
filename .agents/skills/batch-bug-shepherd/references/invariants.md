@@ -134,10 +134,10 @@ here. Every wave honors all of these.
   `PRINCIPLES.md` (rejection contract) + `MANIFESTO.md`. Rows
   demoted to `out-of-scope` / `wrong-direction` SKIP Phase 2/3/4/5
   and surface in Phase 6 under "Recommend close as out-of-scope".
-  The gate FAILS OPEN to `aligned` on subagent malformed-x2 or
-  non-citable principle; it ABORTS only when `apm-ceo.agent.md` or
-  `PRINCIPLES.md` itself is missing. Silently demoting under
-  infrastructure failure would hide real defects. See
+  Malformed-x2 or non-citable advice leaves the row `blocked` for
+  human review, not silently accepted or rejected. Missing persona
+  or `PRINCIPLES.md` aborts that phase. All verdicts are advisory;
+  none supplies the human checkpoint below. See
   `references/strategic-alignment-gate.md`.
 
 ## 18. Worktree isolation
@@ -166,3 +166,46 @@ Procedure:
 Triage (Phase 1) and strategic-alignment (Phase 1.5) are READ-ONLY
 and MAY share a single read-only `REPO_ROOT`; they never mutate the
 tree, so no per-child worktree is required for them.
+
+## Human scope checkpoint
+
+This APM-specific skill depends on the target repository's maintainer tool,
+not a second bundled parser, roster, or package dependency. Resolve a
+trusted default-branch checkout of microsoft/apm, separate from any
+contributor/head worktree. Probe from that repository root:
+
+```bash
+node scripts/governance/eligibility.cjs --help
+node scripts/governance/eligibility.cjs --repo microsoft/apm --issue N --approval-url URL
+```
+
+`URL` must be the nominated issue-comment scope record, not a PR review.
+`scripts/governance/authority.cjs` alone interprets the record and the
+trusted default-branch GOVERNANCE.md roster. Never execute a contributor's
+copy, hand-parse records, infer the responsible human from labels, or
+fall back to persona authority. Missing trusted tool, API/read failure, or
+unverifiable evidence means STOP that row and escalate.
+
+Even evidence state `record-present` and an unedited human record are not
+permission: the JSON always has `authorizes_implementation: false` because
+current snapshots cannot detect deleted withdrawals. Before Phase 3 fix,
+Phase 4 drive (including existing community PRs), and Phase 5 conflict work,
+obtain a fresh explicit confirmation from a responsible human for that
+issue's scope, done-when, exclusions, and review contact. Record the
+confirmation reference and bounded brief in a session receipt; pass it to
+every mutating child. Merely naming a review contact is not availability.
+Generic "sweep the queue", historical acceptance, bot/CEO advice, labels,
+silence, and PR reviews are not this checkpoint. Without it, keep discovery
+read-only and report `blocked`. Recheck the evidence before each wave and
+renew confirmation on resume, scope change, or uncertainty about withdrawal.
+
+## Owned shepherd marker
+
+Track `run_id` and `shepherd_marker_added_by_run` in each row's session
+receipt. After the human checkpoint, an absent `status/shepherding` may
+be added and recorded as owned only after the write is verified. If it
+was already present, another run may own it: do not claim or remove it.
+At verified completion, remove only a marker this run demonstrably added.
+If a concurrent run or lost receipt makes ownership uncertain, preserve
+the marker and escalate. Never sweep or clean up another run's markers.
+Processing markers are not approval, assignment, or scope records.

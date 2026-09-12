@@ -50,6 +50,47 @@ to avoid duplicate work. Assignment records coordination, not permanent
 ownership. If you need to pause, say so on the issue so someone else can help.
 If the scope changes, discuss it before expanding the implementation.
 
+### Scope record format
+
+For new machine-readable evidence, the responsible human posts a **new,
+unedited issue comment** in this format (one field per line):
+
+```text
+<!-- apm-scope:v1 -->
+Decision: approve
+Area: project
+Scope: Describe the bounded change.
+Done when: State the acceptance criteria.
+Out of scope: Name important exclusions, or write None.
+Review contact: @your-maintainer-login
+```
+
+Use `registry-public-api` instead of `project` only for that exact remit in
+[the governance roster](GOVERNANCE.md#maintainers-and-scope). Prefer naming
+yourself as review contact; obtain another maintainer's agreement before
+committing their time. Link the issue and this comment in the PR body.
+Ordinary issue references are valid for partial work; `Fixes` is not required.
+
+To withdraw approval, post a new comment, preserving earlier history:
+
+```text
+<!-- apm-scope:v1 -->
+Decision: withdraw
+Area: project
+Reason: Explain the scope or capacity change.
+```
+
+Do not edit or delete decisions to change their meaning. A missing referenced
+comment or edited record needs fresh evidence, not fallback to an older
+approval. Historical informal approvals need deliberate human confirmation;
+the September 12 acceptance withdrawals are not automatically restored.
+
+The eligibility report is **always neutral**, even when it finds a record.
+It cannot judge whether code fits the issue or reconstruct a deleted withdrawal.
+It does not replace human scope approval, review, or a fresh bounded human
+confirmation before an automation run implements changes. API failures are
+reported as unknown/error, never as approval.
+
 Approval welcomes work within the agreed scope. It does **not** guarantee
 merge, a particular implementation, or a release date. You may experiment in
 your own fork without approval, but an unsolicited PR does not oblige
@@ -61,6 +102,9 @@ Typo fixes and broken documentation links have standing preapproval. Create
 a short issue alongside the PR and link it; no separate approval wait is
 needed. This exception does not cover code fixes, behavior changes, or
 substantive documentation changes. If uncertain, ask on the issue.
+The PR may include `<!-- apm-standing-preapproval: typo -->` or
+`<!-- apm-standing-preapproval: broken-link -->`; this is a claim for human
+review, not an automated exemption for a substantive change.
 
 Maintainer-authored changes and automated PRs also need issue traceability.
 Routine automation may use a bounded maintenance or release issue with
@@ -68,6 +112,10 @@ recorded human approval; it is not a blanket exception for unrelated work.
 Security fixes may use private tracking and human coordination through the
 security-reporting process; do not publish confidential approval links or
 report details to satisfy the PR template.
+Use `<!-- apm-private-tracking -->` to request confidential manual review
+without a public tracking link. The advisory also routes security/dependency
+submissions to manual review; it does not certify private approval or ask
+authors to expose confidential evidence.
 
 ## Submit a reviewable PR
 

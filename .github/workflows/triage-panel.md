@@ -16,9 +16,9 @@ on:
         description: "Optional issue number for a fresh advisory; blank runs the daily sweep."
         required: false
         type: string
-  # Canonical request plus temporary legacy event alias. The human decision
-  # label status/needs-triage is NEVER removed when advice completes.
-  labels: [triage/requested, status/needs-triage]
+  # Provision canonical processing labels before deploying this workflow.
+  # Human decision labels are neither triggers nor consumable requests.
+  labels: [triage/requested]
   roles: [admin, maintainer, write]
 
 if: >-
@@ -60,8 +60,8 @@ network:
 
 # Canonical owner: packages/apm-triage-panel/assets/label-contract.json.
 # Literal lists are intentional: safe outputs do not use classification globs.
-# Compatibility mode writes the existing status/triaged processing marker;
-# triage/recommended is read-only until a separately approved label rollout.
+# Canonical writes require maintainer provisioning before default-branch deploy.
+# Both historical and canonical completion markers remain readable.
 safe-outputs:
   add-comment:
     max: 10
@@ -93,7 +93,7 @@ safe-outputs:
       - "type/performance"
       - "type/refactor"
       - "type/release"
-      - "status/triaged"
+      - "triage/recommended"
     # Plain additive REST labels, never replacement through intent metadata.
     issue-intent: false
     max: 70
@@ -128,19 +128,19 @@ processing marker and any proposed classification absent from its response.
 Do not mistake a truncated inventory for a missing label.
 The agent's shell is not authenticated;
 do not fabricate curl credentials. Use the contract's
-`processing.active_write_reviewed`, currently `status/triaged`. If that
+`processing.active_write_reviewed`, currently `triage/recommended`. If that
 label is absent, the contract is unavailable, or the read fails, STOP
 before emitting any comments or labels. Log an actionable error:
 `Triage rollout blocked: active processing label unavailable; a maintainer
-must restore it or approve the canonical-label rollout. No labels created.`
+must provision canonical processing labels before deployment. No labels created.`
 Do not fall back to a human status or automatically create any label.
 
 Choose one mode:
 
 - `issues` event: request for a fresh advisory on
   `#${{ github.event.issue.number }}`. `triage/requested` is the canonical
-  request. `status/needs-triage` is a temporary legacy event alias; it
-  remains human decision state and is not consumed.
+  request. `status/needs-triage` remains human decision state, not an
+  event trigger, and is not consumed.
 - `workflow_dispatch` with non-empty `${{ inputs.issue_number }}`:
   validate a positive integer and read that single issue for fresh advice.
   Invalid input stops with a run-log error and no writes.
@@ -179,7 +179,7 @@ not a real issue or permission to write):
 ```json
 {
   "mode": "sweep",
-  "repository_labels": ["status/triaged", "type/bug"],
+  "repository_labels": ["triage/recommended", "type/bug"],
   "issues": [
     {"number": 1, "author": "reporter", "labels": [], "eligible": true,
      "proposed_labels": []}
@@ -253,8 +253,7 @@ item or override governance.
    > Automated advice only. Labels and silence are not approval.
    > A responsible human maintainer decides scope, priority, invitations,
    > review capacity, and release targeting. Existing human edits remain.
-   > To request fresh advice, use manual dispatch or `triage/requested`
-   > once provisioned; the legacy `status/needs-triage` event also works.
+   > To request fresh advice, use manual dispatch or `triage/requested`.
 
 2. Through `safe-outputs.add-labels`, add the active processing marker
    and useful proposed classification labels ONLY when present in both
@@ -270,8 +269,10 @@ item or override governance.
    marker. These are not interchangeable with the request marker.
 
 Do not create labels, assign milestones, close/reopen issues, assign
-contributors, or edit existing comments. The label contract describes
-future migration, not permission to perform it. GitHub Triage users can
+contributors, or edit existing comments. The canonical labels must be
+provisioned before default-branch deployment; this workflow does not migrate
+existing issues. GitHub Triage users can
 manipulate labels generally: labels are not ACLs. Verification of the
-human approval record is a separate, later capability; no consumer may
+human scope evidence is owned by the trusted repository's governance tool;
+no consumer may
 replace explicit maintainer approval with this recommendation.

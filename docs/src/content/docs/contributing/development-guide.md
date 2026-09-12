@@ -45,10 +45,58 @@ exclusions, and review-needs brief. Maintainers still decide acceptance,
 priority, contributor invitations, and milestones. The
 [triage label contract](https://github.com/microsoft/apm/blob/main/packages/apm-triage-panel/assets/label-contract.json)
 separates those decisions from advisory processing. During compatibility
-rollout, `status/triaged` records completed automated advice; the future
-`triage/recommended` marker means the same thing, not human review.
+rollout, both `status/triaged` and `triage/recommended` mean completed
+automated advice, not human review. The new writer uses `triage/recommended`
+after the canonical label is provisioned and this code is deployed.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
+
+### Eligibility evidence and automation
+
+The [scope record format](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#scope-record-format)
+provides explicit human evidence on an issue. The deterministic
+`PR eligibility (advisory only)` check is always neutral: `record-present`,
+`withdrawn`, `needs-evidence`, or `error` are not implementation permission.
+Private security/dependency tracking and claimed trivial corrections receive
+manual-review states. Real issue references are checked through GitHub, not
+inferred from arbitrary numbers, PR links, upstream references, or labels.
+Humans still decide whether the change matches the linked scope.
+
+After the workflow reaches the default branch, PR updates and relevant
+issue/comment changes refresh evidence without invoking an LLM panel.
+Forks and stacked PRs use default-branch governance and code, never the head
+or a feature-branch approval roster. Merge-queue reports refresh associated
+PR evidence, but commit associations do not prove complete queue membership;
+missing association/read access is reported as unknown/error. The check is
+not part of the required merge gate, and this PR does not deploy itself.
+Native event delivery and queue limits still apply; use the workflow's
+manual PR-number recheck if a refresh is missed.
+
+For a read-only local assessment, run the tool from a trusted default-branch
+checkout with Node.js and an authenticated `gh`:
+
+```bash
+node scripts/governance/eligibility.cjs --repo microsoft/apm --pr 123
+node scripts/governance/eligibility.cjs --help
+```
+
+The tool reads current policy from the default branch. Until the new roster
+format is deployed there, it deliberately reports a policy error rather than
+using a feature branch as authority. A snapshot cannot recover deleted
+withdrawals, so manual automation still requires fresh responsible-human
+confirmation of the bounded issue scope. No historical acceptance is restored.
+
+Once deployed, Daily Docs Updater runs discovery only, without issue/PR creation
+or auto-merge capabilities. Scheduled and manual runs stop at a human handoff.
+A docs-sync confirmation label likewise requests consideration; it cannot
+authorize a companion PR. Bug sweeps read canonical and legacy bug labels once
+per issue, then require the same human checkpoint before implementation.
+During rollout, keep Daily Docs disabled until the replacement source and
+compiled capabilities are deployed and verified. Opening or merging the PR
+does not authorize resuming the disabled workflow; a maintainer does that
+separately.
+
+### Installing optional skills
 
 To use these tools, [install APM](../../getting-started/installation/) if needed,
 then run from the repository root:

@@ -31,7 +31,7 @@ def _issue(number: int, labels: list[str] | None = None, author: str = "reporter
 def _plan(issues: list[dict], mode: str = "sweep", labels: list[str] | None = None) -> dict:
     """Exercise the same planner the workflow invokes."""
     return PLAN_BATCH(
-        {"mode": mode, "issues": issues, "repository_labels": labels or ["status/triaged"]},
+        {"mode": mode, "issues": issues, "repository_labels": labels or ["triage/recommended"]},
         CONTRACT,
     )
 
@@ -70,8 +70,8 @@ def test_skipped_first_page_and_author_quota_do_not_starve_later_issues() -> Non
     assert result["batch_full"] is True
 
 
-def test_compatibility_needs_no_new_labels_and_never_writes_human_state() -> None:
-    """Unknown/new labels and human decisions cannot enter a write plan."""
+def test_canonical_rollout_never_writes_human_state() -> None:
+    """Unknown labels and human decisions cannot enter a write plan."""
     issue = _issue(1, ["status/needs-triage", "status/accepted", "help wanted", "bug"])
     issue["proposed_labels"] = [
         "type/feature",
@@ -84,9 +84,9 @@ def test_compatibility_needs_no_new_labels_and_never_writes_human_state() -> Non
         "invented",
     ]
     original = deepcopy(issue)
-    result = _plan([issue], labels=["status/triaged", "type/feature", "area/cli"])
+    result = _plan([issue], labels=["triage/recommended", "type/feature", "area/cli"])
     assert result["selected"] == [
-        {"number": 1, "add_labels": ["area/cli", "status/triaged"], "remove_labels": []}
+        {"number": 1, "add_labels": ["area/cli", "triage/recommended"], "remove_labels": []}
     ]
     assert result["implementation_authorized"] is False
     assert issue == original
@@ -95,7 +95,7 @@ def test_compatibility_needs_no_new_labels_and_never_writes_human_state() -> Non
 def test_missing_active_marker_fails_before_any_emission() -> None:
     """Do not silently switch markers or create absent labels during rollout."""
     with pytest.raises(ValueError, match="Active processing label"):
-        _plan([_issue(1)], labels=["triage/recommended"])
+        _plan([_issue(1)], labels=["status/triaged"])
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
         input=json.dumps({"mode": "sweep", "repository_labels": [], "issues": [_issue(1)]}),
@@ -121,8 +121,53 @@ def test_conflicting_classification_and_duplicate_reads_are_bounded() -> None:
     issue = _issue(1)
     issue["proposed_labels"] = ["type/bug", "type/feature"]
     with pytest.raises(ValueError, match="Conflicting proposed type"):
-        _plan([issue], labels=["status/triaged", "type/bug", "type/feature"])
+        _plan([issue], labels=["triage/recommended", "type/bug", "type/feature"])
     assert len(_plan([_issue(1), _issue(1)])["selected"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    [
+        ("bug", "type/bug"),
+        ("enhancement", "type/feature"),
+        ("type/enhancement", "type/feature"),
+        ("documentation", "type/docs"),
+        ("docs", "type/docs"),
+        ("feature", "type/feature"),
+        ("architecture", "type/architecture"),
+        ("automation", "type/automation"),
+        ("CI/CD", "area/ci-cd"),
+        ("ci/cd", "area/ci-cd"),
+        ("cli", "area/cli"),
+        ("marketplace", "area/marketplace"),
+        ("performance", "type/performance"),
+        ("policy", "area/audit-policy"),
+        ("refactor", "type/refactor"),
+        ("security", "theme/security"),
+        ("testing", "area/testing"),
+    ],
+)
+def test_legacy_aliases_occupy_classification_dimensions(alias: str, canonical: str) -> None:
+    """Legacy human choices block new labels in that dimension, not other dimensions."""
+    assert CONTRACT["legacy_read_aliases"][alias] == canonical
+    dimension = canonical.split("/", 1)[0]
+    proposals = ["type/bug", "theme/governance", "area/cli"]
+    issue = _issue(1, [alias, "status/needs-triage"])
+    issue["proposed_labels"] = proposals
+    result = _plan([issue], labels=["triage/recommended", *proposals])
+    expected = sorted(
+        ["triage/recommended"]
+        + [label for label in proposals if label.split("/", 1)[0] != dimension]
+    )
+    assert result["selected"] == [{"number": 1, "add_labels": expected, "remove_labels": []}]
+
+
+def test_canonical_rollout_preserves_read_markers_and_removes_legacy_trigger() -> None:
+    """Only canonical processing may be written or consumed; human state survives."""
+    processing = CONTRACT["processing"]
+    assert processing["active_write_reviewed"] == "triage/recommended"
+    assert processing["read_reviewed"] == ["triage/recommended", "status/triaged"]
+    assert processing["request_triggers"] == processing["removable"] == ["triage/requested"]
 
 
 def test_deferred_consumer_schema_rejects_legacy_acceptance_and_release_fields() -> None:
@@ -166,7 +211,14 @@ def test_template_has_proposed_brief_not_an_operative_decision() -> None:
 def test_installed_skill_files_and_recorded_hashes_match_sources() -> None:
     """Exercise the published package and its generated installation contract."""
     lock = yaml.safe_load((ROOT / "apm.lock.yaml").read_text())
-    for name, source in [("apm-triage-panel", PACKAGE), ("apm-issue-autopilot", AUTOPILOT)]:
+    for name, source in [
+        ("apm-triage-panel", PACKAGE),
+        ("apm-issue-autopilot", AUTOPILOT),
+        (
+            "batch-bug-shepherd",
+            ROOT / "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd",
+        ),
+    ]:
         dep = next(item for item in lock["dependencies"] if item["name"] == name)
         for relative, expected in dep["deployed_file_hashes"].items():
             installed = ROOT / relative

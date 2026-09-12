@@ -37,6 +37,11 @@ Columns:
   rows: `<cited_principle>; reservations: <semicolon-joined list>`.
   Empty for plain `aligned` and `n/a`.
 - notes: short freeform; cite session refs, commit shas, blocker text.
+  Link a session receipt with the nominated approval URL, evidence state,
+  fresh responsible-human confirmation reference, bounded scope/done-when/
+  exclusions/review contact, run_id, and shepherd_marker_added_by_run.
+  Missing confirmation blocks fix/drive; missing marker ownership forbids
+  cleanup. The receipt is tracking, never a substitute for human permission.
 
 Lines stay under 200 chars to remain readable in narrow terminals.
 ASCII only.

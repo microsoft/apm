@@ -11,9 +11,19 @@ under microsoft/apm.
 - ISSUE_TITLE: <required>
 - REPRO_STEPS: <required; verbatim from the triage subagent>
 - REPO_ROOT: <required>
+- HUMAN_SCOPE_RECEIPT: <required; Phase 2.5 evidence and fresh human confirmation>
 
 ## Procedure
 
+0. Apply `references/invariants.md` -> **Human scope checkpoint** from
+   the loaded batch-bug-shepherd skill. Verify the supplied receipt matches
+   this issue and current bounded work before any edits. The trusted
+   repository eligibility tool reports evidence, never permission. If the
+   tool/evidence or fresh responsible-human confirmation is missing, STOP
+   and return `blocked`. A withdrawal or unavailable evidence at this child
+   recheck overrides the earlier Phase 2.5 receipt; make no edits or PR.
+   LEGIT, CEO advice, labels, and an existing record alone cannot authorize
+   implementation. Do not expand the confirmed scope.
 1. Re-read the issue and the repro steps. Confirm the bug still
    reproduces on HEAD.
 2. Design the minimum fix. Identify the canonical sibling code paths
@@ -62,12 +72,22 @@ under microsoft/apm.
 
 ## Returns
 
-Return a JSON object (no schema in this wave; orchestrator just
-needs the PR number):
+Return ONE JSON object matching `assets/verdict-schema.json` ->
+`fix_return`. Success:
 
+```json
+{"kind":"fix","issue":2960,"status":"pr-opened","pr":3000,"branch":"fix-example"}
 ```
-{"kind":"fix","issue":<n>,"pr":<m>,"branch":"<name>"}
+
+If the human-scope recheck fails, return immediately without `pr` or
+`branch`; replace the example issue and reason with the actual values:
+
+```json
+{"kind":"fix","issue":2960,"status":"blocked","reason":"Scope withdrawn after Phase 2.5."}
 ```
+
+An unavailable trusted tool/API/evidence or missing current confirmation
+also returns `blocked` with the specific reason. Do not fabricate PR fields.
 
 ## Hard rules
 

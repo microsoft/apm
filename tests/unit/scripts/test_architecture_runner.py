@@ -607,6 +607,7 @@ contracts-tooling-cached-policy-shape
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
+contracts-tooling-governance-evidence
 contracts-tooling-lockfile-read
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor

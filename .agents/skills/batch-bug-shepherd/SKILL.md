@@ -6,7 +6,8 @@ description: >-
   subagent per issue (LEGIT / UNCLEAR / FIXED-AT-HEAD), gate every
   legit bug against PRINCIPLES.md via an apm-ceo strategic-alignment
   pass, cross-reference legit issues against open PRs, then open a fix
-  PR (TDD + mutation-break gate) for greenfield bugs. Drive every PR
+  PR (TDD + mutation-break gate) for greenfield bugs after a
+  fresh human issue-scope checkpoint. Drive approved PRs
   -- community in-flight and own fix alike -- to mergeable by
   composing the shepherd-driver skill: one driver per PR runs the
   review panel, folds non-blocking recommendations, pushes (preserving
@@ -31,103 +32,56 @@ fold + push + CI loop. shepherd-driver transitively COMPOSES
 that edge and never reaches into panel internals directly. It also
 COMPOSES the `apm-ceo` persona (host-repo agent at
 `.apm/agents/apm-ceo.agent.md`) for the strategic-alignment gate,
-which checks every LEGIT bug against `PRINCIPLES.md` before allowing
-fix / drive work to proceed. Per-PR shepherding is delegated to
+which gives advisory alignment against `PRINCIPLES.md`, never human
+authorization. Per-PR shepherding is delegated to
 shepherd-driver; per-issue verification, strategic alignment,
 PR-in-flight branching, greenfield fix dispatch, post-wave
 mergeability re-probe, and the cross-session table are owned here.
 
 The skill is ADVISORY at the panel layer and EXECUTIVE at the
 orchestrator layer: it WILL push commits, open PRs, post comments,
-close superseded PRs. Every consequential write goes through a
+close superseded PRs ONLY within fresh human-confirmed issue scope.
+Every consequential write goes through a
 deterministic CLI (`gh`, `git`, `uv run ruff`) wrapped in plan +
 execute + verify (A9 SUPERVISED EXECUTION).
 
 ## Architecture invariants
 
-These 18 rules bind every wave. The one-line essence is below; the
-FULL binding text (rationale, edge cases, inherited-from-driver
-detail) lives in `references/invariants.md`. **Load
-`references/invariants.md` before planning Phase 0** -- the summaries
-here are dispatch anchors, not the complete contract.
+**Load `references/invariants.md` before planning Phase 0.** Its 18
+binding rules, human checkpoint, and owned-marker procedure govern every
+wave; these anchors do not replace that reference:
 
-- **Fan-out, not serial.** Triage / alignment / fix / drive run as
-  parallel child threads; single-loop is an anti-pattern.
-- **Verify before fix.** No fix dispatched until the bug reproduces
-  on HEAD (`LEGIT`); `UNCLEAR` -> human, `FIXED-AT-HEAD` -> close.
-- **PR-in-flight detection is mandatory.** `gh pr list` every legit
-  issue before any fix; duplicating community work is the worst
-  failure mode this skill defends against.
-- **Drive, do not split shepherd from complete.** ONE shepherd-driver
-  subagent owns the whole per-PR loop; no separate panel + completion
-  waves.
-- **Mutation-break gate.** A regression trap is real only if deleting
-  the production guard makes the test FAIL.
-- **Canonical-owner gate (driver-enforced).** Every fix gets one
-  architecture classification vs
-  `.github/instructions/architecture.instructions.md`; a new owner,
-  centralization, or split-authority repair needs the full dual
-  guardrail (behavioral + static + `test_architecture_*` + mutation
-  break) before `ready-to-merge`. shepherd-driver enforces and returns
-  it; the orchestrator only records the evidence.
-- **Superseding-PR fallback (inherited).** On contributor-fork push
-  failure the driver opens an authorship-preserving PR under
-  `microsoft/apm` and returns `superseded`.
-- **Single-writer interlock.** One idempotent panel comment + one
-  driver advisory per PR; the orchestrator never posts to a PR.
-- **ASCII only.** Printable ASCII in every artifact (cp1252 safety).
-- **Lint contract is the push gate (inherited).** `ruff check` +
-  `ruff format --check` silent before any `git push`.
-- **Ground-truth table is the single source of truth.** One plan.md
-  table, rewritten on every return, re-read at each wave start
-  (B4 PLAN MEMENTO + B8 ATTENTION ANCHOR).
-- **Cross-session message reports only on green.** Failures stay in
-  the subagent session until resolved or escalated to a human.
-- **Operator visibility is a contract.** Progress mermaid + live
-  table at every boundary; dispatch table before every fan-out
-  (`assets/progress-diagram.md`).
-- **Mergeability is post-wave truth.** Re-probe `mergeStateStatus`
-  before claiming ready; Phase 5 resolves conflicts with
-  `--force-with-lease` (bare `--force` prohibited).
-- **Two-comment-per-PR cap.** Driver advisory + resolution
-  confirmation only; the in-loop panel comment is idempotent and does
-  not add to the count. No third comment, ever.
-- **Bias toward folding (inherited).** The driver folds in-scope
-  follow-ups into the PR; only genuinely separable work becomes a
-  tracking issue.
-- **Strategic-alignment gate before drive.** Phase 1.5 runs one
-  `apm-ceo` subagent per LEGIT row; demoted rows skip Phase 2-5; the
-  gate fails open to `aligned`, aborts only if the persona /
-  `PRINCIPLES.md` is missing.
-- **Worktree isolation.** Every fix and drive child runs in its OWN
-  git worktree (one per issue/PR); never fan out mutating children
-  against a shared `REPO_ROOT` (they would race on `.git/index` and
-  the checked-out branch). Triage is read-only and may share one.
+- Parallel triage/alignment/fix/drive; isolated worktree per mutating child.
+- Reproduce before fixing; `UNCLEAR` -> human, `FIXED-AT-HEAD` -> recommend close.
+- Cross-reference existing PRs before fixes; ONE driver owns each complete PR loop.
+- Mutation-break tests; canonical-owner classification and dual guardrails.
+- Preserve authorship when superseding; only the driver writes to a PR.
+- Printable ASCII; canonical lint contract before every push.
+- One plan.md table: reload at boundaries, rewrite on every return.
+- Report completion only on green; unresolved failures escalate.
+- Progress diagram and live table at boundaries; dispatch table before fan-out.
+- Re-probe mergeability; conflict pushes use only `--force-with-lease`.
+- Two-comment cap plus the idempotent panel surface; no third comment.
+- Fold in-scope follow-ups; track only genuinely separable work.
+- Alignment advice cannot authorize work; malformed/unavailable advice blocks.
+
+Before ANY fix, drive, or conflict-resolution implementation, apply
+the **Human scope checkpoint** in `references/invariants.md`. Discovery
+and advice may proceed read-only; an existing PR, label, or CEO verdict
+does not permit mutations.
 
 ## Composition with shepherd-driver
 
-`shepherd-driver` is the per-PR drive-to-merge engine. This skill
-spawns ONE shepherd-driver subagent per PR (both in-flight community
-PRs and own greenfield fix PRs) using the spawn body
-`../shepherd-driver/assets/shepherd-driver-prompt.md`. The driver owns
-the whole convergence loop -- Copilot classification, apm-review-panel,
-fold-vs-defer, push, CI watch, with its own caps -- and
-returns a `completion_return` matching
-`../shepherd-driver/assets/completion-schema.json`
-(`ready-to-merge` | `advisory-with-deferred` | `superseded` |
-`blocked`). Terminal returns also pass the deterministic semantic gate
-in `../shepherd-driver/scripts/owner_touch_gate.py`.
+The same-repo LOCAL SIBLING `shepherd-driver` is declared in `apm.yml`.
+Its `assets/shepherd-driver-prompt.md` owns the complete per-PR loop,
+including its transitive apm-review-panel dependency. Returns follow
+`assets/completion-schema.json`: `ready-to-merge`,
+`advisory-with-deferred`, `superseded`, or `blocked`. Terminal evidence
+also passes `scripts/owner_touch_gate.py`.
 
-The cross-PR conflict-resolution / mergeability phase is ALSO
-shepherd-driver's: Phase 5 delegates to
-`../shepherd-driver/assets/conflict-resolution-prompt.md` with the
-step-by-step gate in
-`../shepherd-driver/references/mergeability-gate.md`.
-
-shepherd-driver is a same-repo LOCAL SIBLING declared in `apm.yml`
-(`dependencies.apm: [../shepherd-driver]`). PROBE for it before the
-drive wave -- a tool call, not an assertion from recall (A9 SUPERVISED
-EXECUTION):
+Phase 5 loads the sibling's `references/mergeability-gate.md` and
+delegates to `assets/conflict-resolution-prompt.md`. Do not inline either
+loop. Before the drive wave, perform this real dependency probe:
 
 ```
 test -f ../shepherd-driver/assets/shepherd-driver-prompt.md \
@@ -137,13 +91,9 @@ test -f ../shepherd-driver/assets/shepherd-driver-prompt.md \
   || echo "MISSING shepherd-driver - stop and ask the operator"
 ```
 
-On a probe MISS, STOP and ask the operator to restore the sibling; do
-NOT re-implement the loop inline (avoids HAND-ROLLED HALLUCINATION and
-PHANTOM DEPENDENCY). The driver transitively composes
-`apm-review-panel` and probes for it at its own preflight, returning
-`status: blocked` on a miss. The orchestrator uses only
-shepherd-driver's declared prompt, schema, and owner-gate interfaces;
-it NEVER re-implements shepherd-driver or apm-review-panel internals.
+On a probe MISS, STOP and ask the operator to restore the sibling.
+Use only its declared prompt, schema, and owner-gate interfaces; the
+driver probes its own panel dependency and returns `blocked` on a miss.
 
 ## Phases
 
@@ -161,16 +111,23 @@ real-time window into a multi-wave parallel saga.
 
 Input is either (a) an explicit issue list (e.g. `#123 #456 #789`) or
 (b) the `sweep-all` flag, which expands to:
-- `gh issue list --label bug --state open --json number,title,labels,body`
+- BOTH `gh issue list --repo microsoft/apm --label type/bug --state open --json number,title,labels,body`
+  AND `gh issue list --repo microsoft/apm --label bug --state open --json number,title,labels,body`
 - plus `gh issue list --state open --search "is:open no:label"` filtered
   by suspicion keywords (`error`, `crash`, `broken`, `regression`,
   `unexpected`, `traceback`, `does not work`, `cannot`, `fails`).
+
+Union the canonical and legacy bug queries plus the suspicion fallback;
+deduplicate by issue number before triage. Paginate each query to exhaustion
+(do not mistake the CLI default limit for a complete queue). Read failures
+stop discovery; labels select candidates, never authorize work.
 
 Initialize the ground-truth table (`assets/ground-truth-table.md`)
 with one row per candidate. Print a brief plan to the user:
 candidate count, expected wave shape, and the disciplines that will
 be enforced (mutation-break, ASCII, lint). Ask for confirmation only
-if `sweep-all` produced more than 20 candidates -- otherwise proceed.
+if `sweep-all` produced more than 20 candidates -- otherwise proceed
+with read-only triage, not implementation permission.
 
 Then render the progress mermaid diagram for the first time per
 `assets/progress-diagram.md` -- every phase `pending`, with the
@@ -203,7 +160,7 @@ Re-render with `P15` `active` (substitute `L` LEGIT count). If
 
 **Load `references/strategic-alignment-gate.md` when entering this
 phase** -- it holds the binding procedure (external-dep probes,
-fail-open semantics, deferred-PR strategic-rejection subagent).
+blocked-on-failure semantics, deferred-PR advisory subagent).
 
 Probe `.apm/agents/apm-ceo.agent.md` and `PRINCIPLES.md`. Either
 missing -> ABORT. Print the dispatch table for the
@@ -212,7 +169,7 @@ missing -> ABORT. Print the dispatch table for the
 `strategic_alignment_return` JSON (verdict in `aligned` |
 `aligned-with-reservations` | `out-of-scope` | `wrong-direction`).
 Schema-validate per retry-once; on second malformed, route as
-`aligned` with `gate_note` (fail-open).
+`blocked` with the diagnostic for human review, never `aligned`.
 
 Update `strategic_verdict` + `strategic_rationale` columns.
 Demoted rows flip to status `triaged-deferred` and are SKIPPED by
@@ -250,6 +207,15 @@ crash-survivable evidence the Phase 4 spawn reads -- never re-derived
 from recall. Update the table. This phase MUST complete before any
 Phase 3 or Phase 4 spawn.
 
+### Phase 2.5 - responsible-human issue-scope checkpoint
+
+Apply `references/invariants.md` -> **Human scope checkpoint** to each
+issue, including community PRs already in flight. Persist the nominated
+approval URL, evidence state, exact human-confirmed scope and done-when,
+exclusions, review contact, and fresh confirmation reference in the row's
+session receipt. Missing evidence or confirmation leaves that row `blocked`;
+do not dispatch fix/drive children or claim an owned shepherd marker.
+
 ### Phase 3 - greenfield fix fan-out (WAVE 2)
 
 Re-render the progress diagram with `P0..P2` `done` and `P3` `active`.
@@ -259,22 +225,21 @@ render P3 as `skipped` (dashed border) and pass straight to Phase 4.
 This wave is FIX-ONLY. In-flight community PRs do NOT pass through
 here -- they go directly to the Phase 4 drive wave. Filter out any row
 with status `triaged-deferred` (strategically demoted by Phase 1.5).
+Also exclude `blocked` rows and rows without the Phase 2.5 checkpoint.
 
 Print the `fix-<issue>` dispatch table (subagent_id -> issue number)
 BEFORE spawning. For each `LEGIT && !pr_in_flight` row, provision one
 git worktree (`git worktree add <path> origin/main`), record its slug
 in the row's `worktree` column, and spawn a child thread with
-`assets/fix-prompt.md` passing that worktree path as `REPO_ROOT` (per
-the Worktree-isolation invariant). The fix subagent:
-- Writes failing tests FIRST (TDD).
-- Implements the minimum fix.
-- Runs the mutation-break gate (delete the new guard, confirm tests
-  FAIL).
-- Runs the lint contract.
-- Opens a PR under `microsoft/apm` referencing the issue.
-- Returns `{kind, issue, pr, branch}`.
+`assets/fix-prompt.md` passing the worktree as `REPO_ROOT` and the
+Phase 2.5 receipt as `HUMAN_SCOPE_RECEIPT`. The child rechecks scope
+before editing, then follows that prompt's TDD/mutation/owner/lint gates.
 
-On each return, store the Phase 4 driver inputs for the new PR:
+Validate each return against `assets/verdict-schema.json` -> `fix_return`;
+inspect `status` before reading `pr` or `branch`. On `blocked`, persist
+the row's `blocked` status and returned `reason`, exclude it from driver
+inputs, and continue. Malformed or wrong-issue returns also block.
+Only `pr-opened` returns supply the Phase 4 driver inputs:
 `PR_NUMBER` (pr), `AUTHOR` = the maintainer's own gh handle (these are
 own PRs), `HEAD_REPO = microsoft/apm` (same-repo head),
 `HEAD_BRANCH` (branch), `MAINTAINER_CAN_MODIFY = true`, and
@@ -287,7 +252,8 @@ PROBE for shepherd-driver (see "Composition with shepherd-driver").
 On a probe MISS, STOP and ask the operator; do NOT inline the loop.
 
 Re-render with `P4` `active`. Let `D` be the count of PRs to drive --
-EVERY PR in the table that is not `triaged-deferred`: the in-flight
+ONLY PRs with a current Phase 2.5 checkpoint, neither `blocked` nor
+`triaged-deferred`: the in-flight
 community PRs (`ORIGIN = community`, from Phase 2) PLUS the own fix PRs
 (`ORIGIN = own-fix`, from Phase 3). Substitute `D` into the P4 label;
 if `D = 0`, render P4 as `skipped`.
@@ -299,7 +265,10 @@ runs in its OWN worktree (Worktree-isolation invariant): own-fix rows
 REUSE the worktree their Phase 3 fix child recorded; community rows
 get a fresh `git worktree add` + `gh pr checkout`, recorded in
 `worktree`. Pass the inputs the prompt declares, reading each from the
-row (never recall); `REPO_ROOT` is the row's worktree path. For rows
+row (never recall); `REPO_ROOT` is the row's worktree path. Also
+pass the human checkpoint receipt as a binding constraint: no drive,
+fold, push, or superseding PR outside its scope; return `blocked` if
+confirmation is missing or scope changes. For rows
 with `strategic_verdict = aligned-with-reservations`, ALSO pass
 `PANEL_PRIOR = {"reservations": [<the strategic reservations as
 {summary} objects>]}` so the driver surfaces them in the panel run and
@@ -334,8 +303,8 @@ functional evidence.
 
 After both gates pass, write `head_sha`, `mergeable`,
 `merge_state_status`, and `ci_status` from the return into the table,
-and remove the `status/shepherding` label from the driven issue
-(assignment stays). The orchestrator owns only validation, table
+and remove `status/shepherding` ONLY under the owned-marker rule in
+`references/invariants.md` (assignment stays). The orchestrator owns only validation, table
 update, and label cleanup -- it does NOT post to any PR.
 
 ### Phase 5 - mergeability gate (WAVE 4)
@@ -357,6 +326,9 @@ The contract summary:
   (verified-ready) from BEHIND / DIRTY / CONFLICTING (route to 5b).
   BLOCKED is not a conflict.
 - 5b (fan-out, one subagent per CONFLICTING PR): print dispatch
+  only after rechecking the human checkpoint for this implementation;
+  missing/currently uncertain scope blocks the row. Pass its receipt to the
+  conflict-resolution child. Then print dispatch
   table, spawn `resolve-conflicts-<pr>` subagents using
   `../shepherd-driver/assets/conflict-resolution-prompt.md`. Each owns
   its PR end-to-end: rebase, faithful conflict merge, lint silent,
@@ -392,8 +364,8 @@ orchestration. Everything PR-drive related is owned by the composed
 shepherd-driver sibling, loaded from `../shepherd-driver/`, not
 duplicated here.
 
-- `assets/verdict-schema.json` -- JSON schema for the TWO BBS-owned
-  subagent return shapes (`triage_return`, `strategic_alignment_return`).
+- `assets/verdict-schema.json` -- triage, strategic-alignment, and
+  discriminated fix-success/blocked return contracts.
   Schema-validate every return (S4).
 - `assets/ground-truth-table.md` -- canonical table template
   (`issue | verdict | pr | pr_in_flight | author | head_repo |
@@ -407,7 +379,7 @@ duplicated here.
 - `assets/progress-diagram.md` -- mermaid progress diagram, color
   contract, dispatch-table render rules (Phase 1, 1.5, 3, 4, 5b).
 - `references/strategic-alignment-gate.md` -- Phase 1.5
-  step-by-step (external-dep probes, fail-open semantics,
+  step-by-step (external-dep probes, blocked-on-failure semantics,
   deferred-PR strategic-rejection subagent). Load WHEN ENTERING
   PHASE 1.5.
 - `references/invariants.md` -- full binding text of the 18

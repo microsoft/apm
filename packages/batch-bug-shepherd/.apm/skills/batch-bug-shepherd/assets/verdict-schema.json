@@ -2,10 +2,11 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "batch-bug-shepherd-verdict-schema.json",
   "title": "batch-bug-shepherd subagent return shapes",
-  "description": "Two BBS-owned return shapes (triage / strategic-alignment). Driver and conflict-resolution returns validate against shepherd-driver assets/completion-schema.json (loaded by the orchestrator as ../shepherd-driver/assets/completion-schema.json), not this schema. Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR (triage) or route as aligned with gate-failed-open annotation (strategic-alignment) and continue.",
+  "description": "BBS-owned triage, strategic-alignment, and fix returns. Driver and conflict-resolution returns use shepherd-driver assets/completion-schema.json. Validate every return. Malformed triage/alignment may retry once; repeated failures become UNCLEAR (triage) or blocked (alignment), never permission. Malformed fix returns block before consuming PR fields.",
   "oneOf": [
     { "$ref": "#/definitions/triage_return" },
-    { "$ref": "#/definitions/strategic_alignment_return" }
+    { "$ref": "#/definitions/strategic_alignment_return" },
+    { "$ref": "#/definitions/fix_return" }
   ],
   "definitions": {
     "triage_return": {
@@ -51,7 +52,8 @@
         "cited_principle": {
           "type": "string",
           "maxLength": 400,
-          "description": "Verbatim section heading OR short sentence from PRINCIPLES.md that fires (for demote verdicts) or grounds the aligned verdict. On gate-fail-open infrastructure failures, the literal string 'gate-failed-open: <reason>'. NEVER empty; the gate fails OPEN to 'aligned' if no principle is citable, rather than demoting under infrastructure failure (truth #3 OUTPUT IS PROBABILISTIC + truth #4 HALLUCINATION IS INHERENT)."
+          "minLength": 1,
+          "description": "Verbatim section heading or short sentence from PRINCIPLES.md that grounds the verdict. Infrastructure errors cannot stand in for a citation or authorize implementation; unavailable evidence blocks for human review."
         },
         "rationale": {
           "type": "string",
@@ -68,6 +70,33 @@
         {
           "if": { "properties": { "verdict": { "const": "aligned-with-reservations" } } },
           "then": { "required": ["reservations"] }
+        }
+      ]
+    },
+    "fix_return": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "issue", "status", "pr", "branch"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "fix" },
+            "issue": { "type": "integer", "minimum": 1 },
+            "status": { "const": "pr-opened" },
+            "pr": { "type": "integer", "minimum": 1 },
+            "branch": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "issue", "status", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "fix" },
+            "issue": { "type": "integer", "minimum": 1 },
+            "status": { "const": "blocked" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 500 }
+          }
         }
       ]
     }

@@ -71,7 +71,7 @@ apm-ceo subagent per its own scope file. No separate probe needed.
    `assets/strategic-alignment-prompt.md`. Each spawn receives the
    row's issue number, title, body, and Phase 1 triage summary.
 
-## Schema-validation + retry-once + FAIL-OPEN semantics
+## Schema-validation + retry-once + blocked-on-failure semantics
 
 Schema-validate every return against `verdict-schema.json`
 `strategic_alignment_return` (S4 VALIDATION DECORATOR). On the
@@ -79,25 +79,21 @@ FIRST malformed return for a row, re-spawn that subagent ONCE with
 a clarifying note quoting the schema field that failed. On the
 SECOND malformed return:
 
-- ROUTE the row as `aligned` with a `notes` annotation
-  "strategic-gate failed open: subagent malformed x2".
-- Do NOT demote on infrastructure failure. Silently demoting a
-  legit bug under malformed JSON would hide real defects (truth #3
-  OUTPUT IS PROBABILISTIC). Better to let the bug proceed through
-  Phase 2 and surface as a maintainer-review item than to drop it.
+- Mark the row `blocked`, preserve the diagnostic, and escalate to a
+  responsible human. Do not invent `aligned` or a rejection verdict.
+- Apply the same rule to non-citable advice. Read-only cross-reference
+  may inform the report, but no fix or drive may start from failed advice.
 
-Same rule applies to the two ABORT cases above: if the operator
-chooses to override (e.g. PRINCIPLES.md is being authored in the
-same PR as the bbs run), the runtime escape is to manually mark
-all rows `aligned` in the ground-truth table and re-enter Phase 2.
-The gate must NEVER demote under its own infrastructure failure.
+There is no table-edit override that grants implementation permission.
+Even valid `aligned` advice must pass the separate human scope checkpoint
+in `references/invariants.md`; the CEO persona is not a responsible human.
 
 ## Routing after returns
 
 For each row, apply the verdict:
 
-- `aligned` -> row stays in saga; status remains `triaged`; proceed
-  to Phase 2.
+- `aligned` -> row stays in read-only discovery; status remains `triaged`;
+  proceed to Phase 2, then the human checkpoint before implementation.
 - `aligned-with-reservations` -> row stays in saga; status remains
   `triaged`; capture the `reservations` array in the table's
   `notes` column. Downstream phases (Phase 3 panel, Phase 4
@@ -180,6 +176,6 @@ in one pass.
 | `apm-ceo.agent.md` missing               | ABORT Phase 1.5; operator authors / installs  |
 | `PRINCIPLES.md` missing                  | ABORT Phase 1.5; operator authors             |
 | Subagent malformed x1                    | Re-spawn ONCE with schema-clarifying note     |
-| Subagent malformed x2                    | Route row as `aligned` + notes annotation     |
-| Subagent claims a principle that does not exist | Route as `aligned` + notes annotation  |
+| Subagent malformed x2                    | `blocked`; human review, no implementation   |
+| Subagent claims a principle that does not exist | `blocked`; human review, no implementation |
 | Strategic-reject comment fails to post   | Status `gate-comment-failed`; surface in P6   |
