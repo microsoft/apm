@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve marketplace discovery provenance across dependency updates so `plugin@marketplace` uninstall aliases keep working in project and global scope. -- by @mfroembgen (#2949)
+
 ### Added
 
 - `apm init --discover` previews existing agent content; consented `--apply` declares supported local packages without changing source files, ready for a separate `apm install`. Builds on discovery work by @chkp-roniz in #2857. (#2937)
