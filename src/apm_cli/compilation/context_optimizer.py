@@ -62,6 +62,7 @@ PLACEMENT_HIDDEN_TOOL_TREES = frozenset(
         ".gemini",
         ".github",
         ".kiro",
+        ".bob",
         ".opencode",
         ".windsurf",
     }

@@ -32,6 +32,7 @@ _LEGACY_TARGET_PREFIXES = {
     ".cursor/": "cursor",
     ".windsurf/": "windsurf",
     ".kiro/": "kiro",
+    ".bob/": "bob",
     ".gemini/": "gemini",
     ".codex/": "codex",
     ".opencode/": "opencode",

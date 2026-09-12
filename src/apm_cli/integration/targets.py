@@ -273,6 +273,9 @@ class TargetProfile:
     warn_unsupported_primitives: bool = False
     """Warn when a package contains primitives omitted by this profile."""
 
+    is_user_scope: bool = False
+    """Whether this immutable profile copy has been resolved for user scope."""
+
     @property
     def name(self) -> str:
         """Return the canonical native target name."""
@@ -424,6 +427,7 @@ class TargetProfile:
                 self,
                 primitives=filtered,
                 resolved_deploy_root=resolved_root,
+                is_user_scope=True,
             )
 
         if not self.user_supported:
@@ -470,7 +474,7 @@ class TargetProfile:
             merged.update(self.user_primitive_overrides)
             filtered = merged
 
-        return replace(self, root_dir=new_root, primitives=filtered)
+        return replace(self, root_dir=new_root, primitives=filtered, is_user_scope=True)
 
 
 def _encode_cowork_locator(path: Path, deploy_root: Path) -> str:
@@ -649,6 +653,26 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".kiro",
+    ),
+    # IBM Bob -- skills use the Agent Skills SKILL.md layout. Lifecycle
+    # hooks merge into .bob/settings.json (project) or
+    # ~/.bob/settings/settings.json (user); MCP is handled by
+    # BobClientAdapter at .bob/mcp.json in either scope.
+    # Ref: https://bob.ibm.com/docs/ide/features/skills
+    # Ref: https://bob.ibm.com/docs/ide/configuration/lifecycle-hooks
+    # Ref: https://bob.ibm.com/docs/ide/configuration/mcp/mcp-in-bob
+    "bob": TargetProfile(
+        capability=TARGET_CAPABILITIES["bob"],
+        root_dir=".bob",
+        primitives={
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "bob_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".bob",
+        hooks_config_display=".bob/settings.json",
     ),
     # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
     # and commands.  OpenCode has no hooks concept, so "hooks" is excluded.

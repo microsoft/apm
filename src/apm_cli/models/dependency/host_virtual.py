@@ -29,6 +29,7 @@ _HOST_QUALIFIED_VIRTUAL_ROOTS: frozenset[str] = frozenset(
         ".gemini",
         ".github",
         ".kiro",
+        ".bob",
         ".windsurf",
     }
 )

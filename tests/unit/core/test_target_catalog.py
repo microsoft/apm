@@ -39,6 +39,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
     assert (
         frozenset(
             {
+                "bob",
                 "claude",
                 "codex",
                 "cursor",
@@ -74,6 +75,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
                 "agy",
                 "all",
                 "antigravity",
+                "bob",
                 "claude",
                 "codex",
                 "copilot",
@@ -118,6 +120,15 @@ def test_current_native_profiles_are_characterized() -> None:
         for name, profile in KNOWN_TARGETS.items()
     }
     assert actual == {
+        "bob": (
+            ".bob",
+            {
+                "skills": ("skills", "/SKILL.md", "skill_standard", None, False),
+                "hooks": ("hooks", ".json", "bob_hooks", None, False),
+            },
+            "agents",
+            None,
+        ),
         "copilot": (
             ".github",
             {

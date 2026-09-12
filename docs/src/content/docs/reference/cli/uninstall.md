@@ -106,7 +106,7 @@ What gets removed, in order:
    and pruned orphans, across target-owned folders such as `.github/`,
    `.claude/`, `.grok/`, and `.agents/`.
 5. Hook entries inside `.claude/settings.json`, `.cursor/hooks.json`,
-   `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages
+   `.gemini/settings.json`, `.kiro/hooks/`, and `.bob/settings.json` that the removed packages
    contributed. Remaining packages -- including transitive dependencies still
    required by another package -- have their hook entries rebuilt from the
    post-removal lockfile.

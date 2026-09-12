@@ -153,6 +153,7 @@ unresolved required entries fail closed.
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
+| IBM Bob | `.bob/mcp.json` (project) or `~/.bob/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | JetBrains Copilot | `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows) or `$XDG_CONFIG_HOME/github-copilot/intellij/mcp.json` (macOS/Linux; defaults to `~/.config/github-copilot/intellij/mcp.json`) | global | JSON `servers` |
 
 ## How `targets:` gates which configs get written
@@ -231,6 +232,7 @@ Antigravity CLI to `~/.gemini/config/mcp_config.json`, Hermes to
 `$HERMES_HOME/config.yaml` whenever selected explicitly (or
 `~/.hermes/config.yaml` when unset or blank), Windsurf to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
+IBM Bob to `~/.bob/mcp.json`,
 and JetBrains Copilot to its OS-specific user config).
 When the user-scope manifest declares a `targets:` field (or the CLI passes
 `--target`), only the matching runtimes receive the config write. When no CLI

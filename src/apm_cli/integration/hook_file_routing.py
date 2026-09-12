@@ -16,6 +16,7 @@ _HOOK_FILE_TARGET_TOKENS: dict[str, set[str]] = {
     "antigravity": {"antigravity"},
     "windsurf": {"windsurf"},
     "kiro": {"kiro"},
+    "bob": {"bob"},
 }
 
 

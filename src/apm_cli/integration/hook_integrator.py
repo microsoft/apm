@@ -166,6 +166,14 @@ class _MergeHookConfig:
     # overwritten -- the guard in _integrate_merged_hooks() preserves any
     # value the user has set manually.
     top_level_defaults: dict[str, Any] = field(default_factory=dict)
+    user_config_filename: str | None = None
+    allowed_events: frozenset[str] | None = None
+
+    def filename_for_scope(self, user_scope: bool) -> str:
+        """Return the config path relative to the target root."""
+        if user_scope and self.user_config_filename:
+            return self.user_config_filename
+        return self.config_filename
 
 
 # Per-target hook event name mapping.  Packages are authored with
@@ -191,6 +199,17 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         # Copilot camelCase and portable lifecycle aliases -> Claude PascalCase
         "preToolUse": "PreToolUse",
         "postToolUse": "PostToolUse",
+        **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),
+        **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "Stop"),
+    },
+    "bob": {
+        "PreToolUse": "PreToolUse",
+        "preToolUse": "PreToolUse",
+        "PostToolUse": "PostToolUse",
+        "postToolUse": "PostToolUse",
+        "UserPromptSubmit": "UserPromptSubmit",
+        "userPromptSubmit": "UserPromptSubmit",
+        "promptSubmit": "UserPromptSubmit",
         **dict.fromkeys(("SessionStart", "sessionStart"), "SessionStart"),
         **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "Stop"),
     },
@@ -242,6 +261,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "antigravity": "PascalCase",
     "windsurf": "PascalCase",
     "kiro": "PascalCase",
+    "bob": "PascalCase",
 }
 
 
@@ -336,6 +356,16 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         target_key="claude",
         require_dir=False,
         schema_strict=True,
+    ),
+    "bob": _MergeHookConfig(
+        config_filename="settings.json",
+        user_config_filename="settings/settings.json",
+        target_key="bob",
+        require_dir=False,
+        schema_strict=True,
+        allowed_events=frozenset(
+            {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"}
+        ),
     ),
     "cursor": _MergeHookConfig(
         config_filename="hooks.json",
@@ -1232,6 +1262,7 @@ class HookIntegrator(BaseIntegrator):
         root_dir = target.root_dir if target else f".{config.target_key}"
         target_dir = project_root / root_dir
         container = config.event_container_key
+        config_filename = config.filename_for_scope(user_scope)
 
         # Opt-in check: some targets only deploy when their dir exists
         if config.require_dir and not target_dir.exists():
@@ -1276,7 +1307,7 @@ class HookIntegrator(BaseIntegrator):
         cleared_events: set = set()
 
         # Read existing JSON config
-        json_path = target_dir / config.config_filename
+        json_path = target_dir / config_filename
         json_config: dict = {}
         if json_path.exists():
             try:
@@ -1286,7 +1317,7 @@ class HookIntegrator(BaseIntegrator):
                 json_config = {}
 
         # Load external ownership metadata before reconciling native entries.
-        sidecar_path = target_dir / _APM_HOOKS_SIDECAR
+        sidecar_path = json_path.parent / _APM_HOOKS_SIDECAR
         sidecar_data: dict = {}
         if config.schema_strict and sidecar_path.exists():
             try:
@@ -1315,7 +1346,7 @@ class HookIntegrator(BaseIntegrator):
         # stray empty "hooks" object in their native file.
         if container not in json_config:
             json_config[container] = {}
-            _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
+            _log.debug("Seeded hook container '%s' in %s", container, config_filename)
 
         # Inject any target-specific top-level defaults (e.g. "version": 1 for
         # Cursor) that are absent from the existing file.  Existing values are
@@ -1328,7 +1359,7 @@ class HookIntegrator(BaseIntegrator):
         if injected_keys:
             _log.debug(
                 "Injected top_level_defaults into %s: %s",
-                config.config_filename,
+                config_filename,
                 injected_keys,
             )
 
@@ -1365,12 +1396,18 @@ class HookIntegrator(BaseIntegrator):
                 if not isinstance(entries, list) or not entries:
                     continue
                 event_name = event_map.get(raw_event_name, raw_event_name)
+                if config.allowed_events is not None and event_name not in config.allowed_events:
+                    _rich_warning(
+                        f"Hook event '{raw_event_name}' is not supported by "
+                        f"{config.target_key}; skipped."
+                    )
+                    continue
                 if event_name not in json_config[container]:
                     json_config[container][event_name] = []
 
                 # Transform flat Copilot entries to the target's nested /
                 # native hook shape.
-                if config.target_key == "claude":
+                if config.target_key in ("claude", "bob"):
                     entries = _to_claude_hook_entries(entries)
                 elif config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)
@@ -1489,8 +1526,8 @@ class HookIntegrator(BaseIntegrator):
                 hooks_integrated += 1
                 pending_display.append(
                     (
-                        config.config_filename,
-                        config.config_filename,
+                        config_filename,
+                        config_filename,
                         hook_file,
                         file_event_entries,
                     )
@@ -1543,7 +1580,6 @@ class HookIntegrator(BaseIntegrator):
             sidecar_out = _extract_apm_source_sidecar(json_config.get(container, {}))
 
             # Write sidecar
-            sidecar_path = target_dir / _APM_HOOKS_SIDECAR
             if sidecar_out:
                 atomic_write_text(
                     sidecar_path,
@@ -1755,7 +1791,7 @@ class HookIntegrator(BaseIntegrator):
             if config is None:
                 continue
             target_dir = project_root / target.root_dir
-            json_path = target_dir / config.config_filename
+            json_path = target_dir / config.filename_for_scope(target.is_user_scope)
             errors_before = stats["errors"]
             self._clean_apm_source_from_json(
                 json_path,
@@ -1937,7 +1973,7 @@ class HookIntegrator(BaseIntegrator):
         for t in merge_source:
             config = _MERGE_HOOK_TARGETS.get(t.name)
             if config is not None:
-                json_path = project_root / t.root_dir / config.config_filename
+                json_path = project_root / t.root_dir / config.filename_for_scope(t.is_user_scope)
                 self._clean_apm_entries_from_json(
                     json_path,
                     stats,

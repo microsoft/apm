@@ -174,6 +174,7 @@ class TestTargetProfileUserScope:
             "grok-build",
             "grok-cloud",
             "antigravity",
+            "bob",
             "windsurf",
             "kiro",
             "copilot-cowork",

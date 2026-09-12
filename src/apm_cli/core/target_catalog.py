@@ -134,6 +134,13 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             compile_family="agents",
         ),
         _capability(
+            "bob",
+            "IBM Bob native .bob configuration",
+            in_all=True,
+            primitive_profile="bob",
+            compile_family="agents",
+        ),
+        _capability(
             "opencode",
             "OpenCode native .opencode configuration",
             in_all=True,

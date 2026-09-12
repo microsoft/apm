@@ -17,6 +17,7 @@ import pytest
 
 from apm_cli.adapters.client.antigravity import AntigravityClientAdapter
 from apm_cli.adapters.client.base import MCPClientAdapter
+from apm_cli.adapters.client.bob import BobClientAdapter
 from apm_cli.adapters.client.claude import ClaudeClientAdapter
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
@@ -52,6 +53,7 @@ _MCP_ONLY_ADAPTER_NAMES = {"vscode", "intellij"}
 # can resolve config metadata without sniffing class names.
 _ADAPTER_CLASSES = (
     AntigravityClientAdapter,
+    BobClientAdapter,
     CopilotClientAdapter,
     ClaudeClientAdapter,
     CursorClientAdapter,
