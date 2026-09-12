@@ -393,7 +393,8 @@ instances. It blocks **all open, undismissed workflow-scoped alerts with
 high/critical security severity or error severity**, including pre-existing
 alerts—not just new findings. GitHub dismissals are honored; the separate
 external `default` API configuration is excluded. API failures, timeouts, and
-stale state fail closed.
+stale state fail closed. Enabling another language may expose existing findings
+that must be fixed or reviewed before rollout.
 
 **Post-merge rollout (maintainer action):**
 

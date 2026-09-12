@@ -23,9 +23,13 @@ function readPolicy(markdown) {
   requireValue(blocks.length === 1, 'Expected one governance roster');
   const roster = new Map();
   for (const line of blocks[0][1].split('\n')) {
-    if (!line.includes('https://github.com/')) continue;
+    if (!line.trim()) continue;
     const cells = line.split('|').map(cell => cell.trim());
-    requireValue(cells.length === 6, 'Malformed governance roster row');
+    requireValue(cells.length === 6 && cells[0] === '' && cells[5] === '',
+      'Malformed governance roster row');
+    if (cells[1] === 'Maintainer' || cells.slice(1, 5).every(cell => /^:?-+:?$/.test(cell))) {
+      continue;
+    }
     const link = /^\[[^\]]+\]\(https:\/\/github\.com\/([a-zA-Z0-9-]+)\)$/.exec(cells[1]);
     const remit = /^`([^`]+)`$/.exec(cells[4]);
     requireValue(link && remit && REMITS.has(remit[1]), 'Invalid governance identity or remit');

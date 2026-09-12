@@ -88,6 +88,29 @@ test('roster comes from the governance table and preserves narrow remit', () => 
   assert.throws(() => authority.readPolicy(policyText + '\n<!-- apm-scope-reset-before:2027-01-01T00:00:00Z -->'));
 });
 
+test('every roster row must have an exact GitHub identity, not a matching URL substring', () => {
+  for (const url of [
+    'https://github.com.attacker.invalid/nadav-y',
+    'https://attacker.invalid/https://github.com/nadav-y',
+    'https://attacker.invalid/?next=https://github.com/nadav-y',
+    'https://github.com@attacker.invalid/nadav-y',
+    'http://github.com/nadav-y',
+    'https://github.com/nadav-y?extra=true',
+    'https://github.com/nadav-y#extra',
+  ]) {
+    const changed = policyText.replace('https://github.com/nadav-y', url);
+    assert.throws(() => authority.readPolicy(changed), authority.EvidenceError);
+  }
+  assert.throws(() => authority.readPolicy(
+    policyText.replace('[Nadav](https://github.com/nadav-y)', 'Nadav')), authority.EvidenceError);
+});
+
+test('table whitespace and alignment do not change the governance roster', () => {
+  const changed = policyText.replace('| --- | --- | --- | --- |', '| :--- | ---: | :---: | --- |')
+    .replaceAll('\n|', '\n  |').replaceAll('\n', '\r\n');
+  assert.deepEqual(authority.readPolicy(changed).roster, policy.roster);
+});
+
 test('record presence is never reusable permission', () => {
   const result = evaluate();
   assert.equal(result.state, 'record-present');
