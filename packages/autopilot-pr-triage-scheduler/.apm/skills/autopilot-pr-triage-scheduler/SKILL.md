@@ -80,19 +80,24 @@ PR-review slots from this pool.
 ## Fan-out
 
 Load [assets/fan-out-pool.md](assets/fan-out-pool.md). Default
-`FANOUT_LIMIT=2`. Isolated to this run.
+`FANOUT_LIMIT=2` concurrent slots. Isolated to this run.
+`FANOUT_LIMIT` is concurrency, not queue length. Drain the full
+selected list; when a slot returns, fill it with the next item.
 
 ## Procedure
 
 1. Probe `scripts/fetch_queue.py`, `scripts/triage_state.py`, and
    the worker skill on disk. Missing -> stop.
 2. Build the queue with the helpers. Persist a `plan.md` table
-   (number, slot, status, linked-issue). You are the sole table
-   writer.
-3. Fill the pool. One PR per slot. Prefer a new session, else a
-   sub-agent, else run the worker in this thread for that one PR,
-   then the next. Each slot reads the complete PR conversation
-   (and linked issue, if any) before advising.
+   for every selected number (number, slot, status, linked-issue).
+   You are the sole table writer. Do not truncate the table to
+   FANOUT_LIMIT.
+3. Drain the selected list. Concurrent slots <= FANOUT_LIMIT.
+   One PR per slot. Prefer a new session, else a sub-agent, else
+   run the worker in this thread for that one PR, then the next.
+   When a slot returns, dispatch the next queued PR. Do not stop
+   because the pool was full. Each slot reads the complete PR
+   conversation (and linked issue, if any) before advising.
 4. Print a final report from the table.
 
 ## Hard nos

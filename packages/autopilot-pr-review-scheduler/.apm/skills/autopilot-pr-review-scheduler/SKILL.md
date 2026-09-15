@@ -59,14 +59,20 @@ the caller did not include them.
 ## Fan-out
 
 Load [assets/fan-out-pool.md](assets/fan-out-pool.md). Default
-`FANOUT_LIMIT=2`. Isolated to this run.
+`FANOUT_LIMIT=2` concurrent slots. Isolated to this run.
+`FANOUT_LIMIT` is concurrency, not queue length. Drain the full
+selected list; when a slot returns, fill it with the next item.
 
 ## Procedure
 
 1. Probe apm-review-panel (and worker-pull-request if composed)
    on disk. Missing sibling -> stop.
-2. Fill the pool. One PR per slot. Persist a `plan.md` table
-   (number, slot, status, head). You are the sole table writer.
+2. Drain the selected list. Concurrent slots <= FANOUT_LIMIT.
+   One PR per slot. Persist a `plan.md` table for every selected
+   number (number, slot, status, head). You are the sole table
+   writer. Do not truncate the table to FANOUT_LIMIT. When a slot
+   returns, dispatch the next queued PR. Do not stop because the
+   pool was full.
 3. Each slot reads the complete PR conversation and honors
    CODEOWNERS `reviewRequests`.
 4. Never auto-merge.

@@ -93,14 +93,20 @@ caller for `autopilot-pr-review-scheduler`.
 ## Fan-out
 
 Load [assets/fan-out-pool.md](assets/fan-out-pool.md). Default
-`FANOUT_LIMIT=2`. Isolated to this run.
+`FANOUT_LIMIT=2` concurrent slots. Isolated to this run.
+`FANOUT_LIMIT` is concurrency, not queue length. Drain the full
+selected list; when a slot returns, fill it with the next item.
 
 ## Procedure
 
 1. Probe worker-code on disk. Missing sibling -> stop.
-2. Build the queue. Persist a `plan.md` table (number, selector,
-   slot, status, pr). You are the sole table writer.
-3. Fill the pool. One issue per slot. Name each worker session
+2. Build the queue. Persist a `plan.md` table for every selected
+   number (number, selector, slot, status, pr). You are the sole
+   table writer. Do not truncate the table to FANOUT_LIMIT.
+3. Drain the selected list. Concurrent slots <= FANOUT_LIMIT.
+   One issue per slot. When a slot returns, dispatch the next
+   queued issue. Do not stop because the pool was full. Name each
+   worker session
    `#<issue-number> autopilot-issue-delivery-worker <Issue Title>`.
 4. Never auto-merge.
 5. Print a final report from the table.

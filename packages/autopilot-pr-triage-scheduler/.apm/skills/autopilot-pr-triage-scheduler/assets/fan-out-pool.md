@@ -9,9 +9,11 @@ scheduler run.
 
 ## Limit
 
-`FANOUT_LIMIT` defaults to 2. The caller may raise it. Never go
-below 1. A full pool is not a reason to drop queue items; wait for
-a slot.
+`FANOUT_LIMIT` defaults to 2 concurrent slots. The caller may
+raise it. Never go below 1. It is concurrency, not queue length.
+A full pool is not a reason to drop queue items; wait for a
+slot, then dispatch the next queued item until the selected list
+is empty.
 
 ## Fill order (each free slot)
 

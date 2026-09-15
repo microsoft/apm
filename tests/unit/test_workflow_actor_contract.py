@@ -169,6 +169,13 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "FANOUT_LIMIT=2" in triage
     assert "FANOUT_LIMIT=2" in delivery
     assert "FANOUT_LIMIT=2" in review
+    assert "concurrency, not queue length" in triage
+    assert "concurrency, not queue length" in delivery
+    assert "concurrency, not queue length" in review
+    assert "Do not truncate the table to FANOUT_LIMIT" in triage
+    assert "Do not truncate the table to FANOUT_LIMIT" in delivery
+    assert "Do not truncate the table to FANOUT_LIMIT" in review
+    assert "when a slot returns, fill it with the next item" in triage
     assert "No assignment needed" in triage
     assert "assign the implementing user" in delivery
     assert "must request `@me` as a supplemental reviewer" in review
@@ -256,6 +263,8 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     )
     pr_triage = _ascii(SCHEDULER_PR_TRIAGE)
     assert "FANOUT_LIMIT=2" in pr_triage
+    assert "concurrency, not queue length" in pr_triage
+    assert "Do not truncate the table to FANOUT_LIMIT" in pr_triage
     assert "No assignment needed" in pr_triage
     assert "scripts/fetch_queue.py" in pr_triage
     assert "scripts/triage_state.py" in pr_triage
