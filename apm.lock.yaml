@@ -292,7 +292,7 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json
   - .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:ff7dd9525cd5e355d0bc729c0c836b62ef31746c007db60f38bf2ce09496f025
+    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:9d37b266f5c4ede7db1a49defcdb3b03d95e13dae63775aa1ea6fa118cbc714e
     .agents/skills/autopilot-issue-triage-worker/apm.yml: sha256:0e4c913bdcbd7d76e6d97bb57e9b96506e460ab4562b2d9281330e5290997cb0
     .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json: sha256:b1ae10c85bffe63998d1c6e07a34a3d3c345572f4774114e36bd5f42dd8f1627
     .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:0442e9790755877047c361ff2ea7bb1684ed2089c8793a5a9b4266a4a2e44c87

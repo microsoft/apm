@@ -1,5 +1,6 @@
 ---
 name: autopilot-issue-triage-worker
+activation_card: on
 description: >-
   Use this skill to triage ONE microsoft/apm issue already selected
   by autopilot-issue-triage-scheduler. Return one advisory
@@ -30,6 +31,49 @@ This worker owns advisory writes even when summoned without a
 scheduler: one comment plus `triage/recommended` and optional
 classification from the contract allowlist. Never write human
 decision labels. The scheduler must not comment or label.
+Writes are optional via the activation card (`write: on` default).
+
+## Activation card
+
+`activation_card: on`. Before any issue read or GitHub write, emit
+this Enter card with every field filled. Missing field -> stop.
+Do not load Autogenesis path modules from this card.
+
+```text
+skill: autopilot-issue-triage-worker
+skill_path: <resolved directory of this SKILL.md>
+mode: run
+subject: microsoft/apm#<issue-number>
+path: triage
+intent: advise one already-selected issue
+origin: unattended | actor-session
+write: on | off
+repo: microsoft/apm
+issue: <positive integer>
+invocation: agentic-workflow | actor-session
+```
+
+Rules:
+
+- `write` defaults to `on` when the caller omitted it.
+- `write: off` returns the filled template only. Do not comment,
+  add labels, or remove labels.
+- `write: on` posts the one advisory comment and processing /
+  classification labels. Never human decision labels. Never assign.
+- `origin` fail-closed unknown -> `unattended`.
+- One issue. Do not nest a scheduler path.
+
+After the panel, emit this Exit receipt:
+
+```text
+skill: autopilot-issue-triage-worker
+subject: microsoft/apm#<issue-number>
+path: triage
+write: on | off
+posted: yes | no
+labels_applied: <comma list or none>
+approved: n/a
+```
 
 The panel is fixed at **2 mandatory specialist lenses + up to 3
 conditional lenses + 1 always-active arbiter = 6 persona sections in
@@ -281,10 +325,11 @@ A triage comment passes when:
 ## Execution checklist
 
 When this skill is activated for an issue, work through these steps
-in order, in a single agent loop. Do not skip ahead and do not emit
-any output before the final step.
+in order, in a single agent loop. Emit the Activation card first.
+Do not skip ahead. Do not emit the triage comment before the final
+write/receipt step.
 
-1. Read the complete issue context (title, body, labels, author,
+1. Emit the Activation card. Then read the complete issue context (title, body, labels, author,
    `author_association`, every comment in chronological order including
    prior `apm-triage-advisory` receipts and later human replies),
    supplied human governance, and `assets/label-contract.json`. The
@@ -327,19 +372,22 @@ any output before the final step.
    the template, all six persona `<details>` sections, and the closing
    `triage-recommendation` JSON block. If any element is missing, re-render
    from the template instead of posting a hand-composed substitute.
-9. Apply the advisory writes yourself. The scheduler never comments
-   or labels. A worker summoned without a scheduler still writes.
-   No-op when target plus conversation watermark already match.
-   Post exactly one template comment (`gh issue comment` in
-   actor-session / Copilot App / Cloud / Remote; Agentic Workflow
-   `safe-outputs.add-comment`). Add `triage/recommended` plus useful
-   classification from the contract allowlist (`gh issue edit
-   --add-label` or `safe-outputs.add-labels`). Never write human
-   decision labels. Remove only `triage/requested` after successful
-   advice. Also return the filled template and `triage-recommendation`
-   JSON to the caller. Never authorize implementation. This is the
-   ONLY output emission for the entire panel run -- no per-persona
-   comments, no progress comments.
+9. If `write: on`, apply the advisory writes yourself. The scheduler
+   never comments or labels. A worker summoned without a scheduler
+   still writes when `write` is on. No-op when target plus
+   conversation watermark already match. Post exactly one template
+   comment (`gh issue comment` in actor-session / Copilot App /
+   Cloud / Remote; Agentic Workflow `safe-outputs.add-comment`).
+   Add `triage/recommended` plus useful classification from the
+   contract allowlist (`gh issue edit --add-label` or
+   `safe-outputs.add-labels`). Never write human decision labels.
+   Remove only `triage/requested` after successful advice. If
+   `write: off`, return the filled template only. Also return the
+   `triage-recommendation` JSON to the caller. Emit the Exit
+   receipt (`posted: yes` only when a comment was written). Never
+   authorize implementation. This is the ONLY triage-comment
+   emission for the entire panel run -- no per-persona comments,
+   no progress comments.
 
 ### Persona pass procedure
 

@@ -107,9 +107,13 @@ def test_review_panel_requires_complete_paginated_context_and_watermark_noop() -
 def test_triage_never_assigns_and_requires_full_comment_history() -> None:
     """Triage stays advisory for every invocation, including retriage."""
     skill = _ascii(TRIAGE_SKILL)
+    assert "activation_card: on" in skill
+    assert "write: on | off" in skill
+    assert "`write` defaults to `on`" in skill
+    assert "`write: off` returns the filled template only" in skill
+    assert "If `write: on`, apply the advisory writes yourself" in skill
     assert "No assignment needed." in skill
     assert "This worker owns advisory writes even when summoned without a" in skill
-    assert "Apply the advisory writes yourself" in skill
     assert "The scheduler never comments" in skill
     assert "No ORIGIN or INTENT assigns contributors" in skill
     assert "Cloud Agent" in skill
