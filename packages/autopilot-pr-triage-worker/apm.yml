@@ -1,0 +1,11 @@
+name: autopilot-pr-triage-worker
+version: 0.1.0
+description: Advise on ONE community pull request already selected by autopilot-pr-triage-scheduler. Never merges, never assigns, never requests reviewers.
+author: Microsoft
+license: MIT
+
+dependencies:
+  apm: []
+  mcp: []
+
+scripts: {}

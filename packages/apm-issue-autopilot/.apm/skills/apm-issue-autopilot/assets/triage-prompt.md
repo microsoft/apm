@@ -9,6 +9,8 @@ DIRECT mode and return ONE structured decision. You are READ-ONLY.
 - ISSUE_NUMBER: <required>
 - ISSUE_TITLE: <required>
 - ISSUE_BODY: <required; verbatim from the issue>
+- ISSUE_COMMENTS: <required; complete chronological comment history,
+  including prior advisories and later human replies>
 - ISSUE_LABELS: <existing labels, verbatim>
 - HUMAN_POLICY: <current GOVERNANCE.md and CONTRIBUTING.md>
 - REPO_ROOT: <required; absolute path to a READ-ONLY microsoft/apm checkout>
@@ -20,9 +22,10 @@ DIRECT mode and return ONE structured decision. You are READ-ONLY.
    and play its persona lenses in turn IN-CONTEXT (the panel spawns no
    sub-agents; neither do you). Apply its routing topology and arbiter
    exactly as written.
-2. Read the issue and any linked references. Inspect REPO_ROOT at
-   HEAD_SHA to ground feasibility, type, and risk-surface judgments.
-   Do NOT modify the tree.
+2. Read the issue, the complete comment history, and any linked
+   references. Do not produce a decision that ignores existing
+   messages. Inspect REPO_ROOT at HEAD_SHA to ground feasibility,
+   type, and risk-surface judgments. Do NOT modify the tree.
 3. Read the panel's `triage-recommendation` v2 (`advisory_only: true`).
    Adapt `recommendation` to this consumer's legacy internal `decision`
    field and `recommendation_detail` to `decision_detail`; copy

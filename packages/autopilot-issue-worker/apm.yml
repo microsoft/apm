@@ -1,0 +1,11 @@
+name: autopilot-issue-worker
+version: 0.1.0
+description: Compatibility alias for autopilot-issue-delivery-worker.
+author: Microsoft
+license: MIT
+
+dependencies:
+  apm: []
+  mcp: []
+
+scripts: {}

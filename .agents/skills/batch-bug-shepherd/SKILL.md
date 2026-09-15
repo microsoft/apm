@@ -21,6 +21,9 @@ description: >-
 
 # batch-bug-shepherd - Outer-loop bug-queue orchestrator
 
+Canonical queue entrypoint: **autopilot-issue-delivery-scheduler**
+with selector `bugs`. This file remains the bug-queue engine.
+
 This skill is an A10 ORCHESTRATOR-SAGA over fan-out waves (triage,
 strategic-alignment, PR-cross-reference, fix, drive-to-merge,
 conflict-resolution) with a persisted ground-truth table between

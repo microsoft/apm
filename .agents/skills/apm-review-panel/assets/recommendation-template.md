@@ -34,6 +34,11 @@ RENDERING RULES (the orchestrator follows these literally):
   is the only mechanism by which a fresh panel pass surfaces in
   reviewer / author inboxes (replaces the verdict-label notification
   signal of the pre-advisory regime).
+- CODEOWNERS is paramount. Do not render prose that replaces, drops,
+  or contradicts the current reviewRequests users/teams.
+- The orchestrator prepends a receipt HTML comment:
+  `<!-- apm-review-advisory:v1 target=pr#<N> head=<sha> watermark=<w> -->`
+  Same target + head + watermark means do not post again.
 - The full per-persona findings live in a <details> block at the
   bottom. Out of sight unless the maintainer wants depth.
 -->

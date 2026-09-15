@@ -1,0 +1,11 @@
+name: autopilot-pr-review-triage-scheduler
+version: 0.1.0
+description: Compatibility alias for autopilot-pr-triage-scheduler.
+author: Microsoft
+license: MIT
+
+dependencies:
+  apm: []
+  mcp: []
+
+scripts: {}

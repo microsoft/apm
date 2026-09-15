@@ -43,7 +43,7 @@ for human review.
 Issue triage produces a recommendation and a **proposed** scope, done-when,
 exclusions, and review-needs brief. Maintainers still decide acceptance,
 priority, contributor invitations, and milestones. The
-[triage label contract](https://github.com/microsoft/apm/blob/main/packages/apm-triage-panel/assets/label-contract.json)
+[triage label contract](https://github.com/microsoft/apm/blob/main/packages/autopilot-issue-triage-worker/assets/label-contract.json)
 separates those decisions from advisory processing. During compatibility
 rollout, both `status/triaged` and `triage/recommended` mean completed
 automated advice, not human review. The new writer uses `triage/recommended`

@@ -96,7 +96,7 @@ An honest deferral or decline is better than an indefinite promise.
 - `apm-ceo` cites by number in advisory prose.
 - `batch-bug-shepherd` Phase 1.5 spawns one ceo subagent per
   triaged-LEGIT row, which returns a verdict + cited principle.
-- `apm-triage-panel` CEO arbiter cites a principle on every
+- `autopilot-issue-triage-worker` CEO arbiter cites a principle on every
   `decline-with-reason` rubric outcome.
 - `apm-review-panel` CEO synthesizer cites a principle when
   surfacing strategic implications in arbitration.

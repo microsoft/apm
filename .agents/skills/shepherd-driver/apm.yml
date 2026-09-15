@@ -1,6 +1,6 @@
 name: shepherd-driver
 version: 0.1.0
-description: Composed drive-to-merge engine -- drives ONE selected pull request to mergeable under non-determinism via copilot-review classification, the apm-review-panel, fold-by-default, push-and-watch-CI. Used only by a parent batch orchestrator, never user-facing.
+description: Compatibility alias for autopilot-pr-review-worker.
 author: Microsoft
 license: MIT
 type: skill
@@ -23,7 +23,5 @@ type: skill
 # to COMMENT OUT its analogous edge is fixed from 0.16 onward, so the
 # real edges are declared here.
 dependencies:
-  apm:
-    - ../apm-review-panel
-    - ../pr-description-skill
+  apm: []
   mcp: []

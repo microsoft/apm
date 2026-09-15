@@ -1,0 +1,11 @@
+name: autopilot-scheduler-issue-delivery
+version: 0.1.0
+description: Compatibility alias for autopilot-issue-delivery-scheduler.
+author: Microsoft
+license: MIT
+
+dependencies:
+  apm: []
+  mcp: []
+
+scripts: {}

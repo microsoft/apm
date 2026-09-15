@@ -1,6 +1,6 @@
 name: batch-bug-shepherd
 version: 0.1.0
-description: Drive a batch of suspected bugs from raw issue list to mergeable PR queue -- triage in parallel, gate against PRINCIPLES.md, detect in-flight PRs, dispatch greenfield fixes, then drive every PR to merge via shepherd-driver with mutation-break + lint gates.
+description: Compatibility alias for autopilot-scheduler-issues (selector bugs).
 author: Microsoft
 license: MIT
 
@@ -18,8 +18,7 @@ license: MIT
 # declared because the <= 0.14.1 orphaned-lockfile bug is fixed from
 # 0.16 onward.
 dependencies:
-  apm:
-    - ../shepherd-driver
+  apm: []
   mcp: []
 
 scripts: {}

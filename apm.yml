@@ -19,21 +19,35 @@ targets:
 # issue triage, or an orchestrator entrypoint which transitively
 # pulls its engine + panels).
 #
-# Only the two USER-FACING ORCHESTRATOR ENTRYPOINTS are declared
-# here. Everything else arrives transitively, so declaring it again
-# would be a redundant edge (apm 0.16 flags the double-deploy as
-# "skill replaced -- remove one"):
-#  - batch-bug-shepherd  -> shepherd-driver -> apm-review-panel
-#  - apm-issue-autopilot -> shepherd-driver -> apm-review-panel
-#                        -> apm-triage-panel
-# Net transitive closure deployed = all 5 first-party skills
-# (both orchestrators + shepherd-driver + both panels). shepherd-
-# driver stays transitive-only by design ("used only by a parent
-# orchestrator, never user-facing").
+# User-facing schedulers are declared here. Workers and panels
+# arrive transitively:
+#  - autopilot-issue-triage-scheduler -> autopilot-issue-triage-worker
+#  - autopilot-issue-delivery-scheduler -> autopilot-issue-delivery-worker
+#  - autopilot-pr-triage-scheduler -> autopilot-pr-triage-worker
+#  - autopilot-pr-review-scheduler -> review-panel
+#                                           -> autopilot-pr-review-worker
+# Compatibility aliases stay declared so existing prompts still
+# resolve.
 dependencies:
   apm:
+    - ./packages/autopilot-issue-triage-scheduler
+    - ./packages/apm-triage-panel
+    - ./packages/autopilot-scheduler-issue-triage
+    - ./packages/autopilot-issue-delivery-scheduler
+    - ./packages/autopilot-issue-scheduler
+    - ./packages/autopilot-code-scheduler
+    - ./packages/autopilot-scheduler-code
+    - ./packages/autopilot-scheduler-issue-delivery
+    - ./packages/autopilot-pr-triage-scheduler
+    - ./packages/autopilot-pr-review-triage-scheduler
+    - ./packages/autopilot-pr-review-scheduler
+    - ./packages/autopilot-scheduler-pull-request-review
+    - ./packages/autopilot-pull-request-worker
+    - ./packages/autopilot-scheduler-issues
+    - ./packages/autopilot-scheduler-pull-requests
     - ./packages/apm-issue-autopilot
     - ./packages/batch-bug-shepherd
+    - ./packages/shepherd-driver
   mcp: []
 
 scripts: {}

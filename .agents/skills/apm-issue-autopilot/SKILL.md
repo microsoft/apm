@@ -21,6 +21,10 @@ description: >-
 
 # apm-issue-autopilot - intake-to-merge issue orchestrator
 
+Canonical queue entrypoints are **autopilot-issue-triage-scheduler**
+and **autopilot-issue-delivery-scheduler**. This file remains the
+composed all-types engine.
+
 This manually invoked A11 RECONCILIATION LOOP extends
 [batch-bug-shepherd](../batch-bug-shepherd/SKILL.md) to all issue types.
 It composes the triage rubric and per-PR convergence loop below rather

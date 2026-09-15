@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "batch-bug-shepherd-verdict-schema.json",
+  "title": "batch-bug-shepherd subagent return shapes",
+  "description": "Two BBS-owned return shapes (triage / strategic-alignment). Driver and conflict-resolution returns validate against shepherd-driver assets/completion-schema.json (loaded by the orchestrator as ../shepherd-driver/assets/completion-schema.json), not this schema. Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR (triage) or route as aligned with gate-failed-open annotation (strategic-alignment) and continue.",
+  "oneOf": [
+    { "$ref": "#/definitions/triage_return" },
+    { "$ref": "#/definitions/strategic_alignment_return" }
+  ],
+  "definitions": {
+    "triage_return": {
+      "type": "object",
+      "required": ["kind", "issue", "verdict", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "triage" },
+        "issue": { "type": "integer", "minimum": 1 },
+        "verdict": {
+          "type": "string",
+          "enum": ["LEGIT", "UNCLEAR", "FIXED-AT-HEAD", "NOT-A-BUG"]
+        },
+        "summary": { "type": "string", "maxLength": 400 },
+        "repro_steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Smallest possible reproduction; required when verdict=LEGIT."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "Command output, file paths, or commit refs that justify the verdict."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "verdict": { "const": "LEGIT" } } },
+          "then": { "required": ["repro_steps"] }
+        }
+      ]
+    },
+    "strategic_alignment_return": {
+      "type": "object",
+      "required": ["kind", "issue", "verdict", "cited_principle", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "strategic-alignment" },
+        "issue": { "type": "integer", "minimum": 1 },
+        "verdict": {
+          "type": "string",
+          "enum": ["aligned", "aligned-with-reservations", "out-of-scope", "wrong-direction"]
+        },
+        "cited_principle": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Verbatim section heading OR short sentence from PRINCIPLES.md that fires (for demote verdicts) or grounds the aligned verdict. On gate-fail-open infrastructure failures, the literal string 'gate-failed-open: <reason>'. NEVER empty; the gate fails OPEN to 'aligned' if no principle is citable, rather than demoting under infrastructure failure (truth #3 OUTPUT IS PROBABILISTIC + truth #4 HALLUCINATION IS INHERENT)."
+        },
+        "rationale": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "1-3 sentences explaining the verdict in CEO voice. References the cited principle by name."
+        },
+        "reservations": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 200 },
+          "description": "Required when verdict=aligned-with-reservations. Each entry is one specific concern downstream phases (panel / completion) must surface in their review prose. Omitted for other verdicts."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "verdict": { "const": "aligned-with-reservations" } } },
+          "then": { "required": ["reservations"] }
+        }
+      ]
+    }
+  }
+}

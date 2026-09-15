@@ -31,6 +31,12 @@ whole convergence.
   -- e.g. `aligned-with-reservations`). Reservations are NOT panel
   follow-ups; they are upstream concerns that MUST be surfaced to the
   panel and to the maintainer (see Step X.1).
+- `INVOCATION_MODE` -- required, always
+  `composed-implementation-review` (ORIGIN=`actor-session`,
+  INTENT=`review`, COMPOSED=true). Any implementation parent --
+  current or future -- owns issue/PR assignee writes. This driver
+  never assigns and never requests the implementer as a reviewer.
+  Unattended parents must not request a reviewer either.
 
 ## Loaded specs
 
@@ -170,7 +176,9 @@ this run, mark `copilot_drained: true` and skip future fetches.
    FIRST-CLASS, not an emergency fallback:
 
    a. FAST-PATH (if the `skill` tool is present in YOUR context):
-      invoke the `apm-review-panel` skill by name and let it run.
+      invoke the `apm-review-panel` skill by name, passing
+      `INVOCATION_MODE=composed-implementation-review` and the
+      complete PR conversation snapshot, and let it run.
 
    b. INLINE EXECUTION (the NORMAL path for a shepherd subagent):
       you are usually spawned two levels deep, and the runtime
@@ -180,9 +188,11 @@ this run, mark `copilot_drained: true` and skip future fetches.
       reason to block. In that case YOU act as the panel orchestrator:
       load `$REPO_ROOT/.agents/skills/apm-review-panel/SKILL.md` as the
       authoritative contract and EXECUTE its published fan-out yourself
-      via `task` -- spawn each mandatory persona, every conditional
-      persona (active or stubbed per the panel's own activation rubric,
-      so the schema stays uniform), and the `apm-ceo` synthesizer;
+      via `task` in mode `composed-implementation-review` -- gather the
+      complete PR conversation first, spawn each mandatory persona,
+      every conditional persona (active or stubbed per the panel's own
+      activation rubric, so the schema stays uniform), and the
+      `apm-ceo` synthesizer; never request a reviewer and never assign;
       schema-validate each panelist return against
       `assets/panelist-return-schema.json` and the CEO return against
       `assets/ceo-return-schema.json` (re-spawn a malformed persona per
@@ -191,22 +201,21 @@ this run, mark `copilot_drained: true` and skip future fetches.
       SKILL.md verbatim is NOT re-implementing panel internals (see
       Hard rules) -- inventing a substitute review WOULD be.
 
-   WRITE BOUNDARY -- the panel ALWAYS posts its result to the PR. The
-   panel run (fast-path OR inline) is not done until its recommendation
-   comment is live on GitHub via `gh`. This is MANDATORY, not optional:
-   a panel run that computes a stance but posts nothing has not
-   completed. Posting rules:
-   - EXACTLY ONE recommendation comment PER panel run. Within a single
+   WRITE BOUNDARY -- the panel posts its result to the PR unless the
+   review-panel contract elects `noop` (unchanged head SHA plus
+   conversation watermark, unread required history, or CODEOWNERS
+   consistency failure). Otherwise the panel run (fast-path OR inline)
+   is not done until its recommendation comment is live on GitHub via
+   `gh`. Posting rules:
+   - AT MOST ONE recommendation comment PER panel run. Within a single
      run you are the panel's single writer; the panelist and CEO
      subagents return JSON ONLY and never touch PR state (so inline and
      skill-tool runs produce the identical single-comment surface).
-   - One comment PER LOOP ITERATION is EXPECTED and fine. The shepherd
-     reinforcement loop re-runs the panel each iteration; each run posts
-     its OWN fresh comment, so the PR carries the visible review trail
-     across the loop. Do NOT suppress later iterations' comments to
-     preserve a single surface -- the per-iteration comments ARE the
-     convergence record. (Only the WITHIN-a-run single-emission rule
-     above is idempotent; across iterations, N runs post N comments.)
+   - One comment PER LOOP ITERATION is expected when head SHA or
+     conversation changed. If the receipt watermark is unchanged, the
+     panel's `noop` is success, not a missing post.
+   - Never request the implementer as a reviewer. Never assign. Never
+     remove CODEOWNERS-derived reviewRequests.
 
    BLOCK ONLY when the Step 0.0 asset probe MISSED (panel genuinely
    absent). Do NOT block merely because the `skill` tool is absent. If
