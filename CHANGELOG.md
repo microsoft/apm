@@ -7,35 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Preserve unmanaged Claude and Kiro skills when uninstalling an MCP-only package whose lockfile has no deployed files. — by @mfroembgen (#2947)
+## [0.31.0] - 2026-09-15
 
 ### Added
 
-- `apm init --discover` previews existing agent content; consented `--apply` declares supported local packages without changing source files, ready for a separate `apm install`. Builds on discovery work by @chkp-roniz in #2857. (#2937)
-- gh-aw's shared APM import now supports `token-source: github-token`; after consumers re-vendor the workflow, its read-only current-repository identity can fetch same-repository private packages, while `cascade` remains the default and cross-repository packages still require a dedicated token or GitHub App. (#2706)
-- OpenAPM v0.1 adds `req-pl-018` for dependency-policy identity casing and amends `req-rs-016` clause (3), the Section 6.4 merge rules, and the Section 6.5 pattern grammar so repository identity and policy matching cannot diverge; Section 11.2 item 6 now requires the per-host case rule in `CONFORMANCE.md`. (#2706)
+- `apm init --discover` previews existing agent content; consented `--apply` declares supported local packages without changing source files, ready for a separate `apm install`. Builds on discovery work by @chkp-roniz. (#2937)
+- Windows installation guidance now includes `winget install --id Microsoft.APM --exact --source winget` and updates through `winget upgrade` instead of `apm self-update`. (by @Gijsreyn, #2520)
 
 ### Changed
 
-- **BREAKING:** Non-dry-run `apm install` now exits `1` when Agent Plugins v1 target exclusion leaves no package deployed; mixed installs that deploy another package still succeed. Install a direct skill subpath (`apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`) or select `--target copilot` for native registration. (closes #2796) (#2806)
-- **BREAKING:** after consumers re-vendor the shared gh-aw `apm.md`, its import requires an explicit `target` instead of deprecated `all`; `apm-action` otherwise writes `all` into the isolated `apm.yml`, where it degrades to auto-detection without harness markers. Set the workflow engine's target and recompile; see the [gh-aw migration recipe](https://microsoft.github.io/apm/integrations/gh-aw/#shared-apmmd-import-recommended). (#2706)
-- Re-vendored shared gh-aw workflows now default to APM 0.28.0 for both pack and restore, the version used for the recorded `microsoft/apm-action@v1.10.0` compatibility proof, not the latest CLI release; an explicit `apm-version` still overrides it. (#2706)
+- **BREAKING:** Non-dry-run `apm install` now exits `1` when Agent Plugins v1 target exclusion leaves no package deployed; mixed installs that deploy another package still succeed. Install a direct skill subpath for the desired target or select `--target copilot` for native registration. (#2806)
+- **BREAKING:** Re-vendored shared gh-aw APM imports require a concrete `target`; set the engine's target and recompile, with optional read-only `token-source: github-token` for same-repository private packages (`cascade` and APM 0.28.0 remain defaults). Dependency-policy matching now follows canonical repository casing, closing mixed-case deny bypasses; keep lowercase workarounds until all runners use APM 0.31.0 or later. (#2706)
 
 ### Fixed
 
-- Installing a private Git dependency no longer fails with `Unable to verify Git URL rewrite safety` when a `url.<ssh-target>.insteadOf` rule rewrites the fetched HTTPS URL to SSH. The `http.extraHeader` URL-match probe now runs only for HTTP(S) effective URLs, because Git rejects SCP-style targets such as `git@github.com:owner/repo`. (#2906)
+- Git-subpath cache checkouts now preserve committed LF content regardless of host `core.autocrlf` settings; older unpinned cache shards rematerialize on the next install. (by @sergio-sisternes-epam, #2982)
+- `apm uninstall` now preserves unmanaged Claude and Kiro skills when removing an MCP-only package whose lockfile has no deployed files. (by @mfroembgen, #2947)
+- Private Git dependencies rewritten from HTTPS to SSH no longer fail the HTTP-header safety probe; that probe now runs only for HTTP(S) effective URLs. (by @arnaudoisel, #2906)
+- GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2939)
+- Exact registry version selectors now prefer the matching published build, preventing selection of a different build with the same semantic version but different build metadata. (by @nadav-y, #2894)
+- `apm install` again accepts `skills:` subsets from Git collections with nested `skills/<name>/SKILL.md` files but no root manifest or skill, without a `path:` workaround. (#2891)
+- Registry `apm outdated` now separates installed `Current`, constraint-bound `Wanted`, and published `Latest`, so exact pins no longer hide newer releases. It leaves legacy lockfiles unchanged, while `apm update` continues respecting manifest constraints. (#2874)
 
 ### Security
 
-- The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
-- Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
-
-### Fixed
-
-- Git-subpath `GitCache` checkouts pin `core.autocrlf=false` so host autocrlf settings do not rewrite LF-committed package content; older unpinned cache shards rematerialize on the next install. (closes #2971) (#2982)
-- GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2938)
+- File-lock retry diagnostics no longer include paths or exception text that may contain secrets, while retaining retry counts and delays. (#2742)
 
 ## [0.30.0] - 2026-09-07
 
