@@ -37,7 +37,7 @@ dependencies:
   - .agents/skills/apm-issue-autopilot/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
   deployed_file_hashes:
-    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:e39521f906b300fa4505a676825b8e791c617806e5b5964446e3469c495a1681
+    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:0eb3712b0a801bef3174f36f0cf95dae8fd458fc8c18cedb99d068afe95cdf1c
     .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
     .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
     .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
@@ -173,7 +173,7 @@ dependencies:
   - .agents/skills/batch-bug-shepherd/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
   deployed_file_hashes:
-    .agents/skills/batch-bug-shepherd/SKILL.md: sha256:fa5e00baa7e92cbc79069f06ae2fb89d97540a03e3f854fcae828d8bff02485e
+    .agents/skills/batch-bug-shepherd/SKILL.md: sha256:0973311bbb73ed92561ccb653eb1a9b05a7d76ab553e2a821c78245d26e1e5b4
     .agents/skills/batch-bug-shepherd/assets/final-report-template.md: sha256:ea280a4d1e15a9b56ba8d3ef5f0e931754cc44ae29d5615da58da8d445f455c2
     .agents/skills/batch-bug-shepherd/assets/fix-prompt.md: sha256:56ea0fa38b6fe576b319f9b8e38ba748f1136facff70c90f21d4356e00bc07f7
     .agents/skills/batch-bug-shepherd/assets/ground-truth-table.md: sha256:ca5cf460d3b9f0f529a675d4d9f6d9cfc9fcf2f750428b19dda051642f58a5a3
@@ -489,7 +489,7 @@ deployments:
   owners:
   - ./packages/apm-issue-autopilot
   active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:e39521f906b300fa4505a676825b8e791c617806e5b5964446e3469c495a1681
+  content_hash: sha256:0eb3712b0a801bef3174f36f0cf95dae8fd458fc8c18cedb99d068afe95cdf1c
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md
@@ -1416,7 +1416,7 @@ deployments:
   owners:
   - ./packages/batch-bug-shepherd
   active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:fa5e00baa7e92cbc79069f06ae2fb89d97540a03e3f854fcae828d8bff02485e
+  content_hash: sha256:0973311bbb73ed92561ccb653eb1a9b05a7d76ab553e2a821c78245d26e1e5b4
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/assets/final-report-template.md

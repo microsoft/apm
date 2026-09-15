@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
-- `apm-triage-panel`, `autopilot-pr-review-triage-scheduler`, `autopilot-pr-review-triage-worker`, `autopilot-pull-request-worker`, `autopilot-scheduler-pull-request-review`, `autopilot-issue-scheduler`, `autopilot-issue-worker`, `autopilot-scheduler-issue-triage`, `autopilot-worker-pull-request`, `autopilot-code-scheduler`, `autopilot-code-worker`, `autopilot-scheduler-code`, `autopilot-worker-code`, `autopilot-scheduler-issues`, `autopilot-scheduler-issue-delivery`, `autopilot-worker-issue`, `autopilot-scheduler-pull-requests`, `apm-issue-autopilot`, `batch-bug-shepherd`, and `shepherd-driver` remain installable as compatibility aliases for the new autopilot schedulers and workers.
+- `apm-issue-autopilot` and `batch-bug-shepherd` are sequencing aliases (triage then delivery then PR review; delivery `selector=bugs` then PR review). They do not implement. `apm-triage-panel`, `autopilot-pr-review-triage-scheduler`, `autopilot-pr-review-triage-worker`, `autopilot-pull-request-worker`, `autopilot-scheduler-pull-request-review`, `autopilot-issue-scheduler`, `autopilot-issue-worker`, `autopilot-scheduler-issue-triage`, `autopilot-worker-pull-request`, `autopilot-code-scheduler`, `autopilot-code-worker`, `autopilot-scheduler-code`, `autopilot-worker-code`, `autopilot-scheduler-issues`, `autopilot-scheduler-issue-delivery`, `autopilot-worker-issue`, `autopilot-scheduler-pull-requests`, and `shepherd-driver` remain installable as compatibility aliases for the new autopilot schedulers and workers.
 
 ### Security
 

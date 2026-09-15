@@ -1,6 +1,6 @@
 name: batch-bug-shepherd
 version: 0.1.0
-description: Compatibility alias for autopilot-scheduler-issues (selector bugs).
+description: Compatibility alias. Sequences delivery selector bugs, then PR review.
 author: Microsoft
 license: MIT
 

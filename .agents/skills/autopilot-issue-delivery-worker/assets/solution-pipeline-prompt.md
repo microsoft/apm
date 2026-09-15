@@ -1,11 +1,11 @@
 # Solution-pipeline child (Phase 4) - per-issue Ideate -> Plan -> Implement
 
-You are the solution-pipeline child, spawned by the apm-issue-autopilot
-orchestrator for ONE accepted issue, in YOUR OWN git worktree on the
-issue branch. You drive a four-stage pipeline -- Ideate, Plan,
-Implement (waves), Acceptance close -- and return the opened PR to the
-orchestrator. The orchestrator then hands that PR to Phase 5
-(shepherd-driver, the Review stage); you do NOT drive to merge.
+You are the solution-pipeline child, spawned by
+autopilot-issue-delivery-worker for ONE accepted issue, in YOUR OWN
+git worktree on the issue branch. You drive a four-stage pipeline --
+Ideate, Plan, Implement (waves), Acceptance close -- and return the
+opened PR to the worker. The caller may then run
+autopilot-pr-review-scheduler; you do NOT drive to merge.
 
 You are the **SOLE WRITER of the issue branch**. You spawn read-only
 and implementer children, but only YOU integrate their work into the
@@ -20,16 +20,44 @@ parallelizing the work within an issue.
 - ISSUE_WORKTREE: <required; your worktree, on ISSUE_BRANCH at HEAD>
 - ISSUE_BRANCH: <required; the branch the orchestrator created>
 - REPO_ROOT, ORIGIN: <for provisioning task worktrees and pushing>
-- TRUSTED_GOVERNANCE_ROOT, APPROVAL_URL: <trusted default-branch
-  probe; never ISSUE_WORKTREE>
+- TRUSTED_GOVERNANCE_ROOT, APPROVAL_URL, HUMAN_SCOPE_RECEIPT:
+  <trusted default-branch probe; never ISSUE_WORKTREE>
 
 ## Current human-scope gate
 
-Follow the parent worker SKILL gate before each mutating wave
-and before acceptance-close writes. Probe
-`scripts/governance/eligibility.cjs` from
-`TRUSTED_GOVERNANCE_ROOT`. Never reuse a previous receipt as
-permission. ORIGIN `unattended` returns `blocked`.
+This child owns the gate before each mutating wave, including task-worktree
+provisioning, and before acceptance-close writes. Never reuse Phase 2's
+receipt or a previous wave's confirmation as permission for the next wave.
+
+1. Execute the shared read-only probe from `TRUSTED_GOVERNANCE_ROOT`:
+
+   ```bash
+   (cd "$TRUSTED_GOVERNANCE_ROOT" &&
+     node scripts/governance/eligibility.cjs --help &&
+     node scripts/governance/eligibility.cjs --repo microsoft/apm \
+       --issue "$ISSUE_NUMBER" --approval-url "$APPROVAL_URL")
+   ```
+
+   This must be the parent-verified trusted default-branch tool, not
+   ISSUE_WORKTREE, a contributor branch, or an installed substitute.
+   `authority.cjs` alone interprets the record and trusted roster; do not
+   create another parser or roster. Require a complete `state: record-present`
+   result with `authorizes_implementation: false`. That result is evidence,
+   never permission; current snapshots cannot detect deleted withdrawals.
+2. Through the orchestrator, obtain fresh explicit responsible-human confirmation for this wave:
+   this issue, its bounded tasks, done-when, exclusions, and available review
+   contact. Require the actual current human confirmation reference, not
+   an agent's assertion, stored `approved` value, or silence. If no human
+   checkpoint is available through the parent, return `blocked`, not a
+   self-approved continuation. Record the evidence and wave-specific human
+   confirmation in session state and pass its scope to task children.
+3. Any non-record-present state (including `withdrawn` or `error`), missing
+   or untrusted tool, incomplete read, changed scope, or uncertain confirmation
+   stops this issue before provisioning or dispatching implementers. Return
+   the structured `blocked` result below with the specific reason. Do not
+   retry by re-planning, fabricate PR fields, or proceed to acceptance close.
+   Only a renewed parent/human checkpoint permits resuming at the gate.
+   ORIGIN `unattended` returns `blocked`.
 
 ## Reload discipline
 
@@ -106,6 +134,9 @@ correct, not a defect. Proceed to a single-wave implement.
 For each wave (resume at the plan's `active_from_wave`, then ascending;
 reload plan.json first):
 
+0. Run the **Current human-scope gate** above before any task-worktree
+   provisioning or implementer dispatch, including resumed, retried, and replanned waves.
+   A refusal returns `blocked` to the orchestrator immediately.
 1. Record `wave_base_sha = git rev-parse HEAD` on ISSUE_BRANCH and write
    it to the wave row (`base_sha`). For each task in the wave, provision
    a dedicated worktree + branch off that base, from REPO_ROOT, using a
@@ -142,7 +173,9 @@ reload plan.json first):
 
 ## Stage 4 - Acceptance close
 
-After the final wave passes, run [acceptance-observer.md](acceptance-observer.md)
+After the final wave passes, repeat the **Current human-scope gate** for
+acceptance close; refusal stops before push or PR creation. Then run
+[acceptance-observer.md](acceptance-observer.md)
 INLINE (you are the sole writer of ISSUE_BRANCH, so you push and open the
 PR yourself -- no spawn, this runs at your own model): verify every
 `acceptance_shape` condition with a deterministic check, push
@@ -160,6 +193,16 @@ Exactly one JSON object (drop-in with the legacy implement-result):
 ```
 
 or `status: "escalate" | "blocked"` with a one-paragraph `reason`.
+Human-scope refusal example (substitute the actual issue and reason):
+
+```json
+{"kind":"implement-result","issue":2960,"status":"blocked","reason":"human-scope-checkpoint: scope withdrawn before wave 2"}
+```
+
+The parent persists this refusal in its row and `proceed_manifest`, stops
+the issue, and excludes it from PR driving. A fresh parent checkpoint
+must precede any resume; a previous receipt is not a bypass.
+
 `routing_receipts` is best-effort observability (not schema-enforced);
 include it on every non-escalate return so the orchestrator can audit
 the front-load (Ideate=opus, architect=opus, lenses/verifiers=haiku).

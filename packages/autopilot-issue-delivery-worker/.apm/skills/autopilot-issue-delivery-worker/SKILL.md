@@ -26,6 +26,9 @@ Do not pick more issues. Do not fill other slots.
 - `SELECTOR` -- `all` (default) or `bugs`
 - `REPO_ROOT` -- required
 - `ORIGIN` -- if the parent passed it, honor it; else resolve
+- `TRUSTED_GOVERNANCE_ROOT` -- trusted default-branch copy
+- `APPROVAL_URL` -- nominated scope-comment URL
+- `HUMAN_SCOPE_RECEIPT` -- current human confirmation, not a stored grant
 
 ## ORIGIN and assignment
 
@@ -118,6 +121,14 @@ tool) -- STOP.
 
 JSON with `issue`, `status` (`done` / `escalate` / `blocked` /
 `pr-opened` / `pr-in-flight`), optional `pr`, and a one-line note.
+inspect `status` before reading `pr` or `branch`.
+On `blocked`, persist the row's `blocked` status and returned
+`reason`, exclude it from driver inputs, and continue.
+Malformed or wrong-issue returns also block.
+Only `pr-opened` returns are handed to
+`autopilot-pr-review-scheduler`. Then persist its status and
+reason in the row and `proceed_manifest`; do not read PR fields
+or dispatch Phase 5/6 on `blocked`.
 Do not auto-merge.
 
 ASCII only.

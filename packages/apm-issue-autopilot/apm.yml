@@ -1,6 +1,6 @@
 name: apm-issue-autopilot
 version: 0.1.0
-description: Compatibility alias for autopilot-scheduler-issues (selector all).
+description: Compatibility alias. Sequences issue triage, delivery, then PR review.
 author: Microsoft
 license: MIT
 

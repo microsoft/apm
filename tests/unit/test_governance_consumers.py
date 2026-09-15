@@ -121,21 +121,18 @@ def test_docs_workflow_never_treats_a_label_as_companion_approval() -> None:
 
 
 DELIVERY = (
-    ROOT
-    / "packages/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
+    ROOT / "packages/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
 )
 
 
 @pytest.mark.parametrize(
     "path",
     [
-        BATCH / "references/invariants.md",
         DOCS / "SKILL.md",
-        AUTOPILOT / "SKILL.md",
         ROOT / ".github/workflows/daily-doc-updater.md",
         DELIVERY / "SKILL.md",
     ],
-    ids=["bug-shepherd", "docs-sync", "issue-autopilot", "daily-docs", "issue-delivery"],
+    ids=["docs-sync", "daily-docs", "issue-delivery"],
 )
 def test_consumers_probe_shared_trusted_owner_and_require_fresh_human(path: Path) -> None:
     """No consumer gets a second authority implementation or a machine grant."""
@@ -153,20 +150,16 @@ def test_consumers_probe_shared_trusted_owner_and_require_fresh_human(path: Path
 
 
 def test_bug_shepherd_union_human_gate_and_owned_cleanup() -> None:
-    """Regression traps for legacy-only discovery, fail-open advice, and marker theft."""
+    """Alias dispatches; frozen assets keep marker and fail-closed contracts."""
     skill = (BATCH / "SKILL.md").read_text()
     prompt = (
         ROOT / "packages/batch-bug-shepherd/.apm/prompts/batch-bug-shepherd.prompt.md"
     ).read_text()
     for text in (skill, prompt):
-        assert "--label type/bug" in text
-        assert "--label bug" in text
-        assert "deduplicate by issue number" in text
-        assert "suspicion" in text
-    assert skill.index("### Phase 2.5") < skill.index("### Phase 3 -")
-    assert "rows without the Phase 2.5 checkpoint" in skill
-    assert "ONLY PRs with a current Phase 2.5 checkpoint" in skill
-    assert "only after rechecking the human checkpoint" in skill
+        assert "Compatibility alias" in text or "alias" in text
+        assert "autopilot-issue-delivery-scheduler" in text
+        assert "selector `bugs`" in text
+    assert "Do not implement from this file" in skill
     invariants = (BATCH / "references/invariants.md").read_text()
     assert "shepherd_marker_added_by_run" in invariants
     assert "Never sweep or clean up another run's markers" in invariants
@@ -214,8 +207,8 @@ def test_fix_child_recheck_blocked_contract(failure: str, reason: str) -> None:
         {**blocked, "status": "pr-opened"},
     ):
         assert not validator.is_valid(invalid)
-    skill = " ".join((BATCH / "SKILL.md").read_text().split())
-    phase = skill.split("### Phase 3 -", 1)[1].split("### Phase 4 -", 1)[0]
+    skill = " ".join((DELIVERY / "SKILL.md").read_text().split())
+    phase = skill.split("## Return", 1)[1]
     assert "inspect `status` before reading `pr` or `branch`" in phase
     assert "persist the row's `blocked` status and returned `reason`" in phase
     assert "exclude it from driver inputs, and continue" in phase
@@ -286,19 +279,21 @@ def test_edited_skill_metadata_and_line_budgets(skill_root: Path) -> None:
 
 
 def test_trimmed_summaries_explicitly_load_binding_references() -> None:
-    """Trimming repeated prose must not orphan the full operational contracts."""
+    """Aliases dispatch; the delivery worker still loads the pipeline brief."""
     batch = (BATCH / "SKILL.md").read_text()
     autopilot = (AUTOPILOT / "SKILL.md").read_text()
-    assert "Load `references/invariants.md` before planning Phase 0" in batch
-    assert "the **Human scope checkpoint** in `references/invariants.md`" in batch
-    assert "Load `assets/solution-pipeline-prompt.md` on entering Phase 4" in autopilot
-    assert "It owns the full four-stage procedure" in autopilot
+    delivery = (DELIVERY / "SKILL.md").read_text()
+    assert "Compatibility alias" in batch
+    assert "Do not implement from this file" in batch
+    assert "Compatibility alias" in autopilot
+    assert "Do not implement from this file" in autopilot
+    assert "assets/solution-pipeline-prompt.md" in delivery
 
 
 def test_pipeline_child_rechecks_scope_before_each_mutating_boundary() -> None:
     """The actual child brief, not only its parent's receipt, guards provisioning."""
-    prompt = (AUTOPILOT / "assets/solution-pipeline-prompt.md").read_text()
-    skill = (AUTOPILOT / "SKILL.md").read_text()
+    prompt = (DELIVERY / "assets/solution-pipeline-prompt.md").read_text()
+    skill = (DELIVERY / "SKILL.md").read_text()
     for required_input in ("TRUSTED_GOVERNANCE_ROOT", "APPROVAL_URL", "HUMAN_SCOPE_RECEIPT"):
         assert required_input in prompt
         assert required_input in skill
@@ -321,15 +316,15 @@ def test_pipeline_child_rechecks_scope_before_each_mutating_boundary() -> None:
 
 def test_pipeline_scope_refusal_stops_parent_before_pr_consumption() -> None:
     """Blocked child output has no fabricated PR and is excluded from downstream driving."""
-    prompt = (AUTOPILOT / "assets/solution-pipeline-prompt.md").read_text()
+    prompt = (DELIVERY / "assets/solution-pipeline-prompt.md").read_text()
     examples = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", prompt, re.S)]
     refusal = next(example for example in examples if example["status"] == "blocked")
     assert set(refusal) == {"kind", "issue", "status", "reason"}
     assert refusal["kind"] == "implement-result"
     assert isinstance(refusal["issue"], int) and refusal["issue"] > 0
     assert refusal["reason"]
-    skill = " ".join((AUTOPILOT / "SKILL.md").read_text().split())
-    phase = skill.split("### Phase 4 -", 1)[1].split("### Phase 5 -", 1)[0]
+    skill = " ".join((DELIVERY / "SKILL.md").read_text().split())
+    phase = skill.split("## Return", 1)[1]
     assert "persist its status and reason in the row and `proceed_manifest`" in phase
     assert "do not read PR fields or dispatch Phase 5/6" in phase
     assert "Only `pr-opened` returns" in phase
