@@ -119,6 +119,7 @@ Dependency packages contribute only `dependencies.mcp`; their
 - `.gemini/settings.json` (Gemini)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
 - `.kiro/settings/mcp.json` and `~/.kiro/settings/mcp.json` (Kiro IDE)
+- `.bob/mcp.json` and `~/.bob/mcp.json` (IBM Bob)
 - OS-specific `github-copilot/intellij/mcp.json` (JetBrains Copilot -- uses
   `"servers"` key, user-scope global path):
   - `%LOCALAPPDATA%\github-copilot\intellij\mcp.json` (Windows)
@@ -147,6 +148,22 @@ This target covers the documented Kiro IDE/CLI v3 layout
 (ref: [kiro.dev/docs/custom-agents/](https://kiro.dev/docs/custom-agents/),
 [kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/), accessed 2026-08-03).
 See [the targets matrix](../../reference/targets-matrix/#kiro) for a full primitives list.
+
+### IBM Bob
+
+[IBM Bob](https://bob.ibm.com/) reads Agent Skills from `.bob/skills/`,
+lifecycle hooks from `.bob/settings.json`, and MCP servers from
+`.bob/mcp.json`. APM supports the corresponding global locations under
+`~/.bob/`; global hooks use Bob's distinct
+`~/.bob/settings/settings.json` path. Bob also reads the project-root
+`AGENTS.md`, so `apm compile --target bob` supplies compiled instructions.
+
+The integration follows IBM's documented
+[skills](https://bob.ibm.com/docs/ide/features/skills),
+[lifecycle hooks](https://bob.ibm.com/docs/ide/configuration/lifecycle-hooks),
+and [MCP](https://bob.ibm.com/docs/ide/configuration/mcp/mcp-in-bob) schemas.
+See [the targets matrix](../../reference/targets-matrix/#bob) for the full
+path and capability table.
 
 ### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
 

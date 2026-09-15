@@ -77,6 +77,7 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
   opencode     inactive   needs .opencode/                         .opencode/
   windsurf     inactive   needs .windsurf/                         .windsurf/
   kiro         inactive   needs .kiro/                             .kiro/
+  bob          inactive   needs .bob/                              .bob/
 ```
 
 Machine-readable form:
@@ -102,6 +103,7 @@ match per target is enough to activate it.
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
 | `kiro` | `.kiro/` directory | `.kiro/` |
+| `bob` | `.bob/` directory | `.bob/` |
 | `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm deps update` (compile is a no-op for this target). | `.agents/` |
 
 Notes:

@@ -45,7 +45,7 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `-g`, `--global` | off | Discover user-scope packages. Applied local references use installer-compatible absolute or home-rooted paths, not project-relative paths. |
 | `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
 | `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
-| `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`; `all` expands the default stable set. |
+| `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `bob`, and `agent-skills`; `all` expands the default stable set. |
 | `-v`, `--verbose` | off | Show detailed output. |
 
 Target precedence: `--target` flag > interactive prompt > auto-detect at

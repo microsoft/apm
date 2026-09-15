@@ -9,6 +9,7 @@ TARGET_NAMES = frozenset(
     {
         "agent-skills",
         "antigravity",
+        "bob",
         "claude",
         "codex",
         "copilot",

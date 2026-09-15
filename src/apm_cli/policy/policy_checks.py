@@ -778,6 +778,7 @@ _DEFAULT_GOVERNANCE_DIRS = [
     ".claude",
     ".opencode",
     ".kiro",
+    ".bob",
 ]
 
 

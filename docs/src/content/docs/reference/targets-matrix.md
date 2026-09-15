@@ -29,14 +29,15 @@ see [Primitive types](../primitive-types/).
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
+| bob             | `.bob/`                |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 | hermes          | `.agents/` (`~/.hermes/` user scope) | [ ] | [ ] | [ ] | [x] | [ ] | [ ] | [x] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, Hermes project scope, and Windsurf by default (see
-[Skills convergence](#skills-convergence) below). Claude, Grok Build, Kiro, and
-Hermes user scope keep target-native skill directories.
+[Skills convergence](#skills-convergence) below). Claude, Grok Build, Kiro,
+Bob, and Hermes user scope keep target-native skill directories.
 
 (*) For `intellij`, file primitives route through the Copilot profile:
 instructions, prompts, agents, and hooks use `.github/`, while skills use
@@ -50,7 +51,7 @@ stable but explicit-only. See [Experimental](../experimental/).
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, `opencode`, and `hermes`.
+separate root-context compile for `bob`, `codex`, `gemini`, `opencode`, and `hermes`.
 It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
@@ -90,6 +91,7 @@ runtime-specific configuration while compile only generates project output. Use
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
+| bob      | `.bob/` directory                             |
 | intellij | Global `github-copilot/intellij/` config directory (MCP runtime discovery only) |
 
 IntelliJ-specific integration is MCP-only and writes JetBrains Copilot's
@@ -264,6 +266,32 @@ Kiro IDE/CLI v3 unified agent harness.
   - mcp: `.kiro/settings/mcp.json` (project) or `~/.kiro/settings/mcp.json` (user)
 - **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
 - **Scope.** Covers the documented Kiro IDE and CLI v3 layout (unified harness). Ref: [kiro.dev/docs/cli/v3/](https://kiro.dev/docs/cli/v3/) (accessed 2026-08-03).
+
+## bob
+
+IBM Bob IDE.
+
+- **Detection.** `.bob/` directory.
+- **Deploy directory.** `.bob/` at project and user scope.
+- **Supported primitives.** skills, hooks, mcp.
+- **File conventions.**
+  - skills: `.bob/skills/<name>/SKILL.md` (project) or
+    `~/.bob/skills/<name>/SKILL.md` (user)
+  - hooks: merged into `.bob/settings.json` (project) or
+    `~/.bob/settings/settings.json` (user); APM preserves existing settings
+    and user-authored hooks
+  - mcp: `.bob/mcp.json` (project) or `~/.bob/mcp.json` (user), under the
+    top-level `mcpServers` key
+- **Compile output.** `AGENTS.md`; Bob automatically reads the project-root
+  file.
+- **MCP shape.** STDIO servers use `command`, `args`, `cwd`, and `env`.
+  Streamable HTTP servers use `type: streamable-http`, `url`, and optional
+  `headers`; legacy SSE entries omit the type discriminator.
+
+The paths and schemas follow IBM's current documentation for
+[skills](https://bob.ibm.com/docs/ide/features/skills),
+[lifecycle hooks](https://bob.ibm.com/docs/ide/configuration/lifecycle-hooks),
+and [MCP](https://bob.ibm.com/docs/ide/configuration/mcp/mcp-in-bob).
 
 ## intellij
 

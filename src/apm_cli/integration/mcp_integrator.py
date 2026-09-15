@@ -854,6 +854,25 @@ class MCPIntegrator:
                 fail_on_write_error=fail_on_write_error,
             )
 
+        if "bob" in target_runtimes:
+            from apm_cli.factory import ClientFactory
+
+            bob_cfg = Path(
+                ClientFactory.create_client(
+                    "bob",
+                    project_root=project_root_path,
+                    user_scope=user_scope or scope is InstallScope.USER,
+                ).get_config_path()
+            )
+            _clean_json_mcp_config(
+                bob_cfg,
+                expanded_stale,
+                logger,
+                "IBM Bob MCP config",
+                use_rich=True,
+                fail_on_write_error=fail_on_write_error,
+            )
+
         # Clean JetBrains Copilot user-scope mcp.json
         if "intellij" in target_runtimes:
             from apm_cli.factory import ClientFactory

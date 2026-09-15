@@ -1096,9 +1096,10 @@ def _native_hook_state_exists(project_root: Path, targets: list[object]) -> bool
         if config is None:
             continue
         target_dir = project_root / target.root_dir
-        if (target_dir / config.config_filename).exists() or (
-            target_dir / _APM_HOOKS_SIDECAR
-        ).exists():
+        config_path = target_dir / config.filename_for_scope(
+            bool(getattr(target, "is_user_scope", False))
+        )
+        if config_path.exists() or (config_path.parent / _APM_HOOKS_SIDECAR).exists():
             return True
     return False
 

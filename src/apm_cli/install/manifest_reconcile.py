@@ -228,8 +228,11 @@ def merge_hook_config_projection_specs(
         root = str(getattr(target, "root_dir", "") or "").rstrip("/")
         if config is None or not root:
             continue
-        specs[f"{root}/{config.config_filename}"] = (
-            f"{root}/{_hi._APM_HOOKS_SIDECAR}",
+        config_filename = config.filename_for_scope(target.is_user_scope)
+        config_path = f"{root}/{config_filename}"
+        config_parent = config_path.rsplit("/", 1)[0]
+        specs[config_path] = (
+            f"{config_parent}/{_hi._APM_HOOKS_SIDECAR}",
             config.event_container_key,
         )
     return specs

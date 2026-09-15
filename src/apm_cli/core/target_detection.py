@@ -1,7 +1,8 @@
 """Target detection for auto-selecting compilation and integration targets.
 
 This module implements the auto-detection pattern for determining which agent
-targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Antigravity, Kiro) should be used
+targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Antigravity, Kiro,
+IBM Bob) should be used
 based on existing project structure and configuration.
 
 Detection priority (highest to lowest):
@@ -73,6 +74,7 @@ TargetType = Literal[
     "grok-build",
     "windsurf",
     "kiro",
+    "bob",
     "agent-skills",
     "hermes",
     "all",
@@ -116,6 +118,7 @@ UserTargetType = Literal[
     "grok-build",
     "windsurf",
     "kiro",
+    "bob",
     "agent-skills",
     "hermes",
     "all",
@@ -123,7 +126,7 @@ UserTargetType = Literal[
 ]
 
 
-def detect_target(  # noqa: PLR0911
+def detect_target(  # noqa: C901, PLR0911 -- legacy branch table; catalog migration pending
     project_root: Path,
     explicit_target: str | None = None,
     config_target: str | None = None,
@@ -163,6 +166,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "explicit --target flag"
         elif explicit_target == "kiro":
             return "kiro", "explicit --target flag"
+        elif explicit_target == "bob":
+            return "bob", "explicit --target flag"
         elif explicit_target == "grok-build":
             return "grok-build", "explicit --target flag"
         elif explicit_target == "agent-skills":
@@ -192,6 +197,8 @@ def detect_target(  # noqa: PLR0911
             return "windsurf", "apm.yml target"
         elif config_target == "kiro":
             return "kiro", "apm.yml target"
+        elif config_target == "bob":
+            return "bob", "apm.yml target"
         elif config_target == "grok-build":
             return "grok-build", "apm.yml target"
         elif config_target == "agent-skills":
@@ -210,6 +217,7 @@ def detect_target(  # noqa: PLR0911
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
     kiro_exists = (project_root / ".kiro").is_dir()
+    bob_exists = (project_root / ".bob").is_dir()
     grok_exists = (project_root / ".grok").is_dir()
     detected = []
     if github_exists:
@@ -228,6 +236,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".windsurf/")
     if kiro_exists:
         detected.append(".kiro/")
+    if bob_exists:
+        detected.append(".bob/")
     if grok_exists:
         detected.append(".grok/")
 
@@ -249,6 +259,8 @@ def detect_target(  # noqa: PLR0911
         return "windsurf", "detected .windsurf/ folder"
     elif kiro_exists:
         return "kiro", "detected .kiro/ folder"
+    elif bob_exists:
+        return "bob", "detected .bob/ folder"
     elif grok_exists:
         return "grok-build", "detected .grok/ folder"
     else:
@@ -259,7 +271,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
     AGENTS.md is generated for vscode, cursor, opencode, codex, gemini,
-    windsurf, kiro, antigravity, grok-build, hermes, all, and minimal targets.
+    windsurf, kiro, bob, antigravity, grok-build, hermes, all, and minimal targets.
     Gemini needs it because GEMINI.md imports AGENTS.md.
 
     Args:
@@ -281,6 +293,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "grok-build",
         "windsurf",
         "kiro",
+        "bob",
         "hermes",
         "all",
         "minimal",
@@ -419,10 +432,11 @@ def get_target_description(target: UserTargetType) -> str:
         "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
+        "bob": "AGENTS.md + .bob/skills/ + .bob/settings.json hooks + .bob/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .bob/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -508,7 +522,7 @@ def normalize_target_list(
     - ``None`` -> ``None`` (auto-detect)
     - ``"claude"`` -> ``["claude"]``
     - ``"copilot"`` -> ``["vscode"]``  (alias resolution)
-    - ``"all"`` -> ``["claude", "codex", "cursor", "gemini", "kiro", "opencode", "vscode", "windsurf"]``
+    - ``"all"`` -> every target marked ``in_all`` in the target catalog
     - ``["claude", "copilot"]`` -> ``["claude", "vscode"]``
     - Deduplicates while preserving first-seen order.
 
@@ -1024,6 +1038,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("opencode", "dir", ".opencode"),
     ("windsurf", "dir", ".windsurf"),
     ("kiro", "dir", ".kiro"),
+    ("bob", "dir", ".bob"),
 ]
 
 # Ordered list of targets for display (excludes agent-skills meta-target).
@@ -1037,6 +1052,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
     "opencode",
     "windsurf",
     "kiro",
+    "bob",
 ]
 
 # Canonical deploy directories for each target.
@@ -1050,6 +1066,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",
+    "bob": ".bob/",
 }
 
 # The primary (lowest-friction) signal for each target, used in
@@ -1064,6 +1081,7 @@ CANONICAL_SIGNAL: dict[str, str] = {
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
     "kiro": ".kiro/",
+    "bob": ".bob/",
 }
 
 

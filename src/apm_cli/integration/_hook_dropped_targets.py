@@ -66,8 +66,8 @@ def reconcile_dropped_targets(
         if scoped is None:
             continue
         target_dir = scoped.deploy_path(project_root)
-        json_path = target_dir / config.config_filename
-        sidecar_path = target_dir / _hi._APM_HOOKS_SIDECAR
+        json_path = target_dir / config.filename_for_scope(scoped.is_user_scope)
+        sidecar_path = json_path.parent / _hi._APM_HOOKS_SIDECAR
 
         if not json_path.exists():
             if sidecar_path.exists():
