@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import runpy
 import subprocess
@@ -13,6 +12,8 @@ from pathlib import Path
 import jsonschema
 import pytest
 import yaml
+
+from apm_cli.utils.content_hash import compute_file_hash
 
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
@@ -208,7 +209,8 @@ def test_template_has_proposed_brief_not_an_operative_decision() -> None:
     assert template.count("<details>") == 6
 
 
-def test_installed_skill_files_and_recorded_hashes_match_sources() -> None:
+@pytest.mark.windows_compat
+def test_installed_skill_files_and_recorded_hashes_match_sources(tmp_path: Path) -> None:
     """Exercise the published package and its generated installation contract."""
     lock = yaml.safe_load((ROOT / "apm.lock.yaml").read_text())
     for name, source in [
@@ -224,4 +226,11 @@ def test_installed_skill_files_and_recorded_hashes_match_sources() -> None:
             installed = ROOT / relative
             source_file = source / installed.relative_to(ROOT / ".agents/skills" / name)
             assert installed.read_bytes() == source_file.read_bytes()
-            assert expected == f"sha256:{hashlib.sha256(installed.read_bytes()).hexdigest()}"
+            assert expected == compute_file_hash(installed)
+            checkout = tmp_path / installed.name
+            checkout.write_bytes(
+                installed.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+            )
+            assert compute_file_hash(checkout) == expected
+            checkout.write_bytes(checkout.read_bytes() + b"\nchanged content\n")
+            assert compute_file_hash(checkout) != expected
