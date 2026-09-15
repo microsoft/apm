@@ -20,7 +20,7 @@ here. Every wave honors all of these.
   failure mode this skill defends against.
 - **Drive, do not split shepherd from complete.** When a PR exists
   (community in-flight OR own greenfield fix), the entire per-PR
-  drive-to-merge loop -- Copilot classification, apm-review-panel,
+  drive-to-merge loop -- Copilot classification, autopilot-pr-review-panel,
   fold-vs-defer, push, CI watch, advisory comment -- is owned by ONE
   shepherd-driver subagent (see "Composition with shepherd-driver").
   The orchestrator does NOT run a separate panel wave and a separate
@@ -63,7 +63,7 @@ here. Every wave honors all of these.
   returns `status: superseded`. The orchestrator records it in the
   table; it does not perform the supersede itself.
 - **Single-writer interlock per artifact.** Inside the drive loop the
-  apm-review-panel posts exactly ONE comment (its own contract) and
+  autopilot-pr-review-panel posts exactly ONE comment (its own contract) and
   rewrites that same surface idempotently across iterations. Each
   shepherd-driver subagent posts exactly ONE advisory comment at
   terminal. The orchestrator never posts to a PR directly -- it
@@ -113,7 +113,7 @@ here. Every wave honors all of these.
   receives at most TWO orchestrator-controlled comments: the
   shepherd-driver advisory comment (posted at drive-wave terminal),
   and the conflict-resolution resolution-confirmation comment (only
-  when Phase 5 resolved a conflict). The in-loop apm-review-panel
+  when Phase 5 resolved a conflict). The in-loop autopilot-pr-review-panel
   comment is rewritten idempotently by the driver on the same surface
   and does NOT add to the count. No third comment from any phase under
   any circumstance.

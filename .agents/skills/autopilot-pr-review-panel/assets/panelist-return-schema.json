@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "panelist-return-schema.json",
   "title": "APM Review Panel - Panelist Return Shape (advisory regime)",
-  "description": "Shape every panel persona MUST return when invoked by the apm-review-panel skill. Single findings array with explicit severity. There is NO binary verdict; the orchestrator does not compute APPROVE/REJECT. Severity expresses the panelist's signal strength; the CEO synthesizer arbitrates and the human reviewer ships.",
+  "description": "Shape every panel persona MUST return when invoked by the autopilot-pr-review-panel skill. Single findings array with explicit severity. There is NO binary verdict; the orchestrator does not compute APPROVE/REJECT. Severity expresses the panelist's signal strength; the CEO synthesizer arbitrates and the human reviewer ships.",
   "type": "object",
   "required": ["persona", "active", "findings", "summary"],
   "additionalProperties": false,

@@ -76,14 +76,14 @@
       "query": "review my PR -- it's #1432, give me a full panel pass",
       "expected": "no_fire",
       "split": "train",
-      "notes": "Single PR -> apm-review-panel directly, NOT batch-bug-shepherd."
+      "notes": "Single PR -> autopilot-pr-review-panel directly, NOT batch-bug-shepherd."
     },
     {
       "id": "no-fire-02",
       "query": "panel-review this PR and post the recommendation",
       "expected": "no_fire",
       "split": "train",
-      "notes": "Single-PR panel call -> apm-review-panel."
+      "notes": "Single-PR panel call -> autopilot-pr-review-panel."
     },
     {
       "id": "no-fire-03",
@@ -146,7 +146,7 @@
       "query": "fold the panel recommendations into PR #1234",
       "expected": "no_fire",
       "split": "val",
-      "notes": "Single-PR fold-in -> apm-review-panel completion flow, NOT batch outer-loop. Guards against dispatch mis-fire after the fold-in invariant was added."
+      "notes": "Single-PR fold-in -> autopilot-pr-review-panel completion flow, NOT batch outer-loop. Guards against dispatch mis-fire after the fold-in invariant was added."
     },
     {
       "id": "no-fire-12",
@@ -160,7 +160,7 @@
       "query": "apply the panel recommendations to PR #998 and close it out",
       "expected": "no_fire",
       "split": "train",
-      "notes": "Single-PR completion phrasing; remains apm-review-panel territory."
+      "notes": "Single-PR completion phrasing; remains autopilot-pr-review-panel territory."
     },
     {
       "id": "fire-11",

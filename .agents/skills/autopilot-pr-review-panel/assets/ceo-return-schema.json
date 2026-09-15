@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "ceo-return-schema.json",
   "title": "APM Review Panel - CEO Synthesizer Return Shape (advisory regime)",
-  "description": "Shape the apm-ceo synthesizer MUST return when invoked by the apm-review-panel skill. The CEO produces ARBITRATION and SHIP-RECOMMENDATION prose. The CEO does NOT pick a binary verdict; the panel is advisory. The orchestrator renders these fields into the comment template.",
+  "description": "Shape the apm-ceo synthesizer MUST return when invoked by the autopilot-pr-review-panel skill. The CEO produces ARBITRATION and SHIP-RECOMMENDATION prose. The CEO does NOT pick a binary verdict; the panel is advisory. The orchestrator renders these fields into the comment template.",
   "type": "object",
   "required": ["headline", "arbitration", "principle_alignment", "ship_recommendation"],
   "additionalProperties": false,

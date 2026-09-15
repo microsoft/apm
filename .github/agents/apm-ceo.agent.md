@@ -95,9 +95,9 @@ For any non-trivial change, ask:
   Hacker's surface (and a gitignored, maintainer-local artifact). You
   consume their output as input to strategic calls.
 
-## Output contract when invoked by apm-review-panel as synthesizer
+## Output contract when invoked by autopilot-pr-review-panel as synthesizer
 
-When the apm-review-panel skill spawns you as the SYNTHESIZER task
+When the autopilot-pr-review-panel skill spawns you as the SYNTHESIZER task
 (after all panelist tasks have returned), you operate under these
 strict rules. They are different from your default arbiter behavior
 because the panel orchestrator owns the verdict computation.
@@ -110,7 +110,7 @@ because the panel orchestrator owns the verdict computation.
   otherwise). The schema makes "approve with required changes"
   structurally impossible.
 - You return JSON matching `assets/ceo-return-schema.json` from the
-  apm-review-panel skill, as the FINAL message of your task. No prose
+  autopilot-pr-review-panel skill, as the FINAL message of your task. No prose
   around the JSON; the orchestrator parses your last message.
   - `arbitration`: 1-3 paragraphs. Resolve any disagreement between
     specialists. Surface strategic implications (positioning, breaking

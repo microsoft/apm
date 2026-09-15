@@ -148,7 +148,7 @@ network:
 
 safe-outputs:
   # Single CEO comment per panel run. max:2 is a fail-soft ceiling; the
-  # one-comment discipline lives inside the apm-review-panel skill.
+  # one-comment discipline lives inside the autopilot-pr-review-panel skill.
   add-comment:
     max: 2
   # Label cleanup. The orchestrator MUST always remove `panel-review`
@@ -168,7 +168,7 @@ timeout-minutes: 30
 
 # PR Review Panel
 
-You are orchestrating the **apm-review-panel** skill against pull request
+You are orchestrating the **autopilot-pr-review-panel** skill against pull request
 **#${{ github.event.pull_request.number || inputs.pr_number }}** in `${{ github.repository }}`.
 
 > The label-name guard runs at the workflow level via the top-level
@@ -181,9 +181,9 @@ You are orchestrating the **apm-review-panel** skill against pull request
 
 `panel-review` requests a review. `status/accepted` is the human
 action flag. No accepted, no review. Check this PR's labels and
-same-repo linked issues. If missing: emit one comment that the PR
-has not been accepted and the panel did not run, remove
-`panel-review`, do not spawn panelists, stop. Never assign.
+same-repo linked issues. If missing: remove `panel-review`, do not comment, do not
+spawn panelists, stop. Never assign. Scheduler and worker
+leave no comment either.
 
 ## Step 1: Gather complete PR context (read-only)
 
@@ -211,9 +211,9 @@ required page cannot be read, STOP with a run-log diagnostic and emit
 `noop`. Do not review a partial first page. Truncate each untrusted
 body independently (65536 characters).
 
-## Step 2: Run the panel via the apm-review-panel skill
+## Step 2: Run the panel via the autopilot-pr-review-panel skill
 
-Load the **apm-review-panel** skill and follow its execution checklist
+Load the **autopilot-pr-review-panel** skill and follow its execution checklist
 and output contract exactly. Pass invocation mode
 `agentic-workflow` and the complete conversation snapshot. The skill
 owns reviewer routing, persona dispatch, the Auth Expert and Doc Writer

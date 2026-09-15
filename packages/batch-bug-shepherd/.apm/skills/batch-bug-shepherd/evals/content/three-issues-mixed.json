@@ -47,9 +47,9 @@
     },
     {
       "id": "shepherd-via-panel",
-      "pattern": "(?is)(shepherd-driver[\\s\\S]{0,300}apm-review-panel|drive-\\d+[\\s\\S]{0,300}apm-review-panel|apm-review-panel[\\s\\S]{0,120}driver)",
+      "pattern": "(?is)(shepherd-driver[\\s\\S]{0,300}autopilot-pr-review-panel|drive-\\d+[\\s\\S]{0,300}autopilot-pr-review-panel|autopilot-pr-review-panel[\\s\\S]{0,120}driver)",
       "weight": 2,
-      "description": "Drive subagent composes shepherd-driver, which owns the apm-review-panel loop rather than ad-hoc review."
+      "description": "Drive subagent composes shepherd-driver, which owns the autopilot-pr-review-panel loop rather than ad-hoc review."
     },
     {
       "id": "fix-dispatch",

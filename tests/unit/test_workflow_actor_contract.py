@@ -13,8 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 TRIAGE_SKILL = ROOT / "packages/autopilot-issue-triage-worker/SKILL.md"
 TRIAGE_TEMPLATE = ROOT / "packages/autopilot-issue-triage-worker/assets/triage-template.md"
 ALIAS_TRIAGE_PANEL = ROOT / "packages/apm-triage-panel/.apm/skills/apm-triage-panel/SKILL.md"
+ALIAS_REVIEW_PANEL = ROOT / "packages/apm-review-panel/.apm/skills/apm-review-panel/SKILL.md"
 TRIAGE_WORKFLOW = ROOT / ".github/workflows/triage-panel.md"
-REVIEW_SKILL = ROOT / "packages/apm-review-panel/SKILL.md"
+REVIEW_SKILL = ROOT / "packages/autopilot-pr-review-panel/SKILL.md"
 REVIEW_WORKFLOW = ROOT / ".github/workflows/pr-review-panel.md"
 SCHEDULER_TRIAGE = (
     ROOT
@@ -86,6 +87,8 @@ def test_review_panel_declares_origin_intent_contract() -> None:
     assert "The PR review scheduler never comments" in skill
     assert "No accepted, no review" in skill
     assert "remove `panel-review` if present" in skill
+    assert "do not comment" in skill
+    assert "Scheduler and worker also stop and leave no comment" in skill
     assert "Request authenticated `@me` as a supplemental reviewer only" in skill
     assert "self-review-red-flag" in skill
     assert "CODEOWNERS is paramount" in skill
@@ -105,6 +108,7 @@ def test_review_panel_requires_complete_paginated_context_and_watermark_noop() -
     assert "Invocation mode is `agentic-workflow` (ORIGIN=`unattended`)" in workflow
     assert "Never assign a user" in workflow
     assert "No accepted, no review" in workflow
+    assert "do not comment" in workflow
     assert "gh api --paginate" in workflow
     assert "closingIssuesReferences" in workflow
     assert "reviewRequests" in workflow
@@ -175,6 +179,8 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "Never request the implementer as a reviewer" in driver
     assert "emit the activation card" in driver
     assert "No accepted, no review" in driver
+    assert "do not comment" in driver
+    assert "post one comment" not in driver
     assert "Paginate every list to exhaustion" in driver
     pr_worker = _ascii(WORKER_PR_SKILL)
     assert "activation_card: on" in pr_worker
@@ -183,6 +189,7 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "`write: off` returns the filled template only" in pr_worker
     assert "If `write: on`, apply the advisory writes yourself" in pr_worker
     assert "The PR review scheduler never comments" in pr_worker
+    assert "do not comment" in pr_worker
 
 
 def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
@@ -217,6 +224,8 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "run the worker in this thread" in triage
     assert "Compatibility alias" in _ascii(ALIAS_TRIAGE_PANEL)
     assert "autopilot-issue-triage-worker" in _ascii(ALIAS_TRIAGE_PANEL)
+    assert "Compatibility alias" in _ascii(ALIAS_REVIEW_PANEL)
+    assert "autopilot-pr-review-panel" in _ascii(ALIAS_REVIEW_PANEL)
     assert "Do not call" in _ascii(TRIAGE_SKILL)
     assert "fetch_queue.py" in _ascii(TRIAGE_SKILL)
     assert "processing.read_reviewed" in triage
@@ -262,6 +271,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "same PR to two slots" in review
     assert "`panel-review` is the only request trigger" in review
     assert "No accepted, no review" in review
+    assert "Do not spawn it. Do not comment. Do not remove labels." in review
     assert "Never list all open PRs" in review
     assert "gh pr list --state open --label panel-review" in review
     assert "Empty label queue -> empty table, stop" in review
@@ -308,7 +318,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
         "`autopilot-issue-delivery-scheduler`, or "
         "`autopilot-pr-review-scheduler`."
     ) in pr_triage
-    assert "Do not run `apm-review-panel`" in pr_triage
+    assert "Do not run `autopilot-pr-review-panel`" in pr_triage
     assert "same PR to two slots" in pr_triage
     assert "#<pr-number> pr-triage-worker" in _ascii(
         ROOT
@@ -317,7 +327,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     worker_pr_triage = _ascii(WORKER_PR_TRIAGE)
     assert "needs-issue" in worker_pr_triage
     assert "Never request reviewers" in worker_pr_triage
-    assert "Do not run `apm-review-panel`" in worker_pr_triage
+    assert "Do not run `autopilot-pr-review-panel`" in worker_pr_triage
     assert "Never write human decision labels" in worker_pr_triage
     assert "`autopilot-pr-triage-scheduler`" in triage
     assert "`autopilot-pr-triage-scheduler`" in delivery

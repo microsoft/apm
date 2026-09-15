@@ -1,5 +1,5 @@
 ---
-name: apm-review-panel
+name: autopilot-pr-review-panel
 description: >-
   Use this skill to run a multi-persona expert advisory review on a labelled
   pull request in microsoft/apm. The panel fans out to five mandatory
@@ -16,7 +16,7 @@ description: >-
   with CEO arbitration).
 ---
 
-# APM Review Panel - Fan-Out Advisory Review
+# autopilot-pr-review-panel - Fan-Out Advisory Review
 
 The panel is FAN-OUT + SYNTHESIZER. Each persona runs in its own agent
 thread (via the `task` tool) and returns JSON matching
@@ -162,7 +162,7 @@ or requests reviewers.
 ## Topology
 
 ```
-   apm-review-panel SKILL (orchestrator thread)
+   autopilot-pr-review-panel SKILL (orchestrator thread)
                       |
    FAN-OUT via task tool (panelists in parallel)
                       |
@@ -356,7 +356,8 @@ every mandatory persona always runs. Routing is a CEO synthesis hint.
 ## Execution checklist
 
 Work through these steps in order. Do not skip ahead. Do not emit any
-output to the PR before step 6 except the not-accepted stop in step 0.
+output to the PR before step 6. The not-accepted stop in step 0
+posts no comment.
 Every `task` spawn below is BLOCKING:
 wait for the subagent to return before continuing, and never end your
 turn while a panelist or the CEO synthesizer is still running. The turn
@@ -368,10 +369,10 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
    review. Check this PR's labels and same-repo linked issues
    (`closingIssuesReferences`, paginated). Accepted if the PR or
    any linked issue has `status/accepted`.
-   If missing: post one comment that the PR has not been accepted
-   and the advisory panel did not run; remove `panel-review` if
-   present; do not request reviewers; do not assign; do not spawn
-   panelists; stop.
+   If missing: remove `panel-review` if present; do not comment;
+   do not request reviewers; do not assign; do not spawn
+   panelists; stop. Scheduler and worker also stop and leave no
+   comment.
 1. **Read complete PR context.** Resolve invocation mode first. Then
    gather, in chronological order, all of: title, body, labels, author,
    head SHA, changed files, the full diff, issue-style comments, submitted

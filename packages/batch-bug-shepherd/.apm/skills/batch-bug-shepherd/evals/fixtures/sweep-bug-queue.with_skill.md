@@ -281,7 +281,7 @@ Drivers are dispatched in batches of three to bound nested panel fan-out.
 Each driver receives PR_NUMBER, ISSUE_NUMBER, AUTHOR, HEAD_REPO,
 HEAD_BRANCH, MAINTAINER_CAN_MODIFY, REPO_ROOT, ORIGIN, and optional
 PANEL_PRIOR reservations. Each driver owns Copilot classification,
-apm-review-panel, fold-vs-defer classification, pushes, CI watch, and
+autopilot-pr-review-panel, fold-vs-defer classification, pushes, CI watch, and
 one advisory comment. The driver files genuinely separable deferred work
 with `gh issue create --title "Defer separable follow-up from PR <n>"`;
 close-call findings are folded into the PR.
@@ -360,7 +360,7 @@ Sub-phase 5b returns: both `status: resolved`,
 `mergeStateStatus_post: CLEAN`, push command examples include
 `git push origin HEAD:fix/download-race --force-with-lease`, and each
 posts one resolution-confirmation comment. This is the second and final
-orchestrator-attributable comment per PR; the in-loop apm-review-panel
+orchestrator-attributable comment per PR; the in-loop autopilot-pr-review-panel
 comment was rewritten idempotently by the driver and does not add to the
 count.
 

@@ -380,9 +380,9 @@ receive it as input but MUST NOT trust panel-side memory.
   failure mode of a fold pass and is the reason the linter is
   mandatory before render.
 
-## Relationship to apm-review-panel
+## Relationship to autopilot-pr-review-panel
 
-`apm-review-panel` is the general OSS multi-persona review for any
+`autopilot-pr-review-panel` is the general OSS multi-persona review for any
 non-trivial PR in the repo. `apm-spec-guardian` is its narrow,
 spec-only sibling: a different persona roster, a different ship
 decision schema (shocked_meter instead of stance enum), and a

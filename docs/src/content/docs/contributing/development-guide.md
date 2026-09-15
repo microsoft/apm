@@ -53,10 +53,11 @@ No label or milestone migration is performed by the advisory workflow.
 
 PR review is the same shape: `panel-review` requests a fresh
 advisory panel. `status/accepted` (on the PR or a linked issue) is
-the human action flag -- no accepted, no review. If the request
-label is present without acceptance, the reviewing session comments,
-clears `panel-review`, and stops. The panel is advisory and does
-not gate merge.
+the human action flag -- no accepted, no review. If acceptance is
+missing, scheduler, worker, and panel stop with no comment. The
+panel or worker may clear `panel-review`; the scheduler does not
+comment or change labels. The panel is advisory and does not gate
+merge.
 
 ### Eligibility evidence and automation
 

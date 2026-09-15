@@ -9,7 +9,7 @@ description: >-
   queue, or open PRs -- the parent scheduler owns those. Spawn one
   autopilot-pr-review-worker
   subagent per PR: it classifies copilot-pull-request-reviewer[bot]
-  inline review, runs the apm-review-panel, folds (by default) every
+  inline review, runs the autopilot-pr-review-panel, folds (by default) every
   recommendation inside the PR's stated scope, pushes to the head
   branch or a superseding PR that preserves authorship via commit
   trailers, watches CI to green, and iterates under fixed caps until
@@ -25,9 +25,10 @@ The PR review scheduler never comments, labels, assigns, or
 requests reviewers.
 
 `panel-review` requests a review. `status/accepted` is the human
-action flag. No accepted, no review. If `panel-review` is present
-and `status/accepted` is missing on this PR and every linked
-issue: comment, remove `panel-review`, stop. Never assign.
+action flag. No accepted, no review. If `status/accepted` is
+missing on this PR and every linked issue: remove `panel-review`
+if present, do not comment, stop. Never assign. The scheduler
+and panel stop the same way and leave no comment.
 
 ## Activation card
 
@@ -83,7 +84,7 @@ It was extracted (genesis R3 EXTRACT) when a parent scheduler
 needed the same per-PR convergence loop.
 `autopilot-pr-review-scheduler` COMPOSES this skill for
 drive-to-merge; it does not re-implement the loop. It in turn COMPOSES the
-[apm-review-panel](../apm-review-panel/SKILL.md) skill for the review
+[autopilot-pr-review-panel](../autopilot-pr-review-panel/SKILL.md) skill for the review
 pass -- it does NOT re-implement panel review.
 
 ## Boundary (what this skill does and does NOT do)
@@ -137,11 +138,11 @@ On a probe MISS the orchestrator stops and asks the operator rather
 than re-implementing the loop inline (avoids HAND-ROLLED
 HALLUCINATION and PHANTOM DEPENDENCY).
 
-This skill itself COMPOSES [apm-review-panel](../apm-review-panel/SKILL.md).
+This skill itself COMPOSES [autopilot-pr-review-panel](../autopilot-pr-review-panel/SKILL.md).
 A consuming orchestrator inherits that transitive dependency; the
 spawned autopilot-pr-review-worker subagent PROBES for it at preflight (all
 load-bearing panel assets under
-`$REPO_ROOT/.agents/skills/apm-review-panel/`) and returns
+`$REPO_ROOT/.agents/skills/autopilot-pr-review-panel/`) and returns
 `status: blocked` ONLY on a genuine asset MISS, before any checkout
 (see the spawn body Step 0.0). Note: a missing `skill` TOOL is NOT a
 miss -- in the normal subagent context the panel is executed INLINE
@@ -156,7 +157,7 @@ body):
 1. Phase X.0 -- fetch + classify `copilot-pull-request-reviewer[bot]`
    inline review per
    [assets/copilot-classification-prompt.md](assets/copilot-classification-prompt.md).
-2. Phase X.1 -- run the `apm-review-panel` against the PR: via the
+2. Phase X.1 -- run the `autopilot-pr-review-panel` against the PR: via the
    `skill` tool if present, otherwise (the normal subagent case)
    execute it INLINE from its on-disk SKILL.md + schemas. Both paths
    produce the same single recommendation comment.

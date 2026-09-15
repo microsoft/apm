@@ -1,9 +1,9 @@
 {
-  "description": "Trigger evals for the apm-review-panel skill dispatch description. 8 should-trigger + 8 should-NOT-trigger. 60/40 train/val split (10 train, 6 val). Validation split is the ship gate.",
+  "description": "Trigger evals for the autopilot-pr-review-panel skill dispatch description. 8 should-trigger + 8 should-NOT-trigger. 60/40 train/val split (10 train, 6 val). Validation split is the ship gate.",
   "should_trigger": {
     "train": [
       "review this PR with the expert panel",
-      "run the apm-review-panel against this branch",
+      "run the autopilot-pr-review-panel against this branch",
       "do a multi-persona review of PR #1234",
       "panel-review this PR",
       "get the architecture + security + UX review on this PR"
@@ -20,7 +20,7 @@
       "what does the python architect think of this class hierarchy",
       "review this docstring",
       "fix the lint errors in src/",
-      "what is the apm-review-panel skill"
+      "what is the autopilot-pr-review-panel skill"
     ],
     "val": [
       "explain how the auth resolver works",

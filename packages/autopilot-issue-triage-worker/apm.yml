@@ -8,7 +8,7 @@ type: skill
 # Stand-alone primitive: no transitive APM deps. Persona lenses are
 # referenced by relative path (../../agents/*.agent.md) and resolved
 # against the consumer repo's installed .apm/agents/** or
-# .github/agents/** -- identical to the apm-review-panel precedent.
+# .github/agents/** -- identical to the autopilot-pr-review-panel precedent.
 dependencies:
   apm: []
   mcp: []

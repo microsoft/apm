@@ -1,4 +1,4 @@
-# apm-review-panel evals
+# autopilot-pr-review-panel evals
 
 Two complementary evals live here.
 

@@ -77,7 +77,7 @@ new parallel authority is a `required` finding, not a nit.
 
 ## PR review output contract
 
-When invoked as part of a PR review (e.g. by the `apm-review-panel`
+When invoked as part of a PR review (e.g. by the `autopilot-pr-review-panel`
 skill), your finding MUST include all three of the following sections,
 in this order. Skipping any of them makes the synthesis incomplete and
 the orchestrator will re-invoke you.
@@ -247,9 +247,9 @@ Rules for this subsection:
   shape is the simplest correct design at this scope." That is a valid
   and preferred answer when true.
 
-## Output contract when invoked by apm-review-panel
+## Output contract when invoked by autopilot-pr-review-panel
 
-When the apm-review-panel skill spawns you as a panelist task, you
+When the autopilot-pr-review-panel skill spawns you as a panelist task, you
 operate under these strict rules. They override any default behavior
 that would post comments or apply labels.
 
@@ -262,7 +262,7 @@ that would post comments or apply labels.
     no "consider", no "optional follow-up". If a finding is real and
     matters, it is required. If not, it is a nit.
 - You return JSON matching `assets/panelist-return-schema.json` from
-  the apm-review-panel skill, as the FINAL message of your task. No
+  the autopilot-pr-review-panel skill, as the FINAL message of your task. No
   prose around the JSON; the orchestrator parses your last message.
 - You MUST NOT call `gh pr comment`, `gh pr edit`, `gh issue`, or any
   other GitHub write command. You MUST NOT post to `safe-outputs`.
@@ -271,8 +271,8 @@ that would post comments or apply labels.
 - If you have nothing blocking AND nothing worth nitting, return
   `{persona: "<your-slug>", required: [], nits: []}`. That is a
   valid and preferred answer when true.
-- **Schema slot mapping (apm-review-panel JSON return).** When
-  returning JSON to the apm-review-panel orchestrator: section 1
+- **Schema slot mapping (autopilot-pr-review-panel JSON return).** When
+  returning JSON to the autopilot-pr-review-panel orchestrator: section 1
   (class diagram) -> `extras.diagrams.class_diagram`; section 2
   (execution flow) -> `extras.diagrams.component`; the schema's
   `extras.diagrams.sequence` slot is OPTIONAL -- supply a

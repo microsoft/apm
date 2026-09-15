@@ -79,9 +79,9 @@ When reviewing a command, command help text, or a workflow change, ask:
   paths.
 - Strategic naming / positioning calls escalate to the APM CEO.
 
-## Output contract when invoked by apm-review-panel
+## Output contract when invoked by autopilot-pr-review-panel
 
-When the apm-review-panel skill spawns you as a panelist task, you
+When the autopilot-pr-review-panel skill spawns you as a panelist task, you
 operate under these strict rules. They override any default behavior
 that would post comments or apply labels.
 
@@ -94,7 +94,7 @@ that would post comments or apply labels.
     no "consider", no "optional follow-up". If a finding is real and
     matters, it is required. If not, it is a nit.
 - You return JSON matching `assets/panelist-return-schema.json` from
-  the apm-review-panel skill, as the FINAL message of your task. No
+  the autopilot-pr-review-panel skill, as the FINAL message of your task. No
   prose around the JSON; the orchestrator parses your last message.
 - You MUST NOT call `gh pr comment`, `gh pr edit`, `gh issue`, or any
   other GitHub write command. You MUST NOT post to `safe-outputs`.

@@ -4,7 +4,7 @@ description: >-
   Queue microsoft/apm pull requests labelled `panel-review` (or an
   explicit named list) and fan them out through an isolated pool
   (default 2) of review sessions. Default is standalone
-  apm-review-panel (advisory). Pass composed-implementation-review
+  autopilot-pr-review-panel (advisory). Pass composed-implementation-review
   only when the caller asked to drive an existing PR. Never review
   every open PR. Works in a local session, Copilot App automation,
   Cloud Agent, Remote Agent, or Agentic Workflow. Does not triage
@@ -17,7 +17,7 @@ User-facing PR REVIEW queue. This skill SELECTS pull requests and
 THROTTLES fan-out. It does not triage issues and does not open
 greenfield PRs.
 
-Default compose [apm-review-panel](../apm-review-panel/SKILL.md)
+Default compose [autopilot-pr-review-panel](../autopilot-pr-review-panel/SKILL.md)
 one PR per slot (`INVOCATION_MODE=session-review`).
 
 Compose [autopilot-pr-review-worker](../autopilot-pr-review-worker/SKILL.md)
@@ -38,7 +38,7 @@ can apply ownership writes. This scheduler never comments,
 labels, assigns, or requests reviewers.
 
 - `unattended` -- slots never assign, never request reviewers.
-- `actor-session` -- standalone `apm-review-panel` requests `@me`
+- `actor-session` -- standalone `autopilot-pr-review-panel` requests `@me`
   as a supplemental reviewer. Never assign the PR. Skip only on
   `self-review-red-flag` (operator is the PR author). Composed
   `autopilot-pr-review-worker` never requests the implementer.
@@ -58,10 +58,11 @@ label. Re-apply it (remove + add) for a fresh review after the
 panel clears it.
 
 `status/accepted` is the human action flag (on this PR or a
-same-repo linked issue). No accepted, no review. The reviewing
-session owns that check: if `panel-review` is present and
-`status/accepted` is missing, it comments, removes `panel-review`,
-and stops. This scheduler does not comment or remove labels.
+same-repo linked issue). No accepted, no review. After building
+the `panel-review` list, drop any PR that is not accepted. Do
+not spawn it. Do not comment. Do not remove labels. The panel
+or worker, if already invoked, also stops with no comment and
+clears `panel-review`.
 
 Modes:
 
@@ -93,7 +94,7 @@ selected list; when a slot returns, fill it with the next item.
 
 ## Procedure
 
-1. Probe apm-review-panel (and worker-pull-request if composed)
+1. Probe autopilot-pr-review-panel (and worker-pull-request if composed)
    on disk. Missing sibling -> stop.
 2. Drain the selected list. Concurrent slots <= FANOUT_LIMIT.
    One PR per slot. Persist a `plan.md` table for every selected

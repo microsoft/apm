@@ -4,7 +4,7 @@ Consumed by: `assets/shepherd-driver-prompt.md`,
 `assets/fix-prompt.md`, `SKILL.md` Phase 4.
 
 The shepherd-driver subagent uses this rubric to decide, for each
-follow-up surfaced by the apm-review-panel CEO and each LEGIT
+follow-up surfaced by the autopilot-pr-review-panel CEO and each LEGIT
 Copilot inline comment, whether to FOLD it into THIS PR or DEFER it
 to a separate follow-up issue.
 

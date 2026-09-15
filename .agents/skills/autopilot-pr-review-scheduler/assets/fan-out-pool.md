@@ -18,7 +18,7 @@ is empty.
 ## Fill order (each free slot)
 
 1. Prefer a new session (Copilot App / Cloud / Remote) whose kickoff
-   runs `apm-review-panel` (standalone) or
+   runs `autopilot-pr-review-panel` (standalone) or
    `autopilot-pr-review-worker` (composed) on exactly one PR.
 2. Else spawn a sub-agent (`task`) with that skill.
 3. Else run sequentially in this session.

@@ -4,7 +4,7 @@ You are a autopilot-pr-review-worker subagent spawned by an orchestrator that
 composes the autopilot-pr-review-worker skill (autopilot-scheduler-issues or autopilot-scheduler-pull-requests). ONE PR per subagent. Your job is to drive this PR to a
 landing-ready state via an iterative convergence loop that addresses
 both `copilot-pull-request-reviewer[bot]` inline review AND
-apm-review-panel CEO follow-ups, pushing fixes as you go, watching
+autopilot-pr-review-panel CEO follow-ups, pushing fixes as you go, watching
 CI green after each push, and folding by default per the
 fold-vs-defer rubric.
 
@@ -56,7 +56,7 @@ are part of your contract:
   table parsed by the deterministic gate (Step X.2.5)
 - `owner_touch_gate.py` -- exact-revision owner detection and terminal
   evidence verification (Step X.2.5)
-- `../apm-review-panel/SKILL.md`      -- panel composition contract
+- `../autopilot-pr-review-panel/SKILL.md`      -- panel composition contract
 - `../pr-description-skill/SKILL.md`   -- superseding-PR body author (Path B)
 
 ## Loop shape
@@ -65,7 +65,7 @@ Up to FOUR outer iterations. Each iteration:
 
 ```
 X.0 fetch + classify Copilot
-X.1 invoke apm-review-panel skill
+X.1 invoke autopilot-pr-review-panel skill
 X.2 merge follow-ups, apply fold-vs-defer rubric
 X.2.5 canonical-owner gate (classify + evidence, FAIL CLOSED)
 X.3 edit code, fold foldable items
@@ -94,13 +94,13 @@ not just SKILL.md, and anchor at `$REPO_ROOT` (a relative `../` probe
 is brittle once you `cd $REPO_ROOT` in Step 0):
 
 ```
-P=$REPO_ROOT/.agents/skills/apm-review-panel
+P=$REPO_ROOT/.agents/skills/autopilot-pr-review-panel
 test -f $P/SKILL.md \
   && test -f $P/assets/panelist-return-schema.json \
   && test -f $P/assets/ceo-return-schema.json \
   && test -f $P/assets/recommendation-template.md \
-  && echo "apm-review-panel present (inline-executable)" \
-  || echo "MISSING apm-review-panel"
+  && echo "autopilot-pr-review-panel present (inline-executable)" \
+  || echo "MISSING autopilot-pr-review-panel"
 
 D=$REPO_ROOT/.agents/skills/pr-description-skill
 test -f $D/SKILL.md \
@@ -116,8 +116,8 @@ test -f $S/scripts/owner_touch_gate.py \
   || echo "MISSING shepherd owner-evidence gate"
 ```
 
-On an apm-review-panel MISS, return immediately with `status: blocked`
-and `blocker: "apm-review-panel assets not reachable; cannot
+On an autopilot-pr-review-panel MISS, return immediately with `status: blocked`
+and `blocker: "autopilot-pr-review-panel assets not reachable; cannot
 shepherd."`. Do NOT check out the PR or freelance panel review. A PASS
 here means the panel is INLINE-EXECUTABLE regardless of whether the
 `skill` tool is later available (see Step X.1.1) -- you have its
@@ -142,11 +142,10 @@ action flag. No accepted, no review. Check this PR's labels and
 same-repo linked issues (`closingIssuesReferences`, paginated).
 Accepted if the PR or any linked issue has `status/accepted`.
 
-If missing and `write: on`: post one comment that the PR has not
-been accepted and no review was performed; remove `panel-review`
-if present; do not request reviewers; do not assign; do not
+If missing: remove `panel-review` if present and `write: on`;
+do not comment; do not request reviewers; do not assign; do not
 checkout; return `status: blocked`. If `write: off`, stop without
-GitHub writes.
+GitHub writes. Scheduler and panel also stop with no comment.
 
 Read complete PR conversation (issue comments, reviews, inline
 threads, linked issue comments) before any later fold work.
@@ -181,7 +180,7 @@ rationale. Append to your `copilot_findings` array.
 If Copilot has produced zero comments after 2 fetch rounds across
 this run, mark `copilot_drained: true` and skip future fetches.
 
-### Step X.1 -- run apm-review-panel
+### Step X.1 -- run autopilot-pr-review-panel
 
 0. RESERVATIONS PREFLIGHT (first iteration only). If
    `PANEL_PRIOR.reservations` is a non-empty array, treat each entry
@@ -199,7 +198,7 @@ this run, mark `copilot_drained: true` and skip future fetches.
    FIRST-CLASS, not an emergency fallback:
 
    a. FAST-PATH (if the `skill` tool is present in YOUR context):
-      invoke the `apm-review-panel` skill by name, passing
+      invoke the `autopilot-pr-review-panel` skill by name, passing
       `INVOCATION_MODE=composed-implementation-review` and the
       complete PR conversation snapshot, and let it run.
 
@@ -209,7 +208,7 @@ this run, mark `copilot_drained: true` and skip future fetches.
       propagate the `skill` tool. The `skill` one-liner being
       unavailable is EXPECTED here -- it is NOT an error and NOT a
       reason to block. In that case YOU act as the panel orchestrator:
-      load `$REPO_ROOT/.agents/skills/apm-review-panel/SKILL.md` as the
+      load `$REPO_ROOT/.agents/skills/autopilot-pr-review-panel/SKILL.md` as the
       authoritative contract and EXECUTE its published fan-out yourself
       via `task` in mode `composed-implementation-review` -- gather the
       complete PR conversation first, spawn each mandatory persona,
@@ -515,7 +514,7 @@ On cap hit: `status: blocked` with failing job + log excerpt in
   remaining followups are tagged DEFER with valid scope-boundary
   notes.
 
-In this case: re-run the apm-review-panel ONE LAST TIME so the
+In this case: re-run the autopilot-pr-review-panel ONE LAST TIME so the
 visible comment reflects the converged state. That final run posts its
 own recommendation comment to the PR (per the Step X.1 WRITE BOUNDARY:
 the panel always posts its result via `gh`). Move to "Finalize" below.
@@ -525,7 +524,7 @@ the panel always posts its result via `gh`). Move to "Finalize" below.
 - Iteration cap (4) is hit, AND
 - Foldable items remain unresolved.
 
-In this case: re-run the apm-review-panel one last time so its final
+In this case: re-run the autopilot-pr-review-panel one last time so its final
 recommendation comment reflects the converged (capped) state, carrying
 the unfolded items and their deferral rationale in that comment's
 "Deferred" list (see "Finalize" below). The panel posts this final
@@ -729,7 +728,7 @@ compatible because they do not require architecture evidence.
   in the return and the orchestrator strips it.
 - Never apply verdict labels (no panel-approved / panel-rejected).
 - Never auto-merge.
-- Never re-implement apm-review-panel internals. EXECUTING the panel's
+- Never re-implement autopilot-pr-review-panel internals. EXECUTING the panel's
   own published SKILL.md + schemas verbatim (the Step X.1.1 inline path)
   is NOT re-implementing -- it is running the panel as authored.
   Re-implementing means inventing a substitute review (your own persona

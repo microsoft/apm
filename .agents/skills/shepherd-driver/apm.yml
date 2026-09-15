@@ -5,7 +5,7 @@ author: Microsoft
 license: MIT
 type: skill
 
-# Composes the apm-review-panel skill as its per-PR review primitive,
+# Composes the autopilot-pr-review-panel skill as its per-PR review primitive,
 # and pr-description-skill to author the body of any superseding PR it
 # opens (Path B).
 #
@@ -13,7 +13,7 @@ type: skill
 #  - Belt: the manifest deps below declare the edges so the resolver
 #    deploys both alongside this driver. The local-path keys resolve
 #    relative to THIS package's directory (apm-usage dependencies.md
-#    anchor rule), hence `../apm-review-panel` and
+#    anchor rule), hence `../autopilot-pr-review-panel` and
 #    `../pr-description-skill`.
 #  - Suspenders: the runtime activate-by-name probe in
 #    `assets/shepherd-driver-prompt.md` loads each at use time even if
