@@ -16,3 +16,5 @@ Activate **autopilot-pr-review-scheduler**. Targets: **${input:targets}**
 3. Never share slots with issue-triage, issue-delivery, or PR-triage.
 4. Default `INVOCATION_MODE=session-review`. Use
    `composed-implementation-review` only if the caller asked.
+5. Never comment, label, assign, or request reviewers. Slots own
+   those writes.

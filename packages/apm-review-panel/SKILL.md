@@ -139,6 +139,11 @@ unchanged, and continue the advisory. Do not stop.
 
 This skill never assigns issues or PRs in any mode.
 
+This skill owns the actor-session `@me` reviewer request
+(`gh pr edit --add-reviewer @me`) and the one recommendation
+comment. The PR review scheduler never comments, labels, assigns,
+or requests reviewers.
+
 ## Agent roster
 
 | Agent | Role | Always active? |

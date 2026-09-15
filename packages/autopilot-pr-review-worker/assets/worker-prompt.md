@@ -37,6 +37,12 @@ whole convergence.
   never assigns and never requests the implementer as a reviewer.
   Unattended parents must not request a reviewer either.
 
+Before any PR read or GitHub write, emit the activation card from
+this skill's SKILL.md (`write` defaults to `on`). `write: off`
+returns the filled template only: do not comment, label, push, or
+request reviewers. The scheduler never comments, labels, assigns,
+or requests reviewers.
+
 ## Loaded specs
 
 Read these BEFORE starting the loop. They are not advisory -- they

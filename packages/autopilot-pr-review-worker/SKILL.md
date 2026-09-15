@@ -1,5 +1,6 @@
 ---
 name: autopilot-pr-review-worker
+activation_card: on
 description: >-
   Use only as the composed drive-to-merge stage of
   autopilot-pr-review-scheduler when the caller asked to
@@ -18,6 +19,56 @@ description: >-
 ---
 
 # autopilot-pr-review-worker - per-PR drive-to-merge convergence loop
+
+Writes are optional via the activation card (`write: on` default).
+The PR review scheduler never comments, labels, assigns, or
+requests reviewers.
+
+## Activation card
+
+`activation_card: on`. Before any PR read or GitHub write, emit
+this Enter card with every field filled. Missing field -> stop.
+Do not load Autogenesis path modules from this card.
+
+```text
+skill: autopilot-pr-review-worker
+skill_path: <resolved directory of this SKILL.md>
+mode: run
+subject: microsoft/apm#<pr-number>
+path: review
+intent: drive one already-selected PR
+origin: unattended | actor-session
+write: on | off
+repo: microsoft/apm
+pr: <positive integer>
+invocation: agentic-workflow | actor-session
+invocation_mode: composed-implementation-review
+```
+
+Rules:
+
+- `write` defaults to `on` when the caller omitted it.
+- `write: off` returns the filled template only. Do not comment,
+  add labels, remove labels, push, or request reviewers.
+- If `write: on`, apply the advisory writes yourself (one
+  comment) and fold/push inside the PR's stated scope. Never
+  assign. Never request the implementer as a reviewer.
+- `origin` fail-closed unknown -> `unattended`.
+- Unattended never assigns and never requests reviewers.
+- One PR. Do not nest a scheduler path.
+
+After the loop, emit this Exit receipt:
+
+```text
+skill: autopilot-pr-review-worker
+subject: microsoft/apm#<pr-number>
+path: review
+write: on | off
+posted: yes | no
+pushed: yes | no
+reviewer_requested: no
+approved: n/a
+```
 
 This SKILL.md is the natural-language module derived from a genesis
 design packet; refactors re-run the genesis skill from that packet.

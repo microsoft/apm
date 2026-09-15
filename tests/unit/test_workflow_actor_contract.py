@@ -54,6 +54,7 @@ ALIAS_WORKER_ISSUE = (
     ROOT / "packages/autopilot-worker-issue/.apm/skills/autopilot-worker-issue/SKILL.md"
 )
 WORKER_PR = ROOT / "packages/autopilot-pr-review-worker/assets/worker-prompt.md"
+WORKER_PR_SKILL = ROOT / "packages/autopilot-pr-review-worker/SKILL.md"
 ALIAS_AUTOPILOT = ROOT / "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/SKILL.md"
 ALIAS_SHEPHERD = ROOT / "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/SKILL.md"
 ALIAS_DRIVER = ROOT / "packages/shepherd-driver/SKILL.md"
@@ -81,6 +82,8 @@ def test_review_panel_declares_origin_intent_contract() -> None:
     assert "Do not infer COMPOSED from parent skill names." in skill
     assert "Else ORIGIN=`unattended` (fail closed: no ownership writes)." in skill
     assert "This skill never assigns issues or PRs in any mode." in skill
+    assert "This skill owns the actor-session `@me` reviewer request" in skill
+    assert "The PR review scheduler never comments" in skill
     assert "Request authenticated `@me` as a supplemental reviewer only" in skill
     assert "self-review-red-flag" in skill
     assert "CODEOWNERS is paramount" in skill
@@ -167,6 +170,14 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "composed-implementation-review" in driver
     assert "never requests the implementer as a reviewer" in driver
     assert "Never request the implementer as a reviewer" in driver
+    assert "emit the activation card" in driver
+    pr_worker = _ascii(WORKER_PR_SKILL)
+    assert "activation_card: on" in pr_worker
+    assert "write: on | off" in pr_worker
+    assert "`write` defaults to `on`" in pr_worker
+    assert "`write: off` returns the filled template only" in pr_worker
+    assert "If `write: on`, apply the advisory writes yourself" in pr_worker
+    assert "The PR review scheduler never comments" in pr_worker
 
 
 def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
@@ -188,9 +199,9 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "when a slot returns, fill it with the next item" in triage
     assert "No assignment needed" in triage
     assert "assign the implementing user" in delivery
-    assert "must request `@me` as a supplemental reviewer" in review
-    assert "request the reviewing user as reviewer, never assignee" in review
-    assert "Do not assign issues or PRs." in review
+    assert "the reviewing session requests the reviewing user as reviewer" in review
+    assert "Do not comment, label, close, assign, or request reviewers" in review
+    assert "Reviewing sessions own those writes" in review
     assert "Never borrow slots from `autopilot-issue-delivery-scheduler`" in triage
     assert "Never borrow slots from `autopilot-issue-triage-scheduler`" in delivery
     assert "Never borrow slots from `autopilot-issue-triage-scheduler`" in review

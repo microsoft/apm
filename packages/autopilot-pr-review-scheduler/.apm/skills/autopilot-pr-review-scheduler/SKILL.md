@@ -31,24 +31,22 @@ Never borrow slots from `autopilot-issue-triage-scheduler`,
 Works in local sessions, Copilot App automations, Cloud Agent,
 Remote Agent, and Agentic Workflows.
 
-Resolve ORIGIN before any GitHub write:
+Resolve ORIGIN before spawning slots so each reviewing session
+can apply ownership writes. This scheduler never comments,
+labels, assigns, or requests reviewers.
 
-- `unattended` -- never assign, never request reviewers.
-- `actor-session` -- standalone review must request `@me` as a
-  supplemental reviewer (`gh pr edit --add-reviewer @me`) and
-  verify. That request is the public signal of which user is
-  running the review. Never assign the PR. Skip only on
+- `unattended` -- slots never assign, never request reviewers.
+- `actor-session` -- standalone `apm-review-panel` requests `@me`
+  as a supplemental reviewer. Never assign the PR. Skip only on
   `self-review-red-flag` (operator is the PR author). Composed
-  review never requests the implementer.
-
-This scheduler itself never assigns issues or PRs and never
-writes human decision labels.
+  `autopilot-pr-review-worker` never requests the implementer.
 
 Ownership writes:
 
 - Issue triage: none (no assignment needed)
 - Code (accepted implementation): assign the implementing user
-- PR review: request the reviewing user as reviewer, never assignee
+- PR review: the reviewing session requests the reviewing user as
+  reviewer, never assignee. Scheduler does not perform that write.
 
 ## Selection
 
@@ -81,9 +79,8 @@ selected list; when a slot returns, fill it with the next item.
 
 - Do not share this pool.
 - Do not dispatch the same PR to two slots.
-- Do not assign issues or PRs.
-- Do not skip the `@me` reviewer request on actor-session
-  standalone review except `self-review-red-flag`.
+- Do not comment, label, close, assign, or request reviewers.
+  Reviewing sessions own those writes.
 - Do not open issues or greenfield PRs.
 - Do not contradict CODEOWNERS.
 - ASCII only.
