@@ -95,6 +95,9 @@ class TestGitCacheGetCheckout:
         checkout_dir = tmp_path / "git" / "checkouts_v1" / real_shard / sha / "full"
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
+        (checkout_dir / ".git" / "config").write_text(
+            "[core]\n\tautocrlf = false\n", encoding="ascii"
+        )
 
         # Mock git rev-parse HEAD to return the expected SHA
         mock_run.return_value = MagicMock(
@@ -325,6 +328,7 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
+        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
 
         with (
             patch("subprocess.run") as mock_run,

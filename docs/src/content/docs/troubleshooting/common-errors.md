@@ -85,7 +85,7 @@ indicate a supply-chain attack. Use 'apm install --update' to accept
 new content and update the lockfile.
 ```
 
-Cause: the bytes APM downloaded for a locked dependency do not match the `content_hash` recorded in `apm.lock.yaml`. Usually a force-pushed tag, a mutated branch, or a tampered mirror.
+Cause: the bytes APM downloaded for a locked dependency do not match the `content_hash` recorded in `apm.lock.yaml`. Usually a force-pushed tag, a mutated branch, or a tampered mirror. A Windows host with Git's default `core.autocrlf=true` used to record CRLF hashes for git-subpath packages; current APM pins `core.autocrlf=false` on GitCache checkouts and rematerializes older unpinned shards, so that host setting is not a mismatch cause.
 
 Fix: investigate the upstream package before accepting. If the change is legitimate, run `apm install --update` to re-pin and commit the new hash.
 

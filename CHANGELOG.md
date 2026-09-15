@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Git-subpath `GitCache` checkouts pin `core.autocrlf=false` so a Windows host with the Git for Windows default produces the same package `content_hash` as Linux/macOS for LF-committed content; older unpinned cache shards rematerialize on the next install. (closes #2971)
 - GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2938)
 
 ## [0.30.0] - 2026-09-07
