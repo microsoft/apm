@@ -250,18 +250,7 @@ class GitCache:
                     return self._record_checkout_access(
                         self._finalize_sparse_checkout(url, checkout_dir, sparse_paths, env=env)
                     )
-            if sha_ok:
-                _log.info(
-                    "[*] Rematerializing git checkout missing core.autocrlf=false pin: "
-                    "%s @ %s [%s]",
-                    _sanitize_url(url),
-                    sha[:12],
-                    variant,
-                )
-                # Leave the SHA-valid tree in place until ``_create_checkout``
-                # holds ``shard_lock``. A concurrent consumer may still be
-                # reading it; the locked re-probe evicts and rebuilds.
-            else:
+            elif not sha_ok:
                 # Integrity failure -- evict
                 _log.warning(
                     "[!] Evicting corrupt cache entry: %s @ %s [%s]",
@@ -270,6 +259,9 @@ class GitCache:
                     variant,
                 )
                 self._evict_checkout(checkout_dir)
+            # SHA-valid unpinned trees stay until ``_create_checkout`` holds
+            # ``shard_lock`` and emits the rematerialize log. A concurrent
+            # consumer may still be reading the old checkout.
 
         # Cache miss: ensure we have the bare repo, then create checkout.
         # Sparse callers use a partial bare (blob:none) + promisor consumer
