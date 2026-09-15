@@ -156,7 +156,7 @@ Cursor.
 - **Deploy directory.** `.cursor/`.
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
-  - instructions: `.cursor/rules/<name>.mdc`
+  - instructions: `.cursor/rules/<name>.mdc`; a single universal `**` glob emits `alwaysApply: true`, scoped patterns emit `globs:`, and absent or empty `applyTo` emits neither key
   - agents: `.cursor/agents/<name>.md`
   - commands: `.cursor/commands/<name>.md`
   - skills: `.agents/skills/<name>/SKILL.md` (project) or

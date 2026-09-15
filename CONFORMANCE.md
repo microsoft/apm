@@ -29,7 +29,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | Class | Active | Skipped | Xfail | Unbound |
 |-------|-------:|--------:|------:|--------:|
 | Producer | 12 | 0 | 0 | 0 |
-| Consumer | 90 | 1 | 0 | 0 |
+| Consumer | 91 | 1 | 0 | 0 |
 | Registry | 1 | 0 | 0 | 0 |
 | Governance | 18 | 0 | 0 | 0 |
 
@@ -159,6 +159,7 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 | [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 1 | - |
 | [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 7 | - |
 | [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 1 | - |
+| [req-tg-015](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-015) | MUST | 8.5.9 | consumer | active | 1 | - |
 
 ## Waivers
 
