@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Autopilot issue and PR triage workers own the advisory comment and processing labels, including when summoned without a scheduler. Schedulers only select work and fan out slots.
 - Autopilot `FANOUT_LIMIT` is concurrent slots, not queue length. Schedulers persist the full helper-selected list and refill a slot when it returns.
 - Autopilot queues are `autopilot-issue-triage-scheduler`, `autopilot-issue-delivery-scheduler`, `autopilot-pr-triage-scheduler`, and `autopilot-pr-review-scheduler` (isolated pool default 2). Workers are `autopilot-issue-triage-worker`, `autopilot-issue-delivery-worker`, `autopilot-pr-triage-worker`, and `autopilot-pr-review-worker`. Issue triage advice is the renamed `autopilot-issue-triage-worker` (formerly `apm-triage-panel`). Schedulers own queue selection (`fetch_queue.py` then `triage_state.py`) and fan-out; if spawn is unavailable they run the worker in-thread, one item at a time. PR triage classifies community PRs (with or without a linked issue) and never merges, assigns, or requests reviewers. PR review remains advisory `apm-review-panel` unless the caller asked for composed drive-to-merge. Issue delivery queues on `status/accepted` or a named bounded accept, then re-checks `scripts/governance/eligibility.cjs` and requires fresh responsible-human confirmation; unattended ORIGIN never implements. Actor-session assignment is a hard gate for implementation only. Triage request trigger is only `triage/requested`; `status/needs-triage` stays human state.
 - **BREAKING:** Non-dry-run `apm install` now exits `1` when Agent Plugins v1 target exclusion leaves no package deployed; mixed installs that deploy another package still succeed. Install a direct skill subpath (`apm install kunchenguid/lavish-axi/skills/lavish#main --target codex`) or select `--target copilot` for native registration. (closes #2796) (#2806)
@@ -33,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Issue-triage sweep no longer classifies real GitHub bug forms as spam: heading/list line matches no longer swallow the rest of the body after markup strip.
 - GitLab `path:` dependencies now preserve the selected SSH transport, username, and port instead of silently using HTTPS; REST fallback requires an executed same-origin HTTPS attempt admitted by the transport policy. (#2938)
 
 ## [0.30.0] - 2026-09-07

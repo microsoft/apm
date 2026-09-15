@@ -220,7 +220,10 @@ If the worker fails or emits a legacy decision payload, log the issue
 number and reason; do not post partial advice or mark it reviewed. Continue
 with the other selected issues. A failed run is not a human decision.
 
-## Step 3: Emit advisory outputs only
+## Step 3: Worker emits advisory outputs (not the scheduler)
+
+The in-thread worker owns comments and processing labels. Queue
+selection in Step 1 must not emit `add-comment` or `add-labels`.
 
 Re-read each issue's state and labels before emission. Skip if it is now
 closed, locked, or ineligible. Preserve human edits, including all status

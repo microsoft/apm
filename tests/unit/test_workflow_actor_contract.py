@@ -108,6 +108,9 @@ def test_triage_never_assigns_and_requires_full_comment_history() -> None:
     """Triage stays advisory for every invocation, including retriage."""
     skill = _ascii(TRIAGE_SKILL)
     assert "No assignment needed." in skill
+    assert "This worker owns advisory writes even when summoned without a" in skill
+    assert "Apply the advisory writes yourself" in skill
+    assert "The scheduler never comments" in skill
     assert "No ORIGIN or INTENT assigns contributors" in skill
     assert "Cloud Agent" in skill
     assert "Remote Agent" in skill
@@ -120,6 +123,7 @@ def test_triage_never_assigns_and_requires_full_comment_history() -> None:
     assert '"kind": "apm-triage-advisory"' in template
     workflow = _ascii(TRIAGE_WORKFLOW)
     assert "Invocation mode is `agentic-workflow` (ORIGIN=`unattended`)" in workflow
+    assert "Worker emits advisory outputs (not the scheduler)" in workflow
     assert "Never assign contributors" in workflow
     assert "scripts/fetch_queue.py" in workflow
     assert "paginate its complete comment history" in workflow
@@ -166,6 +170,8 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     triage = _ascii(SCHEDULER_TRIAGE)
     delivery = _ascii(SCHEDULER_CODE)
     review = _ascii(SCHEDULER_PR_REVIEW)
+    assert "Do not comment, label, close, or assign" in triage
+    assert "Workers own those writes" in triage
     assert "FANOUT_LIMIT=2" in triage
     assert "FANOUT_LIMIT=2" in delivery
     assert "FANOUT_LIMIT=2" in review
@@ -263,6 +269,8 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     )
     pr_triage = _ascii(SCHEDULER_PR_TRIAGE)
     assert "FANOUT_LIMIT=2" in pr_triage
+    assert "Do not comment, label, close, merge, or assign" in pr_triage
+    assert "Workers own those writes" in pr_triage
     assert "concurrency, not queue length" in pr_triage
     assert "Do not truncate the table to FANOUT_LIMIT" in pr_triage
     assert "No assignment needed" in pr_triage

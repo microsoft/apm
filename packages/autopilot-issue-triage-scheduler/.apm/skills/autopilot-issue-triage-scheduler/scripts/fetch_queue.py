@@ -29,10 +29,11 @@ SWEEP_CAP = 10
 URL_RE = re.compile(r"https?://\S+", re.ASCII)
 IDENTICAL_RUN_RE = re.compile(r"(.)\1{49}")
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-MARKUP_RE = re.compile(
-    r"```.*?```|`[^`]+`|!\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\([^)]*\)|^[#>*].*$",
-    re.DOTALL | re.MULTILINE,
+FENCE_MARKUP_RE = re.compile(
+    r"```.*?```|`[^`]+`|!\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\([^)]*\)",
+    re.DOTALL,
 )
+LINE_MARKUP_RE = re.compile(r"^[#>*].*$", re.MULTILINE)
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s.*$", re.MULTILINE)
 BOLD_HEADING_RE = re.compile(r"^\s*\*\*[^*]+\*\*\s*$", re.MULTILINE)
 PLACEHOLDER_RE = re.compile(
@@ -55,7 +56,8 @@ def _alnum_count(text: str) -> int:
 def strip_markup(body: str) -> str:
     """Remove comments, fences, links, and heading markers for body heuristics."""
     text = HTML_COMMENT_RE.sub(" ", body)
-    text = MARKUP_RE.sub(" ", text)
+    text = FENCE_MARKUP_RE.sub(" ", text)
+    text = LINE_MARKUP_RE.sub(" ", text)
     return text
 
 

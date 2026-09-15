@@ -75,7 +75,9 @@ pass `--records-json` and `--labels-json`. A helper failure stops
 the run.
 
 Do not merge. Do not push. Do not fill issue-triage, delivery, or
-PR-review slots from this pool.
+PR-review slots from this pool. Do not comment on PRs. Do not add
+or remove labels. `add_labels` from `triage_state.py` is a plan
+for the worker, not a scheduler write.
 
 ## Fan-out
 
@@ -104,6 +106,8 @@ selected list; when a slot returns, fill it with the next item.
 
 - Do not share this pool.
 - Do not dispatch the same PR to two slots.
+- Do not comment, label, close, merge, or assign. Workers own those
+  writes even when summoned without this scheduler.
 - Do not run `apm-review-panel` or `autopilot-pr-review-worker`.
 - Do not contradict CODEOWNERS.
 - ASCII only.

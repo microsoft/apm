@@ -21,6 +21,9 @@ before reasoning. Do not invent a second marker.
 No assignment needed. Never request reviewers. Unattended and
 actor-session are equally read-only for ownership.
 
+This worker owns those writes even when summoned without a
+scheduler. The scheduler must not comment or label.
+
 Allowed writes: one advisory comment plus processing / optional
 classification labels from the contract. Never write human
 decision labels (`status/accepted`, `status/needs-design`,

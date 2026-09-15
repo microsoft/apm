@@ -88,6 +88,33 @@ def test_sweep_skips_spam_and_draft_but_explicit_keeps_them() -> None:
     assert FETCH["skip_reason"](short, "dispatch") is None
 
 
+BUG_FORM_BODY = """## Describe the bug
+
+A marketplace plugin whose directory ships `skills/name/SKILL.md`
+and a root `.mcp.json` never registers those servers.
+
+### Steps to reproduce
+
+1. Place the plugin in the marketplace cache.
+2. Run `apm install` without `.claude-plugin/plugin.json`.
+
+```yaml
+mcpServers:
+  demo: {}
+```
+
+Expected: servers appear in the lockfile. Actual: they are dropped.
+"""
+
+
+def test_markdown_bug_form_is_not_sweep_spam() -> None:
+    """Headings, lists, and fences must not wipe reporter prose."""
+    record = FETCH["normalize_record"](_raw(2992, body=BUG_FORM_BODY), "issue")
+    assert FETCH["_alnum_count"](FETCH["strip_markup"](BUG_FORM_BODY)) >= 20
+    assert FETCH["is_spam_shaped"](BUG_FORM_BODY) is False
+    assert FETCH["skip_reason"](record, "sweep") is None
+
+
 def test_identical_run_and_repeated_token_count_as_spam() -> None:
     """Published spam heuristics are encoded, not left to the model."""
     run = FETCH["normalize_record"](_raw(1, body="a" * 50 + " more text here for length"), "issue")

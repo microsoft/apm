@@ -26,6 +26,11 @@ gh-aw, GitHub Actions, future scheduled runs) and actor-session
 runners (direct user harness, Copilot App, Cloud Agent, Remote Agent)
 are equally read-only for ownership.
 
+This worker owns advisory writes even when summoned without a
+scheduler: one comment plus `triage/recommended` and optional
+classification from the contract allowlist. Never write human
+decision labels. The scheduler must not comment or label.
+
 The panel is fixed at **2 mandatory specialist lenses + up to 3
 conditional lenses + 1 always-active arbiter = 6 persona sections in
 one triage comment**. You play each
@@ -322,11 +327,18 @@ any output before the final step.
    the template, all six persona `<details>` sections, and the closing
    `triage-recommendation` JSON block. If any element is missing, re-render
    from the template instead of posting a hand-composed substitute.
-9. Return the filled template and its structured `triage-recommendation`
-   JSON tail to the caller. The workflow alone posts it via its
-   safe-output channel; direct callers receive advice without writes.
-   Never post from inside the skill or authorize implementation. This is the ONLY
-   output emission for the entire panel run -- no per-persona
+9. Apply the advisory writes yourself. The scheduler never comments
+   or labels. A worker summoned without a scheduler still writes.
+   No-op when target plus conversation watermark already match.
+   Post exactly one template comment (`gh issue comment` in
+   actor-session / Copilot App / Cloud / Remote; Agentic Workflow
+   `safe-outputs.add-comment`). Add `triage/recommended` plus useful
+   classification from the contract allowlist (`gh issue edit
+   --add-label` or `safe-outputs.add-labels`). Never write human
+   decision labels. Remove only `triage/requested` after successful
+   advice. Also return the filled template and `triage-recommendation`
+   JSON to the caller. Never authorize implementation. This is the
+   ONLY output emission for the entire panel run -- no per-persona
    comments, no progress comments.
 
 ### Persona pass procedure
