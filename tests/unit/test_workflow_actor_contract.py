@@ -124,6 +124,12 @@ def test_triage_never_assigns_and_requires_full_comment_history() -> None:
     assert "scripts/fetch_queue.py" in workflow
     assert "paginate its complete comment history" in workflow
     assert "unchanged context is a no-op" in workflow
+    assert "`triage/requested` is the only request trigger" in workflow
+    assert "legacy event alias" not in workflow
+    assert "legacy `status/needs-triage` event also works" not in workflow
+    triage_sched = _ascii(SCHEDULER_TRIAGE)
+    assert "legacy event alias" not in triage_sched
+    assert "is the only request trigger" in triage_sched
 
 
 def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
@@ -141,6 +147,14 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "gh pr edit --add-assignee @me" in worker
     assert "Do not request that actor as a reviewer" in worker
     assert "autopilot-pr-review-scheduler" in worker
+    assert "node scripts/governance/eligibility.cjs --help" in worker
+    assert "--repo microsoft/apm --issue N --approval-url URL" in worker
+    assert "authorizes_implementation: false" in worker
+    assert "deleted withdrawals" in worker
+    assert "ORIGIN `unattended` never claims to have obtained it" in worker
+    delivery = _ascii(SCHEDULER_CODE)
+    assert "Workers re-check `scripts/governance/eligibility.cjs`" in delivery
+    assert "ORIGIN `unattended` never implements" in delivery
     driver = _ascii(WORKER_PR)
     assert "composed-implementation-review" in driver
     assert "never requests the implementer as a reviewer" in driver

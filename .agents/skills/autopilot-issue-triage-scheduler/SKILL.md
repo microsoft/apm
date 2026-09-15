@@ -48,9 +48,9 @@ second filter. The worker does not list the queue.
 Modes (match `.github/workflows/triage-panel.md`):
 
 - Named list or one issue number: explicit request (`dispatch` /
-  `label-event`). `triage/requested` is the canonical request.
-  `status/needs-triage` is a legacy event alias; it remains human
-  decision state and is not consumed.
+  `label-event`). `triage/requested` is the only request trigger.
+  `status/needs-triage` is human decision state, not an event, and
+  is not consumed.
 - `queue-all` / no names: daily-style sweep.
 
 `fetch_queue.py` owns list + eligibility (closed, locked, bot,

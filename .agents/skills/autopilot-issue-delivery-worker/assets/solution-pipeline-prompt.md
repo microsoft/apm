@@ -20,6 +20,16 @@ parallelizing the work within an issue.
 - ISSUE_WORKTREE: <required; your worktree, on ISSUE_BRANCH at HEAD>
 - ISSUE_BRANCH: <required; the branch the orchestrator created>
 - REPO_ROOT, ORIGIN: <for provisioning task worktrees and pushing>
+- TRUSTED_GOVERNANCE_ROOT, APPROVAL_URL: <trusted default-branch
+  probe; never ISSUE_WORKTREE>
+
+## Current human-scope gate
+
+Follow the parent worker SKILL gate before each mutating wave
+and before acceptance-close writes. Probe
+`scripts/governance/eligibility.cjs` from
+`TRUSTED_GOVERNANCE_ROOT`. Never reuse a previous receipt as
+permission. ORIGIN `unattended` returns `blocked`.
 
 ## Reload discipline
 

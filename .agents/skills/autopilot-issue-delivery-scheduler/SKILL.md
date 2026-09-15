@@ -62,12 +62,16 @@ is not eligible unless the caller named a bounded accept.
 Build the queue from the caller list or `gh issue list` on
 `status/accepted` (selector `bugs`: also require `type/bug`).
 
-An issue is eligible only if it already carries `status/accepted`
-or the caller named it as a bounded accept.
-`triage/recommended` and legacy `status/triaged` are advisory
-processing markers and are not authorization. Do not
-dispatch an unaccepted issue. Do not run triage-panel to create
-any marker. Do not write `status/accepted`.
+An issue is eligible for the queue only if it already carries
+`status/accepted` or the caller named it as a bounded accept.
+That membership is a communication signal, not implementation
+permission. `triage/recommended` and legacy `status/triaged`
+are advisory processing markers and are not authorization.
+Workers re-check `scripts/governance/eligibility.cjs` from the
+trusted default branch and require fresh responsible-human
+confirmation before any mutate. ORIGIN `unattended` never
+implements. Do not dispatch an unaccepted issue. Do not run
+triage-panel to create any marker. Do not write `status/accepted`.
 
 Skip locked, closed, and bot-authored issues unless the caller
 named them. Deduplicate by number.

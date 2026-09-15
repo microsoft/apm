@@ -120,6 +120,12 @@ def test_docs_workflow_never_treats_a_label_as_companion_approval() -> None:
         assert "create_pull_request" not in config
 
 
+DELIVERY = (
+    ROOT
+    / "packages/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
+)
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -127,8 +133,9 @@ def test_docs_workflow_never_treats_a_label_as_companion_approval() -> None:
         DOCS / "SKILL.md",
         AUTOPILOT / "SKILL.md",
         ROOT / ".github/workflows/daily-doc-updater.md",
+        DELIVERY / "SKILL.md",
     ],
-    ids=["bug-shepherd", "docs-sync", "issue-autopilot", "daily-docs"],
+    ids=["bug-shepherd", "docs-sync", "issue-autopilot", "daily-docs", "issue-delivery"],
 )
 def test_consumers_probe_shared_trusted_owner_and_require_fresh_human(path: Path) -> None:
     """No consumer gets a second authority implementation or a machine grant."""

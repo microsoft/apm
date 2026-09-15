@@ -146,9 +146,9 @@ Do not fall back to a human status or automatically create any label.
 Choose one mode:
 
 - `issues` event: request for a fresh advisory on
-  `#${{ github.event.issue.number }}`. `triage/requested` is the canonical
-  request. `status/needs-triage` is a temporary legacy event alias; it
-  remains human decision state and is not consumed.
+  `#${{ github.event.issue.number }}`. `triage/requested` is the only
+  request trigger. `status/needs-triage` is human decision state, not
+  an event, and is not consumed.
 - `workflow_dispatch` with non-empty `${{ inputs.issue_number }}`:
   validate a positive integer and read that single issue for fresh advice.
   Invalid input stops with a run-log error and no writes.
@@ -253,8 +253,7 @@ item or override governance.
    > Automated advice only. Labels and silence are not approval.
    > A responsible human maintainer decides scope, priority, invitations,
    > review capacity, and release targeting. Existing human edits remain.
-   > To request fresh advice, use manual dispatch or `triage/requested`
-   > once provisioned; the legacy `status/needs-triage` event also works.
+   > To request fresh advice, use `triage/requested` or manual dispatch.
 
 2. Through `safe-outputs.add-labels`, add the active processing marker
    and useful proposed classification labels ONLY when present in both

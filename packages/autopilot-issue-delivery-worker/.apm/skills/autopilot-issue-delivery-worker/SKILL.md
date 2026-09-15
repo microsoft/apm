@@ -2,8 +2,10 @@
 name: autopilot-issue-delivery-worker
 description: >-
   Use this skill to implement ONE microsoft/apm issue already
-  selected by autopilot-issue-delivery-scheduler. Requires `status/accepted`
-  or a maintainer-approved bounded accept. May reproduce a bug,
+  selected by autopilot-issue-delivery-scheduler. Queue signal is
+  `status/accepted` or a named bounded accept; that is not
+  permission. Requires fresh human-scope evidence from
+  scripts/governance before any mutate. May reproduce a bug,
   implement the accepted change, and open a fix PR. Not a queue
   manager and not a triage scheduler. Works in the scheduler's
   session, a child session, Cloud Agent, Remote Agent, or Agentic
@@ -61,12 +63,34 @@ Do not implement if explicit human approval or review capacity is missing.
 ## Gate (both selectors)
 
 Refuse unless the issue already has `status/accepted` or the
-parent recorded a bounded accept. `triage/recommended` and
-`status/triaged` are not authorization. Escalate; do not
-implement.
+parent recorded a bounded accept. That is the queue signal,
+not permission. `triage/recommended` and `status/triaged` are
+not authorization. Escalate; do not implement.
 
 Selector `bugs` also requires `type/bug`. Selector `all` accepts
 any type.
+
+Then re-check human-scope evidence. Do not create another
+parser or roster; `authority.cjs` alone interprets the record.
+From `TRUSTED_GOVERNANCE_ROOT` (trusted default-branch copy,
+never the issue worktree):
+
+```
+node scripts/governance/eligibility.cjs --help
+node scripts/governance/eligibility.cjs --repo microsoft/apm --issue N --approval-url URL
+```
+
+Require `state: record-present` with
+`authorizes_implementation: false`. That result is evidence,
+never permission; current snapshots cannot detect deleted withdrawals.
+Then require fresh explicit responsible-human
+confirmation for this issue's bounded scope. ORIGIN
+`unattended` never claims to have obtained it -- STOP and
+return `blocked`. ORIGIN `actor-session` may proceed only
+after the caller confirms in this session. Assignment,
+labels, eligibility reports, and prior receipts are not that
+confirmation. Any other state (`withdrawn`, `error`, missing
+tool) -- STOP.
 
 ## Procedure
 
