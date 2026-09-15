@@ -1,6 +1,6 @@
 name: apm-review-panel
 version: 0.1.0
-description: Compatibility alias for autopilot-pr-review-panel.
+description: Compatibility alias for autopilot-pr-review-worker.
 author: Microsoft
 license: MIT
 

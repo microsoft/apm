@@ -24,8 +24,9 @@ targets:
 #  - autopilot-issue-triage-scheduler -> autopilot-issue-triage-worker
 #  - autopilot-issue-delivery-scheduler -> autopilot-issue-delivery-worker
 #  - autopilot-pr-triage-scheduler -> autopilot-pr-triage-worker
-#  - autopilot-pr-review-scheduler -> autopilot-pr-review-panel
-#                                           -> autopilot-pr-review-worker
+#  - autopilot-pr-review-scheduler -> autopilot-pr-review-worker
+#  - autopilot-pr-merge-worker is summoned by name (never by
+#    the PR review scheduler)
 # Compatibility aliases stay declared so existing prompts still
 # resolve.
 dependencies:
@@ -33,6 +34,8 @@ dependencies:
     - ./packages/autopilot-issue-triage-scheduler
     - ./packages/apm-triage-panel
     - ./packages/apm-review-panel
+    - ./packages/autopilot-pr-review-panel
+    - ./packages/autopilot-pr-merge-worker
     - ./packages/autopilot-scheduler-issue-triage
     - ./packages/autopilot-issue-delivery-scheduler
     - ./packages/autopilot-issue-scheduler

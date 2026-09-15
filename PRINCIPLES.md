@@ -98,7 +98,7 @@ An honest deferral or decline is better than an indefinite promise.
   triaged-LEGIT row, which returns a verdict + cited principle.
 - `autopilot-issue-triage-worker` CEO arbiter cites a principle on every
   `decline-with-reason` rubric outcome.
-- `autopilot-pr-review-panel` CEO synthesizer cites a principle when
+- `autopilot-pr-review-worker` CEO synthesizer cites a principle when
   surfacing strategic implications in arbitration.
 
 Changes to these principles require a public issue and a human decision

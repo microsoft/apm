@@ -275,7 +275,7 @@ test -f ../shepherd-driver/assets/shepherd-driver-prompt.md && test -f ../shephe
 Each `drive-<pr>` subagent receives PR_NUMBER, ISSUE_NUMBER, AUTHOR,
 HEAD_REPO, HEAD_BRANCH, MAINTAINER_CAN_MODIFY, REPO_ROOT, ORIGIN, and
 for PR #1428 the PANEL_PRIOR reservations from Phase 1.5. The driver
-owns Copilot classification, autopilot-pr-review-panel, fold-vs-defer, push, CI
+owns Copilot classification, autopilot-pr-review-worker, fold-vs-defer, push, CI
 watch, and the single advisory comment. The orchestrator only validates
 `completion_return` against `../shepherd-driver/assets/completion-schema.json`,
 updates the table, and removes `status/shepherding`.
@@ -401,7 +401,7 @@ Reading the final table; rendering `assets/final-report-template.md`:
 
 Two-comment cap honored: the driver advisory comment at drive-wave
 terminal plus the conflict-resolution confirmation comment when Phase 5
-resolved #1428. The in-loop autopilot-pr-review-panel comment was rewritten by
+resolved #1428. The in-loop autopilot-pr-review-worker comment was rewritten by
 the driver and did not add to the count. Single-writer interlock,
 mutation-break, lint contract, mergeStateStatus re-probe, and bias
 toward folding were all honored.

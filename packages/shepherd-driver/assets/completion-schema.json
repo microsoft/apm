@@ -313,7 +313,7 @@
         "panel_execution": {
           "type": "string",
           "enum": ["skill-tool", "inline"],
-          "description": "Which autopilot-pr-review-panel execution path ran (shepherd-driver-prompt.md Step X.1.1). `skill-tool`=activated via the `skill` tool fast-path; `inline`=panel SKILL.md+schemas executed by this subagent via `task` (the normal subagent-context path). Optional parent-audit field."
+          "description": "Which autopilot-pr-review-worker execution path ran (shepherd-driver-prompt.md Step X.1.1). `skill-tool`=activated via the `skill` tool fast-path; `inline`=panel SKILL.md+schemas executed by this subagent via `task` (the normal subagent-context path). Optional parent-audit field."
         },
         "panel_personas": {
           "type": "array",

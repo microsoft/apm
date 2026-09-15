@@ -1,29 +1,13 @@
 name: autopilot-pr-review-worker
 version: 0.1.0
-description: Composed drive-to-merge engine -- drives ONE selected pull request to mergeable under non-determinism via copilot-review classification, the autopilot-pr-review-panel, fold-by-default, push-and-watch-CI. Used only by a parent autopilot scheduler, never user-facing.
+description: Multi-persona advisory review panel for a labelled pull request -- fans out to specialist personas + a CEO synthesizer, posts one recommendation comment, never gates merge.
 author: Microsoft
 license: MIT
 type: skill
 
-# Composes the autopilot-pr-review-panel skill as its per-PR review primitive,
-# and pr-description-skill to author the body of any superseding PR it
-# opens (Path B).
-#
-# Belt + suspenders (genesis step 3.5 declaration mechanism = BOTH):
-#  - Belt: the manifest deps below declare the edges so the resolver
-#    deploys both alongside this driver. The local-path keys resolve
-#    relative to THIS package's directory (apm-usage dependencies.md
-#    anchor rule), hence `../autopilot-pr-review-panel` and
-#    `../pr-description-skill`.
-#  - Suspenders: the runtime activate-by-name probe in
-#    `assets/worker-prompt.md` loads each at use time even if
-#    a consumer wired the deploy differently.
-#
-# The <= 0.14.1 orphaned-lockfile bug that forced autopilot-scheduler-issues
-# to COMMENT OUT its analogous edge is fixed from 0.16 onward, so the
-# real edges are declared here.
+# Stand-alone primitive: no transitive APM deps. The skill body honors
+# the consumer repo's linting / encoding rules at runtime by activating
+# whichever instructions the consumer has installed.
 dependencies:
-  apm:
-    - ../autopilot-pr-review-panel
-    - ../pr-description-skill
+  apm: []
   mcp: []

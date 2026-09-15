@@ -44,10 +44,10 @@ runner error (missing manifest, fixture, or malformed JSON).
 - CONTENT: per-scenario `with_skill` must hit at least 1 anchor that
   `without_skill` misses (`delta_min_anchors >= 1`).
 
-## Distinguishing from autopilot-pr-review-panel
+## Distinguishing from autopilot-pr-review-worker
 
 The no-fire trigger set deliberately includes queries that SHOULD
-route to `autopilot-pr-review-panel` instead (`review my PR`, `panel-review
+route to `autopilot-pr-review-worker` instead (`review my PR`, `panel-review
 this PR`). If the dispatcher confused the two skills, those queries
 would mis-fire here and the val-no-fire gate would drop below 0.5.
 

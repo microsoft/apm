@@ -360,7 +360,7 @@ should live. "We should have more tests" is not a finding.
 
 ## Activation logic (the orchestrator handles this; you self-confirm)
 
-The autopilot-pr-review-panel skill spawns you on EVERY PR for schema-shape
+The autopilot-pr-review-worker skill spawns you on EVERY PR for schema-shape
 uniformity. You set `active: true` when the PR diff includes ANY of:
 
 - changes under `src/apm_cli/cli.py` or `src/apm_cli/commands/`
@@ -385,9 +385,9 @@ You set `active: false` (with `inactive_reason`) ONLY when ALL of:
 When uncertain, set `active: true`. False-active is cheap (one extra
 panel row); false-inactive lets a coverage gap ship.
 
-## Output contract when invoked by autopilot-pr-review-panel
+## Output contract when invoked by autopilot-pr-review-worker
 
-When the autopilot-pr-review-panel skill spawns you as a panelist task, you
+When the autopilot-pr-review-worker skill spawns you as a panelist task, you
 operate under these strict rules. They override any default behavior
 that would post comments or apply labels.
 
@@ -397,7 +397,7 @@ that would post comments or apply labels.
   finding is `blocking` | `recommended` | `nit`. The orchestrator does
   NOT gate on severity; severity is signal strength only.
 - You return JSON matching `assets/panelist-return-schema.json` from
-  the autopilot-pr-review-panel skill, as the FINAL message of your task. No
+  the autopilot-pr-review-worker skill, as the FINAL message of your task. No
   prose around the JSON; the orchestrator parses your last message.
 - You MUST NOT call `gh pr comment`, `gh pr edit`, `gh issue`, or any
   other GitHub write command. You MUST NOT post to `safe-outputs`.

@@ -46,7 +46,7 @@ work over a queue. It must NOT fire on:
 - bugs-only queue sweeps or in-flight bug PR shepherding
   -> batch-bug-shepherd;
 - single-issue triage -> apm-triage-panel;
-- single-PR review -> autopilot-pr-review-panel;
+- single-PR review -> autopilot-pr-review-worker;
 - PR-body / release-note / docs-edit / issue-creation work
   -> their dedicated skills.
 The `no_fire` set encodes each of these siblings.

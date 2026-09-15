@@ -1,13 +1,12 @@
 name: autopilot-pr-review-scheduler
 version: 0.1.0
-description: Queue panel-review pull requests (accepted only) and fan out isolated review slots (default 2). Advisory review by default; composed drive-to-merge only when the caller asked.
+description: Queue panel-review pull requests (accepted only) and fan out isolated advisory review slots (default 2). Never implements. Never composes autopilot-pr-merge-worker.
 author: Microsoft
 license: MIT
 
 dependencies:
   apm:
     - ../autopilot-pr-review-worker
-    - ../autopilot-pr-review-panel
   mcp: []
 
 scripts: {}

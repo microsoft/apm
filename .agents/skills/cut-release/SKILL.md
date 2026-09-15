@@ -249,5 +249,5 @@ This skill does NOT:
 - Decide whether a release should happen -- the operator decided
   that by activating this skill.
 - Bump to >= 1.0.0 without explicit operator confirmation.
-- Review code quality or test coverage (use `autopilot-pr-review-panel`
+- Review code quality or test coverage (use `autopilot-pr-review-worker`
   before activating this skill if a recent PR needs review).

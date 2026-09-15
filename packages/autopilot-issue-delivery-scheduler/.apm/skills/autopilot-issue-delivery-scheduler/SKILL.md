@@ -87,7 +87,7 @@ Do not open a second PR when one already addresses the issue;
 return that PR number.
 
 After a worker opens a PR, do NOT fill this pool with
-`autopilot-pr-review-worker`. Hand the PR number to the
+`autopilot-pr-merge-worker`. Hand the PR number to the
 caller for `autopilot-pr-review-scheduler`.
 
 ## Fan-out

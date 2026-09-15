@@ -8,7 +8,7 @@ license: MIT
 # APM skill:
 #  - shepherd-driver : the per-PR drive-to-merge engine (review panel,
 #                      fold-vs-defer, push, CI watch, conflict
-#                      resolution). Transitively pulls autopilot-pr-review-panel.
+#                      resolution). Transitively pulls autopilot-pr-review-worker.
 #
 # Belt + suspenders (genesis step 3.5 = BOTH): the manifest dep below
 # declares the edge (local-path key resolves relative to THIS package

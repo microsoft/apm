@@ -5,13 +5,13 @@ description: >-
   selected by autopilot-pr-triage-scheduler. Covers community
   PRs that fix an issue and PRs opened without an issue. Return one
   advisory recommendation, never human approval, never a diff review,
-  never merge. Not a queue manager and not autopilot-pr-review-panel.
+  never merge. Not a queue manager and not autopilot-pr-review-worker.
 ---
 
 # autopilot-pr-triage-worker
 
 Advisory classification of ONE already-selected PR. Do not review
-the diff as `autopilot-pr-review-panel` does. Do not drive merge.
+the diff as `autopilot-pr-review-worker` does. Do not drive merge.
 
 Read `assets/label-contract.json` (same contract as issue triage)
 before reasoning. Do not invent a second marker.
@@ -62,7 +62,7 @@ conversation, no-op (do not post a duplicate).
 ## Hard nos
 
 - Do not merge, push, assign, or request reviewers.
-- Do not run `autopilot-pr-review-panel` or `autopilot-pr-review-worker`.
+- Do not run `autopilot-pr-review-worker` or `autopilot-pr-merge-worker`.
 - Do not contradict CODEOWNERS.
 - Do not treat labels or this comment as `status/accepted`.
 - ASCII only.

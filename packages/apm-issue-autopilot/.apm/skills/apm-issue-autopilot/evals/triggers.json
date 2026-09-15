@@ -13,7 +13,7 @@
     {"id": "fire-10", "query": "sweep all open issues to mergeable PRs, escalating to me on any doubt", "expected": "fire", "split": "val", "notes": "Any-issue sweep + escalate-by-default."},
 
     {"id": "no-fire-01", "query": "sweep the bug queue and drive every bug to a mergeable state", "expected": "no_fire", "split": "train", "notes": "Bugs-only queue sweep -> batch-bug-shepherd, NOT autopilot."},
-    {"id": "no-fire-02", "query": "review my PR #712 -- give me a full panel pass", "expected": "no_fire", "split": "train", "notes": "Single-PR review -> autopilot-pr-review-panel."},
+    {"id": "no-fire-02", "query": "review my PR #712 -- give me a full panel pass", "expected": "no_fire", "split": "train", "notes": "Single-PR review -> autopilot-pr-review-worker."},
     {"id": "no-fire-03", "query": "triage this one new issue and tell me the label set", "expected": "no_fire", "split": "train", "notes": "Single-issue triage -> apm-triage-panel, no drive-to-merge."},
     {"id": "no-fire-04", "query": "drive these in-flight community bug PRs to merge: #1410, #1422", "expected": "no_fire", "split": "train", "notes": "In-flight bug PR shepherding -> batch-bug-shepherd."},
     {"id": "no-fire-05", "query": "draft a PR body for the auth refactor branch", "expected": "no_fire", "split": "train", "notes": "PR description -> pr-description-skill."},

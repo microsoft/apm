@@ -6,7 +6,7 @@ description: >-
   through an isolated pool (default 2) of
   autopilot-pr-triage-worker sessions. Advisory only. Never
   merges, never assigns, never requests reviewers, never runs
-  autopilot-pr-review-panel. Activate on a mixed PR list or queue-open when
+  autopilot-pr-review-worker. Activate on a mixed PR list or queue-open when
   the job is PR triage. Works in a local session, Copilot App
   automation, Cloud Agent, Remote Agent, or Agentic Workflow.
 ---
@@ -108,6 +108,6 @@ selected list; when a slot returns, fill it with the next item.
 - Do not dispatch the same PR to two slots.
 - Do not comment, label, close, merge, or assign. Workers own those
   writes even when summoned without this scheduler.
-- Do not run `autopilot-pr-review-panel` or `autopilot-pr-review-worker`.
+- Do not run `autopilot-pr-review-worker` or `autopilot-pr-merge-worker`.
 - Do not contradict CODEOWNERS.
 - ASCII only.

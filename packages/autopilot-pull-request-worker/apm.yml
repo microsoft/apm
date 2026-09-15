@@ -1,6 +1,6 @@
 name: autopilot-pull-request-worker
 version: 0.1.0
-description: Compatibility alias for autopilot-pr-review-worker.
+description: Compatibility alias for autopilot-pr-merge-worker.
 author: Microsoft
 license: MIT
 

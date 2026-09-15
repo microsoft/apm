@@ -16,7 +16,7 @@ Activate **autopilot-pr-review-scheduler**. Targets: **${input:targets}**
    Never list all open PRs.
 2. Fan out through this run's isolated pool (default 2).
 3. Never share slots with issue-triage, issue-delivery, or PR-triage.
-4. Default `INVOCATION_MODE=session-review`. Use
-   `composed-implementation-review` only if the caller asked.
+4. `INVOCATION_MODE=session-review` only. Never compose
+   `autopilot-pr-merge-worker`. Never implement.
 5. Never comment, label, assign, or request reviewers. Slots own
    those writes.

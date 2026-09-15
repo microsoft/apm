@@ -133,7 +133,7 @@ re-probe is the gate.
 
 - Does NOT chase BLOCKED (required-review, Approve-and-run). Those
   belong to the maintainer's policy workflow, not to the bbs.
-- Does NOT re-run the autopilot-pr-review-panel. The shepherd-driver
+- Does NOT re-run the autopilot-pr-review-worker. The shepherd-driver
   convergence loop already owned review, fold/defer, implementation,
   push, and CI; Phase 5 owns ONLY rebase and re-probe. Conflict
   resolution is a mechanical merge, not a fresh judgment pass.

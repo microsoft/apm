@@ -82,7 +82,7 @@ lens in turn from inside a single agent loop (progressive-disclosure
 skill model -- no sub-agent dispatch). Routing chooses *which* lenses
 execute; it never changes which headings appear in the final comment.
 
-This skill mirrors the `autopilot-pr-review-panel` orchestration shape on
+This skill mirrors the `autopilot-pr-review-worker` orchestration shape on
 purpose. Same single-comment discipline, same completeness gate, same
 persona-pass procedure -- only the personas, the rubric, and the
 output template differ.
@@ -100,7 +100,7 @@ output template differ.
 
 Skipped by default: CLI Logging Expert, Auth Expert. Triage operates
 on issue intent, not on diffs -- those personas are invoked downstream
-by `autopilot-pr-review-panel` once a PR exists.
+by `autopilot-pr-review-worker` once a PR exists.
 
 ## Routing topology
 

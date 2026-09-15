@@ -179,8 +179,8 @@ git diff --stat origin/main...HEAD | grep -E '\.py(\s|$)' || echo NONE
 ```
 
 MUST print `NONE`. If a `.py` file was modified, the PR is outside
-this skill's scope (it should also be triggering `autopilot-pr-review-panel`);
-surface "Non-spec files modified -- consider running autopilot-pr-review-panel
+this skill's scope (it should also be triggering `autopilot-pr-review-worker`);
+surface "Non-spec files modified -- consider running autopilot-pr-review-worker
 in parallel" as a linter note.
 
 ---

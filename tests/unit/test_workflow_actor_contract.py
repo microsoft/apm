@@ -14,8 +14,11 @@ TRIAGE_SKILL = ROOT / "packages/autopilot-issue-triage-worker/SKILL.md"
 TRIAGE_TEMPLATE = ROOT / "packages/autopilot-issue-triage-worker/assets/triage-template.md"
 ALIAS_TRIAGE_PANEL = ROOT / "packages/apm-triage-panel/.apm/skills/apm-triage-panel/SKILL.md"
 ALIAS_REVIEW_PANEL = ROOT / "packages/apm-review-panel/.apm/skills/apm-review-panel/SKILL.md"
+ALIAS_REVIEW_PANEL_OLD = (
+    ROOT / "packages/autopilot-pr-review-panel/.apm/skills/autopilot-pr-review-panel/SKILL.md"
+)
 TRIAGE_WORKFLOW = ROOT / ".github/workflows/triage-panel.md"
-REVIEW_SKILL = ROOT / "packages/autopilot-pr-review-panel/SKILL.md"
+REVIEW_SKILL = ROOT / "packages/autopilot-pr-review-worker/SKILL.md"
 REVIEW_WORKFLOW = ROOT / ".github/workflows/pr-review-panel.md"
 SCHEDULER_TRIAGE = (
     ROOT
@@ -54,8 +57,8 @@ WORKER_CODE = (
 ALIAS_WORKER_ISSUE = (
     ROOT / "packages/autopilot-worker-issue/.apm/skills/autopilot-worker-issue/SKILL.md"
 )
-WORKER_PR = ROOT / "packages/autopilot-pr-review-worker/assets/worker-prompt.md"
-WORKER_PR_SKILL = ROOT / "packages/autopilot-pr-review-worker/SKILL.md"
+WORKER_PR = ROOT / "packages/autopilot-pr-merge-worker/assets/worker-prompt.md"
+WORKER_PR_SKILL = ROOT / "packages/autopilot-pr-merge-worker/SKILL.md"
 ALIAS_AUTOPILOT = ROOT / "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/SKILL.md"
 ALIAS_SHEPHERD = ROOT / "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/SKILL.md"
 ALIAS_DRIVER = ROOT / "packages/shepherd-driver/SKILL.md"
@@ -214,6 +217,8 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "the reviewing session requests the reviewing user as reviewer" in review
     assert "Do not comment, label, close, assign, or request reviewers" in review
     assert "Reviewing sessions own those writes" in review
+    assert "Never compose `autopilot-pr-merge-worker`" in review
+    assert "Do not implement. Do not drive-to-merge." in review
     assert "Never borrow slots from `autopilot-issue-delivery-scheduler`" in triage
     assert "Never borrow slots from `autopilot-issue-triage-scheduler`" in delivery
     assert "Never borrow slots from `autopilot-issue-triage-scheduler`" in review
@@ -225,7 +230,9 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "Compatibility alias" in _ascii(ALIAS_TRIAGE_PANEL)
     assert "autopilot-issue-triage-worker" in _ascii(ALIAS_TRIAGE_PANEL)
     assert "Compatibility alias" in _ascii(ALIAS_REVIEW_PANEL)
-    assert "autopilot-pr-review-panel" in _ascii(ALIAS_REVIEW_PANEL)
+    assert "autopilot-pr-review-worker" in _ascii(ALIAS_REVIEW_PANEL)
+    assert "Compatibility alias" in _ascii(ALIAS_REVIEW_PANEL_OLD)
+    assert "autopilot-pr-review-worker" in _ascii(ALIAS_REVIEW_PANEL_OLD)
     assert "Do not call" in _ascii(TRIAGE_SKILL)
     assert "fetch_queue.py" in _ascii(TRIAGE_SKILL)
     assert "processing.read_reviewed" in triage
@@ -282,7 +289,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "Compatibility alias" in _ascii(ALIAS_SHEPHERD)
     assert "Do not implement from this file" in _ascii(ALIAS_SHEPHERD)
     assert "selector `bugs`" in _ascii(ALIAS_SHEPHERD)
-    assert "autopilot-pr-review-worker" in _ascii(ALIAS_DRIVER)
+    assert "autopilot-pr-merge-worker" in _ascii(ALIAS_DRIVER)
     assert "Compatibility alias" in _ascii(ALIAS_SCHEDULER_ISSUES)
     assert "Compatibility alias" in _ascii(ALIAS_SCHEDULER_PRS)
     assert "Compatibility alias" in _ascii(
@@ -318,7 +325,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
         "`autopilot-issue-delivery-scheduler`, or "
         "`autopilot-pr-review-scheduler`."
     ) in pr_triage
-    assert "Do not run `autopilot-pr-review-panel`" in pr_triage
+    assert "Do not run `autopilot-pr-review-worker`" in pr_triage
     assert "same PR to two slots" in pr_triage
     assert "#<pr-number> pr-triage-worker" in _ascii(
         ROOT
@@ -327,7 +334,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     worker_pr_triage = _ascii(WORKER_PR_TRIAGE)
     assert "needs-issue" in worker_pr_triage
     assert "Never request reviewers" in worker_pr_triage
-    assert "Do not run `autopilot-pr-review-panel`" in worker_pr_triage
+    assert "Do not run `autopilot-pr-review-worker`" in worker_pr_triage
     assert "Never write human decision labels" in worker_pr_triage
     assert "`autopilot-pr-triage-scheduler`" in triage
     assert "`autopilot-pr-triage-scheduler`" in delivery

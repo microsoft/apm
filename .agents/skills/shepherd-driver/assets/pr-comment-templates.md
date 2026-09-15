@@ -22,7 +22,7 @@ RENDERING RULES:
 
 ## PR ADVISORY COMMENT block (shepherd-driver -> PR)
 
-Rendered by the autopilot-pr-review-panel skill when invoked from the
+Rendered by the autopilot-pr-review-worker skill when invoked from the
 shepherd-driver loop. The shepherd-driver supplies the appended
 sections below ("Reservations carried from strategic-alignment",
 "Folded in this run", "Copilot signals reviewed", "Deferred",
@@ -111,7 +111,7 @@ Ready for maintainer review.
 Thank you for the original work on this fix. To land it promptly we
 have opened a superseding PR (#{{ superseding_pr }}) under
 microsoft/apm that preserves your authorship via commit trailers and
-resolves the follow-ups surfaced by the autopilot-pr-review-panel pass.
+resolves the follow-ups surfaced by the autopilot-pr-review-worker pass.
 
 Closing this PR in favor of #{{ superseding_pr }}. Your contribution
 is credited on every cherry-picked commit; the superseding PR's body

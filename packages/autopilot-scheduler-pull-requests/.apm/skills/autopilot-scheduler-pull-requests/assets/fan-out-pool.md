@@ -13,7 +13,7 @@ a slot.
 ## Fill order (each free slot)
 
 1. Prefer a new session (Copilot App / Cloud / Remote) whose kickoff
-   runs `autopilot-pr-review-worker` on exactly one PR.
+   runs `autopilot-pr-merge-worker` on exactly one PR.
 2. Else spawn a sub-agent (`task`) with the worker skill.
 3. Else run the worker sequentially in this session.
 

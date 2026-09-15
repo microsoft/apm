@@ -8,7 +8,7 @@ license: MIT
 # batch-bug-shepherd). Composes three APM skills:
 #  - apm-triage-panel    : the per-issue triage rubric (central gate).
 #  - shepherd-driver     : the per-PR drive-to-merge engine
-#                          (transitively pulls autopilot-pr-review-panel).
+#                          (transitively pulls autopilot-pr-review-worker).
 #  - pr-description-skill : authors the anchored PR body at the
 #                          Phase 4 PR-open site (acceptance-observer).
 #

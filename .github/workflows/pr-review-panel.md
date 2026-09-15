@@ -148,7 +148,7 @@ network:
 
 safe-outputs:
   # Single CEO comment per panel run. max:2 is a fail-soft ceiling; the
-  # one-comment discipline lives inside the autopilot-pr-review-panel skill.
+  # one-comment discipline lives inside the autopilot-pr-review-worker skill.
   add-comment:
     max: 2
   # Label cleanup. The orchestrator MUST always remove `panel-review`
@@ -168,7 +168,7 @@ timeout-minutes: 30
 
 # PR Review Panel
 
-You are orchestrating the **autopilot-pr-review-panel** skill against pull request
+You are orchestrating the **autopilot-pr-review-worker** skill against pull request
 **#${{ github.event.pull_request.number || inputs.pr_number }}** in `${{ github.repository }}`.
 
 > The label-name guard runs at the workflow level via the top-level
@@ -211,9 +211,9 @@ required page cannot be read, STOP with a run-log diagnostic and emit
 `noop`. Do not review a partial first page. Truncate each untrusted
 body independently (65536 characters).
 
-## Step 2: Run the panel via the autopilot-pr-review-panel skill
+## Step 2: Run the panel via the autopilot-pr-review-worker skill
 
-Load the **autopilot-pr-review-panel** skill and follow its execution checklist
+Load the **autopilot-pr-review-worker** skill and follow its execution checklist
 and output contract exactly. Pass invocation mode
 `agentic-workflow` and the complete conversation snapshot. The skill
 owns reviewer routing, persona dispatch, the Auth Expert and Doc Writer
