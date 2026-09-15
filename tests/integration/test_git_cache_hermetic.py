@@ -588,6 +588,8 @@ class TestCreateCheckout:
         shard_key = cache_shard_key(url)
         final_dir = cache._checkouts_root / shard_key / ("e" * 40) / "full"
         final_dir.mkdir(parents=True)
+        (final_dir / ".git").mkdir()
+        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
         (cache._db_root / shard_key).mkdir(parents=True)
 
         verify_results = [False, True]

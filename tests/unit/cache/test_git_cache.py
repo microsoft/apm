@@ -392,6 +392,8 @@ class TestCheckoutWriteDedup:
         # Populate final_dir BUT integrity will report failure.
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
+        (final_dir / ".git").mkdir()
+        (final_dir / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
         (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
 
         def _populate(*args, **kwargs):

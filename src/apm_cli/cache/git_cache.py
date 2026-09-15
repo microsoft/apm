@@ -66,11 +66,13 @@ def _safe_git_args() -> list[str]:
       malicious upstream might ship, so clone and checkout stay inert.
     - ``submodule.recurse=false`` prevents any subcommand from
       recursing into attacker-controlled submodule URLs.
-    - ``core.autocrlf=false`` keeps working-tree bytes identical to the
-      committed blob for a pinned SHA. ``-c`` outranks host system /
-      global config and ``GIT_CONFIG_KEY_n`` snapshots from
-      ``git_network_env``, which otherwise win over a repo-local pin
-      (apm#2971).
+    - ``core.autocrlf=false`` disables host autocrlf conversion so
+      LF-committed blobs are not rewritten as CRLF on checkout.
+      ``-c`` outranks host system / global config and
+      ``GIT_CONFIG_KEY_n`` snapshots from ``git_network_env``, which
+      otherwise win over a repo-local pin (apm#2971). This pin does
+      not override ``core.eol`` or ``.gitattributes`` ``eol=crlf`` /
+      ``text=auto`` requests.
 
     These flags are scoped per-invocation via ``-c`` and never mutate
     the user's gitconfig. The cache layer is the single source of
@@ -101,9 +103,25 @@ def _checkout_pins_autocrlf_false(checkout_dir: Path) -> bool:
         return False
     try:
         text = config.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeError):
         return False
-    return "autocrlf = false" in text or "autocrlf=false" in text
+    section = None
+    for raw in text.splitlines():
+        line = raw.split(";", 1)[0].split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            inner = line[1:-1].strip()
+            section = inner.split(" ", 1)[0].strip().lower()
+            continue
+        if section != "core" or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip().lower() != "autocrlf":
+            continue
+        normalized = value.strip().strip("\"'").lower()
+        return normalized in {"false", "0", "no", "off"}
+    return False
 
 
 # Partial bare-cache flavor suffix (perf #1433 follow-up).
@@ -240,7 +258,9 @@ class GitCache:
                     sha[:12],
                     variant,
                 )
-                self._evict_checkout(checkout_dir)
+                # Leave the SHA-valid tree in place until ``_create_checkout``
+                # holds ``shard_lock``. A concurrent consumer may still be
+                # reading it; the locked re-probe evicts and rebuilds.
             else:
                 # Integrity failure -- evict
                 _log.warning(
@@ -668,6 +688,11 @@ class GitCache:
                     variant,
                 )
                 self._evict_checkout(final_dir)
+                if final_dir.exists():
+                    raise RuntimeError(
+                        "Failed to rematerialize unpinned git checkout "
+                        f"for {_sanitize_url(url)} @ {sha[:12]}"
+                    )
 
             staged = stage_path(final_dir)
             ensure_path_within(staged, self._checkouts_root)
@@ -820,8 +845,10 @@ class GitCache:
             if not atomic_land(staged, final_dir, lock):
                 # Another process landed first between our re-probe and
                 # the rename (only possible if our lock dropped, which
-                # it didn't); verify integrity defensively.
-                if not verify_checkout_sha(final_dir, sha):
+                # it didn't); verify integrity and the autocrlf pin.
+                if not (
+                    verify_checkout_sha(final_dir, sha) and _checkout_pins_autocrlf_false(final_dir)
+                ):
                     self._evict_checkout(final_dir)
                     raise RuntimeError(
                         f"Race condition: concurrent checkout failed integrity "
