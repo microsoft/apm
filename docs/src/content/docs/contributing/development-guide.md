@@ -51,6 +51,11 @@ after the canonical label is provisioned and this code is deployed.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
 
+PR review is the same shape: `panel-review` is the only request
+trigger for a fresh advisory panel. Re-apply it to re-run. Open PRs
+without that label are not queued. The panel is advisory and does
+not gate merge.
+
 ### Eligibility evidence and automation
 
 The [scope record format](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#scope-record-format)

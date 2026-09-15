@@ -255,6 +255,11 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
         ROOT / "packages/autopilot-issue-worker/.apm/skills/autopilot-issue-worker/SKILL.md"
     )
     assert "same PR to two slots" in review
+    assert "`panel-review` is the only request trigger" in review
+    assert "Never list all open PRs" in review
+    assert "gh pr list --state open --label panel-review" in review
+    assert "Empty label queue -> empty table, stop" in review
+    assert "oldest first, cap 10" in review
     assert "Compatibility alias" in _ascii(ALIAS_AUTOPILOT)
     assert "Do not implement from this file" in _ascii(ALIAS_AUTOPILOT)
     assert "autopilot-issue-delivery-scheduler" in _ascii(ALIAS_AUTOPILOT)

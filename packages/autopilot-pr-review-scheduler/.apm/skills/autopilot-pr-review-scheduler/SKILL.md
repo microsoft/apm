@@ -1,12 +1,14 @@
 ---
 name: autopilot-pr-review-scheduler
 description: >-
-  Queue open microsoft/apm pull requests and fan them out through
-  an isolated pool (default 2) of review sessions. Default is
-  standalone apm-review-panel (advisory). Pass composed-implementation-review
-  only when the caller asked to drive an existing PR. Works in a
-  local session, Copilot App automation, Cloud Agent, Remote Agent,
-  or Agentic Workflow. Does not triage issues or open greenfield PRs.
+  Queue microsoft/apm pull requests labelled `panel-review` (or an
+  explicit named list) and fan them out through an isolated pool
+  (default 2) of review sessions. Default is standalone
+  apm-review-panel (advisory). Pass composed-implementation-review
+  only when the caller asked to drive an existing PR. Never review
+  every open PR. Works in a local session, Copilot App automation,
+  Cloud Agent, Remote Agent, or Agentic Workflow. Does not triage
+  issues or open greenfield PRs.
 ---
 
 # autopilot-pr-review-scheduler
@@ -50,9 +52,31 @@ Ownership writes:
 
 ## Selection
 
-Build the queue from the caller list, a label, or
-`gh pr list --state open`. Deduplicate by number. Skip drafts if
-the caller did not include them.
+`panel-review` is the only request trigger. It matches
+`.github/workflows/pr-review-panel.md`. It is not a human decision
+label. Re-apply it (remove + add) for a fresh review after the
+panel clears it.
+
+Modes:
+
+- Named list or one PR number: explicit request. Honor those
+  numbers even without `panel-review`.
+- `queue-open` / no names: only open PRs that currently have
+  `panel-review`.
+
+Never list all open PRs. Never fall back to an unfiltered
+`gh pr list --state open`. Empty label queue -> empty table, stop.
+
+Default (authenticated `gh`):
+
+```
+gh pr list --state open --label panel-review --json number,title,isDraft,labels,updatedAt
+```
+
+Deduplicate by number. Skip drafts unless the caller named them.
+Label sweep: oldest first, cap 10. Named list is not capped.
+
+Do not invent a second trigger label.
 
 ## Fan-out
 
@@ -81,6 +105,7 @@ selected list; when a slot returns, fill it with the next item.
 - Do not dispatch the same PR to two slots.
 - Do not comment, label, close, assign, or request reviewers.
   Reviewing sessions own those writes.
+- Do not list all open PRs. `panel-review` or a named list only.
 - Do not open issues or greenfield PRs.
 - Do not contradict CODEOWNERS.
 - ASCII only.

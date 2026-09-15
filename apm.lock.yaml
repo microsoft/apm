@@ -125,7 +125,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-scheduler/SKILL.md
   - .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-scheduler/SKILL.md: sha256:8b259de05f642d6cf70085edd7250e15b022f22fc4312469d5675a0e3dd5512d
+    .agents/skills/autopilot-pr-review-scheduler/SKILL.md: sha256:9f7f91966de5a08d46df0f2567672ffb1477231d0ee06733dc60f8818a997ec4
     .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:f09a31413eea5a6a7ba01f2f8db323df314263446d49521a7d2accb70b07fe53
   source: local
   local_path: ./packages/autopilot-pr-review-scheduler
