@@ -51,9 +51,11 @@ after the canonical label is provisioned and this code is deployed.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
 
-PR review is the same shape: `panel-review` is the only request
-trigger for a fresh advisory panel. Re-apply it to re-run. Open PRs
-without that label are not queued. The panel is advisory and does
+PR review is the same shape: `panel-review` requests a fresh
+advisory panel. `status/accepted` (on the PR or a linked issue) is
+the human action flag -- no accepted, no review. If the request
+label is present without acceptance, the reviewing session comments,
+clears `panel-review`, and stops. The panel is advisory and does
 not gate merge.
 
 ### Eligibility evidence and automation

@@ -84,6 +84,8 @@ def test_review_panel_declares_origin_intent_contract() -> None:
     assert "This skill never assigns issues or PRs in any mode." in skill
     assert "This skill owns the actor-session `@me` reviewer request" in skill
     assert "The PR review scheduler never comments" in skill
+    assert "No accepted, no review" in skill
+    assert "remove `panel-review` if present" in skill
     assert "Request authenticated `@me` as a supplemental reviewer only" in skill
     assert "self-review-red-flag" in skill
     assert "CODEOWNERS is paramount" in skill
@@ -102,6 +104,7 @@ def test_review_panel_requires_complete_paginated_context_and_watermark_noop() -
     workflow = _ascii(REVIEW_WORKFLOW)
     assert "Invocation mode is `agentic-workflow` (ORIGIN=`unattended`)" in workflow
     assert "Never assign a user" in workflow
+    assert "No accepted, no review" in workflow
     assert "gh api --paginate" in workflow
     assert "closingIssuesReferences" in workflow
     assert "reviewRequests" in workflow
@@ -171,6 +174,8 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "never requests the implementer as a reviewer" in driver
     assert "Never request the implementer as a reviewer" in driver
     assert "emit the activation card" in driver
+    assert "No accepted, no review" in driver
+    assert "Paginate every list to exhaustion" in driver
     pr_worker = _ascii(WORKER_PR_SKILL)
     assert "activation_card: on" in pr_worker
     assert "write: on | off" in pr_worker
@@ -256,6 +261,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     )
     assert "same PR to two slots" in review
     assert "`panel-review` is the only request trigger" in review
+    assert "No accepted, no review" in review
     assert "Never list all open PRs" in review
     assert "gh pr list --state open --label panel-review" in review
     assert "Empty label queue -> empty table, stop" in review

@@ -177,6 +177,14 @@ You are orchestrating the **apm-review-panel** skill against pull request
 > label is `panel-review` or this is a manual `workflow_dispatch` --
 > proceed.
 
+## Step 0: Acceptance gate
+
+`panel-review` requests a review. `status/accepted` is the human
+action flag. No accepted, no review. Check this PR's labels and
+same-repo linked issues. If missing: emit one comment that the PR
+has not been accepted and the panel did not run, remove
+`panel-review`, do not spawn panelists, stop. Never assign.
+
 ## Step 1: Gather complete PR context (read-only)
 
 Invocation mode is `agentic-workflow` (ORIGIN=`unattended`). Never

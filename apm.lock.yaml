@@ -125,7 +125,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-scheduler/SKILL.md
   - .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-scheduler/SKILL.md: sha256:9f7f91966de5a08d46df0f2567672ffb1477231d0ee06733dc60f8818a997ec4
+    .agents/skills/autopilot-pr-review-scheduler/SKILL.md: sha256:400eee69cd83a77fd2d84b629a7c17578d1c60e8fa2c214de3133c02187c935a
     .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:f09a31413eea5a6a7ba01f2f8db323df314263446d49521a7d2accb70b07fe53
   source: local
   local_path: ./packages/autopilot-pr-review-scheduler
@@ -250,7 +250,7 @@ dependencies:
   - .agents/skills/apm-review-panel/evals/render_eval.py
   - .agents/skills/apm-review-panel/evals/trigger-evals.json
   deployed_file_hashes:
-    .agents/skills/apm-review-panel/SKILL.md: sha256:4af706c733ec7152319e2743825a1dbafc029cc72f059c4b4d49927a0d5ac298
+    .agents/skills/apm-review-panel/SKILL.md: sha256:9f41f28992d148d02a79cbcc47dc2466108b959f6a59ad87b994c3d8506e0ff8
     .agents/skills/apm-review-panel/apm.yml: sha256:80c403c4d3c59a91bb27b85650e21a466e9cd0cbc28e92bf0f3e53c6ea71cb2c
     .agents/skills/apm-review-panel/assets/ceo-return-schema.json: sha256:d8707211968efb0471d083f880d5353d66a0eda84635e803a930f60c91837468
     .agents/skills/apm-review-panel/assets/panelist-return-schema.json: sha256:e3cf2ae17e93dd934f2659ed77d2640ea9601fbe8698f63ba800edf046691f99
@@ -381,7 +381,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-worker/references/mergeability-gate.md
   - .agents/skills/autopilot-pr-review-worker/scripts/owner_touch_gate.py
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:557ec09905b4a5eebba07b941d10b4abb59e57de31a74c8574f52fde26982a4d
+    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:eb79447f2ffc1ae357369ea8f6dc9785e8c546742f9693aa2549c4448d0e33f4
     .agents/skills/autopilot-pr-review-worker/apm.yml: sha256:89f61a8c5f4f6c67fa93fa22b2f2a3b6bc9affeefdacd0c1ca99f36ec7ee2fa4
     .agents/skills/autopilot-pr-review-worker/assets/ci-recovery-checklist.md: sha256:b6b225fa6dc536e6105621cce53743ea262b84f471e2364e75222054f3502ab1
     .agents/skills/autopilot-pr-review-worker/assets/completion-schema.json: sha256:ffef4711920ae213761f1ae50e40a108d431c36464d9917a3ce963eeb75291fa
@@ -389,7 +389,7 @@ dependencies:
     .agents/skills/autopilot-pr-review-worker/assets/copilot-classification-prompt.md: sha256:890a7d859ba21de926b8d3ea64be3b586daf84e6cd51bd3e06b215bc483810ba
     .agents/skills/autopilot-pr-review-worker/assets/fold-vs-defer-rubric.md: sha256:4ee8713c274e43783ed69f9957ffc6822f2495f10c8440cddeeb0209d9a49004
     .agents/skills/autopilot-pr-review-worker/assets/pr-comment-templates.md: sha256:a156f17516ed56291da05d0965c97d10f107df8768597afb353d8903d6555f33
-    .agents/skills/autopilot-pr-review-worker/assets/worker-prompt.md: sha256:55678f01776b53f78ec50f5db0d760234c4a40f31ed1b4114fd7659c8efcfe5f
+    .agents/skills/autopilot-pr-review-worker/assets/worker-prompt.md: sha256:07b67ef25272b73e38d08048249656e4150e51b5022b92e35741731bc88693bf
     .agents/skills/autopilot-pr-review-worker/references/mergeability-gate.md: sha256:45dbbc2b499ee65db6b0c8d7a06a816de20ad036186ff5a2d767664fcfa40e7d
     .agents/skills/autopilot-pr-review-worker/scripts/owner_touch_gate.py: sha256:ad7e5130306d232e682213e48a679b9b30189dc7a836b1c267ba6bde73f88553
   source: local

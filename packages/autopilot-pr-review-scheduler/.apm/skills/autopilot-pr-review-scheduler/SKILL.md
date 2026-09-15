@@ -57,6 +57,12 @@ Ownership writes:
 label. Re-apply it (remove + add) for a fresh review after the
 panel clears it.
 
+`status/accepted` is the human action flag (on this PR or a
+same-repo linked issue). No accepted, no review. The reviewing
+session owns that check: if `panel-review` is present and
+`status/accepted` is missing, it comments, removes `panel-review`,
+and stops. This scheduler does not comment or remove labels.
+
 Modes:
 
 - Named list or one PR number: explicit request. Honor those

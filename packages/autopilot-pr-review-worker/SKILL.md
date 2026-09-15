@@ -24,6 +24,11 @@ Writes are optional via the activation card (`write: on` default).
 The PR review scheduler never comments, labels, assigns, or
 requests reviewers.
 
+`panel-review` requests a review. `status/accepted` is the human
+action flag. No accepted, no review. If `panel-review` is present
+and `status/accepted` is missing on this PR and every linked
+issue: comment, remove `panel-review`, stop. Never assign.
+
 ## Activation card
 
 `activation_card: on`. Before any PR read or GitHub write, emit

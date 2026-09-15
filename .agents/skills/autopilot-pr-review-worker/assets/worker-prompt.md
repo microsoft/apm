@@ -135,6 +135,24 @@ An owner-evidence-gate MISS blocks every terminal path. Return
 reachable; cannot verify terminal functional evidence."` rather than
 falling back to LLM self-classification.
 
+### Step 0.05 -- acceptance gate (before checkout)
+
+`panel-review` requests a review. `status/accepted` is the human
+action flag. No accepted, no review. Check this PR's labels and
+same-repo linked issues (`closingIssuesReferences`, paginated).
+Accepted if the PR or any linked issue has `status/accepted`.
+
+If missing and `write: on`: post one comment that the PR has not
+been accepted and no review was performed; remove `panel-review`
+if present; do not request reviewers; do not assign; do not
+checkout; return `status: blocked`. If `write: off`, stop without
+GitHub writes.
+
+Read complete PR conversation (issue comments, reviews, inline
+threads, linked issue comments) before any later fold work.
+Paginate every list to exhaustion. Fail closed if a page cannot
+be read.
+
 ### Step 0 -- check out the PR
 
 ```

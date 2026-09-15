@@ -356,12 +356,22 @@ every mandatory persona always runs. Routing is a CEO synthesis hint.
 ## Execution checklist
 
 Work through these steps in order. Do not skip ahead. Do not emit any
-output to the PR before step 6. Every `task` spawn below is BLOCKING:
+output to the PR before step 6 except the not-accepted stop in step 0.
+Every `task` spawn below is BLOCKING:
 wait for the subagent to return before continuing, and never end your
 turn while a panelist or the CEO synthesizer is still running. The turn
 ends only after the comment (step 7) and label sweep (step 8) -- or, if
 no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
 
+0. **Acceptance gate.** `panel-review` requests a review.
+   `status/accepted` is the human action flag. No accepted, no
+   review. Check this PR's labels and same-repo linked issues
+   (`closingIssuesReferences`, paginated). Accepted if the PR or
+   any linked issue has `status/accepted`.
+   If missing: post one comment that the PR has not been accepted
+   and the advisory panel did not run; remove `panel-review` if
+   present; do not request reviewers; do not assign; do not spawn
+   panelists; stop.
 1. **Read complete PR context.** Resolve invocation mode first. Then
    gather, in chronological order, all of: title, body, labels, author,
    head SHA, changed files, the full diff, issue-style comments, submitted
