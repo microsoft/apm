@@ -43,8 +43,10 @@ reviewers.
 - Triage and review read the full conversation (paginate to
   exhaustion). Partial context = stop, no fresh advice.
 - Human decision labels are never written by these skills:
-  `status/needs-triage`, `status/needs-design`, `status/accepted`,
-  `status/deferred`.
+  `status/needs-triage`, `status/needs-design`, `status/accepted`.
+  Exception: PR triage writes `status/deferred` when the PR has no
+  same-repo linked issue labelled `status/accepted`. Do not overwrite
+  `status/accepted` on the PR.
 - Labels, comments, and silence are not authorization.
 - Each canonical skill emits an Enter card before work and an Exit
   receipt after. Missing field = stop. Schedulers are `write: off`.

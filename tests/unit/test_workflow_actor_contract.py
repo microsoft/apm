@@ -446,7 +446,10 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "needs-issue" in worker_pr_triage
     assert "Never request reviewers" in worker_pr_triage
     assert "Do not run `autopilot-pr-review-worker`" in worker_pr_triage
-    assert "Never write human decision labels" in worker_pr_triage
+    assert "Write `status/deferred` only when this" in worker_pr_triage
+    assert "No linked `status/accepted` issue" in worker_pr_triage
+    assert "Start with an issue" in worker_pr_triage
+    assert "Never write human decision labels" not in worker_pr_triage
     assert "`autopilot-pr-triage-scheduler`" in triage
     assert "`autopilot-pr-triage-scheduler`" in delivery
     assert "`autopilot-pr-triage-scheduler`" in review

@@ -30,7 +30,16 @@ recommendation alone.>
 ## Suggested PR comment
 
 ```markdown
-<Warm, specific, evidence-grounded reply. Mention the linked issue
-or the lack of one. Do not imply the project has accepted, assigned,
-or merged this work. Do not contradict CODEOWNERS.>
+<When no linked status/accepted issue, thank the author and invite
+them to open an issue for maintainer review and acceptance first.
+Link CONTRIBUTING.md. Do not imply the project has accepted,
+assigned, or merged this work. Do not contradict CODEOWNERS.
+
+Example:
+Thank you for contributing this pull request. APM starts with an
+issue, not an implementation
+(https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md).
+Please open an issue describing the user problem so a maintainer
+can review and accept the scope first. This PR is labelled
+status/deferred until that happens.>
 ```

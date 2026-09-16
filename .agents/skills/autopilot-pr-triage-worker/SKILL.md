@@ -40,8 +40,10 @@ Rules:
 - `write: off` returns the filled template only. Do not comment,
   add labels, or remove labels.
 - `write: on` posts the one advisory comment and processing /
-  classification labels. Never human decision labels. Never assign.
-  Never request reviewers.
+  classification labels. Never assign. Never request reviewers.
+  Do not write `status/accepted`, `status/needs-design`, or
+  `status/needs-triage`. Write `status/deferred` only when this
+  PR has no same-repo linked issue labelled `status/accepted`.
 - `json` defaults to `off` when omitted or unknown. Omitted `json`
   is not a missing-field stop.
 - `json: off` -> no machine JSON receipt.
@@ -75,9 +77,16 @@ This worker owns those writes even when summoned without a
 scheduler. The scheduler must not comment or label.
 
 Allowed writes: one advisory comment plus processing / optional
-classification labels from the contract. Never write human
-decision labels (`status/accepted`, `status/needs-design`,
-`status/deferred`, `status/needs-triage`).
+classification labels from the contract. Never write
+`status/accepted`, `status/needs-design`, or
+`status/needs-triage`.
+
+Auto-defer: if this PR has no same-repo linked issue labelled
+`status/accepted`, add `status/deferred` (`write: on` only).
+Do not overwrite `status/accepted` already on the PR. Linked
+means `Fixes` / `Closes` / `#N` in the body or commits, or
+GitHub `closingIssuesReferences`, same repository. Any one
+accepted linked issue blocks auto-defer.
 
 CODEOWNERS `reviewRequests` is runtime authority. Note owners in
 the comment. Never add or remove review requests.
@@ -95,17 +104,21 @@ conversation, no-op (do not post a duplicate).
 ## Procedure
 
 1. Confirm the PR is the single target. Missing number -> stop.
-2. Gather full context. Record whether a linked issue exists.
+2. Gather full context. Record linked same-repo issues and whether
+   any carries `status/accepted`.
 3. Fill [assets/pr-triage-template.md](assets/pr-triage-template.md).
    Recommendation is one of: `ready-for-review` | `needs-design` |
    `needs-issue` | `duplicate-of` | `decline-with-reason` |
    `auto-handle`.
-4. `needs-issue` when a substantial change arrived without a
-   maintainer-accepted issue and should have been discussed first.
-   Small docs/typo/bugfix PRs may be `ready-for-review` without an
-   issue.
-5. `ready-for-review` is not merge approval and is not a request
-   to run `autopilot-pr-review-scheduler`.
+4. No linked `status/accepted` issue -> recommend `needs-issue`,
+   add `status/deferred` when `write: on`, and thank the author.
+   Invite them to open an issue for maintainer review and
+   acceptance first, per CONTRIBUTING.md ("Start with an issue,
+   not an implementation."). Link
+   https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md
+5. `ready-for-review` only when a linked same-repo issue is
+   `status/accepted`. It is not merge approval and is not a
+   request to run `autopilot-pr-review-scheduler`.
 6. Post only if the comment would change. Add the contract
    processing marker. Do not remove `status/needs-triage`.
 
@@ -115,4 +128,6 @@ conversation, no-op (do not post a duplicate).
 - Do not run `autopilot-pr-review-worker` or `autopilot-pr-merge-worker`.
 - Do not contradict CODEOWNERS.
 - Do not treat labels or this comment as `status/accepted`.
+- Do not write `status/deferred` when a linked issue is
+  `status/accepted` or the PR already has `status/accepted`.
 - ASCII only.
