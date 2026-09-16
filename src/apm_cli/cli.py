@@ -174,6 +174,20 @@ class _OutputModeGroup(click.Group):
                 with formatter.section("Commands"):
                     formatter.write_dl(rows)
 
+    def shell_complete(self, ctx: click.Context, incomplete: str) -> list:
+        """Complete from stubs so tab-complete does not import lazy verbs."""
+        from click.shell_completion import CompletionItem
+
+        results = [
+            CompletionItem(name, help=command.get_short_help_str())
+            for name in self.list_commands(ctx)
+            if name.startswith(incomplete)
+            for command in (self.commands.get(name),)
+            if command is not None and not command.hidden
+        ]
+        results.extend(click.Command.shell_complete(self, ctx, incomplete))
+        return results
+
 
 def _configure_logging(verbose: bool = False) -> None:
     """Configure stdlib logging for the ``apm_cli`` package.

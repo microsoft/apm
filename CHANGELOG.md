@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `apm --help`, `apm doctor`, and `apm config get` no longer import heavyweight command modules (`install`, `audit`, `pack`, `marketplace`, `uninstall`, `update`); those load only when the matching verb is invoked. (#3001)
+- `apm --help`, `apm doctor --help`, and `apm config get` no longer import heavyweight command modules (`install`, `audit`, `pack`, `marketplace`, `uninstall`, `update`); those load only when the matching verb is invoked. (#3001)
 
 ## [0.31.0] - 2026-09-15
 

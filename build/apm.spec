@@ -232,6 +232,9 @@ hiddenimports = [
 ]
 # Rich loads versioned cell-width tables dynamically; collect every installed version.
 hiddenimports.extend(collect_submodules('rich._unicode_data'))
+# Lazy Click dispatch uses importlib.import_module; PyInstaller cannot follow
+# those string paths, so freeze every commands.* module into the PYZ.
+hiddenimports.extend(collect_submodules('apm_cli.commands'))
 
 # Modules to exclude to reduce binary size
 excludes = [
