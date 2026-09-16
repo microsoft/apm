@@ -66,12 +66,12 @@ dependencies:
     .agents/skills/autopilot-pr-merge-worker/apm.yml: sha256:d598c00c2bcec9ee6020584d92a92e505af1e6af8bde652d8a0d08049056f721
     .agents/skills/autopilot-pr-merge-worker/assets/ci-recovery-checklist.md: sha256:601875105ce91bb22e4b305687d97a0ae10001f73cbd2ac9ff90eb028e1a6aba
     .agents/skills/autopilot-pr-merge-worker/assets/completion-schema.json: sha256:e01d89d69c7ef3a061289f399a7570123b890886eac138e4d613fb6d1bf2dc32
-    .agents/skills/autopilot-pr-merge-worker/assets/conflict-resolution-prompt.md: sha256:e93a4548c65741f76036b6c2956d90a983a50d46387747ed4ba03f4eb9a2a5da
+    .agents/skills/autopilot-pr-merge-worker/assets/conflict-resolution-prompt.md: sha256:18d2476f70df6154849e7a6c06a906d7eb4a73a844455e7562b37af1f095e1bb
     .agents/skills/autopilot-pr-merge-worker/assets/copilot-classification-prompt.md: sha256:911f8b2e2203d3847d08dbc52e34393b457c4d4b2486ea43847d609d092012ce
     .agents/skills/autopilot-pr-merge-worker/assets/fold-vs-defer-rubric.md: sha256:7d9deefac69ea044ee3d2fc0cdb92767e66711dafb79f1000dabd8f372d19cf4
-    .agents/skills/autopilot-pr-merge-worker/assets/pr-comment-templates.md: sha256:a1b6ed7ea6ffa482d48904d5c14569080d2510b93d2b4a30d42859337d6e7a96
-    .agents/skills/autopilot-pr-merge-worker/assets/worker-prompt.md: sha256:9074348468e93c52526032c639775338a003451f88f57c221a77eeb82c1f705c
-    .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md: sha256:f4d956e67487a94183ebcf3e33209103e6ed6f4560e31dd5f217e4878dcfe3d0
+    .agents/skills/autopilot-pr-merge-worker/assets/pr-comment-templates.md: sha256:9306b9342e6fcce0ec68c72663461972267228c44f69b893e0f1848cd5ce7aed
+    .agents/skills/autopilot-pr-merge-worker/assets/worker-prompt.md: sha256:5720fc9e2aa3bd5ff7d54c5ed4ca4097334d2d5c722363378a7e4a24c8eec73d
+    .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md: sha256:156f5eaaf1494b1aa23b9ac65e73bd06b5e44312c3cff0ded3b1ac0442ebfff3
     .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py: sha256:7cc26972deb8f44fb070c964ae28a289324ae5387a96bb442760fe0b2026f1e5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-merge-worker
@@ -153,27 +153,27 @@ dependencies:
   deployed_file_hashes:
     .agents/skills/autopilot-issue-delivery-worker/SKILL.md: sha256:3e2a1f3d4ac1ff6f14914142c63e42a9c07a94718dcd8bd97f06a07707d273d5
     .agents/skills/autopilot-issue-delivery-worker/assets/acceptance-observer.md: sha256:6dad4abe396bff62d755322258ac014ff6175768dc91e178348a851cd4e2c3a3
-    .agents/skills/autopilot-issue-delivery-worker/assets/autopilot-triage-schema.json: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
-    .agents/skills/autopilot-issue-delivery-worker/assets/confidence-gate-rubric.md: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
-    .agents/skills/autopilot-issue-delivery-worker/assets/final-report-template.md: sha256:8088fe8f5bb9fd1ec93fbe806971465bb7f6850019af5be1a329e252d4818df2
+    .agents/skills/autopilot-issue-delivery-worker/assets/autopilot-triage-schema.json: sha256:8b36b127ec4906fac50fedaeeb9fc75106be89cdb73605c39aca08f2366b73ab
+    .agents/skills/autopilot-issue-delivery-worker/assets/confidence-gate-rubric.md: sha256:9c33253d0bdc0bef86be54c53cdab566e767b7aca8b3c4ac92a11225a84c755b
+    .agents/skills/autopilot-issue-delivery-worker/assets/final-report-template.md: sha256:770edb0abee803a329262faedb0a3339c7c75565a25658e3b4e9d3ca2445194a
     .agents/skills/autopilot-issue-delivery-worker/assets/fix-prompt.md: sha256:495efd7f4d68bf8dc9d15bfaaac1dfe1e44155b1534b0051338a2644e8f0b52e
-    .agents/skills/autopilot-issue-delivery-worker/assets/ground-truth-table.md: sha256:00dd5a35ef0b39ba299e5fcd7f9ca682fc322792ec20440f7861edd39997d40e
+    .agents/skills/autopilot-issue-delivery-worker/assets/ground-truth-table.md: sha256:c767ecc1d1477586c49680f504cb75f1917d63f27e78472930faebfb47de1c0b
     .agents/skills/autopilot-issue-delivery-worker/assets/ideate-prompt.md: sha256:abab1a5e2a765229d1cdd215b90c57036cdb4b2764866b68399eb81a51362ddc
     .agents/skills/autopilot-issue-delivery-worker/assets/implement-bug.md: sha256:650e1c70fe456ac51347311c6d19a4a9e7ee195f0793a97947e4561cc63b8d71
     .agents/skills/autopilot-issue-delivery-worker/assets/implement-docs.md: sha256:81f2f9b617587df4a6f422838b05c63a5e05e0c8afd6d80952a9aa5cdad88b5a
     .agents/skills/autopilot-issue-delivery-worker/assets/implement-feature.md: sha256:394b25a0b0b41b0f99b250590af782968c0f25673c156d0b87d4f1f9b205de75
     .agents/skills/autopilot-issue-delivery-worker/assets/implement-refactor.md: sha256:5175ea7edefdaaf787d1701ba6f7fce8433d04134718d9a6445ca524ececa3bc
-    .agents/skills/autopilot-issue-delivery-worker/assets/model-routing.md: sha256:50c8673a9d5b2e9899303d705261fd06086b9d60bd132f3a9dea0d48782a50e2
+    .agents/skills/autopilot-issue-delivery-worker/assets/model-routing.md: sha256:14c80e3795a387615248b63784997a2fe97948ab0b7a4ae12f02d2142b8cbce6
     .agents/skills/autopilot-issue-delivery-worker/assets/plan-panel-prompt.md: sha256:422daafc8fcdf26f1096787075b2e8c15722df6b51e1d1784ea3b1435809b09f
     .agents/skills/autopilot-issue-delivery-worker/assets/plan-schema.json: sha256:f766382fbac2a2b99c0dad1d0327659103c4482cc155854ea7ef2e3c82fce8f2
     .agents/skills/autopilot-issue-delivery-worker/assets/solution-pipeline-prompt.md: sha256:756c8068c36ba255ff8fd19015712663ac98a29610c608f16e2646cca5c15e50
-    .agents/skills/autopilot-issue-delivery-worker/assets/strategic-alignment-prompt.md: sha256:67db0bb51d6cbdafad4ea8224ab2012f02e6341b2fd4eb7a09b2a24cc9cb4d7e
+    .agents/skills/autopilot-issue-delivery-worker/assets/strategic-alignment-prompt.md: sha256:1c48fa9103d47f3673938acda1988d8c55adc5bb888a74cda8d7a60e69c004f9
     .agents/skills/autopilot-issue-delivery-worker/assets/task-implement-prompt.md: sha256:397ab60c270f0312a3ddaac0fbc03e853fa16552a962f6b2ebca5ed27bab2818
-    .agents/skills/autopilot-issue-delivery-worker/assets/triage-digest-template.md: sha256:78c2e7be93543122e485eb494a2b50ecac6e18d7e077a9e8edde12b478242ca9
-    .agents/skills/autopilot-issue-delivery-worker/assets/triage-prompt.md: sha256:51bab548ac85044400b77858c6a1554f59bda197c388d9a8546076d87380b060
-    .agents/skills/autopilot-issue-delivery-worker/assets/verdict-schema.json: sha256:e0a4d0bf08703fc8e6256417a1c0cb816efde31fc8474fbbc2a84ae246da0fd9
+    .agents/skills/autopilot-issue-delivery-worker/assets/triage-digest-template.md: sha256:c404d45be5629bf197b1d6ed30fa1224d0b4bc3dd352019e6b27c0bda4fe6d78
+    .agents/skills/autopilot-issue-delivery-worker/assets/triage-prompt.md: sha256:890bfb20d18bb93f83ece7f2b9ea7ccfcbf2bc5aa3e030e61fa92dddeb3654a8
+    .agents/skills/autopilot-issue-delivery-worker/assets/verdict-schema.json: sha256:1ee856daff1912d38d76c7f01509c69654327355db7a7b1a2f31c8d61059f694
     .agents/skills/autopilot-issue-delivery-worker/assets/wave-gate-rubric.md: sha256:a8bf5270c8d63c1d9ffcf0b3f18ba22d591b062e7b969982320150986ab211cd
-    .agents/skills/autopilot-issue-delivery-worker/references/strategic-alignment-gate.md: sha256:66613a8344411a2f9d5147b4acea798887bed20132ffd27bac9b3f5ba6bb65ed
+    .agents/skills/autopilot-issue-delivery-worker/references/strategic-alignment-gate.md: sha256:17c872d668907fbee8fb1069244e5ac893dffdc1c5a36f898b7aee76397e91c8
   source: local
   local_path: ../autopilot-issue-delivery-worker
   declaring_parent: ./packages/autopilot/autopilot-issue-delivery-scheduler
@@ -3070,7 +3070,7 @@ local_deployed_file_hashes:
   .agents/skills/cut-release/assets/entry-sanitizer.md: sha256:b78d605f1bb17b042681b678e07a6431209ae11934ea320e0b573da313649743
   .agents/skills/cut-release/assets/pr-body-template.md: sha256:8034ad7d64a1f2a9e8677d332ffa1ebbf19071f3b30ba6ecdda660c82bb11917
   .agents/skills/cut-release/assets/semver-rubric.md: sha256:61b9a2001cbbb41360de509c4b56eb3859333cbf9ea74a896fb9e03a1d3a5244
-  .agents/skills/cut-release/evals/evals.json: sha256:8aac33c19aed6ee0e1e96e0a1f2da922490e30fe003e627c8fcb719225922bbe
+  .agents/skills/cut-release/evals/evals.json: sha256:bfe097eed3f636215556e3ed3068a0dec684ef06c8eb8349f1e4daf8aac4753d
   .agents/skills/cut-release/scripts/bump-version.sh: sha256:bc382b5024f415998a3d66689a36596f0458e0a3c79370e96705477a5672a1d4
   .agents/skills/cut-release/scripts/list-changes-since-tag.sh: sha256:4aaacc7f61ca85be9776e921d02a67112569b370d31b581d045e0c3dc941a071
   .agents/skills/cut-release/scripts/verify-lint-mirror.sh: sha256:ab3f4a9ebc8f2b8c357c4cf81e0ada3be093cfc94c06703805d56c87f6fd7ecc

@@ -1,5 +1,5 @@
 <!--
-batch-bug-shepherd - Phase 1.5 strategic-alignment gate procedure.
+autopilot-issue-delivery-worker - Phase 1.5 strategic-alignment gate procedure.
 
 Load trigger (stated in ../SKILL.md Phase 1.5):
 "WHEN ENTERING PHASE 1.5".
@@ -141,7 +141,7 @@ Comment shape (ASCII; courteous; no jargon):
 ```
 Thank you for the work on this PR.
 
-The batch-bug-shepherd strategic-alignment gate (apm-ceo persona)
+The autopilot-issue-delivery-worker strategic-alignment gate (apm-ceo persona)
 reviewed the underlying bug against PRINCIPLES.md and flagged a
 direction conflict before we ask the review panel to spend time on
 the diff. Reason:

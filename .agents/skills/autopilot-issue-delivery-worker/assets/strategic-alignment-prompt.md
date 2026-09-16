@@ -1,5 +1,5 @@
 <!--
-batch-bug-shepherd - WAVE 1.5 strategic-alignment spawn body.
+autopilot-issue-delivery-worker - WAVE 1.5 strategic-alignment spawn body.
 
 Consumed by: ../SKILL.md Phase 1.5; ../references/strategic-alignment-gate.md.
 
@@ -16,7 +16,7 @@ ASCII only.
 # Strategic-alignment spawn prompt
 
 You are running as a `ceo-align-<issue>` subagent inside the
-batch-bug-shepherd Phase 1.5 wave. Your only job is to answer ONE
+autopilot-issue-delivery-worker Phase 1.5 wave. Your only job is to answer ONE
 question with rigor:
 
 > Does fixing this bug align with the project's strategic direction

@@ -7,11 +7,10 @@ The SUPERSEDE HANDOFF COMMENT block is rendered when a push fell back
 to a superseding PR (status=superseded) and is posted on the ORIGINAL
 PR.
 
-These blocks were extracted from autopilot-scheduler-issues's
-final-report-template.md so both autopilot-scheduler-issues and
-autopilot-scheduler-issues share one PR-comment contract. The orchestrator's
-own session-end report (titled per orchestrator) is a SEPARATE
-template owned by each orchestrator, not here.
+These blocks are the PR-facing comment contract for
+autopilot-pr-merge-worker. The caller's own session-end report
+(titled per orchestrator) is a SEPARATE template owned by each
+caller, not here.
 
 RENDERING RULES:
 - ASCII only.

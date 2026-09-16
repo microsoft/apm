@@ -1,12 +1,12 @@
 <!--
-apm-issue-autopilot - final report template (Phase 7).
+autopilot-issue-delivery-worker - final report template (Phase 7).
 
 Rendered ONCE at session end. Mirrors the ground-truth table to the
 maintainer. NEVER auto-closes escalated or terminal-by-triage issues;
 those are surfaced for human action. ASCII only.
 -->
 
-# apm-issue-autopilot - session report
+# autopilot-issue-delivery-worker - session report
 
 Seed: <list-or-query>. HEAD at seed: `<sha>`. Issues processed: <N>.
 

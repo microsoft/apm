@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "apm-issue-autopilot-triage-schema.json",
-  "title": "apm-issue-autopilot triage decision",
-  "description": "Adapts apm-triage-panel v2 advice into the existing internal decision field plus gate fields. Decision is a recommendation, never human approval; legacy status/priority/milestone writes are rejected.",
+  "$id": "autopilot-issue-delivery-worker-triage-schema.json",
+  "title": "autopilot-issue-delivery-worker triage decision",
+  "description": "Adapts autopilot-issue-triage-worker v2 advice into the existing internal decision field plus gate fields. Decision is a recommendation, never human approval; legacy status/priority/milestone writes are rejected.",
   "type": "object",
   "required": ["kind", "issue", "decision", "confidence", "red_flags"],
   "additionalProperties": false,

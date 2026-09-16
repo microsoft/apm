@@ -1,6 +1,6 @@
 # Confidence gate rubric (Phase 2) - escalate by default
 
-This is the load-bearing policy of apm-issue-autopilot. It maps a
+This is the load-bearing policy of autopilot-issue-delivery-worker. It maps a
 triage decision to a `gate`. The bias is ESCALATE: auto-proceed is the
 narrow exception, reached only for a clear, bounded, high-confidence
 accept whose implementation brief is complete. When in doubt, escalate

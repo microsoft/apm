@@ -143,7 +143,7 @@ signal to inspect, not a hard failure.
 Triage runs in Phase 1, not Phase 4, so it is not in the per-spawn table
 above; bind it explicitly here. Triage binds to the PLANNER class
 (claude-opus-4.8) -- front-loaded heavy by deliberate design. It runs the
-OPEN apm-triage-panel rubric as judgement (not the fixed-schema GRADING
+OPEN autopilot-issue-triage-worker rubric as judgement (not the fixed-schema GRADING
 the wave-gate reviewer does), grounds every call against the repo at HEAD,
 and is the gate that decides whether to spend a WHOLE downstream pipeline
 on an issue -- a wrong accept burns a full Ideate/Plan/Implement/shepherd

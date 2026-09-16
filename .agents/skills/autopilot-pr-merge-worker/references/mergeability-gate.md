@@ -2,7 +2,7 @@
 
 Load this file when entering the conflict-resolution phase of an
 orchestrator that composes the autopilot-pr-merge-worker skill
-(autopilot-scheduler-issues Phase 5, autopilot-scheduler-issues Phase 6). It is the
+(conflict-resolution and mergeability phases). It is the
 load-on-demand expansion of that phase contract in the orchestrator's
 SKILL.md; the body keeps the contract terse, this file holds the
 step-by-step.

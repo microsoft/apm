@@ -28,7 +28,7 @@
       {"id": "no-fire-07", "query": "regenerate uv.lock after a dep bump", "expected": "no-fire", "split": "val", "notes": "Lockfile maintenance, not a release."},
       {"id": "no-fire-08", "query": "set version to 0.16.0 in pyproject.toml", "expected": "no-fire", "split": "val", "notes": "Raw version edit; bypasses the rubric and the changelog."},
       {"id": "no-fire-09", "query": "draft release notes for the website", "expected": "no-fire", "split": "val", "notes": "Marketing copy; out of scope."},
-      {"id": "no-fire-10", "query": "triage the open issues", "expected": "no-fire", "split": "val", "notes": "apm-triage-panel territory."}
+      {"id": "no-fire-10", "query": "triage the open issues", "expected": "no-fire", "split": "val", "notes": "autopilot-issue-triage-scheduler territory."}
     ]
   },
   "stop_list": [

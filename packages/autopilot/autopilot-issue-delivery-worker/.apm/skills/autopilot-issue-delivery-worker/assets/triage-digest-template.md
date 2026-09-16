@@ -1,5 +1,5 @@
 <!--
-apm-issue-autopilot - consolidated triage digest (the ONE review).
+autopilot-issue-delivery-worker - consolidated triage digest (the ONE review).
 
 The orchestrator renders this digest EXACTLY ONCE per session, after
 all triage children return and the confidence gate has been applied.

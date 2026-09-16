@@ -1,5 +1,5 @@
 <!--
-apm-issue-autopilot - ground-truth table (the A11 state interlock).
+autopilot-issue-delivery-worker - ground-truth table (the A11 state interlock).
 
 The orchestrator maintains EXACTLY ONE instance of this table in
 plan.md, plus the proceed_manifest block below it. Rewrite the whole

@@ -1,7 +1,8 @@
 # Autopilot PR worker subagent (WAVE / Phase 4) - spawn body
 
 You are a autopilot-pr-merge-worker subagent spawned by an orchestrator that
-composes the autopilot-pr-merge-worker skill (autopilot-scheduler-issues or autopilot-scheduler-pull-requests). ONE PR per subagent. Your job is to drive this PR to a
+composes the autopilot-pr-merge-worker skill (summoned by name; never composed
+by autopilot-pr-review-scheduler). ONE PR per subagent. Your job is to drive this PR to a
 landing-ready state via an iterative convergence loop that addresses
 both `copilot-pull-request-reviewer[bot]` inline review AND
 autopilot-pr-review-worker CEO follow-ups, pushing fixes as you go, watching
