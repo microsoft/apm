@@ -37,7 +37,7 @@ dependencies:
   - .agents/skills/apm-issue-autopilot/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
   deployed_file_hashes:
-    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:0eb3712b0a801bef3174f36f0cf95dae8fd458fc8c18cedb99d068afe95cdf1c
+    .agents/skills/apm-issue-autopilot/SKILL.md: sha256:8cdd6016d9e349386f7379972a8e1ccd5495b10098f9aadc214992f1eeab42dd
     .agents/skills/apm-issue-autopilot/assets/acceptance-observer.md: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
     .agents/skills/apm-issue-autopilot/assets/autopilot-triage-schema.json: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
     .agents/skills/apm-issue-autopilot/assets/confidence-gate-rubric.md: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
@@ -77,7 +77,7 @@ dependencies:
   - .agents/skills/autopilot-scheduler-issue-delivery/SKILL.md
   - .agents/skills/autopilot-scheduler-issue-delivery/assets/fan-out-pool.md
   deployed_file_hashes:
-    .agents/skills/autopilot-scheduler-issue-delivery/SKILL.md: sha256:0619ceab8eccfd2edd7607562df5cd9c54faf85dded08327e88d8bfa7e9cc41c
+    .agents/skills/autopilot-scheduler-issue-delivery/SKILL.md: sha256:2f03a11c53c5c310c513a43af3ae657107fbb4d0d6d1f4d37bc30981685ac5a1
     .agents/skills/autopilot-scheduler-issue-delivery/assets/fan-out-pool.md: sha256:7eb82d4335b24a945ed8479aa89fc655604a6be2be6d5c75484eaf98a21e9bfe
   source: local
   local_path: ./packages/autopilot-scheduler-issue-delivery
@@ -111,7 +111,7 @@ dependencies:
   - .agents/skills/autopilot-scheduler-issues/SKILL.md
   - .agents/skills/autopilot-scheduler-issues/assets/fan-out-pool.md
   deployed_file_hashes:
-    .agents/skills/autopilot-scheduler-issues/SKILL.md: sha256:d957ceedd3388486e564ef8cefc10c5cf75e0862058a854fc8502cbff23c2924
+    .agents/skills/autopilot-scheduler-issues/SKILL.md: sha256:960858902ba37712c84c5e418f254b3990c84b519a4a086825fc1ee360424161
     .agents/skills/autopilot-scheduler-issues/assets/fan-out-pool.md: sha256:d7e0d4f7e32163884f9c848f88828f98d4ae71401a1b671737a0103b276a1cd7
   source: local
   local_path: ./packages/autopilot-scheduler-issues
@@ -139,7 +139,7 @@ dependencies:
   - .agents/skills/autopilot-scheduler-pull-requests/SKILL.md
   - .agents/skills/autopilot-scheduler-pull-requests/assets/fan-out-pool.md
   deployed_file_hashes:
-    .agents/skills/autopilot-scheduler-pull-requests/SKILL.md: sha256:258b9c1cc067542e004e77fb3999ef14d8cc861cc2e292689caace788ad0da27
+    .agents/skills/autopilot-scheduler-pull-requests/SKILL.md: sha256:319fb553e092c9e26e5cdef5f9a306813f7e6f013919b3999ce0262d253fbae5
     .agents/skills/autopilot-scheduler-pull-requests/assets/fan-out-pool.md: sha256:8e177a752ab4e0434c0cbdb066cadafdd3f5ddfb5bf696eab5549cdac02d3cea
   source: local
   local_path: ./packages/autopilot-scheduler-pull-requests
@@ -173,7 +173,7 @@ dependencies:
   - .agents/skills/batch-bug-shepherd/scripts/run_evals.py
   - copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
   deployed_file_hashes:
-    .agents/skills/batch-bug-shepherd/SKILL.md: sha256:0973311bbb73ed92561ccb653eb1a9b05a7d76ab553e2a821c78245d26e1e5b4
+    .agents/skills/batch-bug-shepherd/SKILL.md: sha256:dbea2440b6e96eb5ba3095139f82eb33be5ecbee076cf18c959ea729edd1cca4
     .agents/skills/batch-bug-shepherd/assets/final-report-template.md: sha256:ea280a4d1e15a9b56ba8d3ef5f0e931754cc44ae29d5615da58da8d445f455c2
     .agents/skills/batch-bug-shepherd/assets/fix-prompt.md: sha256:56ea0fa38b6fe576b319f9b8e38ba748f1136facff70c90f21d4356e00bc07f7
     .agents/skills/batch-bug-shepherd/assets/ground-truth-table.md: sha256:ca5cf460d3b9f0f529a675d4d9f6d9cfc9fcf2f750428b19dda051642f58a5a3
@@ -215,7 +215,7 @@ dependencies:
   - .agents/skills/shepherd-driver/references/mergeability-gate.md
   - .agents/skills/shepherd-driver/scripts/owner_touch_gate.py
   deployed_file_hashes:
-    .agents/skills/shepherd-driver/SKILL.md: sha256:f8f36259102ff76f21232a14b3ff00f73406e48c134a23aa53cb620bbab0c324
+    .agents/skills/shepherd-driver/SKILL.md: sha256:a0cfde0dc654f187858b5ad1f53663223f68c0e56302abb08361176a40ebb6ee
     .agents/skills/shepherd-driver/apm.yml: sha256:76423563dcf3171060b940df61a3e7fba8946e78248ca60a4cfd567631297ffa
     .agents/skills/shepherd-driver/assets/ci-recovery-checklist.md: sha256:21801867a8459d9713e45efe68e612c4d22a2cb577c23eceab55cd855bbd23ef
     .agents/skills/shepherd-driver/assets/completion-schema.json: sha256:6b62ea5b5a6bc3f673219f9879e17361739622c27426573e743d05f75d42e9c3
@@ -275,7 +275,7 @@ dependencies:
   - .agents/skills/apm-review-panel
   - .agents/skills/apm-review-panel/SKILL.md
   deployed_file_hashes:
-    .agents/skills/apm-review-panel/SKILL.md: sha256:66eac90170ae300cc2cb835a72cc5337f29d19d5d6e46b12f11103e0f7ba2541
+    .agents/skills/apm-review-panel/SKILL.md: sha256:ce493c091bbc9a6f2531d6d38de76a6a01274bc0f8999b5bc9e4deb548ae4717
   source: local
   local_path: ./packages/apm-review-panel
   declared_license: MIT
@@ -287,7 +287,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-panel
   - .agents/skills/autopilot-pr-review-panel/SKILL.md
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-panel/SKILL.md: sha256:e71585c5b618581eff02a3300b208285543d07c617fe4fba137e2419b198c4fd
+    .agents/skills/autopilot-pr-review-panel/SKILL.md: sha256:607950cdbfdbf9e5cd351c15b7e26c0d0387b1d57f035c362abd78dde1c85cba
   source: local
   local_path: ./packages/autopilot-pr-review-panel
   declared_license: MIT
@@ -299,7 +299,7 @@ dependencies:
   - .agents/skills/apm-triage-panel
   - .agents/skills/apm-triage-panel/SKILL.md
   deployed_file_hashes:
-    .agents/skills/apm-triage-panel/SKILL.md: sha256:795f78ca5ad2d279a4624f9afa163c522bf554c7edf0e88615958af78923e7f5
+    .agents/skills/apm-triage-panel/SKILL.md: sha256:0174762bf0a58f78b409738eacf23c3c1c560f8f05748205ebf6ada6686e8fad
   source: local
   local_path: ./packages/apm-triage-panel
   declared_license: MIT
@@ -357,7 +357,7 @@ dependencies:
   - .agents/skills/autopilot-worker-issue/assets/wave-gate-rubric.md
   - .agents/skills/autopilot-worker-issue/references/strategic-alignment-gate.md
   deployed_file_hashes:
-    .agents/skills/autopilot-worker-issue/SKILL.md: sha256:e8a5edd25dd623e3e43bc4d2c0eee6b5b6a631b60fa0f8c0a51f42847a63353d
+    .agents/skills/autopilot-worker-issue/SKILL.md: sha256:2b808fe2d99b2ea2b06e862750f7df21c51267a351d86bce462fc0aa01583df5
     .agents/skills/autopilot-worker-issue/assets/acceptance-observer.md: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
     .agents/skills/autopilot-worker-issue/assets/autopilot-triage-schema.json: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
     .agents/skills/autopilot-worker-issue/assets/confidence-gate-rubric.md: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb

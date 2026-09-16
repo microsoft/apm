@@ -1,5 +1,6 @@
 ---
 name: batch-bug-shepherd
+activation_card: on
 description: >-
   Compatibility alias. Use autopilot-issue-delivery-scheduler
   with selector `bugs`, then autopilot-pr-review-scheduler.

@@ -1,5 +1,6 @@
 ---
 name: shepherd-driver
+activation_card: on
 description: >-
   Compatibility alias. Use autopilot-pr-merge-worker instead.
   Kept so existing prompts and installs still resolve. Do not

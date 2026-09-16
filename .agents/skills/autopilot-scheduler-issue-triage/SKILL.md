@@ -1,5 +1,6 @@
 ---
 name: autopilot-scheduler-issue-triage
+activation_card: on
 description: >-
   Compatibility alias. Use autopilot-issue-triage-scheduler instead.
   Kept so existing prompts and installs still resolve. Do not

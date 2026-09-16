@@ -1,5 +1,6 @@
 ---
 name: apm-issue-autopilot
+activation_card: on
 description: >-
   Compatibility alias. Sequences autopilot-issue-triage-scheduler,
   then autopilot-issue-delivery-scheduler, then

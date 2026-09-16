@@ -1,5 +1,6 @@
 ---
 name: autopilot-scheduler-issues
+activation_card: on
 description: >-
   Compatibility alias. Use autopilot-issue-triage-scheduler or
   autopilot-issue-delivery-scheduler instead. Kept so existing

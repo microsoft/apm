@@ -1,5 +1,6 @@
 ---
 name: apm-triage-panel
+activation_card: on
 description: >-
   Compatibility alias. Use autopilot-issue-triage-worker instead.
   Kept so existing prompts and installs still resolve. Do not

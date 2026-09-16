@@ -87,6 +87,20 @@ def test_canonical_autopilot_skills_declare_activation_cards() -> None:
         assert "activation_card: on" in text, path
         assert "Missing field -> stop" in text, path
         assert "approved: n/a" in text, path
+    prefixes = (
+        "autopilot-",
+        "apm-review-panel",
+        "apm-triage-panel",
+        "apm-issue-autopilot",
+        "batch-bug-shepherd",
+        "shepherd-driver",
+    )
+    for path in (ROOT / "packages").rglob("SKILL.md"):
+        if not any(part.startswith(prefixes) or part in prefixes for part in path.parts):
+            continue
+        text = path.read_text(encoding="ascii")
+        fm = text.split("---", 2)[1]
+        assert "activation_card: on" in fm, path
     for path in (
         SCHEDULER_TRIAGE,
         SCHEDULER_CODE,

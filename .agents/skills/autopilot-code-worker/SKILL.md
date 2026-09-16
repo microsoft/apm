@@ -1,5 +1,6 @@
 ---
 name: autopilot-code-worker
+activation_card: on
 description: >-
   Compatibility alias. Use autopilot-issue-delivery-worker instead.
   Kept so existing prompts and installs still resolve. Do not

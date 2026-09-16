@@ -1,5 +1,6 @@
 ---
 name: autopilot-pr-review-triage-scheduler
+activation_card: on
 description: >-
   Compatibility alias. Use autopilot-pr-triage-scheduler instead.
   Kept so existing prompts and installs still resolve. Do not

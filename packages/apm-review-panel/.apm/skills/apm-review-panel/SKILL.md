@@ -1,5 +1,6 @@
 ---
 name: apm-review-panel
+activation_card: on
 description: >-
   Compatibility alias. Use autopilot-pr-review-worker instead.
   Kept so existing prompts and installs still resolve. Do not
