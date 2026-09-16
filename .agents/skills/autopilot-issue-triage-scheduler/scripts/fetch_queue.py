@@ -13,7 +13,6 @@ import json
 import os
 import re
 import runpy
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -205,11 +204,28 @@ def build_batch(
     }
 
 
+def _trusted_gh() -> str:
+    """Resolve gh via get_gh_executable, never a project-controlled binary."""
+    src_root: Path | None = None
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "src" / "apm_cli" / "utils" / "git_env.py").is_file():
+            src_root = parent / "src"
+            break
+    if src_root is not None and str(src_root) not in sys.path:
+        sys.path.insert(0, str(src_root))
+    try:
+        from apm_cli.utils.git_env import get_gh_executable
+    except ImportError as error:
+        raise ValueError("gh is not runnable") from error
+    try:
+        return get_gh_executable()
+    except FileNotFoundError as error:
+        raise ValueError("gh is not runnable") from error
+
+
 def _gh_json(args: list[str]) -> Any:
     """Run `gh` and parse JSON; raise ValueError on failure."""
-    gh = shutil.which("gh")
-    if not gh:
-        raise ValueError("gh is not runnable")
+    gh = _trusted_gh()
     try:
         completed = subprocess.run(  # noqa: S603
             [gh, *args],

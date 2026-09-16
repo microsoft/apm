@@ -249,6 +249,9 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "public signal of which user is working" in worker
     assert "Do not start implementation while the issue is unassigned" in worker
     assert "Do not steal." in worker
+    assert "sole human assignee" in worker
+    assert "Being listed among several humans" in worker
+    assert "gh issue edit --remove-assignee @me" in worker
     assert "If ORIGIN is `unattended` or unknown, skip" in worker
     assert "gh issue edit --add-assignee @me" in worker
     assert "gh pr edit --add-assignee @me" in worker

@@ -264,3 +264,15 @@ def test_queue_helpers_match_across_schedulers_and_worker_contract() -> None:
         worker / "assets/label-contract.json"
     ).read_bytes()
     assert not (worker / "scripts").exists()
+
+
+def test_trusted_gh_uses_cli_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Queue helpers resolve gh through get_gh_executable, not shutil.which."""
+    source = (PACKAGE / "scripts/fetch_queue.py").read_text(encoding="ascii")
+    assert "shutil.which" not in source
+    assert "get_gh_executable" in source
+    monkeypatch.setattr(
+        "apm_cli.utils.git_env.get_gh_executable",
+        lambda: "/trusted/bin/gh",
+    )
+    assert FETCH["_trusted_gh"]() == "/trusted/bin/gh"

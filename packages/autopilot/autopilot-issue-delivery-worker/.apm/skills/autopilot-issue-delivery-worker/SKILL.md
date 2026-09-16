@@ -86,20 +86,30 @@ INTENT is `implement`.
 
 When ORIGIN is `actor-session`, assignment is a hard gate. It
 is the public signal of which user is working this issue.
-Before reproduce, edits, or a PR:
+GitHub allows multiple assignees, so a read-then-add is not
+a claim. Before reproduce, edits, or a PR:
 
-1. Read current assignees.
-2. If another user is assigned, escalate. Do not steal.
-3. If unassigned, `gh issue edit --add-assignee @me` and
-   verify the actor is listed.
-4. If already assigned to `@me`, continue.
+1. Read current assignees. Ignore bot logins (`github-actions`,
+   `dependabot`, `copilot`, `web-flow`).
+2. If another human is assigned, escalate. Do not steal.
+3. If unassigned, `gh issue edit --add-assignee @me`.
+4. Re-read assignees immediately. Continue only if `@me` is
+   the sole human assignee. Being listed among several humans
+   is not a claim.
+5. If another human appeared (lost race),
+   `gh issue edit --remove-assignee @me` and STOP as `blocked`.
+   Do not implement.
+6. If already assigned to `@me` alone, continue.
+7. Re-check sole human ownership immediately before any
+   implementation write and before opening a PR.
 
 Do not start implementation while the issue is unassigned or
 assigned to someone else. If a PR exists or is opened, assign
-it the same way (`gh pr edit --add-assignee @me`). Do not
-request that actor as a reviewer. Never alter CODEOWNERS
-`reviewRequests`. If ORIGIN is `unattended` or unknown, skip
-assignee writes. A failed required assignee write is `blocked`.
+it the same way (`gh pr edit --add-assignee @me`), then apply
+the same sole-human re-check. Do not request that actor as a
+reviewer. Never alter CODEOWNERS `reviewRequests`. If ORIGIN
+is `unattended` or unknown, skip assignee writes. A failed
+required assignee write is `blocked`.
 
 Never write human decision labels. Existing `status/shepherding`
 may be added only if that processing label already exists in the
