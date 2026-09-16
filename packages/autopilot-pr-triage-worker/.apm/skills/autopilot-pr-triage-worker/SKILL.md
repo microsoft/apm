@@ -18,7 +18,6 @@ the diff as `autopilot-pr-review-worker` does. Do not drive merge.
 
 `activation_card: on`. Before any PR read or GitHub write, emit
 this Enter card with every field filled. Missing field -> stop.
-Do not load Autogenesis path modules from this card.
 
 ```text
 skill: autopilot-pr-triage-worker

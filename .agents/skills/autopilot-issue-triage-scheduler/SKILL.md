@@ -26,7 +26,6 @@ one issue per slot. Never borrow slots from
 
 `activation_card: on`. Before any queue read or spawn, emit
 this Enter card with every field filled. Missing field -> stop.
-Do not load Autogenesis path modules from this card.
 
 ```text
 skill: autopilot-issue-triage-scheduler

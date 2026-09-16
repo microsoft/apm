@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Canonical autopilot skills emit an Autogenesis-style activation card (`activation_card: on`). Enter before work; Exit after. Do not load Autogenesis path modules from the card. Schedulers are `write: off`. Workers default `write: on`; `write: off` returns the template without GitHub writes.
+- Canonical autopilot skills emit an activation card (`activation_card: on`). Enter before work; Exit after. Schedulers are `write: off`. Workers default `write: on`; `write: off` returns the template without GitHub writes.
 - Autopilot PR-review worker is the advisory panel (formerly `autopilot-pr-review-panel` / `apm-review-panel`). Drive-to-merge is `autopilot-pr-merge-worker` (activation card `path: merge`, `write` default `on`). The PR-review scheduler never comments, labels, assigns, requests reviewers, or composes the merge worker.
 - Autopilot issue and PR triage workers own the advisory comment and processing labels, including when summoned without a scheduler. Schedulers only select work and fan out slots.
 - Autopilot `FANOUT_LIMIT` is concurrent slots, not queue length. Schedulers persist the full helper-selected list and refill a slot when it returns.

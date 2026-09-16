@@ -81,11 +81,10 @@ def _ascii(path: Path) -> str:
 
 
 def test_canonical_autopilot_skills_declare_activation_cards() -> None:
-    """Live autopilot skills use Autogenesis Enter/Exit cards, not path modules."""
+    """Live autopilot skills emit Enter/Exit activation cards."""
     for path in CANONICAL_AUTOPILOT_SKILLS:
         text = _ascii(path)
         assert "activation_card: on" in text, path
-        assert "Do not load Autogenesis path modules from this card" in text, path
         assert "Missing field -> stop" in text, path
         assert "approved: n/a" in text, path
     for path in (

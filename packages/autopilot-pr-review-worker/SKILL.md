@@ -34,7 +34,6 @@ surfaces findings; the maintainer and the PR author decide ship.
 
 `activation_card: on`. Before any PR read or GitHub write, emit
 this Enter card with every field filled. Missing field -> stop.
-Do not load Autogenesis path modules from this card.
 
 ```text
 skill: autopilot-pr-review-worker

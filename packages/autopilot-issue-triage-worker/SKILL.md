@@ -37,7 +37,6 @@ Writes are optional via the activation card (`write: on` default).
 
 `activation_card: on`. Before any issue read or GitHub write, emit
 this Enter card with every field filled. Missing field -> stop.
-Do not load Autogenesis path modules from this card.
 
 ```text
 skill: autopilot-issue-triage-worker

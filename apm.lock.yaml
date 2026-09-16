@@ -94,7 +94,7 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py
   - .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-triage-scheduler/SKILL.md: sha256:81a962cd136a4be783ddb6ead85617c29dbf1ff0decab5bdf691681ca0419f4b
+    .agents/skills/autopilot-issue-triage-scheduler/SKILL.md: sha256:9d909996dc60e8a1522821ffaacd76435eea0037aaff646c6676e6c350393803
     .agents/skills/autopilot-issue-triage-scheduler/assets/fan-out-pool.md: sha256:7cbfd8586c62cbabe25370cc7a5c1f2a753262de35f5efc5fb076542188c21cf
     .agents/skills/autopilot-issue-triage-scheduler/assets/label-contract.json: sha256:b1ae10c85bffe63998d1c6e07a34a3d3c345572f4774114e36bd5f42dd8f1627
     .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py: sha256:67642cb53cd810326f59e1f770b19488a8037fef9f61ac40410aa376b591a03f
@@ -125,7 +125,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-scheduler/SKILL.md
   - .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-scheduler/SKILL.md: sha256:2c05be68ca6734f470520c9ab2f4f48a37c40a9b048ad78c687ca9e567d00c7a
+    .agents/skills/autopilot-pr-review-scheduler/SKILL.md: sha256:f637799488a516ce8426e24ce94aedc256f4dabb861a48a97306e0a0c22d72f0
     .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:ce64a77c44166372b7e76d740098a8c780b8b4e3781334cfca4642bb666155d2
   source: local
   local_path: ./packages/autopilot-pr-review-scheduler
@@ -250,7 +250,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-worker/evals/render_eval.py
   - .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:a96f9ae0b83e189318175b9150de9193ffc38fd7b2bb04d422496598ba26b4f3
+    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:0e49eaa2fb46c536b336ab86601fbd26b3799ca7a19a61e03916256c34763481
     .agents/skills/autopilot-pr-review-worker/apm.yml: sha256:660b156b45acac732f807fafa74f84f67b3b49327a51f2f60e4331634bf7fb66
     .agents/skills/autopilot-pr-review-worker/assets/ceo-return-schema.json: sha256:f47511da124daae14388856863cdfe1c6e8c92158a27c043fe7d86810cb89875
     .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json: sha256:e197285bf95151d884a035dd767009c67812109d4d1c3b7187ac6224eec10870
@@ -316,7 +316,7 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json
   - .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:368e4a5072c84d651f7fd42b5a7991b48568165f6ef2812b1c37a2febdb58922
+    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:de200ff699cdd56fad2f037658ef42cd90171ff5db03a5d14b452eee386f0604
     .agents/skills/autopilot-issue-triage-worker/apm.yml: sha256:d0b7f1e4275c73d58030549e2e9ee560e50cc40ecd86e42e155cf469474cf090
     .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json: sha256:b1ae10c85bffe63998d1c6e07a34a3d3c345572f4774114e36bd5f42dd8f1627
     .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:0442e9790755877047c361ff2ea7bb1684ed2089c8793a5a9b4266a4a2e44c87
@@ -403,7 +403,7 @@ dependencies:
   - .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md
   - .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-merge-worker/SKILL.md: sha256:3d6abc47457bf3ff113f32c6fb2e36eed3dda5bcdafe10c19ba3f493c3266ff4
+    .agents/skills/autopilot-pr-merge-worker/SKILL.md: sha256:0f83fbf9dbcbb2d5222f30496859d816e2ceebfb8f2771420b0a05196e8e4cc1
     .agents/skills/autopilot-pr-merge-worker/apm.yml: sha256:324b1b5a3164b54468871a366e5c2ad0860b14a0b4549fa66d650c74bbf37453
     .agents/skills/autopilot-pr-merge-worker/assets/ci-recovery-checklist.md: sha256:601875105ce91bb22e4b305687d97a0ae10001f73cbd2ac9ff90eb028e1a6aba
     .agents/skills/autopilot-pr-merge-worker/assets/completion-schema.json: sha256:e01d89d69c7ef3a061289f399a7570123b890886eac138e4d613fb6d1bf2dc32
