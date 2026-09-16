@@ -129,6 +129,16 @@ def test_canonical_autopilot_skills_declare_activation_cards() -> None:
         ), path
 
 
+def test_triage_workers_default_json_receipt_off() -> None:
+    """JSON receipts are optional; omitted means off, never a GitHub comment."""
+    for path in (TRIAGE_SKILL, WORKER_PR_TRIAGE):
+        text = _ascii(path)
+        assert "json: off | on" in text, path
+        assert "`json` defaults to `off` when omitted or unknown" in text, path
+        assert "Omitted `json` is not a missing-field stop" in text, path
+        assert "Never post it on GitHub" in text, path
+
+
 def test_schedulers_require_queue_table_with_labels_and_rationale() -> None:
     """Schedulers emit the full keep/drop table before any spawn."""
     for path in (

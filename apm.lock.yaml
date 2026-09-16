@@ -316,10 +316,10 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json
   - .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:de200ff699cdd56fad2f037658ef42cd90171ff5db03a5d14b452eee386f0604
+    .agents/skills/autopilot-issue-triage-worker/SKILL.md: sha256:a4fd4263638f1d5df3259457791ac3691866b465b09eb538a92ebb982c220392
     .agents/skills/autopilot-issue-triage-worker/apm.yml: sha256:d0b7f1e4275c73d58030549e2e9ee560e50cc40ecd86e42e155cf469474cf090
     .agents/skills/autopilot-issue-triage-worker/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
-    .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:0442e9790755877047c361ff2ea7bb1684ed2089c8793a5a9b4266a4a2e44c87
+    .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:a22fee87f8dd4af6b5ebf2cbe775b1cef7ff2f9f4d2d54734c859dd1d2ad01a8
   source: local
   local_path: ../autopilot-issue-triage-worker
   declaring_parent: ./packages/autopilot/autopilot-issue-triage-scheduler
@@ -1004,7 +1004,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-triage-worker
   active_owner: local:packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:d0ef6bf7f844c859603c9493c30e0d08720dc0607ac99fafcb8cf9820ab0755c
+  content_hash: sha256:a4fd4263638f1d5df3259457791ac3691866b465b09eb538a92ebb982c220392
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-worker/apm.yml
@@ -1031,7 +1031,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-triage-worker
   active_owner: local:packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:0442e9790755877047c361ff2ea7bb1684ed2089c8793a5a9b4266a4a2e44c87
+  content_hash: sha256:a22fee87f8dd4af6b5ebf2cbe775b1cef7ff2f9f4d2d54734c859dd1d2ad01a8
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-scheduler-issues

@@ -28,6 +28,7 @@ path: triage
 intent: advise one already-selected PR
 origin: unattended | actor-session
 write: on | off
+json: off | on
 repo: microsoft/apm
 pr: <positive integer>
 invocation: agentic-workflow | actor-session
@@ -41,6 +42,11 @@ Rules:
 - `write: on` posts the one advisory comment and processing /
   classification labels. Never human decision labels. Never assign.
   Never request reviewers.
+- `json` defaults to `off` when omitted or unknown. Omitted `json`
+  is not a missing-field stop.
+- `json: off` -> no machine JSON receipt.
+- `json: on` -> fill JSON only as an internal payload (session
+  file or parent Exit). Never post it on GitHub.
 - `origin` fail-closed unknown -> `unattended`.
 - One PR. Do not nest a scheduler path.
 
@@ -51,6 +57,7 @@ skill: autopilot-pr-triage-worker
 subject: microsoft/apm#<pr-number>
 path: triage
 write: on | off
+json: off | on
 posted: yes | no
 labels_applied: <comma list or none>
 approved: n/a

@@ -49,6 +49,9 @@ reviewers.
 - Each canonical skill emits an Enter card before work and an Exit
   receipt after. Missing field = stop. Schedulers are `write: off`.
   Workers default `write: on`; `write: off` returns the template only.
+  Triage workers default `json: off`. Omitted `json` is not a
+  missing-field stop. `json: on` is an internal receipt only, never
+  posted on GitHub.
 
 ## Labels
 

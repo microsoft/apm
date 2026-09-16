@@ -47,6 +47,7 @@ path: triage
 intent: advise one already-selected issue
 origin: unattended | actor-session
 write: on | off
+json: off | on
 repo: microsoft/apm
 issue: <positive integer>
 invocation: agentic-workflow | actor-session
@@ -59,6 +60,11 @@ Rules:
   add labels, or remove labels.
 - `write: on` posts the one advisory comment and processing /
   classification labels. Never human decision labels. Never assign.
+- `json` defaults to `off` when omitted or unknown. Omitted `json`
+  is not a missing-field stop.
+- `json: off` -> no `triage-recommendation` JSON receipt.
+- `json: on` -> fill that JSON only as an internal payload
+  (session file or parent Exit). Never post it on GitHub.
 - `origin` fail-closed unknown -> `unattended`.
 - One issue. Do not nest a scheduler path.
 
@@ -69,6 +75,7 @@ skill: autopilot-issue-triage-worker
 subject: microsoft/apm#<issue-number>
 path: triage
 write: on | off
+json: off | on
 posted: yes | no
 labels_applied: <comma list or none>
 approved: n/a
@@ -421,11 +428,10 @@ per-persona noise.
   headings, classification, brief, next action, suggested reply,
   and persona details. Do not post JSON, machine fences, or
   `comment_markdown` dumps on the issue.
-- Fill the template's `triage-recommendation` JSON only as an
-  internal worker payload (session file or parent Exit). Keep
-  `schema_version: 2` and `advisory_only: true`. Never attach that
-  JSON to the GitHub comment. Consumers must not treat either
-  format as human approval.
+- Emit the template's `triage-recommendation` JSON only when
+  `json: on`. Keep `schema_version: 2` and `advisory_only: true`.
+  Never attach that JSON to the GitHub comment. Consumers must
+  not treat it as human approval.
 - ASCII only inside the comment body and the internal JSON. No
   emojis, no Unicode dashes, no box-drawing characters. Use
   `[+] [!] [x] [i] [*] [>]` if status symbols are needed.

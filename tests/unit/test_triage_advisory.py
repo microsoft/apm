@@ -174,8 +174,11 @@ def test_template_has_proposed_brief_not_an_operative_decision() -> None:
     assert set(payload["proposed_brief"]) == {"scope", "done_when", "exclusions", "review_needs"}
     assert payload["receipt"]["kind"] == "apm-triage-advisory"
     skill = (WORKER / "SKILL.md").read_text()
+    assert "json: off | on" in skill
+    assert "`json` defaults to `off`" in skill
+    assert "Omitted `json`" in skill
     assert "Do not post JSON" in skill
-    assert "Never attach that" in skill
+    assert "Never attach that JSON" in skill
     assert "The trailing fenced" not in skill
     assert "apm-triage-advisory:v2 target=issue#" in template
     assert not {"decision", "status", "priority", "milestone", "preserved_labels"} & payload.keys()
