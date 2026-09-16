@@ -82,7 +82,8 @@ required check, or automatic closing/acceptance policy is introduced.
 
 ## Roadmap and release planning
 
-Use one public native GitHub Project, with actual issues as its records.
+The public [APM Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5)
+is the active planning surface, with actual issues as its records.
 Keep scope, evidence, and human approval on the issue; Horizon and priority
 order on the Project; release targeting in the issue's milestone. Link PRs
 to their issues rather than adding duplicate PR rows or draft cards. Larger
@@ -127,11 +128,9 @@ and their milestone history, including completed work in the active release.
 
 ### Native Project settings
 
-**Rollout pending:** Project preparation is not an active roadmap announcement.
-The setup board has verified Horizon columns, Milestone grouping, saved views,
-and existing issue intake. Native auto-add still needs configuration and
-verification through the supported UI. Keep the active roadmap announcement
-on hold; further live changes require maintainer approval.
+Project 2304 has public visibility, Horizon columns, Milestone grouping,
+the saved views below, and native issue-only auto-add. Maintainers keep
+the existing-issue intake current and preserve completed issue history.
 
 In Project settings, use public visibility and one single-select field,
 `Horizon`, with `Now`, `Next`, and `Later` in that order. Leave it unset by
@@ -142,10 +141,10 @@ Save these views with `repo:microsoft/apm is:issue` plus the filters below:
 
 | View | Layout and additional filter |
 | --- | --- |
-| Roadmap | Board: `is:open horizon:Now,Next,Later`. Group by Horizon in Now / Next / Later order and manually rank issues within each group, highest first. Unselected intake stays out. |
-| Intake | Table: `is:open`. All open issues are visible, not implicitly approved. |
-| Ready to contribute | Table: `is:open label:"status/accepted" label:"help wanted" no:assignee`. A discovery shortlist, not an approval check. |
-| Release | Table: `has:milestone`, grouped by Milestone. Narrow to an existing milestone when needed; do not filter out closed issues. |
+| [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5) | Board: `is:open horizon:Now,Next,Later`. Group by Horizon in Now / Next / Later order and manually rank issues within each group, highest first. Unselected intake stays out. |
+| [Intake](https://github.com/orgs/microsoft/projects/2304/views/6) | Table: `is:open`. All open issues are visible, not implicitly approved. |
+| [Ready to contribute](https://github.com/orgs/microsoft/projects/2304/views/7) | Table: `is:open label:"status/accepted" label:"help wanted" no:assignee`. A discovery shortlist, not an approval check. |
+| [Release](https://github.com/orgs/microsoft/projects/2304/views/8) | Table: `has:milestone`, grouped by Milestone. Narrow to an existing milestone when needed; do not filter out closed issues. |
 
 For Ready to contribute, maintainers keep labels and assignments current;
 contributors check the human approval, review contact, comments, and linked
@@ -162,25 +161,9 @@ silently remove release history. See GitHub's
 and [view-filter](https://docs.github.com/en/issues/planning-and-tracking-with-projects/customizing-views-in-your-project/filtering-projects)
 instructions.
 
-### Final rollout checklist
-
-After explicit rollout approval, maintainers:
-
-- [x] Prepare the existing public Project, Horizon, saved views, and existing
-  open-issue intake while preserving completed issue and release history.
-- [x] Verify native Roadmap Horizon columns, Release Milestone grouping, and
-  manual ordering while preserving all existing items and historical fields.
-- [ ] Enable and verify repository-scoped auto-add. Recheck the existing-issue
-  backfill; enabling auto-add alone does not perform it. Leave Horizon empty
-  unless a human selected it, and retain legacy planning history without
-  treating it as renewed approval. Leave other native workflows, including
-  auto-archive, off.
-- [ ] Record human priority choices and release targets, then populate the
-  selected Horizons and rank them. Confirm unselected intake stays off Roadmap,
-  Ready to contribute reflects supported unclaimed work, and Release includes
-  completed work as well as unfinished issues.
-- [ ] Publish the verified Project link here and in the repository's Projects
-  entry point, identify it as the active surface, and announce the cadence.
+The initial rollout and its operator decisions are recorded in
+[#2960](https://github.com/microsoft/apm/issues/2960). Keep other native
+workflows off; planning and release decisions remain human-owned.
 
 ## Contributor progression
 

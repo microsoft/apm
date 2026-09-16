@@ -124,6 +124,7 @@ def test_failed_sparse_validation_does_not_refresh_access(
     checkout = cache._checkouts_root / cache_shard_key(_REMOTE) / sha / _variant_key(["skills"])
     (checkout / ".git").mkdir(parents=True)
     (checkout / ".git/HEAD").write_text(sha, encoding="ascii")
+    (checkout / ".git" / "config").write_text("[core]\n\tautocrlf = false\n", encoding="ascii")
 
     def reject_sparse(*args: object, **kwargs: object) -> Path:
         raise error_type("Invalid sparse symlink")

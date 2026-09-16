@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ntpath
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.chdir(root)
     return root
 
@@ -257,6 +259,7 @@ def test_invalid_manifest_fails_visibly_without_replacing(workspace: Path, inval
     assert snapshot(workspace) == before
 
 
+@pytest.mark.windows_compat
 def test_global_uses_existing_user_manifest_and_absolute_refs(workspace: Path) -> None:
     source = skill(Path.home())
     before = snapshot(source)
@@ -266,7 +269,7 @@ def test_global_uses_existing_user_manifest_and_absolute_refs(workspace: Path) -
     assert result.exit_code == 0, result.output
     assert "Run 'apm install --global' separately." in result.output
     manifest = Path.home() / ".apm/apm.yml"
-    assert load_yaml(manifest)["dependencies"]["apm"] == [{"path": str(source)}]
+    assert load_yaml(manifest)["dependencies"]["apm"] == [{"path": source.as_posix()}]
     assert not (workspace / "apm.yml").exists()
     assert snapshot(source) == before
     original = manifest.read_bytes()
@@ -397,7 +400,10 @@ def test_interactive_consent_is_explicit(
     assert confirmations[0][1] is False
 
 
+@pytest.mark.windows_compat
 def test_global_home_reference_deduplicates(workspace: Path) -> None:
+    assert Path("~").expanduser() == Path.home() == workspace.parent / "home"
+    assert Path(ntpath.expanduser("~")) == Path.home()
     skill(Path.home())
     metadata = Path.home() / ".apm"
     metadata.mkdir()

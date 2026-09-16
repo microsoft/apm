@@ -21,9 +21,13 @@ inclusion in APM. This avoids work the project cannot support or accept.
   explaining the user problem, evidence, alternatives, and expected benefit.
   Proposals, investigations, and design discussion need no prior permission.
 
-See [roadmap and release planning](GOVERNANCE.md#roadmap-and-release-planning)
-for how proposals become priorities and release targets. Project rollout is
-pending; roadmap placement is separate from human scope approval.
+Follow the [Roadmap](https://github.com/orgs/microsoft/projects/2304/views/5)
+for Now / Next / Later priorities and
+[Ready to contribute](https://github.com/orgs/microsoft/projects/2304/views/7)
+for supported, unassigned work. See
+[roadmap and release planning](GOVERNANCE.md#roadmap-and-release-planning)
+for how proposals become priorities and release targets. Roadmap placement
+is separate from human scope approval.
 
 Do not report vulnerabilities or publish credentials in public issues or
 PRs. Use the private reporting route in [SECURITY.md](SECURITY.md).
