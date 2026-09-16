@@ -10,7 +10,9 @@ import pytest
 from jsonschema import Draft7Validator
 
 ROOT = Path(__file__).parents[2]
-CANONICAL_SCHEMA = ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/completion-schema.json"
+CANONICAL_SCHEMA = (
+    ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/completion-schema.json"
+)
 MIRROR_SCHEMA = ROOT / ".agents/skills/autopilot-pr-merge-worker/assets/completion-schema.json"
 HEAD_SHA = "a" * 40
 BASE_SHA = "b" * 40

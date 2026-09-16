@@ -18,14 +18,16 @@ from apm_cli.utils.content_hash import compute_file_hash
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = (
-    ROOT / "packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler"
+    ROOT
+    / "packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler"
 )
 WORKER = ROOT / "packages/autopilot/autopilot-issue-triage-worker"
 SCRIPT = PACKAGE / "scripts/triage_state.py"
 CONTRACT = json.loads((PACKAGE / "assets/label-contract.json").read_text())
 PLAN_BATCH = runpy.run_path(str(SCRIPT))["plan_batch"]
 WORKER_CODE = (
-    ROOT / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
+    ROOT
+    / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
 )
 
 

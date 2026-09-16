@@ -17,7 +17,8 @@ pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / ".apm/skills/docs-sync"
 DELIVERY = (
-    ROOT / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
+    ROOT
+    / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
 )
 
 

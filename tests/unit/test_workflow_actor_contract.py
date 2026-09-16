@@ -320,8 +320,7 @@ def test_schedulers_own_isolated_fanout_pools() -> None:
     }
     for skill, label in names.items():
         pool = _ascii(
-            ROOT
-            / f"packages/autopilot/{skill}/.apm/skills/{skill}/assets/fan-out-pool.md"
+            ROOT / f"packages/autopilot/{skill}/.apm/skills/{skill}/assets/fan-out-pool.md"
         )
         assert label in pool, skill
     assert "Do not dispatch an unaccepted issue." in delivery
