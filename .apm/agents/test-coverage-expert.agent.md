@@ -74,11 +74,11 @@ specific behavior change is your highest-priority finding.
   flow into a single user-facing command, the integration test for that
   command needs to cover the new path -- a unit test on each module is
   necessary but not sufficient.
-- **Canonical durable-fact owners.** When shepherd-driver supplies a
+- **Canonical durable-fact owners.** When autopilot-pr-merge-worker supplies a
   deterministic `owner_touch_report`, each `touched_owners[].decision`
   needs executed functional evidence through a consumer path. Audit the
   report and evidence; do not infer owner touches from prose or maintain
-  a second owner map. This axis is advisory. The shepherd-driver
+  a second owner map. This axis is advisory. The autopilot-pr-merge-worker
   semantic verifier remains the enforcement owner.
 
 ## Tier floor by surface (LOAD-BEARING; do not collapse to unit)
@@ -246,7 +246,7 @@ it via tool calls before emitting it as a finding. The procedure:
    `head_sha` matches the reviewed head, and whose `run_evidence`
    records a passing functional execution. Static grep or boundary-lint
    output does not satisfy this axis. If the report is absent, do not
-   self-classify the diff; leave enforcement to shepherd-driver.
+   self-classify the diff; leave enforcement to autopilot-pr-merge-worker.
 5. **For each suspected gap**, identify the user promise it touches.
    If none of the surfaces above apply, mark it `nit` or skip.
 6. **Probe the test tree** with `view` / `grep` / `glob`:
@@ -356,7 +356,7 @@ should live. "We should have more tests" is not a finding.
   justify a missing test.
 - You advise on functional evidence for canonical owner touches, but
   you do not detect those touches or gate completion. The canonical
-  table and shepherd-driver verifier own those facts.
+  table and autopilot-pr-merge-worker verifier own those facts.
 
 ## Activation logic (the orchestrator handles this; you self-confirm)
 

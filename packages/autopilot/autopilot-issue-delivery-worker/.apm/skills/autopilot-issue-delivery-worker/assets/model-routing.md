@@ -129,9 +129,9 @@ machine-readable routing receipt up every return edge:
   (a child cannot prove the SKU it actually ran under).
 - The pipeline child AGGREGATES its descendants' receipts into a
   `routing_receipts` array on its `implement-result` return.
-- The shepherd-driver child returns its OWN `routing_receipt` (its model)
+- The autopilot-pr-merge-worker child returns its OWN `routing_receipt` (its model)
   plus `panel_execution` (`skill-tool` | `inline`) and `panel_personas`
-  on its `completion_return` (see shepherd-driver completion-schema.json).
+  on its `completion_return` (see autopilot-pr-merge-worker completion-schema.json).
 - The orchestrator records these on the row so B12/B14b adherence is
   auditable from plan.md alone -- never from a transcript re-read.
 

@@ -1,6 +1,6 @@
 # Fix subagent (WAVE 2b) - spawn body
 
-You are a fix subagent spawned by the batch-bug-shepherd skill. ONE
+You are a fix subagent spawned by the autopilot-issue-delivery-worker skill. ONE
 issue per subagent. The issue has been triaged LEGIT and has NO
 open PR. Your job is to design, test, and ship a fix as a new PR
 under microsoft/apm.
@@ -45,7 +45,7 @@ under microsoft/apm.
    probe (add a second owner -> lint fails). An `ordinary-fix` or
    `not-applicable` fix skips this step but records why existing
    guards already cover the change. Do NOT open an authority-affecting
-   PR with only one half of the guardrail -- shepherd-driver's Step
+   PR with only one half of the guardrail -- autopilot-pr-merge-worker's Step
    X.2.5 gate will keep it out of `ready-to-merge` regardless.
 7. Run the full relevant test suite for the touched modules. All
    prior tests must still pass.

@@ -23,7 +23,6 @@ WORKER = ROOT / "packages/autopilot/autopilot-issue-triage-worker"
 SCRIPT = PACKAGE / "scripts/triage_state.py"
 CONTRACT = json.loads((PACKAGE / "assets/label-contract.json").read_text())
 PLAN_BATCH = runpy.run_path(str(SCRIPT))["plan_batch"]
-AUTOPILOT = ROOT / "packages/autopilot/apm-issue-autopilot/.apm/skills/apm-issue-autopilot"
 WORKER_CODE = (
     ROOT / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
 )
@@ -140,7 +139,7 @@ def test_conflicting_classification_and_duplicate_reads_are_bounded() -> None:
 
 def test_deferred_consumer_schema_rejects_legacy_acceptance_and_release_fields() -> None:
     """The internal decision remains advice; no writable human metadata survives."""
-    schema = json.loads((AUTOPILOT / "assets/autopilot-triage-schema.json").read_text())
+    schema = json.loads((WORKER_CODE / "assets/autopilot-triage-schema.json").read_text())
     row = {
         "kind": "autopilot-triage-decision",
         "issue": 1,
@@ -190,7 +189,7 @@ def test_installed_skill_files_and_recorded_hashes_match_sources() -> None:
     lock = yaml.safe_load((ROOT / "apm.lock.yaml").read_text())
     for name, source in [
         ("autopilot-issue-triage-worker", WORKER),
-        ("apm-issue-autopilot", AUTOPILOT),
+        ("autopilot-issue-delivery-worker", WORKER_CODE),
     ]:
         dep = next(item for item in lock["dependencies"] if item["name"] == name)
         for relative, expected in dep["deployed_file_hashes"].items():

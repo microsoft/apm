@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "batch-bug-shepherd-verdict-schema.json",
   "title": "batch-bug-shepherd subagent return shapes",
-  "description": "Two BBS-owned return shapes (triage / strategic-alignment). Driver and conflict-resolution returns validate against shepherd-driver assets/completion-schema.json (loaded by the orchestrator as ../shepherd-driver/assets/completion-schema.json), not this schema. Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR (triage) or route as aligned with gate-failed-open annotation (strategic-alignment) and continue.",
+  "description": "Two delivery-owned return shapes (triage / strategic-alignment). Driver and conflict-resolution returns validate against autopilot-pr-merge-worker assets/completion-schema.json, not this schema. Schema-validate every subagent return. On malformed, re-spawn ONCE; on second malformed, mark the row UNCLEAR (triage) or route as aligned with gate-failed-open annotation (strategic-alignment) and continue.",
   "oneOf": [
     { "$ref": "#/definitions/triage_return" },
     { "$ref": "#/definitions/strategic_alignment_return" }

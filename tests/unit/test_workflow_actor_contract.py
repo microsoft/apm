@@ -14,16 +14,6 @@ TRIAGE_SKILL = ROOT / "packages/autopilot/autopilot-issue-triage-worker/SKILL.md
 TRIAGE_TEMPLATE = (
     ROOT / "packages/autopilot/autopilot-issue-triage-worker/assets/triage-template.md"
 )
-ALIAS_TRIAGE_PANEL = (
-    ROOT / "packages/autopilot/apm-triage-panel/.apm/skills/apm-triage-panel/SKILL.md"
-)
-ALIAS_REVIEW_PANEL = (
-    ROOT / "packages/autopilot/apm-review-panel/.apm/skills/apm-review-panel/SKILL.md"
-)
-ALIAS_REVIEW_PANEL_OLD = (
-    ROOT
-    / "packages/autopilot/autopilot-pr-review-panel/.apm/skills/autopilot-pr-review-panel/SKILL.md"
-)
 TRIAGE_WORKFLOW = ROOT / ".github/workflows/triage-panel.md"
 REVIEW_SKILL = ROOT / "packages/autopilot/autopilot-pr-review-worker/SKILL.md"
 REVIEW_WORKFLOW = ROOT / ".github/workflows/pr-review-panel.md"
@@ -34,10 +24,6 @@ SCHEDULER_TRIAGE = (
 SCHEDULER_CODE = (
     ROOT
     / "packages/autopilot/autopilot-issue-delivery-scheduler/.apm/skills/autopilot-issue-delivery-scheduler/SKILL.md"
-)
-ALIAS_DELIVERY = (
-    ROOT
-    / "packages/autopilot/autopilot-scheduler-issue-delivery/.apm/skills/autopilot-scheduler-issue-delivery/SKILL.md"
 )
 SCHEDULER_PR_REVIEW = (
     ROOT
@@ -51,30 +37,12 @@ WORKER_PR_TRIAGE = (
     ROOT
     / "packages/autopilot/autopilot-pr-triage-worker/.apm/skills/autopilot-pr-triage-worker/SKILL.md"
 )
-ALIAS_SCHEDULER_ISSUES = (
-    ROOT
-    / "packages/autopilot/autopilot-scheduler-issues/.apm/skills/autopilot-scheduler-issues/SKILL.md"
-)
-ALIAS_SCHEDULER_PRS = (
-    ROOT
-    / "packages/autopilot/autopilot-scheduler-pull-requests/.apm/skills/autopilot-scheduler-pull-requests/SKILL.md"
-)
 WORKER_CODE = (
     ROOT
     / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker/SKILL.md"
 )
-ALIAS_WORKER_ISSUE = (
-    ROOT / "packages/autopilot/autopilot-worker-issue/.apm/skills/autopilot-worker-issue/SKILL.md"
-)
 WORKER_PR = ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/worker-prompt.md"
 WORKER_PR_SKILL = ROOT / "packages/autopilot/autopilot-pr-merge-worker/SKILL.md"
-ALIAS_AUTOPILOT = (
-    ROOT / "packages/autopilot/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/SKILL.md"
-)
-ALIAS_SHEPHERD = (
-    ROOT / "packages/autopilot/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/SKILL.md"
-)
-ALIAS_DRIVER = ROOT / "packages/autopilot/shepherd-driver/SKILL.md"
 CANONICAL_AUTOPILOT_SKILLS = (
     SCHEDULER_TRIAGE,
     TRIAGE_SKILL,
@@ -100,14 +68,7 @@ def test_canonical_autopilot_skills_declare_activation_cards() -> None:
         assert "activation_card: on" in text, path
         assert "Missing field -> stop" in text, path
         assert "approved: n/a" in text, path
-    prefixes = (
-        "autopilot-",
-        "apm-review-panel",
-        "apm-triage-panel",
-        "apm-issue-autopilot",
-        "batch-bug-shepherd",
-        "shepherd-driver",
-    )
+    prefixes = ("autopilot-",)
     for path in (ROOT / "packages").rglob("SKILL.md"):
         if not any(part.startswith(prefixes) or part in prefixes for part in path.parts):
             continue
@@ -312,8 +273,8 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     assert "do not comment" in pr_worker
 
 
-def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
-    """Each scheduler has its own default-2 pool; old names are aliases."""
+def test_schedulers_own_isolated_fanout_pools() -> None:
+    """Each scheduler has its own default-2 pool."""
     triage = _ascii(SCHEDULER_TRIAGE)
     delivery = _ascii(SCHEDULER_CODE)
     review = _ascii(SCHEDULER_PR_REVIEW)
@@ -344,12 +305,6 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "scripts/triage_state.py" in triage
     assert "Do not invent a second filter" in triage
     assert "run the worker in this thread" in triage
-    assert "Compatibility alias" in _ascii(ALIAS_TRIAGE_PANEL)
-    assert "autopilot-issue-triage-worker" in _ascii(ALIAS_TRIAGE_PANEL)
-    assert "Compatibility alias" in _ascii(ALIAS_REVIEW_PANEL)
-    assert "autopilot-pr-review-worker" in _ascii(ALIAS_REVIEW_PANEL)
-    assert "Compatibility alias" in _ascii(ALIAS_REVIEW_PANEL_OLD)
-    assert "autopilot-pr-review-worker" in _ascii(ALIAS_REVIEW_PANEL_OLD)
     assert "Do not call" in _ascii(TRIAGE_SKILL)
     assert "fetch_queue.py" in _ascii(TRIAGE_SKILL)
     assert "processing.read_reviewed" in triage
@@ -379,30 +334,6 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "`status/accepted`" in delivery
     assert "Type does not matter" in delivery
     assert "Refuse unless the issue already has `status/accepted`" in _ascii(WORKER_CODE)
-    assert "Compatibility alias" in _ascii(ALIAS_DELIVERY)
-    assert "Compatibility alias" in _ascii(ALIAS_WORKER_ISSUE)
-    assert "Compatibility alias" in _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-scheduler-code/.apm/skills/autopilot-scheduler-code/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT / "packages/autopilot/autopilot-worker-code/.apm/skills/autopilot-worker-code/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-code-scheduler/.apm/skills/autopilot-code-scheduler/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT / "packages/autopilot/autopilot-code-worker/.apm/skills/autopilot-code-worker/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-issue-scheduler/.apm/skills/autopilot-issue-scheduler/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-issue-worker/.apm/skills/autopilot-issue-worker/SKILL.md"
-    )
     assert "same PR to two slots" in review
     assert "`panel-review` is the only request trigger" in review
     assert "`status/accepted` on the PR is a sweep source" in review
@@ -413,37 +344,6 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "gh pr list --state open --label status/accepted" in review
     assert "Empty label queue -> empty table, stop" in review
     assert "oldest first, cap 10" in review
-    assert "Compatibility alias" in _ascii(ALIAS_AUTOPILOT)
-    assert "Do not implement from this file" in _ascii(ALIAS_AUTOPILOT)
-    assert "autopilot-issue-delivery-scheduler" in _ascii(ALIAS_AUTOPILOT)
-    assert "Compatibility alias" in _ascii(ALIAS_SHEPHERD)
-    assert "Do not implement from this file" in _ascii(ALIAS_SHEPHERD)
-    assert "selector `bugs`" in _ascii(ALIAS_SHEPHERD)
-    assert "autopilot-pr-merge-worker" in _ascii(ALIAS_DRIVER)
-    assert "Compatibility alias" in _ascii(ALIAS_SCHEDULER_ISSUES)
-    assert "Compatibility alias" in _ascii(ALIAS_SCHEDULER_PRS)
-    assert "Compatibility alias" in _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-scheduler-issue-triage/.apm/skills/autopilot-scheduler-issue-triage/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT / "packages/autopilot/autopilot-worker-pull-request/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT / "packages/autopilot/autopilot-pull-request-worker/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-pr-review-triage-scheduler/.apm/skills/autopilot-pr-review-triage-scheduler/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-pr-review-triage-worker/.apm/skills/autopilot-pr-review-triage-worker/SKILL.md"
-    )
-    assert "Compatibility alias" in _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-scheduler-pull-request-review/.apm/skills/autopilot-scheduler-pull-request-review/SKILL.md"
-    )
     pr_triage = _ascii(SCHEDULER_PR_TRIAGE)
     assert "FANOUT_LIMIT=2" in pr_triage
     assert "Do not comment, label, close, merge, or assign" in pr_triage

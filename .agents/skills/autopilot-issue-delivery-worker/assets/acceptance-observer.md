@@ -80,7 +80,7 @@ On terminal failure:
 ## Hard rules
 
 - The PR is opened ONCE, here, by the pipeline -- never by a task child.
-- Do NOT self-merge. Mergeability is Phase 5/6 (shepherd-driver); the
+- Do NOT self-merge. Mergeability is Phase 5/6 (autopilot-pr-merge-worker); the
   human approves the protected merge.
 - ASCII only. Co-author trailer on the final commit if any close-out
   commit is made.

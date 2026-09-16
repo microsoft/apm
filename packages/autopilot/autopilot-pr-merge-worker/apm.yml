@@ -19,9 +19,9 @@ type: skill
 #    `assets/worker-prompt.md` loads each at use time even if
 #    a consumer wired the deploy differently.
 #
-# The <= 0.14.1 orphaned-lockfile bug that forced autopilot-scheduler-issues
-# to COMMENT OUT its analogous edge is fixed from 0.16 onward, so the
-# real edges are declared here.
+# The <= 0.14.1 orphaned-lockfile bug that forced callers to COMMENT
+# OUT analogous edges is fixed from 0.16 onward, so the real edges
+# are declared here.
 dependencies:
   apm:
     - ../autopilot-pr-review-worker

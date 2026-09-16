@@ -9,16 +9,16 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from jsonschema import Draft7Validator
 
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.utils.content_hash import compute_file_hash
 
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
-BATCH = ROOT / "packages/autopilot/batch-bug-shepherd/.apm/skills/batch-bug-shepherd"
 DOCS = ROOT / ".apm/skills/docs-sync"
-AUTOPILOT = ROOT / "packages/autopilot/apm-issue-autopilot/.apm/skills/apm-issue-autopilot"
+DELIVERY = (
+    ROOT / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
+)
 
 
 def _workflow(name: str) -> tuple[dict, dict, str]:
@@ -120,11 +120,6 @@ def test_docs_workflow_never_treats_a_label_as_companion_approval() -> None:
         assert "create_pull_request" not in config
 
 
-DELIVERY = (
-    ROOT / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
-)
-
-
 @pytest.mark.parametrize(
     "path",
     [
@@ -147,73 +142,6 @@ def test_consumers_probe_shared_trusted_owner_and_require_fresh_human(path: Path
     assert "deleted withdrawals" in text
     assert "fresh" in text and "responsible" in text
     assert "STOP" in text
-
-
-def test_bug_shepherd_union_human_gate_and_owned_cleanup() -> None:
-    """Alias dispatches; frozen assets keep marker and fail-closed contracts."""
-    skill = (BATCH / "SKILL.md").read_text()
-    prompt = (
-        ROOT / "packages/autopilot/batch-bug-shepherd/.apm/prompts/batch-bug-shepherd.prompt.md"
-    ).read_text()
-    for text in (skill, prompt):
-        assert "Compatibility alias" in text or "alias" in text
-        assert "autopilot-issue-delivery-scheduler" in text
-        assert "selector `bugs`" in text
-    assert "Do not implement from this file" in skill
-    invariants = (BATCH / "references/invariants.md").read_text()
-    assert "shepherd_marker_added_by_run" in invariants
-    assert "Never sweep or clean up another run's markers" in invariants
-    assert "If it\nwas already present" in invariants
-    for path in [
-        BATCH / "SKILL.md",
-        BATCH / "assets/strategic-alignment-prompt.md",
-        BATCH / "assets/verdict-schema.json",
-        BATCH / "references/strategic-alignment-gate.md",
-        BATCH / "references/invariants.md",
-    ]:
-        assert "fail-open" not in path.read_text().lower()
-        assert "fails open" not in path.read_text().lower()
-
-
-@pytest.mark.parametrize(
-    ("failure", "reason"),
-    [
-        ("withdrawal", "Scope withdrawn after Phase 2.5."),
-        ("unavailable evidence", "Trusted eligibility API unavailable at child recheck."),
-    ],
-    ids=["revoked-after-parent-checkpoint", "unavailable-after-parent-checkpoint"],
-)
-def test_fix_child_recheck_blocked_contract(failure: str, reason: str) -> None:
-    """Validate refusal payloads and the prose interlock, not simulated LLM behavior."""
-    prompt = (BATCH / "assets/fix-prompt.md").read_text()
-    preflight = prompt.split("1. Re-read", 1)[0]
-    assert failure in preflight
-    assert "recheck overrides the earlier Phase 2.5 receipt" in preflight
-    assert "make no edits or PR" in preflight
-    schema = json.loads((BATCH / "assets/verdict-schema.json").read_text())
-    Draft7Validator.check_schema(schema)
-    validator = Draft7Validator(schema)
-    examples = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", prompt, re.S)]
-    assert {example["status"] for example in examples} == {"pr-opened", "blocked"}
-    for example in examples:
-        validator.validate(example)
-    blocked = next(example for example in examples if example["status"] == "blocked")
-    blocked["reason"] = reason
-    validator.validate(blocked)
-    for invalid in (
-        {key: value for key, value in blocked.items() if key != "reason"},
-        {**blocked, "pr": 3000},
-        {**blocked, "branch": "fabricated"},
-        {**blocked, "status": "pr-opened"},
-    ):
-        assert not validator.is_valid(invalid)
-    skill = " ".join((DELIVERY / "SKILL.md").read_text().split())
-    phase = skill.split("## Return", 1)[1]
-    assert "inspect `status` before reading `pr` or `branch`" in phase
-    assert "persist the row's `blocked` status and returned `reason`" in phase
-    assert "exclude it from driver inputs, and continue" in phase
-    assert phase.index("On `blocked`") < phase.index("Only `pr-opened`")
-    assert "Malformed or wrong-issue returns also block" in phase
 
 
 def test_docs_confirmation_label_is_request_not_ratification() -> None:
@@ -269,7 +197,7 @@ def test_scope_eval_inventory_is_inputs_not_fake_results() -> None:
         assert len(examples["val"]) == 4
 
 
-@pytest.mark.parametrize("skill_root", [BATCH, AUTOPILOT, DOCS], ids=["batch", "autopilot", "docs"])
+@pytest.mark.parametrize("skill_root", [DELIVERY, DOCS], ids=["issue-delivery", "docs"])
 def test_edited_skill_metadata_and_line_budgets(skill_root: Path) -> None:
     """Edited bodies and metadata stay bounded without a new tokenizer dependency."""
     _, frontmatter, body = (skill_root / "SKILL.md").read_text().split("---", 2)
@@ -279,14 +207,8 @@ def test_edited_skill_metadata_and_line_budgets(skill_root: Path) -> None:
 
 
 def test_trimmed_summaries_explicitly_load_binding_references() -> None:
-    """Aliases dispatch; the delivery worker still loads the pipeline brief."""
-    batch = (BATCH / "SKILL.md").read_text()
-    autopilot = (AUTOPILOT / "SKILL.md").read_text()
+    """The delivery worker still loads the pipeline brief."""
     delivery = (DELIVERY / "SKILL.md").read_text()
-    assert "Compatibility alias" in batch
-    assert "Do not implement from this file" in batch
-    assert "Compatibility alias" in autopilot
-    assert "Do not implement from this file" in autopilot
     assert "assets/solution-pipeline-prompt.md" in delivery
 
 
@@ -358,7 +280,11 @@ def test_affected_deployment_ledger_hashes_match_installed_files() -> None:
     lock = yaml.safe_load((ROOT / "apm.lock.yaml").read_text())
     roots = tuple(
         f".agents/skills/{name}/"
-        for name in ("apm-triage-panel", "batch-bug-shepherd", "apm-issue-autopilot", "docs-sync")
+        for name in (
+            "autopilot-issue-triage-worker",
+            "autopilot-issue-delivery-worker",
+            "docs-sync",
+        )
     )
     for record in lock["deployments"]:
         if record["value"].startswith(roots) and record["content_hash"] is not None:

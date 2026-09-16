@@ -84,7 +84,7 @@
     }
   ],
   "trigger_evals": {
-    "skill": "batch-bug-shepherd",
+    "skill": "autopilot-issue-delivery-worker",
     "should_trigger": {
       "train": [
         "Sweep the bug queue and show what needs human scope approval.",

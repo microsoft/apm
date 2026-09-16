@@ -152,16 +152,6 @@ review scheduler never spawns it. Same accepted gate as review
 (silent stop if missing). Folds in the PR's stated scope. Never
 requests the implementer as a reviewer.
 
-## Aliases
-
-Installable names that must not implement. Load the canonical skill
-instead: `apm-triage-panel`, `apm-review-panel`,
-`autopilot-pr-review-panel`, `autopilot-pr-review-triage-*`,
-`autopilot-pull-request-worker`, `autopilot-worker-pull-request`,
-`shepherd-driver`, `autopilot-code-*`, `autopilot-issue-scheduler`,
-`autopilot-issue-worker`, `autopilot-scheduler-*`,
-`autopilot-worker-*`, `apm-issue-autopilot`, `batch-bug-shepherd`.
-
 ## Agentic Workflows
 
 - Issue triage: `.github/workflows/triage-panel.md` (label

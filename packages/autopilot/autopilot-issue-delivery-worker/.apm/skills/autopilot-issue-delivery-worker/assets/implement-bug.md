@@ -16,5 +16,5 @@ Coverage gate: REGRESSION TRAP + MUTATION-BREAK.
 
 Scope fence: fix ONLY the reported defect and its direct cause. A
 broader refactor sparked by the fix is a `non_goals` violation --
-defer it (the shepherd-driver fold layer will surface it as a panel
+defer it (the autopilot-pr-merge-worker fold layer will surface it as a panel
 follow-up if it is in scope).

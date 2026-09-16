@@ -19,39 +19,21 @@ targets:
 # issue triage, or an orchestrator entrypoint which transitively
 # pulls its engine + panels).
 #
-# User-facing schedulers are declared here. Workers and panels
-# arrive transitively:
+# User-facing schedulers are declared here. Workers arrive
+# transitively:
 #  - autopilot-issue-triage-scheduler -> autopilot-issue-triage-worker
 #  - autopilot-issue-delivery-scheduler -> autopilot-issue-delivery-worker
 #  - autopilot-pr-triage-scheduler -> autopilot-pr-triage-worker
 #  - autopilot-pr-review-scheduler -> autopilot-pr-review-worker
 #  - autopilot-pr-merge-worker is summoned by name (never by
 #    the PR review scheduler)
-# Compatibility aliases stay declared so existing prompts still
-# resolve.
 dependencies:
   apm:
     - ./packages/autopilot/autopilot-issue-triage-scheduler
-    - ./packages/autopilot/apm-triage-panel
-    - ./packages/autopilot/apm-review-panel
-    - ./packages/autopilot/autopilot-pr-review-panel
-    - ./packages/autopilot/autopilot-pr-merge-worker
-    - ./packages/autopilot/autopilot-scheduler-issue-triage
     - ./packages/autopilot/autopilot-issue-delivery-scheduler
-    - ./packages/autopilot/autopilot-issue-scheduler
-    - ./packages/autopilot/autopilot-code-scheduler
-    - ./packages/autopilot/autopilot-scheduler-code
-    - ./packages/autopilot/autopilot-scheduler-issue-delivery
     - ./packages/autopilot/autopilot-pr-triage-scheduler
-    - ./packages/autopilot/autopilot-pr-review-triage-scheduler
     - ./packages/autopilot/autopilot-pr-review-scheduler
-    - ./packages/autopilot/autopilot-scheduler-pull-request-review
-    - ./packages/autopilot/autopilot-pull-request-worker
-    - ./packages/autopilot/autopilot-scheduler-issues
-    - ./packages/autopilot/autopilot-scheduler-pull-requests
-    - ./packages/autopilot/apm-issue-autopilot
-    - ./packages/autopilot/batch-bug-shepherd
-    - ./packages/autopilot/shepherd-driver
+    - ./packages/autopilot/autopilot-pr-merge-worker
   mcp: []
 
 scripts: {}
