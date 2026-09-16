@@ -1,0 +1,147 @@
+# Autopilot skills (microsoft/apm)
+
+Maintainer map for the local autopilot packages. Not product docs.
+Humans still accept scope, merge, and release. These skills advise or
+implement only inside that human gate.
+
+Invoke by skill name in a local session, Copilot App automation, Cloud
+Agent, Remote Agent, or Agentic Workflow. Named list = explicit request.
+Empty queue = stop.
+
+## Layout
+
+`autopilot-{domain}-{stage}-{role}`
+
+| Domain | Stage | Scheduler | Worker |
+|--------|-------|-----------|--------|
+| issue | triage | yes | yes |
+| issue | delivery | yes | yes |
+| pr | triage | yes | yes |
+| pr | review | yes | yes (advisory) |
+| pr | merge | no | yes (summon by name) |
+
+Schedulers select and fan out (default 2 concurrent slots, drain the
+full selected list). Workers do one item. Schedulers never comment,
+label, assign, or request reviewers.
+
+## Shared rules
+
+- Unattended (Agentic Workflow / gh-aw / Actions): never assign, never
+  request reviewers.
+- Actor-session: delivery assigns `@me`; standalone review requests
+  `@me` as reviewer, never assignee. Skip self-review if the operator
+  is the PR author.
+- CODEOWNERS `reviewRequests` are runtime authority. Additive only.
+  Never contradict. Never convert a failed reviewer request into an
+  assignee write.
+- Triage and review read the full conversation (paginate to
+  exhaustion). Partial context = stop, no fresh advice.
+- Human decision labels are never written by these skills:
+  `status/needs-triage`, `status/needs-design`, `status/accepted`,
+  `status/deferred`.
+- Labels, comments, and silence are not authorization.
+- Each canonical skill emits an Enter card before work and an Exit
+  receipt after. Missing field = stop. Schedulers are `write: off`.
+  Workers default `write: on`; `write: off` returns the template only.
+
+## Labels
+
+| Label | Kind | Meaning |
+|-------|------|---------|
+| `triage/requested` | request | Fresh issue-triage pass. Re-apply to run again. |
+| `triage/recommended` | processing | Advice posted. Not acceptance. |
+| `status/triaged` | legacy read | Same as completed advice. Do not write. |
+| `status/needs-triage` | human | Still waiting on a human. Not a trigger. |
+| `status/needs-design` | human | Design first. |
+| `status/accepted` | human | Human agrees to act. Required for delivery and PR review/merge. |
+| `status/deferred` | human | Not now. Not accepted. |
+| `panel-review` | request | Fresh PR-review pass. Re-apply (remove + add) to run again. |
+| `type/*` `area/*` `theme/*` | classification | Optional allowlist only. Preserve human choices. |
+| `panel-approved` / `panel-rejected` | leftover | Sweep on advisory review. Do not write. |
+
+Contract file:
+`autopilot-issue-triage-worker/assets/label-contract.json`
+(PR triage ships the same contract).
+
+## Skills
+
+### `autopilot-issue-triage-scheduler`
+
+Selects issues. Compose `autopilot-issue-triage-worker` one issue per
+slot. Trigger: `triage/requested`, a named list, or `queue-all` sweep.
+Does not consume `status/needs-triage`. Helpers:
+`scripts/fetch_queue.py` then `scripts/triage_state.py` (completed-advice
+skip, two per author, oldest first, cap 10).
+
+### `autopilot-issue-triage-worker`
+
+Advises one already-selected issue. One comment plus
+`triage/recommended` and optional classification. May clear
+`triage/requested`. Never assigns. An `accept` recommendation is not
+acceptance.
+
+### `autopilot-issue-delivery-scheduler`
+
+Selects maintainer-accepted issues (`status/accepted` or a named
+bounded accept). Selector `bugs` also requires `type/bug`.
+`triage/recommended` is not authorization. Workers re-check
+`scripts/governance/eligibility.cjs`. Unattended ORIGIN never
+implements.
+
+### `autopilot-issue-delivery-worker`
+
+Implements one already-selected issue. Queue signal is not permission.
+Needs fresh human-scope evidence. Actor-session: assign `@me` on the
+issue and any fix PR before edits. Do not steal. Do not request that
+actor as a reviewer.
+
+### `autopilot-pr-triage-scheduler`
+
+Selects open PRs (named list or `queue-open` sweep). Classifies
+incoming PRs, including those with no linked issue. Never merges,
+never runs review or merge workers.
+
+### `autopilot-pr-triage-worker`
+
+Classifies one PR. One comment plus processing/classification. Notes
+CODEOWNERS owners in the comment; does not change review requests.
+`ready-for-review` is not merge approval and is not a request to run
+PR review.
+
+### `autopilot-pr-review-scheduler`
+
+Selects PRs labelled `panel-review` (or a named list). Never lists
+all open PRs. Drops any PR that is not `status/accepted` on the PR or
+a same-repo linked issue: no spawn, no comment, no label change.
+Never composes `autopilot-pr-merge-worker`.
+
+### `autopilot-pr-review-worker`
+
+Advisory multi-persona review of one PR. Requires `status/accepted`
+(else silent stop; may clear `panel-review`). One recommendation
+comment. Does not gate merge. Actor-session may request `@me` as a
+supplemental reviewer.
+
+### `autopilot-pr-merge-worker`
+
+Drive one already-selected PR toward mergeable. Summon by name. The
+review scheduler never spawns it. Same accepted gate as review
+(silent stop if missing). Folds in the PR's stated scope. Never
+requests the implementer as a reviewer.
+
+## Aliases
+
+Installable names that must not implement. Load the canonical skill
+instead: `apm-triage-panel`, `apm-review-panel`,
+`autopilot-pr-review-panel`, `autopilot-pr-review-triage-*`,
+`autopilot-pull-request-worker`, `autopilot-worker-pull-request`,
+`shepherd-driver`, `autopilot-code-*`, `autopilot-issue-scheduler`,
+`autopilot-issue-worker`, `autopilot-scheduler-*`,
+`autopilot-worker-*`, `apm-issue-autopilot`, `batch-bug-shepherd`.
+
+## Agentic Workflows
+
+- Issue triage: `.github/workflows/triage-panel.md` (label
+  `triage/requested`).
+- PR review: `.github/workflows/pr-review-panel.md` (label
+  `panel-review`). Still a hard skill stop without `status/accepted`.
