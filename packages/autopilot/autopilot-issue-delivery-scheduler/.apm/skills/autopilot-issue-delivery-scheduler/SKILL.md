@@ -117,8 +117,10 @@ confirmation before any mutate. ORIGIN `unattended` never
 implements. Do not dispatch an unaccepted issue. Do not run
 triage-panel to create any marker. Do not write `status/accepted`.
 
-Skip locked, closed, and bot-authored issues unless the caller
-named them. Deduplicate by number.
+Skip locked and closed issues unless the caller named them.
+Deduplicate by number. Do not skip bot-authored issues that
+already carry `status/accepted` or that the caller named.
+Human accept is the gate; author type is not.
 
 Skip `status/needs-design` unless the caller named the issue.
 Skip `status/needs-triage` and `status/deferred` unless named.
@@ -184,6 +186,8 @@ selected list; when a slot returns, fill it with the next item.
 - Do not dispatch the same issue to two slots.
 - Do not dispatch an unaccepted issue.
 - Do not dispatch an issue assigned to another user unless named.
+- Do not drop a bot-authored issue that already carries
+  `status/accepted`.
 - Do not triage or review PRs inside this scheduler.
 - Do not contradict CODEOWNERS.
 - ASCII only.

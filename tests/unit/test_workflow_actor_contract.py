@@ -290,6 +290,9 @@ def test_implementation_harnesses_assign_issue_and_pr_not_reviewer() -> None:
     delivery = _ascii(SCHEDULER_CODE)
     assert "Workers re-check `scripts/governance/eligibility.cjs`" in delivery
     assert "ORIGIN `unattended` never implements" in delivery
+    assert "Do not skip bot-authored issues that" in delivery
+    assert "Human accept is the gate; author type is not." in delivery
+    assert "Do not drop a bot-authored issue that already carries" in delivery
     driver = _ascii(WORKER_PR)
     assert "composed-implementation-review" in driver
     assert "never requests the implementer as a reviewer" in driver

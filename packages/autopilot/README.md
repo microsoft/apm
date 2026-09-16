@@ -99,8 +99,9 @@ acceptance.
 ### `autopilot-issue-delivery-scheduler`
 
 Selects maintainer-accepted issues (`status/accepted` or a named
-bounded accept). Selector `bugs` also requires `type/bug`.
-`triage/recommended` is not authorization. Workers re-check
+bounded accept), including bot-authored issues once accepted.
+Selector `bugs` also requires `type/bug`. `triage/recommended`
+is not authorization. Workers re-check
 `scripts/governance/eligibility.cjs`. Unattended ORIGIN never
 implements.
 
