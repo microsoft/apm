@@ -22,7 +22,7 @@ from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
 pytestmark = pytest.mark.windows_compat
 
 ROOT = Path(__file__).parents[2]
-GATE = ROOT / "packages/shepherd-driver/scripts/owner_touch_gate.py"
+GATE = ROOT / "packages/autopilot/shepherd-driver/scripts/owner_touch_gate.py"
 OWNER_TABLE = ".apm/instructions/architecture.instructions.md"
 REGISTRY_ROOT = ".apm/architecture/owners"
 REGISTRY_INDEX = f"{REGISTRY_ROOT}/index.json"
@@ -1113,7 +1113,7 @@ def test_cross_row_duplicate_selector_fails_closed(
 # search this test's environment previously did not perform), raising
 # FileNotFoundError: [WinError 2]. The fix resolves git's full path once
 # via shutil.which and reuses it for every invocation. These regression
-# tests cover the gate script itself (packages/shepherd-driver/scripts/
+# tests cover the gate script itself (packages/autopilot/shepherd-driver/scripts/
 # owner_touch_gate.py::_git), not just this test file's own fixture
 # helper, since both had the identical bug.
 # ---------------------------------------------------------------------------

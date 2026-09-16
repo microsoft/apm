@@ -58,7 +58,7 @@ network:
     - defaults
     - github
 
-# Canonical owner: packages/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler/assets/label-contract.json.
+# Canonical owner: packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler/assets/label-contract.json.
 # Literal lists are intentional: safe outputs do not use classification globs.
 # Canonical writes require maintainer provisioning before default-branch deploy.
 # Both historical and canonical completion markers remain readable.

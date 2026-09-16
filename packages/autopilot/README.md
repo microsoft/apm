@@ -1,12 +1,13 @@
-# Autopilot skills (microsoft/apm)
+# Autopilot
 
 Maintainer map for the local autopilot packages. Not product docs.
 Humans still accept scope, merge, and release. These skills advise or
 implement only inside that human gate.
 
-Invoke by skill name in a local session, Copilot App automation, Cloud
-Agent, Remote Agent, or Agentic Workflow. Named list = explicit request.
-Empty queue = stop.
+On disk: `packages/autopilot/<package-name>/`. Invoke by skill name,
+not path. Deployed copies stay flat under `.agents/skills/`.
+
+Named list = explicit request. Empty queue = stop.
 
 ## Layout
 

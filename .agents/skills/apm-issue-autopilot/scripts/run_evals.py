@@ -27,7 +27,7 @@ stderr. Exit codes:
 
 Run from the worktree root:
 
-    python packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/scripts/run_evals.py
+    python packages/autopilot/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/scripts/run_evals.py
 
 Use --help for full options.
 """

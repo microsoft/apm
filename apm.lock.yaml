@@ -64,9 +64,9 @@ dependencies:
     .agents/skills/apm-issue-autopilot/evals/evals.json: sha256:a94ed339f171e7ca557df3e7ed10c8e55f9a14befcba940b7263c9d7fe4d8ca1
     .agents/skills/apm-issue-autopilot/evals/real-task-refinement.md: sha256:183d6d7270dc5f865a02d42643ba0afbae9046509f0e3b2481559fc9c1dcb64a
     .agents/skills/apm-issue-autopilot/evals/triggers.json: sha256:973a199602e170fcc07be2f47f042c14985899c45293a4073bc84ce9a4950df1
-    .agents/skills/apm-issue-autopilot/scripts/run_evals.py: sha256:8f4580cb2bdb88e7e570e4feb60cbf244d7fbe3e8217a8eadfd9dff2c763b615
+    .agents/skills/apm-issue-autopilot/scripts/run_evals.py: sha256:8fc1e42ebdaf02639163311596abcc27936415aac643a1fc7f9c8c67a4935a30
   source: local
-  local_path: ./packages/apm-issue-autopilot
+  local_path: ./packages/autopilot/apm-issue-autopilot
   declared_license: MIT
 - repo_url: _local/autopilot-scheduler-issue-delivery
   name: autopilot-scheduler-issue-delivery
@@ -80,7 +80,7 @@ dependencies:
     .agents/skills/autopilot-scheduler-issue-delivery/SKILL.md: sha256:2f03a11c53c5c310c513a43af3ae657107fbb4d0d6d1f4d37bc30981685ac5a1
     .agents/skills/autopilot-scheduler-issue-delivery/assets/fan-out-pool.md: sha256:7eb82d4335b24a945ed8479aa89fc655604a6be2be6d5c75484eaf98a21e9bfe
   source: local
-  local_path: ./packages/autopilot-scheduler-issue-delivery
+  local_path: ./packages/autopilot/autopilot-scheduler-issue-delivery
   declared_license: MIT
 - repo_url: _local/autopilot-issue-triage-scheduler
   name: autopilot-issue-triage-scheduler
@@ -100,7 +100,7 @@ dependencies:
     .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py: sha256:67642cb53cd810326f59e1f770b19488a8037fef9f61ac40410aa376b591a03f
     .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
   source: local
-  local_path: ./packages/autopilot-issue-triage-scheduler
+  local_path: ./packages/autopilot/autopilot-issue-triage-scheduler
   declared_license: MIT
 - repo_url: _local/autopilot-scheduler-issues
   name: autopilot-scheduler-issues
@@ -114,7 +114,7 @@ dependencies:
     .agents/skills/autopilot-scheduler-issues/SKILL.md: sha256:960858902ba37712c84c5e418f254b3990c84b519a4a086825fc1ee360424161
     .agents/skills/autopilot-scheduler-issues/assets/fan-out-pool.md: sha256:d7e0d4f7e32163884f9c848f88828f98d4ae71401a1b671737a0103b276a1cd7
   source: local
-  local_path: ./packages/autopilot-scheduler-issues
+  local_path: ./packages/autopilot/autopilot-scheduler-issues
   declared_license: MIT
 - repo_url: _local/autopilot-pr-review-scheduler
   name: autopilot-pr-review-scheduler
@@ -128,7 +128,7 @@ dependencies:
     .agents/skills/autopilot-pr-review-scheduler/SKILL.md: sha256:f637799488a516ce8426e24ce94aedc256f4dabb861a48a97306e0a0c22d72f0
     .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:ce64a77c44166372b7e76d740098a8c780b8b4e3781334cfca4642bb666155d2
   source: local
-  local_path: ./packages/autopilot-pr-review-scheduler
+  local_path: ./packages/autopilot/autopilot-pr-review-scheduler
   declared_license: MIT
 - repo_url: _local/autopilot-scheduler-pull-requests
   name: autopilot-scheduler-pull-requests
@@ -142,7 +142,7 @@ dependencies:
     .agents/skills/autopilot-scheduler-pull-requests/SKILL.md: sha256:319fb553e092c9e26e5cdef5f9a306813f7e6f013919b3999ce0262d253fbae5
     .agents/skills/autopilot-scheduler-pull-requests/assets/fan-out-pool.md: sha256:8e177a752ab4e0434c0cbdb066cadafdd3f5ddfb5bf696eab5549cdac02d3cea
   source: local
-  local_path: ./packages/autopilot-scheduler-pull-requests
+  local_path: ./packages/autopilot/autopilot-scheduler-pull-requests
   declared_license: MIT
 - repo_url: _local/batch-bug-shepherd
   name: batch-bug-shepherd
@@ -193,9 +193,9 @@ dependencies:
     .agents/skills/batch-bug-shepherd/evals/triggers.json: sha256:15aaed4760eb177275fb49e2e9cfd09cf7b471f47035fe9967a517c877a6538e
     .agents/skills/batch-bug-shepherd/references/invariants.md: sha256:b1be4977d9bb0a869623c897a57ec25d3d09b42b162bb23ca2a1b892e785cc47
     .agents/skills/batch-bug-shepherd/references/strategic-alignment-gate.md: sha256:b612c4f00684c90e96635d891ace0d3de1125d1441cfd99dbc8ede71f81c8ee4
-    .agents/skills/batch-bug-shepherd/scripts/run_evals.py: sha256:ecc003164e65cb002f301a7cdff9c0a2e39eddc35a81ede63da8934519e483c9
+    .agents/skills/batch-bug-shepherd/scripts/run_evals.py: sha256:689a2e7fe0c49a5dd20e9a1c907dc41d729334f00900ef8c9bbf0e4d400a6fdc
   source: local
-  local_path: ./packages/batch-bug-shepherd
+  local_path: ./packages/autopilot/batch-bug-shepherd
   declared_license: MIT
 - repo_url: _local/shepherd-driver
   name: shepherd-driver
@@ -225,9 +225,9 @@ dependencies:
     .agents/skills/shepherd-driver/assets/pr-comment-templates.md: sha256:c6a31d28278dc354962242113906a040c4cd0a553899998818ce20704b2f555a
     .agents/skills/shepherd-driver/assets/shepherd-driver-prompt.md: sha256:89e7fe9a6d649fafa0aaca6a3e33644b257a53fc16365e20ee5208dd680d2e0b
     .agents/skills/shepherd-driver/references/mergeability-gate.md: sha256:cc5dd0cec97b7d2504df89c66eeaf5f40f46a29953fbaf5ddc3545c695e41e6d
-    .agents/skills/shepherd-driver/scripts/owner_touch_gate.py: sha256:eadb3c82c4c98bde8eaebdac489d2b57f1ba4d6412fe52ded92897a9c85422f2
+    .agents/skills/shepherd-driver/scripts/owner_touch_gate.py: sha256:83997fc2dc80da2fb27e301c378a35792ff6b34c43897e36773956aceaae5557
   source: local
-  local_path: ./packages/shepherd-driver
+  local_path: ./packages/autopilot/shepherd-driver
   declared_license: MIT
 - repo_url: _local/autopilot-pr-review-worker
   name: autopilot-pr-review-worker
@@ -264,8 +264,8 @@ dependencies:
     .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json: sha256:76d6da23bde1c6b6f0b0bf883ba8b5bf065f0db73f69182cfd98449716bc0d84
   source: local
   local_path: ../autopilot-pr-review-worker
-  declaring_parent: ./packages/autopilot-pr-review-scheduler
-  anchored_local_path: packages/autopilot-pr-review-worker
+  declaring_parent: ./packages/autopilot/autopilot-pr-review-scheduler
+  anchored_local_path: packages/autopilot/autopilot-pr-review-worker
   declared_license: MIT
 - repo_url: _local/apm-review-panel
   name: apm-review-panel
@@ -277,7 +277,7 @@ dependencies:
   deployed_file_hashes:
     .agents/skills/apm-review-panel/SKILL.md: sha256:ce493c091bbc9a6f2531d6d38de76a6a01274bc0f8999b5bc9e4deb548ae4717
   source: local
-  local_path: ./packages/apm-review-panel
+  local_path: ./packages/autopilot/apm-review-panel
   declared_license: MIT
 - repo_url: _local/autopilot-pr-review-panel
   name: autopilot-pr-review-panel
@@ -289,7 +289,7 @@ dependencies:
   deployed_file_hashes:
     .agents/skills/autopilot-pr-review-panel/SKILL.md: sha256:607950cdbfdbf9e5cd351c15b7e26c0d0387b1d57f035c362abd78dde1c85cba
   source: local
-  local_path: ./packages/autopilot-pr-review-panel
+  local_path: ./packages/autopilot/autopilot-pr-review-panel
   declared_license: MIT
 - repo_url: _local/apm-triage-panel
   name: apm-triage-panel
@@ -301,7 +301,7 @@ dependencies:
   deployed_file_hashes:
     .agents/skills/apm-triage-panel/SKILL.md: sha256:0174762bf0a58f78b409738eacf23c3c1c560f8f05748205ebf6ada6686e8fad
   source: local
-  local_path: ./packages/apm-triage-panel
+  local_path: ./packages/autopilot/apm-triage-panel
   declared_license: MIT
 - repo_url: _local/autopilot-issue-triage-worker
   name: autopilot-issue-triage-worker
@@ -322,8 +322,8 @@ dependencies:
     .agents/skills/autopilot-issue-triage-worker/assets/triage-template.md: sha256:0442e9790755877047c361ff2ea7bb1684ed2089c8793a5a9b4266a4a2e44c87
   source: local
   local_path: ../autopilot-issue-triage-worker
-  declaring_parent: ./packages/autopilot-issue-triage-scheduler
-  anchored_local_path: packages/autopilot-issue-triage-worker
+  declaring_parent: ./packages/autopilot/autopilot-issue-triage-scheduler
+  anchored_local_path: packages/autopilot/autopilot-issue-triage-worker
   declared_license: MIT
 - repo_url: _local/autopilot-worker-issue
   name: autopilot-worker-issue
@@ -382,8 +382,8 @@ dependencies:
     .agents/skills/autopilot-worker-issue/references/strategic-alignment-gate.md: sha256:66613a8344411a2f9d5147b4acea798887bed20132ffd27bac9b3f5ba6bb65ed
   source: local
   local_path: ../autopilot-worker-issue
-  declaring_parent: ./packages/autopilot-scheduler-issue-delivery
-  anchored_local_path: packages/autopilot-worker-issue
+  declaring_parent: ./packages/autopilot/autopilot-scheduler-issue-delivery
+  anchored_local_path: packages/autopilot/autopilot-worker-issue
   declared_license: MIT
 - repo_url: _local/autopilot-pr-merge-worker
   name: autopilot-pr-merge-worker
@@ -415,7 +415,7 @@ dependencies:
     .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md: sha256:f4d956e67487a94183ebcf3e33209103e6ed6f4560e31dd5f217e4878dcfe3d0
     .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py: sha256:043e4fb49661d14030d96f924edaee6c109df3cad6e262ff865b50429b593873
   source: local
-  local_path: ./packages/autopilot-pr-merge-worker
+  local_path: ./packages/autopilot/autopilot-pr-merge-worker
   declared_license: MIT
 - repo_url: _local/pr-description-skill
   name: pr-description-skill
@@ -469,8 +469,8 @@ dependencies:
     .agents/skills/pr-description-skill/evals/triggers.json: sha256:6762c7f071195491700cc59ce5329ff185b0493682c93efdcf01db8fb522bbe4
     .agents/skills/pr-description-skill/scripts/run_evals.py: sha256:a1792f8cb95b4fb37a4133af079908e2a3b5643c1a81d97e4dcda399bac069a2
   source: local
-  local_path: ../pr-description-skill
-  declaring_parent: local:packages/autopilot-worker-issue
+  local_path: ../../pr-description-skill
+  declaring_parent: local:packages/autopilot/autopilot-worker-issue
   anchored_local_path: packages/pr-description-skill
   declared_license: MIT
 deployments:
@@ -480,8 +480,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: null
 - kind: uri
   target: copilot-app
@@ -489,8 +489,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -498,8 +498,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -507,8 +507,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:0eb3712b0a801bef3174f36f0cf95dae8fd458fc8c18cedb99d068afe95cdf1c
 - kind: project-relative
   target: copilot
@@ -516,8 +516,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
 - kind: project-relative
   target: copilot
@@ -525,8 +525,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
 - kind: project-relative
   target: copilot
@@ -534,8 +534,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
 - kind: project-relative
   target: copilot
@@ -543,8 +543,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:8088fe8f5bb9fd1ec93fbe806971465bb7f6850019af5be1a329e252d4818df2
 - kind: project-relative
   target: copilot
@@ -552,8 +552,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:00dd5a35ef0b39ba299e5fcd7f9ca682fc322792ec20440f7861edd39997d40e
 - kind: project-relative
   target: copilot
@@ -561,8 +561,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:abab1a5e2a765229d1cdd215b90c57036cdb4b2764866b68399eb81a51362ddc
 - kind: project-relative
   target: copilot
@@ -570,8 +570,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:4c74c8dfa0f98987ab5beede16d3e8c0e8113fac60955826d2ed61949624bcc5
 - kind: project-relative
   target: copilot
@@ -579,8 +579,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:81f2f9b617587df4a6f422838b05c63a5e05e0c8afd6d80952a9aa5cdad88b5a
 - kind: project-relative
   target: copilot
@@ -588,8 +588,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:394b25a0b0b41b0f99b250590af782968c0f25673c156d0b87d4f1f9b205de75
 - kind: project-relative
   target: copilot
@@ -597,8 +597,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:5175ea7edefdaaf787d1701ba6f7fce8433d04134718d9a6445ca524ececa3bc
 - kind: project-relative
   target: copilot
@@ -606,8 +606,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:4d1ffaf63fab75a7a7de265ff77d457c0636939d36a373dc9ce485ba76275209
 - kind: project-relative
   target: copilot
@@ -615,8 +615,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:422daafc8fcdf26f1096787075b2e8c15722df6b51e1d1784ea3b1435809b09f
 - kind: project-relative
   target: copilot
@@ -624,8 +624,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:f766382fbac2a2b99c0dad1d0327659103c4482cc155854ea7ef2e3c82fce8f2
 - kind: project-relative
   target: copilot
@@ -633,8 +633,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:557a32e60bcda98d023904da6ca5b50033fcfa086fcbac1bbb819307d8bb7656
 - kind: project-relative
   target: copilot
@@ -642,8 +642,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:397ab60c270f0312a3ddaac0fbc03e853fa16552a962f6b2ebca5ed27bab2818
 - kind: project-relative
   target: copilot
@@ -651,8 +651,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:78c2e7be93543122e485eb494a2b50ecac6e18d7e077a9e8edde12b478242ca9
 - kind: project-relative
   target: copilot
@@ -660,8 +660,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:bc4cd0a7bfde9ade1c967723b8bb9833af2e4b1c5361abfbb4ed96db3cd45ecd
 - kind: project-relative
   target: copilot
@@ -669,8 +669,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:a8bf5270c8d63c1d9ffcf0b3f18ba22d591b062e7b969982320150986ab211cd
 - kind: project-relative
   target: copilot
@@ -678,8 +678,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:f370ad043ec0c98a166fd98646c3b94280ed78bc996223b6cca2ba936f7c6781
 - kind: project-relative
   target: copilot
@@ -687,8 +687,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:ceb5b7df2def7f80ab0a101b41f6515381aed96c091cbafcefacb84c625d39cb
 - kind: project-relative
   target: copilot
@@ -696,8 +696,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:20bcabed2b58be8552421f68e9522cea3a1206a1796c26d2f77e65a3982d438f
 - kind: project-relative
   target: copilot
@@ -705,8 +705,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:f304138fe9aafe48989710bd2c68238342b32e643281f9747c0678b7cb1ae244
 - kind: project-relative
   target: copilot
@@ -714,8 +714,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:df2b1b66e1ec64743cc8d66e465e5cca931de6fb51974cc51c81908efad58eb5
 - kind: project-relative
   target: copilot
@@ -723,8 +723,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:a94ed339f171e7ca557df3e7ed10c8e55f9a14befcba940b7263c9d7fe4d8ca1
 - kind: project-relative
   target: copilot
@@ -732,8 +732,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:183d6d7270dc5f865a02d42643ba0afbae9046509f0e3b2481559fc9c1dcb64a
 - kind: project-relative
   target: copilot
@@ -741,8 +741,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
   content_hash: sha256:d0f6a2f5ed7b33b43d57520c21b6736ed2bc5379d799db98b8f841a867b0e7e0
 - kind: project-relative
   target: copilot
@@ -750,17 +750,17 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/apm-issue-autopilot
-  active_owner: ./packages/apm-issue-autopilot
-  content_hash: sha256:8f4580cb2bdb88e7e570e4feb60cbf244d7fbe3e8217a8eadfd9dff2c763b615
+  - ./packages/autopilot/apm-issue-autopilot
+  active_owner: ./packages/autopilot/apm-issue-autopilot
+  content_hash: sha256:8fc1e42ebdaf02639163311596abcc27936415aac643a1fc7f9c8c67a4935a30
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -768,8 +768,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:092761d9ab78a8d1cd6e8e2a8cd482c8d8896712aac6f6ce20889e94912fb89a
 - kind: project-relative
   target: copilot
@@ -777,8 +777,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:593331d030bcba834d933390e07bea7585d6d6db1d14eee69fbcaf8373fadb86
 - kind: project-relative
   target: copilot
@@ -786,8 +786,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:e63b137317e3913de87c43a4b20f4107764f7f99ed06d5c1a1f6ce9a42910250
 - kind: project-relative
   target: copilot
@@ -795,8 +795,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:03a042e0ad37a65d1df41582d074ea18c1f5f199ace6eef93fae33fd7330e9f6
 - kind: project-relative
   target: copilot
@@ -804,8 +804,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:5472b8607a7a1751b9fa9909fd709b96134b7cc24ae2f4b34e41fc01a736b5f5
 - kind: project-relative
   target: copilot
@@ -813,8 +813,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:9a7df32a253abb7656c56880ba2451e8265393e706311bc9e251f7a19aabb15b
 - kind: project-relative
   target: copilot
@@ -822,8 +822,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:108fc261680f17bdade3e2bdf8e64fc908d16a37ec9c29c53169b394530bdd67
 - kind: project-relative
   target: copilot
@@ -831,8 +831,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:ca1fdd3cd24e0fd8ec15b37690c597921ebf1c872270166edb2727d54ee155d8
 - kind: project-relative
   target: copilot
@@ -840,8 +840,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:faa41c6c83c4a7955447bcb8fc0ad5a3b8afb4235db257462f649ba0a901913e
 - kind: project-relative
   target: copilot
@@ -849,8 +849,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
 - kind: project-relative
   target: copilot
@@ -858,8 +858,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:690baf6267775077ad011b98839eda1001e207bbae78a7a8454c4d39bb8a2864
 - kind: project-relative
   target: copilot
@@ -867,8 +867,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-review-worker
-  active_owner: local:packages/autopilot-pr-review-worker
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:10ecce5d5f4646498f870bc5e3a951e223c8accd6a7f33b86ea5b1d904786fd0
 - kind: project-relative
   target: copilot
@@ -876,8 +876,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
+  - local:packages/autopilot/apm-review-panel
+  active_owner: local:packages/autopilot/apm-review-panel
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -885,8 +885,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/apm-review-panel
-  active_owner: local:packages/apm-review-panel
+  - local:packages/autopilot/apm-review-panel
+  active_owner: local:packages/autopilot/apm-review-panel
   content_hash: sha256:93648936aba4ad0671497beba552ef0a26ccc439965492fd22ecdf2246e632f4
 - kind: project-relative
   target: copilot
@@ -894,8 +894,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/apm-triage-panel
-  active_owner: local:packages/apm-triage-panel
+  - local:packages/autopilot/apm-triage-panel
+  active_owner: local:packages/autopilot/apm-triage-panel
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -903,8 +903,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/apm-triage-panel
-  active_owner: local:packages/apm-triage-panel
+  - local:packages/autopilot/apm-triage-panel
+  active_owner: local:packages/autopilot/apm-triage-panel
   content_hash: sha256:795f78ca5ad2d279a4624f9afa163c522bf554c7edf0e88615958af78923e7f5
 - kind: project-relative
   target: copilot
@@ -912,8 +912,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-issue-delivery
-  active_owner: ./packages/autopilot-scheduler-issue-delivery
+  - ./packages/autopilot/autopilot-scheduler-issue-delivery
+  active_owner: ./packages/autopilot/autopilot-scheduler-issue-delivery
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -921,8 +921,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-issue-delivery
-  active_owner: ./packages/autopilot-scheduler-issue-delivery
+  - ./packages/autopilot/autopilot-scheduler-issue-delivery
+  active_owner: ./packages/autopilot/autopilot-scheduler-issue-delivery
   content_hash: sha256:0619ceab8eccfd2edd7607562df5cd9c54faf85dded08327e88d8bfa7e9cc41c
 - kind: project-relative
   target: copilot
@@ -930,8 +930,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-issue-delivery
-  active_owner: ./packages/autopilot-scheduler-issue-delivery
+  - ./packages/autopilot/autopilot-scheduler-issue-delivery
+  active_owner: ./packages/autopilot/autopilot-scheduler-issue-delivery
   content_hash: sha256:7eb82d4335b24a945ed8479aa89fc655604a6be2be6d5c75484eaf98a21e9bfe
 - kind: project-relative
   target: copilot
@@ -939,8 +939,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-issue-triage-scheduler
-  active_owner: ./packages/autopilot-issue-triage-scheduler
+  - ./packages/autopilot/autopilot-issue-triage-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -948,8 +948,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-issue-triage-scheduler
-  active_owner: ./packages/autopilot-issue-triage-scheduler
+  - ./packages/autopilot/autopilot-issue-triage-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
   content_hash: sha256:75522a330c5ec350872feb6f69702b192714dc534d55ef92b169437fa6219954
 - kind: project-relative
   target: copilot
@@ -957,8 +957,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-issue-triage-scheduler
-  active_owner: ./packages/autopilot-issue-triage-scheduler
+  - ./packages/autopilot/autopilot-issue-triage-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
   content_hash: sha256:7cbfd8586c62cbabe25370cc7a5c1f2a753262de35f5efc5fb076542188c21cf
 - kind: project-relative
   target: copilot
@@ -966,8 +966,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-issue-triage-scheduler
-  active_owner: ./packages/autopilot-issue-triage-scheduler
+  - ./packages/autopilot/autopilot-issue-triage-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
   content_hash: sha256:b1ae10c85bffe63998d1c6e07a34a3d3c345572f4774114e36bd5f42dd8f1627
 - kind: project-relative
   target: copilot
@@ -975,8 +975,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-issue-triage-scheduler
-  active_owner: ./packages/autopilot-issue-triage-scheduler
+  - ./packages/autopilot/autopilot-issue-triage-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
   content_hash: sha256:67642cb53cd810326f59e1f770b19488a8037fef9f61ac40410aa376b591a03f
 - kind: project-relative
   target: copilot
@@ -984,8 +984,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-issue-triage-scheduler
-  active_owner: ./packages/autopilot-issue-triage-scheduler
+  - ./packages/autopilot/autopilot-issue-triage-scheduler
+  active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
   content_hash: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
 - kind: project-relative
   target: copilot
@@ -993,8 +993,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-issue-triage-worker
-  active_owner: local:packages/autopilot-issue-triage-worker
+  - local:packages/autopilot/autopilot-issue-triage-worker
+  active_owner: local:packages/autopilot/autopilot-issue-triage-worker
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -1002,8 +1002,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-issue-triage-worker
-  active_owner: local:packages/autopilot-issue-triage-worker
+  - local:packages/autopilot/autopilot-issue-triage-worker
+  active_owner: local:packages/autopilot/autopilot-issue-triage-worker
   content_hash: sha256:d0ef6bf7f844c859603c9493c30e0d08720dc0607ac99fafcb8cf9820ab0755c
 - kind: project-relative
   target: copilot
@@ -1011,8 +1011,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-issue-triage-worker
-  active_owner: local:packages/autopilot-issue-triage-worker
+  - local:packages/autopilot/autopilot-issue-triage-worker
+  active_owner: local:packages/autopilot/autopilot-issue-triage-worker
   content_hash: sha256:01cb6d242b8a75dbd6cf1437297e9c7e114b24948459883ca296356f507e1a9d
 - kind: project-relative
   target: copilot
@@ -1020,8 +1020,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-issue-triage-worker
-  active_owner: local:packages/autopilot-issue-triage-worker
+  - local:packages/autopilot/autopilot-issue-triage-worker
+  active_owner: local:packages/autopilot/autopilot-issue-triage-worker
   content_hash: sha256:b1ae10c85bffe63998d1c6e07a34a3d3c345572f4774114e36bd5f42dd8f1627
 - kind: project-relative
   target: copilot
@@ -1029,8 +1029,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-issue-triage-worker
-  active_owner: local:packages/autopilot-issue-triage-worker
+  - local:packages/autopilot/autopilot-issue-triage-worker
+  active_owner: local:packages/autopilot/autopilot-issue-triage-worker
   content_hash: sha256:0442e9790755877047c361ff2ea7bb1684ed2089c8793a5a9b4266a4a2e44c87
 - kind: project-relative
   target: copilot
@@ -1038,8 +1038,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-issues
-  active_owner: ./packages/autopilot-scheduler-issues
+  - ./packages/autopilot/autopilot-scheduler-issues
+  active_owner: ./packages/autopilot/autopilot-scheduler-issues
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -1047,8 +1047,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-issues
-  active_owner: ./packages/autopilot-scheduler-issues
+  - ./packages/autopilot/autopilot-scheduler-issues
+  active_owner: ./packages/autopilot/autopilot-scheduler-issues
   content_hash: sha256:d957ceedd3388486e564ef8cefc10c5cf75e0862058a854fc8502cbff23c2924
 - kind: project-relative
   target: copilot
@@ -1056,8 +1056,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-issues
-  active_owner: ./packages/autopilot-scheduler-issues
+  - ./packages/autopilot/autopilot-scheduler-issues
+  active_owner: ./packages/autopilot/autopilot-scheduler-issues
   content_hash: sha256:d7e0d4f7e32163884f9c848f88828f98d4ae71401a1b671737a0103b276a1cd7
 - kind: project-relative
   target: copilot
@@ -1065,8 +1065,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-pr-review-scheduler
-  active_owner: ./packages/autopilot-pr-review-scheduler
+  - ./packages/autopilot/autopilot-pr-review-scheduler
+  active_owner: ./packages/autopilot/autopilot-pr-review-scheduler
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -1074,8 +1074,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-pr-review-scheduler
-  active_owner: ./packages/autopilot-pr-review-scheduler
+  - ./packages/autopilot/autopilot-pr-review-scheduler
+  active_owner: ./packages/autopilot/autopilot-pr-review-scheduler
   content_hash: sha256:222e1f5c22a2a3ee42a7dc2c00a062ef7efbd24c468910363799e1fb122a21aa
 - kind: project-relative
   target: copilot
@@ -1083,8 +1083,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-pr-review-scheduler
-  active_owner: ./packages/autopilot-pr-review-scheduler
+  - ./packages/autopilot/autopilot-pr-review-scheduler
+  active_owner: ./packages/autopilot/autopilot-pr-review-scheduler
   content_hash: sha256:45d683c03f160551d0ab86e5229e793c7f1058214f5b563b55abb5d1607e4b66
 - kind: project-relative
   target: copilot
@@ -1092,8 +1092,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-pull-requests
-  active_owner: ./packages/autopilot-scheduler-pull-requests
+  - ./packages/autopilot/autopilot-scheduler-pull-requests
+  active_owner: ./packages/autopilot/autopilot-scheduler-pull-requests
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -1101,8 +1101,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-pull-requests
-  active_owner: ./packages/autopilot-scheduler-pull-requests
+  - ./packages/autopilot/autopilot-scheduler-pull-requests
+  active_owner: ./packages/autopilot/autopilot-scheduler-pull-requests
   content_hash: sha256:258b9c1cc067542e004e77fb3999ef14d8cc861cc2e292689caace788ad0da27
 - kind: project-relative
   target: copilot
@@ -1110,8 +1110,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/autopilot-scheduler-pull-requests
-  active_owner: ./packages/autopilot-scheduler-pull-requests
+  - ./packages/autopilot/autopilot-scheduler-pull-requests
+  active_owner: ./packages/autopilot/autopilot-scheduler-pull-requests
   content_hash: sha256:f7a1b116a1ff26962fb7dbe0f7154c1a1db7fbdaa0d4b65e63282c260af98016
 - kind: project-relative
   target: copilot
@@ -1119,8 +1119,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -1128,8 +1128,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:e8a5edd25dd623e3e43bc4d2c0eee6b5b6a631b60fa0f8c0a51f42847a63353d
 - kind: project-relative
   target: copilot
@@ -1137,8 +1137,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:e4ddab439f62bb372f5ad608775294dd44653ef475eeca8ef5517af7f5e42699
 - kind: project-relative
   target: copilot
@@ -1146,8 +1146,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:a804b7b2b8cd295a5543ef4356028da9287b42719729fbaf1b6bdeead08cc5c3
 - kind: project-relative
   target: copilot
@@ -1155,8 +1155,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:7b734a1e9108433e624c56d13f3aed8ab1c0b8c9247aa546b802c6f1e60361fb
 - kind: project-relative
   target: copilot
@@ -1164,8 +1164,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:8088fe8f5bb9fd1ec93fbe806971465bb7f6850019af5be1a329e252d4818df2
 - kind: project-relative
   target: copilot
@@ -1173,8 +1173,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:ea4fde3d619f12fc7e05f27d6b440b48f3ef66cb9509b2efb85aed66439438f9
 - kind: project-relative
   target: copilot
@@ -1182,8 +1182,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:00dd5a35ef0b39ba299e5fcd7f9ca682fc322792ec20440f7861edd39997d40e
 - kind: project-relative
   target: copilot
@@ -1191,8 +1191,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:abab1a5e2a765229d1cdd215b90c57036cdb4b2764866b68399eb81a51362ddc
 - kind: project-relative
   target: copilot
@@ -1200,8 +1200,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:4c74c8dfa0f98987ab5beede16d3e8c0e8113fac60955826d2ed61949624bcc5
 - kind: project-relative
   target: copilot
@@ -1209,8 +1209,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:81f2f9b617587df4a6f422838b05c63a5e05e0c8afd6d80952a9aa5cdad88b5a
 - kind: project-relative
   target: copilot
@@ -1218,8 +1218,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:394b25a0b0b41b0f99b250590af782968c0f25673c156d0b87d4f1f9b205de75
 - kind: project-relative
   target: copilot
@@ -1227,8 +1227,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:5175ea7edefdaaf787d1701ba6f7fce8433d04134718d9a6445ca524ececa3bc
 - kind: project-relative
   target: copilot
@@ -1236,8 +1236,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:4d1ffaf63fab75a7a7de265ff77d457c0636939d36a373dc9ce485ba76275209
 - kind: project-relative
   target: copilot
@@ -1245,8 +1245,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:422daafc8fcdf26f1096787075b2e8c15722df6b51e1d1784ea3b1435809b09f
 - kind: project-relative
   target: copilot
@@ -1254,8 +1254,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:f766382fbac2a2b99c0dad1d0327659103c4482cc155854ea7ef2e3c82fce8f2
 - kind: project-relative
   target: copilot
@@ -1263,8 +1263,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:812487116b89e66414562312992204dfb3132cc5e9265392b718d78e33cd9973
 - kind: project-relative
   target: copilot
@@ -1272,8 +1272,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:67db0bb51d6cbdafad4ea8224ab2012f02e6341b2fd4eb7a09b2a24cc9cb4d7e
 - kind: project-relative
   target: copilot
@@ -1281,8 +1281,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:397ab60c270f0312a3ddaac0fbc03e853fa16552a962f6b2ebca5ed27bab2818
 - kind: project-relative
   target: copilot
@@ -1290,8 +1290,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:78c2e7be93543122e485eb494a2b50ecac6e18d7e077a9e8edde12b478242ca9
 - kind: project-relative
   target: copilot
@@ -1299,8 +1299,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:51bab548ac85044400b77858c6a1554f59bda197c388d9a8546076d87380b060
 - kind: project-relative
   target: copilot
@@ -1308,8 +1308,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:d82b7ed0791b89617be965097fce1ace9ec6f6b5a33d9a1567cdf4b3651cd83a
 - kind: project-relative
   target: copilot
@@ -1317,8 +1317,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:a8bf5270c8d63c1d9ffcf0b3f18ba22d591b062e7b969982320150986ab211cd
 - kind: project-relative
   target: copilot
@@ -1326,8 +1326,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-worker-issue
-  active_owner: local:packages/autopilot-worker-issue
+  - local:packages/autopilot/autopilot-worker-issue
+  active_owner: local:packages/autopilot/autopilot-worker-issue
   content_hash: sha256:66613a8344411a2f9d5147b4acea798887bed20132ffd27bac9b3f5ba6bb65ed
 - kind: project-relative
   target: copilot
@@ -1335,8 +1335,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -1344,8 +1344,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:1d9c88648def7c1ed0ba0898c77c0f6cee6c782d9ef8ee7610cc7268e3332b08
 - kind: project-relative
   target: copilot
@@ -1353,8 +1353,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:0f1c88d8b9e28947e5583c3b8d28f8cfb30b7739f33584653de2246be8b4c535
 - kind: project-relative
   target: copilot
@@ -1362,8 +1362,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:b6b225fa6dc536e6105621cce53743ea262b84f471e2364e75222054f3502ab1
 - kind: project-relative
   target: copilot
@@ -1371,8 +1371,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:35484aa37dd5a65361a8a18ecf09cea3572385f3f57df9b8dbb2dd757f156e1f
 - kind: project-relative
   target: copilot
@@ -1380,8 +1380,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:d517ab7cc740836dcbce5f3ce022c63c88a623eef526ca6b330b0a904a735921
 - kind: project-relative
   target: copilot
@@ -1389,8 +1389,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:890a7d859ba21de926b8d3ea64be3b586daf84e6cd51bd3e06b215bc483810ba
 - kind: project-relative
   target: copilot
@@ -1398,8 +1398,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:bb096b3b075a21a1fc339a69d0a883c30701db6409006f10aa545c29f847e954
 - kind: project-relative
   target: copilot
@@ -1407,8 +1407,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:9cc418786df5f10711148c32548519ba149f3674d15afae88315bcb8b8a93715
 - kind: project-relative
   target: copilot
@@ -1416,8 +1416,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:7c3c84f4c08802869cedc07103c0af75edbcc303e701e76daeb06a6a2bd7e622
 - kind: project-relative
   target: copilot
@@ -1425,8 +1425,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
   content_hash: sha256:b15812fa4b8ad3246427afe3f6dbcab4eda25aa5b1fe846c5c199e6caef0d80b
 - kind: project-relative
   target: copilot
@@ -1434,17 +1434,17 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - local:packages/autopilot-pr-merge-worker
-  active_owner: local:packages/autopilot-pr-merge-worker
-  content_hash: sha256:ad7e5130306d232e682213e48a679b9b30189dc7a836b1c267ba6bde73f88553
+  - local:packages/autopilot/autopilot-pr-merge-worker
+  active_owner: local:packages/autopilot/autopilot-pr-merge-worker
+  content_hash: sha256:7cc26972deb8f44fb070c964ae28a289324ae5387a96bb442760fe0b2026f1e5
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -1452,8 +1452,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:0973311bbb73ed92561ccb653eb1a9b05a7d76ab553e2a821c78245d26e1e5b4
 - kind: project-relative
   target: copilot
@@ -1461,8 +1461,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:ea280a4d1e15a9b56ba8d3ef5f0e931754cc44ae29d5615da58da8d445f455c2
 - kind: project-relative
   target: copilot
@@ -1470,8 +1470,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:56ea0fa38b6fe576b319f9b8e38ba748f1136facff70c90f21d4356e00bc07f7
 - kind: project-relative
   target: copilot
@@ -1479,8 +1479,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:ca5cf460d3b9f0f529a675d4d9f6d9cfc9fcf2f750428b19dda051642f58a5a3
 - kind: project-relative
   target: copilot
@@ -1488,8 +1488,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:72c4606899f50b0761a7683f6ab17878472bc45b18fe03869aae65e3bd6a7bb2
 - kind: project-relative
   target: copilot
@@ -1497,8 +1497,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:351820afd4835e37486c71733244643687037b2567275b51f1cbb0256a949e40
 - kind: project-relative
   target: copilot
@@ -1506,8 +1506,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:51bab548ac85044400b77858c6a1554f59bda197c388d9a8546076d87380b060
 - kind: project-relative
   target: copilot
@@ -1515,8 +1515,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:f57cc96c4ede3f7c66c8acf7674a57c1c49ae9cf0b545721947703df5206ef22
 - kind: project-relative
   target: copilot
@@ -1524,8 +1524,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:f370ad043ec0c98a166fd98646c3b94280ed78bc996223b6cca2ba936f7c6781
 - kind: project-relative
   target: copilot
@@ -1533,17 +1533,17 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:f0a5f952090bb5b85f46655b6ba0ec37712d5c7867734acb62af0a1d9c9ccf6f
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
+  content_hash: sha256:230c41d8f65255b7d9a371926ed74746b407409360e8215c61e1e7aa8a278e3a
 - kind: project-relative
   target: copilot
   value: .agents/skills/batch-bug-shepherd/evals/content/sweep-bug-queue.json
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:f865943bbe523d22555d6e69834f47364237ce27388cb7732795a6887f6820ee
 - kind: project-relative
   target: copilot
@@ -1551,8 +1551,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:05812ee0bd4efcc72c7db238436c9e6cfb14faab59c99afad6ebcff642538bb8
 - kind: project-relative
   target: copilot
@@ -1560,8 +1560,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:0b47a8ea4c49c375a575d0f44d488b65c0d797bff5022ebb79746808495dab26
 - kind: project-relative
   target: copilot
@@ -1569,8 +1569,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:71267bc76d815feac3f9a6a1328cf41e3dd93623a818765821080eeb838dbb60
 - kind: project-relative
   target: copilot
@@ -1578,8 +1578,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:83a2a11ac6dc2a188bb95a92f24dc7f94568f8af30ec4979ae85f52bd3102ee6
 - kind: project-relative
   target: copilot
@@ -1587,8 +1587,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:9fae1fba169def0725d1604966aa78eb850aae3088c0d3543cdca4c9ed3286d7
 - kind: project-relative
   target: copilot
@@ -1596,8 +1596,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:8bf17d4cdc3c10beb54bcb1348efb4a111846d49d9548ca714e4354b4eccff22
 - kind: project-relative
   target: copilot
@@ -1605,8 +1605,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:711a44b665c0b8b170742b19109af096e7b168c5d96350f2415427d381d9fee4
 - kind: project-relative
   target: copilot
@@ -1614,8 +1614,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:5f1e313b423c2e8af32b3859719a421a1c06b7459365353a9a1f435acaf49abb
 - kind: project-relative
   target: copilot
@@ -1623,8 +1623,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
   content_hash: sha256:b612c4f00684c90e96635d891ace0d3de1125d1441cfd99dbc8ede71f81c8ee4
 - kind: project-relative
   target: copilot
@@ -1632,9 +1632,9 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/batch-bug-shepherd
-  active_owner: ./packages/batch-bug-shepherd
-  content_hash: sha256:ecc003164e65cb002f301a7cdff9c0a2e39eddc35a81ede63da8934519e483c9
+  - ./packages/autopilot/batch-bug-shepherd
+  active_owner: ./packages/autopilot/batch-bug-shepherd
+  content_hash: sha256:689a2e7fe0c49a5dd20e9a1c907dc41d729334f00900ef8c9bbf0e4d400a6fdc
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill
@@ -1839,8 +1839,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: null
 - kind: project-relative
   target: copilot
@@ -1848,8 +1848,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:67a978b44e143d688dcb02693987782c458c7ea9911f7344fd8c8f93ddac2079
 - kind: project-relative
   target: copilot
@@ -1857,8 +1857,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:ae8e6218792c48d28aa3d8c098b37023df4ba9cd980f6bba4566d7723b2ca7b1
 - kind: project-relative
   target: copilot
@@ -1866,8 +1866,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:21801867a8459d9713e45efe68e612c4d22a2cb577c23eceab55cd855bbd23ef
 - kind: project-relative
   target: copilot
@@ -1875,8 +1875,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:52c88b00c5acd08183485ab110570e892c4504821ded8dca7049c089e3f81a8b
 - kind: project-relative
   target: copilot
@@ -1884,8 +1884,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:453237e56043e4008c37c5a89d9da5e77a1fa46b028ea172321dcc39a737c679
 - kind: project-relative
   target: copilot
@@ -1893,8 +1893,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:71c0ad6c5d2c422dcc7fc0c44e13d8b3b049b37c04418ade7daf9722fe115c1f
 - kind: project-relative
   target: copilot
@@ -1902,8 +1902,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:bd25b1aea90daa45a9aac359470525ebd979459ecf4826a46fd99ec194ea9270
 - kind: project-relative
   target: copilot
@@ -1911,8 +1911,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:18a5d74b29d44e13542815a9d012a4583e4b5ea77163c5292886a9bcc1579cfc
 - kind: project-relative
   target: copilot
@@ -1920,8 +1920,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:dd6273e0497f9ae52de0a1703b28463c6eda382f1b9d087d1870615518787ec6
 - kind: project-relative
   target: copilot
@@ -1929,8 +1929,8 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
   content_hash: sha256:50c6a3dca9f77ef751d1d83dd03e8a6fdb0c202f309dea5bec02c7a87e4ac06f
 - kind: project-relative
   target: copilot
@@ -1938,9 +1938,9 @@ deployments:
   runtime: null
   scope: project
   owners:
-  - ./packages/shepherd-driver
-  active_owner: ./packages/shepherd-driver
-  content_hash: sha256:eadb3c82c4c98bde8eaebdac489d2b57f1ba4d6412fe52ded92897a9c85422f2
+  - ./packages/autopilot/shepherd-driver
+  active_owner: ./packages/autopilot/shepherd-driver
+  content_hash: sha256:83997fc2dc80da2fb27e301c378a35792ff6b34c43897e36773956aceaae5557
 - kind: project-relative
   target: copilot
   value: .github/agents/agentic-workflows.agent.md

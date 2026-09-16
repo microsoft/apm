@@ -8,8 +8,8 @@ from typing import Any
 
 ROOT = Path(__file__).parents[2]
 EVALS = ROOT / "tests/fixtures/shepherd_driver/functional_evidence_evals.json"
-PROMPT = ROOT / "packages/shepherd-driver/assets/shepherd-driver-prompt.md"
-GATE = ROOT / "packages/shepherd-driver/scripts/owner_touch_gate.py"
+PROMPT = ROOT / "packages/autopilot/shepherd-driver/assets/shepherd-driver-prompt.md"
+GATE = ROOT / "packages/autopilot/shepherd-driver/scripts/owner_touch_gate.py"
 REQUIRED_SCENARIOS = {
     "positive-owner-touch",
     "missing-functional-evidence",

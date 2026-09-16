@@ -76,7 +76,7 @@ def test_triage_source_and_compiled_writers_are_advisory_only() -> None:
     contract = json.loads(
         (
             REPO_ROOT
-            / "packages/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler/assets/label-contract.json"
+            / "packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler/assets/label-contract.json"
         ).read_text()
     )
     expected_add = set(contract["classification_labels"]) | {

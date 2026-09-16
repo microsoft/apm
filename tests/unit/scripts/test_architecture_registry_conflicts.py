@@ -24,7 +24,7 @@ def test_generated_architecture_projections_match_their_sources() -> None:
     assert (ROOT / ".apm/instructions/architecture.instructions.md").read_bytes() == (
         ROOT / ".github/instructions/architecture.instructions.md"
     ).read_bytes()
-    assert (ROOT / "packages/shepherd-driver/scripts/owner_touch_gate.py").read_bytes() == (
+    assert (ROOT / "packages/autopilot/shepherd-driver/scripts/owner_touch_gate.py").read_bytes() == (
         ROOT / ".agents/skills/shepherd-driver/scripts/owner_touch_gate.py"
     ).read_bytes()
 

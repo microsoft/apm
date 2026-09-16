@@ -31,27 +31,27 @@ targets:
 # resolve.
 dependencies:
   apm:
-    - ./packages/autopilot-issue-triage-scheduler
-    - ./packages/apm-triage-panel
-    - ./packages/apm-review-panel
-    - ./packages/autopilot-pr-review-panel
-    - ./packages/autopilot-pr-merge-worker
-    - ./packages/autopilot-scheduler-issue-triage
-    - ./packages/autopilot-issue-delivery-scheduler
-    - ./packages/autopilot-issue-scheduler
-    - ./packages/autopilot-code-scheduler
-    - ./packages/autopilot-scheduler-code
-    - ./packages/autopilot-scheduler-issue-delivery
-    - ./packages/autopilot-pr-triage-scheduler
-    - ./packages/autopilot-pr-review-triage-scheduler
-    - ./packages/autopilot-pr-review-scheduler
-    - ./packages/autopilot-scheduler-pull-request-review
-    - ./packages/autopilot-pull-request-worker
-    - ./packages/autopilot-scheduler-issues
-    - ./packages/autopilot-scheduler-pull-requests
-    - ./packages/apm-issue-autopilot
-    - ./packages/batch-bug-shepherd
-    - ./packages/shepherd-driver
+    - ./packages/autopilot/autopilot-issue-triage-scheduler
+    - ./packages/autopilot/apm-triage-panel
+    - ./packages/autopilot/apm-review-panel
+    - ./packages/autopilot/autopilot-pr-review-panel
+    - ./packages/autopilot/autopilot-pr-merge-worker
+    - ./packages/autopilot/autopilot-scheduler-issue-triage
+    - ./packages/autopilot/autopilot-issue-delivery-scheduler
+    - ./packages/autopilot/autopilot-issue-scheduler
+    - ./packages/autopilot/autopilot-code-scheduler
+    - ./packages/autopilot/autopilot-scheduler-code
+    - ./packages/autopilot/autopilot-scheduler-issue-delivery
+    - ./packages/autopilot/autopilot-pr-triage-scheduler
+    - ./packages/autopilot/autopilot-pr-review-triage-scheduler
+    - ./packages/autopilot/autopilot-pr-review-scheduler
+    - ./packages/autopilot/autopilot-scheduler-pull-request-review
+    - ./packages/autopilot/autopilot-pull-request-worker
+    - ./packages/autopilot/autopilot-scheduler-issues
+    - ./packages/autopilot/autopilot-scheduler-pull-requests
+    - ./packages/autopilot/apm-issue-autopilot
+    - ./packages/autopilot/batch-bug-shepherd
+    - ./packages/autopilot/shepherd-driver
   mcp: []
 
 scripts: {}

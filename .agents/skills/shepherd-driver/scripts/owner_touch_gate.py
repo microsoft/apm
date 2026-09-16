@@ -36,7 +36,7 @@ OWNER_CLASSIFICATIONS = {
 }
 
 # Cached, PATH-resolved git executable. This script ships as a
-# standalone, portable APM skill artifact (see packages/shepherd-driver)
+# standalone, portable APM skill artifact (see packages/autopilot/shepherd-driver)
 # and must not depend on the main repo's apm_cli package being
 # importable, so it resolves git itself rather than reusing
 # apm_cli.utils.git_env.get_git_executable(). A bare "git" argv does

@@ -28,10 +28,10 @@ From the repo root:
 
 ```bash
 # val split is the SHIP gate; train split is for tuning the description
-python packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py
-python packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py --split train
-python packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py --filter triggers
-python packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py --filter content
+python packages/autopilot/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py
+python packages/autopilot/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py --split train
+python packages/autopilot/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py --filter triggers
+python packages/autopilot/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py --filter content
 ```
 
 Exit 0 = all gates met. Exit 1 = at least one gate failed. Exit 2 =

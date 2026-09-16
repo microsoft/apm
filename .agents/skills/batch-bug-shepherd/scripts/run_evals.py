@@ -27,7 +27,7 @@ stderr. Exit codes:
 
 Run from the worktree root:
 
-    python packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py
+    python packages/autopilot/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/scripts/run_evals.py
 
 Use --help for full options.
 """

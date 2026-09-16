@@ -11,7 +11,7 @@ import pytest
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = (
-    ROOT / "packages/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler"
+    ROOT / "packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler"
 )
 SCRIPT = PACKAGE / "scripts/fetch_queue.py"
 CONTRACT = json.loads((PACKAGE / "assets/label-contract.json").read_text(encoding="ascii"))
@@ -224,8 +224,8 @@ def test_list_pages_drops_pulls_for_issue_kind() -> None:
 
 def test_queue_helpers_match_across_schedulers_and_worker_contract() -> None:
     """Issue and PR schedulers ship one helper implementation; worker has no queue scripts."""
-    pr = ROOT / "packages/autopilot-pr-triage-scheduler/.apm/skills/autopilot-pr-triage-scheduler"
-    worker = ROOT / "packages/autopilot-issue-triage-worker"
+    pr = ROOT / "packages/autopilot/autopilot-pr-triage-scheduler/.apm/skills/autopilot-pr-triage-scheduler"
+    worker = ROOT / "packages/autopilot/autopilot-issue-triage-worker"
     for name in (
         "scripts/fetch_queue.py",
         "scripts/triage_state.py",

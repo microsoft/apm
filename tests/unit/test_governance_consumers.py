@@ -16,9 +16,9 @@ from apm_cli.utils.content_hash import compute_file_hash
 
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
-BATCH = ROOT / "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd"
+BATCH = ROOT / "packages/autopilot/batch-bug-shepherd/.apm/skills/batch-bug-shepherd"
 DOCS = ROOT / ".apm/skills/docs-sync"
-AUTOPILOT = ROOT / "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot"
+AUTOPILOT = ROOT / "packages/autopilot/apm-issue-autopilot/.apm/skills/apm-issue-autopilot"
 
 
 def _workflow(name: str) -> tuple[dict, dict, str]:
@@ -121,7 +121,7 @@ def test_docs_workflow_never_treats_a_label_as_companion_approval() -> None:
 
 
 DELIVERY = (
-    ROOT / "packages/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
+    ROOT / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
 )
 
 
@@ -153,7 +153,7 @@ def test_bug_shepherd_union_human_gate_and_owned_cleanup() -> None:
     """Alias dispatches; frozen assets keep marker and fail-closed contracts."""
     skill = (BATCH / "SKILL.md").read_text()
     prompt = (
-        ROOT / "packages/batch-bug-shepherd/.apm/prompts/batch-bug-shepherd.prompt.md"
+        ROOT / "packages/autopilot/batch-bug-shepherd/.apm/prompts/batch-bug-shepherd.prompt.md"
     ).read_text()
     for text in (skill, prompt):
         assert "Compatibility alias" in text or "alias" in text
