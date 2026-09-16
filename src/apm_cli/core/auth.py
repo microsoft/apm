@@ -235,9 +235,17 @@ class AuthResolver:
         logger: object | None = None,
         *,
         allow_external_fallback: bool = True,
+        github_auth_first: bool = False,
     ):
         self._token_manager = token_manager or GitHubTokenManager()
         self._allow_external_fallback = allow_external_fallback
+        # issue #2545: CLI-scoped override for the anonymous-first opt-out.
+        # ``False`` (default) defers to ``get_apm_github_auth_first()``
+        # (env var > persisted config > False) inside
+        # ``uses_public_github_anonymous_first``; ``True`` short-circuits it
+        # for this resolver instance regardless of env/config.
+        self._github_auth_first_cli = github_auth_first
+        self._github_auth_first_warned = False
         self._cache: dict[AuthCacheKey, AuthContext] = {}
         self._lock = threading.Lock()
         # F2/F3 #852: optional logger lets the install command route the
@@ -497,14 +505,55 @@ class AuthResolver:
         cache fetches, and clone execution cannot drift into separate host
         checks. GitHub Enterprise, ADO, GitLab, and generic hosts retain their
         existing authentication order.
+
+        Issue #2545: exact-host github.com normally answers ``True``, but the
+        ``--auth-first`` CLI flag / ``APM_GITHUB_AUTH_FIRST`` env var /
+        ``github_auth_first`` config (``get_apm_github_auth_first()``, in
+        that resolution order) opt out to ``False`` for users behind a
+        TLS-inspecting proxy whose intercepting CA chain has no revocation
+        info, where the isolated anonymous attempt cannot complete a TLS
+        handshake even though a plain ``git clone`` (which inherits the real
+        git/TLS config) succeeds.
         """
-        return (
+        if (
             self.classify_host(
                 host,
                 port=port,
                 host_type=host_type,
             ).kind
-            == "github"
+            != "github"
+        ):
+            return False
+        from ..config import get_apm_github_auth_first
+
+        # create_config=False: this is a pure decision read, called from ~13
+        # sites per install; it must never create ~/.apm/config.json as a
+        # side effect (a prior `apm config set ...` already created it if
+        # the persisted key is meant to apply).
+        if self._github_auth_first_cli or get_apm_github_auth_first(create_config=False):
+            self.emit_github_auth_first_diagnostic()
+            return False
+        return True
+
+    def emit_github_auth_first_diagnostic(self) -> None:
+        """Emit a one-time [!] warning when the auth-first opt-out is active.
+
+        Issue #2545: the opt-out trades the anonymous-first credential-
+        isolation property for environment-inheriting behavior, so the
+        tradeoff is surfaced once per resolver instance rather than silently.
+        Mirrors :meth:`emit_stale_pat_diagnostic`'s logger-or-fallback shape.
+        """
+        with self._lock:
+            if self._github_auth_first_warned:
+                return
+            self._github_auth_first_warned = True
+        self._emit_warning_with_detail(
+            "github-auth-first is enabled: git credentials will be forwarded "
+            "on the first HTTPS attempt to github.com.",
+            "To restore the default, run 'apm config unset github-auth-first', "
+            "unset APM_GITHUB_AUTH_FIRST, or omit --auth-first.",
+            fallback_context="auth-first",
+            always_show_detail=True,
         )
 
     @staticmethod
@@ -640,19 +689,45 @@ class AuthResolver:
             port=port,
             host_type=host_type,
         )
-        lazy_public_github = unauth_first and self.uses_public_github_anonymous_first(
+        github_anonymous_first_allowed = self.uses_public_github_anonymous_first(
             host,
             port=port,
             host_type=host_type,
         )
+        lazy_public_github = unauth_first and github_anonymous_first_allowed
+        # issue #2545: for exact-host github.com, the --auth-first opt-out
+        # (CLI flag / APM_GITHUB_AUTH_FIRST / persisted config) must skip
+        # the unauthenticated attempt entirely -- not merely fall back from
+        # the hardened "public github anonymous" env to a plain one -- or a
+        # caller's unauth_first=True (e.g. validation's rate-limit-saving
+        # probe) still tries token=None first and can hit the same TLS-
+        # inspecting-proxy failure --auth-first exists to route around.
+        # Every other host class (uses_public_github_anonymous_first is
+        # always False for them) keeps the historical unauth_first-only gate.
+        github_auth_first_opted_out = (
+            host_info.kind == "github" and not github_anonymous_first_allowed
+        )
+        attempt_unauthenticated = unauth_first and not github_auth_first_opted_out
         auth_ctx: AuthContext | None = None
         if not lazy_public_github:
+            # issue #2545: also scope the credential-fill lookup by path for
+            # the github-auth-first-opted-out case (mirrors the existing
+            # gitlab behavior) so GCM multi-account users still get correct
+            # per-URL account selection once the opt-out routes straight to
+            # credentials. Guarded on unauth_first so callers that already
+            # pass unauth_first=False (an explicit auth-first request,
+            # unrelated to this opt-out) keep their prior path=None behavior.
             auth_ctx = self.resolve(
                 host,
                 org,
                 port=port,
                 host_type=host_type,
-                path=path if host_info.kind == "gitlab" else None,
+                path=(
+                    path
+                    if host_info.kind == "gitlab"
+                    or (unauth_first and github_auth_first_opted_out)
+                    else None
+                ),
             )
             host_info = auth_ctx.host_info
         unauth_env = (
@@ -706,18 +781,30 @@ class AuthResolver:
                 f"Token from {ctx.source} failed for {host_info.display_name}; "
                 "trying secondary credential sources"
             )
+
+            def _secondary_credential_env(token: str, source: str) -> dict[str, str]:
+                """Build the env for a secondary (gh-cli / credential-fill)
+                token via the same TLS-aware path as the primary token
+                (issue #2545 follow-up: this fallback also reaches
+                github.com and must not lose the ambient TLS config)."""
+                return self.git_env_for_context(
+                    AuthContext(
+                        token=token,
+                        source=source,
+                        token_type="unknown",
+                        host_info=host_info,
+                        git_env={},
+                    ),
+                    base_env=base_env,
+                )
+
             _log(f"trying gh auth token for {host_info.display_name}")
             gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
             if gh_token:
                 _log(f"gh auth token resolved a credential for {host_info.display_name}")
                 return operation(
                     gh_token,
-                    self._build_git_env(
-                        gh_token,
-                        scheme="basic",
-                        host_kind=host_info.kind,
-                        base_env=base_env,
-                    ),
+                    _secondary_credential_env(gh_token, "gh-auth-token"),
                 )
             path_suffix = f" (path={path})" if path else ""
             _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
@@ -728,12 +815,7 @@ class AuthResolver:
                 _log(f"git credential fill resolved a credential for {host_info.display_name}")
                 return operation(
                     cred,
-                    self._build_git_env(
-                        cred,
-                        scheme="basic",
-                        host_kind=host_info.kind,
-                        base_env=base_env,
-                    ),
+                    _secondary_credential_env(cred, "git-credential-fill"),
                 )
             raise exc
 
@@ -824,7 +906,7 @@ class AuthResolver:
                 )
                 return _try_ado_bearer_fallback(exc)
 
-        if unauth_first:
+        if attempt_unauthenticated:
             # Validation path: save rate limits, EMU-safe
             try:
                 _log(f"Trying unauthenticated access to {host_info.display_name}")
@@ -1317,7 +1399,17 @@ class AuthResolver:
         *,
         base_env: dict[str, str] | None = None,
     ) -> dict[str, str]:
-        """Build a credential-free Git env for public github.com attempts."""
+        """Build a credential-free Git env for public github.com attempts.
+
+        Issue #2545: also inherits ``http.sslBackend``/``http.sslCAInfo``
+        from the caller's real (non-isolated) git config -- the two TLS
+        settings that let a plain ``git clone`` succeed behind a
+        TLS-inspecting proxy whose intercepting CA chain has no revocation
+        info, which the from-scratch isolated config below otherwise
+        discards along with ``credential.helper``. Only these two keys are
+        read; ``credential.helper`` stays forced empty regardless, so the
+        credential-isolation boundary is unaffected.
+        """
         caller_env = os.environ if base_env is None else base_env
         env = cls._build_git_env(
             None,
@@ -1341,6 +1433,12 @@ class AuthResolver:
             )
         cls._append_git_config(env, "credential.helper", "")
         cls._append_git_config(env, "http.extraheader", "")
+
+        from ..utils.git_env import real_git_tls_config
+
+        for key, value in real_git_tls_config().items():
+            if not cls._has_git_config_key(env, key):
+                cls._append_git_config(env, key, value)
         return env
 
     @classmethod
@@ -1370,21 +1468,56 @@ class AuthResolver:
         env[f"GIT_CONFIG_VALUE_{count}"] = value
 
     @staticmethod
+    def _has_git_config_key(env: dict[str, str], key: str) -> bool:
+        """Return whether ``env`` already has an indexed entry for ``key``.
+
+        Case-insensitive, matching Git's own config-key normalization and
+        ``real_git_tls_config()``'s lower-cased keys. Used to make ambient
+        config inheritance (issue #2545) additive-only: it must fill a gap,
+        never override a value the caller (or an earlier build step)
+        already set explicitly -- indexed ``GIT_CONFIG_KEY_N`` entries are
+        last-one-wins in Git, so a blind append would otherwise let the
+        ambient value beat an explicit one appended earlier.
+        """
+        try:
+            count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
+        except ValueError:
+            count = 0
+        normalized = key.lower()
+        return any(env.get(f"GIT_CONFIG_KEY_{i}", "").lower() == normalized for i in range(count))
+
+    @staticmethod
     def git_env_for_context(
         ctx: AuthContext,
         *,
         base_env: dict,
     ) -> dict:
-        """Apply one resolved credential to a hardened Git base environment."""
+        """Apply one resolved credential to a hardened Git base environment.
+
+        Issue #2545: a credentialed exact-host github.com attempt (the
+        ordinary 401/403/404-triggered retry, or the ``--auth-first`` bypass
+        of the anonymous attempt) must not hit the same TLS-inspecting-proxy
+        failure the isolated hardened base env would otherwise reproduce --
+        mirrors :meth:`build_public_github_anonymous_git_env`. Scoped to
+        exact-host github.com only; GHE Cloud/GHES/ADO/GitLab/generic are
+        unaffected.
+        """
         scheme = ctx.auth_scheme
         if ctx.token and ctx.host_info.kind in {"github", "ghe_cloud", "ghes"}:
             scheme = "github-basic"
-        return AuthResolver._build_git_env(
+        env = AuthResolver._build_git_env(
             ctx.token,
             scheme=scheme,
             host_kind=ctx.host_info.kind,
             base_env=base_env,
         )
+        if ctx.host_info.kind == "github":
+            from ..utils.git_env import real_git_tls_config
+
+            for key, value in real_git_tls_config().items():
+                if not AuthResolver._has_git_config_key(env, key):
+                    AuthResolver._append_git_config(env, key, value)
+        return env
 
     def hardened_git_base_env(self) -> dict:
         """Build the credential-free hardened base for Git subprocesses."""
@@ -1545,11 +1678,42 @@ class AuthResolver:
             if host_display in self._stale_pat_warned_hosts:
                 return
             self._stale_pat_warned_hosts.add(host_display)
-        msg = f"ADO_APM_PAT was rejected for {host_display}; fell back to az cli bearer."
-        detail = "Consider unsetting the stale variable."
+        self._emit_warning_with_detail(
+            f"ADO_APM_PAT was rejected for {host_display}; fell back to az cli bearer.",
+            "Consider unsetting the stale variable.",
+            fallback_context="stale-PAT",
+        )
+
+    def _emit_warning_with_detail(
+        self,
+        msg: str,
+        detail: str,
+        *,
+        fallback_context: str,
+        always_show_detail: bool = False,
+    ) -> None:
+        """Emit a msg+detail warning, preferring the wired DiagnosticCollector.
+
+        Shared by every deferred one-time ``[!]`` warning on this resolver
+        (stale-PAT fallback, github-auth-first opt-out, ...). Falls back to
+        inline ``_rich_warning`` when no ``InstallLogger`` is wired (e.g.
+        unit tests). Callers own their own dedup gate (e.g. a per-host set
+        or a boolean flag) before calling this.
+
+        ``DiagnosticCollector``'s warning renderer only prints ``detail``
+        under ``--verbose`` (by design for supplementary context like the
+        stale-PAT cleanup hint). When ``detail`` carries the *only*
+        remediation for the warning (the "So What test"), pass
+        ``always_show_detail=True`` to fold it into the always-rendered
+        message instead -- the ``_rich_warning`` fallback already shows
+        both unconditionally.
+        """
         diagnostics = self._diagnostics_or_none()
         if diagnostics is not None:
-            diagnostics.warn(msg, detail=detail)
+            if always_show_detail:
+                diagnostics.warn(f"{msg} {detail}")
+            else:
+                diagnostics.warn(msg, detail=detail)
             return
         try:
             from apm_cli.utils.console import _rich_warning
@@ -1557,7 +1721,11 @@ class AuthResolver:
             _rich_warning(msg, symbol="warning")
             _rich_warning(f"    {detail}", symbol="warning")
         except ImportError as exc:
-            logger.debug("Console module unavailable for stale-PAT warning; skipping: %s", exc)
+            logger.debug(
+                "Console module unavailable for %s warning; skipping: %s",
+                fallback_context,
+                exc,
+            )
 
     # Backwards-compat alias for any in-tree caller still importing the
     # private name. Safe to remove once all callers move to the public name.

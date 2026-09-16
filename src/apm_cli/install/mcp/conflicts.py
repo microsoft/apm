@@ -38,11 +38,15 @@ def validate_mcp_conflicts(
     update: bool,
     any_transport_flag: bool,
     registry_url: str | None = None,
+    auth_first: bool = False,
 ) -> None:
     """Apply the conflict matrix. Raises ``click.UsageError`` on a conflict.
 
     ``any_transport_flag`` should be ``use_ssh or use_https or
-    allow_protocol_fallback`` (pre-evaluated by the caller).
+    allow_protocol_fallback`` (pre-evaluated by the caller). ``auth_first``
+    (issue #2545) is reported separately from ``any_transport_flag``: it
+    changes credential *order*, not the transport scheme, so it is not a
+    "transport selection flag".
     """
     # E10: flags require --mcp -- run first so users get the right hint.
     if mcp_name is None:
@@ -82,6 +86,14 @@ def validate_mcp_conflicts(
         raise click.UsageError(
             "transport selection flags (--ssh/--https/--allow-protocol-fallback) "
             "don't apply to MCP entries"
+        )
+
+    # E4b: --auth-first (issue #2545) changes credential order, not
+    # transport, but still has nothing to configure on an MCP entry.
+    if auth_first:
+        raise click.UsageError(
+            "--auth-first (a github.com credential-order flag, not a transport "
+            "selector) doesn't apply to MCP entries"
         )
 
     # E5: --update is for refreshing, not adding.

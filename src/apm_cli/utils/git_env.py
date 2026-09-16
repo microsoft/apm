@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -736,6 +737,90 @@ def configured_git_url_policy(
     """Return repository-neutral rewrites and config authorization state."""
     snapshot = _read_effective_git_config(git_subprocess_env(env))
     return snapshot.rewrites, snapshot.http_headers
+
+
+# issue #2545: the only two keys inherited from the ambient (non-isolated)
+# git config into APM's anonymous-first github.com attempt. Deliberately
+# narrow -- credential.helper and other auth-bearing config are never read
+# here, so the credential-leakage boundary the isolated environment exists
+# for is unaffected.
+_TLS_TRANSPORT_CONFIG_KEYS: frozenset[str] = frozenset({"http.sslbackend", "http.sslcainfo"})
+
+# Module-level cache for the ambient (env=None) TLS probe -- see
+# real_git_tls_config(). None means "not probed yet"; {} is a legitimate,
+# cached "no ambient TLS config" answer, not a retry signal. Guarded by
+# _real_git_tls_config_lock: parallel installs call this once per
+# dependency, and the probe spawns a `git config` child with its own
+# 10s/30s retry budget, so an unguarded check-then-probe race could let
+# several workers pay that cost concurrently before either stores a result.
+_real_git_tls_config_cache: dict[str, str] | None = None
+_real_git_tls_config_lock = threading.Lock()
+
+
+def real_git_tls_config(env: dict[str, object] | None = None) -> dict[str, str]:
+    """Return the ambient ``http.sslBackend``/``http.sslCAInfo`` git config.
+
+    Reads the *non-isolated* config a plain ``git clone`` would see -- the
+    settings that let it succeed behind a TLS-inspecting proxy whose
+    intercepting CA chain carries no revocation info, while APM's
+    anonymous-first isolated environment (``GIT_CONFIG_NOSYSTEM=1`` + empty
+    ``GIT_CONFIG_GLOBAL``) cannot complete the same handshake. Keys are
+    returned lower-cased, matching Git's own ``--list`` normalization and
+    this codebase's existing indexed-config convention (see
+    ``AuthResolver._append_git_config`` callers using ``credential.helper``
+    / ``http.extraheader``).
+
+    Best-effort: any probe failure (missing ``git``, malformed output,
+    timeout) yields an empty mapping rather than raising, so a broken
+    ambient config never blocks the anonymous attempt it is meant to help.
+
+    ``entries`` is ordered lowest-to-highest precedence (system, global,
+    local, worktree, command/env), matching Git's own resolution. An
+    explicit higher-precedence empty value (``git config --unset``-like
+    override) must win over an earlier non-empty one, so every value for a
+    tracked key is recorded during the scan and only the final, possibly
+    empty, values are filtered out afterward.
+
+    Cached for the default ``env=None`` case after the first probe: the
+    ambient config a plain ``git clone`` sees is stable for the life of the
+    process, and both ``AuthResolver.build_public_github_anonymous_git_env``
+    and ``AuthResolver.git_env_for_context`` call this once per attempt, so
+    an uncached probe would spawn one extra ``git config`` child process
+    (with its own retry/timeout budget) per dependency in a large install.
+    Callers that pass an explicit ``env`` (tests) always re-probe. Use
+    :func:`reset_git_cache` to clear it (tests only).
+
+    Parallel installs call this from multiple worker threads: the cache is
+    populated under ``_real_git_tls_config_lock`` with a double-checked read
+    (fast, lock-free hit once warm; re-checked inside the lock before
+    probing) so concurrent workers racing the very first call share one
+    probe instead of each paying its own retry/timeout budget.
+    """
+    global _real_git_tls_config_cache
+    if env is None and _real_git_tls_config_cache is not None:
+        return dict(_real_git_tls_config_cache)
+
+    def _probe() -> dict[str, str]:
+        try:
+            snapshot = _read_effective_git_config(git_subprocess_env(env))
+            values: dict[str, str] = {}
+            for entry in snapshot.entries:
+                normalized = entry.key.lower()
+                if normalized in _TLS_TRANSPORT_CONFIG_KEYS:
+                    values[normalized] = entry.value
+            return {key: value for key, value in values.items() if value}
+        except (GitUrlRewriteProbeError, OSError):
+            return {}
+
+    if env is not None:
+        return _probe()
+
+    with _real_git_tls_config_lock:
+        if _real_git_tls_config_cache is not None:
+            return dict(_real_git_tls_config_cache)
+        result = _probe()
+        _real_git_tls_config_cache = result
+        return dict(result)
 
 
 def validate_resolved_git_url_rewrite(
@@ -1506,10 +1591,11 @@ def git_current_branch(
 
 
 def reset_git_cache() -> None:
-    """Reset the cached git executable (for testing purposes only)."""
-    global _gh_executable, _git_executable
+    """Reset the cached git executable and TLS config probe (tests only)."""
+    global _gh_executable, _git_executable, _real_git_tls_config_cache
     _git_executable = None
     _gh_executable = None
+    _real_git_tls_config_cache = None
 
 
 def git_long_paths_args() -> list[str]:

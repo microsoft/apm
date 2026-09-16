@@ -84,8 +84,9 @@ you use the generated registration.
 | `--ssh` | off | Prefer SSH transport for shorthand (`owner/repo`) deps. Mutually exclusive with `--https`. |
 | `--https` | off | Prefer HTTPS transport for shorthand deps. Mutually exclusive with `--ssh`. |
 | `--allow-protocol-fallback` | off | Restore the legacy permissive HTTPS<->SSH fallback chain. Env: `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
+| `--auth-first` | off | Skip the anonymous-first HTTPS attempt for exact-host `github.com` and resolve credentials/environment immediately. Escape hatch for TLS-inspecting proxies whose intercepting CA chain has no revocation info. Env: `APM_GITHUB_AUTH_FIRST=1`. |
 
-Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`.
+Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initial transport for shorthand deps; `APM_ALLOW_PROTOCOL_FALLBACK=1` mirrors `--allow-protocol-fallback`. Credential-order env var: `APM_GITHUB_AUTH_FIRST=1` mirrors `--auth-first` (not a transport selector -- see [Authentication: TLS-inspecting proxy blocks the anonymous attempt](../../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt)).
 
 ### Skill subset
 

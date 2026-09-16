@@ -199,6 +199,27 @@ class TestE4TransportSelectionFlags:
 
 
 # ---------------------------------------------------------------------------
+# E4b - --auth-first doesn't apply to MCP (issue #2545)
+# ---------------------------------------------------------------------------
+
+
+class TestE4bAuthFirst:
+    def test_auth_first_raises(self) -> None:
+        """--auth-first is reported separately: it's not a transport flag."""
+        with pytest.raises(click.UsageError, match=r"--auth-first"):
+            _call(auth_first=True)
+
+    def test_auth_first_message_does_not_claim_transport_selection(self) -> None:
+        """The --auth-first error must not say 'transport selection flags'."""
+        with pytest.raises(click.UsageError) as exc_info:
+            _call(auth_first=True)
+        assert "transport selection flags" not in str(exc_info.value)
+
+    def test_auth_first_false_ok(self) -> None:
+        _call(auth_first=False)
+
+
+# ---------------------------------------------------------------------------
 # E5 - --update is for refreshing
 # ---------------------------------------------------------------------------
 
