@@ -208,6 +208,24 @@ def test_review_panel_requires_complete_paginated_context_and_watermark_noop() -
     assert "gh api --paginate" in workflow
     assert "closingIssuesReferences" in workflow
     assert "reviewRequests" in workflow
+    assert "CODEOWNERS last-comment gate" in workflow
+
+
+def test_pr_review_codeowners_last_comment_gate() -> None:
+    """CODEOWNER asks are conditions; met asks do not block the panel."""
+    scheduler = _ascii(SCHEDULER_PR_REVIEW)
+    worker = _ascii(REVIEW_SKILL)
+    for text in (scheduler, worker):
+        assert "CODEOWNERS last-comment gate" in text
+        assert "explicitly asks for a panel or further review" in text
+        assert "later comments AND current labels" in text
+        assert "asked work is done" in text
+    assert "Named list and `panel-review` do not bypass this gate." in scheduler
+    assert "CODEOWNERS last comment conditions unmet" in scheduler
+    assert "CODEOWNERS last comment conditions unclear" in scheduler
+    assert "Do not spawn" in scheduler
+    assert "do not spawn panelists" in worker
+    assert "Exit `posted: no`" in worker
 
 
 def test_triage_never_assigns_and_requires_full_comment_history() -> None:
@@ -384,10 +402,12 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     )
     assert "same PR to two slots" in review
     assert "`panel-review` is the only request trigger" in review
+    assert "`status/accepted` on the PR is a sweep source" in review
     assert "No accepted, no review" in review
     assert "Do not spawn it. Do not comment. Do not remove labels." in review
     assert "Never list all open PRs" in review
     assert "gh pr list --state open --label panel-review" in review
+    assert "gh pr list --state open --label status/accepted" in review
     assert "Empty label queue -> empty table, stop" in review
     assert "oldest first, cap 10" in review
     assert "Compatibility alias" in _ascii(ALIAS_AUTOPILOT)

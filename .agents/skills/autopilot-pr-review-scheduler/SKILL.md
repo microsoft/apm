@@ -36,7 +36,7 @@ skill_path: <resolved directory of this SKILL.md>
 mode: run
 subject: microsoft/apm
 path: review
-intent: select accepted panel-review PRs and fan out review workers
+intent: select accepted review PRs and fan out review workers
 origin: unattended | actor-session
 write: off
 repo: microsoft/apm
@@ -97,19 +97,24 @@ Ownership writes:
 label. Re-apply it (remove + add) for a fresh review after the
 panel clears it.
 
-`status/accepted` is the human action flag (on this PR or a
-same-repo linked issue). No accepted, no review. After building
-the `panel-review` list, drop any PR that is not accepted. Do
-not spawn it. Do not comment. Do not remove labels. The
-review-worker, if already invoked, also stops with no comment
-and may clear `panel-review`.
+`status/accepted` on the PR is a sweep source, not a request
+trigger. A maintainer already accepted that PR. Union it with
+the `panel-review` list. Do not treat `status/accepted` on a
+linked issue as a sweep source (that would require listing every
+open PR).
+
+No accepted, no review. After building the union, drop any PR
+that is not `status/accepted` on the PR or a same-repo linked
+issue. Do not spawn it. Do not comment. Do not remove labels.
+The review-worker, if already invoked, also stops with no
+comment and may clear `panel-review`.
 
 Modes:
 
 - Named list or one PR number: explicit request. Honor those
   numbers even without `panel-review`.
-- `queue-open` / no names: only open PRs that currently have
-  `panel-review`.
+- `queue-open` / no names: open PRs that currently have
+  `panel-review` or `status/accepted` on the PR.
 
 Never list all open PRs. Never fall back to an unfiltered
 `gh pr list --state open`. Empty label queue -> empty table, stop.
@@ -118,12 +123,44 @@ Default (authenticated `gh`):
 
 ```
 gh pr list --state open --label panel-review --json number,title,isDraft,labels,updatedAt
+gh pr list --state open --label status/accepted --json number,title,isDraft,labels,updatedAt
 ```
 
 Deduplicate by number. Skip drafts unless the caller named them.
 Label sweep: oldest first, cap 10. Named list is not capped.
 
 Do not invent a second trigger label.
+
+## CODEOWNERS last-comment gate
+
+Before any spawn, for each candidate PR (named list,
+`panel-review` sweep, or `status/accepted` on the PR). This
+gate does not bypass `status/accepted`. Named list and
+`panel-review` do not bypass this gate.
+
+1. Snapshot the CODEOWNERS set from current `reviewRequests`
+   (users and teams). If empty, use `CODEOWNERS` for the changed
+   paths. If still empty, skip this gate.
+2. Paginate issue comments and submitted reviews to exhaustion.
+   Ignore bots.
+3. Last CODEOWNER comment = latest of those authored by the
+   CODEOWNERS set.
+4. If none: eligible. The worker still reads full context.
+5. Read that comment as standing conditions (open an issue, link
+   it, wait, change approach, add labels, or explicitly ask for a
+   panel or further review). Evaluate whether those conditions are
+   already met using later comments AND current labels on the PR
+   and on same-repo linked issues. Do not treat "last word" as a
+   stop when the asked work is done.
+6. If the comment explicitly asks for a panel or further review,
+   or its conditions are met: eligible. The comment is required
+   context. Do not contradict it.
+7. If conditions are not met: drop. Do not spawn. Do not comment.
+   Do not change labels. Rationale:
+   `CODEOWNERS last comment conditions unmet`.
+8. If it is unclear whether conditions are met: fail closed.
+   Drop with rationale:
+   `CODEOWNERS last comment conditions unclear`.
 
 ## Queue table (mandatory)
 
@@ -146,8 +183,9 @@ Drop-set (considered, then not scheduled). `slot` is `-`:
 - `slot`: 1-based spawn order, or `-` when dropped
 
 Empty keep-set is success. Still emit the drop-set, or `none`.
-You are the sole table writer. Name missing `panel-review` or
-missing `status/accepted` in `rationale`.
+You are the sole table writer. Name missing `panel-review`,
+missing `status/accepted`, or a CODEOWNERS last-comment drop
+in `rationale`.
 
 ## Fan-out
 
@@ -160,12 +198,13 @@ selected list; when a slot returns, fill it with the next item.
 
 1. Probe autopilot-pr-review-worker on disk. Missing sibling -> stop.
    Do not probe or spawn autopilot-pr-merge-worker.
-2. Emit the mandatory queue table (labels + rationale) before
-   any spawn. Drain the keep-set. Concurrent slots <=
-   FANOUT_LIMIT. One PR per slot. When a slot returns, dispatch
-   the next queued PR. Do not stop because the pool was full.
-3. Each slot reads the complete PR conversation and honors
-   CODEOWNERS `reviewRequests`.
+2. Apply the CODEOWNERS last-comment gate. Emit the mandatory
+   queue table (labels + rationale) before any spawn. Drain the
+   keep-set. Concurrent slots <= FANOUT_LIMIT. One PR per slot.
+   When a slot returns, dispatch the next queued PR. Do not stop
+   because the pool was full.
+3. Each slot reads the complete PR conversation, including the
+   last CODEOWNER comment, and honors CODEOWNERS `reviewRequests`.
 4. Never auto-merge.
 
 ## Hard nos
@@ -174,7 +213,8 @@ selected list; when a slot returns, fill it with the next item.
 - Do not dispatch the same PR to two slots.
 - Do not comment, label, close, assign, or request reviewers.
   Reviewing sessions own those writes.
-- Do not list all open PRs. `panel-review` or a named list only.
+- Do not list all open PRs. `panel-review`, `status/accepted` on
+  the PR, or a named list only.
 - Do not open issues or greenfield PRs.
 - Do not implement. Do not drive-to-merge.
 - Do not compose `autopilot-pr-merge-worker`.

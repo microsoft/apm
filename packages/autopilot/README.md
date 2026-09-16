@@ -39,7 +39,11 @@ reviewers.
   is the PR author.
 - CODEOWNERS `reviewRequests` are runtime authority. Additive only.
   Never contradict. Never convert a failed reviewer request into an
-  assignee write.
+  assignee write. PR review also applies the CODEOWNERS last-comment
+  gate: read the last CODEOWNER comment as conditions and evaluate
+  them against later comments AND labels on the PR and linked
+  issues. Stop only when those conditions are unmet or unclear. Do
+  not stop when the asked work is already done.
 - Triage and review read the full conversation (paginate to
   exhaustion). Partial context = stop, no fresh advice.
 - Human decision labels are never written by these skills:
@@ -123,15 +127,20 @@ PR review.
 
 ### `autopilot-pr-review-scheduler`
 
-Selects PRs labelled `panel-review` (or a named list). Never lists
-all open PRs. Drops any PR that is not `status/accepted` on the PR or
-a same-repo linked issue: no spawn, no comment, no label change.
-Never composes `autopilot-pr-merge-worker`.
+Selects PRs labelled `panel-review` or `status/accepted` on the PR
+(or a named list). Never lists all open PRs. `panel-review` remains
+the only request trigger. Drops any PR that is not `status/accepted`
+on the PR or a same-repo linked issue: no spawn, no comment, no
+label change.
+Also drops when the CODEOWNERS last-comment gate finds unmet or
+unclear conditions. Named list does not bypass that gate. Never
+composes `autopilot-pr-merge-worker`.
 
 ### `autopilot-pr-review-worker`
 
 Advisory multi-persona review of one PR. Requires `status/accepted`
-(else silent stop; may clear `panel-review`). One recommendation
+(else silent stop; may clear `panel-review`). Re-checks the
+CODEOWNERS last-comment gate before panelists. One recommendation
 comment. Does not gate merge. Actor-session may request `@me` as a
 supplemental reviewer.
 

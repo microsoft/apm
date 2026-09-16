@@ -219,7 +219,11 @@ reviewRequests, prior `apm-review-advisory` receipts, later human
 replies, and same-repository linked issue conversations. If any
 required page cannot be read, STOP with a run-log diagnostic and emit
 `noop`. Do not review a partial first page. Truncate each untrusted
-body independently (65536 characters).
+body independently (65536 characters). Apply the CODEOWNERS
+last-comment gate before the worker: evaluate the last CODEOWNER
+comment against later comments AND labels; STOP and emit `noop` only
+when those conditions are unmet or unclear. Do not contradict
+CODEOWNERS.
 
 ## Step 3: Worker emits advisory outputs (not the scheduler)
 
