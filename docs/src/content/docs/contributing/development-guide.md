@@ -44,13 +44,25 @@ for human review.
 Issue triage produces a recommendation and a **proposed** scope, done-when,
 exclusions, and review-needs brief. Maintainers still decide acceptance,
 priority, contributor invitations, and milestones. The
-[triage label contract](https://github.com/microsoft/apm/blob/main/packages/apm-triage-panel/assets/label-contract.json)
+[triage label contract](https://github.com/microsoft/apm/blob/main/packages/autopilot/autopilot-issue-triage-worker/assets/label-contract.json)
 separates those decisions from advisory processing. During compatibility
 rollout, both `status/triaged` and `triage/recommended` mean completed
-automated advice, not human review. The new writer uses `triage/recommended`
-after the canonical label is provisioned and this code is deployed.
+automated advice, not human review. Sweep fetch excludes those labels
+so already-advised open issues and PRs are not re-listed. The new writer
+uses `triage/recommended` after the canonical label is provisioned and
+this code is deployed. Do not write `status/triaged`.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
+
+PR review is the same shape: `panel-review` requests a fresh
+advisory pass (`autopilot-pr-review-worker`). `status/accepted`
+(on the PR or a linked issue) is the human action flag -- no
+accepted, no review. If acceptance is missing, scheduler and
+review-worker stop with no comment. The worker may clear
+`panel-review`; the scheduler does not comment or change labels.
+The review is advisory and does not gate merge. Drive-to-merge
+(`autopilot-pr-merge-worker`) is summoned by name and is never
+composed by the review scheduler.
 
 ### Eligibility evidence and automation
 

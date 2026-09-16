@@ -9,16 +9,17 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from jsonschema import Draft7Validator
 
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.utils.content_hash import compute_file_hash
 
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
-BATCH = ROOT / "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd"
 DOCS = ROOT / ".apm/skills/docs-sync"
-AUTOPILOT = ROOT / "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot"
+DELIVERY = (
+    ROOT
+    / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
+)
 
 
 def _workflow(name: str) -> tuple[dict, dict, str]:
@@ -123,12 +124,11 @@ def test_docs_workflow_never_treats_a_label_as_companion_approval() -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        BATCH / "references/invariants.md",
         DOCS / "SKILL.md",
-        AUTOPILOT / "SKILL.md",
         ROOT / ".github/workflows/daily-doc-updater.md",
+        DELIVERY / "SKILL.md",
     ],
-    ids=["bug-shepherd", "docs-sync", "issue-autopilot", "daily-docs"],
+    ids=["docs-sync", "daily-docs", "issue-delivery"],
 )
 def test_consumers_probe_shared_trusted_owner_and_require_fresh_human(path: Path) -> None:
     """No consumer gets a second authority implementation or a machine grant."""
@@ -143,77 +143,6 @@ def test_consumers_probe_shared_trusted_owner_and_require_fresh_human(path: Path
     assert "deleted withdrawals" in text
     assert "fresh" in text and "responsible" in text
     assert "STOP" in text
-
-
-def test_bug_shepherd_union_human_gate_and_owned_cleanup() -> None:
-    """Regression traps for legacy-only discovery, fail-open advice, and marker theft."""
-    skill = (BATCH / "SKILL.md").read_text()
-    prompt = (
-        ROOT / "packages/batch-bug-shepherd/.apm/prompts/batch-bug-shepherd.prompt.md"
-    ).read_text()
-    for text in (skill, prompt):
-        assert "--label type/bug" in text
-        assert "--label bug" in text
-        assert "deduplicate by issue number" in text
-        assert "suspicion" in text
-    assert skill.index("### Phase 2.5") < skill.index("### Phase 3 -")
-    assert "rows without the Phase 2.5 checkpoint" in skill
-    assert "ONLY PRs with a current Phase 2.5 checkpoint" in skill
-    assert "only after rechecking the human checkpoint" in skill
-    invariants = (BATCH / "references/invariants.md").read_text()
-    assert "shepherd_marker_added_by_run" in invariants
-    assert "Never sweep or clean up another run's markers" in invariants
-    assert "If it\nwas already present" in invariants
-    for path in [
-        BATCH / "SKILL.md",
-        BATCH / "assets/strategic-alignment-prompt.md",
-        BATCH / "assets/verdict-schema.json",
-        BATCH / "references/strategic-alignment-gate.md",
-        BATCH / "references/invariants.md",
-    ]:
-        assert "fail-open" not in path.read_text().lower()
-        assert "fails open" not in path.read_text().lower()
-
-
-@pytest.mark.parametrize(
-    ("failure", "reason"),
-    [
-        ("withdrawal", "Scope withdrawn after Phase 2.5."),
-        ("unavailable evidence", "Trusted eligibility API unavailable at child recheck."),
-    ],
-    ids=["revoked-after-parent-checkpoint", "unavailable-after-parent-checkpoint"],
-)
-def test_fix_child_recheck_blocked_contract(failure: str, reason: str) -> None:
-    """Validate refusal payloads and the prose interlock, not simulated LLM behavior."""
-    prompt = (BATCH / "assets/fix-prompt.md").read_text()
-    preflight = prompt.split("1. Re-read", 1)[0]
-    assert failure in preflight
-    assert "recheck overrides the earlier Phase 2.5 receipt" in preflight
-    assert "make no edits or PR" in preflight
-    schema = json.loads((BATCH / "assets/verdict-schema.json").read_text())
-    Draft7Validator.check_schema(schema)
-    validator = Draft7Validator(schema)
-    examples = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", prompt, re.S)]
-    assert {example["status"] for example in examples} == {"pr-opened", "blocked"}
-    for example in examples:
-        validator.validate(example)
-    blocked = next(example for example in examples if example["status"] == "blocked")
-    blocked["reason"] = reason
-    validator.validate(blocked)
-    for invalid in (
-        {key: value for key, value in blocked.items() if key != "reason"},
-        {**blocked, "pr": 3000},
-        {**blocked, "branch": "fabricated"},
-        {**blocked, "status": "pr-opened"},
-    ):
-        assert not validator.is_valid(invalid)
-    skill = " ".join((BATCH / "SKILL.md").read_text().split())
-    phase = skill.split("### Phase 3 -", 1)[1].split("### Phase 4 -", 1)[0]
-    assert "inspect `status` before reading `pr` or `branch`" in phase
-    assert "persist the row's `blocked` status and returned `reason`" in phase
-    assert "exclude it from driver inputs, and continue" in phase
-    assert phase.index("On `blocked`") < phase.index("Only `pr-opened`")
-    assert "Malformed or wrong-issue returns also block" in phase
 
 
 def test_docs_confirmation_label_is_request_not_ratification() -> None:
@@ -269,7 +198,7 @@ def test_scope_eval_inventory_is_inputs_not_fake_results() -> None:
         assert len(examples["val"]) == 4
 
 
-@pytest.mark.parametrize("skill_root", [BATCH, AUTOPILOT, DOCS], ids=["batch", "autopilot", "docs"])
+@pytest.mark.parametrize("skill_root", [DELIVERY, DOCS], ids=["issue-delivery", "docs"])
 def test_edited_skill_metadata_and_line_budgets(skill_root: Path) -> None:
     """Edited bodies and metadata stay bounded without a new tokenizer dependency."""
     _, frontmatter, body = (skill_root / "SKILL.md").read_text().split("---", 2)
@@ -279,19 +208,15 @@ def test_edited_skill_metadata_and_line_budgets(skill_root: Path) -> None:
 
 
 def test_trimmed_summaries_explicitly_load_binding_references() -> None:
-    """Trimming repeated prose must not orphan the full operational contracts."""
-    batch = (BATCH / "SKILL.md").read_text()
-    autopilot = (AUTOPILOT / "SKILL.md").read_text()
-    assert "Load `references/invariants.md` before planning Phase 0" in batch
-    assert "the **Human scope checkpoint** in `references/invariants.md`" in batch
-    assert "Load `assets/solution-pipeline-prompt.md` on entering Phase 4" in autopilot
-    assert "It owns the full four-stage procedure" in autopilot
+    """The delivery worker still loads the pipeline brief."""
+    delivery = (DELIVERY / "SKILL.md").read_text()
+    assert "assets/solution-pipeline-prompt.md" in delivery
 
 
 def test_pipeline_child_rechecks_scope_before_each_mutating_boundary() -> None:
     """The actual child brief, not only its parent's receipt, guards provisioning."""
-    prompt = (AUTOPILOT / "assets/solution-pipeline-prompt.md").read_text()
-    skill = (AUTOPILOT / "SKILL.md").read_text()
+    prompt = (DELIVERY / "assets/solution-pipeline-prompt.md").read_text()
+    skill = (DELIVERY / "SKILL.md").read_text()
     for required_input in ("TRUSTED_GOVERNANCE_ROOT", "APPROVAL_URL", "HUMAN_SCOPE_RECEIPT"):
         assert required_input in prompt
         assert required_input in skill
@@ -314,15 +239,15 @@ def test_pipeline_child_rechecks_scope_before_each_mutating_boundary() -> None:
 
 def test_pipeline_scope_refusal_stops_parent_before_pr_consumption() -> None:
     """Blocked child output has no fabricated PR and is excluded from downstream driving."""
-    prompt = (AUTOPILOT / "assets/solution-pipeline-prompt.md").read_text()
+    prompt = (DELIVERY / "assets/solution-pipeline-prompt.md").read_text()
     examples = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", prompt, re.S)]
     refusal = next(example for example in examples if example["status"] == "blocked")
     assert set(refusal) == {"kind", "issue", "status", "reason"}
     assert refusal["kind"] == "implement-result"
     assert isinstance(refusal["issue"], int) and refusal["issue"] > 0
     assert refusal["reason"]
-    skill = " ".join((AUTOPILOT / "SKILL.md").read_text().split())
-    phase = skill.split("### Phase 4 -", 1)[1].split("### Phase 5 -", 1)[0]
+    skill = " ".join((DELIVERY / "SKILL.md").read_text().split())
+    phase = skill.split("## Return", 1)[1]
     assert "persist its status and reason in the row and `proceed_manifest`" in phase
     assert "do not read PR fields or dispatch Phase 5/6" in phase
     assert "Only `pr-opened` returns" in phase
@@ -356,7 +281,11 @@ def test_affected_deployment_ledger_hashes_match_installed_files() -> None:
     lock = yaml.safe_load((ROOT / "apm.lock.yaml").read_text())
     roots = tuple(
         f".agents/skills/{name}/"
-        for name in ("apm-triage-panel", "batch-bug-shepherd", "apm-issue-autopilot", "docs-sync")
+        for name in (
+            "autopilot-issue-triage-worker",
+            "autopilot-issue-delivery-worker",
+            "docs-sync",
+        )
     )
     for record in lock["deployments"]:
         if record["value"].startswith(roots) and record["content_hash"] is not None:

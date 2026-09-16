@@ -17,11 +17,18 @@ from apm_cli.utils.content_hash import compute_file_hash
 
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = ROOT / "packages/apm-triage-panel"
+PACKAGE = (
+    ROOT
+    / "packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler"
+)
+WORKER = ROOT / "packages/autopilot/autopilot-issue-triage-worker"
 SCRIPT = PACKAGE / "scripts/triage_state.py"
 CONTRACT = json.loads((PACKAGE / "assets/label-contract.json").read_text())
 PLAN_BATCH = runpy.run_path(str(SCRIPT))["plan_batch"]
-AUTOPILOT = ROOT / "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot"
+WORKER_CODE = (
+    ROOT
+    / "packages/autopilot/autopilot-issue-delivery-worker/.apm/skills/autopilot-issue-delivery-worker"
+)
 
 
 def _issue(number: int, labels: list[str] | None = None, author: str = "reporter") -> dict:
@@ -32,7 +39,11 @@ def _issue(number: int, labels: list[str] | None = None, author: str = "reporter
 def _plan(issues: list[dict], mode: str = "sweep", labels: list[str] | None = None) -> dict:
     """Exercise the same planner the workflow invokes."""
     return PLAN_BATCH(
-        {"mode": mode, "issues": issues, "repository_labels": labels or ["triage/recommended"]},
+        {
+            "mode": mode,
+            "issues": issues,
+            "repository_labels": labels or ["triage/recommended", "status/triaged"],
+        },
         CONTRACT,
     )
 
@@ -71,8 +82,8 @@ def test_skipped_first_page_and_author_quota_do_not_starve_later_issues() -> Non
     assert result["batch_full"] is True
 
 
-def test_canonical_rollout_never_writes_human_state() -> None:
-    """Unknown labels and human decisions cannot enter a write plan."""
+def test_compatibility_needs_no_new_labels_and_never_writes_human_state() -> None:
+    """Unknown/new labels and human decisions cannot enter a write plan."""
     issue = _issue(1, ["status/needs-triage", "status/accepted", "help wanted", "bug"])
     issue["proposed_labels"] = [
         "type/feature",
@@ -122,58 +133,16 @@ def test_conflicting_classification_and_duplicate_reads_are_bounded() -> None:
     issue = _issue(1)
     issue["proposed_labels"] = ["type/bug", "type/feature"]
     with pytest.raises(ValueError, match="Conflicting proposed type"):
-        _plan([issue], labels=["triage/recommended", "type/bug", "type/feature"])
+        _plan(
+            [issue],
+            labels=["triage/recommended", "status/triaged", "type/bug", "type/feature"],
+        )
     assert len(_plan([_issue(1), _issue(1)])["selected"]) == 1
-
-
-@pytest.mark.parametrize(
-    ("alias", "canonical"),
-    [
-        ("bug", "type/bug"),
-        ("enhancement", "type/feature"),
-        ("type/enhancement", "type/feature"),
-        ("documentation", "type/docs"),
-        ("docs", "type/docs"),
-        ("feature", "type/feature"),
-        ("architecture", "type/architecture"),
-        ("automation", "type/automation"),
-        ("CI/CD", "area/ci-cd"),
-        ("ci/cd", "area/ci-cd"),
-        ("cli", "area/cli"),
-        ("marketplace", "area/marketplace"),
-        ("performance", "type/performance"),
-        ("policy", "area/audit-policy"),
-        ("refactor", "type/refactor"),
-        ("security", "theme/security"),
-        ("testing", "area/testing"),
-    ],
-)
-def test_legacy_aliases_occupy_classification_dimensions(alias: str, canonical: str) -> None:
-    """Legacy human choices block new labels in that dimension, not other dimensions."""
-    assert CONTRACT["legacy_read_aliases"][alias] == canonical
-    dimension = canonical.split("/", 1)[0]
-    proposals = ["type/bug", "theme/governance", "area/cli"]
-    issue = _issue(1, [alias, "status/needs-triage"])
-    issue["proposed_labels"] = proposals
-    result = _plan([issue], labels=["triage/recommended", *proposals])
-    expected = sorted(
-        ["triage/recommended"]
-        + [label for label in proposals if label.split("/", 1)[0] != dimension]
-    )
-    assert result["selected"] == [{"number": 1, "add_labels": expected, "remove_labels": []}]
-
-
-def test_canonical_rollout_preserves_read_markers_and_removes_legacy_trigger() -> None:
-    """Only canonical processing may be written or consumed; human state survives."""
-    processing = CONTRACT["processing"]
-    assert processing["active_write_reviewed"] == "triage/recommended"
-    assert processing["read_reviewed"] == ["triage/recommended", "status/triaged"]
-    assert processing["request_triggers"] == processing["removable"] == ["triage/requested"]
 
 
 def test_deferred_consumer_schema_rejects_legacy_acceptance_and_release_fields() -> None:
     """The internal decision remains advice; no writable human metadata survives."""
-    schema = json.loads((AUTOPILOT / "assets/autopilot-triage-schema.json").read_text())
+    schema = json.loads((WORKER_CODE / "assets/autopilot-triage-schema.json").read_text())
     row = {
         "kind": "autopilot-triage-decision",
         "issue": 1,
@@ -190,21 +159,30 @@ def test_deferred_consumer_schema_rejects_legacy_acceptance_and_release_fields()
     }.items():
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({**row, key: value}, schema)
-    skill = (PACKAGE / "SKILL.md").read_text()
+    skill = (WORKER / "SKILL.md").read_text()
     assert "NEVER map `defer-later` to `status/accepted`" in skill
     assert "Labels and silence are not" in skill
-    autopilot = (AUTOPILOT / "SKILL.md").read_text()
-    assert "Do not implement if explicit human approval or review capacity is missing" in autopilot
-    assert "Do not apply `status/accepted`" in autopilot
+    worker = (WORKER_CODE / "SKILL.md").read_text()
+    assert "Do not implement if explicit human approval or review capacity is missing" in worker
+    assert "Do not apply `status/accepted`" in worker
 
 
 def test_template_has_proposed_brief_not_an_operative_decision() -> None:
     """Check the machine-readable shape actually shipped in the template."""
-    template = (PACKAGE / "assets/triage-template.md").read_text(encoding="ascii")
+    template = (WORKER / "assets/triage-template.md").read_text(encoding="ascii")
     payload = json.loads(template.split("```json triage-recommendation\n")[1].split("\n```")[0])
     assert payload["schema_version"] == 2
     assert payload["advisory_only"] is True
     assert set(payload["proposed_brief"]) == {"scope", "done_when", "exclusions", "review_needs"}
+    assert payload["receipt"]["kind"] == "apm-triage-advisory"
+    skill = (WORKER / "SKILL.md").read_text()
+    assert "json: off | on" in skill
+    assert "`json` defaults to `off`" in skill
+    assert "Omitted `json`" in skill
+    assert "Do not post JSON" in skill
+    assert "Never attach that JSON" in skill
+    assert "The trailing fenced" not in skill
+    assert "apm-triage-advisory:v2 target=issue#" in template
     assert not {"decision", "status", "priority", "milestone", "preserved_labels"} & payload.keys()
     assert template.count("<details>") == 6
 
@@ -214,12 +192,8 @@ def test_installed_skill_files_and_recorded_hashes_match_sources(tmp_path: Path)
     """Exercise the published package and its generated installation contract."""
     lock = yaml.safe_load((ROOT / "apm.lock.yaml").read_text())
     for name, source in [
-        ("apm-triage-panel", PACKAGE),
-        ("apm-issue-autopilot", AUTOPILOT),
-        (
-            "batch-bug-shepherd",
-            ROOT / "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd",
-        ),
+        ("autopilot-issue-triage-worker", WORKER),
+        ("autopilot-issue-delivery-worker", WORKER_CODE),
     ]:
         dep = next(item for item in lock["dependencies"] if item["name"] == name)
         for relative, expected in dep["deployed_file_hashes"].items():

@@ -7,9 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Issue triage, issue implementation, and PR review now share an ORIGIN x INTENT contract: unattended automations (Agentic Workflows, gh-aw, future scheduled runs) never assign. Actor-session ownership writes are: issue triage none (no assignment needed); issue delivery assign the implementing user as a hard gate; standalone PR review request that user as reviewer (`gh pr edit --add-reviewer @me`), never as assignee. Both advisory panels read the full conversation, no-op unchanged receipts, and refuse advice that contradicts CODEOWNERS.
+
 ### Changed
 
 - `apm --help`, `apm doctor --help`, and `apm config get` no longer import heavyweight command modules (`install`, `audit`, `pack`, `marketplace`, `uninstall`, `update`); those load only when the matching verb is invoked. (#3001)
+- Issue and PR triage GitHub comments are human prose only. Activation cards default `json: off` (omitted is off, not a missing-field stop). `json: on` emits an internal `triage-recommendation` receipt only; never post JSON on GitHub. The Triage Panel agentic workflow passes `json: off` and does not require a JSON tail. The PR Review Panel agentic workflow loads `autopilot-pr-review-scheduler` then runs `autopilot-pr-review-worker` in-thread; it does not compose the merge worker. PR triage auto-applies `status/deferred` when there is no linked `status/accepted` issue, thanks the author, and asks them to open an issue first per CONTRIBUTING.md.
+- Autopilot worker sessions are named `{Domain} {stage} #{n}` (`Issue triage #2993`). No GitHub title.
+- Issue and PR triage sweeps exclude `triage/recommended` and `status/triaged` at GitHub so already-advised open items are not re-listed. Do not write `status/triaged`.
+- Autopilot scheduler `invocation` is the harness: Copilot App is `actor-session`. `agentic-workflow` is only gh-aw / Actions. Do not copy `origin` into `invocation`.
+- Autopilot schedulers must emit a keep-set and drop-set table (number, kind, labels, rationale, slot) before any spawn. Missing column or blank rationale stops the run.
+- Autopilot skill packages live under `packages/autopilot/`. The maintainer map is `packages/autopilot/README.md`.
+- Autopilot skills declare `activation_card: on`. Canonical skills emit Enter before work and Exit after. Schedulers are `write: off`. Workers default `write: on`; `write: off` returns the template without GitHub writes.
+- Autopilot PR-review worker is the advisory panel (formerly `autopilot-pr-review-panel` / `apm-review-panel`). Drive-to-merge is `autopilot-pr-merge-worker` (activation card `path: merge`, `write` default `on`). The PR-review scheduler never comments, labels, assigns, requests reviewers, or composes the merge worker.
+- Autopilot issue and PR triage workers own the advisory comment and processing labels, including when summoned without a scheduler. Schedulers only select work and fan out slots.
+- Autopilot `FANOUT_LIMIT` is concurrent slots, not queue length. Schedulers persist the full helper-selected list and refill a slot when it returns.
+- Issue delivery no longer drops bot-authored issues that already carry `status/accepted`. Human accept is the gate; author type is not.
+- PRINCIPLES.md and remaining autopilot skill assets name the canonical `autopilot-{domain}-{stage}-{role}` skills only.
+- Autopilot queues are `autopilot-issue-triage-scheduler`, `autopilot-issue-delivery-scheduler`, `autopilot-pr-triage-scheduler`, and `autopilot-pr-review-scheduler` (isolated pool default 2). Workers are `autopilot-issue-triage-worker`, `autopilot-issue-delivery-worker`, `autopilot-pr-triage-worker`, `autopilot-pr-review-worker` (advisory), and `autopilot-pr-merge-worker` (drive-to-merge, summoned by name). Issue triage advice is `autopilot-issue-triage-worker`. Schedulers own queue selection (`fetch_queue.py` then `triage_state.py`) and fan-out; if spawn is unavailable they run the worker in-thread, one item at a time. PR triage classifies community PRs (with or without a linked issue) and never merges, assigns, or requests reviewers. PR review is advisory only. Issue delivery queues on `status/accepted` or a named bounded accept, then re-checks `scripts/governance/eligibility.cjs` and requires fresh responsible-human confirmation; unattended ORIGIN never implements. Actor-session assignment is a hard gate for implementation only. Triage request trigger is only `triage/requested`; `status/needs-triage` stays human state.
+
+### Removed
+
+- Compatibility alias skill packages are gone (`apm-triage-panel`, `apm-review-panel`, `autopilot-pr-review-panel`, `apm-issue-autopilot`, `batch-bug-shepherd`, `shepherd-driver`, and the leftover `autopilot-*-scheduler` / `autopilot-*-worker` stubs). Invoke the canonical `autopilot-{domain}-{stage}-{role}` names only.
+
+### Fixed
+
+- PR-review scheduler no longer queues every open pull request. A fresh review requires the `panel-review` label (same trigger as the Agentic Workflow), `status/accepted` on the PR, or an explicit named PR list. The reviewing session also requires `status/accepted` on the PR or a linked issue; otherwise scheduler and review-worker stop with no comment. The worker may clear `panel-review`; the scheduler does not comment or change labels. Both also apply a CODEOWNERS last-comment gate: read the last CODEOWNER comment as conditions and evaluate them against later comments AND labels on the PR and linked issues. Drop or `noop` only when those conditions are unmet or unclear. Named list does not bypass that gate.
+- Issue-triage sweep no longer classifies real GitHub bug forms as spam: heading/list line matches no longer swallow the rest of the body after markup strip.
 
 ## [0.31.0] - 2026-09-15
 

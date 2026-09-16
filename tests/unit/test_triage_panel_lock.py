@@ -21,7 +21,14 @@ def _load_lock_header(lock_text: str, prefix: str) -> dict:
 
 @pytest.mark.parametrize(
     "workflow",
-    ["cli-consistency-checker", "daily-doc-updater", "docs-sync", "perf-scan", "triage-panel"],
+    [
+        "cli-consistency-checker",
+        "daily-doc-updater",
+        "docs-sync",
+        "perf-scan",
+        "triage-panel",
+        "pr-review-panel",
+    ],
 )
 def test_lock_manifest_matches_runtime_action_pins(workflow: str) -> None:
     """Keep updated runtime actions aligned with manifests and the canonical lock."""
@@ -67,7 +74,10 @@ def test_triage_source_and_compiled_writers_are_advisory_only() -> None:
     frontmatter = yaml.safe_load(source.split("---", 2)[1])
     lock = yaml.safe_load(LOCK_PATH.read_text(encoding="utf-8"))
     contract = json.loads(
-        (REPO_ROOT / "packages/apm-triage-panel/assets/label-contract.json").read_text()
+        (
+            REPO_ROOT
+            / "packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler/assets/label-contract.json"
+        ).read_text()
     )
     expected_add = set(contract["classification_labels"]) | {
         contract["processing"]["active_write_reviewed"]
