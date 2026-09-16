@@ -110,6 +110,8 @@ def test_canonical_autopilot_skills_declare_activation_cards() -> None:
         text = _ascii(path)
         assert "write: off" in text, path
         assert "`write: on` -> stop" in text, path
+        assert "Do not copy `origin` into `invocation`" in text, path
+        assert "Copilot App, local session, Cloud Agent, and Remote Agent are `actor-session`" in text, path
 
 
 def test_schedulers_require_queue_table_with_labels_and_rationale() -> None:

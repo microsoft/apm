@@ -47,6 +47,10 @@ Rules:
   labels, assigns, or requests reviewers.
 - `write: on` -> stop.
 - `origin` fail-closed unknown -> `unattended`.
+- `invocation` is the harness. Copilot App, local session, Cloud
+  Agent, and Remote Agent are `actor-session`. `agentic-workflow`
+  is only gh-aw / GitHub Actions. Do not copy `origin` into
+  `invocation`.
 - One queue. Do not nest another scheduler path.
 
 After the run, emit this Exit receipt:
