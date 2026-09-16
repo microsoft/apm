@@ -3,7 +3,10 @@ Load ONLY at synthesis time. Fill one advisory comment, under 250 lines,
 ASCII only, retaining all headings and six persona sections. Inactive
 conditional lenses say "Not activated -- <reason>". The caller is the
 sole writer; direct invocation returns this without posting.
-The v2 JSON tail is advisory data, not a label/milestone write instruction.
+Fill the v2 JSON block as an internal worker payload only.
+Never post that JSON (or any machine fence) on the GitHub issue.
+The public comment is prose plus the HTML receipt. The JSON is
+advisory data, not a label/milestone write instruction.
 -->
 
 <!-- apm-triage-advisory:v2 target=issue#<N> watermark=<latest-comment-id-or-updated-at> -->

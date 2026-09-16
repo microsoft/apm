@@ -417,14 +417,18 @@ per-persona noise.
   section headings exactly as written. Adapt the body of each
   section to the issue. Do not invent new top-level sections or drop
   existing ones.
-- The trailing fenced ```json block named `triage-recommendation` is
-  REQUIRED. Its `schema_version: 2` and `advisory_only: true` distinguish
-  it from legacy `triage-decision` comments. Consumers must not interpret
-  either format as human approval. No operative status, priority,
-  invitation, or milestone fields are present.
-- ASCII only inside the comment body and JSON tail. No emojis, no
-  Unicode dashes, no box-drawing characters. Use `[+] [!] [x] [i] [*] [>]`
-  if status symbols are needed.
+- The GitHub issue comment is human prose only: HTML receipt,
+  headings, classification, brief, next action, suggested reply,
+  and persona details. Do not post JSON, machine fences, or
+  `comment_markdown` dumps on the issue.
+- Fill the template's `triage-recommendation` JSON only as an
+  internal worker payload (session file or parent Exit). Keep
+  `schema_version: 2` and `advisory_only: true`. Never attach that
+  JSON to the GitHub comment. Consumers must not treat either
+  format as human approval.
+- ASCII only inside the comment body and the internal JSON. No
+  emojis, no Unicode dashes, no box-drawing characters. Use
+  `[+] [!] [x] [i] [*] [>]` if status symbols are needed.
 - CEO arbitration may run only after the completeness gate passes.
 - Never emit findings as separate comments, intermediate progress
   comments, or "I will now invoke X" status comments.
