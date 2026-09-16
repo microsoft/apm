@@ -130,6 +130,30 @@ After a worker opens a PR, do NOT fill this pool with
 `autopilot-pr-merge-worker`. Hand the PR number to the
 caller for `autopilot-pr-review-scheduler`.
 
+## Queue table (mandatory)
+
+Before any spawn, emit the keep-set and the drop-set in `plan.md`
+and in the session report. Missing table, missing column, or blank
+rationale -> stop. Do not spawn.
+
+Keep-set (items this run will schedule). One row per item. Do not
+truncate to FANOUT_LIMIT:
+
+| number | kind | labels | rationale | slot |
+
+Drop-set (considered, then not scheduled). `slot` is `-`:
+
+| number | kind | labels | rationale | slot |
+
+- `kind`: `issue` or `pr`
+- `labels`: current GitHub labels, comma-separated; `none` if empty
+- `rationale`: why queued or dropped (helper rule and labels)
+- `slot`: 1-based spawn order, or `-` when dropped
+
+Empty keep-set is success. Still emit the drop-set, or `none`.
+You are the sole table writer. Put selector and existing-PR
+facts in `rationale`.
+
 ## Fan-out
 
 Load [assets/fan-out-pool.md](assets/fan-out-pool.md). Default
@@ -140,9 +164,8 @@ selected list; when a slot returns, fill it with the next item.
 ## Procedure
 
 1. Probe worker-code on disk. Missing sibling -> stop.
-2. Build the queue. Persist a `plan.md` table for every selected
-   number (number, selector, slot, status, pr). You are the sole
-   table writer. Do not truncate the table to FANOUT_LIMIT.
+2. Build the queue. Emit the mandatory queue table (labels +
+   rationale) before any spawn.
 3. Drain the selected list. Concurrent slots <= FANOUT_LIMIT.
    One issue per slot. When a slot returns, dispatch the next
    queued issue. Do not stop because the pool was full. Name each

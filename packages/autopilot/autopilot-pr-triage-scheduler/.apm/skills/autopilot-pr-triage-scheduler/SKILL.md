@@ -119,6 +119,30 @@ PR-review slots from this pool. Do not comment on PRs. Do not add
 or remove labels. `add_labels` from `triage_state.py` is a plan
 for the worker, not a scheduler write.
 
+## Queue table (mandatory)
+
+Before any spawn, emit the keep-set and the drop-set in `plan.md`
+and in the session report. Missing table, missing column, or blank
+rationale -> stop. Do not spawn.
+
+Keep-set (items this run will schedule). One row per item. Do not
+truncate to FANOUT_LIMIT:
+
+| number | kind | labels | rationale | slot |
+
+Drop-set (considered, then not scheduled). `slot` is `-`:
+
+| number | kind | labels | rationale | slot |
+
+- `kind`: `issue` or `pr`
+- `labels`: current GitHub labels, comma-separated; `none` if empty
+- `rationale`: why queued or dropped (helper rule and labels)
+- `slot`: 1-based spawn order, or `-` when dropped
+
+Empty keep-set is success. Still emit the drop-set, or `none`.
+You are the sole table writer. Put linked-issue facts in
+`rationale`.
+
 ## Fan-out
 
 Load [assets/fan-out-pool.md](assets/fan-out-pool.md). Default
@@ -130,10 +154,8 @@ selected list; when a slot returns, fill it with the next item.
 
 1. Probe `scripts/fetch_queue.py`, `scripts/triage_state.py`, and
    the worker skill on disk. Missing -> stop.
-2. Build the queue with the helpers. Persist a `plan.md` table
-   for every selected number (number, slot, status, linked-issue).
-   You are the sole table writer. Do not truncate the table to
-   FANOUT_LIMIT.
+2. Build the queue with the helpers. Emit the mandatory queue
+   table (labels + rationale) before any spawn.
 3. Drain the selected list. Concurrent slots <= FANOUT_LIMIT.
    One PR per slot. Prefer a new session, else a sub-agent, else
    run the worker in this thread for that one PR, then the next.

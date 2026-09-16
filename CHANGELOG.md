@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Autopilot schedulers must emit a keep-set and drop-set table (number, kind, labels, rationale, slot) before any spawn. Missing column or blank rationale stops the run.
 - Autopilot skill packages live under `packages/autopilot/`. The maintainer map is `packages/autopilot/README.md`.
 - Autopilot skills declare `activation_card: on`. Canonical skills emit Enter before work and Exit after. Schedulers are `write: off`. Workers default `write: on`; `write: off` returns the template without GitHub writes.
 - Autopilot PR-review worker is the advisory panel (formerly `autopilot-pr-review-panel` / `apm-review-panel`). Drive-to-merge is `autopilot-pr-merge-worker` (activation card `path: merge`, `write` default `on`). The PR-review scheduler never comments, labels, assigns, requests reviewers, or composes the merge worker.

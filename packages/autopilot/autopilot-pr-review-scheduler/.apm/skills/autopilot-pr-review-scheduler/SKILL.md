@@ -121,6 +121,30 @@ Label sweep: oldest first, cap 10. Named list is not capped.
 
 Do not invent a second trigger label.
 
+## Queue table (mandatory)
+
+Before any spawn, emit the keep-set and the drop-set in `plan.md`
+and in the session report. Missing table, missing column, or blank
+rationale -> stop. Do not spawn.
+
+Keep-set (items this run will schedule). One row per item. Do not
+truncate to FANOUT_LIMIT:
+
+| number | kind | labels | rationale | slot |
+
+Drop-set (considered, then not scheduled). `slot` is `-`:
+
+| number | kind | labels | rationale | slot |
+
+- `kind`: `issue` or `pr`
+- `labels`: current GitHub labels, comma-separated; `none` if empty
+- `rationale`: why queued or dropped (helper rule and labels)
+- `slot`: 1-based spawn order, or `-` when dropped
+
+Empty keep-set is success. Still emit the drop-set, or `none`.
+You are the sole table writer. Name missing `panel-review` or
+missing `status/accepted` in `rationale`.
+
 ## Fan-out
 
 Load [assets/fan-out-pool.md](assets/fan-out-pool.md). Default
@@ -132,12 +156,10 @@ selected list; when a slot returns, fill it with the next item.
 
 1. Probe autopilot-pr-review-worker on disk. Missing sibling -> stop.
    Do not probe or spawn autopilot-pr-merge-worker.
-2. Drain the selected list. Concurrent slots <= FANOUT_LIMIT.
-   One PR per slot. Persist a `plan.md` table for every selected
-   number (number, slot, status, head). You are the sole table
-   writer. Do not truncate the table to FANOUT_LIMIT. When a slot
-   returns, dispatch the next queued PR. Do not stop because the
-   pool was full.
+2. Emit the mandatory queue table (labels + rationale) before
+   any spawn. Drain the keep-set. Concurrent slots <=
+   FANOUT_LIMIT. One PR per slot. When a slot returns, dispatch
+   the next queued PR. Do not stop because the pool was full.
 3. Each slot reads the complete PR conversation and honors
    CODEOWNERS `reviewRequests`.
 4. Never auto-merge.

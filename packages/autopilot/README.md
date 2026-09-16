@@ -22,8 +22,10 @@ Named list = explicit request. Empty queue = stop.
 | pr | merge | no | yes (summon by name) |
 
 Schedulers select and fan out (default 2 concurrent slots, drain the
-full selected list). Workers do one item. Schedulers never comment,
-label, assign, or request reviewers.
+full selected list). Before any spawn they emit a keep-set and
+drop-set table: number, kind, labels, rationale, slot. Missing
+column or blank rationale -> stop. Workers do one item. Schedulers
+never comment, label, assign, or request reviewers.
 
 ## Shared rules
 

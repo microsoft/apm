@@ -112,6 +112,21 @@ def test_canonical_autopilot_skills_declare_activation_cards() -> None:
         assert "`write: on` -> stop" in text, path
 
 
+def test_schedulers_require_queue_table_with_labels_and_rationale() -> None:
+    """Schedulers emit the full keep/drop table before any spawn."""
+    for path in (
+        SCHEDULER_TRIAGE,
+        SCHEDULER_CODE,
+        SCHEDULER_PR_TRIAGE,
+        SCHEDULER_PR_REVIEW,
+    ):
+        text = _ascii(path)
+        assert "Queue table (mandatory)" in text, path
+        assert "| number | kind | labels | rationale | slot |" in text, path
+        assert "Missing table, missing column, or blank rationale -> stop" in text, path
+        assert "Do not spawn" in text, path
+
+
 def test_review_panel_declares_origin_intent_contract() -> None:
     """Session, unattended, and composed review must not share writes."""
     skill = _ascii(REVIEW_SKILL)
@@ -251,9 +266,9 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "concurrency, not queue length" in triage
     assert "concurrency, not queue length" in delivery
     assert "concurrency, not queue length" in review
-    assert "Do not truncate the table to FANOUT_LIMIT" in triage
-    assert "Do not truncate the table to FANOUT_LIMIT" in delivery
-    assert "Do not truncate the table to FANOUT_LIMIT" in review
+    assert "Do not truncate to FANOUT_LIMIT" in triage
+    assert "Do not truncate to FANOUT_LIMIT" in delivery
+    assert "Do not truncate to FANOUT_LIMIT" in review
     assert "when a slot returns, fill it with the next item" in triage
     assert "No assignment needed" in triage
     assert "assign the implementing user" in delivery
@@ -358,7 +373,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "Do not comment, label, close, merge, or assign" in pr_triage
     assert "Workers own those writes" in pr_triage
     assert "concurrency, not queue length" in pr_triage
-    assert "Do not truncate the table to FANOUT_LIMIT" in pr_triage
+    assert "Do not truncate to FANOUT_LIMIT" in pr_triage
     assert "No assignment needed" in pr_triage
     assert "scripts/fetch_queue.py" in pr_triage
     assert "scripts/triage_state.py" in pr_triage
