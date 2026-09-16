@@ -6,7 +6,9 @@ CLI bootstrap/update metadata recovery is separate from package authentication. 
 
 ## Token precedence chain
 
-For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`.
+For public `github.com` HTTPS repositories, APM makes one anonymous attempt before checking any token source. The attempt removes GitHub token variables, credential-bearing HTTP headers, and credential helpers while preserving CA settings, safe URL rewrites, non-credential HTTP headers, and `credential.interactive=never`. It also inherits `http.sslBackend`/`http.sslCAInfo` from the real (non-isolated) git config, so a corporate TLS trust store or `sslBackend` setting still applies.
+
+If a network sits behind a TLS-inspecting proxy whose intercepting CA chain carries no revocation info at all, the isolated attempt can still fail the TLS handshake even with that inheritance. `--auth-first` / `APM_GITHUB_AUTH_FIRST=1` / `apm config set github-auth-first true` skip the anonymous attempt entirely for exact-host `github.com` and resolve credentials/environment immediately, emitting a one-time `[!]` warning when active. See [Authentication: TLS-inspecting proxy blocks the anonymous attempt](https://microsoft.github.io/apm/getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt).
 
 Only HTTP 401, 403, 404, or an equivalent Git authentication failure unlocks the fallback chain below. DNS, TLS, timeout, and GitHub throttle failures do not prompt for credentials. Ordinary credentials are cached per `(host, port, org)` for the process. A private `github.com` helper fallback adds the repository path to that scope, so later phases reuse it without applying that credential to another repository. APM never writes the credential into persistent cache keys or stored remote URLs.
 

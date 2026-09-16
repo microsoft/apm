@@ -33,14 +33,15 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GIT_SSH_COMMAND` | Standard git SSH command override. APM reads it before composing its own SSH env. | unset | If you set it, APM preserves your value. |
 | `APM_GIT_CREDENTIAL_TIMEOUT` | Seconds to wait for a `git credential fill` response. | implementation default | Integer-like string; invalid values are ignored. |
 
-## Transport and protocol
+## Transport and credential order
 
-Controls how APM clones packages and enumerates refs on Git hosts. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
+Controls how APM clones packages and enumerates refs on Git hosts: `APM_GIT_PROTOCOL` and `APM_ALLOW_PROTOCOL_FALLBACK` select the transport scheme, while `APM_GITHUB_AUTH_FIRST` changes credential order for exact-host `github.com` without affecting transport. These settings can also be persisted via [`apm config set`](../cli/config/) to avoid repeating flags or environment-variable exports.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
 | `APM_GIT_PROTOCOL` | Preferred Git protocol for cloning and ref enumeration on shorthand (`owner/repo`) dependencies. Accepted values: `ssh`, `https`. | unset | Equivalent to `--ssh` / `--https` flag. Resolution: CLI flag → env var → `prefer-ssh` key in `~/.apm/config.json` → git `insteadOf` rules → HTTPS. |
 | `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` (or `true`/`yes`/`on`) to enable the legacy cross-protocol fallback chain. When enabled, a failed clone is retried with the opposite protocol. | unset | Equivalent to `--allow-protocol-fallback`. Resolution: CLI flag → env var → `allow-protocol-fallback` key in `~/.apm/config.json` → `false`. |
+| `APM_GITHUB_AUTH_FIRST` | Set to `1` (or `true`/`yes`/`on`) to skip the anonymous-first HTTPS attempt for exact-host `github.com` and resolve credentials/environment immediately. Escape hatch for TLS-inspecting proxies whose intercepting CA chain has no revocation info. | unset | Equivalent to `--auth-first`. Resolution: CLI flag → env var → `github-auth-first` key in `~/.apm/config.json` → `false`. See [Authentication: TLS-inspecting proxy blocks the anonymous attempt](../getting-started/authentication/#tls-inspecting-proxy-blocks-the-anonymous-attempt). |
 
 ## TLS trust
 

@@ -10,6 +10,7 @@ import os
 # ---------------------------------------------------------------------------
 _ENV_ALLOW_PROTOCOL_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
 _ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
+_ENV_GITHUB_AUTH_FIRST = "APM_GITHUB_AUTH_FIRST"
 
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
@@ -411,8 +412,11 @@ def unset_prefer_ssh() -> None:
     _unset_config_key("prefer_ssh")
 
 
-def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
-    """Parse ``APM_ALLOW_PROTOCOL_FALLBACK`` as a tri-state value.
+def _parse_tristate_bool_env(raw: str | None) -> bool | None:
+    """Parse a tri-state boolean environment variable value.
+
+    Shared by every ``APM_*`` boolean env var (``APM_ALLOW_PROTOCOL_FALLBACK``,
+    ``APM_GITHUB_AUTH_FIRST``, ...) so the accepted spellings stay in one place.
 
     Args:
         raw: Raw environment variable value, or ``None`` when unset.
@@ -432,6 +436,11 @@ def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
     if normalized in ("0", "false", "no", "off"):
         return False
     return None
+
+
+def _parse_allow_protocol_fallback_env(raw: str | None) -> bool | None:
+    """Parse ``APM_ALLOW_PROTOCOL_FALLBACK`` as a tri-state value."""
+    return _parse_tristate_bool_env(raw)
 
 
 def get_apm_allow_protocol_fallback(
@@ -456,6 +465,82 @@ def get_apm_allow_protocol_fallback(
         return env_value
     should_create = _resolve_create_config(bootstrap=bootstrap, create_config=create_config)
     return get_allow_protocol_fallback(create_config=should_create)
+
+
+# ---------------------------------------------------------------------------
+# GitHub anonymous-first opt-out (issue #2545)
+# ---------------------------------------------------------------------------
+
+
+def get_github_auth_first(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> bool:
+    """Get the github-auth-first setting.
+
+    Args:
+        bootstrap: Legacy name for whether to create a missing user config file.
+        create_config: When false, do not create a missing user config file.
+
+    Returns:
+        bool: Whether exact-host github.com HTTPS attempts skip the
+        anonymous-first attempt and go straight to credentialed/environment-
+        inheriting behavior (default: False).
+    """
+    return get_config(
+        create=_resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    ).get("github_auth_first", False)
+
+
+def set_github_auth_first(enabled: bool) -> None:
+    """Set the github-auth-first setting.
+
+    Args:
+        enabled: Whether to skip the anonymous-first HTTPS attempt for
+            exact-host github.com dependencies.
+    """
+    update_config({"github_auth_first": enabled})
+
+
+def unset_github_auth_first() -> None:
+    """Remove the ``github_auth_first`` key from the config file.
+
+    No-op if the key is not present. After this call
+    :func:`get_apm_github_auth_first` will fall through to
+    ``APM_GITHUB_AUTH_FIRST`` env var and then the built-in default (``False``).
+    """
+    _unset_config_key("github_auth_first")
+
+
+def _parse_github_auth_first_env(raw: str | None) -> bool | None:
+    """Parse ``APM_GITHUB_AUTH_FIRST`` as a tri-state value."""
+    return _parse_tristate_bool_env(raw)
+
+
+def get_apm_github_auth_first(
+    *,
+    bootstrap: bool | None = None,
+    create_config: bool | None = None,
+) -> bool:
+    """Return the effective github-auth-first flag.
+
+    Resolution order:
+      1. ``APM_GITHUB_AUTH_FIRST`` environment variable
+         (``"1"``/``"true"``/``"yes"``/``"on"`` => True;
+          ``"0"``/``"false"``/``"no"``/``"off"`` => False)
+      2. ``github_auth_first`` value from ``~/.apm/config.json``
+      3. ``False`` (default: anonymous-first for exact-host github.com)
+
+    Returns:
+        ``True`` when github.com HTTPS attempts should skip the anonymous
+        attempt, otherwise ``False``.
+    """
+    env_value = _parse_github_auth_first_env(os.environ.get(_ENV_GITHUB_AUTH_FIRST))
+    if env_value is not None:
+        return env_value
+    should_create = _resolve_create_config(bootstrap=bootstrap, create_config=create_config)
+    return get_github_auth_first(create_config=should_create)
 
 
 def get_apm_protocol_pref(

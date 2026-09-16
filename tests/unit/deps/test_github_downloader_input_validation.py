@@ -479,7 +479,12 @@ class TestBuildValidationAttempts:
             AuthResolver.git_env_for_context(ctx, base_env=dl.git_env)
         )
 
-        attempts = _build_validation_attempts(dl, dep, lambda m: None)
+        # issue #2545: git_env_for_context() also probes the ambient TLS
+        # config for github.com contexts; pin it to {} so this test's exact
+        # GIT_CONFIG_COUNT assertion is independent of the host's real git
+        # config (some machines set http.sslBackend globally).
+        with patch("apm_cli.utils.git_env.real_git_tls_config", return_value={}):
+            attempts = _build_validation_attempts(dl, dep, lambda m: None)
         token_env = attempts[0].env
         assert token_env["GIT_CONFIG_COUNT"] == "3"
         assert token_env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
