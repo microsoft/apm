@@ -210,13 +210,13 @@ require the full history. If comment author or complete history cannot
 be verified, stop for that issue with a run-log diagnostic instead of
 guessing.
 
-Pass issue context, invocation mode `agentic-workflow`, and human
-governance to **autopilot-issue-triage-worker**. Run it once per
-issue in this thread, keeping each issue's findings separate. It returns the six existing lens sections,
-classification, proposed scope/done-when/exclusions/review needs, and
-a `triage-recommendation` v2 JSON tail. No status, priority,
-invitation, assignment, or milestone is machine-actionable in this
-payload.
+Pass issue context, invocation mode `agentic-workflow`, `json: off`,
+and human governance to **autopilot-issue-triage-worker**. Run it
+once per issue in this thread, keeping each issue's findings
+separate. It returns the six existing lens sections, classification,
+and proposed scope/done-when/exclusions/review needs. Do not require
+or post a `triage-recommendation` JSON tail. No status, priority,
+invitation, assignment, or milestone is machine-actionable.
 
 If the worker fails or emits a legacy decision payload, log the issue
 number and reason; do not post partial advice or mark it reviewed. Continue
@@ -251,9 +251,9 @@ item or override governance.
    `## Triage recommendation`,
    `## Proposed classification`, `## Proposed scope brief`,
    `## Suggested next action`, `## Suggested issue comment`, and
-   `## Per-lens notes (collapsed)`, all six persona sections, and the
-   `triage-recommendation` JSON tail (`schema_version: 2`,
-   `advisory_only: true`). Keep the receipt marker. Finish with:
+   `## Per-lens notes (collapsed)`, and all six persona sections.
+   Do not include a `triage-recommendation` JSON fence. Keep the
+   HTML receipt marker. Finish with:
 
    > Automated advice only. Labels and silence are not approval.
    > A responsible human maintainer decides scope, priority, invitations,

@@ -235,6 +235,9 @@ def test_triage_never_assigns_and_requires_full_comment_history() -> None:
     assert "paginate its complete comment history" in workflow
     assert "unchanged context is a no-op" in workflow
     assert "`triage/requested` is the only request trigger" in workflow
+    assert "`json: off`" in workflow
+    assert "Do not require or post a `triage-recommendation` JSON tail" in workflow
+    assert "Do not include a `triage-recommendation` JSON fence" in workflow
     assert "legacy event alias" not in workflow
     assert "legacy `status/needs-triage` event also works" not in workflow
     triage_sched = _ascii(SCHEDULER_TRIAGE)

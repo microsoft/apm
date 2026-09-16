@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Issue and PR triage GitHub comments are human prose only. Activation cards default `json: off` (omitted is off, not a missing-field stop). `json: on` emits an internal `triage-recommendation` receipt only; never post JSON on GitHub.
+- Issue and PR triage GitHub comments are human prose only. Activation cards default `json: off` (omitted is off, not a missing-field stop). `json: on` emits an internal `triage-recommendation` receipt only; never post JSON on GitHub. The Triage Panel agentic workflow passes `json: off` and does not require a JSON tail.
 - Autopilot worker sessions are named `{Domain} {stage} #{n}` (`Issue triage #2993`). No GitHub title.
 - Issue and PR triage sweeps exclude `triage/recommended` and `status/triaged` at GitHub so already-advised open items are not re-listed. Do not write `status/triaged`.
 - Autopilot scheduler `invocation` is the harness: Copilot App is `actor-session`. `agentic-workflow` is only gh-aw / Actions. Do not copy `origin` into `invocation`.
