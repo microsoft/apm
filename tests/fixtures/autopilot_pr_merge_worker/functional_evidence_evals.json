@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "skill": "shepherd-driver",
+  "skill": "autopilot-pr-merge-worker",
   "invocation_mode": "forced",
   "content_evals": [
     {
@@ -90,7 +90,7 @@
   "trigger_evals": {
     "should_trigger": {
       "train": [
-        "Drive PR 42 through shepherd-driver after triage accepted it.",
+        "Drive PR 42 through autopilot-pr-merge-worker after triage accepted it.",
         "Use the per-PR convergence child for these selected PRs.",
         "Batch shepherd: dispatch one driver for each in-flight PR.",
         "Autopilot approved issue 8; hand its PR to the mergeability driver.",
@@ -99,9 +99,9 @@
       ],
       "val": [
         "The parent queue selected PR 99; drive it to a terminal state.",
-        "Compose shepherd-driver for one existing community PR.",
+        "Compose autopilot-pr-merge-worker for one existing community PR.",
         "Re-run the bounded per-PR driver until exact-head CI is green.",
-        "Use the shared drive-to-merge engine from issue autopilot."
+        "Use the shared drive-to-merge engine from issue delivery scheduler."
       ]
     },
     "should_not_trigger": {

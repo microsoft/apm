@@ -189,6 +189,17 @@ def test_pr_review_codeowners_last_comment_gate() -> None:
     assert "Exit `posted: no`" in worker
 
 
+def test_pr_review_app_prompt_unions_accepted_sweep() -> None:
+    """Copilot App prompt must use the same sweep as the scheduler."""
+    prompt = _ascii(
+        ROOT
+        / "packages/autopilot/autopilot-pr-review-scheduler/.apm/prompts/autopilot-pr-review-scheduler.prompt.md"
+    )
+    assert "panel-review union status/accepted" in prompt
+    assert "`status/accepted` on the PR is a sweep source" in prompt
+    assert "panel-review only" not in prompt
+
+
 def test_triage_never_assigns_and_requires_full_comment_history() -> None:
     """Triage stays advisory for every invocation, including retriage."""
     skill = _ascii(TRIAGE_SKILL)
@@ -369,7 +380,8 @@ def test_schedulers_own_isolated_fanout_pools() -> None:
     assert "Never request reviewers" in worker_pr_triage
     assert "Do not run `autopilot-pr-review-worker`" in worker_pr_triage
     assert "Write `status/deferred` only when this" in worker_pr_triage
-    assert "No linked `status/accepted` issue" in worker_pr_triage
+    assert "PR is not labelled `status/accepted`" in worker_pr_triage
+    assert "Neither this PR nor a linked same-repo issue" in worker_pr_triage
     assert "Start with an issue" in worker_pr_triage
     assert "Never write human decision labels" not in worker_pr_triage
     assert "`autopilot-pr-triage-scheduler`" in triage

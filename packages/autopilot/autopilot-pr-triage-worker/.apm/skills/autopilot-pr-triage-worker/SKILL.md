@@ -43,7 +43,8 @@ Rules:
   classification labels. Never assign. Never request reviewers.
   Do not write `status/accepted`, `status/needs-design`, or
   `status/needs-triage`. Write `status/deferred` only when this
-  PR has no same-repo linked issue labelled `status/accepted`.
+  PR is not labelled `status/accepted` and has no same-repo
+  linked issue labelled `status/accepted`.
 - `json` defaults to `off` when omitted or unknown. Omitted `json`
   is not a missing-field stop.
 - `json: off` -> no machine JSON receipt.
@@ -81,12 +82,14 @@ classification labels from the contract. Never write
 `status/accepted`, `status/needs-design`, or
 `status/needs-triage`.
 
-Auto-defer: if this PR has no same-repo linked issue labelled
-`status/accepted`, add `status/deferred` (`write: on` only).
+Auto-defer: if this PR is not labelled `status/accepted` and
+has no same-repo linked issue labelled `status/accepted`, add
+`status/deferred` (`write: on` only).
 Do not overwrite `status/accepted` already on the PR. Linked
 means `Fixes` / `Closes` / `#N` in the body or commits, or
 GitHub `closingIssuesReferences`, same repository. Any one
-accepted linked issue blocks auto-defer.
+accepted linked issue or `status/accepted` on the PR blocks
+auto-defer.
 
 CODEOWNERS `reviewRequests` is runtime authority. Note owners in
 the comment. Never add or remove review requests.
@@ -104,19 +107,21 @@ conversation, no-op (do not post a duplicate).
 ## Procedure
 
 1. Confirm the PR is the single target. Missing number -> stop.
-2. Gather full context. Record linked same-repo issues and whether
+2. Gather full context. Record whether this PR is labelled
+   `status/accepted`, and linked same-repo issues and whether
    any carries `status/accepted`.
 3. Fill [assets/pr-triage-template.md](assets/pr-triage-template.md).
    Recommendation is one of: `ready-for-review` | `needs-design` |
    `needs-issue` | `duplicate-of` | `decline-with-reason` |
    `auto-handle`.
-4. No linked `status/accepted` issue -> recommend `needs-issue`,
+4. Neither this PR nor a linked same-repo issue is
+   `status/accepted` -> recommend `needs-issue`,
    add `status/deferred` when `write: on`, and thank the author.
    Invite them to open an issue for maintainer review and
    acceptance first, per CONTRIBUTING.md ("Start with an issue,
    not an implementation."). Link
    https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md
-5. `ready-for-review` only when a linked same-repo issue is
+5. `ready-for-review` when this PR or a linked same-repo issue is
    `status/accepted`. It is not merge approval and is not a
    request to run `autopilot-pr-review-scheduler`.
 6. Post only if the comment would change. Add the contract

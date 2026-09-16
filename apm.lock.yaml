@@ -1,15 +1,6 @@
 lockfile_version: '1'
-apm_version: 0.30.0
+apm_version: 0.31.0
 dependencies:
-- repo_url: _local/apm-issue-autopilot
-  name: apm-issue-autopilot
-  version: 0.1.0
-  package_type: apm_package
-  deployed_files:
-  - copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
-  source: local
-  local_path: ./packages/autopilot/apm-issue-autopilot
-  declared_license: MIT
 - repo_url: _local/autopilot-issue-delivery-scheduler
   name: autopilot-issue-delivery-scheduler
   version: 0.1.0
@@ -109,15 +100,6 @@ dependencies:
     .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
   source: local
   local_path: ./packages/autopilot/autopilot-pr-triage-scheduler
-  declared_license: MIT
-- repo_url: _local/batch-bug-shepherd
-  name: batch-bug-shepherd
-  version: 0.1.0
-  package_type: apm_package
-  deployed_files:
-  - copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
-  source: local
-  local_path: ./packages/autopilot/batch-bug-shepherd
   declared_license: MIT
 - repo_url: _local/autopilot-issue-delivery-worker
   name: autopilot-issue-delivery-worker
@@ -251,7 +233,7 @@ dependencies:
   - .agents/skills/autopilot-pr-triage-worker/assets/label-contract.json
   - .agents/skills/autopilot-pr-triage-worker/assets/pr-triage-template.md
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-triage-worker/SKILL.md: sha256:c5475de81deefde3e3de1a478ca405e6139959a495fa4f063a0db25763fdda80
+    .agents/skills/autopilot-pr-triage-worker/SKILL.md: sha256:588482dfa1345fa8b2331962e4f9c7d5fe851341ff69d04f08f8b86219a421d1
     .agents/skills/autopilot-pr-triage-worker/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
     .agents/skills/autopilot-pr-triage-worker/assets/pr-triage-template.md: sha256:47c2d38b8403f596ed601f7b38486dc0276a3dcfec8865347c8990dfa34872e8
   source: local
@@ -316,24 +298,6 @@ dependencies:
   anchored_local_path: packages/pr-description-skill
   declared_license: MIT
 deployments:
-- kind: uri
-  target: copilot-app
-  value: copilot-app-db://workflows/apm--_local--apm-issue-autopilot--apm-issue-autopilot
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/autopilot/apm-issue-autopilot
-  active_owner: ./packages/autopilot/apm-issue-autopilot
-  content_hash: null
-- kind: uri
-  target: copilot-app
-  value: copilot-app-db://workflows/apm--_local--batch-bug-shepherd--batch-bug-shepherd
-  runtime: null
-  scope: project
-  owners:
-  - ./packages/autopilot/batch-bug-shepherd
-  active_owner: ./packages/autopilot/batch-bug-shepherd
-  content_hash: null
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-delivery-scheduler
@@ -999,7 +963,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-triage-worker
   active_owner: local:packages/autopilot/autopilot-pr-triage-worker
-  content_hash: sha256:c5475de81deefde3e3de1a478ca405e6139959a495fa4f063a0db25763fdda80
+  content_hash: sha256:588482dfa1345fa8b2331962e4f9c7d5fe851341ff69d04f08f8b86219a421d1
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-worker/assets/label-contract.json
