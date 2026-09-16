@@ -1,5 +1,6 @@
 ---
 name: autopilot-issue-delivery-worker
+activation_card: on
 description: >-
   Use this skill to implement ONE microsoft/apm issue already
   selected by autopilot-issue-delivery-scheduler. Queue signal is
@@ -19,6 +20,49 @@ Per-issue implementation worker. The parent
 fan-out pool. You own exactly one `ISSUE_NUMBER`.
 
 Do not pick more issues. Do not fill other slots.
+
+## Activation card
+
+`activation_card: on`. Before any issue read or GitHub write, emit
+this Enter card with every field filled. Missing field -> stop.
+Do not load Autogenesis path modules from this card.
+
+```text
+skill: autopilot-issue-delivery-worker
+skill_path: <resolved directory of this SKILL.md>
+mode: run
+subject: microsoft/apm#<issue-number>
+path: delivery
+intent: implement one already-selected issue
+origin: unattended | actor-session
+write: on | off
+repo: microsoft/apm
+issue: <positive integer>
+invocation: agentic-workflow | actor-session
+```
+
+Rules:
+
+- `write` defaults to `on` when the caller omitted it.
+- `write: off` returns the filled template only. Do not assign,
+  comment, label, edit, or open a PR.
+- `write: on` may assign `@me` (actor-session only) and implement
+  inside the accepted scope. Unattended never assigns and never
+  implements.
+- `origin` fail-closed unknown -> `unattended`.
+- One issue. Do not nest a scheduler path.
+
+After the run, emit this Exit receipt:
+
+```text
+skill: autopilot-issue-delivery-worker
+subject: microsoft/apm#<issue-number>
+path: delivery
+write: on | off
+assigned: yes | no | skipped
+pushed: yes | no
+approved: n/a
+```
 
 ## Inputs
 

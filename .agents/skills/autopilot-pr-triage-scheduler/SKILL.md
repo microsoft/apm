@@ -1,5 +1,6 @@
 ---
 name: autopilot-pr-triage-scheduler
+activation_card: on
 description: >-
   Queue open microsoft/apm pull requests (community fixes, PRs
   without an issue, or PRs that close an issue) and fan them out
@@ -22,6 +23,46 @@ one PR per slot. Never borrow slots from
 `autopilot-issue-triage-scheduler`,
 `autopilot-issue-delivery-scheduler`, or
 `autopilot-pr-review-scheduler`.
+
+## Activation card
+
+`activation_card: on`. Before any queue read or spawn, emit
+this Enter card with every field filled. Missing field -> stop.
+Do not load Autogenesis path modules from this card.
+
+```text
+skill: autopilot-pr-triage-scheduler
+skill_path: <resolved directory of this SKILL.md>
+mode: run
+subject: microsoft/apm
+path: triage
+intent: select PRs and fan out triage workers
+origin: unattended | actor-session
+write: off
+repo: microsoft/apm
+fanout_limit: <positive integer>
+invocation: agentic-workflow | actor-session
+```
+
+Rules:
+
+- `write` is always `off`. This scheduler never comments,
+  labels, assigns, or requests reviewers.
+- `write: on` -> stop.
+- `origin` fail-closed unknown -> `unattended`.
+- One queue. Do not nest another scheduler path.
+
+After the run, emit this Exit receipt:
+
+```text
+skill: autopilot-pr-triage-scheduler
+subject: microsoft/apm
+path: triage
+write: off
+queued: <integer>
+spawned: <integer>
+approved: n/a
+```
 
 ## Invocation
 

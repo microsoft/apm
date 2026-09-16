@@ -1,5 +1,6 @@
 ---
 name: autopilot-pr-review-worker
+activation_card: on
 description: >-
   Use this skill to run a multi-persona expert advisory review on a labelled
   pull request in microsoft/apm. The panel fans out to five mandatory
@@ -28,6 +29,51 @@ renders ONE recommendation comment from `assets/recommendation-template.md`.
 This skill is ADVISORY by design. It does not compute a binary verdict, it
 does not apply verdict labels, and it does not gate merge. The panel
 surfaces findings; the maintainer and the PR author decide ship.
+
+## Activation card
+
+`activation_card: on`. Before any PR read or GitHub write, emit
+this Enter card with every field filled. Missing field -> stop.
+Do not load Autogenesis path modules from this card.
+
+```text
+skill: autopilot-pr-review-worker
+skill_path: <resolved directory of this SKILL.md>
+mode: run
+subject: microsoft/apm#<pr-number>
+path: review
+intent: advise one already-selected PR
+origin: unattended | actor-session
+write: on | off
+repo: microsoft/apm
+pr: <positive integer>
+invocation: agentic-workflow | actor-session
+invocation_mode: session-review | direct-user-review | composed-implementation-review
+```
+
+Rules:
+
+- `write` defaults to `on` when the caller omitted it.
+- `write: off` returns the filled template only. Do not comment,
+  add labels, remove labels, or request reviewers.
+- `write: on` posts the one advisory comment and may clear
+  `panel-review`. Never assign. Actor-session may request `@me`
+  as a supplemental reviewer.
+- `origin` fail-closed unknown -> `unattended`.
+- Unattended never assigns and never requests reviewers.
+- One PR. Do not nest a scheduler path.
+
+After the panel, emit this Exit receipt:
+
+```text
+skill: autopilot-pr-review-worker
+subject: microsoft/apm#<pr-number>
+path: review
+write: on | off
+posted: yes | no
+reviewer_requested: yes | no | skipped
+approved: n/a
+```
 
 ## Architecture invariants
 

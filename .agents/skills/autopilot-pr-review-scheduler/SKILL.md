@@ -1,5 +1,6 @@
 ---
 name: autopilot-pr-review-scheduler
+activation_card: on
 description: >-
   Queue microsoft/apm pull requests labelled `panel-review` (or an
   explicit named list) and fan them out through an isolated pool
@@ -23,6 +24,47 @@ one PR per slot (`INVOCATION_MODE=session-review`). Never compose
 Never borrow slots from `autopilot-issue-triage-scheduler`,
 `autopilot-issue-delivery-scheduler`, or
 `autopilot-pr-triage-scheduler`.
+
+## Activation card
+
+`activation_card: on`. Before any queue read or spawn, emit
+this Enter card with every field filled. Missing field -> stop.
+Do not load Autogenesis path modules from this card.
+
+```text
+skill: autopilot-pr-review-scheduler
+skill_path: <resolved directory of this SKILL.md>
+mode: run
+subject: microsoft/apm
+path: review
+intent: select accepted panel-review PRs and fan out review workers
+origin: unattended | actor-session
+write: off
+repo: microsoft/apm
+fanout_limit: <positive integer>
+invocation: agentic-workflow | actor-session
+```
+
+Rules:
+
+- `write` is always `off`. This scheduler never comments,
+  labels, assigns, or requests reviewers.
+- `write: on` -> stop.
+- `origin` fail-closed unknown -> `unattended`.
+- One queue. Do not nest another scheduler path.
+- Do not compose `autopilot-pr-merge-worker`.
+
+After the run, emit this Exit receipt:
+
+```text
+skill: autopilot-pr-review-scheduler
+subject: microsoft/apm
+path: review
+write: off
+queued: <integer>
+spawned: <integer>
+approved: n/a
+```
 
 ## Invocation
 

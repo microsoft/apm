@@ -62,11 +62,41 @@ WORKER_PR_SKILL = ROOT / "packages/autopilot-pr-merge-worker/SKILL.md"
 ALIAS_AUTOPILOT = ROOT / "packages/apm-issue-autopilot/.apm/skills/apm-issue-autopilot/SKILL.md"
 ALIAS_SHEPHERD = ROOT / "packages/batch-bug-shepherd/.apm/skills/batch-bug-shepherd/SKILL.md"
 ALIAS_DRIVER = ROOT / "packages/shepherd-driver/SKILL.md"
+CANONICAL_AUTOPILOT_SKILLS = (
+    SCHEDULER_TRIAGE,
+    TRIAGE_SKILL,
+    SCHEDULER_CODE,
+    WORKER_CODE,
+    SCHEDULER_PR_TRIAGE,
+    WORKER_PR_TRIAGE,
+    SCHEDULER_PR_REVIEW,
+    REVIEW_SKILL,
+    WORKER_PR_SKILL,
+)
 
 
 def _ascii(path: Path) -> str:
     """Read a contract file as printable ASCII with newlines flattened."""
     return " ".join(path.read_text(encoding="ascii").split())
+
+
+def test_canonical_autopilot_skills_declare_activation_cards() -> None:
+    """Live autopilot skills use Autogenesis Enter/Exit cards, not path modules."""
+    for path in CANONICAL_AUTOPILOT_SKILLS:
+        text = _ascii(path)
+        assert "activation_card: on" in text, path
+        assert "Do not load Autogenesis path modules from this card" in text, path
+        assert "Missing field -> stop" in text, path
+        assert "approved: n/a" in text, path
+    for path in (
+        SCHEDULER_TRIAGE,
+        SCHEDULER_CODE,
+        SCHEDULER_PR_TRIAGE,
+        SCHEDULER_PR_REVIEW,
+    ):
+        text = _ascii(path)
+        assert "write: off" in text, path
+        assert "`write: on` -> stop" in text, path
 
 
 def test_review_panel_declares_origin_intent_contract() -> None:

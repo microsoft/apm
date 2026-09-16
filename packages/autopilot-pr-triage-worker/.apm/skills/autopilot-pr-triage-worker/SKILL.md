@@ -1,5 +1,6 @@
 ---
 name: autopilot-pr-triage-worker
+activation_card: on
 description: >-
   Use this skill to triage ONE microsoft/apm pull request already
   selected by autopilot-pr-triage-scheduler. Covers community
@@ -12,6 +13,49 @@ description: >-
 
 Advisory classification of ONE already-selected PR. Do not review
 the diff as `autopilot-pr-review-worker` does. Do not drive merge.
+
+## Activation card
+
+`activation_card: on`. Before any PR read or GitHub write, emit
+this Enter card with every field filled. Missing field -> stop.
+Do not load Autogenesis path modules from this card.
+
+```text
+skill: autopilot-pr-triage-worker
+skill_path: <resolved directory of this SKILL.md>
+mode: run
+subject: microsoft/apm#<pr-number>
+path: triage
+intent: advise one already-selected PR
+origin: unattended | actor-session
+write: on | off
+repo: microsoft/apm
+pr: <positive integer>
+invocation: agentic-workflow | actor-session
+```
+
+Rules:
+
+- `write` defaults to `on` when the caller omitted it.
+- `write: off` returns the filled template only. Do not comment,
+  add labels, or remove labels.
+- `write: on` posts the one advisory comment and processing /
+  classification labels. Never human decision labels. Never assign.
+  Never request reviewers.
+- `origin` fail-closed unknown -> `unattended`.
+- One PR. Do not nest a scheduler path.
+
+After the run, emit this Exit receipt:
+
+```text
+skill: autopilot-pr-triage-worker
+subject: microsoft/apm#<pr-number>
+path: triage
+write: on | off
+posted: yes | no
+labels_applied: <comma list or none>
+approved: n/a
+```
 
 Read `assets/label-contract.json` (same contract as issue triage)
 before reasoning. Do not invent a second marker.
