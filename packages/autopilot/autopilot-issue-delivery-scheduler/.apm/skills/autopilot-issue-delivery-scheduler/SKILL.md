@@ -174,7 +174,7 @@ selected list; when a slot returns, fill it with the next item.
    One issue per slot. When a slot returns, dispatch the next
    queued issue. Do not stop because the pool was full. Name each
    worker session
-   `#<issue-number> autopilot-issue-delivery-worker <Issue Title>`.
+   `Issue delivery #<issue-number>`.
 4. Never auto-merge.
 5. Print a final report from the table.
 

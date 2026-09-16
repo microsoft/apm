@@ -318,12 +318,19 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     assert "at most two per author" in triage
     assert "oldest first" in triage
     assert "same issue to two slots" in delivery
-    assert "#<issue-number> autopilot-issue-delivery-worker <Issue Title>" in delivery
-    pool = _ascii(
-        ROOT
-        / "packages/autopilot/autopilot-issue-delivery-scheduler/.apm/skills/autopilot-issue-delivery-scheduler/assets/fan-out-pool.md"
-    )
-    assert "#<issue-number> autopilot-issue-delivery-worker <Issue Title>" in pool
+    assert "Issue delivery #<issue-number>" in delivery
+    names = {
+        "autopilot-issue-triage-scheduler": "Issue triage #<issue-number>",
+        "autopilot-issue-delivery-scheduler": "Issue delivery #<issue-number>",
+        "autopilot-pr-triage-scheduler": "PR triage #<pr-number>",
+        "autopilot-pr-review-scheduler": "PR review #<pr-number>",
+    }
+    for skill, label in names.items():
+        pool = _ascii(
+            ROOT
+            / f"packages/autopilot/{skill}/.apm/skills/{skill}/assets/fan-out-pool.md"
+        )
+        assert label in pool, skill
     assert "Do not dispatch an unaccepted issue." in delivery
     assert "Do not dispatch an issue assigned to another user unless named." in delivery
     assert "assignment as a hard gate" in delivery
@@ -414,7 +421,7 @@ def test_schedulers_own_isolated_fanout_pools_and_aliases_redirect() -> None:
     ) in pr_triage
     assert "Do not run `autopilot-pr-review-worker`" in pr_triage
     assert "same PR to two slots" in pr_triage
-    assert "#<pr-number> pr-triage-worker" in _ascii(
+    assert "PR triage #<pr-number>" in _ascii(
         ROOT
         / "packages/autopilot/autopilot-pr-triage-scheduler/.apm/skills/autopilot-pr-triage-scheduler/assets/fan-out-pool.md"
     )

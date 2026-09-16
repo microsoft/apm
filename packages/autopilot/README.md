@@ -24,8 +24,11 @@ Named list = explicit request. Empty queue = stop.
 Schedulers select and fan out (default 2 concurrent slots, drain the
 full selected list). Before any spawn they emit a keep-set and
 drop-set table: number, kind, labels, rationale, slot. Missing
-column or blank rationale -> stop. Workers do one item. Schedulers
-never comment, label, assign, or request reviewers.
+column or blank rationale -> stop. Worker sessions are named
+`{Domain} {stage} #{n}` (`Issue triage #2993`, `PR triage #1017`,
+`Issue delivery #2902`, `PR review #2741`). No GitHub title. Workers
+do one item. Schedulers never comment, label, assign, or request
+reviewers.
 
 ## Shared rules
 

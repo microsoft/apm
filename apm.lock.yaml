@@ -95,7 +95,7 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py
   deployed_file_hashes:
     .agents/skills/autopilot-issue-triage-scheduler/SKILL.md: sha256:48b597bc323e78e3fba34db318c800df74d9c5fcf337249a7421df3e9b474449
-    .agents/skills/autopilot-issue-triage-scheduler/assets/fan-out-pool.md: sha256:7cbfd8586c62cbabe25370cc7a5c1f2a753262de35f5efc5fb076542188c21cf
+    .agents/skills/autopilot-issue-triage-scheduler/assets/fan-out-pool.md: sha256:747aa0092a5b496417035729b61c39aa74980f7918f3e108790eb2ce7e565d45
     .agents/skills/autopilot-issue-triage-scheduler/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
     .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py: sha256:797eeff9a45715a8e6c98dd4cdf663b3870bfbfdb1bde2cd6582e687055c45e5
     .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
@@ -126,7 +126,7 @@ dependencies:
   - .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md
   deployed_file_hashes:
     .agents/skills/autopilot-pr-review-scheduler/SKILL.md: sha256:e2f396cc14fbf7da81b71fde160b979a772a2b3efb260cb838c20d443a719908
-    .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:ce64a77c44166372b7e76d740098a8c780b8b4e3781334cfca4642bb666155d2
+    .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md: sha256:09d80279df99d2b4119508b54f4c07339c8f0f25b9e7d96d9f762869d414fc82
   source: local
   local_path: ./packages/autopilot/autopilot-pr-review-scheduler
   declared_license: MIT
@@ -959,7 +959,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:7cbfd8586c62cbabe25370cc7a5c1f2a753262de35f5efc5fb076542188c21cf
+  content_hash: sha256:747aa0092a5b496417035729b61c39aa74980f7918f3e108790eb2ce7e565d45
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-scheduler/assets/label-contract.json

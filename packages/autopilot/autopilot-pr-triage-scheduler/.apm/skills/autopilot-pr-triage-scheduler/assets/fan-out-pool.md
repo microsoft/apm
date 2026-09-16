@@ -18,9 +18,8 @@ is empty.
 ## Fill order (each free slot)
 
 1. Prefer a new session (Copilot App / Cloud / Remote) named
-   `#<pr-number> pr-triage-worker` whose kickoff runs
+   `PR triage #<pr-number>` whose kickoff runs
    `autopilot-pr-triage-worker` on exactly one PR.
-   Truncate the title if the harness caps length.
 2. Else spawn a sub-agent (`task`) with the worker skill.
 3. Else run the worker sequentially in this session.
 

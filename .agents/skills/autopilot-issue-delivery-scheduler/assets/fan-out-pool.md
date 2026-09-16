@@ -16,12 +16,10 @@ is empty.
 
 ## Fill order (each free slot)
 
-1. Prefer a new session (Copilot App / Cloud / Remote) whose kickoff
-   runs `autopilot-issue-delivery-worker` on exactly one issue. Default
-   session name: `#<issue-number> autopilot-issue-delivery-worker <Issue Title>`
-   (GitHub title, ASCII-safe). If the harness caps length, keep
-   `#<issue-number> autopilot-issue-delivery-worker` and truncate the title.
-   Do not invent a nickname.
+1. Prefer a new session (Copilot App / Cloud / Remote) named
+   `Issue delivery #<issue-number>` whose kickoff runs
+   `autopilot-issue-delivery-worker` on exactly one issue.
+   Do not invent a nickname. Do not append the GitHub title.
 2. Else spawn a sub-agent (`task`) with the worker skill. Use the
    same name string for the agent `name`.
 3. Else run the worker sequentially in this session.

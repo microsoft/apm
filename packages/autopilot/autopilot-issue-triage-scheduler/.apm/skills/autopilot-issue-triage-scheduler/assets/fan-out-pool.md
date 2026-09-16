@@ -16,8 +16,9 @@ is empty.
 
 ## Fill order (each free slot)
 
-1. Prefer a new session (Copilot App / Cloud / Remote) whose kickoff
-   runs `autopilot-issue-triage-worker` on exactly one issue.
+1. Prefer a new session (Copilot App / Cloud / Remote) named
+   `Issue triage #<issue-number>` whose kickoff runs
+   `autopilot-issue-triage-worker` on exactly one issue.
 2. Else spawn a sub-agent (`task`) with the worker skill.
 3. Else run the worker sequentially in this session.
 

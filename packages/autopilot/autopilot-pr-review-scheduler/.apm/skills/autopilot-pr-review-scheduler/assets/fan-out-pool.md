@@ -17,8 +17,9 @@ is empty.
 
 ## Fill order (each free slot)
 
-1. Prefer a new session (Copilot App / Cloud / Remote) whose kickoff
-   runs `autopilot-pr-review-worker` on exactly one PR.
+1. Prefer a new session (Copilot App / Cloud / Remote) named
+   `PR review #<pr-number>` whose kickoff runs
+   `autopilot-pr-review-worker` on exactly one PR.
 2. Else spawn a sub-agent (`task`) with that skill.
 3. Else run sequentially in this session.
    Never spawn `autopilot-pr-merge-worker` from this pool.
