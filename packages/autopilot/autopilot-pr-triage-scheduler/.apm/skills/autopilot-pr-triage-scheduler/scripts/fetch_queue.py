@@ -19,6 +19,7 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 plan_batch = runpy.run_path(str(Path(__file__).resolve().with_name("triage_state.py")))[
     "plan_batch"
@@ -227,20 +228,56 @@ def _gh_json(args: list[str]) -> Any:
         raise ValueError(f"gh returned invalid JSON: {error}") from error
 
 
+def _search_items(raw: Any) -> list[Any]:
+    """Flatten a GitHub issue-search payload into a list of items."""
+    if isinstance(raw, dict) and isinstance(raw.get("items"), list):
+        return list(raw["items"])
+    if isinstance(raw, list):
+        items: list[Any] = []
+        for page in raw:
+            if isinstance(page, dict) and isinstance(page.get("items"), list):
+                items.extend(page["items"])
+            elif isinstance(page, dict) and "number" in page:
+                items.append(page)
+            else:
+                raise ValueError("GitHub search response must include items")
+        return items
+    raise ValueError("GitHub search response must include items")
+
+
 def list_pages(
     kind: str,
     repo: str,
     runner: Callable[[list[str]], Any] | None = None,
+    exclude_labels: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
-    """Paginate open issues or pulls oldest-first via `gh api`."""
+    """Paginate open issues or pulls oldest-first via `gh api`.
+
+    Sweep passes `processing.read_reviewed` so already-advised items
+    (`triage/recommended`, `status/triaged`) are excluded at GitHub
+    and never downloaded.
+    """
     call = runner or _gh_json
-    path = "issues" if kind == "issue" else "pulls"
-    query = f"/repos/{repo}/{path}?state=open&sort=created&direction=asc&per_page={PAGE_SIZE}"
-    raw = call(["api", "--paginate", query])
-    if not isinstance(raw, list):
-        raise ValueError("GitHub list response must be a JSON array")
+    if exclude_labels:
+        kind_token = "is:issue" if kind == "issue" else "is:pr"
+        negatives = " ".join(f'-label:"{name}"' for name in exclude_labels)
+        search = f"repo:{repo} {kind_token} is:open {negatives}"
+        path = (
+            f"/search/issues?q={quote(search, safe='')}&sort=created&order=asc&per_page={PAGE_SIZE}"
+        )
+        raw = call(["api", "--paginate", path])
+        items = _search_items(raw)
+    else:
+        rest_path = "issues" if kind == "issue" else "pulls"
+        query = (
+            f"/repos/{repo}/{rest_path}?state=open&sort=created&direction=asc&per_page={PAGE_SIZE}"
+        )
+        raw = call(["api", "--paginate", query])
+        if not isinstance(raw, list):
+            raise ValueError("GitHub list response must be a JSON array")
+        items = raw
     records = []
-    for item in raw:
+    for item in items:
         if not isinstance(item, dict) or "number" not in item:
             raise ValueError("GitHub list items must include number")
         if kind == "issue" and item.get("pull_request"):
@@ -347,7 +384,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             records = [get_one(args.kind, repo, args.numbers[0])]
         else:
             repo = args.repo or _default_repo()
-            records = list_pages(args.kind, repo)
+            exclude = list(contract["processing"]["read_reviewed"]) if args.mode == "sweep" else []
+            records = list_pages(args.kind, repo, exclude_labels=exclude)
         if args.labels_json:
             label_payload = (
                 sys.stdin.read()

@@ -100,10 +100,12 @@ Modes:
 - `queue-open` / no names: sweep.
 
 `fetch_queue.py` owns list + eligibility (closed, merged, locked,
-bot, empty, template-only; sweep-only draft and spam). Do not
-comment on skips. `triage_state.py` owns completed-advice skip,
-at most two per author, oldest first, cap 10. Explicit requests
-bypass only spam and completed-advice.
+bot, empty, template-only; sweep-only draft and spam). Sweep list
+excludes `processing.read_reviewed` (`triage/recommended`,
+`status/triaged`) at GitHub so already-advised open PRs are not
+downloaded. Do not comment on skips. `triage_state.py` owns
+completed-advice skip, at most two per author, oldest first,
+cap 10. Explicit requests bypass only spam and completed-advice.
 
 A missing linked issue is not a skip. Community PRs without an
 issue are in-scope; the worker advises whether an issue should
@@ -144,6 +146,7 @@ Drop-set (considered, then not scheduled). `slot` is `-`:
 - `slot`: 1-based spawn order, or `-` when dropped
 
 Empty keep-set is success. Still emit the drop-set, or `none`.
+Completed-advice excluded at fetch is not a drop-set row.
 You are the sole table writer. Put linked-issue facts in
 `rationale`.
 

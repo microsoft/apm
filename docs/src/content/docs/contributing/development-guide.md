@@ -46,8 +46,10 @@ priority, contributor invitations, and milestones. The
 [triage label contract](https://github.com/microsoft/apm/blob/main/packages/autopilot/autopilot-issue-triage-worker/assets/label-contract.json)
 separates those decisions from advisory processing. During compatibility
 rollout, both `status/triaged` and `triage/recommended` mean completed
-automated advice, not human review. The new writer uses `triage/recommended`
-after the canonical label is provisioned and this code is deployed.
+automated advice, not human review. Sweep fetch excludes those labels
+so already-advised open issues and PRs are not re-listed. The new writer
+uses `triage/recommended` after the canonical label is provisioned and
+this code is deployed. Do not write `status/triaged`.
 `status/needs-triage` can remain after advice while awaiting a human decision.
 No label or milestone migration is performed by the advisory workflow.
 

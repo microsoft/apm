@@ -98,8 +98,10 @@ Modes (match `.github/workflows/triage-panel.md`):
 - `queue-all` / no names: daily-style sweep.
 
 `fetch_queue.py` owns list + eligibility (closed, locked, bot,
-empty, template-only; sweep-only spam). Do not comment on skips.
-`triage_state.py` owns completed-advice skip
+empty, template-only; sweep-only spam). Sweep list excludes
+`processing.read_reviewed` (`triage/recommended`, `status/triaged`)
+at GitHub so already-advised open items are not downloaded. Do not
+comment on skips. `triage_state.py` owns completed-advice skip
 (`processing.read_reviewed`), at most two per author, oldest first,
 cap 10. Explicit requests bypass only spam and completed-advice.
 
@@ -140,6 +142,7 @@ Drop-set (considered, then not scheduled). `slot` is `-`:
 - `slot`: 1-based spawn order, or `-` when dropped
 
 Empty keep-set is success. Still emit the drop-set, or `none`.
+Completed-advice excluded at fetch is not a drop-set row.
 You are the sole table writer.
 
 ## Fan-out

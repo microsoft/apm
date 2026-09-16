@@ -155,8 +155,9 @@ Choose one mode:
 - Otherwise: daily sweep, up to 10 eligible issues, oldest first.
 
 The agent's shell is not authenticated. Do not reimplement eligibility
-or marker rules. Use the GitHub issue-list read tool (creation
-ascending, 100 per page, paginate to exhaustion) only to dump REST-shaped
+or marker rules. Use the GitHub issue-search read tool (creation
+ascending) with `-label:triage/recommended -label:status/triaged`
+so already-advised open issues are not downloaded. Dump REST-shaped
 items, then run the skill helpers. Exclude pull requests in the dump
 for issue mode. If the GitHub read fails, log the failure and stop
 rather than presenting a partial page as an exhausted queue.
@@ -172,8 +173,9 @@ python <issue-triage-scheduler>/scripts/triage_state.py < batch.json
 `get_label`. Explicit requests use `--mode label-event` or `--mode
 dispatch` with `--records-json` containing exactly one issue (or
 `--number` when `gh` is authenticated). `fetch_queue.py` owns
-closed/locked/bot/empty/template-only and sweep-only spam. Do not
-label suspected spam. `triage_state.py` owns completed-advice skip
+closed/locked/bot/empty/template-only and sweep-only spam. Sweep
+list excludes `processing.read_reviewed`. Do not label suspected
+spam. `triage_state.py` owns completed-advice skip
 (`processing.read_reviewed`), at most two issues per author, and cap
 10. Explicit requests bypass only spam and completed-advice. A helper
 failure stops emission, with its diagnostic in the run log.

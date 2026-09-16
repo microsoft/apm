@@ -11,7 +11,8 @@ import pytest
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = (
-    ROOT / "packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler"
+    ROOT
+    / "packages/autopilot/autopilot-issue-triage-scheduler/.apm/skills/autopilot-issue-triage-scheduler"
 )
 SCRIPT = PACKAGE / "scripts/fetch_queue.py"
 CONTRACT = json.loads((PACKAGE / "assets/label-contract.json").read_text(encoding="ascii"))
@@ -125,7 +126,7 @@ def test_identical_run_and_repeated_token_count_as_spam() -> None:
 
 
 def test_completed_advice_stays_eligible_for_the_planner() -> None:
-    """Fetch does not own completed-advice; plan_batch skips it on sweep."""
+    """Records-json still leaves completed-advice eligible; plan_batch skips it."""
     raw = _raw(8, labels=["status/triaged"])
     record = FETCH["normalize_record"](raw, "issue")
     assert FETCH["skip_reason"](record, "sweep") is None
@@ -212,6 +213,30 @@ def test_cli_subprocess_filters_ineligible(
     assert reasons == {1: "empty", 3: "bot-authored"}
 
 
+def test_list_pages_sweep_excludes_completed_advice_via_search() -> None:
+    """Live sweep lists through search minus triage/recommended and status/triaged."""
+    seen: list[list[str]] = []
+
+    def _runner(args: list[str]) -> dict:
+        seen.append(args)
+        return {"items": [_raw(2993), _raw(8, labels=["status/triaged"])]}
+
+    records = FETCH["list_pages"](
+        "issue",
+        "microsoft/apm",
+        runner=_runner,
+        exclude_labels=["triage/recommended", "status/triaged"],
+    )
+    assert seen and seen[0][0] == "api"
+    assert seen[0][1] == "--paginate"
+    query = seen[0][2]
+    assert query.startswith("/search/issues?")
+    assert "is%3Aissue" in query
+    assert "triage%2Frecommended" in query or "triage/recommended" in query
+    assert "status%2Ftriaged" in query or "status/triaged" in query
+    assert [item["number"] for item in records] == [2993, 8]
+
+
 def test_list_pages_drops_pulls_for_issue_kind() -> None:
     """Issue fetch must not enqueue pull requests from the issues endpoint."""
 
@@ -224,7 +249,10 @@ def test_list_pages_drops_pulls_for_issue_kind() -> None:
 
 def test_queue_helpers_match_across_schedulers_and_worker_contract() -> None:
     """Issue and PR schedulers ship one helper implementation; worker has no queue scripts."""
-    pr = ROOT / "packages/autopilot/autopilot-pr-triage-scheduler/.apm/skills/autopilot-pr-triage-scheduler"
+    pr = (
+        ROOT
+        / "packages/autopilot/autopilot-pr-triage-scheduler/.apm/skills/autopilot-pr-triage-scheduler"
+    )
     worker = ROOT / "packages/autopilot/autopilot-issue-triage-worker"
     for name in (
         "scripts/fetch_queue.py",

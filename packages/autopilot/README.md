@@ -53,7 +53,7 @@ never comment, label, assign, or request reviewers.
 |-------|------|---------|
 | `triage/requested` | request | Fresh issue-triage pass. Re-apply to run again. |
 | `triage/recommended` | processing | Advice posted. Not acceptance. |
-| `status/triaged` | legacy read | Same as completed advice. Do not write. |
+| `status/triaged` | legacy read | Same as completed advice. Sweep fetch excludes it. Do not write. |
 | `status/needs-triage` | human | Still waiting on a human. Not a trigger. |
 | `status/needs-design` | human | Design first. |
 | `status/accepted` | human | Human agrees to act. Required for delivery and PR review/merge. |
@@ -73,7 +73,8 @@ Contract file:
 Selects issues. Compose `autopilot-issue-triage-worker` one issue per
 slot. Trigger: `triage/requested`, a named list, or `queue-all` sweep.
 Does not consume `status/needs-triage`. Helpers:
-`scripts/fetch_queue.py` then `scripts/triage_state.py` (completed-advice
+`scripts/fetch_queue.py` then `scripts/triage_state.py` (sweep fetch
+excludes `triage/recommended` and `status/triaged`; completed-advice
 skip, two per author, oldest first, cap 10).
 
 ### `autopilot-issue-triage-worker`
@@ -100,7 +101,8 @@ actor as a reviewer.
 
 ### `autopilot-pr-triage-scheduler`
 
-Selects open PRs (named list or `queue-open` sweep). Classifies
+Selects open PRs (named list or `queue-open` sweep). Sweep fetch
+excludes `triage/recommended` and `status/triaged`. Classifies
 incoming PRs, including those with no linked issue. Never merges,
 never runs review or merge workers.
 
