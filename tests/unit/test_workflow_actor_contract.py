@@ -197,10 +197,14 @@ def test_review_panel_requires_complete_paginated_context_and_watermark_noop() -
     assert "Unchanged context is not a fresh review" in skill
     assert "Ownership consistency gate" in skill
     workflow = _ascii(REVIEW_WORKFLOW)
+    assert "Load **autopilot-pr-review-scheduler**" in workflow
+    assert "autopilot-pr-review-worker" in workflow
+    assert "Do not compose `autopilot-pr-merge-worker`" in workflow
     assert "Invocation mode is `agentic-workflow` (ORIGIN=`unattended`)" in workflow
     assert "Never assign a user" in workflow
     assert "No accepted, no review" in workflow
     assert "do not comment" in workflow
+    assert "Worker emits advisory outputs (not the scheduler)" in workflow
     assert "gh api --paginate" in workflow
     assert "closingIssuesReferences" in workflow
     assert "reviewRequests" in workflow
