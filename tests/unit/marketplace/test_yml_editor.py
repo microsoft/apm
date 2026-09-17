@@ -77,6 +77,7 @@ class TestAddPluginHappy:
             tag_pattern="v{version}",
             tags=["utilities", "testing"],
             include_prerelease=True,
+            category="Productivity",
         )
         assert name == "full-tool"
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
@@ -85,6 +86,7 @@ class TestAddPluginHappy:
         assert added["tag_pattern"] == "v{version}"
         assert added["tags"] == ["utilities", "testing"]
         assert added["include_prerelease"] is True
+        assert added["category"] == "Productivity"
 
     def test_name_defaults_to_repo_from_source(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
@@ -188,6 +190,16 @@ class TestAddPluginErrors:
                 subdir="../etc",
             )
 
+    def test_blank_category_raises(self, tmp_path):
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        with pytest.raises(MarketplaceYmlError, match="category"):
+            add_plugin_entry(
+                yml,
+                source="acme/tool",
+                version=">=1.0.0",
+                category="   ",
+            )
+
 
 # ---------------------------------------------------------------------------
 # add_plugin_entry - comment preservation
@@ -236,6 +248,13 @@ class TestUpdatePluginHappy:
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
         assert entry["subdir"] == "src/plugin"
+
+    def test_update_category(self, tmp_path):
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        update_plugin_entry(yml, "existing-package", category="Productivity")
+        data = yaml.safe_load(yml.read_text(encoding="utf-8"))
+        entry = data["packages"][0]
+        assert entry["category"] == "Productivity"
 
     def test_setting_ref_clears_version(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
@@ -289,6 +308,11 @@ class TestUpdatePluginHappy:
 
 
 class TestUpdatePluginErrors:
+    def test_blank_category_raises(self, tmp_path):
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        with pytest.raises(MarketplaceYmlError, match="category"):
+            update_plugin_entry(yml, "existing-package", category="   ")
+
     def test_package_not_found_raises(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         with pytest.raises(MarketplaceYmlError, match="not found"):
