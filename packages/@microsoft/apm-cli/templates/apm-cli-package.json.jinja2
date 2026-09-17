@@ -1,0 +1,36 @@
+{
+  "name": "@microsoft/apm-cli",
+  "version": "{{ version }}",
+  "description": "APM (Agent Package Manager) -- ship and govern AI agent context",
+  "license": "MIT",
+  "author": "Microsoft",
+  "homepage": "https://microsoft.github.io/apm/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/microsoft/apm.git"
+  },
+  "bugs": "https://github.com/microsoft/apm/issues",
+  "bin": {
+    "apm": "bin/apm"
+  },
+  "keywords": [
+    "agent",
+    "package-manager",
+    "mcp",
+    "ai",
+    "llm",
+    "copilot",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "provenance": true
+  },
+  "optionalDependencies": {
+{% for npm_platform, npm_arch in platforms %}
+    "@microsoft/apm-cli-{{ npm_platform }}-{{ npm_arch }}": "{{ version }}"{{ "," if not loop.last else "" }}
+{% endfor %}
+  }
+}
