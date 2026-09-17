@@ -20,8 +20,11 @@ import os
 import threading
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    from ..models.dependency.reference import DependencyReference
 
 # Public env vars (also recognized by CLI flag plumbing).
 ENV_PROTOCOL = "APM_GIT_PROTOCOL"
@@ -37,6 +40,9 @@ REWRITE_FALLBACK_HINT = (
     "Git URL configuration rewrites every web attempt to the same transport. "
     "Inspect matching rules with "
     "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'."
+)
+_PROTOCOL_FALLBACK_DOCS_URL = (
+    "https://microsoft.github.io/apm/consumer/manage-dependencies/#transport-selection"
 )
 
 
@@ -102,6 +108,53 @@ class TransportPlan:
     attempts: list[TransportAttempt]
     strict: bool
     fallback_hint: str | None = None
+
+
+def initial_transport_scheme(
+    dep_ref: DependencyReference | None,
+    cli_pref: ProtocolPreference = ProtocolPreference.NONE,
+) -> str:
+    """Return the explicit scheme, shorthand SSH preference, or HTTPS default.
+
+    This is the candidate scheme before Git URL rewrites, not the effective
+    transport selected by :class:`TransportSelector`.
+    """
+    explicit = (getattr(dep_ref, "explicit_scheme", None) or "").lower()
+    if explicit:
+        return explicit
+    return "ssh" if cli_pref == ProtocolPreference.SSH else "https"
+
+
+def fallback_port_warning(
+    dep_ref: DependencyReference | None,
+    plan: TransportPlan,
+) -> str | None:
+    """Describe an admitted SSH/HTTPS fallback sharing a declared custom port.
+
+    Callers own emission and deduplication using the downloader's shared state.
+    """
+    dep_port = getattr(dep_ref, "port", None)
+    if (
+        dep_ref is None
+        or plan.strict
+        or dep_port is None
+        or not any(a.scheme == "ssh" for a in plan.attempts)
+        or not any(a.scheme == "https" for a in plan.attempts)
+    ):
+        return None
+    initial_scheme = plan.attempts[0].scheme.upper()
+    fallback_scheme = next(
+        a.scheme.upper() for a in plan.attempts if a.scheme != plan.attempts[0].scheme
+    )
+    host_display = dep_ref.host or "host"
+    return (
+        f"Custom port {dep_port} on {host_display}/{dep_ref.repo_url}: "
+        f"if {initial_scheme} fails, APM will retry over "
+        f"{fallback_scheme} on the same port.\n"
+        f"    Disable protocol fallback in CLI flags, environment, "
+        f"and saved config to fail fast.\n"
+        f"    See: {_PROTOCOL_FALLBACK_DOCS_URL}"
+    )
 
 
 @runtime_checkable
@@ -356,9 +409,10 @@ class TransportSelector:
         Returns:
             :class:`TransportPlan`.
         """
-        explicit = (getattr(dep_ref, "explicit_scheme", None) or "").lower() or None
+        initial_scheme = initial_transport_scheme(dep_ref, cli_pref)
+        explicit = bool(getattr(dep_ref, "explicit_scheme", None))
         candidate = candidate_url
-        if candidate is None and explicit is None:
+        if candidate is None and not explicit:
             builder = getattr(dep_ref, "to_github_url", None)
             candidate = (
                 builder()
@@ -387,11 +441,11 @@ class TransportSelector:
         #    In strict mode (default) the plan contains exactly that one attempt.
         #    With allow_fallback (escape hatch for migration), we keep the user's
         #    explicit starting protocol and then append the opposite protocol.
-        if explicit in ("ssh", "https", "http"):
-            if explicit == "ssh":
+        if explicit and initial_scheme in ("ssh", "https", "http"):
+            if initial_scheme == "ssh":
                 initial = [_SSH]
                 chained = [_AUTH_HTTPS, _PLAIN_HTTPS] if has_token else [_PLAIN_HTTPS]
-            elif explicit == "https":
+            elif initial_scheme == "https":
                 initial = [_AUTH_HTTPS] if has_token else [_PLAIN_HTTPS]
                 chained = [_SSH, _PLAIN_HTTPS] if has_token else [_SSH]
             else:
@@ -422,12 +476,9 @@ class TransportSelector:
 
         # 2. Shorthand (no explicit scheme). Consult the CLI preference and git
         #    insteadOf rewrites to pick the initial protocol.
-        if cli_pref == ProtocolPreference.SSH:
+        if initial_scheme == "ssh":
             initial = [_SSH]
             chained = [_AUTH_HTTPS, _PLAIN_HTTPS] if has_token else [_PLAIN_HTTPS]
-        elif cli_pref == ProtocolPreference.HTTPS:
-            initial = [_AUTH_HTTPS] if has_token else [_PLAIN_HTTPS]
-            chained = [_SSH, _PLAIN_HTTPS] if has_token else [_SSH]
         else:
             # Default shorthand initial attempt: HTTPS. If allow_fallback is on,
             # append SSH (and plain HTTPS after auth) below.

@@ -134,11 +134,10 @@ _SCP_HOST_RE = re.compile(r"^(?:[^/@:\s]+@)?(\[[^\]]+\]|[^/:@\s]+):")
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _GIT_CONFIG_PROBE_TIMEOUTS = (10, 30)
 
-_URL_REWRITE_RECOVERY = (
-    "inspect matching rules with "
-    "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$' "
-    "and remove the unsafe rule"
+_URL_REWRITE_INSPECTION = (
+    "inspect matching rules with 'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'"
 )
+_URL_REWRITE_RECOVERY = f"{_URL_REWRITE_INSPECTION} and remove the unsafe rule"
 
 
 class GitUrlRewriteError(ValueError):
@@ -159,7 +158,7 @@ class GitUrlRewriteProbeError(ValueError):
         self.category = category
         super().__init__(
             f"Unable to verify Git URL rewrite safety ({category}); "
-            f"check Git configuration and retry; {_URL_REWRITE_RECOVERY}"
+            f"check Git configuration and retry; {_URL_REWRITE_INSPECTION}"
         )
 
 
@@ -597,7 +596,13 @@ def _has_applicable_http_authorization(
     headers: Sequence[GitConfigEntry],
     env: dict[str, str],
 ) -> bool:
-    """Ask Git which URL-scoped extra headers apply to one remote."""
+    """Ask Git which URL-scoped extra headers apply to one HTTP(S) remote."""
+    try:
+        scheme = urlsplit(remote_url).scheme.lower()
+    except ValueError:
+        return False
+    if scheme not in {"http", "https"}:
+        return False
     direct_header = env.get("GIT_HTTP_EXTRAHEADER", "")
     if _is_valid_http_extraheader_value(direct_header) and _is_credential_bearing_http_header(
         direct_header
@@ -657,7 +662,7 @@ def _urlmatched_header_group(
     if result.returncode == 1:
         return ()
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
-        raise GitUrlRewriteProbeError("Git URL-match probe failed")
+        raise GitUrlRewriteProbeError(f"Git URL-match probe exited with status {result.returncode}")
     selected = result.stdout.rstrip(b"\0\n")
     prefix = b"X-Apm-Config-Probe: "
     if not selected.startswith(prefix):

@@ -2,6 +2,16 @@
   "version": 1,
   "owners": [
     {
+      "id": "git-transport-selection",
+      "decision": "Initial Git scheme, ordered protocol attempts, and GitLab sparse-fetch plan consumption",
+      "owner": "deps/transport_selection.py (initial_transport_scheme, TransportSelector); deps/download_strategies.py (DownloadDelegate.download_gitlab_file)",
+      "selectors": [
+        "src/apm_cli/deps/transport_selection.py",
+        "src/apm_cli/deps/download_strategies.py"
+      ],
+      "guards": ["transport-platform-gitlab-sparse-plan"]
+    },
+    {
       "id": "unix-install-ownership",
       "decision": "Unix installer destinations, prior-install ownership, native shell setup receipt and unprivileged replacement",
       "owner": "install.sh (apm_is_recognized_bundle, apm_resolve_install_paths, apm_require_owned_bundle, apm_configure_native_shell_path, apm_read_shell_receipt)",

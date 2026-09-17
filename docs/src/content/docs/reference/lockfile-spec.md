@@ -218,7 +218,7 @@ Each item in `dependencies` describes one resolved package.
 | `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
 | `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |
 | `local_path` | string | no | Original path from `apm.yml` for local deps, relative to project root. |
-| `content_hash` | string | no | SHA-256 of the materialized package tree, computed from sorted relative paths and raw file bytes. For remote dependencies it verifies that downloaded or cached content still matches the lock; for local path dependencies it detects source-tree changes. |
+| `content_hash` | string | no | SHA-256 of the materialized package tree, computed from sorted relative paths and raw file bytes. GitCache-backed git-subpath checkouts pin `core.autocrlf=false` so LF-committed content is not rewritten as CRLF on checkout; this pin does not override `.gitattributes` or `core.eol`. Bytes that are committed as CRLF stay CRLF. For remote dependencies it verifies that downloaded or cached content still matches the lock; for local path dependencies it detects source-tree changes. |
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
 | `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
 | `marketplace_plugin_name` | string | no | Plugin name as listed in that marketplace. |

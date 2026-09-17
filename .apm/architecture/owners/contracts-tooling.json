@@ -2,6 +2,20 @@
   "version": 1,
   "owners": [
     {
+      "id": "human-scope-evidence",
+      "decision": "Trusted governance roster and immutable issue-scope record interpretation; evidence never grants automated permission",
+      "owner": "scripts/governance/authority.cjs",
+      "selectors": ["scripts/governance/*.cjs"],
+      "guards": ["contracts-tooling-governance-evidence"]
+    },
+    {
+      "id": "onboarding-metadata-only",
+      "decision": "Discovery inventory and consented consumer dependency delta; never source or deployment mutation",
+      "owner": "adopt/discovery.py + adopt/materialize.py + adopt/manifest_edit.py",
+      "selectors": ["src/apm_cli/adopt/*.py", "src/apm_cli/commands/discover.py", "src/apm_cli/commands/init.py"],
+      "guards": ["onboarding-metadata-only"]
+    },
+    {
       "id": "dependency-identity-materialization",
       "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; embedded git URL subpath validation",
       "owner": "models/dependency/identity.py + materialization.py + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py)",

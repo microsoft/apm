@@ -51,7 +51,7 @@ from ..utils.github_host import (
 )
 from .git_remote_ops import validate_ls_remote_tag_output
 from .github_rate_limit import raise_for_github_throttle
-from .transport_selection import ProtocolPreference
+from .transport_selection import ProtocolPreference, initial_transport_scheme
 
 if TYPE_CHECKING:
     import requests
@@ -150,10 +150,7 @@ class GitReferenceResolver:
 
         is_ado = dep_ref.is_azure_devops()
         repo_url_base = dep_ref.repo_url
-        explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower()
-        candidate_uses_ssh = explicit_scheme == "ssh" or (
-            not explicit_scheme and host._protocol_pref == ProtocolPreference.SSH
-        )
+        candidate_uses_ssh = initial_transport_scheme(dep_ref, host._protocol_pref) == "ssh"
         rewrite_candidate = host._build_repo_url(
             repo_url_base,
             use_ssh=candidate_uses_ssh,

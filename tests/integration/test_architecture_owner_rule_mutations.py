@@ -140,6 +140,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Generated footer owner loses the one canonical builder definition.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-governance-evidence",
+        rule_id="contracts-tooling-governance-evidence",
+        path="scripts/governance/authority.cjs",
+        old="authorizes_implementation: false",
+        new="authorizes_implementation: true",
+        intent="Advisory evidence starts claiming implementation authority.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-lockfile-read",
         rule_id="contracts-tooling-lockfile-read",
         path="src/apm_cli/deps/lockfile.py",
@@ -593,6 +601,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local marketplace version precedence skips the plugin.json fallback read.",
     ),
     MutationCase(
+        guard_id="onboarding-metadata-only",
+        rule_id="onboarding-metadata-only",
+        path="src/apm_cli/adopt/discovery.py",
+        old="validate_apm_package(path, read_only=True)",
+        new="validate_apm_package(path, read_only=False)",
+        intent="Discovery allows package admission to mutate the source it is inventorying.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-bootstrap-project-name",
         rule_id="registry_delegation.bootstrap_project_name",
         path="src/apm_cli/core/project_name.py",
@@ -952,6 +968,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             "def _debug(message: str) -> None:"
         ),
         intent="A parallel throttle classifier appears outside deps/github_rate_limit.py.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-gitlab-sparse-plan",
+        rule_id="transport-platform-gitlab-sparse-plan",
+        path="src/apm_cli/deps/download_strategies.py",
+        old="        if rest_eligible:",
+        new="        if True:  # bypass rest_eligible",
+        intent="GitLab file downloads bypass the executed HTTPS plan gate before REST.",
     ),
     MutationCase(
         guard_id="transport-platform-host-credential-resolution",

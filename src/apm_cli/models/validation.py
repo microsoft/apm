@@ -340,6 +340,7 @@ def validate_apm_package(
     *,
     source_path: Path | None = None,
     agent_plugin_detection: AgentPluginDetection | None = None,
+    read_only: bool = False,
 ) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
 
@@ -354,6 +355,7 @@ def validate_apm_package(
 
     Args:
         package_path: Path to the directory to validate
+        read_only: Reject formats requiring normalization and avoid config creation.
 
     Returns:
         ValidationResult: Validation results with any errors/warnings
@@ -430,6 +432,7 @@ def validate_apm_package(
             result,
             source_path=source_path,
             detection=native_detection,
+            create_config=not read_only,
         )
 
     # Handle Claude Skills (no apm.yml) - auto-generate minimal apm.yml
@@ -439,16 +442,22 @@ def validate_apm_package(
 
     # Handle Marketplace Plugins (no apm.yml) - synthesize apm.yml from plugin.json
     if result.package_type == PackageType.MARKETPLACE_PLUGIN:
-        return _validate_marketplace_plugin(
-            package_path,
-            plugin_json_path,
-            result,
-            source_path=source_path,
-        )
+        if read_only:
+            result.add_error("Plugin requires normalization; prepare a local APM package manually.")
+        else:
+            result = _validate_marketplace_plugin(
+                package_path,
+                plugin_json_path,
+                result,
+                source_path=source_path,
+            )
+        return result
 
     # Handle Skill Bundles (nested skills/<name>/SKILL.md)
     if result.package_type == PackageType.SKILL_BUNDLE:
-        return _validate_skill_bundle(package_path, result, source_path=source_path)
+        return _validate_skill_bundle(
+            package_path, result, source_path=source_path, create_config=not read_only
+        )
 
     # Standard APM package or HYBRID validation (has apm.yml)
     apm_yml_path = package_path / APM_YML_FILENAME
@@ -462,6 +471,7 @@ def validate_apm_package(
             apm_yml_path,
             result,
             source_path=source_path,
+            create_config=not read_only,
         )
 
     return _validate_apm_package_with_yml(
@@ -469,6 +479,7 @@ def validate_apm_package(
         apm_yml_path,
         result,
         source_path=source_path,
+        create_config=not read_only,
     )
 
 
@@ -479,6 +490,7 @@ def _validate_agent_plugin(
     *,
     source_path: Path | None = None,
     detection: AgentPluginDetection | None = None,
+    create_config: bool = True,
 ) -> ValidationResult:
     """Validate an Agent Plugin without entering Claude normalization."""
     if plugin_json_path is None:
@@ -492,7 +504,7 @@ def _validate_agent_plugin(
         plugin = detection.plugin
         from ..agent_plugins.projection import project_agent_plugin_package
 
-        package = project_agent_plugin_package(plugin)
+        package = project_agent_plugin_package(plugin, create_config=create_config)
         if source_path is not None:
             package.source_path = source_path.resolve()
     except AgentPluginError as exc:
@@ -583,6 +595,7 @@ def _validate_skill_bundle(
     result: ValidationResult,
     *,
     source_path: Path | None = None,
+    create_config: bool = True,
 ) -> ValidationResult:
     """Validate a SKILL_BUNDLE package (nested skills/<name>/SKILL.md).
 
@@ -682,7 +695,9 @@ def _validate_skill_bundle(
     # Build APMPackage: use apm.yml if present, otherwise synthesize
     if apm_yml_path.exists():
         try:
-            package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
+            package = APMPackage.from_apm_yml(
+                apm_yml_path, source_path=source_path, create_config=create_config
+            )
         except (ValueError, FileNotFoundError) as e:
             result.add_error(f"Invalid apm.yml: {e}")
             return result
@@ -706,6 +721,7 @@ def _validate_hybrid_package(
     result: ValidationResult,
     *,
     source_path: Path | None = None,
+    create_config: bool = True,
 ) -> ValidationResult:
     """Validate a HYBRID package (apm.yml + SKILL.md).
 
@@ -735,6 +751,7 @@ def _validate_hybrid_package(
             apm_yml_path,
             result,
             source_path=source_path,
+            create_config=create_config,
         )
 
     # --- Skill-bundle path (no .apm/) ---
@@ -742,7 +759,9 @@ def _validate_hybrid_package(
 
     # Parse apm.yml -- authoritative for APM-owned fields.
     try:
-        package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
+        package = APMPackage.from_apm_yml(
+            apm_yml_path, source_path=source_path, create_config=create_config
+        )
     except (ValueError, FileNotFoundError) as e:
         result.add_error(f"Invalid apm.yml: {e}")
         return result
@@ -846,6 +865,7 @@ def _validate_apm_package_with_yml(
     result: ValidationResult,
     *,
     source_path: Path | None = None,
+    create_config: bool = True,
 ) -> ValidationResult:
     """Validate a standard APM package with apm.yml.
 
@@ -861,7 +881,9 @@ def _validate_apm_package_with_yml(
 
     # Try to parse apm.yml
     try:
-        package = APMPackage.from_apm_yml(apm_yml_path, source_path=source_path)
+        package = APMPackage.from_apm_yml(
+            apm_yml_path, source_path=source_path, create_config=create_config
+        )
         result.package = package
     except (ValueError, FileNotFoundError) as e:
         result.add_error(f"Invalid apm.yml: {e}")
