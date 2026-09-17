@@ -417,6 +417,10 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 
 ## Configuration and updates
 
+Updating selected packages preserves deployment targets in `apm.lock.yaml` for
+refreshed and untouched dependencies, including shared `.agents/skills/` paths.
+No follow-up install is needed to restore those target records.
+
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm config` | Show current configuration | -- |

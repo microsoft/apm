@@ -391,6 +391,10 @@ class LockfileBuilder:
                     lockfile.dependencies[dep_key].source_digest = prov.get("source_digest")
 
     def _merge_existing(self, lockfile: LockFile) -> None:
+        # Partial operations merge untouched dependencies and their canonical
+        # deployment records together in _maybe_merge_partial.
+        if self.ctx.only_packages:
+            return
         if self.ctx.existing_lockfile and not self.ctx.update_refs:
             retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
             for dep_key, dep in self.ctx.existing_lockfile.dependencies.items():
@@ -424,8 +428,14 @@ class LockfileBuilder:
         if self.ctx.only_packages:
             existing = _LF.read(lockfile_path)
             if existing:
-                for key, dep in lockfile.dependencies.items():  # noqa: B007
-                    existing.add_dependency(dep)
+                from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+                DeploymentLedgerCodec.merge_dependencies(
+                    existing,
+                    lockfile,
+                    project_root=self.ctx.project_root,
+                    diagnostics=self.ctx.diagnostics,
+                )
                 lockfile = existing
         return lockfile
 
