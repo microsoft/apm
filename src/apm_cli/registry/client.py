@@ -84,6 +84,7 @@ def _decode_registry_json(raw: bytes) -> Any:
 
 
 _DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
+OFFICIAL_MCP_REGISTRY_URL = "https://registry.modelcontextprotocol.io"
 
 # Human-readable name of each ambient precedence layer, for the one-line
 # "Using MCP registry: <url> (<label>)" diagnostic. Callers label their own
@@ -98,6 +99,7 @@ REGISTRY_SOURCE_LABELS = {
 # the layer that supplied it. Naming the wrong knob is worse than naming none.
 _REGISTRY_URL_HINTS = {
     "explicit": "Check the --registry value or the dependency's registry: URL.",
+    "flag": "Check the --registry value.",
     "env": "Check MCP_REGISTRY_URL if set.",
     "config": "Check 'apm config get mcp-registry-url'.",
     "default": "",
@@ -217,6 +219,11 @@ _V0_1_PREFIX = "/v0.1"
 # explicit at the call site so a future caller cannot bypass search
 # and feed attacker-controlled strings into the path.
 _SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)?$")
+
+
+def is_valid_mcp_server_name(server_name: object) -> bool:
+    """Return whether ``server_name`` has the MCP Registry spec-safe shape."""
+    return isinstance(server_name, str) and _SERVER_NAME_RE.fullmatch(server_name) is not None
 
 
 class ServerNotFoundError(ValueError):
@@ -623,7 +630,7 @@ class SimpleRegistryClient:
             ServerNotFoundError: If the registry returns 404.
             requests.RequestException: If the request fails for other reasons.
         """
-        if not _SERVER_NAME_RE.match(server_name or ""):
+        if not is_valid_mcp_server_name(server_name):
             raise ValueError(
                 f"Invalid server name {server_name!r}: expected MCP spec shape "
                 f"(reverse-DNS identifier, optionally with a single '/<repo>' suffix)."

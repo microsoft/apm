@@ -111,6 +111,8 @@ def _rich_echo(
     style: str = None,  # noqa: RUF013
     bold: bool = False,
     symbol: str = None,  # noqa: RUF013
+    *,
+    soft_wrap: bool = False,
 ):
     """Echo message with Rich formatting or colorama fallback."""
     # Handle backward compatibility - if style is provided, use it as color
@@ -127,7 +129,13 @@ def _rich_echo(
             style_str = color
             if bold:
                 style_str = f"bold {color}"
-            console.print(message, style=style_str, highlight=False, markup=False)
+            console.print(
+                message,
+                style=style_str,
+                highlight=False,
+                markup=False,
+                soft_wrap=soft_wrap,
+            )
             return
         except Exception:
             pass
@@ -167,9 +175,14 @@ def _rich_warning(message: str, symbol: str = None):  # noqa: RUF013
     _rich_echo(message, color="yellow", symbol=symbol)
 
 
-def _rich_info(message: str, symbol: str = None):  # noqa: RUF013
+def _rich_info(
+    message: str,
+    symbol: str = None,  # noqa: RUF013
+    *,
+    soft_wrap: bool = False,
+):
     """Display info message with blue color."""
-    _rich_echo(message, color="blue", symbol=symbol)
+    _rich_echo(message, color="blue", symbol=symbol, soft_wrap=soft_wrap)
 
 
 def _rich_panel(content: str, title: str = None, style: str = "cyan"):  # noqa: RUF013
