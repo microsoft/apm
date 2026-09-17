@@ -124,6 +124,7 @@ def test_invalid_lock_alias_guidance_repairs_the_lock_not_the_manifest() -> None
     """A lock-only defect must not send users back to an already-valid manifest."""
     with pytest.raises(ValueError, match=r"Restore a known-good apm\.lock\.yaml") as caught:
         LockedDependency.from_dict({"repo_url": "owner/package", "alias": ".."})
+    assert "from version control" in str(caught.value)
     assert "Do not delete content" in str(caught.value)
     assert "in apm.yml" not in str(caught.value)
 

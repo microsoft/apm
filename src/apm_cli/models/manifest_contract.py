@@ -29,7 +29,8 @@ def negotiate_manifest_contract(data: dict) -> ManifestContract:
     if schema_uri in (OPENAPM_V01_SCHEMA_URI, OPENAPM_V0141_SCHEMA_URI):
         return ManifestContract.OPENAPM_V01
     raise UnsupportedManifestContractError(
-        f"Unsupported apm.yml $schema contract: {schema_uri!r}. "
-        f"Use a supported explicit contract: {OPENAPM_V01_SCHEMA_URI} "
-        f"or {OPENAPM_V0141_SCHEMA_URI}"
+        f"Unsupported apm.yml $schema contract: {schema_uri!r}.\n"
+        "Use a supported explicit contract:\n"
+        f"  {OPENAPM_V01_SCHEMA_URI}\n"
+        f"  {OPENAPM_V0141_SCHEMA_URI}"
     )

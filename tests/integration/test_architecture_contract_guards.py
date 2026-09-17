@@ -246,6 +246,8 @@ def test_manifest_schema_negotiates_normative_v01_registry_shape(
 
 def test_unknown_manifest_schema_identity_fails_closed(tmp_path: Path) -> None:
     """A future schema cannot be silently interpreted as the working draft."""
+    from urllib.parse import urlparse
+
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.manifest_contract import UnsupportedManifestContractError
 
@@ -255,8 +257,13 @@ def test_unknown_manifest_schema_identity_fails_closed(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(UnsupportedManifestContractError):
+    with pytest.raises(UnsupportedManifestContractError) as caught:
         APMPackage.from_apm_yml(manifest)
+    urls = [urlparse(line.strip()) for line in str(caught.value).splitlines()[2:]]
+    assert [(url.scheme, url.hostname, url.path) for url in urls] == [
+        ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.schema.json"),
+        ("https", "microsoft.github.io", "/apm/specs/schemas/manifest-v0.1.41.schema.json"),
+    ]
 
 
 def test_lifecycle_docs_match_explicit_compilation_contract() -> None:

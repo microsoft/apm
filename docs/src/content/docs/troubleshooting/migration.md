@@ -107,27 +107,34 @@ unverified recovery entry automatically.
 
 ### Rejected dependency aliases
 
-APM now rejects aliases `.` and `..`. The alias directory must resolve strictly
-under `apm_modules/`, including through symlinks. Safe dotted names such as
-`.safe`, `safe.`, `foo..bar`, and `my-skill.v2` remain valid; see the
+This repair changes no CLI commands or flags; it intentionally tightens
+invalid-input handling. After whitespace trimming, exactly the bare tokens
+`.` and `..` are newly rejected aliases. Separators (`/`, `\`) and percent
+escapes were already invalid. `.safe`, `safe.`, `foo..bar`, and `my-skill.v2`
+remain valid; see the
 [alias field reference](../../reference/manifest-schema/#412-object-form).
 
-1. In the declaring `apm.yml`, replace `alias: .` or `alias: ..` with
-   `alias: my-skill.v2`. Leave the source unchanged, including local `../` paths.
-2. Run `apm install`.
-3. Review `apm.lock.yaml`, installed package contents, and generated deployment
-   changes before committing. Do not assume previously incorrect metadata is
-   automatically repaired.
+Alias destinations must resolve strictly beneath `apm_modules/`; symlinks
+resolving to that root or outside it fail.
 
-Do not remove or prune the rejected alias path: it can refer to
-`apm_modules/` itself or its parent.
+1. Replace `alias: .` or `alias: ..` in the declaring `apm.yml` with
+   `alias: my-skill.v2`. For unsafe symlink destinations, choose a separate
+   package directory without removing the symlink target. Keep source paths,
+   including local `../` paths, unchanged.
+2. Run `apm install`. Review the lockfile, installed contents, and deployment
+   changes before committing; do not assume prior metadata is repaired.
 
-Valid aliases now persist in the lockfile so audit replay, hooks, MCP,
-and cleanup use the same directory as installation. For an older aliased
-install, run `apm install` and review the new `alias` metadata before
-committing. Keep using the updated CLI: older readers may preserve this
-field without honoring its placement. A missing alias never defaults to
-the package's inventory `name`.
+Never remove or prune a rejected alias path: it can refer to `apm_modules/`
+or its parent.
+
+The optional lock-entry `alias` fixes lost placement during replay and cleanup
+without changing `lockfile_version`. Reinstall older aliased dependencies and
+review this metadata. Older readers may preserve the field without honoring
+placement; an absent alias never uses inventory `name`.
+
+Opting into the [0.1.41 manifest `$schema`](../../reference/manifest-schema/#2-document-structure)
+requires a client supporting that exact identity. Older clients lacking it
+fail closed; this explicit opt-in is not backward-compatible.
 
 ## 4. Compile strategy migration
 

@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PR-review scheduler no longer queues every open pull request. A fresh review requires the `panel-review` label (same trigger as the Agentic Workflow), `status/accepted` on the PR, or an explicit named PR list. The reviewing session also requires `status/accepted` on the PR or a linked issue; otherwise scheduler and review-worker stop with no comment. The worker may clear `panel-review`; the scheduler does not comment or change labels. Both also apply a CODEOWNERS last-comment gate: read the last CODEOWNER comment as conditions and evaluate them against later comments AND labels on the PR and linked issues. Drop or `noop` only when those conditions are unmet or unclear. Named list does not bypass that gate.
 - Issue-triage sweep no longer classifies real GitHub bug forms as spam: heading/list line matches no longer swallow the rest of the body after markup strip.
 
+### Security
+
+- **BREAKING (invalid inputs):** Reject bare `.`/`..` aliases and unsafe symlink destinations; safe dotted aliases and CLI commands/flags are unchanged. Preserve replay placement via optional lock `alias`, without a `lockfile_version` bump. Clients lacking 0.1.41 manifest `$schema` support fail closed on that explicit opt-in; see `specs/openapm-v0.1.md` (`req-mf-025`) and [migration](https://microsoft.github.io/apm/troubleshooting/migration/#rejected-dependency-aliases). - by @Danvs60 (#2901)
+
 ## [0.31.0] - 2026-09-15
 
 ### Added
@@ -61,7 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Dependency aliases now reject `.` and `..`, require contained destinations, and persist placement for replay and cleanup; documented in `specs/openapm-v0.1.md` (`req-mf-025`). [Review alias migration and reinstall artifacts](https://microsoft.github.io/apm/troubleshooting/migration/#rejected-dependency-aliases). - by @Danvs60 (#2901)
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
 - Dependency policy `allow`, `deny`, and exact `require` matching now follows canonical owner/repository casing, fixing mixed-case blocks and deny fail-open behavior while retaining lazy shared required-package lookup. APM 0.30.0 and earlier match patterns byte-exactly against the lowercased identity; lowercase patterns keep matching in every release, so drop workaround duplicates only after every runner uses a release carrying this fix. (#2706)
 - File-lock retry diagnostics no longer include paths or exception text that may contain secrets, while retaining retry counts and delays. (#2742)

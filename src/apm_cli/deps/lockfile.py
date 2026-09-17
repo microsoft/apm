@@ -290,7 +290,8 @@ class LockedDependency:
         except ValueError as exc:
             raise ValueError(
                 f"Invalid lockfile dependency alias {self.alias!r}. Restore a known-good "
-                "apm.lock.yaml or correct this entry's alias to its intended placement. "
+                "apm.lock.yaml from version control or correct this entry's alias "
+                "to its intended placement. "
                 "Do not delete content at a rejected alias destination."
             ) from exc
         original_repo_url = self.repo_url
