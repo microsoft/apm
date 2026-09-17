@@ -23,6 +23,7 @@ Focuses on:
 from __future__ import annotations
 
 import os
+import subprocess
 from threading import Thread
 from unittest.mock import MagicMock, patch
 
@@ -777,8 +778,88 @@ class TestTryWithFallbackCredentialChain:
             path="contoso/platform/tools",
         )
         gcm_env = attempts[-1][1]
-        assert gcm_env["GIT_CONFIG_KEY_0"] == "http.extraheader"
-        assert gcm_env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+        count = int(gcm_env.get("GIT_CONFIG_COUNT", "0"))
+        pairs = [
+            (gcm_env[f"GIT_CONFIG_KEY_{i}"], gcm_env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(count)
+        ]
+        assert any(
+            key == "http.extraheader" and value.startswith("Authorization: Basic ")
+            for key, value in pairs
+        )
+
+    def test_ado_wrapped_git_stderr_falls_back_to_repository_credential(self) -> None:
+        inner = subprocess.CalledProcessError(
+            128,
+            ["git", "clone"],
+            stderr=b"fatal: unable to access: The requested URL returned error: 401",
+        )
+        wrapped = RuntimeError("git clone failed")
+        wrapped.__cause__ = inner
+        attempts: list[str | None] = []
+
+        def _op(token, _env):
+            attempts.append(token)
+            if token == "gcm-token":
+                return "ok"
+            raise wrapped
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+            result = resolver.try_with_fallback("dev.azure.com", _op, path="org/proj/_git/repo")
+
+        assert result == "ok"
+        assert attempts[-1] == "gcm-token"
+        credential_fill.assert_called_once()
+
+    def test_ado_tf401_does_not_probe_credential_helper(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ) as credential_fill,
+        ):
+            resolver = AuthResolver()
+
+            def _op(_token, _env):
+                raise RuntimeError("TF401019: The Git repository does not exist")
+
+            with pytest.raises(RuntimeError, match="TF401019"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        credential_fill.assert_not_called()
+
+    def test_ado_empty_fill_logs_and_wraps_terminal_error(self) -> None:
+        logs: list[str] = []
+
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value=None,
+            ),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(RuntimeError, match="git credential fill"):
+                resolver.try_with_fallback(
+                    "dev.azure.com",
+                    _op,
+                    verbose_callback=logs.append,
+                )
+
+        assert any("returned no credential" in line for line in logs)
 
     def test_ado_network_failure_does_not_probe_credential_helper(self) -> None:
         with (

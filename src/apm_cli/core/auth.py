@@ -719,7 +719,8 @@ class AuthResolver:
             """
             if ctx.source in ("gh-auth-token", "git-credential-fill", "none"):
                 raise exc
-            # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
+            # ADO fill is owned by _try_ado_credential_fallback after PAT
+            # and az bearer, not this GitHub-class secondary chain.
             if host_info.kind == "ado":
                 raise exc
             _log(
@@ -771,7 +772,7 @@ class AuthResolver:
                 raise exc
             from apm_cli.utils.github_host import is_ado_auth_failure_signal
 
-            if not is_ado_auth_failure_signal(str(exc)):
+            if not is_ado_auth_failure_signal(exc):
                 raise exc
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
 
@@ -812,13 +813,21 @@ class AuthResolver:
                 )
             raise exc
 
+        def _ado_chain_exhausted(exc: Exception) -> T:
+            raise RuntimeError(
+                f"Authentication failed for {host_info.display_name}: "
+                "ADO_APM_PAT, az CLI bearer, and git credential fill were "
+                "all rejected. Refresh ADO_APM_PAT, run 'az login', or store "
+                "a repository credential in Git Credential Manager, then retry."
+            ) from exc
+
         def _try_ado_credential_fallback(exc: Exception) -> T:
             """Retry ADO with a repository-scoped Git credential helper."""
             if not self._allow_external_fallback:
                 raise exc
             from apm_cli.utils.github_host import is_ado_auth_failure_signal
 
-            if not is_ado_auth_failure_signal(str(exc)):
+            if not is_ado_auth_failure_signal(exc):
                 raise exc
             path_suffix = f" (path={path})" if path else ""
             _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
@@ -828,17 +837,28 @@ class AuthResolver:
                 path=path,
             )
             if not credential:
-                raise exc
+                _log(
+                    f"git credential fill returned no credential for "
+                    f"{host_info.display_name}; re-raising original error"
+                )
+                return _ado_chain_exhausted(exc)
             _log(f"git credential fill resolved a credential for {host_info.display_name}")
-            return operation(
-                credential,
-                self._build_git_env(
+            try:
+                return operation(
                     credential,
-                    scheme="basic",
-                    host_kind="ado",
-                    base_env=base_env,
-                ),
-            )
+                    self._build_git_env(
+                        credential,
+                        scheme="basic",
+                        host_kind="ado",
+                        base_env=base_env,
+                    ),
+                )
+            except Exception as fill_exc:
+                _log(
+                    f"git credential fill was rejected for {host_info.display_name}; "
+                    "re-raising after PAT, az bearer, and fill"
+                )
+                return _ado_chain_exhausted(fill_exc)
 
         # Hosts that never have public repos -> auth-only
         if host_info.kind == "ghe_cloud":

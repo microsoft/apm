@@ -68,7 +68,7 @@ If you operate multiple GitLab instances, list them in `APM_GITLAB_HOSTS` (comma
 Azure DevOps Services hosts (`dev.azure.com` and `*.visualstudio.com`) use:
 
 ```text
-ADO_APM_PAT   ->   AAD bearer (via az cli)   ->   none
+ADO_APM_PAT   ->   AAD bearer (via az cli)   ->   git credential fill
 ```
 
 ```bash
@@ -85,10 +85,10 @@ az login
 apm install
 ```
 
-Azure DevOps Server is PAT-only:
+Azure DevOps Server uses PAT then git credential fill:
 
 ```text
-ADO_APM_PAT   ->   none
+ADO_APM_PAT   ->   git credential fill
 ```
 
 ```bash

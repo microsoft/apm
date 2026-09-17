@@ -17,10 +17,10 @@ Pick the path that matches your dependencies:
 - **Private github.com / GHE.com / GHES packages.** Either run `gh auth login` (recommended) or set `GITHUB_APM_PAT`.
 - **GitLab packages (SaaS or self-managed).** Set `GITLAB_APM_PAT`, or rely on your `git credential` helper.
 - **Azure DevOps Services packages.** Set `ADO_APM_PAT`, or run `az login`;
-  APM checks the PAT first.
+  APM checks the PAT first, then `az`, then your git credential helper.
 - **Azure DevOps Server packages.** Register the host with `ADO_HOST` or
   `APM_ADO_HOSTS`, then set `ADO_APM_PAT`. Server does not use the Azure CLI
-  bearer.
+  bearer; a rejected PAT retries `git credential fill`.
 - **Bitbucket, Gitea, or any other git host.** Use your existing `git credential` helper -- if `git clone <url>` works in your shell, `apm install` works too.
 
 That covers the consumer case. The rest of this page expands each path.

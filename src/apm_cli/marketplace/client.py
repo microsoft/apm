@@ -616,8 +616,26 @@ def _fetch_git(
             sparse_paths=[file_path] if "/" in file_path else None,
         )
 
+    ado_host = getattr(host_info, "kind", "") == "ado"
+    git_env: dict | None = None
+    if not ado_host:
+        try:
+            auth_ctx = (
+                auth_resolver.resolve_for_remote(host_info.host, source.url, org, port=source.port)
+                if source.port is not None
+                else auth_resolver.resolve_for_remote(host_info.host, source.url, org)
+            )
+            git_env = auth_resolver.git_env_for_remote(auth_ctx, source.url)
+        except (GitUrlRewriteError, GitUrlRewriteProbeError, ValueError) as exc:
+            logger.debug(
+                "Generic-git policy rejected '%s': %s",
+                source.name,
+                type(exc).__name__,
+            )
+            raise _rewrite_policy_error(exc) from exc
+
     try:
-        if getattr(host_info, "kind", "") == "ado":
+        if ado_host:
             fallback_kwargs = {
                 "org": org,
                 "path": urlsplit(source.url).path.lstrip("/"),
@@ -632,22 +650,6 @@ def _fetch_git(
                 **fallback_kwargs,
             )
         else:
-            try:
-                auth_ctx = (
-                    auth_resolver.resolve_for_remote(
-                        host_info.host, source.url, org, port=source.port
-                    )
-                    if source.port is not None
-                    else auth_resolver.resolve_for_remote(host_info.host, source.url, org)
-                )
-                git_env = auth_resolver.git_env_for_remote(auth_ctx, source.url)
-            except ValueError as exc:
-                logger.debug(
-                    "Generic-git policy rejected '%s': %s",
-                    source.name,
-                    type(exc).__name__,
-                )
-                raise _rewrite_policy_error(exc) from exc
             checkout_dir = _checkout(None, git_env)
     except (GitUrlRewriteError, GitUrlRewriteProbeError) as exc:
         logger.debug("Generic-git rewrite policy rejected '%s'", source.name)

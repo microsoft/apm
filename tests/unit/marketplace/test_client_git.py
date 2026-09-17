@@ -217,6 +217,8 @@ def test_fetch_git_ado_url_routes_via_auth_fallback(tmp_path: Path, fake_auth_re
     assert result == {}
     _, fallback_kwargs = fake_auth_resolver.try_with_fallback.call_args
     assert fallback_kwargs["path"] == "org/project/_git/repo"
+    fake_auth_resolver.hardened_git_base_env.assert_called_once()
+    assert fallback_kwargs["base_env"] is fake_auth_resolver.hardened_git_base_env.return_value
     env = gitcache_mock.get_checkout.call_args.kwargs["env"]
     assert "GIT_CONFIG_VALUE_0" in env
 
