@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - PR-review scheduler no longer queues every open pull request. A fresh review requires the `panel-review` label (same trigger as the Agentic Workflow), `status/accepted` on the PR, or an explicit named PR list. The reviewing session also requires `status/accepted` on the PR or a linked issue; otherwise scheduler and review-worker stop with no comment. The worker may clear `panel-review`; the scheduler does not comment or change labels. Both also apply a CODEOWNERS last-comment gate: read the last CODEOWNER comment as conditions and evaluate them against later comments AND labels on the PR and linked issues. Drop or `noop` only when those conditions are unmet or unclear. Named list does not bypass that gate.
 - Issue-triage sweep no longer classifies real GitHub bug forms as spam: heading/list line matches no longer swallow the rest of the body after markup strip.
+- Cursor target no longer emits a quoted, multi-item YAML list for `globs` when an instruction's `applyTo` has comma-separated globs; it now emits the single comma-joined, always-bare scalar Cursor's own `.mdc` docs document -- including patterns starting with `**`, which every Cursor doc example leaves unquoted too. `description` no longer forces `\uXXXX`-escaped non-ASCII text either. (#3002)
 
 ### Security
 

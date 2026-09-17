@@ -215,7 +215,7 @@ print("ordinary Markdown")
         ("target", "deployed_path", "scope_marker"),
         [
             ("claude", ".claude/rules/test-skill.md", '  - "src/**"'),
-            ("cursor", ".cursor/rules/test-skill.mdc", 'globs: "src/**"'),
+            ("cursor", ".cursor/rules/test-skill.mdc", "globs: src/**"),
             ("windsurf", ".windsurf/rules/test-skill.md", 'globs: "src/**"'),
             ("kiro", ".kiro/steering/test-skill.md", 'fileMatchPattern: "src/**"'),
             ("antigravity", ".agents/rules/test-skill.md", 'globs: "src/**"'),
