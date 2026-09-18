@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `batch_fetch_server_info` now looks up independent MCP registry documents concurrently with a bounded `ThreadPoolExecutor` (max 4 workers), matching the existing install-check fan-out. Closes #2981. (#2983)
 - `apm --help`, `apm doctor --help`, and `apm config get` no longer import heavyweight command modules (`install`, `audit`, `pack`, `marketplace`, `uninstall`, `update`); those load only when the matching verb is invoked. (#3001)
 - Issue and PR triage GitHub comments are human prose only. Activation cards default `json: off` (omitted is off, not a missing-field stop). `json: on` emits an internal `triage-recommendation` receipt only; never post JSON on GitHub. The Triage Panel agentic workflow passes `json: off` and does not require a JSON tail. The PR Review Panel agentic workflow loads `autopilot-pr-review-scheduler` then runs `autopilot-pr-review-worker` in-thread; it does not compose the merge worker. PR triage auto-applies `status/deferred` when there is no linked `status/accepted` issue, thanks the author, and asks them to open an issue first per CONTRIBUTING.md.
 - Autopilot worker sessions are named `{Domain} {stage} #{n}` (`Issue triage #2993`). No GitHub title.
