@@ -520,7 +520,7 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 | Purpose | Environment variables (checked in order) |
 |---|---|
 | GitHub packages | `GITHUB_APM_PAT`, `GITHUB_TOKEN`, `GH_TOKEN` |
-| Azure DevOps packages | `ADO_APM_PAT` |
+| Azure DevOps packages | `ADO_APM_PAT`, then Azure CLI bearer, then path-scoped `git credential fill` |
 
 - **Never stored in files.** Tokens are read from the environment at runtime. They are never written to `apm.yml`, `apm.lock.yaml`, or any generated file.
 - **Never logged.** Token values are not included in console output, error messages, or debug logs.
@@ -535,7 +535,8 @@ When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps Services
 (`dev.azure.com` and `*.visualstudio.com`) with a Microsoft Entra ID bearer
 token issued on demand by the Azure CLI (`az account get-access-token`).
 Azure DevOps Server hosts configured with `ADO_HOST` or `APM_ADO_HOSTS`
-are PAT-only. The Services bearer posture:
+are PAT then path-scoped `git credential fill` (no Azure CLI bearer).
+The Services bearer posture:
 
 - **Short-lived.** Tokens expire in roughly 60 minutes, are acquired per resolution, and are never persisted by APM.
 - **No new secrets in manifests.** Nothing is written to `apm.yml` or `apm.lock.yaml`. The token never crosses the `apm.yml`/lockfile boundary.

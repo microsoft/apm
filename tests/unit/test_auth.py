@@ -1695,13 +1695,25 @@ class TestCredentialFallbackOrderRegressionTrap:
                 def ado_op(token, env):
                     raise RuntimeError("401 unauthorized")
 
-                with pytest.raises(RuntimeError, match="401 unauthorized"):
+                with (
+                    patch.object(
+                        GitHubTokenManager,
+                        "resolve_credential_from_git",
+                        return_value=None,
+                    ),
+                    pytest.raises(
+                        RuntimeError,
+                        match=r"ADO_APM_PAT, az CLI bearer, and git credential fill",
+                    ) as caught,
+                ):
                     resolver.try_with_fallback("dev.azure.com", ado_op)
 
         assert bearer_calls, (
-            "ADO bearer must be attempted before re-raising original PAT error; "
+            "ADO bearer must be attempted before wrapping the exhausted chain; "
             "cascade order changed (regression trap #935)"
         )
+        assert caught.value.__cause__ is not None
+        assert str(caught.value.__cause__) == "401 unauthorized"
 
     def test_ghe_cloud_never_falls_back_to_unauth(self):
         """ghe_cloud: unauthenticated fallback must NEVER be attempted.

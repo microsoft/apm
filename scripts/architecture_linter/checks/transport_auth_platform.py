@@ -219,7 +219,13 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
         ("src/apm_cli/install/helpers/ref_reuse.py", ("hardened_git_env_for_context",)),
         (
             "src/apm_cli/marketplace/client.py",
-            ("resolve_for_remote", "git_env_for_remote"),
+            (
+                "resolve_for_remote",
+                "git_env_for_remote",
+                "validate_git_url_rewrite_safety",
+                "try_with_fallback",
+                "except AdoAuthChainExhaustedError as exc:",
+            ),
         ),
         ("src/apm_cli/marketplace/builder.py", ("hardened_git_env_for_context",)),
         ("src/apm_cli/marketplace/auth_helpers.py", ('ctx.token or ctx.host_info.kind == "ado"',)),

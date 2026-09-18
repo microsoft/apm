@@ -1548,7 +1548,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:bf1039cb63dbb968d50dbf4a9e4ceec9a4c30e40e8dd666d404f1c39eda55bc0
+  content_hash: sha256:ef24767d77edd2f8dd175690cdda1c153690dd9d02f53bdb8ccb8905964455a9
 - kind: project-relative
   target: legacy
   value: .agents/skills/cli-logging-ux
@@ -3028,7 +3028,7 @@ local_deployed_file_hashes:
   .agents/skills/apm-spec-guardian/assets/panelist-return-schema.json: sha256:bb66b270394c386665c6b93d83befe05ce9f8206abf8d656079c29d65729fefd
   .agents/skills/apm-spec-guardian/assets/synthesizer-return-schema.json: sha256:e6e2771f2fe8578e72d12e51edcc3817717f8a0bbef66d8a8a5c556f0dce06d7
   .agents/skills/apm-strategy/SKILL.md: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef
-  .agents/skills/auth/SKILL.md: sha256:bf1039cb63dbb968d50dbf4a9e4ceec9a4c30e40e8dd666d404f1c39eda55bc0
+  .agents/skills/auth/SKILL.md: sha256:ef24767d77edd2f8dd175690cdda1c153690dd9d02f53bdb8ccb8905964455a9
   .agents/skills/cli-logging-ux/SKILL.md: sha256:b04d5282a9f21b33c75ac98c41c7eab7e562eafea8c89bbb5732d9956958fe7c
   .agents/skills/cut-release/SKILL.md: sha256:b1e9f26d36845ec6a6b4a65f0c846cec713aa8324a2bb38609945435253b856e
   .agents/skills/cut-release/assets/entry-sanitizer.md: sha256:b78d605f1bb17b042681b678e07a6431209ae11934ea320e0b573da313649743

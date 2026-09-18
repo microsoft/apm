@@ -29,11 +29,14 @@ The full per-org -> global -> credential-fill -> fallback resolution flow is in 
 
 ## Bearer-token authentication for ADO
 
-ADO hosts (`dev.azure.com`, `*.visualstudio.com`) resolve auth in this order:
+Azure DevOps Services (`dev.azure.com`, `*.visualstudio.com`) resolve auth in this order:
 
 1. `ADO_APM_PAT` env var if set
 2. AAD bearer via `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798` if `az` is installed and `az account show` succeeds
-3. Otherwise: auth-failed error from `build_error_context`
+3. Path-scoped `git credential fill` (Git Credential Manager) after an auth-failure signal (`is_ado_auth_failure_signal`)
+4. Otherwise: `AdoAuthChainExhaustedError` from `try_with_fallback`, or `build_error_context` on resolve-time failures
+
+Azure DevOps Server hosts (`ADO_HOST` / `APM_ADO_HOSTS`) skip az bearer: PAT, then fill.
 
 `ADO_APM_PAT` is the env var name used by the auth flow. The AAD bearer source constant lives in `src/apm_cli/core/token_manager.py` as `GitHubTokenManager.ADO_BEARER_SOURCE = "AAD_BEARER_AZ_CLI"`.
 
@@ -51,9 +54,11 @@ ADO hosts (`dev.azure.com`, `*.visualstudio.com`) resolve auth in this order:
 [i] dev.azure.com -- token from ADO_APM_PAT
 ```
 
-**Diagnostic cases** (`_emit_stale_pat_diagnostic` + `build_error_context` in `src/apm_cli/core/auth.py`):
+**Diagnostic cases** (`build_error_context` + `AdoAuthChainExhaustedError` in `src/apm_cli/core/auth.py`):
 
-1. No PAT, no `az`: `No ADO_APM_PAT was set and az CLI is not installed.` -> install `az`, run `az login --tenant <tenant>`, or set `ADO_APM_PAT`.
-2. No PAT, `az` not signed in: `az CLI is installed but no active session was found.` -> run `az login --tenant <tenant>` against the tenant that owns the org, or set `ADO_APM_PAT`.
-3. No PAT, wrong tenant: `az CLI returned a token but the org does not accept it (likely a tenant mismatch).` -> run `az login --tenant <correct-tenant>`, or set `ADO_APM_PAT`.
-4. PAT 401, no `az` fallback: `ADO_APM_PAT was rejected (HTTP 401) and no az cli fallback was available.` -> rotate the PAT, or install `az` and run `az login --tenant <tenant>`.
+1. No PAT, no `az`: `Azure DevOps requires authentication. You have two options` -> install `az` and `az login`, set `ADO_APM_PAT`, or store a Git Credential Manager credential.
+2. No PAT, `az` not signed in: same two-options copy with `az login` first.
+3. No PAT, wrong tenant: `Your az cli session (tenant: ...) returned a bearer token, but Azure DevOps rejected it (HTTP 401).` -> `az login --tenant <correct-tenant>`, or set `ADO_APM_PAT`.
+4. PAT set, request failed: `ADO_APM_PAT is set, but the Azure DevOps request failed.` -> rotate the PAT, `az login` on Services, or store a GCM credential.
+5. Fill hop exhausted: `Authentication failed for {host}: ... git credential fill was rejected.` (`AdoAuthChainExhaustedError`) -> refresh PAT, `az login` on Services, or store a GCM credential. Non-auth failures (DNS, TLS, timeout) re-raise; do not wrap them as chain exhaustion.
+6. Server, no PAT: `Azure DevOps Server requires ADO_APM_PAT or a Git credential helper.` -> set `ADO_APM_PAT` or store a GCM credential (`az` does not apply).
