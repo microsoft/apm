@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm compile --target claude` now includes `CLAUDE.md` imports for Azure DevOps three-level dependency paths (`apm_modules/org/project/repo`), matching GitHub two-level packages. (#2951)
+
 ### Added
 
 - Issue triage, issue implementation, and PR review now share an ORIGIN x INTENT contract: unattended automations (Agentic Workflows, gh-aw, future scheduled runs) never assign. Actor-session ownership writes are: issue triage none (no assignment needed); issue delivery assign the implementing user as a hard gate; standalone PR review request that user as reviewer (`gh pr edit --add-reviewer @me`), never as assignee. Both advisory panels read the full conversation, no-op unchanged receipts, and refuse advice that contradicts CODEOWNERS.
