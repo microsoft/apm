@@ -178,10 +178,8 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "preToolUse": "preToolUse",
         "PostToolUse": "postToolUse",
         "postToolUse": "postToolUse",
-        **dict.fromkeys(
-            ("UserPromptSubmit", "userPromptSubmit", "userPromptSubmitted"),
-            "userPromptSubmitted",
-        ),
+        **dict.fromkeys(("UserPromptSubmit", "userPromptSubmit"), "userPromptSubmitted"),
+        "userPromptSubmitted": "userPromptSubmitted",
         **dict.fromkeys(("SessionStart", "sessionStart"), "sessionStart"),
         **dict.fromkeys(("Stop", "AgentStop", "agentStop"), "agentStop"),
         "PreTaskExecution": "preTaskExecution",
