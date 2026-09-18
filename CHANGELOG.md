@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PR-review scheduler no longer queues every open pull request. A fresh review requires the `panel-review` label (same trigger as the Agentic Workflow), `status/accepted` on the PR, or an explicit named PR list. The reviewing session also requires `status/accepted` on the PR or a linked issue; otherwise scheduler and review-worker stop with no comment. The worker may clear `panel-review`; the scheduler does not comment or change labels. Both also apply a CODEOWNERS last-comment gate: read the last CODEOWNER comment as conditions and evaluate them against later comments AND labels on the PR and linked issues. Drop or `noop` only when those conditions are unmet or unclear. Named list does not bypass that gate.
 - Issue-triage sweep no longer classifies real GitHub bug forms as spam: heading/list line matches no longer swallow the rest of the body after markup strip.
 - Preserve marketplace discovery provenance across dependency updates so `plugin@marketplace` uninstall aliases keep working in project and global scope. -- by @mfroembgen (#2949)
-- Copilot hooks: `UserPromptSubmit` and `userPromptSubmit` now deploy as `userPromptSubmitted`, the event Copilot CLI runs; they were written as `userPromptSubmit`, which never fired. -- by @sheilagithub
+- Copilot hooks: `UserPromptSubmit` and `userPromptSubmit` now deploy as `userPromptSubmitted`, the event Copilot CLI runs; they were written as `userPromptSubmit`, which never fired. -- by @sheilagithub (#3030)
 
 ### Security
 
