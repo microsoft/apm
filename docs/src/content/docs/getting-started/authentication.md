@@ -344,9 +344,10 @@ apm install dev.azure.com/myorg/myproject/myrepo
 
 `apm marketplace check` uses this same chain for an ADO `marketplace.sourceBase`.
 Azure CLI credentials are passed to `git ls-remote` as a bearer Authorization
-header, never embedded in the repository URL. Git clones that still fail after
-PAT and bearer retry `git credential fill` with the repository path so GCM can
-select a stored account.
+header, never embedded in the repository URL. A rejected PAT or bearer
+(HTTP 401/403 or Git auth failure) retries path-scoped `git credential fill`
+with the repository path so GCM can select a stored account. DNS, TLS, and
+timeout failures do not unlock fill.
 
 **Stale-PAT fallback:** if `ADO_APM_PAT` is set but rejected (HTTP 401), APM silently retries with the `az` bearer and emits:
 

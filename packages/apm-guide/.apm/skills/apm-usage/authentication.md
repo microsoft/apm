@@ -223,10 +223,10 @@ need to unset `GITHUB_HOST`.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `No ADO_APM_PAT was set and az CLI is not installed` | Neither path available | Install `az` from https://aka.ms/installazurecli and run `az login --tenant <tenant>`, or set `ADO_APM_PAT` |
-| `az CLI is installed but no active session was found` | `az account show` fails | Run `az login --tenant <tenant>` against the tenant that owns the org |
-| `az CLI returned a token but the org does not accept it (likely a tenant mismatch)` | Wrong tenant | Run `az login --tenant <correct-tenant>`, or set `ADO_APM_PAT` |
-| `ADO_APM_PAT was rejected (HTTP 401) and no az cli fallback was available` | Stale PAT, no `az` | Rotate the PAT, or install `az` and run `az login --tenant <tenant>` |
+| `Azure DevOps requires authentication. You have two options` | No PAT and no az session | Install `az` from https://aka.ms/installazurecli and run `az login --tenant <tenant>`, set `ADO_APM_PAT`, or store a Git Credential Manager credential |
+| `ADO_APM_PAT is set, but the Azure DevOps request failed` | Stale or wrong-org PAT, no az | Rotate the PAT, run `az login --tenant <tenant>`, or store a Git Credential Manager credential |
+| `ADO_APM_PAT was rejected; az cli bearer was also rejected` | PAT and az both failed | `unset ADO_APM_PAT`, run `az login --tenant <correct-tenant>`, or store a Git Credential Manager credential |
+| `Azure DevOps Server requires ADO_APM_PAT or a Git credential helper` | On-prem Server, no PAT or fill | Set `ADO_APM_PAT` or store a repository credential in Git Credential Manager (`az` does not apply) |
 | `Authentication failed ... git credential fill was rejected` | PAT / `az` / fill chain exhausted | Refresh `ADO_APM_PAT`, run `az login` on Services, or store a Git Credential Manager credential |
 | On-prem host classified as GHES / GitHub credentials selected | `GITHUB_HOST` set without an ADO host configuration | Add `ADO_HOST=your-ado-server.example.com` (or list it in `APM_ADO_HOSTS`); ADO takes precedence |
 
