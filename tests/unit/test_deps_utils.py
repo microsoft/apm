@@ -96,6 +96,7 @@ class TestIsNestedUnderPackage:
         assert _is_nested_under_package(deep, modules) is True
 
 
+@pytest.mark.windows_compat
 @pytest.mark.parametrize("alias", [".safe", "safe.", "foo..bar", "my-skill.v2"])
 def test_scan_includes_flattened_alias_without_nested_or_symlink_packages(
     tmp_path: Path, alias: str
@@ -112,7 +113,8 @@ def test_scan_includes_flattened_alias_without_nested_or_symlink_packages(
     outside.mkdir()
     _make_apm_yml(outside)
     (modules / "linked").symlink_to(outside, target_is_directory=True)
-    assert _scan_installed_packages(modules) == [alias]
+    # Windows strips trailing dots when creating directories; scan the on-disk name.
+    assert _scan_installed_packages(modules) == [package.resolve().name]
 
 
 # ==================================================================

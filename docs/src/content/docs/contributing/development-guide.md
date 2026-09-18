@@ -364,15 +364,15 @@ WIP push.
 ### Workflow dependency updates
 
 When updating actions in generated `.github/workflows/*.lock.yml` files,
-keep their `gh-aw-manifest` headers, human-readable action lists, and
-`.github/aw/actions-lock.json` entries aligned with the runtime `uses:` pins.
-Dependabot does not update those metadata records. Preserve the compiler
-version and source hashes for dependency-only edits; recompile with
-`gh aw compile` when changing workflow source.
+align `gh-aw-manifest` headers, action lists, and `.github/aw/actions-lock.json`
+entries with runtime `uses:` pins. Dependabot does not update this metadata.
+Preserve compiler versions and source hashes for dependency-only edits.
+For source changes, including comments, run `gh aw compile` with the workflow's
+generator version and commit source and regenerated lock together.
 
 Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py`
-to check setup and app-token action pin consistency across the manifest-bearing
-workflows.
+to check triage/review source freshness and compiler-header consistency, plus
+setup and app-token action-pin consistency across manifest-bearing workflows.
 
 ### Code scanning on pull requests and merge queues
 

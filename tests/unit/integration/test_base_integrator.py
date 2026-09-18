@@ -705,9 +705,12 @@ class TestInitLinkResolverHomeScoping:
 
         mock_discover.assert_called_once_with(Path.home() / ".apm")
 
+    @pytest.mark.parametrize("has_recorded_root", [False, True])
     @patch("apm_cli.integration.base_integrator.discover_primitives")
     @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
-    def test_uses_install_path_when_not_home(self, mock_resolver_cls, mock_discover, tmp_path):
+    def test_uses_install_path_when_not_home(
+        self, mock_resolver_cls, mock_discover, tmp_path, has_recorded_root
+    ):
         """Real installed dependencies (install_path under apm_modules/, NOT
         equal to project_root) must scan install_path directly."""
         mock_discover.return_value = []
@@ -718,6 +721,7 @@ class TestInitLinkResolverHomeScoping:
         install_path = tmp_path / "apm_modules" / "owner" / "repo"
         install_path.mkdir(parents=True)
         pkg_info.install_path = install_path
+        pkg_info.root_local_project_root = tmp_path if has_recorded_root else None
 
         bi.init_link_resolver(pkg_info, tmp_path)
 
@@ -769,10 +773,25 @@ class TestInitLinkResolverLocalScoping:
     not get walked end-to-end. See issue #1507 (13-minute hang).
     """
 
+    @pytest.fixture(params=["install", "replay"])
+    def local_context(
+        self,
+        tmp_path: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        request: pytest.FixtureRequest,
+    ) -> tuple[MagicMock, Path]:
+        """Keep the source root fixed when replay deploys into scratch."""
+        pkg_info = MagicMock()
+        pkg_info.install_path = tmp_path
+        replay = request.param == "replay"
+        pkg_info.root_local_project_root = tmp_path if replay else None
+        destination = tmp_path_factory.mktemp("replay") if replay else tmp_path
+        return pkg_info, destination
+
     @patch("apm_cli.integration.base_integrator.discover_primitives")
     @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
     def test_narrows_to_apm_and_github_when_install_path_is_project_root(
-        self, mock_resolver_cls, mock_discover, tmp_path
+        self, mock_resolver_cls, mock_discover, tmp_path, local_context
     ):
         mock_discover.return_value = []
         (tmp_path / ".apm").mkdir()
@@ -783,10 +802,7 @@ class TestInitLinkResolverLocalScoping:
         (tmp_path / "noise" / "deep" / "irrelevant.txt").write_text("x")
 
         bi = BaseIntegrator()
-        pkg_info = MagicMock()
-        pkg_info.install_path = tmp_path
-
-        bi.init_link_resolver(pkg_info, tmp_path)
+        bi.init_link_resolver(*local_context)
 
         called_roots = [call.args[0] for call in mock_discover.call_args_list]
         assert mock_resolver_cls.return_value.package_root == tmp_path
@@ -800,7 +816,9 @@ class TestInitLinkResolverLocalScoping:
 
     @patch("apm_cli.integration.base_integrator.discover_primitives")
     @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
-    def test_skips_missing_directories(self, mock_resolver_cls, mock_discover, tmp_path):
+    def test_skips_missing_directories(
+        self, mock_resolver_cls, mock_discover, tmp_path, local_context
+    ):
         """If only ``.apm/`` exists, only ``.apm/`` is scanned -- no waste
         from probing a non-existent ``.github/``."""
         mock_discover.return_value = []
@@ -808,29 +826,23 @@ class TestInitLinkResolverLocalScoping:
         # No .github/
 
         bi = BaseIntegrator()
-        pkg_info = MagicMock()
-        pkg_info.install_path = tmp_path
-
-        bi.init_link_resolver(pkg_info, tmp_path)
+        bi.init_link_resolver(*local_context)
 
         called_roots = [call.args[0] for call in mock_discover.call_args_list]
         assert called_roots == [tmp_path / ".apm"]
 
     @patch("apm_cli.integration.base_integrator.discover_primitives")
     @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
-    def test_no_apm_or_github_means_no_walk(self, mock_resolver_cls, mock_discover, tmp_path):
+    def test_no_apm_or_github_means_no_walk(self, mock_resolver_cls, mock_discover, local_context):
         """Project root with no .apm/ or .github/ must not walk anything."""
         mock_discover.return_value = []
 
         bi = BaseIntegrator()
-        pkg_info = MagicMock()
-        pkg_info.install_path = tmp_path
-
-        bi.init_link_resolver(pkg_info, tmp_path)
+        bi.init_link_resolver(*local_context)
 
         mock_discover.assert_not_called()
 
-    def test_real_walk_does_not_traverse_noise_subtree(self, tmp_path):
+    def test_real_walk_does_not_traverse_noise_subtree(self, tmp_path, local_context):
         """End-to-end: with a real (non-mocked) discover_primitives call,
         confirm files under a noise subtree do NOT get walked. Acts as a
         regression trap for the original 13-minute hang on large repos.
@@ -862,11 +874,9 @@ class TestInitLinkResolverLocalScoping:
                 yield dirpath, dirnames, filenames
 
         bi = BaseIntegrator()
-        pkg_info = MagicMock()
-        pkg_info.install_path = tmp_path
 
         with patch("apm_cli.primitives.discovery.os.walk", side_effect=spy_walk):
-            bi.init_link_resolver(pkg_info, tmp_path)
+            bi.init_link_resolver(*local_context)
 
         # The noise subtree must never appear in any walked directory.
         for d in visited_dirs:
