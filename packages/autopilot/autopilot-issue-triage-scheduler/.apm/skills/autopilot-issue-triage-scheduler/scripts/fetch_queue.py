@@ -45,9 +45,6 @@ PLACEHOLDER_RE = re.compile(
     r"reporting and investigating a bug need no permission.*$",
     re.IGNORECASE | re.MULTILINE,
 )
-BOT_LOGINS = frozenset({"github-actions", "dependabot", "copilot", "web-flow"})
-
-
 def _alnum_count(text: str) -> int:
     """Count ASCII alphanumeric characters."""
     return sum(char.isalnum() for char in text)
@@ -105,22 +102,11 @@ def is_spam_shaped(body: str) -> bool:
     return _alnum_count(strip_markup(body)) < 20
 
 
-def is_bot_author(author: str, author_type: str) -> bool:
-    """True for GitHub bot accounts used in skip rules."""
-    login = author.lower()
-    return (
-        author_type.lower() == "bot"
-        or login.endswith("[bot]")
-        or login.endswith("-bot")
-        or login in BOT_LOGINS
-    )
-
-
 def skip_reason(record: dict[str, Any], mode: str) -> str | None:
     """Return a skip token, or None when state/body filters pass.
 
-    Bot-authored issues skip. Bot-authored PRs stay eligible so they
-    can be triaged, accepted, reviewed, and merged.
+    Bot-authored issues and PRs stay eligible so automations are
+    triaged like any other contribution.
 
     Completed-advice markers stay eligible; `triage_state.plan_batch` owns
     that sweep skip plus the per-author quota.
@@ -131,10 +117,6 @@ def skip_reason(record: dict[str, Any], mode: str) -> str | None:
         return "merged"
     if record.get("locked"):
         return "locked"
-    if record.get("kind") != "pr" and is_bot_author(
-        str(record["author"]), str(record.get("author_type", "User"))
-    ):
-        return "bot-authored"
     body = record.get("body")
     if not isinstance(body, str) or is_empty_body(body):
         return "empty"

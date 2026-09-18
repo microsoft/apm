@@ -23,8 +23,7 @@ on:
 
 if: >-
   ${{ github.event_name != 'issues'
-      || (github.event.issue.user.type != 'Bot'
-          && github.event.issue.locked != true
+      || (github.event.issue.locked != true
           && github.event.issue.state == 'open') }}
 
 # Serialize all modes: a manual request must not race a scheduled sweep.
@@ -173,7 +172,8 @@ python <issue-triage-scheduler>/scripts/triage_state.py < batch.json
 `get_label`. Explicit requests use `--mode label-event` or `--mode
 dispatch` with `--records-json` containing exactly one issue (or
 `--number` when `gh` is authenticated). `fetch_queue.py` owns
-closed/locked/bot/empty/template-only and sweep-only spam. Sweep
+closed/locked/empty/template-only and sweep-only spam. Bot-authored
+issues stay eligible. Sweep
 list excludes `processing.read_reviewed`. Do not label suspected
 spam. `triage_state.py` owns completed-advice skip
 (`processing.read_reviewed`), at most two issues per author, and cap

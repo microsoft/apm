@@ -15,11 +15,6 @@
       "version": "v8",
       "sha": "ed597411d8f924073f98dfc5c65a23a2325f34cd"
     },
-    "actions/github-script@v9": {
-      "repo": "actions/github-script",
-      "version": "v9",
-      "sha": "3a2844b7e9c422d3c10d287c895573f7108da1b3"
-    },
     "actions/github-script@v9.0.0": {
       "repo": "actions/github-script",
       "version": "v9.0.0",
@@ -39,11 +34,6 @@
       "repo": "github/gh-aw-actions/setup",
       "version": "v0.87.8",
       "sha": "1aa033c7bf25ac9428fe521065b90c30a7070c4e"
-    },
-    "github/gh-aw-actions/setup@v0.88.2": {
-      "repo": "github/gh-aw-actions/setup",
-      "version": "v0.88.2",
-      "sha": "9271a1804551c0dc4fb0085a97979950aa2f8489"
     },
     "microsoft/apm-action@v1.10.0": {
       "repo": "microsoft/apm-action",

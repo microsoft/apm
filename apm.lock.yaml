@@ -27,10 +27,10 @@ dependencies:
   - .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py
   - .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py
   deployed_file_hashes:
-    .agents/skills/autopilot-issue-triage-scheduler/SKILL.md: sha256:d2d0c340db7f60377d8f15831494c1e7c2f76eeae3788b50398fcc6679772275
+    .agents/skills/autopilot-issue-triage-scheduler/SKILL.md: sha256:ec2544ba86f1fd1064397ea3abc8dab4200d26f752001a6f07020cda32943951
     .agents/skills/autopilot-issue-triage-scheduler/assets/fan-out-pool.md: sha256:b7c780cf9ec1d73ea5d4d8bc2cda031287aa2a478872339a3d6a8cc2cc329677
     .agents/skills/autopilot-issue-triage-scheduler/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
-    .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py: sha256:c82dd5985a9e8a4dd18df081a608a185ed71ebbc8a4f631b475d687722f8a868
+    .agents/skills/autopilot-issue-triage-scheduler/scripts/fetch_queue.py: sha256:8dbfbf8846f72c1b481e3d222001e4944d6a02f5bca367efef9396e26d20be9d
     .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
   source: local
   local_path: ./packages/autopilot/autopilot-issue-triage-scheduler
@@ -93,10 +93,10 @@ dependencies:
   - .agents/skills/autopilot-pr-triage-scheduler/scripts/fetch_queue.py
   - .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-triage-scheduler/SKILL.md: sha256:8d5b943b5f9d230c466431402c0dccda7819381f097c0049bb25f2d52ce38764
+    .agents/skills/autopilot-pr-triage-scheduler/SKILL.md: sha256:6b1eedeb452b4af4c1a43fe94e7dded7e2893ba16da3f727669fa2891d02d075
     .agents/skills/autopilot-pr-triage-scheduler/assets/fan-out-pool.md: sha256:c6c997d5bc1a941b10afafd35b06313b2ed34d7d484a29b82680019ec97e160d
     .agents/skills/autopilot-pr-triage-scheduler/assets/label-contract.json: sha256:a9a2030f24aa3f211aab49aad9805e81445a61b5800cb001fcc1de422d4660a4
-    .agents/skills/autopilot-pr-triage-scheduler/scripts/fetch_queue.py: sha256:c82dd5985a9e8a4dd18df081a608a185ed71ebbc8a4f631b475d687722f8a868
+    .agents/skills/autopilot-pr-triage-scheduler/scripts/fetch_queue.py: sha256:8dbfbf8846f72c1b481e3d222001e4944d6a02f5bca367efef9396e26d20be9d
     .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py: sha256:edd8f016bc45372a31638d6c72ad2d88378b371383ff3c1fb73bd40424c8206c
   source: local
   local_path: ./packages/autopilot/autopilot-pr-triage-scheduler
@@ -609,7 +609,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:d2d0c340db7f60377d8f15831494c1e7c2f76eeae3788b50398fcc6679772275
+  content_hash: sha256:ec2544ba86f1fd1064397ea3abc8dab4200d26f752001a6f07020cda32943951
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-scheduler/assets/fan-out-pool.md
@@ -636,7 +636,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:c82dd5985a9e8a4dd18df081a608a185ed71ebbc8a4f631b475d687722f8a868
+  content_hash: sha256:8dbfbf8846f72c1b481e3d222001e4944d6a02f5bca367efef9396e26d20be9d
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py
@@ -987,7 +987,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-triage-scheduler
-  content_hash: sha256:8d5b943b5f9d230c466431402c0dccda7819381f097c0049bb25f2d52ce38764
+  content_hash: sha256:6b1eedeb452b4af4c1a43fe94e7dded7e2893ba16da3f727669fa2891d02d075
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-scheduler/assets/fan-out-pool.md
@@ -1014,7 +1014,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-triage-scheduler
-  content_hash: sha256:c82dd5985a9e8a4dd18df081a608a185ed71ebbc8a4f631b475d687722f8a868
+  content_hash: sha256:8dbfbf8846f72c1b481e3d222001e4944d6a02f5bca367efef9396e26d20be9d
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py

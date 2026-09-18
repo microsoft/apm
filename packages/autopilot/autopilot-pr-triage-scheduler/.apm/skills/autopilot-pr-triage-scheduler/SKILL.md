@@ -100,8 +100,8 @@ Modes:
 - `queue-open` / no names: sweep.
 
 `fetch_queue.py` owns list + eligibility (closed, merged, locked,
-empty, template-only; sweep-only draft and spam). Bot-authored PRs
-stay eligible. Sweep list
+empty, template-only; sweep-only draft and spam). Bot-authored
+issues and PRs stay eligible. Sweep list
 excludes `processing.read_reviewed` (`triage/recommended`,
 `status/triaged`) at GitHub so already-advised open PRs are not
 downloaded. Do not comment on skips. `triage_state.py` owns

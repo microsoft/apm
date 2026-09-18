@@ -61,11 +61,10 @@ def _raw(
 
 
 def test_state_and_body_skips_are_stable() -> None:
-    """Closed, locked, bot, empty, and template-only never become eligible."""
+    """Closed, locked, empty, and template-only never become eligible."""
     cases = [
         (_raw(1, state="closed"), "closed"),
         (_raw(2, locked=True), "locked"),
-        (_raw(3, login="github-actions[bot]", author_type="Bot"), "bot-authored"),
         (_raw(4, body="   "), "empty"),
         (_raw(5, body=TEMPLATE_BODY), "template-only"),
         (_raw(6, merged_at="2026-01-01T00:00:00Z", state="closed"), "merged"),
@@ -76,18 +75,21 @@ def test_state_and_body_skips_are_stable() -> None:
         assert FETCH["skip_reason"](record, "sweep") == expected
 
 
-def test_bot_authored_prs_stay_eligible() -> None:
-    """Copilot, dependabot, and Actions PRs must enter the triage queue."""
+def test_bot_authored_issues_and_prs_stay_eligible() -> None:
+    """Copilot, dependabot, and Actions items must enter the triage queue."""
     logins = (
         ("github-actions[bot]", "Bot"),
         ("dependabot", "Bot"),
         ("copilot", "Bot"),
         ("Copilot", "Bot"),
     )
-    for login, author_type in logins:
-        record = FETCH["normalize_record"](_raw(10, login=login, author_type=author_type), "pr")
-        assert FETCH["skip_reason"](record, "sweep") is None
-        assert FETCH["skip_reason"](record, "dispatch") is None
+    for kind in ("issue", "pr"):
+        for login, author_type in logins:
+            record = FETCH["normalize_record"](
+                _raw(10, login=login, author_type=author_type), kind
+            )
+            assert FETCH["skip_reason"](record, "sweep") is None
+            assert FETCH["skip_reason"](record, "dispatch") is None
 
 
 def test_sweep_skips_spam_and_draft_but_explicit_keeps_them() -> None:
@@ -202,7 +204,7 @@ def test_cli_subprocess_filters_ineligible(
     records = tmp_path / "records.json"
     labels = tmp_path / "labels.json"
     records.write_text(
-        json.dumps([_raw(1, body=""), _raw(2), _raw(3, login="dependabot", author_type="Bot")]),
+        json.dumps([_raw(1, body=""), _raw(2), _raw(3, state="closed")]),
         encoding="ascii",
     )
     labels.write_text(json.dumps(["triage/recommended", "status/triaged"]), encoding="ascii")
@@ -224,7 +226,7 @@ def test_cli_subprocess_filters_ineligible(
     by_number = {item["number"]: item["eligible"] for item in payload["issues"]}
     assert by_number == {1: False, 2: True, 3: False}
     reasons = {item["number"]: item["reason"] for item in payload["skipped"]}
-    assert reasons == {1: "empty", 3: "bot-authored"}
+    assert reasons == {1: "empty", 3: "closed"}
 
 
 def test_list_pages_sweep_excludes_completed_advice_via_search() -> None:

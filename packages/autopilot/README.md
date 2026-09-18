@@ -90,7 +90,8 @@ Contract file:
 
 ### `autopilot-issue-triage-scheduler`
 
-Selects issues. Compose `autopilot-issue-triage-worker` one issue per
+Selects issues, including bot-authored issues. Compose
+`autopilot-issue-triage-worker` one issue per
 slot. Trigger: `triage/requested`, a named list, or `queue-all` sweep.
 Does not consume `status/needs-triage`. Helpers:
 `scripts/fetch_queue.py` then `scripts/triage_state.py` (sweep fetch

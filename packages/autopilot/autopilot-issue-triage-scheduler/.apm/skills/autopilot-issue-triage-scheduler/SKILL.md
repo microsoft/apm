@@ -97,8 +97,9 @@ Modes (match `.github/workflows/triage-panel.md`):
   is not consumed.
 - `queue-all` / no names: daily-style sweep.
 
-`fetch_queue.py` owns list + eligibility (closed, locked, bot,
-empty, template-only; sweep-only spam). Sweep list excludes
+`fetch_queue.py` owns list + eligibility (closed, locked,
+empty, template-only; sweep-only spam). Bot-authored issues stay
+eligible. Sweep list excludes
 `processing.read_reviewed` (`triage/recommended`, `status/triaged`)
 at GitHub so already-advised open items are not downloaded. Do not
 comment on skips. `triage_state.py` owns completed-advice skip
