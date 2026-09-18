@@ -558,7 +558,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:48b597bc323e78e3fba34db318c800df74d9c5fcf337249a7421df3e9b474449
+  content_hash: sha256:d2d0c340db7f60377d8f15831494c1e7c2f76eeae3788b50398fcc6679772275
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-scheduler/assets/fan-out-pool.md
@@ -567,7 +567,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:747aa0092a5b496417035729b61c39aa74980f7918f3e108790eb2ce7e565d45
+  content_hash: sha256:b7c780cf9ec1d73ea5d4d8bc2cda031287aa2a478872339a3d6a8cc2cc329677
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-scheduler/assets/label-contract.json
@@ -585,7 +585,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-issue-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-triage-scheduler
-  content_hash: sha256:525885df9a0aa9ae61b458003371c1445d0bcd64cdafb527a67cd71a4c0d1b2c
+  content_hash: sha256:c82dd5985a9e8a4dd18df081a608a185ed71ebbc8a4f631b475d687722f8a868
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-scheduler/scripts/triage_state.py
@@ -612,7 +612,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-triage-worker
   active_owner: local:packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:6d3c90c1d6092d0e1f87107df4e504d294fa863bef92ffc9c1c2c747a88818f5
+  content_hash: sha256:671433a866ce90de3aa2864ead74c5939eec49081e4065589eb63fe9cb0e032a
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-triage-worker/apm.yml
@@ -639,7 +639,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-issue-triage-worker
   active_owner: local:packages/autopilot/autopilot-issue-triage-worker
-  content_hash: sha256:4ccfa77abc689d067678d21d70b4702fbf30949b1306a8fa719f01d190199258
+  content_hash: sha256:e37365e25911cca25775b1b111f38bbd1ccd09f6b57b7739ea09471d245d3d35
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker
@@ -657,7 +657,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:ae366ab4c2a34533bff238da97c32934147e834bc933015aa2a8cfbda13b8804
+  content_hash: sha256:bff587a94c928a8d3e0104edde83cf4323939a737f5ee17fed4918f00810f981
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/apm.yml
@@ -675,7 +675,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:601875105ce91bb22e4b305687d97a0ae10001f73cbd2ac9ff90eb028e1a6aba
+  content_hash: sha256:99a56f316d6f8c859703e281d4c8177771e47d642dc098da0d8441813336d59b
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/assets/completion-schema.json
@@ -684,7 +684,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:e01d89d69c7ef3a061289f399a7570123b890886eac138e4d613fb6d1bf2dc32
+  content_hash: sha256:6e0a06fa98f3e0544f5ebd6039da28f9cbdfeccd807565365b761265f8515a5c
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/assets/conflict-resolution-prompt.md
@@ -729,7 +729,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:5720fc9e2aa3bd5ff7d54c5ed4ca4097334d2d5c722363378a7e4a24c8eec73d
+  content_hash: sha256:84150a8e1a66793b284c0cb12cfb8191e0944e42b00790edc6cb82f9ee8e79fc
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md
@@ -765,7 +765,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-review-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-review-scheduler
-  content_hash: sha256:86cb5b4ec6d0d19b56f9a4bd67a9e901659698a37c5941e2605c8d7d6b3709b6
+  content_hash: sha256:2f3d2e905f2e38e8551a03918aedc68a78ce8a620a75630c52fc298d430d9cb9
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-scheduler/assets/fan-out-pool.md
@@ -774,7 +774,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-review-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-review-scheduler
-  content_hash: sha256:09d80279df99d2b4119508b54f4c07339c8f0f25b9e7d96d9f762869d414fc82
+  content_hash: sha256:6c4c5802109cbbb76ecf28ab2299410f4f6f3f9dd9cb2586624c1783538d20a5
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker
@@ -792,7 +792,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:4d48b785d1065fadbef3e3ced16a39b313fc2912365b7f4f1259b2a7389c020e
+  content_hash: sha256:dad6d5ad4044b596e833d8d9cf22c75116e0cab8d07118215cca6a93f1daaa63
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/apm.yml
@@ -810,7 +810,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:f47511da124daae14388856863cdfe1c6e8c92158a27c043fe7d86810cb89875
+  content_hash: sha256:30e38bcb18cfdca8d5d56b384febf84e726e7376872d75e194277d3e1cb12293
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json
@@ -819,7 +819,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:e197285bf95151d884a035dd767009c67812109d4d1c3b7187ac6224eec10870
+  content_hash: sha256:959a9e744cf3a062c906ca7ec716731cfc440561c8ef6c1b57f3c7fc108c8c44
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/assets/recommendation-template.md
@@ -828,7 +828,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:5472b8607a7a1751b9fa9909fd709b96134b7cc24ae2f4b34e41fc01a736b5f5
+  content_hash: sha256:b757b09997a900f0f1e07b47c7815736b33f6824fa13bfabd5192491c4664321
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/evals/README.md
@@ -909,7 +909,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-triage-scheduler
-  content_hash: sha256:af1a181bf52c8f8364b5be575098e6f4d6b0f960a40c9ac9fea2e9d2747524cb
+  content_hash: sha256:8d5b943b5f9d230c466431402c0dccda7819381f097c0049bb25f2d52ce38764
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-scheduler/assets/fan-out-pool.md
@@ -918,7 +918,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-triage-scheduler
-  content_hash: sha256:c790107b578c1aefeb791982f90a22f4bd58b9a3745b3adb93b984bd27c060c2
+  content_hash: sha256:c6c997d5bc1a941b10afafd35b06313b2ed34d7d484a29b82680019ec97e160d
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-scheduler/assets/label-contract.json
@@ -936,7 +936,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-triage-scheduler
   active_owner: ./packages/autopilot/autopilot-pr-triage-scheduler
-  content_hash: sha256:525885df9a0aa9ae61b458003371c1445d0bcd64cdafb527a67cd71a4c0d1b2c
+  content_hash: sha256:c82dd5985a9e8a4dd18df081a608a185ed71ebbc8a4f631b475d687722f8a868
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-scheduler/scripts/triage_state.py
@@ -963,7 +963,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-triage-worker
   active_owner: local:packages/autopilot/autopilot-pr-triage-worker
-  content_hash: sha256:7812f9106aee5f3db2825196f65aed7e92b77a7ddcdd97fdff4006b5e3788143
+  content_hash: sha256:33e5daa2f1f096b94a6e0583f751279fa41dc46175f92c569e20f0ca5f055a78
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-triage-worker/assets/label-contract.json
@@ -981,7 +981,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-triage-worker
   active_owner: local:packages/autopilot/autopilot-pr-triage-worker
-  content_hash: sha256:4e2a459586a46b6ac9d18e211ccc29576b1f0d1394f3381bac0a7b3f3a87e7bb
+  content_hash: sha256:d5155b45b2fa10badd82945582a9e3968cfaece5ca29678f3091f78e9dffae70
 - kind: project-relative
   target: copilot
   value: .agents/skills/pr-description-skill
