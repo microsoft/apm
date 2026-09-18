@@ -88,7 +88,8 @@ entry_point = repo_root / 'src' / 'apm_cli' / 'cli.py'
 
 # Data files to include - recursively include all template files
 datas = [
-    (str(repo_root / 'scripts' / 'runtime'), 'scripts/runtime'),  # Bundle runtime setup scripts
+    (str(repo_root / 'src' / 'apm_cli' / 'runtime' / 'scripts' / 'runtime'),
+     'scripts/runtime'),  # Bundle runtime setup scripts
     (str(repo_root / 'pyproject.toml'), '.'),  # Bundle pyproject.toml for version reading
     # Child-runtime TLS trust bootstrap: ships at apm_cli/core/_child_tls/ so
     # ensure_child_tls_bootstrap() can copy the self-contained .pth bootstrap
@@ -103,7 +104,8 @@ datas = [
 if sys.platform == 'win32':
     datas.append((str(repo_root / 'scripts' / 'windows' / 'github-token-helper.ps1'), 'scripts'))
 else:
-    datas.append((str(repo_root / 'scripts' / 'github-token-helper.sh'), 'scripts'))
+    datas.append((str(repo_root / 'src' / 'apm_cli' / 'runtime' / 'scripts' /
+                      'github-token-helper.sh'), 'scripts'))
 
 # Recursively add all files from templates directory, including hidden directories
 def collect_template_files(templates_root):
