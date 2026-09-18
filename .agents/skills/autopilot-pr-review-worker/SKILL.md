@@ -210,16 +210,16 @@ are active for this `panel-mode` and surface. Do not spawn
 
 | Agent | Role | When spawned |
 |-------|------|----------------|
-| [Python Architect](../../agents/python-architect.agent.md) | Architectural Reviewer + mermaid in `full` | Core, unless docs/changelog-only. Optional in `lean` on tiny diffs. |
-| [CLI Logging Expert](../../agents/cli-logging-expert.agent.md) | Output UX Reviewer | Surface-gated |
-| [DevX UX Expert](../../agents/devx-ux-expert.agent.md) | Package-Manager UX | Surface-gated |
-| [Supply Chain Security Expert](../../agents/supply-chain-security-expert.agent.md) | Threat-Model Reviewer | Surface-gated |
-| [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Adoption Strategist | Surface-gated |
-| [Auth Expert](../../agents/auth-expert.agent.md) | Auth / Token Reviewer | Surface-gated |
-| [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Surface-gated |
-| [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer | Core unless docs-only (`src/` untouched) |
-| [Performance Expert](../../agents/performance-expert.agent.md) | Package-Manager Performance Reviewer | Surface-gated |
-| [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Always |
+| [Python Architect](.apm/agents/python-architect.agent.md) | Architectural Reviewer + mermaid in `full` | Core, unless docs/changelog-only. Optional in `lean` on tiny diffs. |
+| [CLI Logging Expert](.apm/agents/cli-logging-expert.agent.md) | Output UX Reviewer | Surface-gated |
+| [DevX UX Expert](.apm/agents/devx-ux-expert.agent.md) | Package-Manager UX | Surface-gated |
+| [Supply Chain Security Expert](.apm/agents/supply-chain-security-expert.agent.md) | Threat-Model Reviewer | Surface-gated |
+| [OSS Growth Hacker](.apm/agents/oss-growth-hacker.agent.md) | Adoption Strategist | Surface-gated |
+| [Auth Expert](.apm/agents/auth-expert.agent.md) | Auth / Token Reviewer | Surface-gated |
+| [Doc Writer](.apm/agents/doc-writer.agent.md) | Documentation Reviewer | Surface-gated |
+| [Test Coverage Expert](.apm/agents/test-coverage-expert.agent.md) | Test-Presence Reviewer | Core unless docs-only (`src/` untouched) |
+| [Performance Expert](.apm/agents/performance-expert.agent.md) | Package-Manager Performance Reviewer | Surface-gated |
+| [APM CEO](.apm/agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Always |
 
 ## Topology
 
@@ -530,7 +530,7 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
 5. **Spawn the CEO synthesizer task.** Pass the spawned panelist JSON
    returns (omitted personas are inactive; do not invent stub JSON)
    to a `task` invocation that loads
-   `../../agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
+   `.apm/agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
    for its JSON return -- do NOT spawn it detached (background mode that
    returns an `agent_id`) and do NOT end your turn while it runs. Its
    return is required to render the comment; ending the turn here is the

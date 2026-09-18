@@ -101,6 +101,24 @@ dependencies:
   source: local
   local_path: ./packages/autopilot/autopilot-pr-triage-scheduler
   declared_license: MIT
+- repo_url: _local/autopilot-comment
+  name: autopilot-comment
+  version: 0.1.0
+  depth: 2
+  resolved_by: _local/autopilot-pr-merge-worker
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/autopilot-comment
+  - .agents/skills/autopilot-comment/SKILL.md
+  - .agents/skills/autopilot-comment/apm.yml
+  deployed_file_hashes:
+    .agents/skills/autopilot-comment/SKILL.md: sha256:8707dbc45d8327dceab976f12008fe8384854c9fddf1b399c175d87e74041339
+    .agents/skills/autopilot-comment/apm.yml: sha256:4db657c42507061d9bfbd795a498e32f2492817b91343e4ff158886619c17fd0
+  source: local
+  local_path: ../autopilot-comment
+  declaring_parent: ./packages/autopilot/autopilot-pr-merge-worker
+  anchored_local_path: packages/autopilot/autopilot-comment
+  declared_license: MIT
 - repo_url: _local/autopilot-issue-delivery-worker
   name: autopilot-issue-delivery-worker
   version: 0.1.0
@@ -194,26 +212,32 @@ dependencies:
   - .agents/skills/autopilot-pr-review-worker/SKILL.md
   - .agents/skills/autopilot-pr-review-worker/apm.yml
   - .agents/skills/autopilot-pr-review-worker/assets/ceo-return-schema.json
+  - .agents/skills/autopilot-pr-review-worker/assets/panel-mode.md
   - .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json
   - .agents/skills/autopilot-pr-review-worker/assets/recommendation-template.md
+  - .agents/skills/autopilot-pr-review-worker/assets/shared-brief.example.json
   - .agents/skills/autopilot-pr-review-worker/evals/README.md
   - .agents/skills/autopilot-pr-review-worker/evals/fixtures/01-ship-now-pr1084-shape.json
   - .agents/skills/autopilot-pr-review-worker/evals/fixtures/01-ship-now-pr1084-shape.rendered.md
   - .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.json
   - .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.rendered.md
+  - .agents/skills/autopilot-pr-review-worker/evals/fixtures/03-panel-mode-walkthrough.md
   - .agents/skills/autopilot-pr-review-worker/evals/render_eval.py
   - .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:dad6d5ad4044b596e833d8d9cf22c75116e0cab8d07118215cca6a93f1daaa63
+    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:9f648dd0bc893b1368ecd858480a8e2f5425b5a05ca3d94e9187ca43a1693258
     .agents/skills/autopilot-pr-review-worker/apm.yml: sha256:140ac5ad227d28c8f7ed26b8e9ba7c262ce8abc598497fcbfb228258018d468f
     .agents/skills/autopilot-pr-review-worker/assets/ceo-return-schema.json: sha256:30e38bcb18cfdca8d5d56b384febf84e726e7376872d75e194277d3e1cb12293
+    .agents/skills/autopilot-pr-review-worker/assets/panel-mode.md: sha256:2d535e4ee141fcb865df7689f2be100d636e3dfa0410054d610cf9a1d9623c8d
     .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json: sha256:959a9e744cf3a062c906ca7ec716731cfc440561c8ef6c1b57f3c7fc108c8c44
     .agents/skills/autopilot-pr-review-worker/assets/recommendation-template.md: sha256:b757b09997a900f0f1e07b47c7815736b33f6824fa13bfabd5192491c4664321
+    .agents/skills/autopilot-pr-review-worker/assets/shared-brief.example.json: sha256:ed29ab0264be660d1796d19b2c51aa974879743d1b5617afb86e1b7705a241f8
     .agents/skills/autopilot-pr-review-worker/evals/README.md: sha256:3f458fad235db5750336a9cb7622fc2331562364de7728251f023bee35e57108
     .agents/skills/autopilot-pr-review-worker/evals/fixtures/01-ship-now-pr1084-shape.json: sha256:108fc261680f17bdade3e2bdf8e64fc908d16a37ec9c29c53169b394530bdd67
     .agents/skills/autopilot-pr-review-worker/evals/fixtures/01-ship-now-pr1084-shape.rendered.md: sha256:ca1fdd3cd24e0fd8ec15b37690c597921ebf1c872270166edb2727d54ee155d8
     .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.json: sha256:faa41c6c83c4a7955447bcb8fc0ad5a3b8afb4235db257462f649ba0a901913e
     .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.rendered.md: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
+    .agents/skills/autopilot-pr-review-worker/evals/fixtures/03-panel-mode-walkthrough.md: sha256:42388926b5147daedc5a4205778f8b4edac1beec650f15b5e70008e81116c660
     .agents/skills/autopilot-pr-review-worker/evals/render_eval.py: sha256:690baf6267775077ad011b98839eda1001e207bbae78a7a8454c4d39bb8a2864
     .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json: sha256:76d6da23bde1c6b6f0b0bf883ba8b5bf065f0db73f69182cfd98449716bc0d84
   source: local
@@ -325,6 +349,33 @@ deployments:
   - ./packages/autopilot/autopilot-issue-delivery-scheduler
   active_owner: ./packages/autopilot/autopilot-issue-delivery-scheduler
   content_hash: sha256:a971df108f648c10d738a85204d6d34d81997b7002aa3951c70f110b255598ee
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-comment
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/autopilot/autopilot-comment
+  active_owner: local:packages/autopilot/autopilot-comment
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-comment/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/autopilot/autopilot-comment
+  active_owner: local:packages/autopilot/autopilot-comment
+  content_hash: sha256:8707dbc45d8327dceab976f12008fe8384854c9fddf1b399c175d87e74041339
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-comment/apm.yml
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/autopilot/autopilot-comment
+  active_owner: local:packages/autopilot/autopilot-comment
+  content_hash: sha256:4db657c42507061d9bfbd795a498e32f2492817b91343e4ff158886619c17fd0
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-issue-delivery-worker
@@ -792,7 +843,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:dad6d5ad4044b596e833d8d9cf22c75116e0cab8d07118215cca6a93f1daaa63
+  content_hash: sha256:9f648dd0bc893b1368ecd858480a8e2f5425b5a05ca3d94e9187ca43a1693258
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/apm.yml
@@ -813,6 +864,15 @@ deployments:
   content_hash: sha256:30e38bcb18cfdca8d5d56b384febf84e726e7376872d75e194277d3e1cb12293
 - kind: project-relative
   target: copilot
+  value: .agents/skills/autopilot-pr-review-worker/assets/panel-mode.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
+  content_hash: sha256:2d535e4ee141fcb865df7689f2be100d636e3dfa0410054d610cf9a1d9623c8d
+- kind: project-relative
+  target: copilot
   value: .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json
   runtime: null
   scope: project
@@ -829,6 +889,15 @@ deployments:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:b757b09997a900f0f1e07b47c7815736b33f6824fa13bfabd5192491c4664321
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-pr-review-worker/assets/shared-brief.example.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
+  content_hash: sha256:ed29ab0264be660d1796d19b2c51aa974879743d1b5617afb86e1b7705a241f8
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/evals/README.md
@@ -874,6 +943,15 @@ deployments:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-pr-review-worker/evals/fixtures/03-panel-mode-walkthrough.md
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
+  content_hash: sha256:42388926b5147daedc5a4205778f8b4edac1beec650f15b5e70008e81116c660
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/evals/render_eval.py

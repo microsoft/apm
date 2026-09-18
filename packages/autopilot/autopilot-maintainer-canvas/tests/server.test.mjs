@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -268,6 +268,29 @@ describe("occupancy reports", () => {
         assert.equal(occupancy.get("scheduler:issue-triage").activity, "idle");
         assert.equal(occupancy.get("scheduler:issue-triage").creatorSessionId, "canvas");
         assert.equal(occupancy.has("worker:pr-triage:99"), false);
+    });
+
+    it("preserves occupancy when Copilot data.db cannot be read", () => {
+        const occupancy = new Map();
+        applyOccupancyReport(occupancy, {
+            target: "scheduler:issue-triage",
+            busy: true,
+            name: "Issue triage scheduler",
+        });
+        const result = syncOccupancyFromCopilot(occupancy, {
+            readCopilotAppSessions: () => {
+                throw new Error("database is locked");
+            },
+        });
+        assert.equal(result.ok, false);
+        assert.equal(occupancy.get("scheduler:issue-triage").name, "Issue triage scheduler");
+    });
+
+    it("throws when an existing Copilot data.db is unreadable", () => {
+        const dir = mkdtempSync(join(tmpdir(), "apm-copilot-db-bad-"));
+        const dbPath = join(dir, "data.db");
+        writeFileSync(dbPath, "not a sqlite database");
+        assert.throws(() => readCopilotAppSessions(dbPath), /unreadable/);
     });
 
     it("keeps idle workers listed until busy is false", () => {

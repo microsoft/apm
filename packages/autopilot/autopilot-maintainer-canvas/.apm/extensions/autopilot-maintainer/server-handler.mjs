@@ -298,7 +298,17 @@ export function createHandler(deps) {
 
 export function syncOccupancyFromCopilot(occupancy, deps = {}) {
     const reader = deps.readCopilotAppSessions || readCopilotAppSessions;
-    const live = occupancyRowsFromCopilotSessions(reader(deps.copilotDbPath));
+    let liveSessions;
+    try {
+        liveSessions = reader(deps.copilotDbPath);
+    } catch (error) {
+        return {
+            ok: false,
+            error: String((error && error.message) || error),
+            count: occupancy.size,
+        };
+    }
+    const live = occupancyRowsFromCopilotSessions(liveSessions);
     mergeLiveOccupancy(occupancy, live);
     return { ok: true, count: occupancy.size };
 }

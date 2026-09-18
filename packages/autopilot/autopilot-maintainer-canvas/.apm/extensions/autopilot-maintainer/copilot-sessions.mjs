@@ -33,8 +33,11 @@ export function readCopilotAppSessions(dbPath = defaultCopilotDbPath()) {
             archivedAt: row.archivedAt || null,
             creatorSessionId: row.creatorSessionId || null,
         }));
-    } catch {
-        return [];
+    } catch (error) {
+        const wrapped = new Error("copilot session db unreadable");
+        wrapped.code = "COPILOT_DB_UNREADABLE";
+        wrapped.cause = error;
+        throw wrapped;
     } finally {
         if (db) db.close();
     }
