@@ -5,7 +5,8 @@ author: Microsoft
 license: MIT
 
 dependencies:
-  apm: []
+  apm:
+    - ../autopilot-comment
   mcp: []
 
 scripts: {}

@@ -163,7 +163,11 @@ selected list; when a slot returns, fill it with the next item.
    else run the worker in this thread for that one issue, then
    the next. When a slot returns, dispatch the next queued
    issue. Do not stop because the pool was full. Each slot reads
-   the complete comment history before advising.
+   the complete comment history before advising. Pass `debug: off`
+   unless this run's caller set `debug: on`. Pass
+   `comment_via: autopilot-comment`. Worker kickoff must load
+   `autopilot-comment` before any GitHub comment. Workers must
+   not call `gh issue comment`.
 4. Optionally present ONE consolidated triage digest. Wait if the
    caller asked for a checkpoint. Never treat silence as accept.
 5. Print a final report from the table.

@@ -10,6 +10,16 @@ landing candidate.
 
 ASCII only.
 
+## Prefer agent-merge when available
+
+If the `agent-merge` skill is loaded in this session, or the
+prompt contains an `<agent_merge_state>` block, use that skill
+for CI, review-thread, and conflict work. Do not sleep, poll, or
+run `gh pr checks --watch` inside that turn -- the next tick is
+the poll. Never merge, enable auto-merge, enqueue, or run
+`gh pr merge`. This checklist's watch contract is the fallback
+when `agent-merge` is not available.
+
 ## Watch contract
 
 ```

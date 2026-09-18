@@ -20,6 +20,8 @@ is empty.
 1. Prefer a new session (Copilot App / Cloud / Remote) named
    `PR triage #<pr-number>` whose kickoff runs
    `autopilot-pr-triage-worker` on exactly one PR.
+   Kickoff must also load `autopilot-comment` (`comment_via:
+   autopilot-comment`, `debug: off` unless the caller set on).
 2. Else spawn a sub-agent (`task`) with the worker skill.
 3. Else run the worker sequentially in this session.
 
@@ -29,4 +31,6 @@ is empty.
 - When a slot returns, take the next queued PR.
 - ORIGIN is resolved in the worker session, not as a batch cheat.
 - This pool never assigns, never requests reviewers, and never
-  writes human decision labels.
+  writes human decision labels. Worker kickoff loads
+  `autopilot-comment` (`comment_via: autopilot-comment`).
+  Workers must not call `gh pr comment`.

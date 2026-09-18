@@ -58,6 +58,21 @@
         }
       }
     },
+    "panel_mode": {
+      "type": "string",
+      "enum": ["full", "lean", "delta"],
+      "description": "Optional. Mode the orchestrator actually ran."
+    },
+    "personas_spawned": {
+      "type": "array",
+      "description": "Optional. Persona slugs spawned this run. Omitted persona = inactive.",
+      "items": { "type": "string" }
+    },
+    "adhoc_reasons": {
+      "type": "object",
+      "description": "Optional. Map of persona slug to one-line reason when the orchestrator added that persona beyond fast-path.",
+      "additionalProperties": { "type": "string" }
+    },
     "ship_recommendation": {
       "type": "object",
       "required": ["stance", "prose"],

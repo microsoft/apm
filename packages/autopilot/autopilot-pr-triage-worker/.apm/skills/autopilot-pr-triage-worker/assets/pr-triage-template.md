@@ -1,6 +1,10 @@
 <!--
 Load ONLY at synthesis time. Fill one advisory comment, under 250 lines,
 ASCII only. Direct invocation returns this without posting.
+Default `debug: off` posts only the HTML receipt plus the Suggested
+PR comment body. `debug: on` posts this filled template prefixed with
+`[i] Skill debug is on.` Both paths go through `autopilot-comment`,
+which appends the AI disclaimer. Never post with `gh pr comment`.
 -->
 
 <!-- apm-pr-triage-advisory:v1 target=pr#<N> watermark=<latest-comment-id-or-updated-at> -->

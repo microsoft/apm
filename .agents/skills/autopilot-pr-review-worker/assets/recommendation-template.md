@@ -36,6 +36,9 @@ RENDERING RULES (the orchestrator follows these literally):
   signal of the pre-advisory regime).
 - CODEOWNERS is paramount. Do not render prose that replaces, drops,
   or contradicts the current reviewRequests users/teams.
+- Optional one-liner under the headline when the orchestrator
+  passes `panel_mode_line` (example:
+  `panel-mode=delta; personas=auth-expert,test-coverage-expert,apm-ceo`).
 - The orchestrator prepends a receipt HTML comment:
   `<!-- apm-review-advisory:v1 target=pr#<N> head=<sha> watermark=<w> -->`
   Same target + head + watermark means do not post again.
@@ -46,6 +49,10 @@ RENDERING RULES (the orchestrator follows these literally):
 ## APM Review Panel: `{{ ceo.ship_recommendation.stance }}`
 
 > {{ ceo.headline }}
+
+{{#if panel_mode_line }}
+`{{ panel_mode_line }}`
+{{/if}}
 
 {{#if notify_audience }}
 cc {{ notify_audience | space_join }} -- a fresh advisory pass is ready for your review.

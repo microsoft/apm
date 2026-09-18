@@ -76,6 +76,20 @@ def test_state_and_body_skips_are_stable() -> None:
         assert FETCH["skip_reason"](record, "sweep") == expected
 
 
+def test_bot_authored_prs_stay_eligible() -> None:
+    """Copilot, dependabot, and Actions PRs must enter the triage queue."""
+    logins = (
+        ("github-actions[bot]", "Bot"),
+        ("dependabot", "Bot"),
+        ("copilot", "Bot"),
+        ("Copilot", "Bot"),
+    )
+    for login, author_type in logins:
+        record = FETCH["normalize_record"](_raw(10, login=login, author_type=author_type), "pr")
+        assert FETCH["skip_reason"](record, "sweep") is None
+        assert FETCH["skip_reason"](record, "dispatch") is None
+
+
 def test_sweep_skips_spam_and_draft_but_explicit_keeps_them() -> None:
     """Explicit requests bypass only spam and draft, not other preconditions."""
     spam = FETCH["normalize_record"](_raw(1, body="http://example.test/" * 40), "issue")

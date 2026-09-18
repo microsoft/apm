@@ -18,7 +18,8 @@ THROTTLES fan-out. It does not triage issues, does not implement,
 and does not open greenfield PRs.
 
 Compose [autopilot-pr-review-worker](../autopilot-pr-review-worker/SKILL.md)
-one PR per slot (`INVOCATION_MODE=session-review`). Never compose
+one PR per slot (`INVOCATION_MODE=session-review`,
+`panel-mode: full` for a first advisory). Never compose
 `autopilot-pr-merge-worker`. Drive-to-merge is a different skill.
 
 Never borrow slots from `autopilot-issue-triage-scheduler`,
@@ -205,6 +206,8 @@ selected list; when a slot returns, fill it with the next item.
    because the pool was full.
 3. Each slot reads the complete PR conversation, including the
    last CODEOWNER comment, and honors CODEOWNERS `reviewRequests`.
+   Pass `panel-mode: full` on the worker activation card (first
+   advisory). The worker may still lean or add ad-hoc personas.
 4. Never auto-merge.
 
 ## Hard nos

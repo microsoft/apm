@@ -5,9 +5,13 @@ conditional lenses say "Not activated -- <reason>". The caller is the
 sole writer; direct invocation returns this without posting.
 Fill the v2 JSON block only when the activation card has `json: on`.
 Default is `json: off`: omit the JSON receipt. Never post that JSON
-(or any machine fence) on the GitHub issue. The public comment is
-prose plus the HTML receipt. The JSON is advisory data, not a
-label/milestone write instruction.
+(or any machine fence) on the GitHub issue. Default `debug: off`
+posts only the HTML receipt plus the Suggested issue comment body.
+`debug: on` posts this filled template prefixed with
+`[i] Skill debug is on.` Both paths go through
+`autopilot-comment`, which appends the AI disclaimer.
+Never post with `gh issue comment`. The JSON is advisory
+data, not a label/milestone write instruction.
 -->
 
 <!-- apm-triage-advisory:v2 target=issue#<N> watermark=<latest-comment-id-or-updated-at> -->

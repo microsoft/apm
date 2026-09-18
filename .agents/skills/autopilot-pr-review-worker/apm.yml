@@ -9,5 +9,6 @@ type: skill
 # the consumer repo's linting / encoding rules at runtime by activating
 # whichever instructions the consumer has installed.
 dependencies:
-  apm: []
+  apm:
+    - ../autopilot-comment
   mcp: []

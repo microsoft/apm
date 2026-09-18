@@ -100,7 +100,8 @@ Modes:
 - `queue-open` / no names: sweep.
 
 `fetch_queue.py` owns list + eligibility (closed, merged, locked,
-bot, empty, template-only; sweep-only draft and spam). Sweep list
+empty, template-only; sweep-only draft and spam). Bot-authored PRs
+stay eligible. Sweep list
 excludes `processing.read_reviewed` (`triage/recommended`,
 `status/triaged`) at GitHub so already-advised open PRs are not
 downloaded. Do not comment on skips. `triage_state.py` owns
@@ -169,6 +170,10 @@ selected list; when a slot returns, fill it with the next item.
    When a slot returns, dispatch the next queued PR. Do not stop
    because the pool was full. Each slot reads the complete PR
    conversation (and linked issue, if any) before advising.
+   Pass `debug: off` unless this run's caller set `debug: on`.
+   Pass `comment_via: autopilot-comment`. Worker kickoff must
+   load `autopilot-comment` before any GitHub comment. Workers
+   must not call `gh pr comment`.
 4. Print a final report from the table.
 
 ## Hard nos

@@ -119,6 +119,9 @@ def is_bot_author(author: str, author_type: str) -> bool:
 def skip_reason(record: dict[str, Any], mode: str) -> str | None:
     """Return a skip token, or None when state/body filters pass.
 
+    Bot-authored issues skip. Bot-authored PRs stay eligible so they
+    can be triaged, accepted, reviewed, and merged.
+
     Completed-advice markers stay eligible; `triage_state.plan_batch` owns
     that sweep skip plus the per-author quota.
     """
@@ -128,7 +131,9 @@ def skip_reason(record: dict[str, Any], mode: str) -> str | None:
         return "merged"
     if record.get("locked"):
         return "locked"
-    if is_bot_author(str(record["author"]), str(record.get("author_type", "User"))):
+    if record.get("kind") != "pr" and is_bot_author(
+        str(record["author"]), str(record.get("author_type", "User"))
+    ):
         return "bot-authored"
     body = record.get("body")
     if not isinstance(body, str) or is_empty_body(body):

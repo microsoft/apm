@@ -29,6 +29,7 @@ intent: advise one already-selected PR
 origin: unattended | actor-session
 write: on | off
 json: off | on
+debug: off | on
 repo: microsoft/apm
 pr: <positive integer>
 invocation: agentic-workflow | actor-session
@@ -39,8 +40,9 @@ Rules:
 - `write` defaults to `on` when the caller omitted it.
 - `write: off` returns the filled template only. Do not comment,
   add labels, or remove labels.
-- `write: on` posts the one advisory comment and processing /
-  classification labels. Never assign. Never request reviewers.
+- `write: on` posts one GitHub comment via `autopilot-comment`
+  and processing / classification labels. Never assign. Never
+  request reviewers. Do not call `gh pr comment` yourself.
   Do not write `status/accepted`, `status/needs-design`, or
   `status/needs-triage`. Write `status/deferred` only when this
   PR is not labelled `status/accepted` and has no same-repo
@@ -50,6 +52,18 @@ Rules:
 - `json: off` -> no machine JSON receipt.
 - `json: on` -> fill JSON only as an internal payload (session
   file or parent Exit). Never post it on GitHub.
+- `debug` defaults to `off` when omitted or unknown. Omitted `debug`
+  is not a missing-field stop.
+- `debug: off` -> pass `public_body` as the Suggested PR comment
+  (unwrap the markdown fence) to `autopilot-comment`. Do not
+  pass recommendation, linked issue, classification, or next
+  action headings as `public_body`.
+- `debug: on` -> pass `debug_body` as the filled template
+  without a JSON fence. `autopilot-comment` prefixes
+  `[i] Skill debug is on.`
+- Load `autopilot-comment` before any GitHub comment write.
+  `source_skill: autopilot-pr-triage-worker`. Missing card ->
+  stop.
 - `origin` fail-closed unknown -> `unattended`.
 - One PR. Do not nest a scheduler path.
 
@@ -61,6 +75,7 @@ subject: microsoft/apm#<pr-number>
 path: triage
 write: on | off
 json: off | on
+debug: off | on
 posted: yes | no
 labels_applied: <comma list or none>
 approved: n/a
@@ -124,8 +139,17 @@ conversation, no-op (do not post a duplicate).
 5. `ready-for-review` when this PR or a linked same-repo issue is
    `status/accepted`. It is not merge approval and is not a
    request to run `autopilot-pr-review-scheduler`.
-6. Post only if the comment would change. Add the contract
-   processing marker. Do not remove `status/needs-triage`.
+6. Post only if the comment would change. Probe
+   `$REPO_ROOT/.agents/skills/autopilot-comment/SKILL.md` (or the
+   sibling package). Missing -> stop. Do not post. Activate
+   `autopilot-comment` (`source_skill:
+   autopilot-pr-triage-worker`). Do not call `gh pr comment`
+   yourself. `debug: off`: Suggested PR comment body as
+   `public_body` (not the filled template). `debug: on`: filled
+   template as `debug_body`. Missing footer after that write
+   is a failed post -- patch via `autopilot-comment`
+   (`intent: patch`). Add the contract processing marker.
+   Do not remove `status/needs-triage`.
 
 ## Hard nos
 
