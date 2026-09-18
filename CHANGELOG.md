@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` again accepts `skills:` subsets from Git collections with nested `skills/<name>/SKILL.md` files but no root manifest or skill, without a `path:` workaround. (#2891)
 - Registry `apm outdated` now separates installed `Current`, constraint-bound `Wanted`, and published `Latest`, so exact pins no longer hide newer releases. It leaves legacy lockfiles unchanged, while `apm update` continues respecting manifest constraints. (#2874)
 
+### Fixed
+
+- `apm install` now explains skipped symlinked agent sources and points to the real-files remedy, without changing which files deploy. (#2932)
+
 ### Security
 
 - The shared gh-aw APM pack job now declares `contents: read` (previously `permissions: {}`), the minimum the explicit built-in-token path needs. No write scope is added, and the token is not forwarded to restore or agent jobs. (#2706)
