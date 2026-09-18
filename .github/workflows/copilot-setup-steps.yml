@@ -35,7 +35,7 @@ jobs:
       # Repository compiler pin: gh-aw v0.87.8 tag commit
       # e973b8cc974ce0b3628a8f9759b40733b4bf146b.
       - name: Install gh-aw extension
-        uses: github/gh-aw-actions/setup-cli@1aa033c7bf25ac9428fe521065b90c30a7070c4e # v0.87.8
+        uses: github/gh-aw-actions/setup-cli@c9a91649fa6263a455ef783f7c06a96940052fec # v0.89.7
         with:
           version: v0.87.8
       
@@ -45,7 +45,7 @@ jobs:
           python-version: '3.12'
       
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       
       - name: Sync dependencies with uv
         run: uv sync --frozen
