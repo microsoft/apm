@@ -175,6 +175,16 @@ apm install
 
 This re-resolves and rewrites `apm.lock.yaml`. Commit the result.
 
+### Merge conflict markers in the lockfile
+
+After a git merge that touched `apm.lock.yaml`, the file may still contain `<<<<<<<` / `>>>>>>>` markers. Commands that read the lockfile then report `apm.lock.yaml contains git merge conflict markers`. A full install discards the file and resolves from `apm.yml`:
+
+```bash
+apm install
+```
+
+APM warns that it is discarding the conflicted file, then writes a fresh lockfile. Commit the result. `apm lock` does the same without deploying files. Partial installs (`apm install PACKAGE`, `--only apm`, `--only mcp`, `--mcp NAME`) and `apm install --frozen` refuse to rewrite the file; resolve the conflict in git first, or run a full `apm install` without `--frozen`. A lockfile that is invalid for any other reason still fails closed in every mode.
+
 ### Drifted refs
 
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:

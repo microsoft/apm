@@ -94,7 +94,13 @@ class FrozenInstallError(RuntimeError):
 
 
 def frozen_install_tip(error: FrozenInstallError) -> str:
-    """Return recovery guidance tailored to package or MCP lock drift."""
+    """Return recovery guidance tailored to package or MCP lock drift.
+
+    Returns an empty string when the error carries no drift reasons, because
+    a missing or unreadable lockfile message already names its next action.
+    """
+    if not error.reasons:
+        return ""
     has_mcp_drift = any("MCP server" in reason for reason in error.reasons)
     has_package_drift = any("MCP server" not in reason for reason in error.reasons)
     if has_mcp_drift and has_package_drift:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +76,25 @@ class LockfileFormatError(ValueError):
 
 class UnsupportedLockfileVersionError(LockfileFormatError):
     """Raised when a lockfile declares a version this client cannot read."""
+
+
+class LockfileConflictError(LockfileFormatError):
+    """Raised when a lockfile still contains git merge conflict markers."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(
+            f"{path} contains git merge conflict markers. Resolve the merge "
+            "conflict, or run 'apm install' to regenerate it from apm.yml."
+        )
+
+
+_CONFLICT_MARKER_RE = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: |$)", re.MULTILINE)
+
+
+def has_conflict_markers(text: str) -> bool:
+    """Return True when *text* contains a git merge conflict marker at line start."""
+    return _CONFLICT_MARKER_RE.search(text) is not None
 
 
 def require_supported_lockfile_version(data: object) -> str:
@@ -1034,11 +1054,14 @@ class LockFile:
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
-        """Read lock file from disk. Returns None if not exists or corrupt."""
+        """Read lock file from disk. Returns None when the file does not exist."""
         if not path.exists():
             return None
+        text = path.read_text(encoding="utf-8")
+        if has_conflict_markers(text):
+            raise LockfileConflictError(path)
         try:
-            return cls.from_yaml(path.read_text(encoding="utf-8"))
+            return cls.from_yaml(text)
         except (LockfileFormatError, UnsupportedLockfileVersionError):
             raise
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
@@ -1262,6 +1285,14 @@ def migrate_lockfile_if_needed(project_root: Path) -> bool:
             return False
         return True
     return False
+
+
+def discard_conflicted_lockfile(path: Path) -> bool:
+    """Delete a lockfile left with git merge conflict markers so install regenerates it."""
+    if not path.exists() or not has_conflict_markers(path.read_text(encoding="utf-8")):
+        return False
+    path.unlink()
+    return True
 
 
 def get_lockfile_installed_paths(project_root: Path) -> list[str]:

@@ -34,7 +34,12 @@ from .writer import add_mcp_to_apm_yml
 # code paths (package install vs. MCP install).
 APM_DEPS_AVAILABLE = False
 try:
-    from ...deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ...deps.lockfile import (
+        LockFile,
+        LockfileFormatError,
+        get_lockfile_path,
+        migrate_lockfile_if_needed,
+    )
     from ...integration.mcp_integrator import MCPIntegrator
 
     APM_DEPS_AVAILABLE = True
@@ -300,6 +305,10 @@ def run_mcp_install(  # noqa: PLR0913
                 )
             except InstallFailureAlreadyRendered:
                 raise
+            except LockfileFormatError as exc:
+                logger.error(str(exc))
+                logger.error("MCP server written to apm.yml but tool integration failed.")
+                raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
             except Exception as exc:
                 # Keep the raw exception (which may contain internal paths,
                 # credentials, or stack-trace fragments) at verbose level

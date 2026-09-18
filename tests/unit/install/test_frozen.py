@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.install.errors import FrozenInstallError
+from apm_cli.install.errors import FrozenInstallError, frozen_install_tip
 from apm_cli.install.request import InstallRequest
 from apm_cli.install.service import InstallService
 from apm_cli.models.dependency.reference import DependencyReference
@@ -76,6 +76,37 @@ class TestEnforceFrozen:
         req = _make_request(project_dir=tmp_path, manifest_deps=[dep])
 
         InstallService.enforce_frozen(req)
+
+    def test_conflict_markers_fail_closed_with_named_next_action(self, tmp_path: Path):
+        """#2979: --frozen never regenerates; the error names the conflict and the way out."""
+        _write_apm_yml(tmp_path)
+        conflicted = (
+            "lockfile_version: '1'\n"
+            "<<<<<<< HEAD\n"
+            "dependencies: []\n"
+            "=======\n"
+            "dependencies:\n"
+            "- repo_url: example/x\n"
+            ">>>>>>> feature\n"
+        )
+        (tmp_path / "apm.lock.yaml").write_text(conflicted)
+        req = _make_request(project_dir=tmp_path, manifest_deps=[])
+
+        with pytest.raises(FrozenInstallError, match="conflict markers") as exc_info:
+            InstallService.enforce_frozen(req)
+
+        assert "without --frozen" in str(exc_info.value)
+        assert "apm outdated" not in frozen_install_tip(exc_info.value)
+        assert (tmp_path / "apm.lock.yaml").read_text() == conflicted
+
+    def test_missing_lockfile_tip_does_not_point_at_unreadable_commands(self, tmp_path: Path):
+        _write_apm_yml(tmp_path)
+        req = _make_request(project_dir=tmp_path, manifest_deps=[])
+
+        with pytest.raises(FrozenInstallError) as exc_info:
+            InstallService.enforce_frozen(req)
+
+        assert frozen_install_tip(exc_info.value) == ""
 
     def test_orphan_lockfile_entries_dont_fail(self, tmp_path: Path):
         """Mirrors npm ci: extra lock entries are tolerated; only direct deps must be present."""

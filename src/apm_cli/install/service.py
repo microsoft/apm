@@ -263,7 +263,7 @@ class InstallService:
         """
         from pathlib import Path
 
-        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.deps.lockfile import LockFile, LockfileConflictError
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.plan import lockfile_satisfies_manifest
 
@@ -284,6 +284,12 @@ class InstallService:
 
         try:
             lockfile = LockFile.read(lockfile_path)
+        except LockfileConflictError as e:
+            raise FrozenInstallError(
+                "--frozen cannot use apm.lock.yaml: it contains git merge conflict "
+                "markers. Resolve the merge conflict, or run 'apm install' without "
+                "--frozen to regenerate it from apm.yml.",
+            ) from e
         except Exception as e:
             raise FrozenInstallError(
                 f"--frozen could not read apm.lock.yaml: {e}",

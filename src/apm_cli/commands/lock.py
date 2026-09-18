@@ -223,8 +223,14 @@ def _run_lock(
     logger = InstallLogger(verbose=verbose)
 
     try:
-        from apm_cli.commands.install import _install_apm_dependencies
+        from apm_cli.commands.install import (
+            _LOCKFILE_CONFLICT_DISCARDED,
+            _install_apm_dependencies,
+        )
+        from apm_cli.deps.lockfile import discard_conflicted_lockfile, get_lockfile_path
 
+        if discard_conflicted_lockfile(get_lockfile_path(project_root)):
+            logger.warning(_LOCKFILE_CONFLICT_DISCARDED)
         result = _install_apm_dependencies(
             apm_package,
             update_refs=update_refs,
@@ -304,11 +310,11 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
         project_root = manifest_path.parent if manifest_path else Path.cwd().resolve()
 
     lockfile_path = get_lockfile_path(project_root)
-    if not lockfile_path.is_file():
+    lockfile = LockFile.read(lockfile_path)
+    if lockfile is None:
         _rich_error(f"No lockfile found at {lockfile_path}. Run 'apm lock' to generate one first.")
         sys.exit(1)
 
-    lockfile = LockFile.from_yaml(lockfile_path.read_text(encoding="utf-8"))
     resolved_timestamp = _resolve_export_timestamp(timestamp, lockfile.generated_at)
 
     document = export_sbom(lockfile, fmt, timestamp=resolved_timestamp)

@@ -224,9 +224,17 @@ class InstallContext:
 # APM Dependencies (conditional import for graceful degradation)
 APM_DEPS_AVAILABLE = False
 _APM_IMPORT_ERROR = None
+_LOCKFILE_CONFLICT_DISCARDED = (
+    "apm.lock.yaml contains git merge conflict markers; discarding it and resolving from apm.yml."
+)
 try:
     from ..deps.apm_resolver import APMDependencyResolver
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ..deps.lockfile import (
+        LockFile,
+        discard_conflicted_lockfile,
+        get_lockfile_path,
+        migrate_lockfile_if_needed,
+    )
     from ..integration.mcp_integrator import (
         MCPIntegrator,  # noqa: F401 -- re-exported; tests patch commands.install.MCPIntegrator
     )
@@ -1643,7 +1651,8 @@ def install(  # noqa: PLR0913
         logger.error(str(e))
         for reason in e.reasons:
             logger.error_detail(reason)
-        logger.info(_frozen_install_tip(e))
+        if tip := _frozen_install_tip(e):
+            logger.info(tip)
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1822,6 +1831,11 @@ def _install_apm_packages(ctx, outcome):
 
     # Migrate legacy apm.lock -> apm.lock.yaml if needed (one-time, transparent)
     migrate_lockfile_if_needed(ctx.apm_dir)
+    # Only a full install re-resolves every apm.yml entry; a partial add or
+    # --only run would write a lockfile missing the other entries.
+    full_install = not ctx.frozen and not ctx.packages and ctx.install_mode == InstallMode.ALL
+    if full_install and discard_conflicted_lockfile(get_lockfile_path(ctx.apm_dir)):
+        logger.warning(_LOCKFILE_CONFLICT_DISCARDED)
 
     # Capture old MCP servers and configs from lockfile BEFORE
     # _install_apm_dependencies regenerates it (which drops the fields).
@@ -1928,7 +1942,8 @@ def _install_apm_packages(ctx, outcome):
             logger.error(str(e))
             for reason in e.reasons:
                 logger.error_detail(reason)
-            logger.info(_frozen_install_tip(e))
+            if tip := _frozen_install_tip(e):
+                logger.info(tip)
             raise InstallFailureAlreadyRendered(str(e)) from e
         except InstallFailureAlreadyRendered:
             raise
