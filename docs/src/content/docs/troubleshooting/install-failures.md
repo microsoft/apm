@@ -100,8 +100,9 @@ Use `APM_ADO_HOSTS` for multiple Server instances. A configured ADO host wins
 when `GITHUB_HOST` names the same host. Host variables accept FQDNs only,
 without a scheme, port, or path; put a non-default HTTPS port in the
 dependency URL. Use a root-hosted collection path. APM rejects `/tfs/`
-prefixes. If the PAT is rejected, rotate it -- Azure CLI bearer auth does
-not apply to Server.
+prefixes. If the PAT is rejected, APM retries path-scoped `git credential fill`
+(Git Credential Manager). Azure CLI bearer auth does not apply to Server.
+If fill also fails, rotate the PAT or store a repository credential in GCM.
 
 ### Test your token
 

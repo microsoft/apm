@@ -882,6 +882,14 @@ class AuthResolver:
                     ),
                 )
             except Exception as fill_exc:
+                prior_context = fill_exc.__context__
+                fill_exc.__context__ = None
+                try:
+                    fill_is_auth_failure = is_ado_auth_failure_signal(fill_exc)
+                finally:
+                    fill_exc.__context__ = prior_context
+                if not fill_is_auth_failure:
+                    raise fill_exc from None
                 _log(
                     f"git credential fill was rejected for {host_info.display_name}; "
                     "wrapping exhausted-chain error"

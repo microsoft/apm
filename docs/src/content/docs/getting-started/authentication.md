@@ -278,7 +278,7 @@ Create the PAT at `https://dev.azure.com/{org}/_usersSettings/tokens` with **Cod
 ### On-prem Azure DevOps Server
 
 If you have an on-prem Azure DevOps Server (not `dev.azure.com`),
-register its hostname so APM routes it through the ADO PAT chain instead of
+register its hostname so APM routes it through the ADO auth chain instead of
 the generic or GHES chain. No manual host-type flag is needed:
 
 ```bash
@@ -306,7 +306,9 @@ If `GITHUB_HOST` names the same hostname, `ADO_HOST` or `APM_ADO_HOSTS`
 takes precedence and the host is classified as ADO, not GHES. Adding the ADO
 configuration is sufficient; `GITHUB_HOST` does not have to be unset.
 
-Azure DevOps Server authentication is PAT-only in APM:
+Azure DevOps Server authentication uses `ADO_APM_PAT`, then path-scoped
+`git credential fill` (Git Credential Manager). Store a repository
+credential in Git if you do not want to set a PAT.
 
 ```bash
 export ADO_APM_PAT=your_ado_server_pat
@@ -562,19 +564,19 @@ flowchart TD
     ADOPAT -->|Yes| ADOCRED[Use ADO PAT]
     ADOPAT -->|No| AZ{az bearer available?}
     AZ -->|Yes| ADOBEARER[Use az bearer]
-    AZ -->|No| F
+    AZ -->|No| I
     ADOCRED --> ADOREQ{ADO request works?}
     ADOBEARER --> ADOREQ
     ADOREQ -->|Yes| L
     ADOREQ -->|PAT rejected and az available| ADOBEARER
-    ADOREQ -->|bearer also rejected| F
+    ADOREQ -->|bearer also rejected| I
 
     HC -->|ADO Server| SERVERPAT{ADO_APM_PAT set?}
     SERVERPAT -->|Yes| SERVERCRED[Use Server PAT]
-    SERVERPAT -->|No| F
+    SERVERPAT -->|No| I
     SERVERCRED --> SERVERREQ{Server request works?}
     SERVERREQ -->|Yes| L
-    SERVERREQ -->|No| F
+    SERVERREQ -->|No| I
 
     HC -->|Generic FQDN| F
 

@@ -910,6 +910,50 @@ class TestTryWithFallbackCredentialChain:
         assert "az CLI bearer" not in message
         assert "az login" in message
 
+    def test_ado_fill_non_auth_failure_is_not_wrapped(self) -> None:
+        def _op(token, _env):
+            if token == "gcm-token":
+                raise RuntimeError("network timeout")
+            raise RuntimeError("401 Unauthorized")
+
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(RuntimeError, match="network timeout") as raised:
+                resolver.try_with_fallback("dev.azure.com", _op)
+        assert type(raised.value) is RuntimeError
+        assert not isinstance(raised.value, AdoAuthChainExhaustedError)
+
+    def test_ado_fill_auth_failure_is_wrapped(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="gcm-token",
+            ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError, match="git credential fill"):
+                resolver.try_with_fallback("dev.azure.com", _op)
+
     def test_ado_network_failure_does_not_probe_credential_helper(self) -> None:
         with (
             patch.dict(os.environ, {}, clear=True),

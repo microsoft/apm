@@ -149,13 +149,15 @@ For SSO-protected orgs, authorize the token under Settings > Tokens > Configure 
 
 ## Azure DevOps (ADO)
 
-Azure DevOps Services supports two auth modes; the GitHub token chain does
-not apply. The recommended approach is `az login`; explicit PATs are also
+Azure DevOps Services supports PAT, Azure CLI bearer, and path-scoped git
+credential fill; the GitHub token chain does not apply. The recommended
+approach is `az login`; explicit PATs and Git Credential Manager are also
 supported. Resolution order:
 
 1. `ADO_APM_PAT` env var if set
 2. AAD bearer from `az account get-access-token` if `az` is installed and signed in
-3. Otherwise: auth-failed error with actionable diagnostic
+3. Path-scoped `git credential fill` (Git Credential Manager)
+4. Otherwise: auth-failed error with actionable diagnostic
 
 ```bash
 # Recommended: bearer mode (no env var needed)
@@ -168,8 +170,7 @@ apm install dev.azure.com/org/project/_git/repo
 ```
 
 ADO paths use the 3-segment format: `org/project/repo`. Auth is always required.
-No ADO Git path invokes native credential helpers.
-`apm marketplace check` uses the PAT-to-bearer chain. See
+`apm marketplace check` uses the PAT-to-bearer-to-fill chain. See
 [Marketplace source bases](package-authoring.md#marketplace-source-bases) for
 ADO marketplace URL authoring.
 
