@@ -285,9 +285,19 @@ agent a procedure" fits a skill -- and reaches every harness.
   alias) for scripts that ship inside the package, using the quoting forms
   described above. Plain absolute paths break on consumers' machines.
 - **Hook script path resolution.** `apm install -g` (user-scope)
-  rewrites `${PLUGIN_ROOT}` and relative `./` references to absolute
-  paths so Claude Code and Copilot CLI can execute scripts regardless
-  of the working directory. Project-scope `apm install` (no `-g`) keeps
+  rewrites `${PLUGIN_ROOT}` and relative `./` references so Claude Code
+  and Copilot CLI can execute scripts regardless of the working
+  directory. On POSIX hosts the rewritten path is anchored to `$HOME`
+  (for example `$HOME/.claude/hooks/<pkg>/run.sh`), which the shell
+  expands at invocation time, so a user-scope config kept in a dotfiles
+  repo stays valid on a host with a different home directory. Because the
+  anchor resolves late, the hook runs the script under whatever `HOME` the
+  launching shell provides -- keep `HOME` pointing at the installing user's
+  home when a wrapper script, service, or CI job invokes the harness.
+  Windows keeps the absolute form, and so do single-quoted references (a
+  shell does not expand `$HOME` inside single quotes) and a dynamic target
+  root outside the home directory (for example `CLAUDE_CONFIG_DIR`).
+  Project-scope `apm install` (no `-g`) keeps
   non-Claude command paths repo-relative. Claude project hooks use
   `CLAUDE_PROJECT_DIR` (or `$env:CLAUDE_PROJECT_DIR` for PowerShell) so
   checked-in settings remain portable while hooks can run from outside the

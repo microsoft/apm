@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -192,8 +193,13 @@ def test_copilot_install_scope_controls_script_paths(
     ).resolve()
     monkeypatch.chdir(package_info.install_path)
     if user_scope:
-        assert Path(command).is_absolute()
-        assert Path(command).resolve() == installed_script
+        # User-scope commands must resolve from any cwd. On POSIX they anchor
+        # to $HOME so a settings file kept in a dotfiles repo stays valid on a
+        # host with a different home directory; Windows keeps absolute paths.
+        relative = f"{target.root_dir}/hooks/scripts/{package_info.package.name}/run.sh"
+        assert command == (f"$HOME/{relative}" if os.name != "nt" else str(installed_script))
+        expanded = command.replace("$HOME", str(Path.home()))
+        assert Path(expanded).resolve() == installed_script
     else:
         assert not Path(command).is_absolute()
         assert command == f"{target.root_dir}/hooks/scripts/{package_info.package.name}/run.sh"
@@ -236,8 +242,12 @@ def test_kiro_install_scope_controls_script_paths(
     ).resolve()
     monkeypatch.chdir(package_info.install_path)
     if user_scope:
-        assert Path(command).is_absolute()
-        assert Path(command).resolve() == installed_script
+        # Same POSIX $HOME anchor as Copilot: Kiro consumes the shared hook
+        # scope rewrite decision.
+        relative = f"{target.root_dir}/hooks/{package_info.package.name}/run.sh"
+        assert command == (f"$HOME/{relative}" if os.name != "nt" else str(installed_script))
+        expanded = command.replace("$HOME", str(Path.home()))
+        assert Path(expanded).resolve() == installed_script
     else:
         assert not Path(command).is_absolute()
         assert command == f"{target.root_dir}/hooks/{package_info.package.name}/run.sh"
