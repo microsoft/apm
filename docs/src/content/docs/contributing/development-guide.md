@@ -30,6 +30,11 @@ cd apm
 uv sync --extra dev
 ```
 
+For binary builds, install the locked build tools with
+`uv sync --frozen --extra dev --extra build`. PyInstaller 6.17 or newer is
+required for compatibility with setuptools 83, which no longer provides
+`pkg_resources`.
+
 ## Optional agent tools
 
 No AI tool, harness, or repository skill is required to contribute. APM
