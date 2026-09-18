@@ -292,7 +292,8 @@ class InstallService:
             ) from e
         except Exception as e:
             raise FrozenInstallError(
-                f"--frozen could not read apm.lock.yaml: {e}",
+                f"--frozen could not read apm.lock.yaml: {e}. Fix or remove the file, "
+                "then run 'apm install' without --frozen to regenerate it.",
             ) from e
 
         if lockfile is None:

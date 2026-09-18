@@ -13,7 +13,7 @@ from apm_cli.deps.lockfile import (
     discard_conflicted_lockfile,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 _VALID = "lockfile_version: '1'\ndependencies: []\n"
 
@@ -94,6 +94,26 @@ def test_read_treats_separator_only_line_as_ordinary_format_error(tmp_path: Path
         LockFile.read(path)
 
     assert not isinstance(exc_info.value, LockfileConflictError)
+
+
+def test_read_undecodable_lockfile_is_a_format_error(tmp_path: Path) -> None:
+    path = tmp_path / "apm.lock.yaml"
+    path.write_bytes(b"lockfile_version: '1'\n\xff\xfe<<<<<<< HEAD\n")
+
+    with pytest.raises(LockfileFormatError) as exc_info:
+        LockFile.read(path)
+
+    assert not isinstance(exc_info.value, LockfileConflictError)
+    assert str(path) in str(exc_info.value)
+
+
+def test_discard_leaves_an_undecodable_lockfile_in_place(tmp_path: Path) -> None:
+    path = tmp_path / "apm.lock.yaml"
+    raw = b"\xff\xfe<<<<<<< HEAD\n"
+    path.write_bytes(raw)
+
+    assert discard_conflicted_lockfile(path) is False
+    assert path.read_bytes() == raw
 
 
 def test_discard_removes_only_a_conflicted_lockfile(tmp_path: Path) -> None:

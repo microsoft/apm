@@ -1057,10 +1057,10 @@ class LockFile:
         """Read lock file from disk. Returns None when the file does not exist."""
         if not path.exists():
             return None
-        text = path.read_text(encoding="utf-8")
-        if has_conflict_markers(text):
-            raise LockfileConflictError(path)
         try:
+            text = path.read_text(encoding="utf-8")
+            if has_conflict_markers(text):
+                raise LockfileConflictError(path)
             return cls.from_yaml(text)
         except (LockfileFormatError, UnsupportedLockfileVersionError):
             raise
@@ -1289,7 +1289,13 @@ def migrate_lockfile_if_needed(project_root: Path) -> bool:
 
 def discard_conflicted_lockfile(path: Path) -> bool:
     """Delete a lockfile left with git merge conflict markers so install regenerates it."""
-    if not path.exists() or not has_conflict_markers(path.read_text(encoding="utf-8")):
+    if not path.exists():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not has_conflict_markers(text):
         return False
     path.unlink()
     return True

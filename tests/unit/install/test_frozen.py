@@ -99,6 +99,17 @@ class TestEnforceFrozen:
         assert "apm outdated" not in frozen_install_tip(exc_info.value)
         assert (tmp_path / "apm.lock.yaml").read_text() == conflicted
 
+    def test_corrupt_lockfile_names_a_next_action(self, tmp_path: Path):
+        _write_apm_yml(tmp_path)
+        (tmp_path / "apm.lock.yaml").write_text("lockfile_version: '1'\ndependencies: [\n")
+        req = _make_request(project_dir=tmp_path, manifest_deps=[])
+
+        with pytest.raises(FrozenInstallError, match="could not read") as exc_info:
+            InstallService.enforce_frozen(req)
+
+        assert "without --frozen" in str(exc_info.value)
+        assert frozen_install_tip(exc_info.value) == ""
+
     def test_missing_lockfile_tip_does_not_point_at_unreadable_commands(self, tmp_path: Path):
         _write_apm_yml(tmp_path)
         req = _make_request(project_dir=tmp_path, manifest_deps=[])

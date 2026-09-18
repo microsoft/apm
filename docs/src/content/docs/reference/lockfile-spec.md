@@ -395,8 +395,9 @@ an empty lockfile.
 
 A lockfile that still contains git merge conflict markers (`<<<<<<<`,
 `>>>>>>>`, or `|||||||` at the start of a line) is reported as a merge
-conflict rather than a YAML error. Every command that reads the lockfile names
-the file and the next action. A full `apm install` (no package arguments, no
+conflict rather than a YAML error. Commands that require the lockfile name
+the file and the next action; best-effort readers such as `apm view` continue
+without lock metadata as before. A full `apm install` (no package arguments, no
 `--only`) or `apm lock` warns, discards the file, and resolves from
 `apm.yml`, the same input a non-frozen install resolves from anyway;
 deployed-file records from the conflicted file are not carried over, and a

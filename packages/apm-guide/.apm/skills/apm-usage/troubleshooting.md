@@ -11,6 +11,7 @@
 | MCP path contains `.apm-resolution-staging` | Upgrade APM and retry the same install once. If it repeats, stop and report the redacted error and named MCP entry. Do not edit package files, delete the lockfile, or use `--refresh`/`--force` solely for this repair. |
 | TLS verification failed | Install your corporate CA into the OS trust store. For a per-shell override, set `REQUESTS_CA_BUNDLE=/path/to/ca-bundle.pem`; `SSL_CERT_FILE` alone is not a reliable requests override. |
 | Orphaned packages in lockfile | Run `apm prune` to remove packages no longer in apm.yml. |
+| `apm.lock.yaml` contains git merge conflict markers | Run a full `apm install` (or `apm lock`): APM warns, discards the conflicted file, and resolves from apm.yml. `--frozen`, partial installs (`PACKAGE`, `--only`, `--mcp`), and read-only commands fail with the named error until then; resolve the conflict in git to keep the existing pins instead. |
 | Security findings block install | Run `apm audit` to review findings, then `apm install --force` if acceptable. |
 | Compilation not picking up changes | Run `apm compile --clean` to remove orphaned output, or `apm compile --watch` for auto-regeneration. |
 | Windows encoding / charmap errors | Ensure all source files and CLI output use printable ASCII only (U+0020-U+007E). No emojis or unicode symbols. |

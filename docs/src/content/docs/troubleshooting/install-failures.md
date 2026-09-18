@@ -177,7 +177,7 @@ This re-resolves and rewrites `apm.lock.yaml`. Commit the result.
 
 ### Merge conflict markers in the lockfile
 
-After a git merge that touched `apm.lock.yaml`, the file may still contain `<<<<<<<` / `>>>>>>>` markers. Commands that read the lockfile then report `apm.lock.yaml contains git merge conflict markers`. A full install discards the file and resolves from `apm.yml`:
+After a git merge that touched `apm.lock.yaml`, the file may still contain `<<<<<<<` / `>>>>>>>` markers. Commands that require the lockfile then report `apm.lock.yaml contains git merge conflict markers`. A full install discards the file and resolves from `apm.yml`:
 
 ```bash
 apm install
