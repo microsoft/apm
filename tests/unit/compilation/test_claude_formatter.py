@@ -16,7 +16,7 @@ from apm_cli.compilation.claude_formatter import (
     format_claude_md,
 )
 from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
-from apm_cli.primitives.models import Chatmode, Instruction, PrimitiveCollection
+from apm_cli.primitives.models import Chatmode, Context, Instruction, PrimitiveCollection
 from apm_cli.version import get_version
 
 
@@ -705,3 +705,117 @@ class TestSkipInstructions:
         content = next(iter(result.content_map.values()))
         assert "## Dependencies" in content.splitlines()
         assert "Project Standards" not in content
+
+
+class TestContextLinkResolution:
+    """Regression tests: CLAUDE.md must resolve ``.context.md``/``.memory.md``
+    links the same way AGENTS.md already does (distributed_compiler.py).
+
+    Before this fix, ``_generate_claude_content`` returned
+    ``"\\n".join(sections)`` directly with no call into
+    ``UnifiedLinkResolver`` at all, so any relative link embedded in an
+    instruction body was emitted byte-for-byte from the source file --
+    correct only when CLAUDE.md happens to land in the same directory as the
+    instruction that referenced it, and silently broken otherwise (e.g. a
+    global/no-``applyTo`` instruction whose body links to a sibling
+    ``.apm/context/*.context.md`` fragment).
+    """
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        resolved = Path(temp_dir).resolve()
+        yield resolved
+        shutil.rmtree(resolved, ignore_errors=True)
+
+    def test_context_link_rewritten_relative_to_claude_md(self, temp_project):
+        """A link to a `.context.md` fragment must resolve from CLAUDE.md's
+        own directory, not from the source instruction's directory."""
+        primitives = PrimitiveCollection()
+
+        context_file = temp_project / ".apm" / "context" / "conventions.context.md"
+        context_file.parent.mkdir(parents=True)
+        context_file.write_text("Real content lives here.")
+        primitives.add_primitive(
+            Context(
+                name="conventions",
+                file_path=context_file,
+                content="Real content lives here.",
+                source="local",
+            )
+        )
+
+        instruction_file = temp_project / ".apm" / "instructions" / "signpost.instructions.md"
+        instruction_file.parent.mkdir(parents=True)
+        instruction = Instruction(
+            name="signpost",
+            file_path=instruction_file,
+            description="Signpost",
+            apply_to="",
+            content="See [conventions](../context/conventions.context.md) for details.",
+            author="test",
+            source="local",
+        )
+        primitives.add_primitive(instruction)
+
+        formatter = ClaudeFormatter(str(temp_project))
+        placement_map = {temp_project: list(primitives.instructions)}
+        result = formatter.format_distributed(primitives, placement_map)
+
+        assert result.success
+        content = result.content_map[temp_project / "CLAUDE.md"]
+
+        # The link must now be anchored to CLAUDE.md's own directory
+        # (temp_project), matching what AGENTS.md already produces for the
+        # same source instruction -- not the original "../context/..."
+        # written relative to the instruction file's own directory.
+        assert "(.apm/context/conventions.context.md)" in content
+        assert "../context/conventions.context.md" not in content
+
+        # And the rewritten link must actually resolve on disk.
+        rewritten_target = temp_project / ".apm" / "context" / "conventions.context.md"
+        assert rewritten_target.exists()
+
+    def test_context_link_rewritten_for_dependency_sourced_instruction(self, temp_project):
+        """Same as above, but the instruction+context pair are sourced from a
+        dependency materialized under apm_modules/, matching how a real
+        component-repo dependency is discovered."""
+        primitives = PrimitiveCollection()
+
+        dep_root = temp_project / "apm_modules" / "_local" / "some-repo"
+        context_file = dep_root / ".apm" / "context" / "conventions.context.md"
+        context_file.parent.mkdir(parents=True)
+        context_file.write_text("Real content lives here.")
+        primitives.add_primitive(
+            Context(
+                name="conventions",
+                file_path=context_file,
+                content="Real content lives here.",
+                source="dependency:some-repo",
+            )
+        )
+
+        instruction_file = dep_root / ".apm" / "instructions" / "signpost.instructions.md"
+        instruction_file.parent.mkdir(parents=True)
+        instruction = Instruction(
+            name="signpost",
+            file_path=instruction_file,
+            description="Signpost",
+            apply_to="",
+            content="See [conventions](../context/conventions.context.md) for details.",
+            author="test",
+            source="dependency:some-repo",
+        )
+        primitives.add_primitive(instruction)
+
+        formatter = ClaudeFormatter(str(temp_project))
+        placement_map = {temp_project: [instruction]}
+        result = formatter.format_distributed(primitives, placement_map)
+
+        assert result.success
+        content = result.content_map[temp_project / "CLAUDE.md"]
+
+        expected_relative = "apm_modules/_local/some-repo/.apm/context/conventions.context.md"
+        assert f"({expected_relative})" in content
+        assert "../context/conventions.context.md" not in content
+        assert (temp_project / expected_relative).exists()
