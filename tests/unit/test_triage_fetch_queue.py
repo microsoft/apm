@@ -85,9 +85,7 @@ def test_bot_authored_issues_and_prs_stay_eligible() -> None:
     )
     for kind in ("issue", "pr"):
         for login, author_type in logins:
-            record = FETCH["normalize_record"](
-                _raw(10, login=login, author_type=author_type), kind
-            )
+            record = FETCH["normalize_record"](_raw(10, login=login, author_type=author_type), kind)
             assert FETCH["skip_reason"](record, "sweep") is None
             assert FETCH["skip_reason"](record, "dispatch") is None
 
