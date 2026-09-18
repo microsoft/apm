@@ -390,23 +390,23 @@ class AgentIntegrator(BaseIntegrator):
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
-        try:
-            content = source.read_text(encoding="utf-8")
-        except OSError:
-            return 0
+        content = source.read_text(encoding="utf-8")
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
             try:
-                fm: dict = load_yaml_str(fm_match.group(1)) or {}
+                fm = load_yaml_str(fm_match.group(1)) or {}
             except yaml.YAMLError:
                 fm = {}
+            converted = False
             if isinstance(fm, dict) and "tools" in fm:
                 tools = fm["tools"]
                 if isinstance(tools, list):
                     fm["tools"] = {str(t).strip(): True for t in tools if str(t).strip()}
+                    converted = True
                 elif isinstance(tools, str):
                     fm["tools"] = {t.strip(): True for t in tools.split(",") if t.strip()}
-            if isinstance(fm, dict) and fm:
+                    converted = True
+            if converted:
                 body = content[fm_match.end() :]
                 new_fm = yaml_to_str(fm)
                 content = f"---\n{new_fm}---\n{body}"

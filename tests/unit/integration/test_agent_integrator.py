@@ -1155,6 +1155,25 @@ class TestOpenCodeAgentConversion:
         fm = yaml.safe_load(fm_text)
         assert fm["tools"] == {"Read": True, "Grep": True}
 
+    def test_dict_tools_keeps_frontmatter_comments(self):
+        """Already-correct tools must not rewrite unrelated frontmatter."""
+        source = self._write_source(
+            "agent.agent.md",
+            "---\n# keep this comment\ntools:\n  Read: true\n---\nBody\n",
+        )
+        target = self._target("agent.md")
+        self.integrator._write_opencode_agent(source, target)
+        assert "# keep this comment" in target.read_text()
+
+    def test_unreadable_source_raises(self):
+        """Read failures propagate, matching copy_agent."""
+        import pytest
+
+        source = self.temp_dir / "missing.agent.md"
+        target = self._target("agent.md")
+        with pytest.raises(OSError):
+            self.integrator._write_opencode_agent(source, target)
+
     def test_no_tools_field_preserved(self):
         """Agent without tools field is written unchanged."""
         source = self._write_source(
