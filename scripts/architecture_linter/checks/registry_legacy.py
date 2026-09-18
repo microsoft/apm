@@ -63,10 +63,10 @@ OPENCODE_FUNCTION = "validate_opencode_frontmatter"
 AGENT_DIAGNOSTIC_FUNCTIONS: Mapping[str, bool] = {
     "AgentIntegrator._warn_codex_unverified_scope": True,
     "AgentIntegrator._warn_codex_tools_dropped": True,
-    "AgentIntegrator._warn_opencode_frontmatter": False,
+    "AgentIntegrator._write_opencode_agent": False,
 }
 ALLOWED_IDENTITY_DELEGATES: Mapping[str, frozenset[str]] = {
-    "AgentIntegrator._warn_opencode_frontmatter": frozenset({OPENCODE_FUNCTION}),
+    "AgentIntegrator._write_opencode_agent": frozenset({OPENCODE_FUNCTION}),
 }
 _DIAGNOSTIC_SINKS: frozenset[str] = frozenset({"warn", "lossy_agent_compilation"})
 _ASCII_PROBE_METHODS: frozenset[str] = frozenset({"isascii", "isprintable"})
