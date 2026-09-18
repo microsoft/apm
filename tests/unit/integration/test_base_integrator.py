@@ -722,10 +722,14 @@ class TestInitLinkResolverHomeScoping:
         install_path.mkdir(parents=True)
         pkg_info.install_path = install_path
         pkg_info.root_local_project_root = tmp_path if has_recorded_root else None
+        pkg_info.deployment_package_root = None
 
         bi.init_link_resolver(pkg_info, tmp_path)
 
         mock_discover.assert_called_once_with(install_path)
+        assert bi.link_resolver is mock_resolver_cls.return_value
+        assert bi.link_resolver.package_root == install_path
+        assert bi.link_resolver.deployment_package_root == install_path
 
     @patch("apm_cli.integration.base_integrator.discover_primitives")
     @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
@@ -783,6 +787,7 @@ class TestInitLinkResolverLocalScoping:
         """Keep the source root fixed when replay deploys into scratch."""
         pkg_info = MagicMock()
         pkg_info.install_path = tmp_path
+        pkg_info.deployment_package_root = None
         replay = request.param == "replay"
         pkg_info.root_local_project_root = tmp_path if replay else None
         destination = tmp_path_factory.mktemp("replay") if replay else tmp_path
@@ -805,7 +810,9 @@ class TestInitLinkResolverLocalScoping:
         bi.init_link_resolver(*local_context)
 
         called_roots = [call.args[0] for call in mock_discover.call_args_list]
-        assert mock_resolver_cls.return_value.package_root == tmp_path
+        assert bi.link_resolver is mock_resolver_cls.return_value
+        assert bi.link_resolver.package_root == tmp_path
+        assert bi.link_resolver.deployment_package_root == tmp_path
         assert tmp_path / ".apm" in called_roots
         assert tmp_path / ".github" in called_roots
         # Critically: project_root itself was NOT passed to discover_primitives.
@@ -829,6 +836,7 @@ class TestInitLinkResolverLocalScoping:
         bi.init_link_resolver(*local_context)
 
         called_roots = [call.args[0] for call in mock_discover.call_args_list]
+        assert bi.link_resolver is mock_resolver_cls.return_value
         assert called_roots == [tmp_path / ".apm"]
 
     @patch("apm_cli.integration.base_integrator.discover_primitives")
@@ -841,6 +849,7 @@ class TestInitLinkResolverLocalScoping:
         bi.init_link_resolver(*local_context)
 
         mock_discover.assert_not_called()
+        assert bi.link_resolver is mock_resolver_cls.return_value
 
     def test_real_walk_does_not_traverse_noise_subtree(self, tmp_path, local_context):
         """End-to-end: with a real (non-mocked) discover_primitives call,
@@ -878,6 +887,9 @@ class TestInitLinkResolverLocalScoping:
         with patch("apm_cli.primitives.discovery.os.walk", side_effect=spy_walk):
             bi.init_link_resolver(*local_context)
 
+        assert bi.link_resolver is not None
+        assert bi.link_resolver.package_root == tmp_path
+        assert bi.link_resolver.deployment_package_root == tmp_path
         # The noise subtree must never appear in any walked directory.
         for d in visited_dirs:
             assert "noise" not in Path(d).parts, f"discovery walked noise subtree: {d}"

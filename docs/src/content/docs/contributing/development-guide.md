@@ -367,12 +367,13 @@ When updating actions in generated `.github/workflows/*.lock.yml` files,
 align `gh-aw-manifest` headers, action lists, and `.github/aw/actions-lock.json`
 entries with runtime `uses:` pins. Dependabot does not update this metadata.
 Preserve compiler versions and source hashes for dependency-only edits.
-For source changes, including comments, run `gh aw compile` with the workflow's
-generator version and commit source and regenerated lock together.
+For source changes, including comments, run `gh aw compile` with the repository's
+pinned compiler version from `.github/workflows/copilot-setup-steps.yml`.
+Commit source and regenerated lock together; do not edit compiler metadata by hand.
 
-Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py`
-to check triage/review source freshness and compiler-header consistency, plus
-setup and app-token action-pin consistency across manifest-bearing workflows.
+Run `uv run --frozen --extra dev pytest tests/unit/test_triage_panel_lock.py tests/unit/test_shared_apm_workflow_contract.py`
+to check triage/review source freshness across line endings, compiler-header
+consistency with the repository pin, and action-pin consistency.
 
 ### Code scanning on pull requests and merge queues
 

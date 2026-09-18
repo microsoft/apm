@@ -98,10 +98,8 @@ class TestIsNestedUnderPackage:
 
 @pytest.mark.windows_compat
 @pytest.mark.parametrize("alias", [".safe", "safe.", "foo..bar", "my-skill.v2"])
-def test_scan_includes_flattened_alias_without_nested_or_symlink_packages(
-    tmp_path: Path, alias: str
-) -> None:
-    """Prune must see an alias root, but not its contents or external links."""
+def test_scan_includes_flattened_alias_without_nested_packages(tmp_path: Path, alias: str) -> None:
+    """Prune must see an alias root, but not its nested packages."""
     modules = tmp_path / "apm_modules"
     package = modules / alias
     package.mkdir(parents=True)
@@ -109,12 +107,23 @@ def test_scan_includes_flattened_alias_without_nested_or_symlink_packages(
     nested = package / "nested"
     nested.mkdir()
     _make_apm_yml(nested)
+    # Windows strips trailing dots when creating directories; scan the on-disk name.
+    assert _scan_installed_packages(modules) == [package.resolve().name]
+
+
+@pytest.mark.windows_compat
+def test_scan_excludes_symlink_packages(tmp_path: Path) -> None:
+    """Symlink prerequisites must not skip the independent alias regression."""
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
     _make_apm_yml(outside)
-    (modules / "linked").symlink_to(outside, target_is_directory=True)
-    # Windows strips trailing dots when creating directories; scan the on-disk name.
-    assert _scan_installed_packages(modules) == [package.resolve().name]
+    try:
+        (modules / "linked").symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("platform does not support directory symlinks")
+    assert _scan_installed_packages(modules) == []
 
 
 # ==================================================================

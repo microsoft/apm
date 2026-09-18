@@ -22,9 +22,17 @@ def _load_lock_header(lock_text: str, prefix: str) -> dict:
 
 @pytest.mark.windows_compat
 @pytest.mark.parametrize("workflow", ["triage-panel", "pr-review-panel"])
-def test_advisory_lock_metadata_matches_source(workflow: str) -> None:
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"], ids=["lf", "crlf", "cr"])
+def test_advisory_lock_metadata_matches_source(workflow: str, newline: str, tmp_path: Path) -> None:
     """Catch stale source hashes before an advisory workflow reaches activation."""
-    source_path = LOCK_PATH.with_name(f"{workflow}.md")
+    for relative in (f"{workflow}.md", "shared/apm.md", f"{workflow}.lock.yml"):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = (LOCK_PATH.parent / relative).read_text(encoding="utf-8")
+        target.write_bytes(text.replace("\n", newline).encode("utf-8"))
+
+    # read_text uses universal-newline translation, including CRLF and bare CR.
+    source_path = tmp_path / f"{workflow}.md"
     source = source_path.read_text(encoding="utf-8")
     _, frontmatter, body = source.split("---", 2)
     config = yaml.safe_load(frontmatter)
