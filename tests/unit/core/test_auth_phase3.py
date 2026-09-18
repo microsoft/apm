@@ -889,6 +889,9 @@ class TestTryWithFallbackCredentialChain:
         def _op(_token, _env):
             raise RuntimeError("401 Unauthorized")
 
+        unavailable = MagicMock()
+        unavailable.is_available.return_value = False
+
         with (
             patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True),
             patch.object(
@@ -896,6 +899,7 @@ class TestTryWithFallbackCredentialChain:
                 "resolve_credential_from_git",
                 return_value=None,
             ),
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=unavailable),
         ):
             resolver = AuthResolver()
             with pytest.raises(AdoAuthChainExhaustedError) as raised:
