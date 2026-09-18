@@ -210,8 +210,8 @@ the dependency URL. The first path segment is the server collection.
 Root-hosted collection URLs are supported; `/tfs/` or another server
 base-path prefix is not currently supported.
 
-Azure DevOps Server authentication is PAT-only in APM. Set `ADO_APM_PAT`;
-the Azure CLI bearer fallback applies to Azure DevOps Services, not Server.
+Azure DevOps Server uses `ADO_APM_PAT` then path-scoped `git credential fill`.
+The Azure CLI bearer fallback applies to Azure DevOps Services, not Server.
 
 `GITHUB_HOST` alone classifies a custom hostname as GitHub Enterprise Server.
 When `ADO_HOST` or `APM_ADO_HOSTS` also names that host, the ADO
@@ -226,6 +226,7 @@ need to unset `GITHUB_HOST`.
 | `az CLI is installed but no active session was found` | `az account show` fails | Run `az login --tenant <tenant>` against the tenant that owns the org |
 | `az CLI returned a token but the org does not accept it (likely a tenant mismatch)` | Wrong tenant | Run `az login --tenant <correct-tenant>`, or set `ADO_APM_PAT` |
 | `ADO_APM_PAT was rejected (HTTP 401) and no az cli fallback was available` | Stale PAT, no `az` | Rotate the PAT, or install `az` and run `az login --tenant <tenant>` |
+| `Authentication failed ... git credential fill was rejected` | PAT / `az` / fill chain exhausted | Refresh `ADO_APM_PAT`, run `az login` on Services, or store a Git Credential Manager credential |
 | On-prem host classified as GHES / GitHub credentials selected | `GITHUB_HOST` set without an ADO host configuration | Add `ADO_HOST=your-ado-server.example.com` (or list it in `APM_ADO_HOSTS`); ADO takes precedence |
 
 ## GitHub Enterprise Server (GHES)

@@ -112,8 +112,9 @@ apm install
 ```
 
 Use `APM_ADO_HOSTS` instead when you have multiple Server instances. Server
-is PAT-only; the Azure CLI bearer does not apply. ADO is always
-auth-required -- there is no anonymous fallback. See the
+does not use the Azure CLI bearer; a rejected PAT retries path-scoped
+`git credential fill`. ADO is always auth-required -- there is no
+anonymous fallback. See the
 [full Azure DevOps flow](../../getting-started/authentication/#azure-devops).
 
 ## Bitbucket, Gitea, and any other git host

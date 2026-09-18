@@ -31,6 +31,7 @@ import pytest
 
 from apm_cli.core import azure_cli as _azure_cli_mod
 from apm_cli.core.auth import (
+    AdoAuthChainExhaustedError,
     AuthContext,
     AuthResolver,
     BearerFallbackOutcome,
@@ -852,7 +853,7 @@ class TestTryWithFallbackCredentialChain:
             ),
         ):
             resolver = AuthResolver()
-            with pytest.raises(RuntimeError, match="git credential fill"):
+            with pytest.raises(AdoAuthChainExhaustedError, match="git credential fill"):
                 resolver.try_with_fallback(
                     "dev.azure.com",
                     _op,
@@ -860,6 +861,50 @@ class TestTryWithFallbackCredentialChain:
                 )
 
         assert any("returned no credential" in line for line in logs)
+        assert any("wrapping exhausted-chain error" in line for line in logs)
+
+    def test_ado_server_exhausted_omits_az_login(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {"ADO_HOST": "ado.example.com"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value=None,
+            ),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError) as raised:
+                resolver.try_with_fallback("ado.example.com", _op)
+
+        message = str(raised.value)
+        assert "git credential fill" in message
+        assert "ADO_APM_PAT" in message
+        assert "az login" not in message
+        assert "ADO_APM_PAT was" not in message
+
+    def test_ado_services_exhausted_names_only_attempted_steps(self) -> None:
+        def _op(_token, _env):
+            raise RuntimeError("401 Unauthorized")
+
+        with (
+            patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value=None,
+            ),
+        ):
+            resolver = AuthResolver()
+            with pytest.raises(AdoAuthChainExhaustedError) as raised:
+                resolver.try_with_fallback("dev.azure.com", _op)
+
+        message = str(raised.value)
+        assert "ADO_APM_PAT and git credential fill were rejected" in message
+        assert "az CLI bearer" not in message
+        assert "az login" in message
 
     def test_ado_network_failure_does_not_probe_credential_helper(self) -> None:
         with (

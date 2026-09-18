@@ -576,6 +576,7 @@ def _fetch_git(
 
     from ..cache.git_cache import GitCache
     from ..cache.paths import get_cache_root
+    from ..core.auth import AdoAuthChainExhaustedError
     from ..utils.git_env import GitUrlRewriteError, GitUrlRewriteProbeError
 
     org = source.owner or None
@@ -618,21 +619,27 @@ def _fetch_git(
 
     ado_host = getattr(host_info, "kind", "") == "ado"
     git_env: dict | None = None
-    if not ado_host:
-        try:
+    ado_base_env: dict | None = None
+    try:
+        if ado_host:
+            from ..utils.git_env import validate_git_url_rewrite_safety
+
+            ado_base_env = auth_resolver.hardened_git_base_env()
+            validate_git_url_rewrite_safety(source.url, ado_base_env)
+        else:
             auth_ctx = (
                 auth_resolver.resolve_for_remote(host_info.host, source.url, org, port=source.port)
                 if source.port is not None
                 else auth_resolver.resolve_for_remote(host_info.host, source.url, org)
             )
             git_env = auth_resolver.git_env_for_remote(auth_ctx, source.url)
-        except (GitUrlRewriteError, GitUrlRewriteProbeError, ValueError) as exc:
-            logger.debug(
-                "Generic-git policy rejected '%s': %s",
-                source.name,
-                type(exc).__name__,
-            )
-            raise _rewrite_policy_error(exc) from exc
+    except (GitUrlRewriteError, GitUrlRewriteProbeError, ValueError) as exc:
+        logger.debug(
+            "Generic-git policy rejected '%s': %s",
+            source.name,
+            type(exc).__name__,
+        )
+        raise _rewrite_policy_error(exc) from exc
 
     try:
         if ado_host:
@@ -643,7 +650,7 @@ def _fetch_git(
             }
             if source.port is not None:
                 fallback_kwargs["port"] = source.port
-            fallback_kwargs["base_env"] = auth_resolver.hardened_git_base_env()
+            fallback_kwargs["base_env"] = ado_base_env
             checkout_dir = auth_resolver.try_with_fallback(
                 host_info.host,
                 _checkout,
@@ -654,6 +661,14 @@ def _fetch_git(
     except (GitUrlRewriteError, GitUrlRewriteProbeError) as exc:
         logger.debug("Generic-git rewrite policy rejected '%s'", source.name)
         raise _rewrite_policy_error(exc) from exc
+    except AdoAuthChainExhaustedError as exc:
+        raise MarketplaceFetchError(
+            source.name,
+            str(exc),
+            retry_hint=(
+                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
+            ),
+        ) from exc
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
         # caller's _auto_detect_path probe can try the next candidate path.
