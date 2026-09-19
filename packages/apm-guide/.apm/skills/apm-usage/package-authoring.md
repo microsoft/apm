@@ -181,6 +181,7 @@ hook action under `.kiro/hooks/`.
 |----------------|---------------------|-------------------|
 | `SessionStart`, `sessionStart` | `sessionStart` | `SessionStart` |
 | `Stop`, `AgentStop`, `agentStop` | `agentStop` | `Stop` |
+| `UserPromptSubmit`, `userPromptSubmit`, `userPromptSubmitted` | `userPromptSubmitted` | `UserPromptSubmit` (native; the other two spellings are not renamed and will not fire) |
 
 Event names absent from this table are preserved unchanged. Only an unmapped
 camelCase or PascalCase name that conflicts with the target convention emits
