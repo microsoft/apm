@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.hook_contract import walk_hook_commands
-from apm_cli.integration.hook_bundle import _hook_source_root
+from apm_cli.integration.hook_bundle import _hook_source_root, package_plugin_manifest
 from apm_cli.integration.hook_command_paths import (
     iter_plugin_root_paths,
     iter_relative_script_paths,
@@ -174,15 +174,20 @@ def select_hook_sources(
             ):
                 source_roots.add(_hook_source_root(package_path, hook_file.parent, source_file))
 
+        exclude_json_files = target_name == "copilot"
         bundle_files: set[Path] = set()
         for source_root in sorted(source_roots):
             bundle_files.update(
                 iter_bundle_files(
                     source_root,
                     descriptor_files=all_descriptors,
-                    exclude_json_files=target_name == "copilot",
+                    exclude_json_files=exclude_json_files,
                 )
             )
+        if bundle_files and not exclude_json_files:
+            plugin_manifest = package_plugin_manifest(package_path)
+            if plugin_manifest is not None:
+                bundle_files.add(plugin_manifest)
         bundles_by_target[target_name] = frozenset(bundle_files)
 
     return HookSourceSelection(descriptors_by_target, bundles_by_target)

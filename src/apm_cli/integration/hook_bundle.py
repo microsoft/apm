@@ -10,11 +10,28 @@ from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+)
 from apm_cli.utils.paths import portable_relpath
 
 _HOOK_SCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
+_PLUGIN_MANIFEST_PARTS = (".claude-plugin", "plugin.json")
 _log = logging.getLogger(__name__)
+
+
+def package_plugin_manifest(package_path: Path) -> Path | None:
+    """Return the package's plugin manifest when it is a contained real file."""
+    manifest = package_path.joinpath(*_PLUGIN_MANIFEST_PARTS)
+    try:
+        ensure_path_within(manifest, package_path)
+    except (OSError, PathTraversalError, RuntimeError):
+        return None
+    if has_symlink_component(package_path, manifest) or not manifest.is_file():
+        return None
+    return manifest
 
 
 @dataclass
@@ -60,6 +77,20 @@ def _target_root_for_hook_source(
     for _part in source_rel.parts:
         target_root = target_root.parent
     return target_root
+
+
+def _deployed_package_root(
+    package_name: str,
+    target_root: Path,
+    project_root: Path,
+) -> Path | None:
+    """Return the explicit package namespace containing a deployed hook root."""
+    for candidate in (target_root, *target_root.parents):
+        if not candidate.is_relative_to(project_root):
+            break
+        if candidate.name == package_name and candidate.parent.name == "hooks":
+            return candidate
+    return None
 
 
 def _hook_module_type(package_path: Path, hook_source_root: Path) -> str:
@@ -128,6 +159,7 @@ def copy_deployed_hook_bundle(
     integrator: BaseIntegrator,
     *,
     package_path: Path,
+    package_name: str,
     hook_file_dir: Path | None,
     project_root: Path,
     scripts: list[tuple[Path, str]],
@@ -197,6 +229,26 @@ def copy_deployed_hook_bundle(
             copy_plan[portable_relpath(target_file, project_root)] = source_file
             if source_file.suffix.lower() in _HOOK_SCRIPT_EXTENSIONS:
                 root_has_js_hook[(source_root, target_root)] = True
+
+    manifest_source = None if exclude_json_files else package_plugin_manifest(package_path)
+    if manifest_source is not None and (
+        manifest_source in selected_bundle_files
+        and (
+            source_plan is None
+            or source_plan.includes(portable_relpath(manifest_source, source_plan.source_root))
+        )
+    ):
+        # Plugin-root tokens resolve here, so a script's relative manifest read lands here too.
+        for _source_root, target_root in source_target_roots:
+            deployed_root = _deployed_package_root(
+                package_name,
+                target_root,
+                project_root,
+            )
+            if deployed_root is None:
+                continue
+            target_file = deployed_root.joinpath(*_PLUGIN_MANIFEST_PARTS)
+            copy_plan.setdefault(portable_relpath(target_file, project_root), manifest_source)
 
     for target_rel, source_file in copy_plan.items():
         target_file = project_root / target_rel

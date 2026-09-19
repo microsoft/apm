@@ -191,6 +191,7 @@ def _copy_scripts(
     integrator: HookIntegrator,
     scripts,
     package_path: Path,
+    package_name: str,
     hook_file_dir: Path,
     project_root: Path,
     managed_files,
@@ -205,6 +206,7 @@ def _copy_scripts(
     copy_result = copy_deployed_hook_bundle(
         integrator,
         package_path=package_path,
+        package_name=package_name,
         hook_file_dir=hook_file_dir,
         project_root=project_root,
         scripts=scripts,
@@ -293,6 +295,7 @@ def integrate_kiro_hooks(
             integrator,
             scripts,
             package_info.install_path,
+            package_name,
             hook_file.parent,
             project_root,
             managed_files,

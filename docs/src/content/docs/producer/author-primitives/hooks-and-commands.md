@@ -110,6 +110,11 @@ available at runtime:
 
 - Claude-family merged targets (Claude, Cursor, Codex, Gemini,
   Antigravity, and Windsurf), Copilot, and Kiro receive the same bundle.
+- For plugin-root token commands, non-Copilot/VS Code targets also receive
+  `.claude-plugin/plugin.json` at the matching package-relative location.
+  This preserves script-relative manifest reads, but the deployed hook tree is
+  not a copy of the whole package; other package-root assets such as `prompts/`
+  and `schemas/` are not implicitly deployed.
 - Root hook JSON descriptors, symlinks, and `.apm-pin` markers are not
   deployed.
 - JavaScript and TypeScript hook bundles get a minimal `package.json`
