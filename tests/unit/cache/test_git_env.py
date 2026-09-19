@@ -130,12 +130,40 @@ class TestResolveTrustedExecutable:
 
         with (
             patch("os.get_exec_path", return_value=[str(project_bin), str(trusted_bin)]),
-            patch("shutil.which", return_value=str(trusted_bin / "git")) as mock_which,
+            patch("shutil.which", return_value=str(trusted_bin / "git.exe")) as mock_which,
         ):
             result = _resolve_trusted_executable("git")
 
-        assert result == str((trusted_bin / "git").resolve())
-        mock_which.assert_called_once_with(str(trusted_bin / "git"))
+        assert result == str((trusted_bin / "git.exe").resolve())
+        mock_which.assert_called_once_with("git", path=str(trusted_bin))
+
+    @pytest.mark.parametrize("name", ["git", "gh"])
+    def test_resolves_windows_executable_extensions(
+        self, name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pass the command and PATH directory separately for PATHEXT lookup."""
+        project = tmp_path / "project"
+        trusted_bin = tmp_path / "tools"
+        project.mkdir()
+        trusted_bin.mkdir()
+        executable = trusted_bin / f"{name}.EXE"
+        executable.touch()
+        monkeypatch.chdir(project)
+
+        def windows_which(command: str, path: str | None = None) -> str | None:
+            if path is None or Path(command).parent != Path("."):
+                return None
+            candidate = Path(path) / f"{command}.EXE"
+            return str(candidate) if candidate.is_file() else None
+
+        with (
+            patch("os.get_exec_path", return_value=[str(trusted_bin)]),
+            patch("shutil.which", side_effect=windows_which) as mock_which,
+        ):
+            result = _resolve_trusted_executable(name)
+
+        assert result == str(executable.resolve())
+        mock_which.assert_called_once_with(name, path=str(trusted_bin))
 
     def test_rejects_candidate_resolving_inside_worktree(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -243,7 +243,7 @@ def _resolve_trusted_executable(name: str) -> str:
                 continue
         except (OSError, ValueError):
             continue
-        candidate = shutil.which(str(directory / name))
+        candidate = shutil.which(name, path=str(directory))
         if candidate is None:
             continue
         resolved = Path(candidate).resolve()
