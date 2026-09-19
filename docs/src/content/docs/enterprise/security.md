@@ -197,7 +197,7 @@ This prevents lockfile membership from shrinking silently. Shared merge-hook
 targets and sidecars remain exempt because APM merges into user-owned files
 rather than claiming them.
 
-A whole-project scan checks **every regular file under the deploy trees your targets govern** for hidden Unicode, not only files recorded in `apm.lock.yaml`. Hash verification and positional `PACKAGE` scans remain lockfile-scoped because they need recorded ownership. Source content under `.apm/` is not added by the deploy-tree walk; install-time scanning owns that surface, while any `.apm/` path already recorded in the lockfile remains covered.
+A whole-project scan checks **every regular file under the deploy directories your targets govern** (primitive directories such as `.claude/skills/` and generated files, not the whole target root) for hidden Unicode, unioned with every file recorded in `apm.lock.yaml`, so a recorded path outside those directories such as `.claude/settings.json` stays covered. Hash verification and positional `PACKAGE` scans remain lockfile-scoped because they need recorded ownership. Source content under `.apm/` is not added by the deploy-tree walk; install-time scanning owns that surface, while any `.apm/` path already recorded in the lockfile remains covered.
 
 CI and remediation are separate commands because `--ci` and `--strip` are mutually exclusive:
 
