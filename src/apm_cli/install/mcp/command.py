@@ -36,7 +36,7 @@ APM_DEPS_AVAILABLE = False
 try:
     from ...deps.lockfile import (
         LockFile,
-        LockfileFormatError,
+        LockfileConflictError,
         get_lockfile_path,
         migrate_lockfile_if_needed,
     )
@@ -305,7 +305,7 @@ def run_mcp_install(  # noqa: PLR0913
                 )
             except InstallFailureAlreadyRendered:
                 raise
-            except LockfileFormatError as exc:
+            except LockfileConflictError as exc:
                 logger.error(str(exc))
                 logger.error("MCP server written to apm.yml but tool integration failed.")
                 raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
