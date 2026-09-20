@@ -28,11 +28,13 @@ from scripts.architecture_linter.checks.install_dry_run_plan import (
 )
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
+    _GUARD_CONFLICTED_LOCKFILE,
     _GUARD_FROZEN,
     _GUARD_LIFECYCLE_SERIALIZATION,
     _GUARD_MCP_OWNERSHIP,
     _GUARD_UNINSTALL_REACHABILITY,
     check_audit_replay,
+    check_conflicted_lockfile_discard,
     check_frozen,
     check_lifecycle_serialization,
     check_mcp_ownership_migration,
@@ -166,6 +168,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LIFECYCLE_SERIALIZATION,
         "Lifecycle mutators route through install/locking.py.",
         check_lifecycle_serialization,
+    ),
+    _rule(
+        _GUARD_CONFLICTED_LOCKFILE,
+        "Conflicted lockfile discard and restore route through install/transaction.py.",
+        check_conflicted_lockfile_discard,
     ),
     _rule(
         _GUARD_UNINSTALL_SELECTION,

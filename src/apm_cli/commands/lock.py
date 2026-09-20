@@ -221,44 +221,45 @@ def _run_lock(
         sys.exit(1)
 
     logger = InstallLogger(verbose=verbose)
+    from apm_cli.commands.install import (
+        _LOCKFILE_CONFLICT_DISCARDED,
+        _install_apm_dependencies,
+    )
     from apm_cli.core.scope import get_modules_dir
-    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.deps.lockfile import resolve_lockfile_path_for_read
     from apm_cli.install.transaction import InstallTransaction
 
-    transaction = InstallTransaction(
+    # The context manager rolls back on any exit that did not complete, so an
+    # interrupt after the discard still restores the conflicted lockfile.
+    with InstallTransaction(
         manifest_path=project_root / "apm.yml",
         apm_modules_dir=get_modules_dir(scope),
         validation=None,
         logger=logger,
         acquire_lock=False,
-    )
-    try:
-        from apm_cli.commands.install import (
-            _LOCKFILE_CONFLICT_DISCARDED,
-            _install_apm_dependencies,
-        )
-
-        if transaction.discard_conflicted_lockfile(get_lockfile_path(project_root)):
-            logger.warning(_LOCKFILE_CONFLICT_DISCARDED)
-        result = _install_apm_dependencies(
-            apm_package,
-            update_refs=update_refs,
-            verbose=verbose,
-            scope=scope,
-            parallel_downloads=parallel_downloads,
-            logger=logger,
-            no_policy=no_policy,
-            target=target,
-            lockfile_only=True,
-            transaction=transaction,
-        )
-        result = transaction.complete(result)
-    except click.UsageError:
-        transaction.rollback()
-        raise
-    except Exception as e:
-        transaction.fail(e)
-        _handle_lock_error(e, verbose)
+    ) as transaction:
+        try:
+            lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=False)
+            if transaction.discard_conflicted_lockfile(lockfile_path):
+                logger.warning(_LOCKFILE_CONFLICT_DISCARDED)
+            result = _install_apm_dependencies(
+                apm_package,
+                update_refs=update_refs,
+                verbose=verbose,
+                scope=scope,
+                parallel_downloads=parallel_downloads,
+                logger=logger,
+                no_policy=no_policy,
+                target=target,
+                lockfile_only=True,
+                transaction=transaction,
+            )
+            result = transaction.complete(result)
+        except click.UsageError:
+            raise
+        except Exception as e:
+            transaction.fail(e)
+            _handle_lock_error(e, verbose)
 
     from apm_cli.install.summary import exit_unless_install_result_allows_success
 

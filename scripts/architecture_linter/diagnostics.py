@@ -45,6 +45,7 @@ LEGACY_AC_ALIASES: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "install-deployment-cached-claude-skill-metadata": ("AC4",),
         "install-deployment-dependency-winner-selection": ("AC4",),
         "install-deployment-deployment-frame-projection": ("AC4",),
+        "install-deployment-conflicted-lockfile-discard": ("AC27",),
         "install-deployment-frozen-mutation-eligibility": ("AC27",),
         "install-deployment-git-object-field-authority": ("AC4",),
         "install-deployment-gitlab-facade-orchestration": ("AC3",),

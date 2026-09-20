@@ -210,3 +210,31 @@ def test_failed_run_after_discard_restores_the_conflicted_lockfile(
     assert "apm.lock.yaml restored to its previous state" in output
     lockfile_text = (conflicted_project / "apm.lock.yaml").read_text(encoding="utf-8")
     assert lockfile_text == _CONFLICTED_LOCKFILE
+
+
+def test_lock_discards_a_conflicted_legacy_lockfile(
+    runner: CliRunner, conflicted_project: Path
+) -> None:
+    (conflicted_project / "apm.lock.yaml").rename(conflicted_project / "apm.lock")
+
+    result = _invoke(runner, ["lock"])
+
+    assert result.exit_code == 0, result.output
+    assert "resolving from apm.yml" in _combined_output(result)
+    assert not (conflicted_project / "apm.lock").exists()
+    lock = LockFile.read(conflicted_project / "apm.lock.yaml")
+    assert lock is not None
+
+
+def test_lock_restores_the_conflicted_lockfile_when_interrupted(
+    runner: CliRunner, conflicted_project: Path
+) -> None:
+    with patch(
+        "apm_cli.commands.install._install_apm_dependencies",
+        side_effect=KeyboardInterrupt,
+    ):
+        result = _invoke(runner, ["lock"], catch_exceptions=True)
+
+    assert isinstance(result.exception, (KeyboardInterrupt, SystemExit))
+    lockfile_text = (conflicted_project / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert lockfile_text == _CONFLICTED_LOCKFILE

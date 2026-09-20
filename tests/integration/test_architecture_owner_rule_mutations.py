@@ -326,6 +326,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Local bundle routing branches on target names instead of target primitives.",
     ),
     MutationCase(
+        guard_id="install-deployment-conflicted-lockfile-discard",
+        rule_id="install-deployment-conflicted-lockfile-discard",
+        path="src/apm_cli/install/transaction.py",
+        old="                self._restore_discarded_lockfile()\n",
+        new="",
+        intent="Rollback stops restoring a discarded conflicted lockfile.",
+    ),
+    MutationCase(
         guard_id="install-deployment-executable-trust-context",
         rule_id="install-deployment-executable-trust-context",
         path="src/apm_cli/security/executables.py",

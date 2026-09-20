@@ -157,6 +157,13 @@
       "owner": "models/dependency/selection.py (via DependencyReference)",
       "selectors": ["src/apm_cli/models/dependency/selection.py"],
       "guards": ["install-deployment-uninstall-selection"]
+    },
+    {
+      "id": "conflicted-lockfile-discard",
+      "decision": "Conflicted lockfile discard and rollback restore",
+      "owner": "install/transaction.py (InstallTransaction.discard_conflicted_lockfile)",
+      "selectors": ["src/apm_cli/install/transaction.py"],
+      "guards": ["install-deployment-conflicted-lockfile-discard"]
     }
   ]
 }

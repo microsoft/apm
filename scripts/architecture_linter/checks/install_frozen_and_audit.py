@@ -1,12 +1,13 @@
-"""Frozen-mutation, MCP-ownership, uninstall-reachability, and audit-replay
-install analyzers.
+"""Frozen-mutation, MCP-ownership, uninstall-reachability, audit-replay, and
+conflicted-lockfile install analyzers.
 
-Ports four owner guards recorded in
+Ports five owner guards recorded in
 ``.apm/architecture/owners/install-deployment.json``:
 ``install-deployment-frozen-mutation-eligibility``,
 ``install-deployment-mcp-ownership-migration``,
-``install-deployment-uninstall-reachability``, and
-``install-deployment-audit-replay``.
+``install-deployment-uninstall-reachability``,
+``install-deployment-audit-replay``, and
+``install-deployment-conflicted-lockfile-discard``.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _body_has,
     _duplicate_definition_lines,
     _facts_for,
+    _line_findings,
     _lines,
     _name_calls_in,
     _present,
@@ -43,6 +45,7 @@ _GUARD_UNINSTALL_REACHABILITY = "install-deployment-uninstall-reachability"
 
 _GUARD_AUDIT_REPLAY = "install-deployment-audit-replay"
 _GUARD_LIFECYCLE_SERIALIZATION = "install-deployment-lifecycle-serialization"
+_GUARD_CONFLICTED_LOCKFILE = "install-deployment-conflicted-lockfile-discard"
 
 
 def _first_line(facts: object, needle: str) -> int | None:
@@ -382,3 +385,62 @@ def check_lifecycle_serialization(provider: FactsProvider) -> tuple[Violation, .
                     )
                 )
     return tuple(findings)
+
+
+_CONFLICT_DETECTION_OWNER = "src/apm_cli/deps/lockfile.py"
+_CONFLICT_DISCARD_OWNER = "src/apm_cli/install/transaction.py"
+_CONFLICT_DISCARD_CALLERS = (
+    "src/apm_cli/commands/install.py",
+    "src/apm_cli/commands/lock.py",
+)
+_CONFLICT_MARKER_USE = re.compile(r"\bhas_conflict_markers\(")
+_CONFLICT_DISCARD_DEF = re.compile(r"^\s*def discard_conflicted_lockfile\(")
+
+
+def check_conflicted_lockfile_discard(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Conflicted-lockfile discard and restore stay inside InstallTransaction."""
+    rule_id = _GUARD_CONFLICTED_LOCKFILE
+    message = "Conflicted lockfile discard must route through InstallTransaction"
+    owner, owner_fail = _facts_for(provider, _CONFLICT_DISCARD_OWNER, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
+
+    findings: list[Violation] = []
+    owner_complete = (
+        _present_re(owner, re.compile(r"^    def discard_conflicted_lockfile\("))
+        and _present_re(owner, re.compile(r"^    def _restore_discarded_lockfile\("))
+        and "_restore_discarded_lockfile" in _method_calls_in(owner, "rollback")
+    )
+    if not owner_complete:
+        findings.append(_summary(rule_id, _CONFLICT_DISCARD_OWNER, message))
+    for path in _CONFLICT_DISCARD_CALLERS:
+        caller, caller_fail = _facts_for(provider, path, rule_id)
+        if caller_fail:
+            findings.extend(caller_fail)
+        elif not _present(caller, ".discard_conflicted_lockfile("):
+            findings.append(_summary(rule_id, path, message))
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path in (_CONFLICT_DETECTION_OWNER, _CONFLICT_DISCARD_OWNER):
+            continue
+        facts = provider.file_facts(path)
+        if facts.read_error is not None:
+            continue
+        for pattern in (_CONFLICT_MARKER_USE, _CONFLICT_DISCARD_DEF):
+            findings.extend(
+                _line_findings(facts, path, rule_id, pattern, message, respect_exempt=True)
+            )
+    return tuple(findings)
+
+
+def _method_calls_in(facts: object, function_name: str) -> set[str]:
+    """Return terminal attribute names called inside *function_name*."""
+    ranges = [
+        (definition.line, definition.end_line)
+        for definition in getattr(facts, "definitions", ())
+        if definition.name == function_name and definition.kind in ("function", "async_function")
+    ]
+    names: set[str] = set()
+    for call in getattr(facts, "calls", ()):
+        if any(low <= call.line <= high for low, high in ranges):
+            names.add(call.qualname.rsplit(".", 1)[-1])
+    return names
