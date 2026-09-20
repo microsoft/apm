@@ -183,3 +183,30 @@ def test_corrupt_lockfile_without_markers_still_fails_closed(
     assert result.exit_code == 1, result.output
     assert "conflict markers" not in _combined_output(result)
     assert lockfile_path.read_text(encoding="utf-8") == corrupt
+
+
+@pytest.mark.parametrize("args", [["install"], ["lock"]])
+def test_failed_run_after_discard_restores_the_conflicted_lockfile(
+    runner: CliRunner, conflicted_project: Path, args: list[str]
+) -> None:
+    (conflicted_project / "apm.yml").write_text(
+        textwrap.dedent("""\
+            name: test-project
+            version: '1.0.0'
+            targets:
+              - claude
+            dependencies:
+              apm:
+                - ./does-not-exist
+        """),
+        encoding="utf-8",
+    )
+
+    result = _invoke(runner, args, catch_exceptions=True)
+
+    assert result.exit_code == 1, result.output
+    output = _combined_output(result)
+    assert "resolving from apm.yml" in output
+    assert "apm.lock.yaml restored to its previous state" in output
+    lockfile_text = (conflicted_project / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert lockfile_text == _CONFLICTED_LOCKFILE

@@ -401,7 +401,8 @@ without lock metadata as before. A full `apm install` (no package arguments, no
 `--only`) or `apm lock` warns, discards the file, and resolves from
 `apm.yml`, the same input a non-frozen install resolves from anyway;
 deployed-file records from the conflicted file are not carried over, and a
-manifest with nothing to lock ends with no lockfile. Partial installs and
+manifest with nothing to lock ends with no lockfile. If that run fails before
+writing a new lockfile, the conflicted file is put back. Partial installs and
 `apm install --frozen` never rewrite the file: resolve the conflict in git, or
 run a full `apm install` without `--frozen`.
 

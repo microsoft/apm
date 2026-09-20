@@ -1287,20 +1287,6 @@ def migrate_lockfile_if_needed(project_root: Path) -> bool:
     return False
 
 
-def discard_conflicted_lockfile(path: Path) -> bool:
-    """Delete a lockfile left with git merge conflict markers so install regenerates it."""
-    if not path.exists():
-        return False
-    try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return False
-    if not has_conflict_markers(text):
-        return False
-    path.unlink()
-    return True
-
-
 def get_lockfile_installed_paths(project_root: Path) -> list[str]:
     """Deprecated: use LockFile.installed_paths_for_project() instead."""
     return LockFile.installed_paths_for_project(project_root)

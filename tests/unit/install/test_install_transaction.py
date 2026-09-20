@@ -734,3 +734,75 @@ def test_failed_first_install_removes_auto_created_manifest(
 
     assert result.exit_code == 1
     assert not (tmp_path / "apm.yml").exists()
+
+
+_CONFLICTED_LOCKFILE = (
+    b"lockfile_version: '1'\n"
+    b"<<<<<<< HEAD\n"
+    b"dependencies: []\n"
+    b"=======\n"
+    b"dependencies:\n"
+    b"- repo_url: example/x\n"
+    b">>>>>>> feature\n"
+)
+
+
+def test_discard_conflicted_lockfile_removes_it_and_rollback_restores_it(tmp_path: Path) -> None:
+    transaction = _transaction(tmp_path)
+    lockfile = tmp_path / "apm.lock.yaml"
+    lockfile.write_bytes(_CONFLICTED_LOCKFILE)
+
+    assert transaction.discard_conflicted_lockfile(lockfile) is True
+    assert not lockfile.exists()
+
+    transaction.fail(RuntimeError("resolution failed"))
+
+    assert lockfile.read_bytes() == _CONFLICTED_LOCKFILE
+
+
+def test_rollback_keeps_a_lockfile_written_after_the_discard(tmp_path: Path) -> None:
+    transaction = _transaction(tmp_path)
+    lockfile = tmp_path / "apm.lock.yaml"
+    lockfile.write_bytes(_CONFLICTED_LOCKFILE)
+    transaction.discard_conflicted_lockfile(lockfile)
+    lockfile.write_bytes(b"lockfile_version: '1'\ndependencies: []\n")
+
+    transaction.rollback()
+
+    assert lockfile.read_bytes() == b"lockfile_version: '1'\ndependencies: []\n"
+
+
+def test_commit_does_not_restore_a_discarded_lockfile(tmp_path: Path) -> None:
+    transaction = _transaction(tmp_path)
+    lockfile = tmp_path / "apm.lock.yaml"
+    lockfile.write_bytes(_CONFLICTED_LOCKFILE)
+    transaction.discard_conflicted_lockfile(lockfile)
+
+    transaction.commit(InstallResult())
+
+    assert not lockfile.exists()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(b"lockfile_version: '1'\ndependencies: []\n", id="valid"),
+        pytest.param(b"lockfile_version: '1'\ndependencies: [\n", id="corrupt"),
+        pytest.param(b"\xff\xfe<<<<<<< HEAD\n", id="undecodable"),
+    ],
+)
+def test_discard_leaves_other_lockfiles_in_place(tmp_path: Path, content: bytes) -> None:
+    transaction = _transaction(tmp_path)
+    lockfile = tmp_path / "apm.lock.yaml"
+    lockfile.write_bytes(content)
+
+    assert transaction.discard_conflicted_lockfile(lockfile) is False
+    assert lockfile.read_bytes() == content
+    transaction.rollback()
+    assert lockfile.read_bytes() == content
+
+
+def test_discard_missing_lockfile_is_a_no_op(tmp_path: Path) -> None:
+    transaction = _transaction(tmp_path)
+
+    assert transaction.discard_conflicted_lockfile(tmp_path / "apm.lock.yaml") is False

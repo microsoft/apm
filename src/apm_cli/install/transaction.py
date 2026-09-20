@@ -10,6 +10,7 @@ import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from apm_cli.deps.lockfile import has_conflict_markers
 from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.results import InstallDisposition, InstallResult
@@ -18,16 +19,16 @@ if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
 
 
-def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:
-    """Atomically replace *manifest_path* with byte-exact *snapshot*."""
+def _restore_manifest_from_snapshot(path: Path, snapshot: bytes) -> None:
+    """Atomically replace *path* with byte-exact *snapshot*."""
     fd, temporary_name = tempfile.mkstemp(
         prefix="apm-restore-",
-        dir=str(manifest_path.parent),
+        dir=str(path.parent),
     )
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(snapshot)
-        os.replace(temporary_name, manifest_path)
+        os.replace(temporary_name, path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(temporary_name)
@@ -108,6 +109,7 @@ class InstallTransaction:
             self._release_workspace_lock()
             raise
         self._lock = threading.RLock()
+        self._discarded_lockfile: tuple[Path, bytes] | None = None
         self.committed = False
         self._completed = False
         self._rolled_back = False
@@ -116,6 +118,23 @@ class InstallTransaction:
     def resolution(self) -> ResolutionStagingSession:
         """Return the single resolution journal owned by this attempt."""
         return self._resolution
+
+    def discard_conflicted_lockfile(self, lockfile_path: Path) -> bool:
+        """Remove a lockfile left with git merge conflict markers so this attempt
+        resolves from the manifest; rollback restores it if the attempt fails."""
+        if not lockfile_path.exists():
+            return False
+        snapshot = lockfile_path.read_bytes()
+        try:
+            text = snapshot.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        if not has_conflict_markers(text):
+            return False
+        with self._lock:
+            lockfile_path.unlink()
+            self._discarded_lockfile = (lockfile_path, snapshot)
+        return True
 
     def record_validation(self, validation: _ValidationOutcome) -> None:
         """Attach the validation outcome produced after transaction creation."""
@@ -210,6 +229,7 @@ class InstallTransaction:
                 cleanup_issues = self._resolution.rollback() or []
                 self._report_resolution_cleanup_issues(cleanup_issues)
                 self._restore_manifest()
+                self._restore_discarded_lockfile()
                 self._rolled_back = True
                 self._completed = True
             finally:
@@ -242,6 +262,25 @@ class InstallTransaction:
             self._logger,
             self._manifest_existed,
         )
+
+    def _restore_discarded_lockfile(self) -> None:
+        """Put back the conflicted lockfile unless this attempt already wrote a new one."""
+        if self._discarded_lockfile is None:
+            return
+        lockfile_path, snapshot = self._discarded_lockfile
+        if lockfile_path.exists():
+            return
+        try:
+            _restore_manifest_from_snapshot(lockfile_path, snapshot)
+            if self._logger is not None:
+                self._logger.progress(f"{lockfile_path.name} restored to its previous state.")
+        except Exception as exc:
+            if self._logger is not None:
+                self._logger.warning(
+                    f"Failed to restore {lockfile_path.name}. Recover it from version "
+                    "control before retrying."
+                )
+                self._logger.verbose_detail(f"Lockfile rollback error: {exc}")
 
     def _release_workspace_lock(self) -> None:
         """Release this transaction's nested lifecycle acquisition once."""

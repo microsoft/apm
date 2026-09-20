@@ -6,16 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.deps.lockfile import (
-    LockFile,
-    LockfileConflictError,
-    LockfileFormatError,
-    discard_conflicted_lockfile,
-)
+from apm_cli.deps.lockfile import LockFile, LockfileConflictError, LockfileFormatError
 
 pytestmark = pytest.mark.component
 
-_VALID = "lockfile_version: '1'\ndependencies: []\n"
 
 _CONFLICTED = (
     "lockfile_version: '1'\n"
@@ -105,26 +99,3 @@ def test_read_undecodable_lockfile_is_a_format_error(tmp_path: Path) -> None:
 
     assert not isinstance(exc_info.value, LockfileConflictError)
     assert str(path) in str(exc_info.value)
-
-
-def test_discard_leaves_an_undecodable_lockfile_in_place(tmp_path: Path) -> None:
-    path = tmp_path / "apm.lock.yaml"
-    raw = b"\xff\xfe<<<<<<< HEAD\n"
-    path.write_bytes(raw)
-
-    assert discard_conflicted_lockfile(path) is False
-    assert path.read_bytes() == raw
-
-
-def test_discard_removes_only_a_conflicted_lockfile(tmp_path: Path) -> None:
-    path = tmp_path / "apm.lock.yaml"
-
-    assert discard_conflicted_lockfile(path) is False
-
-    path.write_text(_VALID, encoding="utf-8")
-    assert discard_conflicted_lockfile(path) is False
-    assert path.read_text(encoding="utf-8") == _VALID
-
-    path.write_text(_CONFLICTED, encoding="utf-8")
-    assert discard_conflicted_lockfile(path) is True
-    assert not path.exists()

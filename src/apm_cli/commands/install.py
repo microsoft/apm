@@ -229,12 +229,7 @@ _LOCKFILE_CONFLICT_DISCARDED = (
 )
 try:
     from ..deps.apm_resolver import APMDependencyResolver
-    from ..deps.lockfile import (
-        LockFile,
-        discard_conflicted_lockfile,
-        get_lockfile_path,
-        migrate_lockfile_if_needed,
-    )
+    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
     from ..integration.mcp_integrator import (
         MCPIntegrator,  # noqa: F401 -- re-exported; tests patch commands.install.MCPIntegrator
     )
@@ -1834,7 +1829,11 @@ def _install_apm_packages(ctx, outcome):
     # Only a full install re-resolves every apm.yml entry; a partial add or
     # --only run would write a lockfile missing the other entries.
     full_install = not ctx.frozen and not ctx.packages and ctx.install_mode == InstallMode.ALL
-    if full_install and discard_conflicted_lockfile(get_lockfile_path(ctx.apm_dir)):
+    if (
+        full_install
+        and ctx.transaction is not None
+        and ctx.transaction.discard_conflicted_lockfile(get_lockfile_path(ctx.apm_dir))
+    ):
         logger.warning(_LOCKFILE_CONFLICT_DISCARDED)
 
     # Capture old MCP servers and configs from lockfile BEFORE
