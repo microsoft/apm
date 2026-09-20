@@ -58,6 +58,7 @@ def resolve_version_constraint(
     auth_resolver=None,
     git_env: dict[str, str] | None = None,
     port: int | None = None,
+    remote_url: str | None = None,
 ) -> tuple[str, str]:
     """Resolve a semver range to the highest matching git tag.
 
@@ -75,6 +76,10 @@ def resolve_version_constraint(
         host: Git host for ``git ls-remote``. Defaults to github.com.
         token: Optional auth token for private repos.
         auth_scheme: Authentication scheme from ``AuthContext``.
+        remote_url: Optional canonical clone URL. When the package lives
+            on a different remote than the marketplace catalog, pass the
+            package URL so ``git ls-remote`` queries the repo that has
+            the tags.
 
     Returns:
         ``(tag_name, commit_sha)`` of the highest matching version.
@@ -102,7 +107,7 @@ def resolve_version_constraint(
         )
     resolver = RefResolver(**resolver_kwargs)
     try:
-        refs = resolver.list_remote_refs(owner_repo)
+        refs = resolver.list_remote_refs(owner_repo, remote_url=remote_url)
     finally:
         resolver.close()
 
@@ -114,11 +119,14 @@ def resolve_version_constraint(
             candidates.append((sv, tag_name, sha))
 
     if not candidates:
+        remote_detail = f"remote='{owner_repo}'"
+        if remote_url:
+            remote_detail += f", remote_url='{remote_url}'"
         raise NoMatchingVersionError(
             plugin_name,
             version_range,
             detail=(
-                f"pattern='{tag_pattern}', remote='{owner_repo}'. "
+                f"pattern='{tag_pattern}', {remote_detail}. "
                 "Verify the published tags or set version to an explicit tag "
                 "such as 'v1.0.0'"
             ),

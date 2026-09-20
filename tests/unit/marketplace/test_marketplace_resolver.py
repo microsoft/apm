@@ -12,6 +12,7 @@ from apm_cli.marketplace.models import (
     MarketplacePlugin,
     MarketplaceSource,
 )
+from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.resolver import (
     _resolve_git_subdir_source,
     _resolve_github_source,
@@ -910,15 +911,17 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         assert dep is not None
         assert dep.reference == "pkg--v1.0.0"
         assert result.canonical.endswith("#pkg--v1.0.0")
+        expected_repo = urlparse(source["url"]).path.strip("/")
         mock_resolve_version.assert_called_once_with(
             "pkg",
-            "catalog/remote-mkt",
+            expected_repo,
             "1.0.0",
             tag_pattern="{name}--v{version}",
             host="git.example.invalid",
             token=None,
             auth_scheme="basic",
             auth_resolver=None,
+            remote_url=source["url"],
         )
 
     @pytest.mark.parametrize(
@@ -972,6 +975,54 @@ class TestResolveMarketplacePluginGitLabMonorepo:
                 "remote-mkt",
                 version_spec=version_spec,
             )
+
+    @patch("apm_cli.marketplace.version_resolver.RefResolver")
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_packed_url_version_spec_queries_package_remote(
+        self, mock_get, mock_fetch, mock_ref_resolver
+    ):
+        """Version tags are listed on the package remote, not the catalog (#2928)."""
+        package_url = "https://git.example.invalid/team/repo"
+        marketplace_source = MarketplaceSource(
+            name="remote-mkt",
+            owner="catalog",
+            repo="remote-mkt",
+            host="git.example.invalid",
+        )
+        mock_get.return_value = marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(
+            MarketplacePlugin(
+                name="pkg",
+                source={"source": "url", "url": package_url},
+            )
+        )
+
+        package_tag = RemoteRef(name="refs/tags/pkg--v1.0.0", sha="c" * 40)
+
+        def list_refs(owner_repo, *, remote_url=None):
+            if owner_repo == "catalog/remote-mkt" and remote_url is None:
+                return []
+            if owner_repo == "team/repo" and remote_url == package_url:
+                return [package_tag]
+            return []
+
+        mock_ref_resolver.return_value.list_remote_refs.side_effect = list_refs
+
+        result = resolve_marketplace_plugin(
+            "pkg",
+            "remote-mkt",
+            version_spec="1.0.0",
+        )
+
+        assert result.canonical.endswith("#pkg--v1.0.0")
+        dep = result.dependency_reference
+        assert dep is not None
+        assert dep.reference == "pkg--v1.0.0"
+        mock_ref_resolver.return_value.list_remote_refs.assert_called_once_with(
+            "team/repo",
+            remote_url=package_url,
+        )
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")

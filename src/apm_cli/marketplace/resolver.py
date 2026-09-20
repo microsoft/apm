@@ -803,6 +803,83 @@ def _extract_auth(
         return None, "basic", None
 
 
+def _coords_from_package_locator(
+    locator: str, source: MarketplaceSource
+) -> tuple[str, str | None, str, int | None, str | None] | None:
+    """Parse a plugin source locator into version-tag lookup coordinates.
+
+    Returns ``(owner_repo, remote_url, host, port, org)`` or ``None`` when
+    *locator* is not a usable package identity.
+    """
+    if "://" in locator or locator.startswith("git@"):
+        try:
+            dep = DependencyReference.parse(locator)
+        except ValueError:
+            return None
+        if dep.is_local or not dep.repo_url:
+            return None
+        return (
+            dep.repo_url,
+            dep.to_clone_url(),
+            dep.host or source.host,
+            dep.port if dep.port is not None else source.port,
+            dep.repo_url.split("/", 1)[0],
+        )
+    owner_repo = locator.rstrip("/")
+    if owner_repo.endswith(".git"):
+        owner_repo = owner_repo[:-4]
+    if "/" not in owner_repo:
+        return None
+    return (
+        owner_repo,
+        None,
+        source.host,
+        source.port,
+        owner_repo.split("/", 1)[0],
+    )
+
+
+def _package_version_remote(
+    plugin: MarketplacePlugin,
+    source: MarketplaceSource,
+    dep_ref: DependencyReference | None,
+) -> tuple[str, str | None, str, int | None, str | None]:
+    """Return the git remote that hosts package version tags.
+
+    Packed and cross-repo sources publish tags on the package repository,
+    not the marketplace catalog. In-marketplace packages keep the catalog
+    ``owner/repo``.
+
+    Returns ``(owner_repo, remote_url, host, port, org)``.
+    """
+    if dep_ref is not None:
+        return (
+            dep_ref.repo_url,
+            None if dep_ref.is_local else dep_ref.to_clone_url(),
+            dep_ref.host or source.host,
+            dep_ref.port if dep_ref.port is not None else source.port,
+            dep_ref.repo_url.split("/", 1)[0] if dep_ref.repo_url else source.owner,
+        )
+
+    src = plugin.source
+    if isinstance(src, dict) and not _is_in_marketplace_source(plugin, source):
+        kind = _coerce_dict_plugin_type(src)
+        if kind in {"github", "gitlab", "git-subdir"}:
+            locator = src.get("repo") or src.get("repository") or src.get("url")
+            if isinstance(locator, str) and locator.strip():
+                coords = _coords_from_package_locator(locator.strip(), source)
+                if coords is not None:
+                    return coords
+
+    return (
+        f"{source.owner}/{source.repo}",
+        None,
+        source.host,
+        source.port,
+        source.owner,
+    )
+
+
 def resolve_marketplace_plugin(
     plugin_name: str,
     marketplace_name: str,
@@ -995,8 +1072,9 @@ def resolve_marketplace_plugin(
     # ---- Version spec override ----
     # When version_spec is provided it either triggers semver-aware tag
     # resolution (for range expressions like ~2.1.0) or a raw ref override
-    # (for plain tags/branches/SHAs like v2.0.0). The tag lookup uses the
-    # marketplace catalog host; structured package fetches still use dep_ref.host.
+    # (for plain tags/branches/SHAs like v2.0.0). Tags live on the package
+    # repository; when that differs from the marketplace catalog, query the
+    # package remote instead of ``source.owner/source.repo``.
     if version_spec:
         from .version_resolver import is_version_constraint
 
@@ -1005,12 +1083,14 @@ def resolve_marketplace_plugin(
         if is_version_constraint(version_spec):
             from .version_resolver import DEFAULT_TAG_PATTERN, resolve_version_constraint
 
-            owner_repo = f"{source.owner}/{source.repo}"
+            owner_repo, remote_url, lookup_host, lookup_port, lookup_org = _package_version_remote(
+                plugin, source, dep_ref
+            )
             token, auth_scheme, git_env = _extract_auth(
                 auth_resolver,
-                source.host,
-                org=source.owner,
-                port=source.port,
+                lookup_host,
+                org=lookup_org,
+                port=lookup_port,
             )
             effective_tag_pattern = plugin.tag_pattern
             if effective_tag_pattern is None:
@@ -1022,7 +1102,7 @@ def resolve_marketplace_plugin(
                 )
                 effective_tag_pattern = DEFAULT_TAG_PATTERN
             version_auth = {
-                "host": source.host,
+                "host": lookup_host,
                 "token": token,
                 "auth_scheme": auth_scheme,
                 "auth_resolver": auth_resolver,
@@ -1030,8 +1110,10 @@ def resolve_marketplace_plugin(
             }
             if git_env is not None:
                 version_auth["git_env"] = git_env
-            if source.port is not None:
-                version_auth["port"] = source.port
+            if lookup_port is not None:
+                version_auth["port"] = lookup_port
+            if remote_url is not None:
+                version_auth["remote_url"] = remote_url
             tag_name, _sha = resolve_version_constraint(
                 plugin_name,
                 owner_repo,
