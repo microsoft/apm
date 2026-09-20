@@ -803,15 +803,34 @@ def _extract_auth(
         return None, "basic", None
 
 
+def _locator_is_host_qualified(locator: str) -> bool:
+    """True when the first path segment looks like a hostname (dot or localhost)."""
+    first_segment = locator.split("/", 1)[0]
+    return "." in first_segment or first_segment.lower() == "localhost"
+
+
 def _coords_from_package_locator(
-    locator: str, source: MarketplaceSource
+    locator: str,
+    source: MarketplaceSource,
+    source_kind: str | None = None,
 ) -> tuple[str, str | None, str, int | None, str | None] | None:
     """Parse a plugin source locator into version-tag lookup coordinates.
+
+    URLs, SSH, host-qualified shorthand, and ``type: github`` locators are
+    parsed through :meth:`DependencyReference.parse` so the package host
+    (typically ``github.com`` via :func:`default_host`) wins over the
+    marketplace catalog host. Bare ``owner/repo`` on gitlab/git-subdir (or
+    unknown) kinds keep the marketplace host.
 
     Returns ``(owner_repo, remote_url, host, port, org)`` or ``None`` when
     *locator* is not a usable package identity.
     """
-    if "://" in locator or locator.startswith("git@"):
+    if (
+        "://" in locator
+        or locator.startswith("git@")
+        or _locator_is_host_qualified(locator)
+        or source_kind == "github"
+    ):
         try:
             dep = DependencyReference.parse(locator)
         except ValueError:
@@ -867,7 +886,9 @@ def _package_version_remote(
         if kind in {"github", "gitlab", "git-subdir"}:
             locator = src.get("repo") or src.get("repository") or src.get("url")
             if isinstance(locator, str) and locator.strip():
-                coords = _coords_from_package_locator(locator.strip(), source)
+                coords = _coords_from_package_locator(
+                    locator.strip(), source, source_kind=kind
+                )
                 if coords is not None:
                     return coords
 
