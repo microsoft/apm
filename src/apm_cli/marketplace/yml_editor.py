@@ -151,10 +151,11 @@ def _validate_subdir(subdir: str) -> None:
         raise MarketplaceYmlError(str(exc)) from exc
 
 
-def _validate_category(category: str) -> None:
-    """Validate *category* is a non-empty string."""
+def _validate_category(category: str) -> str:
+    """Validate *category* is a non-empty string and return it stripped."""
     if not isinstance(category, str) or not category.strip():
         raise MarketplaceYmlError("'category' must be a non-empty string")
+    return category.strip()
 
 
 # -------------------------------------------------------------------
@@ -196,7 +197,7 @@ def add_plugin_entry(
         _validate_subdir(subdir)
 
     if category is not None:
-        _validate_category(category)
+        category = _validate_category(category)
 
     # Derive name from source repo if not provided.
     if name is None:
@@ -282,11 +283,12 @@ def update_plugin_entry(yml_path: Path, name: str, **fields) -> None:
     _SIMPLE_FIELDS = ("subdir", "tag_pattern", "category")
     for key in _SIMPLE_FIELDS:
         if key in fields and fields[key] is not None:
+            value = fields[key]
             if key == "subdir":
-                _validate_subdir(fields[key])
+                _validate_subdir(value)
             elif key == "category":
-                _validate_category(fields[key])
-            entry[key] = fields[key]
+                value = _validate_category(value)
+            entry[key] = value
 
     # Boolean field: include_prerelease.
     if "include_prerelease" in fields and fields["include_prerelease"] is not None:

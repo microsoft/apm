@@ -88,6 +88,18 @@ class TestAddPluginHappy:
         assert added["include_prerelease"] is True
         assert added["category"] == "Productivity"
 
+    def test_category_is_stored_stripped(self, tmp_path):
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        add_plugin_entry(
+            yml,
+            source="acme/tool",
+            version=">=1.0.0",
+            category="  Productivity  ",
+        )
+        data = yaml.safe_load(yml.read_text(encoding="utf-8"))
+        added = next(p for p in data["packages"] if p["name"] == "tool")
+        assert added["category"] == "Productivity"
+
     def test_name_defaults_to_repo_from_source(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         name = add_plugin_entry(yml, source="some-org/my-awesome-tool", version=">=1.0.0")
@@ -252,6 +264,13 @@ class TestUpdatePluginHappy:
     def test_update_category(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         update_plugin_entry(yml, "existing-package", category="Productivity")
+        data = yaml.safe_load(yml.read_text(encoding="utf-8"))
+        entry = data["packages"][0]
+        assert entry["category"] == "Productivity"
+
+    def test_update_category_is_stored_stripped(self, tmp_path):
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        update_plugin_entry(yml, "existing-package", category="  Productivity  ")
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
         assert entry["category"] == "Productivity"
