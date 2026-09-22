@@ -320,6 +320,20 @@ def _check_metadata_enrichment(provider: FactsProvider) -> tuple[Violation, ...]
             provider,
             inv,
             _RID_METADATA,
+            _METADATA_OWNER,
+            (
+                'skill_path = f"{path_prefix}SKILL.md"',
+                'return MetadataEnrichmentOutcome(pkg.name, "manifestless")',
+            ),
+            "marketplace metadata owner must verify manifestless skills before certification",
+            parse=True,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_METADATA,
             _METADATA_DRIFT,
             ("not remote_metadata.certifiable",),
             "drift checks must consume builder-owned metadata certification",

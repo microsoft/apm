@@ -237,7 +237,9 @@ apm pack --strict-metadata      # require remote Claude package metadata fetches
 Strict remote metadata inheritance currently uses GitHub APIs. For GitLab,
 Azure DevOps, or another host, give each remote package a fixed `description`
 and fixed display `version` (not a range) so `--strict-metadata` can certify it
-without fetching `apm.yml`.
+without fetching `apm.yml`. On GitHub, an absent remote `apm.yml` is also
+certifiable when APM verifies a `SKILL.md` at the same resolved repository,
+ref, and package subdirectory.
 
 For the release-gate flags (`--check-versions`, `--check-clean`),
 see [Releasing from any CI](../releasing-from-any-ci/).
