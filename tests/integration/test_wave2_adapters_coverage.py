@@ -2712,7 +2712,13 @@ class TestCodexFormatServerConfig:
         assert result["command"] in ("npx", "npm")
 
     def test_format_server_config_remote_with_headers(self, tmp_path: Path) -> None:
-        """HTTP remote with headers gets http_headers in config."""
+        """HTTP remote with headers carries them into the config.
+
+        A header whose value is exactly ``${VAR}`` belongs in
+        ``env_http_headers``: Codex reads the variable at server start, whereas
+        ``http_headers`` is documented as static values and would send the
+        placeholder as literal text.
+        """
         adapter = CodexClientAdapter(project_root=tmp_path)
         server_info = {
             "id": "abc",
@@ -2728,8 +2734,8 @@ class TestCodexFormatServerConfig:
         result = adapter._format_server_config(server_info)
         assert result is not None
         assert "url" in result
-        # Headers resolved (or passed through) should be in http_headers
-        assert "http_headers" in result
+        assert result["env_http_headers"] == {"Authorization": "MY_TOKEN"}
+        assert "http_headers" not in result
 
     def test_format_server_config_hybrid_prefers_package(self, tmp_path: Path) -> None:
         """Hybrid server (remote + packages) prefers packages."""

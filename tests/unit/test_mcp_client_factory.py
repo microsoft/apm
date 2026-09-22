@@ -269,6 +269,20 @@ class TestCodexClientAdapter(unittest.TestCase):
             ["-y", "@modelcontextprotocol/server-filesystem", ".", "."],
         )
 
+    @staticmethod
+    def _remote_with_headers(headers):
+        """Build self-defined streamable-http server info carrying *headers*."""
+        return {
+            "name": "bridge",
+            "remotes": [
+                {
+                    "transport_type": "streamable-http",
+                    "url": "https://example.com/mcp",
+                    "headers": [{"name": name, "value": value} for name, value in headers],
+                }
+            ],
+        }
+
     def test_format_server_config_streamable_http_writes_url_and_id(self):
         """Streamable-HTTP remote produces url + id (no http_headers when none)."""
         server_info = {
@@ -325,6 +339,109 @@ class TestCodexClientAdapter(unittest.TestCase):
         config = self.adapter._format_server_config(server_info)
         self.assertEqual(config["url"], "https://example.com/mcp")
         self.assertEqual(config["http_headers"], {"Authorization": "Bearer xyz"})
+
+    def test_bearer_placeholder_becomes_bearer_token_env_var(self):
+        """``Authorization: Bearer ${VAR}`` uses Codex's bearer-token field.
+
+        ``http_headers`` is documented as static values, so the placeholder
+        written there would reach the server as literal ``${VAR}`` text.
+        """
+        config = self.adapter._format_server_config(
+            self._remote_with_headers([("Authorization", "Bearer ${TOKEN}")])
+        )
+        self.assertEqual(config["bearer_token_env_var"], "TOKEN")
+        self.assertNotIn("http_headers", config)
+        self.assertNotIn("env_http_headers", config)
+
+    def test_placeholder_only_header_becomes_env_http_headers(self):
+        """A value that is exactly ``${VAR}`` names the variable for Codex."""
+        config = self.adapter._format_server_config(
+            self._remote_with_headers([("X-Api-Key", "${API_KEY}")])
+        )
+        self.assertEqual(config["env_http_headers"], {"X-Api-Key": "API_KEY"})
+        self.assertNotIn("http_headers", config)
+
+    def test_env_prefixed_placeholder_is_recognized(self):
+        """``${env:VAR}`` is the same reference as ``${VAR}``."""
+        config = self.adapter._format_server_config(
+            self._remote_with_headers([("X-Api-Key", "${env:API_KEY}")])
+        )
+        self.assertEqual(config["env_http_headers"], {"X-Api-Key": "API_KEY"})
+
+    def test_authorization_placeholder_only_uses_env_http_headers(self):
+        """A bare ``${VAR}`` on Authorization declares no ``Bearer`` scheme.
+
+        ``bearer_token_env_var`` would make Codex send one, so the whole-value
+        field is the faithful rendering.
+        """
+        config = self.adapter._format_server_config(
+            self._remote_with_headers([("Authorization", "${TOKEN}")])
+        )
+        self.assertEqual(config["env_http_headers"], {"Authorization": "TOKEN"})
+        self.assertNotIn("bearer_token_env_var", config)
+
+    def test_literal_header_still_lands_in_http_headers(self):
+        """A value with no placeholder is static, which is what the field means."""
+        config = self.adapter._format_server_config(
+            self._remote_with_headers([("X-Region", "us-east-1")])
+        )
+        self.assertEqual(config["http_headers"], {"X-Region": "us-east-1"})
+        self.assertNotIn("env_http_headers", config)
+
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    def test_mixed_literal_and_placeholder_is_skipped_with_warning(self, mock_warn):
+        """Codex has no field for a value that is part literal, part variable."""
+        config = self.adapter._format_server_config(
+            self._remote_with_headers(
+                [("X-Mixed", "prefix-${SOME_VAR}-suffix"), ("X-Region", "us-east-1")]
+            )
+        )
+        self.assertEqual(config["http_headers"], {"X-Region": "us-east-1"})
+        self.assertNotIn("env_http_headers", config)
+        mock_warn.assert_called_once()
+        self.assertIn("X-Mixed", mock_warn.call_args[0][0])
+
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    def test_shell_default_placeholder_is_skipped_with_warning(self, mock_warn):
+        """``${VAR:-}`` is a reference Codex cannot resolve from either field.
+
+        The canonical parser does not model the shell default, so this value
+        must not fall through to ``http_headers`` as though it were static --
+        that is the shape the reported context7 manifest declares.
+        """
+        config = self.adapter._format_server_config(
+            self._remote_with_headers([("Authorization", "${CONTEXT7_API_KEY:-}")])
+        )
+        self.assertNotIn("http_headers", config)
+        self.assertNotIn("env_http_headers", config)
+        self.assertNotIn("bearer_token_env_var", config)
+        mock_warn.assert_called_once()
+        self.assertIn("Authorization", mock_warn.call_args[0][0])
+
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    def test_input_variable_header_is_not_swept_into_the_skip_path(self, mock_warn):
+        """``${input:...}`` is collected elsewhere and keeps its own handling.
+
+        Widening the unsupported-reference check must not capture it, or the
+        input-variable path would lose its header.
+        """
+        config = self.adapter._format_server_config(
+            self._remote_with_headers([("X-Project", "${input:proj}")])
+        )
+        self.assertEqual(config["http_headers"], {"X-Project": "${input:proj}"})
+        mock_warn.assert_not_called()
+
+    @patch("apm_cli.adapters.client.codex._rich_warning")
+    def test_bearer_placeholder_outside_authorization_is_skipped(self, mock_warn):
+        """Only Authorization has a bearer field; elsewhere the shape is mixed."""
+        config = self.adapter._format_server_config(
+            self._remote_with_headers([("X-Auth", "Bearer ${TOKEN}")])
+        )
+        self.assertNotIn("bearer_token_env_var", config)
+        self.assertNotIn("http_headers", config)
+        self.assertNotIn("env_http_headers", config)
+        mock_warn.assert_called_once()
+        self.assertIn("X-Auth", mock_warn.call_args[0][0])
 
     @patch("apm_cli.adapters.client.codex._rich_warning")
     def test_format_server_config_streamable_http_rejects_non_https(self, mock_warn):

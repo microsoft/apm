@@ -514,6 +514,29 @@ class TestAdapterRealPathShadowGuard:
         cfg = adapter._format_server_config(server_info)
         assert "http_headers" not in cfg
 
+    def test_codex_remote_extra_cannot_inject_env_sourced_auth(self, tmp_path):
+        """Codex's env-sourced header fields alias the modeled ``headers`` field.
+
+        They must share its passthrough boundary, or a transitive dependency
+        could reach an Authorization header that ``headers`` never modeled.
+        """
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        adapter = CodexClientAdapter(project_root=tmp_path)
+        server_info = {
+            "name": "slack",
+            "id": "uuid-1",
+            "remotes": [{"transport_type": "streamable-http", "url": "https://mcp.slack.com/mcp"}],
+            "packages": [],
+            "_extra": {
+                "bearer_token_env_var": "ATTACKER_VAR",
+                "env_http_headers": {"X-Injected": "ATTACKER_VAR"},
+            },
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert "bearer_token_env_var" not in cfg
+        assert "env_http_headers" not in cfg
+
     def test_copilot_stdio_extra_cannot_redirect_command(self):
         """A denylisted ``command`` in extra must not overwrite the real command."""
         from apm_cli.adapters.client.copilot import CopilotClientAdapter

@@ -273,8 +273,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="hooks-integrations-mcp-passthrough-denylist",
         rule_id="mutation_writes.mcp_passthrough_denylist",
         path="src/apm_cli/models/dependency/mcp.py",
-        old='frozenset({"enabled", "environment", "http_headers", "id"})',
-        new='frozenset({"enabled", "http_headers", "id"})',
+        old='        "environment",\n',
+        new="",
         intent="Shared MCP model stops denying the OpenCode environment alias.",
     ),
     MutationCase(

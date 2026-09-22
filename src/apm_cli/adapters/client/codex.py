@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,9 +16,34 @@ from ...utils.console import _rich_success, _rich_warning
 from ...utils.net import is_loopback_host
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
-from .base import MCPClientAdapter
+from .base import _ENV_VAR_RE, MCPClientAdapter
 
 _log = logging.getLogger(__name__)
+
+# Codex documents ``http_headers`` as a map of header names to STATIC values,
+# so a ``${VAR}`` written there reaches the server as that literal text. An
+# environment-sourced header has two dedicated fields instead:
+# ``env_http_headers`` maps a header name to the variable holding its whole
+# value, and ``bearer_token_env_var`` names the variable holding an
+# Authorization bearer token. Codex resolves both at server start, which is
+# what the declared ``${VAR}`` asks for -- this adapter does not support
+# runtime substitution itself, so the placeholder survives
+# ``_resolve_variable_placeholders`` untouched.
+# See https://learn.chatgpt.com/docs/extend/mcp?surface=cli
+_CODEX_BEARER_HEADER = "authorization"
+# Reuse the canonical placeholder syntax so the two spellings APM accepts
+# (``${VAR}`` and ``${env:VAR}``) cannot drift apart here. The auth scheme is
+# case-insensitive per RFC 7235; Codex always writes it as ``Bearer``.
+_CODEX_ENV_HEADER_VALUE_RE = re.compile(rf"^{_ENV_VAR_RE.pattern}$")
+_CODEX_BEARER_VALUE_RE = re.compile(rf"^(?i:Bearer)\s+{_ENV_VAR_RE.pattern}$")
+# Any reference still standing in a resolved value, deliberately wider than the
+# canonical parser: a spelling it does not model, such as the shell default in
+# ``${VAR:-}``, is no more static than a ``${VAR}`` Codex could resolve, and
+# writing it to ``http_headers`` sends the braces to the server. Widening the
+# report here, rather than the parser, keeps every other adapter's placeholder
+# semantics untouched. ``${input:...}`` is excluded: input variables are
+# collected elsewhere and carry their own warning.
+_CODEX_UNSUPPORTED_REFERENCE_RE = re.compile(r"\$\{(?!input:)")
 
 
 class CodexClientAdapter(MCPClientAdapter):
@@ -293,16 +319,47 @@ class CodexClientAdapter(MCPClientAdapter):
                 "id": server_info.get("id", ""),
             }
             http_headers: dict[str, str] = {}
+            env_http_headers: dict[str, str] = {}
+            bearer_token_env_var = ""
+            unsupported_headers: list[str] = []
             for header in remote.get("headers", []):
                 h_name = header.get("name", "")
                 h_value = header.get("value", "")
-                if h_name and h_value:
-                    http_headers[h_name] = self._resolve_variable_placeholders(
-                        h_value, env_overrides or {}, runtime_vars or {}
-                    )
+                if not (h_name and h_value):
+                    continue
+                resolved = self._resolve_variable_placeholders(
+                    h_value, env_overrides or {}, runtime_vars or {}
+                )
+                bearer = _CODEX_BEARER_VALUE_RE.match(resolved)
+                if bearer and h_name.lower() == _CODEX_BEARER_HEADER:
+                    bearer_token_env_var = bearer.group(1)
+                    continue
+                env_header = _CODEX_ENV_HEADER_VALUE_RE.match(resolved)
+                if env_header:
+                    env_http_headers[h_name] = env_header.group(1)
+                    continue
+                if _CODEX_UNSUPPORTED_REFERENCE_RE.search(resolved):
+                    unsupported_headers.append(h_name)
+                    continue
+                http_headers[h_name] = resolved
+            if unsupported_headers:
+                _rich_warning(
+                    f"Skipping header(s) {', '.join(unsupported_headers)} of MCP server "
+                    f"'{server_name}' for Codex CLI: Codex reads a header from the "
+                    "environment only when the value is exactly ${VAR} or, for "
+                    "Authorization, `Bearer ${VAR}`. Literal text around the "
+                    "reference, or a shell-style default such as ${VAR:-}, has no "
+                    "Codex equivalent; export the whole header value as one variable.",
+                    symbol="warning",
+                )
+            # Scalars precede the sub-tables tomlkit renders for the dict values.
+            if bearer_token_env_var:
+                remote_config["bearer_token_env_var"] = bearer_token_env_var
             if http_headers:
                 remote_config["http_headers"] = http_headers
                 self._warn_input_variables(http_headers, server_name, "Codex CLI")
+            if env_http_headers:
+                remote_config["env_http_headers"] = env_http_headers
             self._merge_extra(remote_config, server_info)
             return remote_config
 
