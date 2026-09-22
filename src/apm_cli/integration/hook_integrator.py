@@ -1359,7 +1359,6 @@ class HookIntegrator(BaseIntegrator):
             reverse_map: dict[str, set[str]] = {}
             for source_name, norm_name in event_map.items():
                 reverse_map.setdefault(norm_name, set()).add(source_name)
-
             entries_appended_for_file = False
             file_event_entries: dict = {}
             for raw_event_name, entries in hooks.items():
@@ -1369,8 +1368,6 @@ class HookIntegrator(BaseIntegrator):
                 if event_name not in json_config[container]:
                     json_config[container][event_name] = []
 
-                # Transform flat Copilot entries to the target's nested /
-                # native hook shape.
                 if config.target_key == "claude":
                     entries = _to_claude_hook_entries(entries)
                 elif config.target_key == "codex":
