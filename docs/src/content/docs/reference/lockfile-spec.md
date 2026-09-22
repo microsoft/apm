@@ -327,7 +327,7 @@ shipped.
 | Command | Reads | Writes |
 |---|---|---|
 | `apm install` | existing lockfile (for `--frozen` and incremental reuse) | full rewrite on resolution change |
-| `apm install --frozen` | required | never writes; fails on a missing pin or MCP config/server-name drift |
+| `apm install --frozen` | required | rejects missing pins, incompatible immutable requirements, or MCP config/server-name drift |
 | `apm compile` | yes (resolution + integrity) | no |
 | `apm audit` | yes | no |
 | `apm prune` | yes (orphans and `deployments` ownership, even with nothing else to prune) | yes (after removing orphans and reconciling `deployments`) |
@@ -341,6 +341,13 @@ dependency changes do not manufacture timestamp conflicts. If a pre-existing
 lockfile includes the field, APM retains it for compatibility and refreshes it
 only on a substantive write. To migrate a legacy lockfile manually, delete the
 `generated_at: ...` line from `apm.lock.yaml` once; APM will not add it back.
+
+Frozen replay checks immutable requirements from dependency manifests as they
+are loaded. A lock entry cannot silently replace a required tag or SHA with a
+different commit. Equivalent tag/SHA spellings are accepted after verification;
+checking distinct tag names may require a remote ref lookup. On a cold cache,
+APM may fetch a locked parent before discovering its conflicting requirement.
+Fix the manifest refs and regenerate the lockfile with a normal install.
 
 ## Drift and integrity
 

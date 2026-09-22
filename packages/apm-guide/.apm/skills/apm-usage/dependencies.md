@@ -609,6 +609,13 @@ package uninstall revoke only entries it wrote.
 
 ## Version pinning
 
+APM uses one version per package identity. Incompatible tag/SHA requirements
+fail with both dependency paths and requested refs; unequal ref strings alone
+are not a conflict when they resolve to the same commit. Align the root or
+parent manifest refs, then run `apm install` to regenerate the lockfile.
+`--frozen` rejects locked commits that drop an immutable transitive requirement.
+Distinct named refs may need a Git lookup to establish equivalence.
+
 | Strategy | Syntax | When to use |
 |----------|--------|-------------|
 | Tag | `owner/repo#v1.0.0` | Production -- immutable reference |

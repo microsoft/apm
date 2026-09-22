@@ -64,14 +64,21 @@ from scripts.architecture_linter.checks.install_request_and_source import (
     check_source_plan,
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
+    _GUARD_IMMUTABLE_REQUIREMENTS,
     _GUARD_RESOLUTION_REPLACEMENT,
     _GUARD_UNINSTALL_SELECTION,
+    check_immutable_requirements,
     check_resolution_replacement,
     check_uninstall_selection,
 )
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        _GUARD_IMMUTABLE_REQUIREMENTS,
+        "Immutable dependency compatibility is checked by one owner before hoisting.",
+        check_immutable_requirements,
+    ),
     _rule(
         _GUARD_PACKAGE_TARGET,
         "Restriction-only package target authorization has one owner (install/target_filter.py).",

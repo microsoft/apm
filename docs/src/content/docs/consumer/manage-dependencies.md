@@ -177,6 +177,21 @@ For reserved aliases `.` and `..`, see [Rejected dependency aliases](../../troub
 For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
 [Registries](../../guides/registries/).
 
+## Incompatible immutable requirements
+
+APM installs one version per package identity. If two dependency paths require
+tags or commit SHAs that resolve to different commits, install fails with both
+root-to-package paths and requested refs. Different tag names, or a tag and its
+commit SHA, are compatible when they identify the same commit. APM may query
+Git refs to verify this; a failed lookup is not treated as proof of compatibility.
+
+Align the refs in your `apm.yml`, or select a parent package release that requires
+the same commit. Then run `apm install` to regenerate the lockfile. Do not edit
+`apm.lock.yaml` to hide a conflict. `--frozen` also rejects a locked commit that
+drops an immutable requirement discovered in a dependency manifest, including
+on a cold cache after the parent package is fetched. Side-by-side versions are
+not supported.
+
 ## Add a dependency
 
 You have two paths.

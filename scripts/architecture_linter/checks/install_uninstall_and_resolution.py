@@ -16,6 +16,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _UNINSTALL_ENGINE,
     _all_names,
     _count_re,
+    _duplicate_definition_lines,
     _facts_for,
     _line_findings,
     _present,
@@ -31,6 +32,42 @@ _GUARD_RESOLUTION_REPLACEMENT = "install-deployment-resolution-replacement"
 
 
 _GUARD_UNINSTALL_SELECTION = "install-deployment-uninstall-selection"
+_GUARD_IMMUTABLE_REQUIREMENTS = "install-deployment-immutable-requirements"
+
+
+def check_immutable_requirements(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Keep immutable compatibility in one owner and mandatory before hoisting."""
+    rule_id = _GUARD_IMMUTABLE_REQUIREMENTS
+    owner = "src/apm_cli/deps/immutable_requirements.py"
+    findings = list(
+        _duplicate_definition_lines(
+            provider,
+            rule_id=rule_id,
+            prefix=_SRC_PREFIX,
+            pattern=re.compile(r"^\s*(?:class ImmutableRequirements\b|def _require_equal\()"),
+            owner=owner,
+            message="Immutable requirement compatibility belongs in deps/immutable_requirements.py",
+            respect_exempt=False,
+        )
+    )
+    required = {
+        owner: ("class ImmutableRequirements:", "def _require_equal("),
+        "src/apm_cli/deps/apm_resolver.py": ("requirements.add(node)", "ImmutableRequirements("),
+        "src/apm_cli/install/phases/resolve.py": (
+            "reference_resolver=downloader",
+            "frozen=ctx.frozen",
+        ),
+        "src/apm_cli/install/service.py": ("frozen=request.frozen",),
+        "src/apm_cli/install/pipeline.py": ("frozen=frozen",),
+    }
+    for path, fragments in required.items():
+        facts, failures = _facts_for(provider, path, rule_id)
+        findings.extend(failures)
+        if not failures and not all(_present(facts, fragment) for fragment in fragments):
+            findings.append(
+                _summary(rule_id, path, "Immutable requirements must be checked before hoisting")
+            )
+    return tuple(findings)
 
 
 def _call_terminal_name(node: ast.Call) -> str | None:

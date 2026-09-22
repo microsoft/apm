@@ -342,6 +342,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="InstallService stops owning the frozen-install mutation preflight.",
     ),
     MutationCase(
+        guard_id="install-deployment-immutable-requirements",
+        rule_id="install-deployment-immutable-requirements",
+        path="src/apm_cli/deps/apm_resolver.py",
+        old="requirements.add(node)",
+        new="requirements.add_unchecked(node)",
+        intent="Resolver skips canonical immutable admission before selecting a winner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-install-scope-selection",
         rule_id="install-deployment-install-scope-selection",
         path="src/apm_cli/commands/install.py",
