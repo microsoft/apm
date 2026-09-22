@@ -78,6 +78,7 @@ from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
 from apm_cli.integration.hook_native_formats import (
     _to_antigravity_hook_entries,
     _to_claude_hook_entries,
+    _to_codex_hook_entries,
     _to_gemini_hook_entries,
 )
 from apm_cli.integration.hook_ownership import (
@@ -1372,6 +1373,8 @@ class HookIntegrator(BaseIntegrator):
                 # native hook shape.
                 if config.target_key == "claude":
                     entries = _to_claude_hook_entries(entries)
+                elif config.target_key == "codex":
+                    entries = _to_codex_hook_entries(entries)
                 elif config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)
                 elif config.target_key == "antigravity":
