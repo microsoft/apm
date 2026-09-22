@@ -323,9 +323,10 @@ def _check_metadata_enrichment(provider: FactsProvider) -> tuple[Violation, ...]
             _METADATA_OWNER,
             (
                 'skill_path = f"{path_prefix}SKILL.md"',
+                "skill = loads_frontmatter(_request_text(url, rest=rest))",
                 'return MetadataEnrichmentOutcome(pkg.name, "manifestless")',
             ),
-            "marketplace metadata owner must verify manifestless skills before certification",
+            "marketplace metadata owner must parse manifestless skills before certification",
             parse=True,
         )
     )

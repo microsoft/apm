@@ -61,7 +61,7 @@ The `metadata_enrichment` object has a closed per-package status vocabulary:
 |---|---|---|
 | `fetched` | Remote `apm.yml` supplied metadata. | yes |
 | `empty` | Remote `apm.yml` was reachable but had no description or version. | yes |
-| `manifestless` | Remote `apm.yml` was absent, but `SKILL.md` verified a supported manifestless skill at the resolved path. | yes |
+| `manifestless` | Remote `apm.yml` was absent, but `SKILL.md` had valid `name` and `description` frontmatter at the resolved path. | yes |
 | `local` | Metadata came from a local package. | yes |
 | `explicit` | Fixed description and version came from the marketplace entry. | yes |
 | `failed` | The remote manifest could not be fetched. | no |
@@ -95,10 +95,11 @@ uses `metadata_incomplete` and exits `5` before writing.
 GitHub-hosted packages can inherit description and version from their remote
 `apm.yml`. When that file returns `404`, APM verifies `SKILL.md` at the same
 resolved repository, ref, and subdirectory. A verified manifestless skill is
-certifiable; a missing repository, ref, package path, or `SKILL.md` remains a
-failure. For GitLab, Azure DevOps, and other hosts, set fixed `description` and
-`version` fields on the marketplace package entry so strict checks can certify
-without a GitHub metadata request.
+certifiable when its frontmatter has non-empty `name` and `description` fields;
+a missing repository, ref, package path, or valid `SKILL.md` remains a failure.
+For GitLab, Azure DevOps, and other hosts, set fixed `description` and `version`
+fields on the marketplace package entry so strict checks can certify without a
+GitHub metadata request.
 
 ## Examples
 

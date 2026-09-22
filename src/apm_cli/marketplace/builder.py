@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 from ..utils.github_host import default_host, is_azure_devops_hostname
 from ..utils.path_security import ensure_path_within
-from ..utils.yaml_io import load_yaml_str
+from ..utils.yaml_io import load_yaml_str, loads_frontmatter
 from ._io import atomic_write
 from ._shared import iter_semver_tags
 from .auth_helpers import resolve_auth_for_host
@@ -1236,6 +1236,7 @@ class MarketplaceBuilder:
                     )
 
                 def _request_text(url: str, *, rest: bool = False) -> str:
+                    """Read one bounded remote document with attempt credentials."""
                     req = urllib.request.Request(url)  # noqa: S310
                     if rest:
                         req.add_header("Accept", "application/vnd.github.raw")
@@ -1244,21 +1245,25 @@ class MarketplaceBuilder:
                     with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
                         return _read_capped_text(resp)
 
-                def _exists(url: str, *, rest: bool = False) -> bool:
+                def _is_valid_skill(url: str, *, rest: bool = False) -> bool:
+                    """Return whether the URL contains parseable Agent Skills metadata."""
                     try:
-                        req = urllib.request.Request(url)  # noqa: S310
-                        if rest:
-                            req.add_header("Accept", "application/vnd.github.raw")
-                        if token:
-                            req.add_header("Authorization", f"token {token}")
-                        with urllib.request.urlopen(req, timeout=5):  # noqa: S310
-                            return True
+                        skill = loads_frontmatter(_request_text(url, rest=rest))
                     except urllib.error.HTTPError as exc:
                         if exc.code == 404:
                             return False
                         raise
+                    name = skill.metadata.get("name")
+                    description = skill.metadata.get("description")
+                    return (
+                        isinstance(name, str)
+                        and bool(name.strip())
+                        and isinstance(description, str)
+                        and bool(description.strip())
+                    )
 
                 def _rest_url(file_path: str) -> str:
+                    """Build a Contents API URL for the resolved package path."""
                     api_base = (
                         host_info.api_base if host_info else None
                     ) or f"https://{effective_host}/api/v3"
@@ -1278,7 +1283,7 @@ class MarketplaceBuilder:
                             "https://raw.githubusercontent.com/"
                             f"{pkg.source_repo}/{pkg.sha}/{skill_path}"
                         )
-                        if _exists(raw_skill_url):
+                        if _is_valid_skill(raw_skill_url):
                             return _RemoteMetadataDocument(None, manifestless=True)
                         if token is None:
                             raise
@@ -1288,7 +1293,7 @@ class MarketplaceBuilder:
                 except urllib.error.HTTPError as exc:
                     if exc.code != 404:
                         raise
-                    if _exists(_rest_url(skill_path), rest=True):
+                    if _is_valid_skill(_rest_url(skill_path), rest=True):
                         return _RemoteMetadataDocument(None, manifestless=True)
                     raise
 

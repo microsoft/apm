@@ -2496,7 +2496,10 @@ class TestFetchRemoteMetadataGHEHost:
         )
         with patch(
             "apm_cli.marketplace.builder.urllib.request.urlopen",
-            side_effect=[manifest_404, _FakeHTTPResponse(b"# Review skill\n")],
+            side_effect=[
+                manifest_404,
+                _FakeHTTPResponse(b"---\nname: review\ndescription: Review skill\n---\n# Review\n"),
+            ],
         ) as mock_open:
             outcome = builder._fetch_remote_metadata_outcome(pkg)
 
@@ -2509,6 +2512,37 @@ class TestFetchRemoteMetadataGHEHost:
         assert parsed.query == f"ref={_SHA_A}"
         assert skill_req.get_header("Accept") == "application/vnd.github.raw"
         assert skill_req.get_header("Authorization") == "token test-token"
+
+    def test_metadata_fetch_does_not_certify_directory_named_skill_md(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A Contents API directory response is not a manifestless skill."""
+        import urllib.error
+
+        pkg = self._make_pkg(subdir="skills/review")
+        builder = self._make_builder(tmp_path)
+        builder._host = "corp.ghe.com"
+        builder._github_token = "test-token"
+        builder._host_info = SimpleNamespace(
+            kind="ghes",
+            api_base="https://corp.ghe.com/api/v3",
+        )
+        manifest_404 = urllib.error.HTTPError(
+            url="https://corp.ghe.com/api/v3/repos/acme/tools/contents/skills/review/apm.yml",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
+        )
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            side_effect=[manifest_404, _FakeHTTPResponse(b'[{"type":"file","name":"child"}]')],
+        ):
+            outcome = builder._fetch_remote_metadata_outcome(pkg)
+
+        assert outcome.status == "failed"
+        assert outcome.cause == "HTTP 404"
 
     def test_metadata_fetch_github_com_falls_back_to_rest_api_on_raw_404(
         self,
