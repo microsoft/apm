@@ -152,6 +152,26 @@ def _check_ref_freshness(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inv,
             _RID_FRESHNESS,
+            _TIERED,
+            ("def remotely_resolved(", "self.freshness_policy.requires_remote"),
+            "persistent ref observations must be authorized by the freshness owner",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FRESHNESS,
+            "src/apm_cli/deps/github_downloader.py",
+            ("resolver.remotely_resolved(dep_ref, locked_sha)",),
+            "persistent ref writes must consult remote resolution provenance",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_FRESHNESS,
             "src/apm_cli/install/phases/resolve.py",
             ("ref_freshness_policy_for_install(ctx)",),
             "resolve phase must consult RefFreshnessPolicy",

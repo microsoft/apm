@@ -21,7 +21,9 @@ from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.deps.git_file_transport import GitFileTransportError
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.utils.git_env import get_git_executable
 from apm_cli.utils.path_security import PathTraversalError
 
 # Patch cred helper so tests never call real git for token resolution.
@@ -213,7 +215,7 @@ class TestFetchFileViaGitSparse:
         assert result.content == b"# Agent"
         assert result.resolved_commit == expected_sha
         assert any(
-            call.args[0] == ["git", "rev-parse", "--verify", "FETCH_HEAD^{commit}"]
+            call.args[0] == [get_git_executable(), "rev-parse", "--verify", "FETCH_HEAD^{commit}"]
             for call in mock_run.call_args_list
         )
 
@@ -769,7 +771,7 @@ class TestGitlabGitTransportIntegration:
                 patch(
                     "apm_cli.deps.download_strategies.GitSparseFileTransport",
                     return_value=_mock_git_transport(
-                        side_effect=RuntimeError("git transport failed")
+                        side_effect=GitFileTransportError("git transport failed")
                     ),
                 ),
                 patch.object(downloader, "_resilient_get", return_value=mock_response) as mock_api,
@@ -801,7 +803,9 @@ class TestGitlabGitTransportIntegration:
             with (
                 patch(
                     "apm_cli.deps.download_strategies.GitSparseFileTransport",
-                    return_value=_mock_git_transport(side_effect=RuntimeError("SSH auth failed")),
+                    return_value=_mock_git_transport(
+                        side_effect=GitFileTransportError("SSH auth failed")
+                    ),
                 ),
                 patch.object(downloader, "_resilient_get") as mock_api,
             ):

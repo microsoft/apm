@@ -5,7 +5,7 @@ Covers the pure helpers that scan, count, and describe installed packages.
 
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.commands.deps._utils import (
     _count_package_files,
@@ -94,6 +94,36 @@ class TestIsNestedUnderPackage:
         deep = pkg / "a" / "b" / "c"
         deep.mkdir(parents=True)
         assert _is_nested_under_package(deep, modules) is True
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("alias", [".safe", "safe.", "foo..bar", "my-skill.v2"])
+def test_scan_includes_flattened_alias_without_nested_packages(tmp_path: Path, alias: str) -> None:
+    """Prune must see an alias root, but not its nested packages."""
+    modules = tmp_path / "apm_modules"
+    package = modules / alias
+    package.mkdir(parents=True)
+    _make_apm_yml(package)
+    nested = package / "nested"
+    nested.mkdir()
+    _make_apm_yml(nested)
+    # Windows strips trailing dots when creating directories; scan the on-disk name.
+    assert _scan_installed_packages(modules) == [package.resolve().name]
+
+
+@pytest.mark.windows_compat
+def test_scan_excludes_symlink_packages(tmp_path: Path) -> None:
+    """Symlink prerequisites must not skip the independent alias regression."""
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _make_apm_yml(outside)
+    try:
+        (modules / "linked").symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("platform does not support directory symlinks")
+    assert _scan_installed_packages(modules) == []
 
 
 # ==================================================================
@@ -517,10 +547,9 @@ class TestScanInstalledPackages:
         result = _scan_installed_packages(tmp_path)
         assert "org/repo" in result
 
-    def test_single_level_dirs_excluded(self, tmp_path):
-        """Single-level paths (just 'org') are not included."""
+    def test_single_level_namespace_dirs_excluded(self, tmp_path):
+        """A namespace directory without package metadata is not a package."""
         org = tmp_path / "justorg"
         org.mkdir()
-        _make_apm_yml(org, "justorg")
         result = _scan_installed_packages(tmp_path)
         assert result == []

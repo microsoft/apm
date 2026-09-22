@@ -129,6 +129,14 @@ class TestBinaryStartup:
         )
         assert result.stdout.strip(), "apm --version produced empty stdout"
 
+    def test_apm_install_help_runs(self, apm_binary_path: Path, tmp_path: Path) -> None:
+        """Lazy verbs must import from the frozen PYZ (hiddenimports)."""
+        result = _run_apm(apm_binary_path, ["install", "--help"], cwd=tmp_path)
+        assert result.returncode == 0, (
+            f"apm install --help failed (rc={result.returncode})\nstderr:\n{result.stderr}"
+        )
+        assert "Usage:" in result.stdout
+
     def test_apm_rich_table_runs(self, apm_binary_path: Path, tmp_path: Path) -> None:
         """``deps list`` must render non-ASCII cell widths from the frozen binary."""
         repo_name = "wide-\u4e2d"

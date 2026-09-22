@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from apm_cli.deps.github_downloader import GitHubPackageDownloader
     from apm_cli.deps.transport_selection import ProtocolPreference, TransportSelector
+    from apm_cli.install.context import InstallContext
     from apm_cli.models.dependency.reference import DependencyReference
 
 RefResolverCacheKey = tuple[
@@ -27,6 +28,14 @@ RefResolverCacheKey = tuple[
     tuple[str, str | None, int | None, bool],
 ]
 _UNRESOLVED_AUTH_CONTEXT = object()
+
+
+def requires_remote_ref_resolution(ctx: InstallContext) -> bool:
+    """Return the configured policy decision or fail before resolution."""
+    policy = ctx.ref_freshness_policy
+    if policy is None:
+        raise RuntimeError("Ref freshness policy was not configured")
+    return policy.requires_remote
 
 
 def _token_fingerprint(token: str | None) -> str | None:

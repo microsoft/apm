@@ -380,6 +380,20 @@ class LockfileBuilder:
                 lockfile.dependencies[dep_key].declared_license = declared
 
     def _attach_marketplace_provenance(self, lockfile: LockFile) -> None:
+        # Canonical manifest entries do not rediscover their marketplace on
+        # update. Keep the original discovery snapshot for surviving identities
+        # without carrying forward stale commits, hashes, or removed entries.
+        if self.ctx.existing_lockfile:
+            for dep_key, dep in lockfile.dependencies.items():
+                previous = self.ctx.existing_lockfile.dependencies.get(dep_key)
+                # Ports are not part of the dependency key.
+                if previous is not None and previous.port == dep.port:
+                    dep.discovered_via = previous.discovered_via
+                    dep.marketplace_plugin_name = previous.marketplace_plugin_name
+                    dep.source_url = previous.source_url
+                    dep.source_digest = previous.source_digest
+
+        # Fresh discovery replaces the entire snapshot, including absent fields.
         if self.ctx.marketplace_provenance:
             for dep_key, prov in self.ctx.marketplace_provenance.items():
                 if dep_key in lockfile.dependencies:
